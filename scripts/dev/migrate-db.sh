@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 API_DIR="$ROOT_DIR/services/tasks-api"
+BUDGET_API_DIR="$ROOT_DIR/services/budget-api"
 KNOWN_DRIFT_MIGRATION="20260308000000_add_blocked_ready_columns"
 
 # shellcheck source=./mode-env.sh
@@ -20,6 +21,18 @@ ensure_tasks_api_deps() {
   echo "Prisma CLI not found in services/tasks-api/node_modules; installing dependencies..."
   (
     cd "$API_DIR"
+    npm install
+  )
+}
+
+ensure_budget_api_deps() {
+  if [[ -x "$BUDGET_API_DIR/node_modules/.bin/prisma" ]]; then
+    return 0
+  fi
+
+  echo "Prisma CLI not found in services/budget-api/node_modules; installing dependencies..."
+  (
+    cd "$BUDGET_API_DIR"
     npm install
   )
 }
@@ -182,6 +195,13 @@ run_prisma_migrate_with_auto_recover
 (
   cd "$API_DIR"
   DATABASE_URL="$DATABASE_URL" npm run prisma:generate
+)
+
+echo "Applying Prisma migrations for budget-api (MODE=$MODE)..."
+ensure_budget_api_deps
+(
+  cd "$BUDGET_API_DIR"
+  DATABASE_URL="$BUDGET_DATABASE_URL" npm run prisma:migrate
 )
 
 echo "Migration complete for MODE=$MODE."

@@ -3,10 +3,12 @@ observability_enabled = os.getenv('TILT_OBSERVABILITY', '1').strip() != '0'
 
 mode = os.getenv('MODE', 'dev')
 tasks_api_port = os.getenv('TASKS_API_PORT', '4000')
+budget_api_port = os.getenv('BUDGET_API_PORT', '4002')
 tasks_app_port = os.getenv('TASKS_APP_PORT', '5173')
 tasks_api_base_url = os.getenv('TASKS_API_BASE_URL', 'http://localhost:4000/api/v1')
 tasks_api_env_file = os.getenv('TASKS_API_ENV_FILE', 'services/tasks-api/.env.dev')
 compose_project = os.getenv('COMPOSE_PROJECT_NAME', 'sindustries-' + mode)
+budget_api_env_file = os.getenv('BUDGET_API_ENV_FILE', 'services/budget-api/.env.dev')
 
 docker_compose('../docker-compose.dev.yml', project_name=compose_project)
 
@@ -44,6 +46,28 @@ local_resource(
   ],
   resource_deps=['postgres'],
   labels=['tasks', 'api', mode],
+  allow_parallel=False,
+)
+
+local_resource(
+  'budget-api',
+  serve_cmd='cd ../../services/budget-api && DOTENV_CONFIG_PATH=../../{} PORT={} DATABASE_URL="{}" CORS_ALLOWED_ORIGINS="{}" npm run dev'.format(
+    budget_api_env_file,
+    budget_api_port,
+    os.getenv('BUDGET_DATABASE_URL', ''),
+    os.getenv('CORS_ALLOWED_ORIGINS', ''),
+  ),
+  deps=[
+    '../../services/budget-api/src',
+    '../../services/budget-api/prisma',
+    '../../services/budget-api/package.json',
+    '../../services/budget-api/package-lock.json',
+    '../../services/budget-api/.env.example',
+    '../../packages/budget-domain/src',
+    '../../packages/budget-domain/package.json',
+  ],
+  resource_deps=['postgres'],
+  labels=['budget', 'api', mode],
   allow_parallel=False,
 )
 

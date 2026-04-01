@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 API_DIR="$ROOT_DIR/services/tasks-api"
+BUDGET_API_DIR="$ROOT_DIR/services/budget-api"
 
 # shellcheck source=./mode-env.sh
 source "$ROOT_DIR/scripts/dev/mode-env.sh"
@@ -15,6 +16,18 @@ ensure_tasks_api_deps() {
   echo "Prisma CLI not found in services/tasks-api/node_modules; installing dependencies..."
   (
     cd "$API_DIR"
+    npm install
+  )
+}
+
+ensure_budget_api_deps() {
+  if [[ -x "$BUDGET_API_DIR/node_modules/.bin/prisma" ]]; then
+    return 0
+  fi
+
+  echo "Prisma CLI not found in services/budget-api/node_modules; installing dependencies..."
+  (
+    cd "$BUDGET_API_DIR"
     npm install
   )
 }
@@ -76,6 +89,8 @@ DROP SCHEMA IF EXISTS tasks_api CASCADE;
 CREATE SCHEMA tasks_api;
 DROP SCHEMA IF EXISTS tasks_app CASCADE;
 CREATE SCHEMA tasks_app;
+DROP SCHEMA IF EXISTS budget_api CASCADE;
+CREATE SCHEMA budget_api;
 SQL
 
 (
@@ -89,6 +104,19 @@ SQL
     DATABASE_URL="$DATABASE_URL" npm run prisma:seed
   else
     echo "Skipping seed (SEED_DB=$SEED_DB)."
+  fi
+)
+
+(
+  cd "$BUDGET_API_DIR"
+  ensure_budget_api_deps
+  DATABASE_URL="$BUDGET_DATABASE_URL" npm run prisma:migrate
+
+  if [[ "$SEED_DB" == "true" ]]; then
+    echo "Seeding budget-api (SEED_DB=true)..."
+    DATABASE_URL="$BUDGET_DATABASE_URL" npm run prisma:seed
+  else
+    echo "Skipping budget-api seed (SEED_DB=$SEED_DB)."
   fi
 )
 
