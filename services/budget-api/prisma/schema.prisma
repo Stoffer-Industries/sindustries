@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionDirection {
+  debit
+  credit
+}
+
+enum CategorySource {
+  import
+  model
+  rule
+  manual
+}
+
+model User {
+  id        String    @id @default(uuid()) @db.Uuid
+  email     String    @unique
+  createdAt DateTime  @default(now())
+
+  sessions  Session[]
+  cards     LinkedCard[]
+  budgets   CardMonthlyBudget[]
+  txns      Transaction[]
+  feedback  CategorizationFeedback[]
+  alerts    NotificationEvent[]
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model LinkedCard {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  provider       String
+  providerCardId String
+  displayName    String
+  last4          String?
+  createdAt      DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  txns           Transaction[]
+  budgets        CardMonthlyBudget[]
+
+  @@unique([provider, providerCardId])
+  @@index([userId, createdAt])
+}
+
+model Transaction {
+  id                    String               @id @default(uuid()) @db.Uuid
+  userId                String               @db.Uuid
+  cardId                String               @db.Uuid
+  provider              String
+  providerTransactionId String               @unique
+  occurredAt            DateTime
+  merchant              String?
+  description           String?
+  amountCents           Int
+  direction             TransactionDirection
+
+  category              String?
+  categorySource        CategorySource       @default(import)
+  categoryConfidence    Float                @default(0)
+
+  createdAt             DateTime             @default(now())
+
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card                  LinkedCard           @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@index([cardId, occurredAt])
+}
+
+model CardMonthlyBudget {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  cardId           String   @db.Uuid
+  month            String
+  monthlyLimitCents Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card             LinkedCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, month], name: "cardId_month")
+  @@index([userId, month])
+}
+
+model CategorizationFeedback {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  merchantKey      String
+  originalCategory String?
+  correctedCategory String
+  createdAt        DateTime @default(now())
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, merchantKey])
+}
+
+model NotificationEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  cardId    String?  @db.Uuid
+  month     String?
+  stage     String?
+  dedupeKey String   @unique
+  type      String
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, cardId, month])
+}
+
