@@ -1,17 +1,15 @@
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { CategoryTimeseriesChart } from '../components/CategoryTimeseriesChart';
 import { apiFetch } from '../api/http';
+import type { RootStackParamList } from '../navigation/types';
 import { useSession } from '../state/SessionContext';
 
-export function DashboardScreen({
-  onNavigateTransactions,
-  onNavigateAlerts
-}: {
-  onNavigateTransactions: () => void;
-  onNavigateAlerts: () => void;
-}) {
+type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
+
+export function DashboardScreen({ navigation }: Props) {
   const { session, setSession } = useSession();
   const [email, setEmail] = useState('dev@example.com');
   const [series, setSeries] = useState<Record<string, { day: string; amountCents: number }[]>>(
@@ -137,11 +135,11 @@ export function DashboardScreen({
       <View style={{ gap: 12 }}>
         <Button
           title="View transactions"
-          onPress={onNavigateTransactions}
+          onPress={() => navigation.navigate('Transactions')}
         />
         <Button
           title="View alerts"
-          onPress={onNavigateAlerts}
+          onPress={() => navigation.navigate('Alerts')}
         />
       </View>
     </ScrollView>

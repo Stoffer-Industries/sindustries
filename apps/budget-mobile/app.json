@@ -25,6 +25,18 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "291287e0-33cd-45fa-b7f7-786de56944fe"
+      }
+    },
+    "owner": "tomstoffer",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/291287e0-33cd-45fa-b7f7-786de56944fe"
     }
   }
 }
