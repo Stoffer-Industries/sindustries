@@ -16,6 +16,7 @@ export function CategoryTimeseriesChart({
 }) {
   const { width: screenWidth } = useWindowDimensions();
   const width = Math.max(280, Math.min(520, Math.floor(screenWidth - 32)));
+
   const values = points.map((p) => p.amountCents);
   const max = Math.max(1, ...values);
 
@@ -37,12 +38,7 @@ export function CategoryTimeseriesChart({
   return (
     <View style={{ borderRadius: 12, overflow: 'hidden' }}>
       <Svg width={width} height={height}>
-        <Polyline
-          points={polyPoints}
-          fill="none"
-          stroke="#111827"
-          strokeWidth={2}
-        />
+        <Polyline points={polyPoints} stroke="#111827" strokeWidth={2} />
       </Svg>
     </View>
   );
