@@ -25,7 +25,7 @@ const categories = [
   'other'
 ];
 
-export function TransactionsScreen({ onBack }: { onBack?: () => void }) {
+export function TransactionsScreen() {
   const { session } = useSession();
   const [data, setData] = useState<Txn[]>(useMemo(() => [], []));
   const [loading, setLoading] = useState(false);
@@ -37,11 +37,14 @@ export function TransactionsScreen({ onBack }: { onBack?: () => void }) {
       if (!session) return;
       setLoading(true);
       try {
-        const res = await apiFetch<{ transactions: Txn[] }>(
+        const res = await apiFetch<{ transactions?: Txn[] }>(
           `/transactions?userId=${encodeURIComponent(session.user.id)}`,
           { session }
         );
-        if (!cancelled) setData(res.transactions);
+        const list = res?.transactions;
+        if (!cancelled) setData(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setData([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -84,16 +87,14 @@ export function TransactionsScreen({ onBack }: { onBack?: () => void }) {
   }
 
   return (
-    <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      {onBack ? <Button title="Back" onPress={onBack} /> : null}
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>Transactions</Text>
+    <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, gap: 12 }}>
       <Text style={{ color: '#6b7280' }}>
         {session ? (loading ? 'Loading…' : 'Backed by budget-api') : 'Please dev-login first.'}
       </Text>
-
       <FlatList
         data={data}
         keyExtractor={(t) => t.id}
+        style={{ flex: 1 }}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         renderItem={({ item }) => (
           <View

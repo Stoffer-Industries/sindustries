@@ -20,7 +20,14 @@ export async function apiFetch<T>(
   });
 
   const text = await res.text();
-  const json = text ? (JSON.parse(text) as unknown) : null;
+  let json: unknown = null;
+  if (text) {
+    try {
+      json = JSON.parse(text) as unknown;
+    } catch {
+      throw new Error('Invalid JSON from API');
+    }
+  }
 
   if (!res.ok) {
     const apiError =
