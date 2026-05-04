@@ -1,22 +1,21 @@
 import React from 'react';
-import { Button, FlatList, Text, View } from 'react-native';
+import { FlatList, Text, View } from 'react-native';
 
-export function AlertsScreen({ onBack }: { onBack?: () => void }) {
+export function AlertsScreen() {
   const demo = [
     { id: 'a1', title: '80% warning', body: 'Card ending 1234 is at 80%.' },
     { id: 'a2', title: '95% warning', body: 'Card ending 1234 is at 95%.' }
   ];
 
   return (
-    <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      {onBack ? <Button title="Back" onPress={onBack} /> : null}
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>Alerts</Text>
+    <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, gap: 12 }}>
       <Text style={{ color: '#6b7280' }}>
         Demo list; will be backed by server-generated events.
       </Text>
       <FlatList
         data={demo}
         keyExtractor={(a) => a.id}
+        style={{ flex: 1 }}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         renderItem={({ item }) => (
           <View

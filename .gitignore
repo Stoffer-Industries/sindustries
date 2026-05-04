@@ -1,9 +1,9 @@
 .DS_Store
 node_modules/
 **/node_modules/
-dist/
 **/dist/
 .env
+dist/
 **/.env
 services/tasks-api/.env.dev
 services/tasks-api/.env.prodlike
@@ -16,3 +16,4 @@ apps/tasks/test-results/.last-run.json
 
 # OpenClaw runtime state (setup marker, regenerated on init)
 .openclaw/workspace-state.json
+apps/budget-mobile/dist-ios/
