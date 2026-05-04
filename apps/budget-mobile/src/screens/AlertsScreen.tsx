@@ -1,7 +1,7 @@
 import React from 'react';
-import { FlatList, Text, View } from 'react-native';
+import { Button, FlatList, Text, View } from 'react-native';
 
-export function AlertsScreen() {
+export function AlertsScreen({ onBack }: { onBack?: () => void }) {
   const demo = [
     { id: 'a1', title: '80% warning', body: 'Card ending 1234 is at 80%.' },
     { id: 'a2', title: '95% warning', body: 'Card ending 1234 is at 95%.' }
@@ -9,6 +9,7 @@ export function AlertsScreen() {
 
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
+      {onBack ? <Button title="Back" onPress={onBack} /> : null}
       <Text style={{ fontSize: 20, fontWeight: '700' }}>Alerts</Text>
       <Text style={{ color: '#6b7280' }}>
         Demo list; will be backed by server-generated events.

@@ -5,7 +5,13 @@ import { CategoryTimeseriesChart } from '../components/CategoryTimeseriesChart';
 import { apiFetch } from '../api/http';
 import { useSession } from '../state/SessionContext';
 
-export function DashboardScreen({ navigation }: any) {
+export function DashboardScreen({
+  onNavigateTransactions,
+  onNavigateAlerts
+}: {
+  onNavigateTransactions: () => void;
+  onNavigateAlerts: () => void;
+}) {
   const { session, setSession } = useSession();
   const [email, setEmail] = useState('dev@example.com');
   const [series, setSeries] = useState<Record<string, { day: string; amountCents: number }[]>>(
@@ -131,11 +137,11 @@ export function DashboardScreen({ navigation }: any) {
       <View style={{ gap: 12 }}>
         <Button
           title="View transactions"
-          onPress={() => navigation.navigate('Transactions')}
+          onPress={onNavigateTransactions}
         />
         <Button
           title="View alerts"
-          onPress={() => navigation.navigate('Alerts')}
+          onPress={onNavigateAlerts}
         />
       </View>
     </ScrollView>

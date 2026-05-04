@@ -7,10 +7,16 @@ export type Session = {
 
 type SessionCtx = {
   session: Session | null;
-  setSession: (s: Session | null) => void;
+  setSession: React.Dispatch<React.SetStateAction<Session | null>>;
 };
 
-const Ctx = createContext<SessionCtx | null>(null);
+const Ctx = createContext<SessionCtx>({
+  session: null,
+  // Default no-op; real setter comes from provider.
+  setSession: () => {
+    /* no-op */
+  }
+});
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -19,8 +25,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useSession() {
-  const v = useContext(Ctx);
-  if (!v) throw new Error('useSession must be used within SessionProvider');
-  return v;
+  return useContext(Ctx);
 }
 
