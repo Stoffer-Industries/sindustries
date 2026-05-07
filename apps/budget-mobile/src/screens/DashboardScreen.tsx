@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Button, Linking, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { CategoryTimeseriesChart } from '../components/CategoryTimeseriesChart';
 import { apiFetch } from '../api/http';
@@ -16,6 +16,7 @@ export function DashboardScreen({ navigation }: Props) {
     {}
   );
   const [selectedCategory, setSelectedCategory] = useState<string>('other');
+  const [akahuStatus, setAkahuStatus] = useState<string>('');
 
   const demoPoints = useMemo(
     () => [
@@ -65,6 +66,56 @@ export function DashboardScreen({ navigation }: Props) {
     run();
     return () => {
       cancelled = true;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let alive = true;
+
+    async function maybeHandleUrl(url: string) {
+      try {
+        // Akahu redirects to the configured redirect_uri with ?code=... on success.
+        const u = new URL(url);
+        const code = u.searchParams.get('code');
+        if (!code) return;
+
+        setAkahuStatus('Exchanging Akahu code…');
+        await apiFetch('/akahu/exchange', {
+          method: 'POST',
+          body: JSON.stringify({ userId: session.user.id, code }),
+          session
+        });
+
+        setAkahuStatus('Syncing transactions…');
+        const now = Date.now();
+        const startMs = now - 30 * 24 * 60 * 60 * 1000;
+        await apiFetch('/akahu/sync', {
+          method: 'POST',
+          body: JSON.stringify({ userId: session.user.id, startMs, endMs: now }),
+          session
+        });
+
+        if (alive) setAkahuStatus('Akahu linked + synced');
+      } catch (e: any) {
+        if (alive) setAkahuStatus('');
+        Alert.alert('Akahu link failed', e?.message ?? 'Unknown error');
+      }
+    }
+
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) return maybeHandleUrl(url);
+      })
+      .catch(() => {});
+
+    const sub = Linking.addEventListener('url', (evt) => {
+      void maybeHandleUrl(evt.url);
+    });
+
+    return () => {
+      alive = false;
+      sub.remove();
     };
   }, [session]);
 
@@ -133,6 +184,46 @@ export function DashboardScreen({ navigation }: Props) {
       </View>
 
       <View style={{ gap: 12 }}>
+        {session ? (
+          <View style={{ gap: 8 }}>
+            <Button
+              title="Link Akahu"
+              onPress={async () => {
+                try {
+                  setAkahuStatus('Opening Akahu…');
+                  const res = await apiFetch<{ authorizeUrl: string }>(
+                    `/akahu/authorize-url?userId=${encodeURIComponent(session.user.id)}`,
+                    { session }
+                  );
+                  await Linking.openURL(res.authorizeUrl);
+                } catch (e: any) {
+                  setAkahuStatus('');
+                  Alert.alert('Could not open Akahu', e?.message ?? 'Unknown error');
+                }
+              }}
+            />
+            <Button
+              title="Sync Akahu now"
+              onPress={async () => {
+                try {
+                  setAkahuStatus('Syncing transactions…');
+                  const now = Date.now();
+                  const startMs = now - 30 * 24 * 60 * 60 * 1000;
+                  await apiFetch('/akahu/sync', {
+                    method: 'POST',
+                    body: JSON.stringify({ userId: session.user.id, startMs, endMs: now }),
+                    session
+                  });
+                  setAkahuStatus('Sync complete');
+                } catch (e: any) {
+                  setAkahuStatus('');
+                  Alert.alert('Sync failed', e?.message ?? 'Unknown error');
+                }
+              }}
+            />
+            {akahuStatus ? <Text style={{ color: '#6b7280' }}>{akahuStatus}</Text> : null}
+          </View>
+        ) : null}
         <Button
           title="View transactions"
           onPress={() => navigation.navigate('Transactions')}
