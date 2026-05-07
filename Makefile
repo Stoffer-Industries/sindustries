@@ -23,6 +23,7 @@ test: test-api test-app test-e2e
 
 test-api:
 	cd services/tasks-api && npm test
+	cd services/budget-api && npm test
 
 test-app:
 	cd apps/tasks && npm test
