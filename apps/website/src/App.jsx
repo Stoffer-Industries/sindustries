@@ -6,27 +6,38 @@ const NAV_ITEMS = [
   { label: 'Contact', path: '/contact' }
 ];
 
+const SOCIAL_LINKS = {
+  x: 'https://x.com/stoff81?s=21&t=RdCkvkBscucBkM7Fx5wurg',
+  tiktok: 'https://www.tiktok.com/@sindustries1?_r=1&_t=ZS-96GZycL6JzM'
+};
+
+const CONTACT_EMAIL = 'hello@sindustries.co.nz';
+
 const SITE_COPY = {
-  heroTitle: 'Build useful things. Run them well.',
+  heroTitle: 'Stay relevant in an ever-changing world.',
   heroBody:
-    'SIndustries is a builder\'s workshop for digital products, systems, and experiments designed to compound over time.',
+    'SIndustries is Tom Stoffer\'s AI-native business for building in public: testing tools, systems, and experiments that turn uncertainty into useful action.',
   positioning:
-    'We build practical digital products, internal tools, and operating systems for better work — with speed, precision, and long-term thinking.',
+    'We are not pretending anyone has the full map. We are building from real software delivery experience, using the latest tools, and sharing what actually creates value.',
   principles: [
-    'Start simple, then sharpen what proves useful.',
-    'Ship early enough to learn, but not so early it wastes trust.',
-    'Turn messy workflows into durable systems.',
-    'Use automation to remove repetition and free up focus.'
+    'Face reality early.',
+    'Build for outcomes, not activity.',
+    'Stay fit as the world changes.',
+    'Think in systems, not symptoms.',
+    'Move with intent.',
+    'Bring people with you.'
   ],
-  focus: [
-    'Focused software products',
-    'Internal tools and workflow automation',
-    'Experiments that can grow into durable digital businesses'
+  experiments: [
+    'OpenClaw and AI chief-of-staff systems',
+    'Ecommerce drops and lightweight commerce loops',
+    'Software factory workflows for shaping and shipping work',
+    'Content factory systems for turning work into public signal',
+    'Personal finance and fitness assistant experiments'
   ],
   aboutBody:
-    'SIndustries is the company behind Tom Stoffer\'s builder-operator work: a home for software products, workflow systems, and experiments that solve real problems without unnecessary complexity.',
+    'SIndustries is the place Tom builds, tests, and shares what comes next. It combines deep software delivery experience with AI-native tools to explore new ways of working, building, and staying relevant.',
   contactBody:
-    'If you want to collaborate, compare notes, or see what is being built, get in touch.'
+    'If you are building, backing, or reshaping how organisations work, the line is open.'
 };
 
 function getPathname() {
@@ -64,14 +75,7 @@ function Shell({ pathname, navigate, children }) {
           event.preventDefault();
           navigate('/');
         }}>
-          <span className="brand-mark" aria-hidden="true">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="28" height="28" rx="6" fill="var(--si-color-ink-950)"/>
-              <path d="M7 8L14 20L21 8" stroke="var(--si-color-brand-500)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M7 14H21" stroke="var(--si-color-brand-500)" strokeWidth="3" strokeLinecap="round"/>
-            </svg>
-          </span>
-          <span className="brand-name">SIndustries</span>
+          <img className="brand-logo" src="/brand/sindustries-logo.webp" alt="SIndustries" />
         </a>
         <nav className="nav" aria-label="Primary">
           {NAV_ITEMS.map((item) => (
@@ -91,8 +95,12 @@ function Shell({ pathname, navigate, children }) {
       </header>
       <main>{children}</main>
       <footer className="footer">
-        <p>Built with intent in Auckland, New Zealand.</p>
-        <a href="mailto:tom@stofferindustries.com">tom@stofferindustries.com</a>
+        <p>SIndustries · Auckland, New Zealand</p>
+        <div className="footer-links">
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          <a href={SOCIAL_LINKS.x}>X</a>
+          <a href={SOCIAL_LINKS.tiktok}>TikTok</a>
+        </div>
       </footer>
     </div>
   );
@@ -101,37 +109,39 @@ function Shell({ pathname, navigate, children }) {
 function HomePage({ navigate }) {
   return (
     <>
-      <section className="hero panel">
-        <p className="eyebrow">Builder-operator company</p>
+      <section className="hero panel dark-panel">
+        <p className="eyebrow">AI-native build in public</p>
         <h1>{SITE_COPY.heroTitle}</h1>
         <p className="lede">{SITE_COPY.heroBody}</p>
         <div className="hero-actions">
-          <a className="btn primary" href="mailto:tom@stofferindustries.com">Start a conversation</a>
-          <button className="btn secondary" onClick={() => navigate('/about')}>How we work</button>
+          <a className="btn primary" href={SOCIAL_LINKS.x}>Follow Tom on X</a>
+          <a className="btn secondary" href={SOCIAL_LINKS.tiktok}>Follow the story</a>
+          <button className="btn ghost" onClick={() => navigate('/about')}>What we are building</button>
         </div>
       </section>
 
       <section className="grid two-up">
-        <article className="panel dark-panel">
+        <article className="panel">
           <p className="eyebrow">What SIndustries is</p>
-          <h2>Practical systems over performative noise.</h2>
+          <h2>Figuring out what comes next by building it.</h2>
           <p>{SITE_COPY.positioning}</p>
         </article>
-        <article className="panel">
-          <p className="eyebrow">Current focus</p>
+        <article className="panel dark-panel">
+          <p className="eyebrow">Current experiments</p>
           <ul>
-            {SITE_COPY.focus.map((item) => (
+            {SITE_COPY.experiments.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
         </article>
       </section>
 
-      <section className="panel">
-        <p className="eyebrow">Operating principles</p>
+      <section className="panel values-panel">
+        <p className="eyebrow">How we work</p>
+        <h2>Curious, direct, outcome-led.</h2>
         <div className="principles-grid">
           {SITE_COPY.principles.map((principle) => (
-            <article key={principle} className="principle-card dark-card">
+            <article key={principle} className="principle-card">
               <span className="principle-marker" aria-hidden="true">▸</span>
               <p>{principle}</p>
             </article>
@@ -147,30 +157,32 @@ function AboutPage() {
     <section className="page-stack">
       <div className="panel page-intro">
         <p className="eyebrow">About</p>
-        <h1>A builder\'s shop for modern software.</h1>
+        <h1>A business for building what comes next.</h1>
         <p className="lede">{SITE_COPY.aboutBody}</p>
       </div>
       <div className="grid two-up">
         <article className="panel dark-panel">
           <p className="eyebrow">Why it exists</p>
           <p>
-            The goal is simple: create useful tools, products, and systems that make work clearer,
-            faster, and more durable.
+            The AI wave is changing how software, teams, and companies are built. SIndustries exists
+            to test those changes in the open and find what creates real value.
           </p>
         </article>
         <article className="panel">
-          <p className="eyebrow">How it works</p>
+          <p className="eyebrow">The stance</p>
           <p>
-            SIndustries ships in small, focused slices. Learn quickly. Keep what works. Build
-            the operating system behind better products.
+            No one knows exactly how this plays out. The work is to stay close to reality, build in
+            small useful slices, and keep adapting as the signal gets clearer.
           </p>
         </article>
       </div>
       <article className="panel founder-note">
-        <p className="eyebrow">Founder note</p>
+        <p className="eyebrow">Founder profile</p>
+        <h2>Tom Stoffer</h2>
         <p>
-          Founded by Tom Stoffer — product-minded engineering leader, systems thinker, and builder.
-          This company is the home for the products and workflows he wants to own for the long term.
+          Tom is a builder/operator with a background in software, product delivery, and scaling
+          teams. He has helped take multiple companies to exit across a broad spectrum of industries.
+          SIndustries is where he builds in public and explores what AI-native work makes possible.
         </p>
       </article>
     </section>
@@ -180,7 +192,7 @@ function AboutPage() {
 function ContactPage() {
   return (
     <section className="page-stack">
-      <div className="panel page-intro">
+      <div className="panel page-intro dark-panel">
         <p className="eyebrow">Contact</p>
         <h1>Open line. Clear signal.</h1>
         <p className="lede">{SITE_COPY.contactBody}</p>
@@ -188,15 +200,14 @@ function ContactPage() {
       <div className="grid two-up">
         <article className="panel">
           <p className="eyebrow">Email</p>
-          <a className="contact-link" href="mailto:tom@stofferindustries.com">tom@stofferindustries.com</a>
-          <p className="muted">Best for collaborations, intros, and product conversations.</p>
+          <a className="contact-link" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          <p className="muted">Best for collaborations, intros, and serious product conversations.</p>
         </article>
         <article className="panel">
-          <p className="eyebrow">What to include</p>
-          <ul>
-            <li>What you are building or exploring</li>
-            <li>Why you think it overlaps</li>
-            <li>Any useful links or context</li>
+          <p className="eyebrow">Follow along</p>
+          <ul className="link-list">
+            <li><a href={SOCIAL_LINKS.x}>Follow Tom on X</a></li>
+            <li><a href={SOCIAL_LINKS.tiktok}>Follow the story on TikTok</a></li>
           </ul>
         </article>
       </div>

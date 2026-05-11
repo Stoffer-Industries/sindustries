@@ -10,9 +10,12 @@
   --si-color-sage-500: #7a8b7c;
   --si-color-cream-100: #f3f1ec;
   --si-color-cream-200: #d5d3cd;
+  --si-color-bone-50: #fdfbf6;
+  --si-color-bone-100: #f7f1e7;
   --si-color-paper-200: #ece3cc;
   --si-color-neutral-300: #d3d3d3;
   --si-color-neutral-200: #dddddd;
+  --si-color-brand-700: #a76f00;
   --si-color-brand-500: #ffc935;
   --si-color-brand-200: #ffe891;
   --si-color-info-500: #00d4ff;
@@ -23,8 +26,8 @@
   --si-color-danger-500: #ff5252;
 
   /* Bone-first surface system */
-  --si-color-bg-canvas: var(--si-color-cream-100);
-  --si-color-bg-canvas-alt: var(--si-color-cream-200);
+  --si-color-bg-canvas: var(--si-color-bone-50);
+  --si-color-bg-canvas-alt: var(--si-color-bone-100);
   --si-color-bg-surface: var(--si-color-surface-800);
   --si-color-bg-panel: var(--si-color-ink-900);
   --si-color-bg-glass: rgb(43 47 52 / 85%);
@@ -61,6 +64,7 @@
 
   --si-shadow-soft: 0 18px 60px rgb(0 0 0 / 12%);
   --si-shadow-hard: 4px 4px 0 var(--si-color-ink-950);
+  --si-surface-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
 }
 
 *,

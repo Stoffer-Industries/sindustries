@@ -10,8 +10,8 @@ describe('website app', () => {
 
   test('renders home messaging', () => {
     render(<App />);
-    expect(screen.getByRole('heading', { name: /build useful things\. run them well\./i })).toBeInTheDocument();
-    expect(screen.getByText(/practical digital products, internal tools, and operating systems/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /stay relevant in an ever-changing world\./i })).toBeInTheDocument();
+    expect(screen.getByText(/ai-native business for building in public/i)).toBeInTheDocument();
   });
 
   test('navigates to about and contact routes', async () => {
@@ -19,10 +19,10 @@ describe('website app', () => {
     render(<App />);
 
     await user.click(screen.getByRole('link', { name: /about/i }));
-    expect(screen.getByText(/founder note/i)).toBeInTheDocument();
+    expect(screen.getByText(/founder profile/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole('link', { name: /contact/i }));
-    expect(screen.getByText(/what to include/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /tom@stofferindustries.com/i }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/follow along/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /hello@sindustries.co.nz/i }).length).toBeGreaterThan(0);
   });
 });
