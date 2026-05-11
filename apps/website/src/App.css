@@ -1,78 +1,15 @@
+/* ─────────────────────────────────────────────
+   Surface system: bone base, graphite panels, amber signal
+   ───────────────────────────────────────────── */
 :root {
-  background:
-    radial-gradient(circle at top, rgb(255 201 53 / 12%), transparent 30%),
-    linear-gradient(180deg, var(--si-color-bg-canvas) 0%, var(--si-color-bg-canvas-alt) 100%);
+  --hero-height: auto;
 }
 
-body {
-  background: var(--si-color-bg-canvas);
-  font-family: var(--si-font-body);
-}
-
+/* ─── Shell / Layout ─── */
 .site-shell {
   width: min(1120px, calc(100% - 32px));
   margin: 0 auto;
   padding: 24px 0 48px;
-}
-
-.topbar,
-.footer,
-.panel,
-.principle-card {
-  border: 1px solid var(--si-color-border-subtle);
-  background: var(--si-color-bg-glass);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--si-shadow-soft);
-}
-
-.topbar,
-.footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
-  border-radius: 18px;
-}
-
-.brand {
-  display: inline-flex;
-  gap: 12px;
-  align-items: center;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.brand-kicker,
-.eyebrow {
-  color: var(--si-color-brand-500);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.brand-name {
-  font-size: 0.95rem;
-  font-weight: 700;
-}
-
-.nav {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.nav-link {
-  padding: 10px 14px;
-  border-radius: 999px;
-  color: var(--si-color-text-muted);
-}
-
-.nav-link:hover,
-.nav-link.active {
-  color: var(--si-color-text-primary);
-  background: rgb(255 201 53 / 12%);
 }
 
 main {
@@ -81,90 +18,114 @@ main {
   padding: 28px 0;
 }
 
-.panel {
-  border-radius: 28px;
-  padding: 28px;
-}
-
-.hero {
-  padding: 56px 32px;
-}
-
-h1,
-h2 {
-  margin: 0;
-  line-height: 1.02;
-  letter-spacing: -0.04em;
-}
-
-h1 {
-  font-size: clamp(2.8rem, 7vw, 5.4rem);
-  max-width: 11ch;
-}
-
-h2 {
-  font-size: clamp(1.7rem, 3vw, 2.4rem);
-  margin-top: 10px;
-}
-
-p,
-li {
-  color: var(--si-color-text-secondary);
-  font-size: 1.02rem;
-}
-
-.lede {
-  max-width: 42rem;
-  font-size: 1.15rem;
-  color: var(--si-color-text-primary);
-}
-
-.muted,
-.footer p {
-  color: var(--si-color-text-muted);
-}
-
-.hero-actions,
-.grid,
-.principles-grid,
-.page-stack {
-  display: grid;
-  gap: 18px;
-}
-
-.hero-actions {
+/* ─── Topbar ─── */
+.topbar,
+.footer {
   display: flex;
-  flex-wrap: wrap;
-  margin-top: 28px;
-}
-
-.btn {
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-height: 48px;
-  padding: 0 18px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  cursor: pointer;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  border-radius: var(--si-radius-xl);
+  background: var(--si-color-ink-950);
+  box-shadow: var(--si-shadow-soft);
 }
 
-.btn.primary {
-  background: var(--si-color-brand-500);
-  color: var(--si-color-bg-canvas);
+.topbar {
+  border: 1px solid rgb(255 255 255 / 8%);
+}
+
+/* ─── Brand / Nav ─── */
+.brand {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.brand-name {
+  font-family: var(--si-font-display);
+  font-size: 1rem;
   font-weight: 700;
+  color: var(--si-color-cream-100);
+  letter-spacing: 0.02em;
 }
 
-.btn.secondary {
-  background: transparent;
-  border-color: rgb(143 150 158 / 35%);
-  color: var(--si-color-text-primary);
+.brand-kicker,
+.eyebrow {
+  color: var(--si-color-brand-500);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-.two-up {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
+.nav-link {
+  padding: 8px 14px;
+  border-radius: var(--si-radius-pill);
+  color: var(--si-color-slate-500);
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.nav-link:hover {
+  color: var(--si-color-cream-100);
+  background: rgb(255 255 255 / 8%);
+}
+
+.nav-link.active {
+  color: var(--si-color-brand-500);
+  background: rgb(255 201 53 / 10%);
+}
+
+/* ─── Panels ─── */
+.panel {
+  border-radius: var(--si-radius-xl);
+  padding: 28px;
+  background: var(--si-color-cream-100);
+  border: 1px solid var(--si-color-cream-200);
+  box-shadow: var(--si-shadow-soft);
+  position: relative;
+}
+
+/* Dark graphite panels sit on top of bone surface */
+.dark-panel {
+  background: var(--si-color-ink-900);
+  border-color: rgb(255 255 255 / 8%);
+}
+
+.dark-panel .eyebrow {
+  color: var(--si-color-brand-500);
+}
+
+.dark-panel h2,
+.dark-panel p {
+  color: var(--si-color-cream-200);
+}
+
+.dark-card {
+  background: var(--si-color-ink-900);
+  border-color: rgb(255 255 255 / 8%);
+}
+
+.dark-card p {
+  color: var(--si-color-cream-200);
+}
+
+/* Accent glow on focus grid panel */
 .accent-panel {
   position: relative;
   overflow: hidden;
@@ -176,47 +137,206 @@ li {
   inset: auto -12% -30% auto;
   width: 220px;
   height: 220px;
-  background: radial-gradient(circle, rgb(255 201 53 / 18%), transparent 65%);
+  background: radial-gradient(circle, rgb(255 201 53 / 15%), transparent 65%);
+  pointer-events: none;
 }
 
-ul {
-  margin: 12px 0 0;
-  padding-left: 18px;
+/* ─── Hero ─── */
+.hero {
+  padding: 56px 32px;
+  background: var(--si-color-ink-950);
+  border-color: rgb(255 255 255 / 8%);
+  text-align: left;
+}
+
+.hero .eyebrow {
+  color: var(--si-color-brand-500);
+}
+
+.hero h1 {
+  color: var(--si-color-cream-100);
+}
+
+.hero .lede {
+  color: var(--si-color-slate-500);
+}
+
+/* ─── Typography ─── */
+h1,
+h2 {
+  margin: 0;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+h1 {
+  font-size: clamp(2.6rem, 6.5vw, 5rem);
+  max-width: 11ch;
+  color: var(--si-color-ink-950);
+}
+
+h2 {
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  margin-top: 10px;
+  color: var(--si-color-ink-950);
+}
+
+p,
+li {
+  color: var(--si-color-surface-800);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.lede {
+  max-width: 42rem;
+  font-size: 1.1rem;
+  color: var(--si-color-surface-800);
+  margin-top: 14px;
+}
+
+.hero .lede {
+  color: var(--si-color-slate-500);
+}
+
+.muted,
+.footer p {
+  color: var(--si-color-slate-500);
+}
+
+/* ─── Grids ─── */
+.hero-actions,
+.grid,
+.principles-grid,
+.page-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.two-up {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .principles-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* ─── Principle cards ─── */
 .principle-card {
   display: flex;
   gap: 14px;
-  padding: 18px;
-  border-radius: 20px;
+  padding: 18px 20px;
+  border-radius: var(--si-radius-lg);
+  background: var(--si-color-cream-100);
+  border: 1px solid var(--si-color-cream-200);
 }
 
 .principle-marker {
   color: var(--si-color-brand-500);
   font-weight: 900;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  line-height: 1.4;
 }
 
+/* ─── Buttons ─── */
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 28px;
+  gap: 10px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 20px;
+  border-radius: var(--si-radius-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn.primary {
+  background: var(--si-color-brand-500);
+  color: var(--si-color-ink-950);
+  box-shadow: 0 4px 16px rgb(255 201 53 / 30%);
+}
+
+.btn.secondary {
+  background: transparent;
+  border-color: var(--si-color-slate-500);
+  color: var(--si-color-cream-100);
+}
+
+.btn.secondary:hover {
+  border-color: var(--si-color-cream-200);
+  color: var(--si-color-cream-100);
+}
+
+/* ─── Lists ─── */
+ul {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+li {
+  margin-bottom: 6px;
+}
+
+/* ─── Page intro ─── */
 .page-intro {
   padding-top: 32px;
 }
 
+/* ─── Founder note ─── */
+.founder-note {
+  border-left: 4px solid var(--si-color-brand-500);
+}
+
+/* ─── Contact link ─── */
 .contact-link {
   display: inline-block;
   margin-top: 6px;
-  font-size: 1.35rem;
+  font-size: 1.3rem;
   color: var(--si-color-brand-500);
   font-weight: 700;
 }
 
+/* ─── Footer ─── */
 .footer {
   margin-top: 8px;
   flex-wrap: wrap;
 }
 
+.footer p {
+  color: var(--si-color-slate-500);
+  font-size: 0.9rem;
+}
+
+.footer a {
+  color: var(--si-color-slate-500);
+  font-size: 0.9rem;
+  transition: color 0.15s ease;
+}
+
+.footer a:hover {
+  color: var(--si-color-cream-200);
+}
+
+/* ─── Responsive ─── */
 @media (max-width: 760px) {
   .site-shell {
     width: min(100% - 24px, 1120px);
@@ -234,11 +354,15 @@ ul {
 
   .panel {
     padding: 22px;
-    border-radius: 22px;
+    border-radius: var(--si-radius-lg);
   }
 
   .two-up,
   .principles-grid {
     grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 2.4rem;
   }
 }

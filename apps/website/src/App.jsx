@@ -9,7 +9,7 @@ const NAV_ITEMS = [
 const SITE_COPY = {
   heroTitle: 'Build useful things. Run them well.',
   heroBody:
-    'Stoffer Industries is a builder\'s workshop for digital products, systems, and experiments designed to compound over time.',
+    'SIndustries is a builder\'s workshop for digital products, systems, and experiments designed to compound over time.',
   positioning:
     'We build practical digital products, internal tools, and operating systems for better work — with speed, precision, and long-term thinking.',
   principles: [
@@ -24,7 +24,7 @@ const SITE_COPY = {
     'Experiments that can grow into durable digital businesses'
   ],
   aboutBody:
-    'Stoffer Industries is the company behind Tom Stoffer\'s builder-operator work: a home for software products, workflow systems, and experiments that solve real problems without unnecessary complexity.',
+    'SIndustries is the company behind Tom Stoffer\'s builder-operator work: a home for software products, workflow systems, and experiments that solve real problems without unnecessary complexity.',
   contactBody:
     'If you want to collaborate, compare notes, or see what is being built, get in touch.'
 };
@@ -64,8 +64,14 @@ function Shell({ pathname, navigate, children }) {
           event.preventDefault();
           navigate('/');
         }}>
-          <span className="brand-kicker">SIN</span>
-          <span className="brand-name">Stoffer Industries</span>
+          <span className="brand-mark" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="28" height="28" rx="6" fill="var(--si-color-ink-950)"/>
+              <path d="M7 8L14 20L21 8" stroke="var(--si-color-brand-500)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M7 14H21" stroke="var(--si-color-brand-500)" strokeWidth="3" strokeLinecap="round"/>
+            </svg>
+          </span>
+          <span className="brand-name">SIndustries</span>
         </a>
         <nav className="nav" aria-label="Primary">
           {NAV_ITEMS.map((item) => (
@@ -106,12 +112,12 @@ function HomePage({ navigate }) {
       </section>
 
       <section className="grid two-up">
-        <article className="panel">
-          <p className="eyebrow">What Stoffer Industries is</p>
+        <article className="panel dark-panel">
+          <p className="eyebrow">What SIndustries is</p>
           <h2>Practical systems over performative noise.</h2>
           <p>{SITE_COPY.positioning}</p>
         </article>
-        <article className="panel accent-panel">
+        <article className="panel">
           <p className="eyebrow">Current focus</p>
           <ul>
             {SITE_COPY.focus.map((item) => (
@@ -125,7 +131,7 @@ function HomePage({ navigate }) {
         <p className="eyebrow">Operating principles</p>
         <div className="principles-grid">
           {SITE_COPY.principles.map((principle) => (
-            <article key={principle} className="principle-card">
+            <article key={principle} className="principle-card dark-card">
               <span className="principle-marker" aria-hidden="true">▸</span>
               <p>{principle}</p>
             </article>
@@ -145,7 +151,7 @@ function AboutPage() {
         <p className="lede">{SITE_COPY.aboutBody}</p>
       </div>
       <div className="grid two-up">
-        <article className="panel">
+        <article className="panel dark-panel">
           <p className="eyebrow">Why it exists</p>
           <p>
             The goal is simple: create useful tools, products, and systems that make work clearer,
@@ -155,7 +161,7 @@ function AboutPage() {
         <article className="panel">
           <p className="eyebrow">How it works</p>
           <p>
-            Stoffer Industries ships in small, focused slices. Learn quickly. Keep what works. Build
+            SIndustries ships in small, focused slices. Learn quickly. Keep what works. Build
             the operating system behind better products.
           </p>
         </article>

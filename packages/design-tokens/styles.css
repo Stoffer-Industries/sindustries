@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Inter:wght@400;500;600;700;800&family=Work+Sans:wght@400;500;600;700;800;900&display=swap');
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
   --si-color-ink-950: #111213;
   --si-color-ink-900: #161a1e;
@@ -22,16 +22,22 @@
   --si-color-success-500: #31c76a;
   --si-color-danger-500: #ff5252;
 
-  --si-color-bg-canvas: var(--si-color-ink-950);
-  --si-color-bg-canvas-alt: var(--si-color-ink-900);
+  /* Bone-first surface system */
+  --si-color-bg-canvas: var(--si-color-cream-100);
+  --si-color-bg-canvas-alt: var(--si-color-cream-200);
   --si-color-bg-surface: var(--si-color-surface-800);
-  --si-color-bg-glass: rgb(43 47 52 / 68%);
-  --si-color-text-primary: var(--si-color-cream-100);
-  --si-color-text-secondary: var(--si-color-cream-200);
+  --si-color-bg-panel: var(--si-color-ink-900);
+  --si-color-bg-glass: rgb(43 47 52 / 85%);
+  --si-color-text-primary: var(--si-color-ink-950);
+  --si-color-text-secondary: var(--si-color-surface-800);
   --si-color-text-muted: var(--si-color-slate-500);
   --si-color-border-strong: var(--si-color-slate-500);
-  --si-color-border-subtle: rgb(143 150 158 / 18%);
-  --si-color-focus: var(--si-color-info-500);
+  --si-color-border-subtle: rgb(143 150 158 / 30%);
+  --si-color-focus: var(--si-color-brand-500);
+
+  /* Text on dark backgrounds (for graphite panels) */
+  --si-color-text-on-dark: var(--si-color-cream-100);
+  --si-color-text-on-dark-secondary: var(--si-color-cream-200);
 
   --si-font-body: 'Work Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --si-font-ui: 'Inter', 'Work Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -53,7 +59,7 @@
   --si-radius-xl: 28px;
   --si-radius-pill: 999px;
 
-  --si-shadow-soft: 0 18px 60px rgb(0 0 0 / 22%);
+  --si-shadow-soft: 0 18px 60px rgb(0 0 0 / 12%);
   --si-shadow-hard: 4px 4px 0 var(--si-color-ink-950);
 }
 
@@ -77,6 +83,17 @@ body {
   min-height: 100vh;
   background: var(--si-color-bg-canvas);
   color: var(--si-color-text-primary);
+  position: relative;
+}
+
+/* Subtle bone texture — tactile workshop feel */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
 }
 
 button,
@@ -93,4 +110,6 @@ a {
 
 #root {
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
 }

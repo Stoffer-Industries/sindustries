@@ -4,11 +4,12 @@ Brand Spec v0.2 — Stoffer Industries (SIN)
 
 ## 1. Brand Core
 
-**Name**: Stoffer Industries  
+**Name**: SIndustries  
+**Domain**: `sindustries.co.nz`  
 **Shortmark**: SIN  
 **Archetype**: The Builder-Operator  
 **Essence**: Craft. Precision. Momentum.  
-**Positioning**: Stoffer Industries is a builder’s workshop for the modern era — designing, shipping, and operating digital products with speed, discipline, and long-term thinking.
+**Positioning**: SIndustries is a builder’s workshop for the modern era — designing, shipping, and operating digital products with speed, discipline, and long-term thinking.
 
 Not an agency. Not a consultancy. A builder’s shop.
 
@@ -67,11 +68,13 @@ Shapes should feel machined, not illustrated.
 
 **Texture**
 
-- Subtle grain / material noise
-- Low opacity overlays only
-- Never distressed or grunge
+- The textured bone/off-white surface from the current logo assets is now the preferred default background surface.
+- Use it as a tactile, premium base layer for marketing pages, landing pages, and brand-led surfaces.
+- Keep the texture subtle: material depth, not distressed/grunge.
+- Dark industrial panels can sit on top of the bone surface for contrast and hierarchy.
+- Low opacity grain/noise overlays are acceptable when they reinforce the logo texture direction.
 
-The goal: precision with a hint of steel dust.
+The goal: precision with a hint of workshop materiality — bone surface, graphite structure, amber signal.
 
 ---
 
