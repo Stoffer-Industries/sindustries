@@ -57,12 +57,13 @@ const STORIES = [
 
 const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
 const HEADER_TAB_TRANSITION_PX = 20;
+const COLLAPSED_TAB_WIDTH_PX = 12;
 
 function slug(label) {
   return label.toLowerCase();
 }
 
-function SectionNav({ current, tabProgress, tabRefs }) {
+function SectionNav({ current, tabProgress, tabRefs, tabsRef }) {
   const visibleIndex = Math.round(tabProgress);
 
   return (
@@ -71,7 +72,7 @@ function SectionNav({ current, tabProgress, tabRefs }) {
         <a href="#sin" className="section-logo" aria-label="SIndustries home">
           <LogoMark />
         </a>
-        <div className="section-tabs">
+        <div className="section-tabs" ref={tabsRef}>
           {SECTIONS.map((section, index) => {
             const distance = Math.abs(index - tabProgress);
             const expansion = Math.max(0, 1 - distance);
@@ -182,22 +183,31 @@ function LogoMark() {
 export function App() {
   const { activeSection, tabProgress } = useSectionProgress();
   const tabRefs = useRef({});
+  const tabsRef = useRef(null);
   const [headingTargets, setHeadingTargets] = useState({});
 
   useLayoutEffect(() => {
     const measureHeadingTargets = () => {
+      const tabsRect = tabsRef.current?.getBoundingClientRect();
+      if (!tabsRect) return;
+
+      const expandedWidth = Math.max(
+        COLLAPSED_TAB_WIDTH_PX,
+        tabsRect.width - ((SECTIONS.length - 1) * COLLAPSED_TAB_WIDTH_PX)
+      );
+
       setHeadingTargets(Object.fromEntries(
-        SECTIONS.map((section) => {
-          const tabRect = tabRefs.current[section]?.getBoundingClientRect();
-          return [section, tabRect ? tabRect.left + tabRect.width / 2 : 0];
-        })
+        SECTIONS.map((section, index) => [
+          section,
+          tabsRect.left + (index * COLLAPSED_TAB_WIDTH_PX) + (expandedWidth / 2)
+        ])
       ));
     };
 
     measureHeadingTargets();
     window.addEventListener('resize', measureHeadingTargets);
     return () => window.removeEventListener('resize', measureHeadingTargets);
-  }, [tabProgress]);
+  }, []);
 
   return (
     <div className="site-shell">
@@ -205,6 +215,7 @@ export function App() {
         current={activeSection}
         tabProgress={tabProgress}
         tabRefs={tabRefs}
+        tabsRef={tabsRef}
       />
       <main>
         <section id="sin" className="hero-section">
