@@ -58,16 +58,30 @@ const STORIES = [
 const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
 const HEADER_TAB_TRANSITION_PX = 20;
 const COLLAPSED_TAB_WIDTH_PX = 12;
+const PAGE_HEADING_FADE_PX = 8;
 
 function slug(label) {
   return label.toLowerCase();
 }
 
-function SectionNav({ current, tabProgress, tabRefs, tabsRef }) {
+function SectionNav({ current, tabProgress, tabRefs, tabsRef, headingTargets }) {
   const visibleIndex = Math.round(tabProgress);
 
   return (
     <div className="section-nav-shell">
+      {SECTIONS.slice(1).map((section) => (
+        <span
+          key={section}
+          className="section-header-heading"
+          style={{
+            '--section-heading-target-x': `${headingTargets[section] ?? 0}px`,
+            '--section-header-opacity': section === current ? 1 : 0
+          }}
+          aria-hidden="true"
+        >
+          {section}
+        </span>
+      ))}
       <nav className="section-nav" aria-label="Section navigation">
         <a href="#sin" className="section-logo" aria-label="SIndustries home">
           <LogoMark />
@@ -101,7 +115,11 @@ function SectionNav({ current, tabProgress, tabRefs, tabsRef }) {
 }
 
 function useSectionProgress() {
-  const [sectionState, setSectionState] = useState({ activeSection: SECTIONS[0], tabProgress: 0 });
+  const [sectionState, setSectionState] = useState({
+    activeSection: SECTIONS[0],
+    tabProgress: 0,
+    pageHeadingOpacities: {}
+  });
 
   useEffect(() => {
     let animationFrame = null;
@@ -130,7 +148,15 @@ function useSectionProgress() {
         tabProgress = activeIndex + Math.min(1, Math.max(0, rawProgress));
       }
 
-      setSectionState({ activeSection: SECTIONS[activeIndex], tabProgress });
+      const pageHeadingOpacities = Object.fromEntries(
+        SECTIONS.slice(1).map((section) => {
+          const top = sectionTops[SECTIONS.indexOf(section)];
+          const opacity = Math.min(1, Math.max(0, top / PAGE_HEADING_FADE_PX));
+          return [section, opacity];
+        })
+      );
+
+      setSectionState({ activeSection: SECTIONS[activeIndex], tabProgress, pageHeadingOpacities });
     };
 
     const requestUpdate = () => {
@@ -155,7 +181,7 @@ function useSectionProgress() {
   return sectionState;
 }
 
-function Section({ name, eyebrow, title, headingTarget, children }) {
+function Section({ name, eyebrow, title, headingTarget, pageHeadingOpacity, children }) {
   return (
     <section
       id={slug(name)}
@@ -163,7 +189,11 @@ function Section({ name, eyebrow, title, headingTarget, children }) {
       style={{ '--section-heading-target-x': `${headingTarget ?? 0}px` }}
     >
       {name !== SECTIONS[0] ? (
-        <div className="section-page-heading" aria-hidden="true">
+        <div
+          className="section-page-heading"
+          style={{ '--section-page-heading-opacity': pageHeadingOpacity ?? 1 }}
+          aria-hidden="true"
+        >
           <span>{name}</span>
         </div>
       ) : null}
@@ -181,7 +211,7 @@ function LogoMark() {
 }
 
 export function App() {
-  const { activeSection, tabProgress } = useSectionProgress();
+  const { activeSection, tabProgress, pageHeadingOpacities } = useSectionProgress();
   const tabRefs = useRef({});
   const tabsRef = useRef(null);
   const [headingTargets, setHeadingTargets] = useState({});
@@ -216,6 +246,7 @@ export function App() {
         tabProgress={tabProgress}
         tabRefs={tabRefs}
         tabsRef={tabsRef}
+        headingTargets={headingTargets}
       />
       <main>
         <section id="sin" className="hero-section">
@@ -251,7 +282,7 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={headingTargets.Signals}>
+        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={headingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
             {SIGNALS.map((signal) => (
               <article className="signal-card" key={signal.label}>
@@ -263,7 +294,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion." headingTarget={headingTargets.Systems}>
+        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion." headingTarget={headingTargets.Systems} pageHeadingOpacity={pageHeadingOpacities.Systems}>
           <div className="systems-grid">
             {SYSTEMS.map((system) => (
               <article className="system-card" key={system.name}>
@@ -276,13 +307,13 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output." headingTarget={headingTargets.Stacks}>
+        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output." headingTarget={headingTargets.Stacks} pageHeadingOpacity={pageHeadingOpacities.Stacks}>
           <div className="stack-cloud">
             {STACKS.map((stack) => <span key={stack}>{stack}</span>)}
           </div>
         </Section>
 
-        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock." headingTarget={headingTargets.Ships}>
+        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock." headingTarget={headingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
           <div className="ships-list">
             {SHIPS.map((ship, index) => (
               <article className="ship-row" key={ship}>
@@ -293,7 +324,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={headingTargets.Stories}>
+        <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={headingTargets.Stories} pageHeadingOpacity={pageHeadingOpacities.Stories}>
           <div className="stories-grid">
             {STORIES.map((story) => (
               <article className="story-card" key={story}>
@@ -304,7 +335,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines." headingTarget={headingTargets.Studio}>
+        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines." headingTarget={headingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
           <div className="studio-grid">
             {STUDIO.map((item) => (
               <article className="studio-card" key={item}>
@@ -316,7 +347,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line." headingTarget={headingTargets.Summon}>
+        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line." headingTarget={headingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>
           <div className="summon-grid">
             <p className="lede">
               If you are building, backing, or reshaping how organisations work, the line is open. Follow the experiments or start a conversation.

@@ -219,7 +219,8 @@ main {
   pointer-events: none;
 }
 
-.section-page-heading span {
+.section-page-heading span,
+.section-header-heading {
   position: absolute;
   top: 0;
   left: var(--section-heading-target-x);
@@ -234,6 +235,16 @@ main {
   text-transform: uppercase;
   transform: translateX(-50%);
   white-space: nowrap;
+}
+
+.section-page-heading span {
+  opacity: var(--section-page-heading-opacity);
+}
+
+.section-header-heading {
+  z-index: 1;
+  opacity: var(--section-header-opacity);
+  pointer-events: none;
 }
 
 .section-nav-shell {
