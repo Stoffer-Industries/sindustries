@@ -1,28 +1,20 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { App } from './App.jsx';
 
 describe('website app', () => {
-  beforeEach(() => {
-    window.history.pushState({}, '', '/');
+  test('renders the long-scroll home messaging', () => {
+    render(<App />);
+    expect(screen.getByRole('heading', { name: /build the systems\. ship the signal\./i })).toBeInTheDocument();
+    expect(screen.getByText(/ai-native builder\/operator company/i)).toBeInTheDocument();
   });
 
-  test('renders home messaging', () => {
-    render(<App />);
-    expect(screen.getByRole('heading', { name: /stay relevant in an ever-changing world\./i })).toBeInTheDocument();
-    expect(screen.getByText(/ai-native business for building in public/i)).toBeInTheDocument();
-  });
-
-  test('navigates to about and contact routes', async () => {
-    const user = userEvent.setup();
+  test('renders section navigation and footer contact', () => {
     render(<App />);
 
-    await user.click(screen.getByRole('link', { name: /about/i }));
-    expect(screen.getByText(/founder profile/i)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('link', { name: /contact/i }));
-    expect(screen.getByText(/follow along/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /signals/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: /hero cards for the machines in motion\./i })).toBeInTheDocument();
+    expect(screen.getByText(/about: sindustries builds practical digital products/i)).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /hello@sindustries.co.nz/i }).length).toBeGreaterThan(0);
   });
 });

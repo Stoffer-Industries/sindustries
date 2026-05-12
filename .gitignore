@@ -9,3 +9,4 @@ services/tasks-api/.env.dev
 services/tasks-api/.env.prodlike
 apps/tasks/test-results/.last-run.json
 .db-backups/
+.vercel
