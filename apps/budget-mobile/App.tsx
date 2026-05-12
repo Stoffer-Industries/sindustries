@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppEdgeSwipeBack } from './src/components/AppEdgeSwipeBack';
 import { AlertsScreen } from './src/screens/AlertsScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
+import { TokenSpecimenScreen } from './src/screens/TokenSpecimenScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
 import { SessionProvider } from './src/state/SessionContext';
 import type { RootStackParamList } from './src/navigation/types';
@@ -29,7 +30,8 @@ export default function App() {
                 screens: {
                   Dashboard: '',
                   Transactions: 'transactions',
-                  Alerts: 'alerts'
+                  Alerts: 'alerts',
+                  TokenSpecimen: 'tokens'
                 }
               }
             }}
@@ -63,6 +65,11 @@ export default function App() {
                   headerBackTitle: 'Back',
                   headerBackButtonDisplayMode: 'generic'
                 }}
+              />
+              <Stack.Screen
+                name="TokenSpecimen"
+                component={TokenSpecimenScreen}
+                options={{ headerShown: false }}
               />
             </Stack.Navigator>
             <AppEdgeSwipeBack navigationRef={navigationRef} />

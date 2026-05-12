@@ -256,6 +256,13 @@ export const colors = {
     orange: dark.labelOrange,
     purple: dark.labelPurple,
     gray: dark.labelGray
+  },
+  chart: {
+    groceries: dark.labelGreen,
+    subscriptions: dark.labelBlue,
+    transport: dark.labelOrange,
+    dining: dark.labelPurple,
+    other: dark.labelGray
   }
 } as const;
 
@@ -305,6 +312,13 @@ export const colorsLight = {
     orange: light.labelOrange,
     purple: light.labelPurple,
     gray: light.labelGray
+  },
+  chart: {
+    groceries: light.labelGreen,
+    subscriptions: light.labelBlue,
+    transport: light.labelOrange,
+    dining: light.labelPurple,
+    other: light.labelGray
   }
 } as const;
 
