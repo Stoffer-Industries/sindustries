@@ -16,7 +16,7 @@
     "prisma:validate": "prisma validate"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.js"
+    "seed": "node prisma/seed.js"
   },
   "dependencies": {
     "@sindustries/otel-node": "file:../../packages/otel-node",

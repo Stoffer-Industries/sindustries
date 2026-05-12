@@ -96,6 +96,8 @@ SQL
 (
   cd "$API_DIR"
   ensure_tasks_api_deps
+  # Prisma Client is hoisted at repo root; regenerate for this schema before seeding.
+  DATABASE_URL="$DATABASE_URL" npm run prisma:generate
   DATABASE_URL="$DATABASE_URL" npm run prisma:migrate
   DATABASE_URL="$DATABASE_URL" npm run prisma:generate
 
@@ -110,6 +112,8 @@ SQL
 (
   cd "$BUDGET_API_DIR"
   ensure_budget_api_deps
+  # Prisma Client is hoisted at repo root; regenerate for this schema before seeding.
+  DATABASE_URL="$BUDGET_DATABASE_URL" npm run prisma:generate
   DATABASE_URL="$BUDGET_DATABASE_URL" npm run prisma:migrate
 
   if [[ "$SEED_DB" == "true" ]]; then

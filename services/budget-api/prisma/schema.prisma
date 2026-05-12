@@ -27,6 +27,7 @@ model User {
   sessions  Session[]
   akahu     AkahuConnection?
   cards     LinkedCard[]
+  balanceSnapshots AccountBalanceSnapshot[]
   budgets   CardMonthlyBudget[]
   txns      Transaction[]
   feedback  CategorizationFeedback[]
@@ -63,14 +64,37 @@ model LinkedCard {
   providerCardId String
   displayName    String
   last4          String?
+  currentBalanceCents   Int?
+  availableBalanceCents Int?
+  balanceCurrency       String?
+  balanceOverdrawn      Boolean?
+  balanceUpdatedAt      DateTime?
   createdAt      DateTime @default(now())
 
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   txns           Transaction[]
+  balanceSnapshots AccountBalanceSnapshot[]
   budgets        CardMonthlyBudget[]
 
   @@unique([provider, providerCardId])
   @@index([userId, createdAt])
+}
+
+model AccountBalanceSnapshot {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @db.Uuid
+  cardId                String   @db.Uuid
+  currentBalanceCents   Int?
+  availableBalanceCents Int?
+  currency              String?
+  overdrawn             Boolean?
+  capturedAt            DateTime @default(now())
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card                  LinkedCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId, capturedAt])
+  @@index([cardId, capturedAt])
 }
 
 model Transaction {
