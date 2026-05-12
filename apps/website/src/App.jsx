@@ -62,19 +62,11 @@ function slug(label) {
   return label.toLowerCase();
 }
 
-function SectionNav({ current, tabProgress, tabRefs, headingTargets }) {
+function SectionNav({ current, tabProgress, tabRefs }) {
   const visibleIndex = Math.round(tabProgress);
-  const activeHeadingX = headingTargets[current] ?? 0;
 
   return (
     <div className="section-nav-shell">
-      <div
-        className="section-nav-active-heading"
-        style={{ '--active-heading-x': `${activeHeadingX}px` }}
-        aria-hidden="true"
-      >
-        {current !== SECTIONS[0] ? <span>{current}</span> : null}
-      </div>
       <nav className="section-nav" aria-label="Section navigation">
         <a href="#sin" className="section-logo" aria-label="SIndustries home">
           <LogoMark />
@@ -213,7 +205,6 @@ export function App() {
         current={activeSection}
         tabProgress={tabProgress}
         tabRefs={tabRefs}
-        headingTargets={headingTargets}
       />
       <main>
         <section id="sin" className="hero-section">
