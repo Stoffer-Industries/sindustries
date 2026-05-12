@@ -38,6 +38,7 @@ model AkahuConnection {
   userId      String   @unique @db.Uuid
   accessToken String
   scope       String?
+  lastSyncedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -71,6 +71,7 @@ export function DashboardScreen({ navigation }: Props) {
 
   useEffect(() => {
     if (!session) return;
+    const activeSession = session;
     let alive = true;
 
     async function maybeHandleUrl(url: string) {
@@ -83,8 +84,8 @@ export function DashboardScreen({ navigation }: Props) {
         setAkahuStatus('Exchanging Akahu code…');
         await apiFetch('/akahu/exchange', {
           method: 'POST',
-          body: JSON.stringify({ userId: session.user.id, code }),
-          session
+          body: JSON.stringify({ userId: activeSession.user.id, code }),
+          session: activeSession
         });
 
         setAkahuStatus('Syncing transactions…');
@@ -92,8 +93,8 @@ export function DashboardScreen({ navigation }: Props) {
         const startMs = now - 30 * 24 * 60 * 60 * 1000;
         await apiFetch('/akahu/sync', {
           method: 'POST',
-          body: JSON.stringify({ userId: session.user.id, startMs, endMs: now }),
-          session
+          body: JSON.stringify({ userId: activeSession.user.id, startMs, endMs: now }),
+          session: activeSession
         });
 
         if (alive) setAkahuStatus('Akahu linked + synced');
@@ -206,12 +207,17 @@ export function DashboardScreen({ navigation }: Props) {
               title="Sync Akahu now"
               onPress={async () => {
                 try {
-                  setAkahuStatus('Syncing transactions…');
+                  setAkahuStatus('Refreshing Akahu + syncing transactions…');
                   const now = Date.now();
-                  const startMs = now - 30 * 24 * 60 * 60 * 1000;
+                  const startMs = now - 90 * 24 * 60 * 60 * 1000;
                   await apiFetch('/akahu/sync', {
                     method: 'POST',
-                    body: JSON.stringify({ userId: session.user.id, startMs, endMs: now }),
+                    body: JSON.stringify({
+                      userId: session.user.id,
+                      startMs,
+                      endMs: now,
+                      force: true
+                    }),
                     session
                   });
                   setAkahuStatus('Sync complete');

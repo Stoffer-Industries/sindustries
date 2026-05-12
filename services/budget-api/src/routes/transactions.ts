@@ -26,7 +26,8 @@ transactionsRouter.get('/transactions', async (req, res) => {
       direction: t.direction,
       category: t.category,
       categorySource: t.categorySource,
-      categoryConfidence: t.categoryConfidence
+      categoryConfidence: t.categoryConfidence,
+      pending: t.providerTransactionId.startsWith('akahu-pending:')
     }))
   });
 });
