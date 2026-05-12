@@ -16,3 +16,10 @@ export async function getAkahuConnectionForUser(userId: string) {
   return prisma.akahuConnection.findUnique({ where: { userId } });
 }
 
+export async function markAkahuSyncComplete(params: { userId: string; lastSyncedAt: Date }) {
+  return prisma.akahuConnection.update({
+    where: { userId: params.userId },
+    data: { lastSyncedAt: params.lastSyncedAt }
+  });
+}
+

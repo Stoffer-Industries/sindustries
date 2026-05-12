@@ -14,11 +14,22 @@ type AkahuListResponse<T> = {
   message?: string;
 };
 
+type AkahuActionResponse = {
+  success?: boolean;
+  message?: string;
+};
+
 export type AkahuAccount = {
   _id: string;
   name?: string;
   status?: string;
   type?: string;
+  balance?: {
+    current?: number;
+    available?: number;
+    currency?: string;
+    overdrawn?: boolean;
+  };
 };
 
 export type AkahuTransaction = {
@@ -27,7 +38,12 @@ export type AkahuTransaction = {
   date: string;
   description: string;
   amount: number;
+  type?: string;
   merchant?: { name?: string } | null;
+};
+
+export type AkahuPendingTransaction = Omit<AkahuTransaction, '_id' | 'merchant'> & {
+  updated_at?: string;
 };
 
 function requiredEnv(name: string): string {
@@ -88,6 +104,38 @@ export async function akahuGetAccounts(params: { accessToken: string }) {
   return json.items;
 }
 
+export async function akahuRefreshAllAccounts(params: { accessToken: string }) {
+  const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
+  const res = await fetch('https://api.akahu.io/v1/refresh', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+      'X-Akahu-Id': appIdToken
+    }
+  });
+
+  const text = await res.text();
+  let json: AkahuActionResponse | null = null;
+  if (text) {
+    json = (JSON.parse(text) as AkahuActionResponse) ?? null;
+  }
+
+  if (res.status === 429) {
+    return {
+      requested: false,
+      rateLimited: true,
+      message: json?.message ?? 'Akahu refresh was recently requested'
+    };
+  }
+
+  if (!res.ok || json?.success !== true) {
+    const msg = json?.message ?? `HTTP ${res.status}`;
+    throw new Error(`Akahu /refresh failed: ${msg}`);
+  }
+
+  return { requested: true, rateLimited: false, message: json?.message ?? null };
+}
+
 export async function akahuGetTransactions(params: {
   accessToken: string;
   startMs?: number;
@@ -117,6 +165,29 @@ export async function akahuGetTransactions(params: {
   if (!res.ok || !json || json.success !== true || !Array.isArray(json.items)) {
     const msg = (json as any)?.message ?? `HTTP ${res.status}`;
     throw new Error(`Akahu /transactions failed: ${msg}`);
+  }
+
+  return json.items;
+}
+
+export async function akahuGetPendingTransactions(params: { accessToken: string }) {
+  const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
+  const res = await fetch('https://api.akahu.io/v1/transactions/pending', {
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+      'X-Akahu-Id': appIdToken
+    }
+  });
+
+  const text = await res.text();
+  let json: AkahuListResponse<AkahuPendingTransaction> | null = null;
+  if (text) {
+    json = (JSON.parse(text) as AkahuListResponse<AkahuPendingTransaction>) ?? null;
+  }
+
+  if (!res.ok || !json || json.success !== true || !Array.isArray(json.items)) {
+    const msg = (json as any)?.message ?? `HTTP ${res.status}`;
+    throw new Error(`Akahu /transactions/pending failed: ${msg}`);
   }
 
   return json.items;
