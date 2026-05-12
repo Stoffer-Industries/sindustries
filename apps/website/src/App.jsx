@@ -66,6 +66,7 @@ function slug(label) {
 
 function SectionNav({ current, tabProgress, tabRefs, tabsRef, headingTargets }) {
   const visibleIndex = Math.round(tabProgress);
+  const activeIndex = SECTIONS.indexOf(current);
 
   return (
     <div className="section-nav-shell">
@@ -99,7 +100,7 @@ function SectionNav({ current, tabProgress, tabRefs, tabsRef, headingTargets }) 
                   tabRefs.current[section] = element;
                 }}
                 href={`#${slug(section)}`}
-                className={`section-tab ${expansion > 0.01 ? 'active' : 'collapsed'}`}
+                className={`section-tab ${expansion > 0.01 ? 'active' : 'collapsed'} ${index < activeIndex ? 'arrived' : ''}`}
                 style={{ '--tab-expansion': expansion }}
                 aria-current={section === current ? 'page' : undefined}
                 aria-label={isVisible ? section : `Go to ${section}`}

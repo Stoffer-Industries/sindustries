@@ -341,6 +341,11 @@ main {
   transform: translateY(0);
 }
 
+.section-tab.arrived span {
+  opacity: 1;
+  transform: translateY(0) rotate(-90deg);
+}
+
 .section-tab:hover {
   color: var(--si-color-ink-950);
   background: rgb(255 201 53 / 12%);
