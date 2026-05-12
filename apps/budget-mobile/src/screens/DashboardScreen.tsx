@@ -341,6 +341,10 @@ export function DashboardScreen({ navigation }: Props) {
           title="View alerts"
           onPress={() => navigation.navigate('Alerts')}
         />
+        <Button
+          title="View token specimen"
+          onPress={() => navigation.navigate('TokenSpecimen')}
+        />
       </View>
     </ScrollView>
   );

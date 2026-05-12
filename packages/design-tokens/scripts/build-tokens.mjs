@@ -311,6 +311,13 @@ ${semantic}
     orange: ${modeAccessor}.labelOrange,
     purple: ${modeAccessor}.labelPurple,
     gray: ${modeAccessor}.labelGray
+  },
+  chart: {
+    groceries: ${modeAccessor}.labelGreen,
+    subscriptions: ${modeAccessor}.labelBlue,
+    transport: ${modeAccessor}.labelOrange,
+    dining: ${modeAccessor}.labelPurple,
+    other: ${modeAccessor}.labelGray
   }
 } as const`;
 }
