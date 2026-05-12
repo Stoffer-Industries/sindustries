@@ -213,9 +213,10 @@ main {
   position: sticky;
   top: 0;
   z-index: 11;
-  height: 0;
+  width: 100vw;
+  height: 54px;
+  margin-left: calc(50% - 50vw);
   pointer-events: none;
-  transform: translateY(-54px);
 }
 
 .section-sticky-heading span {
@@ -325,7 +326,7 @@ main {
 }
 
 .section-tab.active span {
-  opacity: 1;
+  opacity: 0;
   transform: translateY(0);
 }
 
