@@ -209,17 +209,19 @@ main {
   scroll-margin-top: 0;
 }
 
-.section-floating-headings {
-  position: fixed;
-  inset: 0 auto auto 0;
+.section-page-heading {
+  position: sticky;
+  top: 0;
   z-index: 11;
   width: 100vw;
+  height: 54px;
+  margin-left: calc(50% - 50vw);
   pointer-events: none;
 }
 
-.section-floating-headings span {
+.section-page-heading span {
   position: absolute;
-  top: var(--section-heading-y);
+  top: 0;
   left: var(--section-heading-target-x);
   display: inline-flex;
   align-items: center;
@@ -229,14 +231,9 @@ main {
   font-size: 0.72rem;
   font-weight: 950;
   letter-spacing: 0.16em;
-  opacity: 0;
   text-transform: uppercase;
   transform: translateX(-50%);
   white-space: nowrap;
-}
-
-.section-floating-headings span.visible {
-  opacity: 1;
 }
 
 .section-nav-shell {

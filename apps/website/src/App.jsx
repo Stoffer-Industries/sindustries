@@ -57,14 +57,12 @@ const STORIES = [
 
 const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
 const HEADER_TAB_TRANSITION_PX = 20;
-const COLLAPSED_TAB_WIDTH_PX = 12;
-const HEADER_HEIGHT_PX = 54;
 
 function slug(label) {
   return label.toLowerCase();
 }
 
-function SectionNav({ current, tabProgress, tabRefs, tabsRef }) {
+function SectionNav({ current, tabProgress, tabRefs }) {
   const visibleIndex = Math.round(tabProgress);
 
   return (
@@ -73,7 +71,7 @@ function SectionNav({ current, tabProgress, tabRefs, tabsRef }) {
         <a href="#sin" className="section-logo" aria-label="SIndustries home">
           <LogoMark />
         </a>
-        <div className="section-tabs" ref={tabsRef}>
+        <div className="section-tabs">
           {SECTIONS.map((section, index) => {
             const distance = Math.abs(index - tabProgress);
             const expansion = Math.max(0, 1 - distance);
@@ -102,7 +100,7 @@ function SectionNav({ current, tabProgress, tabRefs, tabsRef }) {
 }
 
 function useSectionProgress() {
-  const [sectionState, setSectionState] = useState({ activeSection: SECTIONS[0], tabProgress: 0, headerLabels: [] });
+  const [sectionState, setSectionState] = useState({ activeSection: SECTIONS[0], tabProgress: 0 });
 
   useEffect(() => {
     let animationFrame = null;
@@ -131,18 +129,7 @@ function useSectionProgress() {
         tabProgress = activeIndex + Math.min(1, Math.max(0, rawProgress));
       }
 
-      const headerLabels = SECTIONS.slice(1).map((section) => {
-        const element = document.getElementById(slug(section));
-        const sectionTop = element ? element.getBoundingClientRect().top : Infinity;
-        const y = Math.max(0, sectionTop);
-        return {
-          section,
-          visible: y <= HEADER_HEIGHT_PX,
-          y
-        };
-      });
-
-      setSectionState({ activeSection: SECTIONS[activeIndex], tabProgress, headerLabels });
+      setSectionState({ activeSection: SECTIONS[activeIndex], tabProgress });
     };
 
     const requestUpdate = () => {
@@ -167,9 +154,18 @@ function useSectionProgress() {
   return sectionState;
 }
 
-function Section({ name, eyebrow, title, children }) {
+function Section({ name, eyebrow, title, headingTarget, children }) {
   return (
-    <section id={slug(name)} className="home-section">
+    <section
+      id={slug(name)}
+      className="home-section"
+      style={{ '--section-heading-target-x': `${headingTarget ?? 0}px` }}
+    >
+      {name !== SECTIONS[0] ? (
+        <div className="section-page-heading" aria-hidden="true">
+          <span>{name}</span>
+        </div>
+      ) : null}
       <div className="section-inner">
         <p className="eyebrow">{eyebrow}</p>
         <h2>{title}</h2>
@@ -184,33 +180,24 @@ function LogoMark() {
 }
 
 export function App() {
-  const { activeSection, tabProgress, headerLabels } = useSectionProgress();
+  const { activeSection, tabProgress } = useSectionProgress();
   const tabRefs = useRef({});
-  const tabsRef = useRef(null);
   const [headingTargets, setHeadingTargets] = useState({});
 
   useLayoutEffect(() => {
     const measureHeadingTargets = () => {
-      const tabsRect = tabsRef.current?.getBoundingClientRect();
-      if (!tabsRect) return;
-
-      const expandedWidth = Math.max(
-        COLLAPSED_TAB_WIDTH_PX,
-        tabsRect.width - ((SECTIONS.length - 1) * COLLAPSED_TAB_WIDTH_PX)
-      );
-
       setHeadingTargets(Object.fromEntries(
-        SECTIONS.map((section, index) => [
-          section,
-          tabsRect.left + (index * COLLAPSED_TAB_WIDTH_PX) + (expandedWidth / 2)
-        ])
+        SECTIONS.map((section) => {
+          const tabRect = tabRefs.current[section]?.getBoundingClientRect();
+          return [section, tabRect ? tabRect.left + tabRect.width / 2 : 0];
+        })
       ));
     };
 
     measureHeadingTargets();
     window.addEventListener('resize', measureHeadingTargets);
     return () => window.removeEventListener('resize', measureHeadingTargets);
-  }, []);
+  }, [tabProgress]);
 
   return (
     <div className="site-shell">
@@ -218,22 +205,7 @@ export function App() {
         current={activeSection}
         tabProgress={tabProgress}
         tabRefs={tabRefs}
-        tabsRef={tabsRef}
       />
-      <div className="section-floating-headings" aria-hidden="true">
-        {headerLabels.map(({ section, visible, y }) => (
-          <span
-            key={section}
-            className={visible ? 'visible' : ''}
-            style={{
-              '--section-heading-target-x': `${headingTargets[section] ?? 0}px`,
-              '--section-heading-y': `${y}px`
-            }}
-          >
-            {section}
-          </span>
-        ))}
-      </div>
       <main>
         <section id="sin" className="hero-section">
           <div className="hero-glow" aria-hidden="true" />
@@ -268,7 +240,7 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive.">
+        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={headingTargets.Signals}>
           <div className="signals-grid">
             {SIGNALS.map((signal) => (
               <article className="signal-card" key={signal.label}>
@@ -280,7 +252,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion.">
+        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion." headingTarget={headingTargets.Systems}>
           <div className="systems-grid">
             {SYSTEMS.map((system) => (
               <article className="system-card" key={system.name}>
@@ -293,13 +265,13 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output.">
+        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output." headingTarget={headingTargets.Stacks}>
           <div className="stack-cloud">
             {STACKS.map((stack) => <span key={stack}>{stack}</span>)}
           </div>
         </Section>
 
-        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock.">
+        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock." headingTarget={headingTargets.Ships}>
           <div className="ships-list">
             {SHIPS.map((ship, index) => (
               <article className="ship-row" key={ship}>
@@ -310,7 +282,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build.">
+        <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={headingTargets.Stories}>
           <div className="stories-grid">
             {STORIES.map((story) => (
               <article className="story-card" key={story}>
@@ -321,7 +293,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines.">
+        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines." headingTarget={headingTargets.Studio}>
           <div className="studio-grid">
             {STUDIO.map((item) => (
               <article className="studio-card" key={item}>
@@ -333,7 +305,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line.">
+        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line." headingTarget={headingTargets.Summon}>
           <div className="summon-grid">
             <p className="lede">
               If you are building, backing, or reshaping how organisations work, the line is open. Follow the experiments or start a conversation.
