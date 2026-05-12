@@ -56,9 +56,16 @@ const STORIES = [
 ];
 
 const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
-const HEADER_TAB_TRANSITION_PX = 20;
+const HEADER_TAB_TRIGGER_OFFSET_PX = 56;
+const HEADER_TAB_TRANSITION_PX = 24;
 const COLLAPSED_TAB_WIDTH_PX = 12;
-const PAGE_HEADING_FADE_PX = 8;
+/**
+ * Sticky section title opacity: stay fully opaque until the section’s top is within
+ * PAGE_HEADING_VISIBLE_PX of the viewport top, then fade over PAGE_HEADING_FADE_PX px.
+ * Increase VISIBLE to delay the fade; increase FADE for a slower ramp.
+ */
+const PAGE_HEADING_VISIBLE_PX = 0;
+const PAGE_HEADING_FADE_PX = 1;
 
 function slug(label) {
   return label.toLowerCase();
@@ -128,6 +135,7 @@ function useSectionProgress() {
     const updateActiveSection = () => {
       const nav = document.querySelector('.section-nav-shell');
       const activationLine = nav?.getBoundingClientRect().bottom ?? 0;
+      const tabTriggerLine = activationLine - HEADER_TAB_TRIGGER_OFFSET_PX;
       let activeIndex = 0;
       const sectionTops = SECTIONS.map((section) => {
         const element = document.getElementById(slug(section));
@@ -135,7 +143,7 @@ function useSectionProgress() {
       });
 
       for (let index = 0; index < sectionTops.length; index += 1) {
-        if (sectionTops[index] <= activationLine + 1) activeIndex = index;
+        if (sectionTops[index] <= tabTriggerLine + 1) activeIndex = index;
         else break;
       }
 
@@ -144,15 +152,31 @@ function useSectionProgress() {
 
       if (nextIndex !== activeIndex) {
         const nextTop = sectionTops[nextIndex];
-        const distanceToNext = nextTop - activationLine;
-        const rawProgress = (HEADER_TAB_TRANSITION_PX - distanceToNext) / HEADER_TAB_TRANSITION_PX;
+        const distanceToNext = nextTop - tabTriggerLine;
+        const band = HEADER_TAB_TRANSITION_PX;
+        let rawProgress;
+        if (band <= 0) {
+          rawProgress = distanceToNext <= 0 ? 1 : 0;
+        } else {
+          rawProgress = (band - distanceToNext) / band;
+        }
         tabProgress = activeIndex + Math.min(1, Math.max(0, rawProgress));
       }
 
       const pageHeadingOpacities = Object.fromEntries(
         SECTIONS.slice(1).map((section) => {
           const top = sectionTops[SECTIONS.indexOf(section)];
-          const opacity = Math.min(1, Math.max(0, top / PAGE_HEADING_FADE_PX));
+          const fadeStart = PAGE_HEADING_VISIBLE_PX;
+          let opacity;
+          if (PAGE_HEADING_FADE_PX <= 0) {
+            opacity = top >= fadeStart ? 1 : 0;
+          } else {
+            const fadeEnd = fadeStart - PAGE_HEADING_FADE_PX;
+            if (top >= fadeStart) opacity = 1;
+            else if (top <= fadeEnd) opacity = 0;
+            else opacity = (top - fadeEnd) / PAGE_HEADING_FADE_PX;
+          }
+
           return [section, opacity];
         })
       );
@@ -215,30 +239,50 @@ export function App() {
   const { activeSection, tabProgress, pageHeadingOpacities } = useSectionProgress();
   const tabRefs = useRef({});
   const tabsRef = useRef(null);
-  const [headingTargets, setHeadingTargets] = useState({});
+  const [navHeadingTargets, setNavHeadingTargets] = useState({});
+  const [pageHeadingTargets, setPageHeadingTargets] = useState({});
 
   useLayoutEffect(() => {
     const measureHeadingTargets = () => {
-      const tabsRect = tabsRef.current?.getBoundingClientRect();
-      if (!tabsRect) return;
+      const shell = document.querySelector('.section-nav-shell');
+      const tabsEl = tabsRef.current;
+      if (!shell || !tabsEl) return;
+
+      const shellRect = shell.getBoundingClientRect();
+      const tabsRect = tabsEl.getBoundingClientRect();
+      const tabsLeftInShell = tabsRect.left - shellRect.left;
 
       const expandedWidth = Math.max(
         COLLAPSED_TAB_WIDTH_PX,
         tabsRect.width - ((SECTIONS.length - 1) * COLLAPSED_TAB_WIDTH_PX)
       );
 
-      setHeadingTargets(Object.fromEntries(
-        SECTIONS.map((section, index) => [
-          section,
-          tabsRect.left + (index * COLLAPSED_TAB_WIDTH_PX) + (expandedWidth / 2)
-        ])
-      ));
+      setNavHeadingTargets(
+        Object.fromEntries(
+          SECTIONS.map((section) => {
+            const tabEl = tabRefs.current[section];
+            if (!tabEl) return [section, 0];
+            const r = tabEl.getBoundingClientRect();
+            const cx = r.left + r.width / 2 - shellRect.left;
+            return [section, cx];
+          })
+        )
+      );
+
+      setPageHeadingTargets(
+        Object.fromEntries(
+          SECTIONS.map((section, index) => [
+            section,
+            tabsLeftInShell + (index * COLLAPSED_TAB_WIDTH_PX) + (expandedWidth / 2)
+          ])
+        )
+      );
     };
 
     measureHeadingTargets();
     window.addEventListener('resize', measureHeadingTargets);
     return () => window.removeEventListener('resize', measureHeadingTargets);
-  }, []);
+  }, [tabProgress, activeSection]);
 
   return (
     <div className="site-shell">
@@ -247,7 +291,7 @@ export function App() {
         tabProgress={tabProgress}
         tabRefs={tabRefs}
         tabsRef={tabsRef}
-        headingTargets={headingTargets}
+        headingTargets={navHeadingTargets}
       />
       <main>
         <section id="sin" className="hero-section">
@@ -283,7 +327,7 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={headingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
+        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
             {SIGNALS.map((signal) => (
               <article className="signal-card" key={signal.label}>
@@ -295,7 +339,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion." headingTarget={headingTargets.Systems} pageHeadingOpacity={pageHeadingOpacities.Systems}>
+        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion." headingTarget={pageHeadingTargets.Systems} pageHeadingOpacity={pageHeadingOpacities.Systems}>
           <div className="systems-grid">
             {SYSTEMS.map((system) => (
               <article className="system-card" key={system.name}>
@@ -308,13 +352,13 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output." headingTarget={headingTargets.Stacks} pageHeadingOpacity={pageHeadingOpacities.Stacks}>
+        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output." headingTarget={pageHeadingTargets.Stacks} pageHeadingOpacity={pageHeadingOpacities.Stacks}>
           <div className="stack-cloud">
             {STACKS.map((stack) => <span key={stack}>{stack}</span>)}
           </div>
         </Section>
 
-        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock." headingTarget={headingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
+        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock." headingTarget={pageHeadingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
           <div className="ships-list">
             {SHIPS.map((ship, index) => (
               <article className="ship-row" key={ship}>
@@ -325,7 +369,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={headingTargets.Stories} pageHeadingOpacity={pageHeadingOpacities.Stories}>
+        <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={pageHeadingTargets.Stories} pageHeadingOpacity={pageHeadingOpacities.Stories}>
           <div className="stories-grid">
             {STORIES.map((story) => (
               <article className="story-card" key={story}>
@@ -336,7 +380,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines." headingTarget={headingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
+        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines." headingTarget={pageHeadingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
           <div className="studio-grid">
             {STUDIO.map((item) => (
               <article className="studio-card" key={item}>
@@ -348,7 +392,7 @@ export function App() {
           </div>
         </Section>
 
-        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line." headingTarget={headingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>
+        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line." headingTarget={pageHeadingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>
           <div className="summon-grid">
             <p className="lede">
               If you are building, backing, or reshaping how organisations work, the line is open. Follow the experiments or start a conversation.

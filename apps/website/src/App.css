@@ -14,7 +14,7 @@ body {
 .site-shell {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 24px 0 48px;
+  padding: 0 0 48px;
 }
 
 main {
@@ -336,14 +336,33 @@ main {
   opacity: 0;
 }
 
-.section-tab.active span {
-  opacity: 0;
-  transform: translateY(0);
+/* Fill the <a>’s box and center label in the tab (avoids % left resolving oddly vs viewport). */
+.section-tab.active span,
+.section-tab.collapsed.arrived span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+  margin: 0;
+  width: auto;
+  max-width: none;
+  transform-origin: center;
 }
 
-.section-tab.arrived span {
+.section-tab.active:not(.arrived) span {
+  opacity: 0;
+  transform: none;
+}
+
+.section-tab.collapsed.arrived span {
   opacity: 1;
-  transform: translateY(0) rotate(-90deg);
+  transform: rotate(-90deg);
+}
+
+.section-tab.active.arrived span {
+  opacity: 1;
+  transform: rotate(-90deg);
 }
 
 .section-tab:hover {
