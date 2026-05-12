@@ -1,15 +1,27 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { jsonError } from '../lib/http.ts';
 import { evaluateAlertsForUser } from '../services/alerts.ts';
 import {
   akahuGetAccounts,
+  akahuGetPendingTransactions,
+  akahuRefreshAllAccounts,
   akahuGetTransactions,
   exchangeAuthorizationCode
 } from '../services/akahuClient.ts';
-import { getAkahuConnectionForUser, upsertAkahuConnection } from '../repos/akahuRepo.ts';
+import {
+  getAkahuConnectionForUser,
+  markAkahuSyncComplete,
+  upsertAkahuConnection
+} from '../repos/akahuRepo.ts';
+import { categorizeTransaction } from '../services/categorizer.ts';
 
 export const akahuRouter = Router();
+
+const INCREMENTAL_OVERLAP_MS = 7 * 24 * 60 * 60 * 1000;
+const FORCE_SYNC_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
+const AKAHU_PENDING_PROVIDER_ID_PREFIX = 'akahu-pending:';
 
 akahuRouter.get('/akahu/authorize-url', async (req, res) => {
   const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
@@ -58,6 +70,7 @@ akahuRouter.post('/akahu/sync', async (req, res) => {
   const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
   const startMs = typeof req.body?.startMs === 'number' ? req.body.startMs : undefined;
   const endMs = typeof req.body?.endMs === 'number' ? req.body.endMs : undefined;
+  const force = req.body?.force === true;
   if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -76,22 +89,40 @@ akahuRouter.post('/akahu/sync', async (req, res) => {
   }
 
   try {
-    const [accounts, txns] = await Promise.all([
+    const accessToken =
+      (conn?.accessToken ?? process.env.AKAHU_DEV_USER_ACCESS_TOKEN ?? '').trim();
+    const nowMs = Date.now();
+    const syncStartMs =
+      typeof startMs === 'number'
+        ? startMs
+        : force
+          ? Math.max(0, nowMs - FORCE_SYNC_LOOKBACK_MS)
+          : conn?.lastSyncedAt
+            ? Math.max(0, conn.lastSyncedAt.getTime() - INCREMENTAL_OVERLAP_MS)
+            : undefined;
+    const syncEndMs = typeof endMs === 'number' ? endMs : nowMs;
+    const refresh = force ? await akahuRefreshAllAccounts({ accessToken }) : null;
+
+    const [accounts, txns, pendingTxns] = await Promise.all([
       akahuGetAccounts({
-        accessToken:
-          (conn?.accessToken ?? process.env.AKAHU_DEV_USER_ACCESS_TOKEN ?? '').trim()
+        accessToken
       }),
       akahuGetTransactions({
-        accessToken:
-          (conn?.accessToken ?? process.env.AKAHU_DEV_USER_ACCESS_TOKEN ?? '').trim(),
-        startMs,
-        endMs
+        accessToken,
+        // Akahu can surface transactions after the bank date has already passed,
+        // especially for cards. Keep a larger overlap so late arrivals are upserted.
+        startMs: syncStartMs,
+        endMs: syncEndMs
+      }),
+      akahuGetPendingTransactions({
+        accessToken
       })
     ]);
 
     // Upsert accounts into LinkedCard so the rest of the app can treat them "card-like".
     const cardsByProviderId = new Map<string, { id: string }>();
     for (const acc of accounts) {
+
       const card = await prisma.linkedCard.upsert({
         where: {
           provider_providerCardId: { provider: 'akahu', providerCardId: acc._id }
@@ -107,10 +138,13 @@ akahuRouter.post('/akahu/sync', async (req, res) => {
         select: { id: true }
       });
       cardsByProviderId.set(acc._id, card);
+
     }
 
     // Upsert transactions (idempotent by providerTransactionId).
-    let upserted = 0;
+    let created = 0;
+    let updated = 0;
+    let categorized = 0;
     for (const t of txns) {
       const card = cardsByProviderId.get(t._account);
       if (!card) continue;
@@ -118,37 +152,117 @@ akahuRouter.post('/akahu/sync', async (req, res) => {
       const amountCentsAbs = Math.round(Math.abs(t.amount) * 100);
       const direction = t.amount < 0 ? 'debit' : 'credit';
       const merchant = t.merchant?.name ?? null;
+      const providerTransactionId = `akahu:${t._id}`;
 
-      await prisma.transaction.upsert({
-        where: { providerTransactionId: `akahu:${t._id}` },
-        update: {
-          occurredAt: new Date(t.date),
-          merchant,
-          description: t.description,
-          amountCents: amountCentsAbs,
-          direction
-        },
-        create: {
+      const existing = await prisma.transaction.findUnique({
+        where: { providerTransactionId },
+        select: { id: true }
+      });
+
+      if (existing) {
+        await prisma.transaction.update({
+          where: { providerTransactionId },
+          data: {
+            occurredAt: new Date(t.date),
+            merchant,
+            description: t.description,
+            amountCents: amountCentsAbs,
+            direction
+          }
+        });
+        updated += 1;
+        continue;
+      }
+
+      const categoryInputMerchant = merchant ?? t.description ?? 'unknown';
+      const cat = await categorizeTransaction({
+        userId,
+        merchant: categoryInputMerchant,
+        description: t.description,
+        amountCents: amountCentsAbs
+      });
+      categorized += 1;
+
+      await prisma.transaction.create({
+        data: {
           userId,
           cardId: card.id,
           provider: 'akahu',
-          providerTransactionId: `akahu:${t._id}`,
+          providerTransactionId,
           occurredAt: new Date(t.date),
           merchant,
           description: t.description,
           amountCents: amountCentsAbs,
           direction,
-          category: 'other',
-          categoryConfidence: 0,
-          categorySource: 'import'
+          category: cat.category,
+          categoryConfidence: cat.confidence,
+          categorySource: cat.source
         }
       });
-      upserted += 1;
+      created += 1;
     }
+
+    // Pending transactions have no stable Akahu id. Rebuild our local pending set each sync
+    // so items disappear once Akahu moves them into settled /transactions.
+    await prisma.transaction.deleteMany({
+      where: {
+        userId,
+        provider: 'akahu',
+        providerTransactionId: { startsWith: AKAHU_PENDING_PROVIDER_ID_PREFIX }
+      }
+    });
+
+    let pendingCreated = 0;
+    for (const [idx, t] of pendingTxns.entries()) {
+      const card = cardsByProviderId.get(t._account);
+      if (!card) continue;
+
+      const amountCentsAbs = Math.round(Math.abs(t.amount) * 100);
+      const direction = t.amount < 0 ? 'debit' : 'credit';
+      const merchant = null;
+      const description = t.description ?? 'Pending transaction';
+      const providerTransactionId = pendingProviderTransactionId(t, idx);
+      const cat = await categorizeTransaction({
+        userId,
+        merchant: description,
+        description,
+        amountCents: amountCentsAbs
+      });
+      categorized += 1;
+
+      await prisma.transaction.create({
+        data: {
+          userId,
+          cardId: card.id,
+          provider: 'akahu',
+          providerTransactionId,
+          occurredAt: new Date(t.date),
+          merchant,
+          description,
+          amountCents: amountCentsAbs,
+          direction,
+          category: cat.category,
+          categoryConfidence: cat.confidence,
+          categorySource: cat.source
+        }
+      });
+      pendingCreated += 1;
+    }
+
+    await markAkahuSyncComplete({ userId, lastSyncedAt: new Date() });
 
     const month = currentMonthKey();
     const alerts = await evaluateAlertsForUser({ userId, month });
-    res.status(200).json({ ok: true, accounts: accounts.length, transactions: upserted, alerts });
+    res.status(200).json({
+      ok: true,
+      accounts: accounts.length,
+      created,
+      updated,
+      pendingCreated,
+      categorized,
+      refresh,
+      alerts
+    });
   } catch (e: any) {
     return jsonError(res, 400, 'BAD_REQUEST', e?.message ?? 'Akahu sync failed');
   }
@@ -161,3 +275,23 @@ function currentMonthKey() {
   return `${y}-${m}`;
 }
 
+function pendingProviderTransactionId(
+  txn: { _account: string; date: string; description?: string; amount: number; type?: string },
+  index: number
+) {
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        account: txn._account,
+        date: txn.date,
+        description: txn.description ?? '',
+        amount: txn.amount,
+        type: txn.type ?? '',
+        index
+      })
+    )
+    .digest('hex')
+    .slice(0, 32);
+
+  return `${AKAHU_PENDING_PROVIDER_ID_PREFIX}${digest}`;
+}

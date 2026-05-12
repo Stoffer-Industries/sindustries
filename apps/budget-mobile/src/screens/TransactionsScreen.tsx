@@ -5,9 +5,11 @@ import { useSession } from '../state/SessionContext';
 
 type Txn = {
   id: string;
-  merchant: string;
+  merchant: string | null;
+  description: string | null;
   amountCents: number;
   category: string;
+  pending?: boolean;
 };
 
 const categories = [
@@ -96,25 +98,32 @@ export function TransactionsScreen() {
         keyExtractor={(t) => t.id}
         style={{ flex: 1 }}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        renderItem={({ item }) => (
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: '#e5e7eb',
-              borderRadius: 12,
-              padding: 12,
-              gap: 8
-            }}
-          >
-            <Text style={{ fontWeight: '700' }}>{item.merchant}</Text>
-            <Text>${(item.amountCents / 100).toFixed(2)}</Text>
-            <Text style={{ color: '#6b7280' }}>Category: {item.category}</Text>
-            <Button
-              title="Change category"
-              onPress={() => recategorize(item.id)}
-            />
-          </View>
-        )}
+        renderItem={({ item }) => {
+          const title = item.merchant?.trim() || item.description?.trim() || 'Unknown transaction';
+
+          return (
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: '#e5e7eb',
+                borderRadius: 12,
+                padding: 12,
+                gap: 8
+              }}
+            >
+              <Text style={{ fontWeight: '700' }}>
+                {title}
+                {item.pending ? ' (pending)' : ''}
+              </Text>
+              <Text>${(item.amountCents / 100).toFixed(2)}</Text>
+              <Text style={{ color: '#6b7280' }}>Category: {item.category}</Text>
+              <Button
+                title="Change category"
+                onPress={() => recategorize(item.id)}
+              />
+            </View>
+          );
+        }}
       />
     </View>
   );
