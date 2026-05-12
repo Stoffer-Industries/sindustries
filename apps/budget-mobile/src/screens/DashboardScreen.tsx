@@ -9,12 +9,29 @@ import { useSession } from '../state/SessionContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
+type BalanceAccount = {
+  id: string;
+  displayName: string;
+  currentBalanceCents: number | null;
+  availableBalanceCents: number | null;
+  balanceCurrency: string | null;
+  balanceUpdatedAt: string | null;
+};
+
+type BalancePoint = {
+  capturedAt: string;
+  currentBalanceCents: number;
+};
+
 export function DashboardScreen({ navigation }: Props) {
   const { session, setSession } = useSession();
   const [email, setEmail] = useState('dev@example.com');
   const [series, setSeries] = useState<Record<string, { day: string; amountCents: number }[]>>(
     {}
   );
+  const [balanceAccounts, setBalanceAccounts] = useState<BalanceAccount[]>([]);
+  const [balancePoints, setBalancePoints] = useState<{ day: string; amountCents: number }[]>([]);
+  const [syncVersion, setSyncVersion] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>('other');
   const [akahuStatus, setAkahuStatus] = useState<string>('');
 
@@ -70,6 +87,64 @@ export function DashboardScreen({ navigation }: Props) {
   }, [session]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function validateSession() {
+      if (!session) return;
+
+      try {
+        await apiFetch('/me', { session });
+      } catch {
+        if (!cancelled) {
+          setSession(null);
+          setAkahuStatus('Session expired after DB reset. Sign in again.');
+        }
+      }
+    }
+
+    validateSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, setSession]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!session) return;
+      const now = new Date();
+      const to = now.toISOString();
+      const from = new Date(now.valueOf() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      try {
+        const res = await apiFetch<{
+          accounts?: BalanceAccount[];
+          totalSeries?: BalancePoint[];
+        }>(
+          `/cards/balance-history?userId=${encodeURIComponent(
+            session.user.id
+          )}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+          { session }
+        );
+        if (cancelled) return;
+        setBalanceAccounts(res.accounts ?? []);
+        setBalancePoints(
+          (res.totalSeries ?? []).map((point) => ({
+            day: point.capturedAt.slice(0, 10),
+            amountCents: point.currentBalanceCents
+          }))
+        );
+      } catch {
+        // Balance history only exists after Akahu sync has captured account balances.
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, syncVersion]);
+
+  useEffect(() => {
     if (!session) return;
     const activeSession = session;
     let alive = true;
@@ -97,7 +172,10 @@ export function DashboardScreen({ navigation }: Props) {
           session: activeSession
         });
 
-        if (alive) setAkahuStatus('Akahu linked + synced');
+        if (alive) {
+          setAkahuStatus('Akahu linked + synced');
+          setSyncVersion((value) => value + 1);
+        }
       } catch (e: any) {
         if (alive) setAkahuStatus('');
         Alert.alert('Akahu link failed', e?.message ?? 'Unknown error');
@@ -124,6 +202,10 @@ export function DashboardScreen({ navigation }: Props) {
   const chartPoints = session
     ? series[selectedCategory] ?? []
     : demoPoints;
+  const latestTotalBalanceCents = balanceAccounts.reduce((sum, account) => {
+    const value = account.currentBalanceCents ?? account.availableBalanceCents;
+    return value === null ? sum : sum + value;
+  }, 0);
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
@@ -184,6 +266,26 @@ export function DashboardScreen({ navigation }: Props) {
         <CategoryTimeseriesChart points={chartPoints} />
       </View>
 
+      {session ? (
+        <View style={{ gap: 8 }}>
+          <Text style={{ fontSize: 18, fontWeight: '700' }}>Balance trend</Text>
+          <Text style={{ color: '#6b7280' }}>
+            {balanceAccounts.length > 0
+              ? `Latest total ${formatCents(latestTotalBalanceCents)}`
+              : 'Sync Akahu to capture account balances'}
+          </Text>
+          <CategoryTimeseriesChart points={balancePoints} />
+          {balanceAccounts.slice(0, 4).map((account) => {
+            const balance = account.currentBalanceCents ?? account.availableBalanceCents;
+            return (
+              <Text key={account.id} style={{ color: '#374151' }}>
+                {account.displayName}: {balance === null ? 'No balance yet' : formatCents(balance)}
+              </Text>
+            );
+          })}
+        </View>
+      ) : null}
+
       <View style={{ gap: 12 }}>
         {session ? (
           <View style={{ gap: 8 }}>
@@ -221,6 +323,7 @@ export function DashboardScreen({ navigation }: Props) {
                     session
                   });
                   setAkahuStatus('Sync complete');
+                  setSyncVersion((value) => value + 1);
                 } catch (e: any) {
                   setAkahuStatus('');
                   Alert.alert('Sync failed', e?.message ?? 'Unknown error');
@@ -241,5 +344,12 @@ export function DashboardScreen({ navigation }: Props) {
       </View>
     </ScrollView>
   );
+}
+
+function formatCents(cents: number) {
+  return new Intl.NumberFormat('en-NZ', {
+    style: 'currency',
+    currency: 'NZD'
+  }).format(cents / 100);
 }
 

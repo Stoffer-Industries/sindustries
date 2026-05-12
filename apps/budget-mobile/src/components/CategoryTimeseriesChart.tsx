@@ -18,7 +18,9 @@ export function CategoryTimeseriesChart({
   const width = Math.max(280, Math.min(520, Math.floor(screenWidth - 32)));
 
   const values = points.map((p) => p.amountCents);
+  const min = Math.min(0, ...values);
   const max = Math.max(1, ...values);
+  const span = Math.max(1, max - min);
 
   const padding = 10;
   const innerW = width - padding * 2;
@@ -30,7 +32,7 @@ export function CategoryTimeseriesChart({
       : points
           .map((p, idx) => {
             const x = padding + (idx / (points.length - 1)) * innerW;
-            const y = padding + (1 - p.amountCents / max) * innerH;
+            const y = padding + (1 - (p.amountCents - min) / span) * innerH;
             return `${x},${y}`;
           })
           .join(' ');

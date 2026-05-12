@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
       create: vi.fn(),
       deleteMany: vi.fn()
     },
-    accountBalanceSnapshot: { create: vi.fn() },
+    accountBalanceSnapshot: { create: vi.fn(), findMany: vi.fn() },
     cardMonthlyBudget: { findUnique: vi.fn() },
     notificationEvent: { create: vi.fn() },
     categorizationFeedback: { findFirst: vi.fn() }
@@ -65,6 +65,8 @@ describe('POST /api/v1/akahu/sync', () => {
     mocks.prisma.transaction.update.mockResolvedValue({});
     mocks.prisma.transaction.create.mockResolvedValue({});
     mocks.prisma.transaction.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.prisma.accountBalanceSnapshot.create.mockResolvedValue({});
+    mocks.prisma.accountBalanceSnapshot.findMany.mockResolvedValue([]);
 
     mocks.akahuGetAccounts.mockResolvedValue([{ _id: 'acc_1', name: 'Credit card' }]);
     mocks.akahuGetTransactions.mockResolvedValue([
@@ -158,6 +160,129 @@ describe('POST /api/v1/akahu/sync', () => {
       startMs: new Date('2026-05-03T00:00:00.000Z').getTime(),
       endMs: new Date('2026-05-12T00:00:00.000Z').getTime()
     });
+  });
+
+  it('persists latest account balances and creates chart snapshots', async () => {
+    mocks.akahuGetAccounts.mockResolvedValue([
+      {
+        _id: 'acc_1',
+        name: 'Everyday account',
+        balance: {
+          current: 123.45,
+          available: 120,
+          currency: 'NZD',
+          overdrawn: false
+        }
+      }
+    ]);
+
+    const res = await request(createApp())
+      .post('/api/v1/akahu/sync')
+      .send({ userId: 'user_1' })
+      .expect(200);
+
+    expect(mocks.prisma.linkedCard.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          displayName: 'Everyday account',
+          currentBalanceCents: 12345,
+          availableBalanceCents: 12000,
+          balanceCurrency: 'NZD',
+          balanceOverdrawn: false,
+          balanceUpdatedAt: new Date('2026-05-12T00:00:00.000Z')
+        }),
+        create: expect.objectContaining({
+          currentBalanceCents: 12345,
+          availableBalanceCents: 12000,
+          balanceCurrency: 'NZD',
+          balanceOverdrawn: false,
+          balanceUpdatedAt: new Date('2026-05-12T00:00:00.000Z')
+        })
+      })
+    );
+    expect(mocks.prisma.accountBalanceSnapshot.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'user_1',
+        cardId: 'card_1',
+        currentBalanceCents: 12345,
+        availableBalanceCents: 12000,
+        currency: 'NZD',
+        overdrawn: false,
+        capturedAt: new Date('2026-05-12T00:00:00.000Z')
+      }
+    });
+    expect(res.body).toMatchObject({
+      ok: true,
+      balanceSnapshotsCreated: 1
+    });
+  });
+
+  it('returns balance history and total balance series', async () => {
+    mocks.prisma.linkedCard.findMany.mockResolvedValue([
+      {
+        id: 'card_1',
+        displayName: 'Everyday account',
+        provider: 'akahu',
+        providerCardId: 'acc_1',
+        currentBalanceCents: 12345,
+        availableBalanceCents: 12000,
+        balanceCurrency: 'NZD',
+        balanceOverdrawn: false,
+        balanceUpdatedAt: new Date('2026-05-12T00:00:00.000Z')
+      }
+    ]);
+    mocks.prisma.accountBalanceSnapshot.findMany.mockResolvedValue([
+      {
+        cardId: 'card_1',
+        capturedAt: new Date('2026-05-11T00:00:00.000Z'),
+        currentBalanceCents: 10000,
+        availableBalanceCents: 9500,
+        currency: 'NZD',
+        overdrawn: false
+      },
+      {
+        cardId: 'card_1',
+        capturedAt: new Date('2026-05-12T00:00:00.000Z'),
+        currentBalanceCents: 12345,
+        availableBalanceCents: 12000,
+        currency: 'NZD',
+        overdrawn: false
+      }
+    ]);
+
+    const res = await request(createApp())
+      .get('/api/v1/cards/balance-history')
+      .query({
+        userId: 'user_1',
+        from: '2026-05-01T00:00:00.000Z',
+        to: '2026-05-12T00:00:00.000Z'
+      })
+      .expect(200);
+
+    expect(mocks.prisma.accountBalanceSnapshot.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user_1',
+        capturedAt: {
+          gte: new Date('2026-05-01T00:00:00.000Z'),
+          lte: new Date('2026-05-12T00:00:00.000Z')
+        }
+      },
+      orderBy: { capturedAt: 'asc' },
+      select: {
+        cardId: true,
+        capturedAt: true,
+        currentBalanceCents: true,
+        availableBalanceCents: true,
+        currency: true,
+        overdrawn: true
+      }
+    });
+    expect(res.body.accounts).toHaveLength(1);
+    expect(res.body.series.card_1).toHaveLength(2);
+    expect(res.body.totalSeries).toEqual([
+      { capturedAt: '2026-05-11T00:00:00.000Z', currentBalanceCents: 10000 },
+      { capturedAt: '2026-05-12T00:00:00.000Z', currentBalanceCents: 12345 }
+    ]);
   });
 
   it('marks Akahu pending rows when listing transactions', async () => {

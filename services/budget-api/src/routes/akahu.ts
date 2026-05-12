@@ -121,24 +121,62 @@ akahuRouter.post('/akahu/sync', async (req, res) => {
 
     // Upsert accounts into LinkedCard so the rest of the app can treat them "card-like".
     const cardsByProviderId = new Map<string, { id: string }>();
+    const balanceCapturedAt = new Date();
+    let balanceSnapshotsCreated = 0;
     for (const acc of accounts) {
+      const currentBalanceCents = akahuAmountToCents(acc.balance?.current);
+      const availableBalanceCents = akahuAmountToCents(acc.balance?.available);
+      const balanceCurrency = acc.balance?.currency ?? null;
+      const balanceOverdrawn =
+        typeof acc.balance?.overdrawn === 'boolean' ? acc.balance.overdrawn : null;
+      const hasBalance =
+        currentBalanceCents !== null ||
+        availableBalanceCents !== null ||
+        balanceCurrency !== null ||
+        balanceOverdrawn !== null;
 
       const card = await prisma.linkedCard.upsert({
         where: {
           provider_providerCardId: { provider: 'akahu', providerCardId: acc._id }
         },
-        update: { displayName: acc.name ?? 'Akahu account' },
+        update: {
+          displayName: acc.name ?? 'Akahu account',
+          currentBalanceCents,
+          availableBalanceCents,
+          balanceCurrency,
+          balanceOverdrawn,
+          balanceUpdatedAt: hasBalance ? balanceCapturedAt : null
+        },
         create: {
           userId,
           provider: 'akahu',
           providerCardId: acc._id,
           displayName: acc.name ?? 'Akahu account',
-          last4: null
+          last4: null,
+          currentBalanceCents,
+          availableBalanceCents,
+          balanceCurrency,
+          balanceOverdrawn,
+          balanceUpdatedAt: hasBalance ? balanceCapturedAt : null
         },
         select: { id: true }
       });
       cardsByProviderId.set(acc._id, card);
 
+      if (hasBalance) {
+        await prisma.accountBalanceSnapshot.create({
+          data: {
+            userId,
+            cardId: card.id,
+            currentBalanceCents,
+            availableBalanceCents,
+            currency: balanceCurrency,
+            overdrawn: balanceOverdrawn,
+            capturedAt: balanceCapturedAt
+          }
+        });
+        balanceSnapshotsCreated += 1;
+      }
     }
 
     // Upsert transactions (idempotent by providerTransactionId).
@@ -259,6 +297,7 @@ akahuRouter.post('/akahu/sync', async (req, res) => {
       created,
       updated,
       pendingCreated,
+      balanceSnapshotsCreated,
       categorized,
       refresh,
       alerts
@@ -295,3 +334,8 @@ function pendingProviderTransactionId(
 
   return `${AKAHU_PENDING_PROVIDER_ID_PREFIX}${digest}`;
 }
+
+function akahuAmountToCents(amount: number | undefined) {
+  return typeof amount === 'number' && Number.isFinite(amount) ? Math.round(amount * 100) : null;
+}
+
