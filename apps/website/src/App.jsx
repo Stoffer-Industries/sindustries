@@ -62,11 +62,19 @@ function slug(label) {
   return label.toLowerCase();
 }
 
-function SectionNav({ current, tabProgress, tabRefs }) {
+function SectionNav({ current, tabProgress, tabRefs, headingTargets }) {
   const visibleIndex = Math.round(tabProgress);
+  const activeHeadingX = headingTargets[current] ?? 0;
 
   return (
     <div className="section-nav-shell">
+      <div
+        className="section-nav-active-heading"
+        style={{ '--active-heading-x': `${activeHeadingX}px` }}
+        aria-hidden="true"
+      >
+        {current !== SECTIONS[0] ? <span>{current}</span> : null}
+      </div>
       <nav className="section-nav" aria-label="Section navigation">
         <a href="#sin" className="section-logo" aria-label="SIndustries home">
           <LogoMark />
@@ -161,9 +169,11 @@ function Section({ name, eyebrow, title, headingTarget, children }) {
       className="home-section"
       style={{ '--section-heading-target-x': `${headingTarget ?? 0}px` }}
     >
-      <div className="section-sticky-heading" aria-hidden="true">
-        <span>{name}</span>
-      </div>
+      {name !== SECTIONS[0] ? (
+        <div className="section-page-heading" aria-hidden="true">
+          <span>{name}</span>
+        </div>
+      ) : null}
       <div className="section-inner">
         <p className="eyebrow">{eyebrow}</p>
         <h2>{title}</h2>
@@ -199,7 +209,12 @@ export function App() {
 
   return (
     <div className="site-shell">
-      <SectionNav current={activeSection} tabProgress={tabProgress} tabRefs={tabRefs} />
+      <SectionNav
+        current={activeSection}
+        tabProgress={tabProgress}
+        tabRefs={tabRefs}
+        headingTargets={headingTargets}
+      />
       <main>
         <section id="sin" className="hero-section">
           <div className="hero-glow" aria-hidden="true" />

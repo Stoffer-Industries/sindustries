@@ -209,19 +209,17 @@ main {
   scroll-margin-top: 0;
 }
 
-.section-sticky-heading {
-  position: sticky;
-  top: 0;
-  z-index: 11;
+.section-page-heading {
   width: 100vw;
   height: 54px;
   margin-left: calc(50% - 50vw);
   pointer-events: none;
+  opacity: 1;
 }
 
-.section-sticky-heading span {
+.section-page-heading span,
+.section-nav-active-heading span {
   position: absolute;
-  top: 0;
   left: var(--section-heading-target-x);
   display: inline-flex;
   align-items: center;
@@ -234,6 +232,22 @@ main {
   text-transform: uppercase;
   transform: translateX(-50%);
   white-space: nowrap;
+}
+
+.section-page-heading span {
+  top: 0;
+}
+
+.section-nav-active-heading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.section-nav-active-heading span {
+  left: var(--active-heading-x);
+  top: 0;
 }
 
 .section-nav-shell {
