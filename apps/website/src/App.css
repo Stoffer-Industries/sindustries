@@ -17,6 +17,10 @@ body {
   padding: 0 0 48px;
 }
 
+.section-nav-shell + main {
+  margin-top: calc(-1 * var(--section-nav-height, 56px));
+}
+
 main {
   display: block;
 }
@@ -24,15 +28,27 @@ main {
 /* ─── Hero ─── */
 .hero-section {
   position: relative;
-  min-height: calc(100vh - 48px);
+  min-height: 100vh;
   overflow: hidden;
   border: 1px solid rgb(17 18 19 / 16%);
-  border-radius: var(--si-radius-xl);
+  border-radius: 0 0 var(--si-radius-xl) var(--si-radius-xl);
   background:
-    radial-gradient(circle at 78% 22%, rgb(255 201 53 / 18%), transparent 20rem),
+    linear-gradient(135deg, rgb(8 9 10 / 72%), rgb(8 9 10 / 62%)),
+    url('/brand/hero-background.jpg') center / cover no-repeat,
     linear-gradient(135deg, var(--si-color-ink-950), var(--si-color-ink-900));
   color: var(--si-color-text-on-dark);
   box-shadow: var(--si-shadow-soft);
+}
+
+.hero-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 26%, rgb(0 0 0 / 44%), transparent 26rem),
+    radial-gradient(circle at 78% 22%, rgb(255 201 53 / 8%), transparent 20rem),
+    linear-gradient(90deg, rgb(0 0 0 / 38%), rgb(0 0 0 / 8%));
+  pointer-events: none;
 }
 
 .hero-glow {
@@ -41,7 +57,7 @@ main {
   width: 24rem;
   height: 24rem;
   border-radius: 999px;
-  background: rgb(255 201 53 / 14%);
+  background: rgb(255 201 53 / 10%);
   filter: blur(70px);
   pointer-events: none;
 }
@@ -83,8 +99,8 @@ main {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   gap: clamp(28px, 6vw, 72px);
   align-items: end;
-  min-height: calc(100vh - 96px);
-  padding: clamp(28px, 6vw, 72px);
+  min-height: 100vh;
+  padding: calc(var(--section-nav-height, 56px) + clamp(28px, 6vw, 72px)) clamp(28px, 6vw, 72px) clamp(28px, 6vw, 72px);
 }
 
 .status-line {
@@ -114,11 +130,11 @@ main {
 }
 
 .hero-copy h1 {
-  max-width: 9.5ch;
+  max-width: 10.8ch;
   margin: 0;
   color: var(--si-color-text-on-dark);
   font-family: var(--si-font-display);
-  font-size: clamp(4rem, 11vw, 8.6rem);
+  font-size: clamp(3.25rem, 8.6vw, 7.3rem);
   font-weight: 950;
   letter-spacing: -0.075em;
   line-height: 0.86;
@@ -144,7 +160,8 @@ main {
   margin-top: 30px;
 }
 
-.live-card {
+/* ─── Signal grid (signals section) ─── */
+.signal-card {
   display: grid;
   gap: 10px;
   padding: 18px;
@@ -253,6 +270,7 @@ main {
   left: 0;
   z-index: 10;
   width: 100vw;
+  height: var(--section-nav-height, 56px);
   margin-left: calc(50% - 50vw);
   overflow: hidden;
   border-block: 1px solid rgb(17 18 19 / 12%);
@@ -320,10 +338,7 @@ main {
 }
 
 .section-tab span {
-  opacity: 0;
-  transform: translateY(4px);
-  white-space: nowrap;
-  transition: transform 0.22s ease;
+  display: none;
 }
 
 .section-tab.active {
@@ -336,34 +351,6 @@ main {
   opacity: 0;
 }
 
-/* Fill the <a>’s box and center label in the tab (avoids % left resolving oddly vs viewport). */
-.section-tab.active span,
-.section-tab.collapsed.arrived span {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  z-index: 1;
-  margin: 0;
-  width: auto;
-  max-width: none;
-  transform-origin: center;
-}
-
-.section-tab.active:not(.arrived) span {
-  opacity: 0;
-  transform: none;
-}
-
-.section-tab.collapsed.arrived span {
-  opacity: 1;
-  transform: rotate(-90deg);
-}
-
-.section-tab.active.arrived span {
-  opacity: 1;
-  transform: rotate(-90deg);
-}
 
 .section-tab:hover {
   color: var(--si-color-ink-950);
@@ -428,7 +415,7 @@ li {
 }
 
 .signals-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .signal-card,
@@ -443,6 +430,14 @@ li {
 
 .signal-card {
   padding: 22px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.signal-card:hover {
+  border-color: rgb(255 201 53 / 72%);
+  transform: translateY(-2px);
 }
 
 .signal-card p,
@@ -687,7 +682,6 @@ li {
 @media (max-width: 720px) {
   .site-shell {
     width: min(100% - 24px, 1180px);
-    padding-top: 12px;
   }
 
   .footer {
@@ -695,12 +689,17 @@ li {
     flex-direction: column;
   }
 
+  .hero-section {
+    background-size: auto, cover, auto;
+    background-position: center, center 42%, center;
+  }
+
   .hero-grid {
-    padding: 22px;
+    padding: calc(var(--section-nav-height, 56px) + 42px) 22px 22px;
   }
 
   .hero-copy h1 {
-    font-size: clamp(3.3rem, 16vw, 5rem);
+    font-size: clamp(2.75rem, 13.5vw, 4.35rem);
   }
 
   .signals-grid,
