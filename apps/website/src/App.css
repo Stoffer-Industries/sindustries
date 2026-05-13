@@ -382,6 +382,14 @@ h2 {
   font-weight: 950;
 }
 
+.section-subtitle {
+  margin: calc(-1 * var(--si-space-5)) 0 var(--si-space-5);
+  color: var(--si-color-text-secondary);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
 h3 {
   margin: 0;
   font-size: clamp(1.25rem, 2vw, 1.75rem);
@@ -440,8 +448,7 @@ li {
   transform: translateY(-2px);
 }
 
-.signal-card p,
-.signal-card span {
+.signal-card p {
   margin: 0;
   color: var(--si-color-text-muted);
   font-family: var(--si-font-ui);
@@ -451,14 +458,20 @@ li {
   text-transform: uppercase;
 }
 
+.signal-card p span {
+  color: var(--si-color-brand-500);
+  margin-left: 6px;
+}
+
 .signal-card strong {
   display: block;
-  margin: 18px 0 4px;
+  margin: 14px 0 0;
   color: var(--si-color-brand-700);
   font-size: clamp(2.8rem, 6vw, 4.6rem);
   font-weight: 950;
   letter-spacing: -0.07em;
   line-height: 0.9;
+  text-align: right;
 }
 
 .systems-grid {

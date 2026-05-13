@@ -26,16 +26,11 @@ const STORIES = [
 const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
 
 
-const SIGNAL_SECTION_MAP = {
-  'systems shipped': '#ships',
-  'active experiments': '#studio',
-  'builder logs': '#stories'
-};
-
 const SIGNALS = [
-  { label: 'systems shipped', value: SHIPS.length, note: 'shipped or merged' },
-  { label: 'active experiments', value: STUDIO.length, note: 'live prototypes' },
-  { label: 'builder logs', value: STORIES.length, note: 'published posts' }
+  { label: 'active experiments', value: STUDIO.length, href: '#studio' },
+  { label: 'builder logs', value: STORIES.length, href: '#stories' },
+  { label: 'systems at work', value: SHIPS.length, href: '#ships' },
+  { label: 'concepts killed', value: '03', href: '#' }
 ];
 
 const SYSTEMS = [
@@ -213,7 +208,7 @@ function useSectionProgress() {
   return sectionState;
 }
 
-function Section({ name, eyebrow, title, headingTarget, pageHeadingOpacity, children }) {
+function Section({ name, eyebrow, title, subTitle, headingTarget, pageHeadingOpacity, children }) {
   return (
     <section
       id={slug(name)}
@@ -232,6 +227,7 @@ function Section({ name, eyebrow, title, headingTarget, pageHeadingOpacity, chil
       <div className="section-inner">
         <p className="eyebrow">{eyebrow}</p>
         <h2>{title}</h2>
+        {subTitle ? <p className="section-subtitle">{subTitle}</p> : null}
         {children}
       </div>
     </section>
@@ -317,13 +313,12 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
+        <Section name="Signals" eyebrow="Live-ish proof" title="PROOF OF MOVEMENT" subTitle="Signals from the systems we're building." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
             {SIGNALS.map((signal) => (
-              <a className="signal-card" href={SIGNAL_SECTION_MAP[signal.label]} key={signal.label}>
-                <p>{signal.label}</p>
+              <a className="signal-card" href={signal.href} key={signal.label}>
+                <p>{signal.label} <span>→</span></p>
                 <strong>{signal.value}</strong>
-                <span>→</span>
               </a>
             ))}
           </div>
