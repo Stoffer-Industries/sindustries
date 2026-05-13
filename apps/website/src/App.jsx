@@ -313,7 +313,7 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="PROOF OF MOVEMENT" title="Live-ish proof" subTitle="Signals from the systems we're building." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
+        <Section name="Signals" eyebrow="PROOF OF MOVEMENT" title="Signals from the systems we're building." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
             {SIGNALS.map((signal) => (
               <a className="signal-card" href={signal.href} key={signal.label}>
