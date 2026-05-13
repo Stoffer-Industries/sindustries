@@ -9,11 +9,33 @@ const SOCIAL_LINKS = {
 
 const CONTACT_EMAIL = 'hello@sindustries.co.nz';
 
+const SHIPS = [
+  'SIndustries website v1',
+  'Tasks API prodlike workflow',
+  'Agent role split: Quinn / Rowan / Lox',
+  'Plano local model routing',
+  'Drop microsite prototype'
+];
+
+const STORIES = [
+  'The company-of-one operating system.',
+  'Turning an assistant into a chief of staff.',
+  'Building in public before the business is obvious.'
+];
+
+const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
+
+
+const SIGNAL_SECTION_MAP = {
+  'systems shipped': '#ships',
+  'active experiments': '#studio',
+  'builder logs': '#stories'
+};
+
 const SIGNALS = [
-  { label: 'commits', value: '1,247', note: 'last 90 days' },
-  { label: 'projects', value: '08', note: 'active threads' },
-  { label: 'systems', value: '04', note: 'online / forming' },
-  { label: 'ships', value: '23', note: 'released or merged' }
+  { label: 'systems shipped', value: SHIPS.length, note: 'shipped or merged' },
+  { label: 'active experiments', value: STUDIO.length, note: 'live prototypes' },
+  { label: 'builder logs', value: STORIES.length, note: 'published posts' }
 ];
 
 const SYSTEMS = [
@@ -41,21 +63,6 @@ const SYSTEMS = [
 
 const STACKS = ['OpenClaw', 'Plano', 'Local models', 'Codex', 'MiniMax', 'Telegram', 'Tasks API', 'Vite', 'React'];
 
-const SHIPS = [
-  'SIndustries website v1',
-  'Tasks API prodlike workflow',
-  'Agent role split: Quinn / Rowan / Lox',
-  'Plano local model routing',
-  'Drop microsite prototype'
-];
-
-const STORIES = [
-  'The company-of-one operating system.',
-  'Turning an assistant into a chief of staff.',
-  'Building in public before the business is obvious.'
-];
-
-const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
 const HEADER_TAB_TRIGGER_OFFSET_PX = 56;
 const HEADER_TAB_TRANSITION_PX = 24;
 const COLLAPSED_TAB_WIDTH_PX = 12;
@@ -298,43 +305,26 @@ export function App() {
           <div className="hero-glow" aria-hidden="true" />
           <div className="hero-grid">
             <div className="hero-copy">
-              <a className="hero-brand" href="#sin" aria-label="SIndustries home">
-                <LogoMark />
-              </a>
-              <p className="status-line"><span /> SIndustries is online</p>
-              <h1>Build the systems. Ship the signal.</h1>
+              <h1>Stay relevant in an ever-changing world</h1>
               <p className="lede">
-                SIndustries is Tom Stoffer’s AI-native builder/operator company: tools, agents, workflows, and experiments that turn uncertainty into useful action.
+                SINDUSTRIES is an AI-native builder/operator company: tools, agents, workflows, and experiments that create real value.
               </p>
               <div className="hero-actions">
-                <a className="btn primary" href={SOCIAL_LINKS.x}>Follow Tom on X</a>
+                <a className="btn primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow Tom on X</a>
                 <a className="btn secondary" href="#signals">See the signal</a>
               </div>
             </div>
-
-            <aside className="live-card" aria-label="Current activity">
-              <div className="live-card-header">
-                <p>Live board</p>
-                <span>Active</span>
-              </div>
-              {['agent workflow', 'homepage iteration', 'first drop', 'infra review'].map((item) => (
-                <div className="live-row" key={item}>
-                  <span>{item}</span>
-                  <i aria-hidden="true" />
-                </div>
-              ))}
-            </aside>
           </div>
         </section>
 
         <Section name="Signals" eyebrow="Live-ish proof" title="Numbers that make the work feel alive." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
             {SIGNALS.map((signal) => (
-              <article className="signal-card" key={signal.label}>
+              <a className="signal-card" href={SIGNAL_SECTION_MAP[signal.label]} key={signal.label}>
                 <p>{signal.label}</p>
                 <strong>{signal.value}</strong>
-                <span>{signal.note}</span>
-              </article>
+                <span>→</span>
+              </a>
             ))}
           </div>
         </Section>
@@ -399,8 +389,8 @@ export function App() {
             </p>
             <div className="summon-actions">
               <a className="btn primary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</a>
-              <a className="btn secondary light" href={SOCIAL_LINKS.x}>X</a>
-              <a className="btn secondary light" href={SOCIAL_LINKS.tiktok}>TikTok</a>
+              <a className="btn secondary light" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">X</a>
+              <a className="btn secondary light" href={SOCIAL_LINKS.tiktok} target="_blank" rel="noreferrer">TikTok</a>
             </div>
           </div>
         </Section>
@@ -415,8 +405,8 @@ export function App() {
           <p>Contact: <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
         </div>
         <div className="footer-links">
-          <a href={SOCIAL_LINKS.x}>X</a>
-          <a href={SOCIAL_LINKS.tiktok}>TikTok</a>
+          <a href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">X</a>
+          <a href={SOCIAL_LINKS.tiktok} target="_blank" rel="noreferrer">TikTok</a>
         </div>
       </footer>
     </div>
