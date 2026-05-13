@@ -5,7 +5,7 @@ import { App } from './App.jsx';
 describe('website app', () => {
   test('renders the long-scroll home messaging', () => {
     render(<App />);
-    expect(screen.getByRole('heading', { name: /build the systems\. ship the signal\./i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /stay relevant in an ever-changing world/i })).toBeInTheDocument();
     expect(screen.getByText(/ai-native builder\/operator company/i)).toBeInTheDocument();
   });
 
