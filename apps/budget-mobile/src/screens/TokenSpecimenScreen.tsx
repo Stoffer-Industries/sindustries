@@ -16,7 +16,16 @@ const swatches = [
   ['Brand', colors.brand],
   ['Success', colors.success],
   ['Danger', colors.danger],
-  ['Other', colors.chart.other]
+  ['Sage', colors.sage],
+  ['Accent pink', colors.accentPink]
+] as const;
+
+const labelSwatches = [
+  ['Green', colors.labels.green],
+  ['Blue', colors.labels.blue],
+  ['Orange', colors.labels.orange],
+  ['Purple', colors.labels.purple],
+  ['Gray', colors.labels.gray]
 ] as const;
 
 const radiusEntries = Object.entries(radius);
@@ -54,6 +63,19 @@ export function TokenSpecimenScreen({ navigation }: Props) {
         <Text style={styles.sectionTitle}>Color</Text>
         <View style={styles.swatchGrid}>
           {swatches.map(([label, value]) => (
+            <View key={label} style={styles.swatchCard}>
+              <View style={[styles.swatch, { backgroundColor: value }]} />
+              <Text style={styles.swatchLabel}>{label}</Text>
+              <Text style={styles.code}>{value}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Color Labels</Text>
+        <View style={styles.swatchGrid}>
+          {labelSwatches.map(([label, value]) => (
             <View key={label} style={styles.swatchCard}>
               <View style={[styles.swatch, { backgroundColor: value }]} />
               <Text style={styles.swatchLabel}>{label}</Text>
@@ -261,7 +283,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand
   },
   primaryButtonText: {
-    color: colors.bgCanvas,
+    color: colors.ink950,
     fontFamily: fonts.ui,
     fontSize: 15,
     fontWeight: '800'
