@@ -1,5 +1,7 @@
 {
-  "installCommand": "npm install",
-  "buildCommand": "npm run build -w @sindustries/website",
-  "outputDirectory": "apps/website/dist"
+  "buildCommand": "cd apps/website && npm run build",
+  "outputDirectory": "apps/website/dist",
+  "rewrites": [
+    { "source": "/about", "destination": "/index.html" }
+  ]
 }

@@ -69,16 +69,45 @@ Examples:
 
 Metrics can be placeholder for now, but the visual language should anticipate real data later.
 
+Use Signals as the proof-of-movement layer across three buckets:
+
+- **Systems** — repeatable engines and operating assets.
+- **Experiments** — bounded bets that test demand, channels, products, or narratives.
+- **Ships** — outputs that have already left the dock.
+
+Current proof buckets:
+
+**Experiments**
+
+- Drop 1
+- Social content
+- Product Market Scans
+- Plano model routing for agent ops
+- NZ Personal Banking App
+- Roadmapping Scenarios App
+
+**Systems**
+
+- OpenClaw, agent runtime
+- X bookmark reviews, signal pipeline
+- Tasks API
+- Design System
+
+**Ships**
+
+- SIndustries v1 site
+- Bookmark archiver skill
+
 ### 3. Systems
 
 Hero cards for the main systems being built.
 
 Example systems:
 
-- OpenClaw
-- Agent Ops
-- Software Factory
-- Commerce Loops
+- OpenClaw, agent runtime
+- X bookmark reviews, signal pipeline
+- Tasks API
+- Design System
 
 ### 4. Stacks
 
@@ -109,6 +138,15 @@ Placeholder story titles are acceptable.
 Experiments and prototypes in motion.
 
 This can feel more playful and unfinished.
+
+Current experiment list:
+
+- Drop 1
+- Social content
+- Product Market Scans
+- Plano model routing for agent ops
+- NZ Personal Banking App
+- Roadmapping Scenarios App
 
 ### 8. Summon
 
