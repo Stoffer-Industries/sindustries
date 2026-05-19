@@ -1,0 +1,36 @@
+.slcs-root {
+  display: block;
+  min-height: calc(max(var(--slcs-header-min-height), var(--slcs-header-height, 0px)) + var(--slcs-card-min-height) + ((var(--slcs-card-count) - 1) * var(--slcs-stack-offset)) + ((var(--slcs-card-count) - 1) * var(--slcs-reveal-distance)) + var(--slcs-end-buffer, 280px));
+  overflow-anchor: none;
+}
+
+.slcs-scene {
+  position: sticky;
+  top: var(--slcs-sticky-top, 78px);
+  z-index: 10;
+  overflow-anchor: none;
+}
+
+.slcs-header {
+  min-height: max(var(--slcs-header-min-height), var(--slcs-header-height, 0px));
+}
+
+.slcs-stage {
+  position: relative;
+  height: calc(var(--slcs-card-min-height) + ((var(--slcs-card-count) - 1) * var(--slcs-stack-offset)));
+  isolation: isolate;
+  overflow-anchor: none;
+}
+
+.slcs-card {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: calc(1 + var(--slcs-card-index, 0));
+  min-height: var(--slcs-card-min-height);
+  backface-visibility: hidden;
+  contain: paint;
+  overflow-anchor: none;
+  will-change: transform, opacity;
+}

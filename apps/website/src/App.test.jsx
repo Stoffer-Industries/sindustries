@@ -13,8 +13,9 @@ describe('website app', () => {
     render(<App />);
 
     expect(screen.getAllByRole('link', { name: /signals/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: /hero cards for the machines in motion\./i })).toBeInTheDocument();
-    expect(screen.getByText(/about: sindustries builds practical digital products/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /hello@sindustries.co.nz/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: /compounding value over time\./i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /bounded bets/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^about$/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /email tom/i })).toBeInTheDocument();
   });
 });

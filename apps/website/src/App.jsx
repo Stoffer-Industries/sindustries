@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { StickyCardStack } from './components/StickyCardStack.jsx';
 
 const SECTIONS = ['SIN', 'Signals', 'Systems', 'Stacks', 'Ships', 'Stories', 'Studio', 'Summon'];
 
@@ -10,50 +11,95 @@ const SOCIAL_LINKS = {
 const CONTACT_EMAIL = 'hello@sindustries.co.nz';
 
 const SHIPS = [
-  'SIndustries website v1',
-  'Tasks API prodlike workflow',
-  'Agent role split: Quinn / Rowan / Lox',
-  'Plano local model routing',
-  'Drop microsite prototype'
+  'SIndustries v1 site',
+  'Bookmark archiver skill'
 ];
 
 const STORIES = [
-  'The company-of-one operating system.',
-  'Turning an assistant into a chief of staff.',
-  'Building in public before the business is obvious.'
+  {
+    title: 'Turning an assistant into a chief of staff',
+    summary: 'A founder note on building Quinn/OpenClaw into an operating layer for delegation, memory, workflows, and leverage.',
+    url: 'https://x.com/stoff81/status/2055944314128314490'
+  },
+  {
+    title: 'Building in public before the business is obvious',
+    summary: 'Notes on SIndustries as a company-of-one experiment: systems first, proof of movement, and public signal before the model fully resolves.',
+    url: 'https://x.com/stoff81/status/2043866685258809478'
+  }
 ];
 
-const STUDIO = ['Live signal feed', 'Agent workbench', 'First product drop', 'Founder log stream'];
-
-
-const SIGNALS = [
-  { label: 'active experiments', value: STUDIO.length, href: '#studio' },
-  { label: 'builder logs', value: STORIES.length, href: '#stories' },
-  { label: 'systems at work', value: SHIPS.length, href: '#ships' },
-  { label: 'concepts killed', value: '03', href: '#' }
+const STUDIO = [
+  {
+    name: 'Drop 1',
+    tag: 'Commerce test',
+    image: '/brand/studio/drop-1-hero.png',
+    body: 'A small, real-world product drop to test demand, sourcing, positioning, and fulfilment without overbuilding.'
+  },
+  {
+    name: 'Social content',
+    tag: 'Channel experiment',
+    image: '/brand/studio/social-content-hero.png',
+    body: 'Short-form public signal to build distribution, sharpen narrative, and learn what people respond to.'
+  },
+  {
+    name: 'Product Market Scans',
+    tag: 'Opportunity radar',
+    image: '/brand/studio/product-market-scans-hero.png',
+    body: 'Recurring scans for gaps, pricing windows, underserved niches, and first-drop candidates.'
+  },
+  {
+    name: 'Plano model routing',
+    tag: 'Agent ops',
+    image: '/brand/studio/plano-model-routing-hero.png',
+    body: 'Local model routing for cheaper, faster, more autonomous agent work across routine operations.'
+  },
+  {
+    name: 'NZ Personal Banking App',
+    tag: 'Product concept',
+    image: '/brand/studio/nz-personal-banking-hero.png',
+    body: 'A visibility layer for household spending, budget drift, and real-time financial control.'
+  },
+  {
+    name: 'Roadmapping Scenarios App',
+    tag: 'Planning tool',
+    image: '/brand/studio/roadmapping-scenarios-hero.png',
+    body: 'A scenario-driven planning surface for comparing paths, trade-offs, and sequencing decisions.'
+  }
 ];
+
 
 const SYSTEMS = [
   {
     name: 'OpenClaw',
-    tag: 'Chief-of-staff OS',
-    body: 'Agent orchestration, memory, tasks, and the operating layer around Tom’s work.'
+    tag: 'Agent runtime',
+    image: '/brand/systems/openclaw-lobster.jpg',
+    body: 'The operating layer for agents, memory, tools, messaging, and human-in-the-loop work.'
   },
   {
-    name: 'Agent Ops',
-    tag: 'Quinn / Rowan / Lox',
-    body: 'Specialist agents with roles, workflows, reviews, and delivery discipline.'
+    name: 'X bookmark reviews',
+    tag: 'Signal pipeline',
+    image: '/brand/systems/bookmark-bunker-manual.jpg',
+    body: 'A pipeline for turning saved signals into reviews, specs, tasks, and decisions.'
   },
   {
-    name: 'Software Factory',
-    tag: 'Shape → build → review',
-    body: 'A repeatable loop for turning loose intent into executable, reviewed work.'
+    name: 'Tasks API',
+    tag: 'Workflow engine',
+    image: '/brand/systems/tasks-api-hero.png',
+    body: 'Task state, ownership, comments, reviews, and heartbeat-driven operating discipline.'
   },
   {
-    name: 'Commerce Loops',
-    tag: 'Drops / tests / learning',
-    body: 'Lightweight experiments for products, waitlists, content, and revenue signals.'
+    name: 'Design System',
+    tag: 'Brand operating layer',
+    image: '/brand/systems/design-system-hero.png',
+    body: 'Reusable visual language, components, and constraints for SIndustries products.'
   }
+];
+
+const SIGNALS = [
+  { label: 'active experiments', value: STUDIO.length, href: '#studio' },
+  { label: 'release to the world', value: SYSTEMS.length, href: '#systems' },
+  { label: 'ships delivered', value: SHIPS.length, href: '#ships' },
+  { label: 'builder logs', value: STORIES.length, href: '#stories' }
 ];
 
 const STACKS = ['OpenClaw', 'Plano', 'Local models', 'Codex', 'MiniMax', 'Telegram', 'Tasks API', 'Vite', 'React'];
@@ -225,12 +271,186 @@ function Section({ name, eyebrow, title, subTitle, headingTarget, pageHeadingOpa
         </div>
       ) : null}
       <div className="section-inner">
-        <p className="eyebrow">{eyebrow}</p>
-        <h2>{title}</h2>
-        {subTitle ? <p className="section-subtitle">{subTitle}</p> : null}
+        {eyebrow || title || subTitle ? (
+          <div className="section-copy">
+            {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+            {title ? <h2>{title}</h2> : null}
+            {subTitle ? <p className="section-subtitle">{subTitle}</p> : null}
+          </div>
+        ) : null}
         {children}
       </div>
     </section>
+  );
+}
+
+function useInViewOnce(threshold = 0.35) {
+  const ref = useRef(null);
+  const [isInView, setIsInView] = useState(false);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || isInView) return undefined;
+
+    const reduceMotion = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false;
+    if (reduceMotion || typeof IntersectionObserver !== 'function') {
+      setIsInView(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsInView(true);
+          observer.disconnect();
+        }
+      },
+      { threshold }
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isInView, threshold]);
+
+  return [ref, isInView];
+}
+
+const FLIP_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const FLIP_NUMBERS = '0123456789';
+const FLIP_SYMBOLS = '->';
+const FLIP_STEP_MS = 64;
+const FLIP_STAGGER_MS = 18;
+
+function getFlipSequence(character) {
+  const target = String(character).toUpperCase();
+  if (target === ' ') return [' '];
+
+  const alphabetIndex = FLIP_LETTERS.indexOf(target);
+  if (alphabetIndex >= 0) return [' ', ...FLIP_LETTERS.slice(0, alphabetIndex + 1).split('')];
+
+  const numberIndex = FLIP_NUMBERS.indexOf(target);
+  if (numberIndex >= 0) return [' ', ...FLIP_NUMBERS.slice(0, numberIndex + 1).split('')];
+
+  const symbolIndex = FLIP_SYMBOLS.indexOf(target);
+  if (symbolIndex >= 0) return [' ', ...FLIP_SYMBOLS.slice(0, symbolIndex + 1).split('')];
+
+  return [' ', target];
+}
+
+function useSplitFlapDisplay(text, active) {
+  const targetText = String(text).toUpperCase();
+  const [displayState, setDisplayState] = useState(() => (
+    targetText.split('').map(() => ({ character: ' ', tick: 0 }))
+  ));
+
+  useEffect(() => {
+    const reduceMotion = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false;
+
+    if (reduceMotion) {
+      setDisplayState(targetText.split('').map((character) => ({ character, tick: 0 })));
+      return undefined;
+    }
+
+    setDisplayState(targetText.split('').map(() => ({ character: ' ', tick: 0 })));
+    if (!active) return undefined;
+
+    const timers = [];
+    targetText.split('').forEach((character, characterIndex) => {
+      const sequence = getFlipSequence(character);
+      sequence.forEach((nextCharacter, sequenceIndex) => {
+        const timer = window.setTimeout(() => {
+          setDisplayState((previous) => previous.map((item, itemIndex) => (
+            itemIndex === characterIndex
+              ? { character: nextCharacter, tick: item.tick + 1 }
+              : item
+          )));
+        }, (sequenceIndex * FLIP_STEP_MS) + (characterIndex * FLIP_STAGGER_MS));
+        timers.push(timer);
+      });
+    });
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [active, targetText]);
+
+  return displayState;
+}
+
+function FlipText({ text, active }) {
+  const characters = useSplitFlapDisplay(text, active);
+
+  return (
+    <span className="flip-text" aria-hidden="true">
+      {characters.map(({ character, tick }, index) => (
+        <span className={`flip-char ${character === ' ' ? 'space' : ''}`} key={index}>
+          <span className="flip-char-value">{character === ' ' ? '\u00A0' : character}</span>
+          <span className="flip-char-fold" key={`${index}-${tick}`} aria-hidden="true" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function ScaleToFitWidth({ children }) {
+  const frameRef = useRef(null);
+  const contentRef = useRef(null);
+  const [layout, setLayout] = useState({ scale: 1, height: undefined });
+
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const content = contentRef.current;
+    if (!frame || !content || typeof ResizeObserver === 'undefined') return undefined;
+
+    const updateLayout = () => {
+      const frameWidth = frame.clientWidth;
+      const contentWidth = content.offsetWidth;
+      const contentHeight = content.offsetHeight;
+      if (!frameWidth || !contentWidth || !contentHeight) return;
+
+      const scale = frameWidth / contentWidth;
+      setLayout({ scale, height: contentHeight * scale });
+    };
+
+    updateLayout();
+    const resizeObserver = new ResizeObserver(updateLayout);
+    resizeObserver.observe(frame);
+    resizeObserver.observe(content);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  return (
+    <div className="fit-scale-frame" ref={frameRef} style={layout.height ? { height: `${layout.height}px` } : undefined}>
+      <div className="fit-scale-content" ref={contentRef} style={{ transform: `scale(${layout.scale})` }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SignalClickerRow({ signal, index }) {
+  const [ref, isInView] = useInViewOnce(0.45);
+  const labelLength = Math.max(...SIGNALS.map(({ label }) => label.length));
+  const numericLength = Math.max(...SIGNALS.map(({ value }) => `${value}->`.length));
+  const numericLabel = `${signal.value}->`;
+  const blankTilePadding = ' '.repeat(3);
+  const rowText = `${signal.label.padEnd(labelLength, ' ')}${blankTilePadding}${numericLabel.padStart(numericLength, ' ')}`;
+
+  return (
+    <a
+      ref={ref}
+      className="signal-card"
+      href={signal.href}
+      style={{ '--signal-row-index': index }}
+      aria-label={`${signal.label} ${signal.value} arrow`}
+    >
+      <span className="signal-line">
+        <FlipText text={rowText} active={isInView} />
+      </span>
+    </a>
   );
 }
 
@@ -238,7 +458,66 @@ function LogoMark() {
   return <img className="brand-logo" src="/brand/sindustries-logo.webp" alt="SIndustries" />;
 }
 
+function SiteFooter() {
+  return (
+    <footer className="site-footer">
+      <div className="site-footer-grid">
+        <a href="/about">About</a>
+        <div className="footer-socials" aria-label="Social links">
+          <a href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer" aria-label="Follow Tom on X">𝕏</a>
+          <a href={SOCIAL_LINKS.tiktok} target="_blank" rel="noreferrer" aria-label="Follow SIndustries on TikTok">♪</a>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+function AboutPage() {
+  return (
+    <>
+    <div className="site-shell about-shell">
+      <header className="about-hero">
+        <a className="about-home-link" href="/" aria-label="Back to SIndustries home"><LogoMark /></a>
+        <p className="eyebrow">About</p>
+        <h1>Tom Stoffer builds systems for staying relevant.</h1>
+        <p className="lede">
+          SIndustries is Tom’s AI-native builder/operator company: part product studio, part operating system, part public lab for compounding leverage.
+        </p>
+      </header>
+
+      <main className="about-content">
+        <section className="about-card">
+          <p className="eyebrow">Profile</p>
+          <h2>Builder, engineering leader, systems thinker.</h2>
+          <p>
+            Tom Stoffer is a senior engineering leader based in Auckland, New Zealand. He has built software across games, DJ technology, surgical training, embedded platforms, web services, and agent systems.
+          </p>
+          <p>
+            After years leading teams and shipping other people’s roadmaps, SIndustries is the vehicle for building his own IP in public: practical products, automation loops, AI-native workflows, and small experiments that can compound into a company of one.
+          </p>
+        </section>
+
+        <section className="about-card dark">
+          <p className="eyebrow">What SIndustries is for</p>
+          <p>
+            The thesis is simple: stay relevant in an ever-changing world by building systems that learn, products that test demand, and public signal that compounds over time.
+          </p>
+          <div className="about-actions">
+            <a className="btn primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow on X</a>
+            <a className="btn secondary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</a>
+          </div>
+        </section>
+      </main>
+
+    </div>
+    <SiteFooter />
+    </>
+  );
+}
+
 export function App() {
+  if (window.location.pathname === '/about') return <AboutPage />;
+
   const { activeSection, tabProgress, pageHeadingOpacities } = useSectionProgress();
   const tabRefs = useRef({});
   const tabsRef = useRef(null);
@@ -288,6 +567,7 @@ export function App() {
   }, [tabProgress, activeSection]);
 
   return (
+    <>
     <div className="site-shell">
       <SectionNav
         current={activeSection}
@@ -303,7 +583,7 @@ export function App() {
             <div className="hero-copy">
               <h1>Stay relevant in an ever-changing world</h1>
               <p className="lede">
-                SINDUSTRIES is an AI-native builder/operator company: tools, agents, workflows, and experiments that create real value.
+                SINDUSTRIES is an AI-native builder/operator company: systems that compound, experiments that test reality, and signals that prove momentum.
               </p>
               <div className="hero-actions">
                 <a className="btn primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow Tom on X</a>
@@ -313,37 +593,43 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="PROOF OF MOVEMENT" title="Signals from the systems we're building." headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
+        <Section name="Signals" eyebrow="PROOF OF MOVEMENT" title="Systems, experiments and output signals" headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
-            {SIGNALS.map((signal) => (
-              <a className="signal-card" href={signal.href} key={signal.label}>
-                <p>{signal.label} <span>→</span></p>
-                <strong>{signal.value}</strong>
-              </a>
+            <div className="signals-board">
+              <ScaleToFitWidth>
+                <div className="signals-flap-panel">
+                  {SIGNALS.map((signal, index) => (
+                    <SignalClickerRow signal={signal} index={index} key={signal.label} />
+                  ))}
+                </div>
+              </ScaleToFitWidth>
+            </div>
+          </div>
+        </Section>
+
+        <Section name="Systems" headingTarget={pageHeadingTargets.Systems} pageHeadingOpacity={pageHeadingOpacities.Systems}>
+          <StickyCardStack items={SYSTEMS} eyebrow="Repeatable engines" title="Compounding value over time" />
+        </Section>
+
+        <Section name="Stacks" eyebrow="Operating Infrastructure" title="The tools that keep us sharp" headingTarget={pageHeadingTargets.Stacks} pageHeadingOpacity={pageHeadingOpacities.Stacks}>
+          <div className="stack-marquee" aria-label="SIndustries technology stack">
+            {[0, 1, 2].map((row) => (
+              <div className="stack-marquee-row" key={row} style={{ '--stack-row-index': row }}>
+                <div className="stack-marquee-track">
+                  {[0, 1].map((set) => (
+                    <div className="stack-marquee-set" key={set} aria-hidden={set === 1 ? 'true' : undefined}>
+                      {STACKS.map((stack) => (
+                        <span key={`${set}-${stack}`}>{stack}</span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </Section>
 
-        <Section name="Systems" eyebrow="What we are building" title="Hero cards for the machines in motion." headingTarget={pageHeadingTargets.Systems} pageHeadingOpacity={pageHeadingOpacities.Systems}>
-          <div className="systems-grid">
-            {SYSTEMS.map((system) => (
-              <article className="system-card" key={system.name}>
-                <div className="system-visual" aria-hidden="true" />
-                <p className="system-tag">{system.tag}</p>
-                <h3>{system.name}</h3>
-                <p>{system.body}</p>
-              </article>
-            ))}
-          </div>
-        </Section>
-
-        <Section name="Stacks" eyebrow="Operating model" title="The tools behind the output." headingTarget={pageHeadingTargets.Stacks} pageHeadingOpacity={pageHeadingOpacities.Stacks}>
-          <div className="stack-cloud">
-            {STACKS.map((stack) => <span key={stack}>{stack}</span>)}
-          </div>
-        </Section>
-
-        <Section name="Ships" eyebrow="Changelog" title="Things that have left the dock." headingTarget={pageHeadingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
+        <Section name="Ships" eyebrow="Released to the world" title="Outputs that have left the dock" headingTarget={pageHeadingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
           <div className="ships-list">
             {SHIPS.map((ship, index) => (
               <article className="ship-row" key={ship}>
@@ -357,30 +643,26 @@ export function App() {
         <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={pageHeadingTargets.Stories} pageHeadingOpacity={pageHeadingOpacities.Stories}>
           <div className="stories-grid">
             {STORIES.map((story) => (
-              <article className="story-card" key={story}>
-                <h3>{story}</h3>
-                <p>Placeholder — draft story slot.</p>
+              <article className="story-card" key={story.title}>
+                <p className="story-source">From X</p>
+                <h3>{story.title}</h3>
+                <p>{story.summary}</p>
+                <a className="story-link" href={story.url} target="_blank" rel="noreferrer">
+                  Read on X →
+                </a>
               </article>
             ))}
           </div>
         </Section>
 
-        <Section name="Studio" eyebrow="Experiments" title="Prototypes, sparks, and unfinished machines." headingTarget={pageHeadingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
-          <div className="studio-grid">
-            {STUDIO.map((item) => (
-              <article className="studio-card" key={item}>
-                <span aria-hidden="true" />
-                <h3>{item}</h3>
-                <p>In the lab.</p>
-              </article>
-            ))}
-          </div>
+        <Section name="Studio" headingTarget={pageHeadingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
+          <StickyCardStack items={STUDIO} eyebrow="Experiments" title="Proof before scale"/>
         </Section>
 
-        <Section name="Summon" eyebrow="Call to action" title="Follow the signal. Open the line." headingTarget={pageHeadingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>
+        <Section name="Summon" eyebrow="Open Line" title="Follow the signal" headingTarget={pageHeadingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>
           <div className="summon-grid">
             <p className="lede">
-              If you are building, backing, or reshaping how organisations work, the line is open. Follow the experiments or start a conversation.
+              If you are building, backing, or reshaping how organisations work, the line is open. Follow the systems, watch the experiments, or start a conversation.
             </p>
             <div className="summon-actions">
               <a className="btn primary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</a>
@@ -389,21 +671,10 @@ export function App() {
             </div>
           </div>
         </Section>
-      </main>
 
-      <footer className="footer" id="about">
-        <div>
-          <LogoMark />
-          <p>
-            About: SIndustries builds practical digital products, agent systems, and operating loops in public from Auckland, New Zealand.
-          </p>
-          <p>Contact: <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
-        </div>
-        <div className="footer-links">
-          <a href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">X</a>
-          <a href={SOCIAL_LINKS.tiktok} target="_blank" rel="noreferrer">TikTok</a>
-        </div>
-      </footer>
+      </main>
     </div>
+    <SiteFooter />
+    </>
   );
 }
