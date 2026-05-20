@@ -79,7 +79,11 @@ jobs:
             TARGET="production"
           else
             DEPLOY_URL=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
-            vercel alias set "$DEPLOY_URL" "$STAGING_DOMAIN" --token="$VERCEL_TOKEN"
+            if vercel alias set "$DEPLOY_URL" "$STAGING_DOMAIN" --token="$VERCEL_TOKEN"; then
+              STAGING_ALIAS_STATUS="assigned"
+            else
+              STAGING_ALIAS_STATUS="pending DNS/certificate setup"
+            fi
             TARGET="staging"
           fi
 
@@ -92,5 +96,6 @@ jobs:
             echo "- URL: $DEPLOY_URL"
             if [ "$TARGET" = "staging" ]; then
               echo "- Stable staging URL: https://$STAGING_DOMAIN"
+              echo "- Staging alias: $STAGING_ALIAS_STATUS"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
