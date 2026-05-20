@@ -802,6 +802,11 @@ li {
   background: var(--si-color-brand-500);
 }
 
+#stacks,
+#summon {
+  padding-top: clamp(72px, 10vw, 140px);
+}
+
 .summon-grid {
   display: grid;
   gap: var(--si-space-4);
