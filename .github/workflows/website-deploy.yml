@@ -1,0 +1,91 @@
+name: Website Deploy
+
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'apps/website/**'
+      - 'packages/design-tokens/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vercel.json'
+      - '.github/workflows/website-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  deploy:
+    name: Deploy website to Vercel
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Ensure Rollup Linux native binary is present
+        run: npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace apps/website
+
+      - name: Test website
+        run: npm test --workspace apps/website
+
+      - name: Build website
+        run: npm run build --workspace apps/website
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@54.2.0
+
+      - name: Pull Vercel environment
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          else
+            vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Build Vercel output
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            vercel build --prod --token="$VERCEL_TOKEN"
+          else
+            vercel build --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Deploy to Vercel
+        id: deploy
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            DEPLOY_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+            TARGET="production"
+          else
+            DEPLOY_URL=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+            TARGET="staging"
+          fi
+
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Vercel deployment"
+            echo ""
+            echo "- Target: $TARGET"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- URL: $DEPLOY_URL"
+          } >> "$GITHUB_STEP_SUMMARY"

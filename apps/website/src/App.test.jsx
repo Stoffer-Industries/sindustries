@@ -13,8 +13,9 @@ describe('website app', () => {
     render(<App />);
 
     expect(screen.getAllByRole('link', { name: /signals/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: /compounding value over time\./i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /bounded bets/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /compounding value over time/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /proof before scale/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /systems, explorations and output signals/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^about$/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /email tom/i })).toBeInTheDocument();
   });

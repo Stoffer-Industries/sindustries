@@ -23,7 +23,7 @@ const STORIES = [
   },
   {
     title: 'Building in public before the business is obvious',
-    summary: 'Notes on SIndustries as a company-of-one experiment: systems first, proof of movement, and public signal before the model fully resolves.',
+    summary: 'Notes on SIndustries as a company-of-one exploration: systems first, proof of movement, and public signal before the model fully resolves.',
     url: 'https://x.com/stoff81/status/2043866685258809478'
   }
 ];
@@ -37,7 +37,7 @@ const STUDIO = [
   },
   {
     name: 'Social content',
-    tag: 'Channel experiment',
+    tag: 'Channel exploration',
     image: '/brand/studio/social-content-hero.png',
     body: 'Short-form public signal to build distribution, sharpen narrative, and learn what people respond to.'
   },
@@ -96,9 +96,9 @@ const SYSTEMS = [
 ];
 
 const SIGNALS = [
-  { label: 'active experiments', value: STUDIO.length, href: '#studio' },
-  { label: 'release to the world', value: SYSTEMS.length, href: '#systems' },
-  { label: 'ships delivered', value: SHIPS.length, href: '#ships' },
+  { label: 'active explorations', value: STUDIO.length, href: '#studio' },
+  { label: 'systems at work', value: SYSTEMS.length, href: '#systems' },
+  { label: 'released to the world', value: SHIPS.length, href: '#ships' },
   { label: 'builder logs', value: STORIES.length, href: '#stories' }
 ];
 
@@ -493,7 +493,7 @@ function AboutPage() {
             Tom Stoffer is a senior engineering leader based in Auckland, New Zealand. He has built software across games, DJ technology, surgical training, embedded platforms, web services, and agent systems.
           </p>
           <p>
-            After years leading teams and shipping other people’s roadmaps, SIndustries is the vehicle for building his own IP in public: practical products, automation loops, AI-native workflows, and small experiments that can compound into a company of one.
+            After years leading teams and shipping other people’s roadmaps, SIndustries is the vehicle for building his own IP in public: practical products, automation loops, AI-native workflows, and small explorations that can compound into a company of one.
           </p>
         </section>
 
@@ -583,7 +583,7 @@ export function App() {
             <div className="hero-copy">
               <h1>Stay relevant in an ever-changing world</h1>
               <p className="lede">
-                SINDUSTRIES is an AI-native builder/operator company: systems that compound, experiments that test reality, and signals that prove momentum.
+                SINDUSTRIES is an AI-native builder/operator company: systems that compound, explorations that test reality, and signals that prove momentum.
               </p>
               <div className="hero-actions">
                 <a className="btn primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow Tom on X</a>
@@ -593,7 +593,7 @@ export function App() {
           </div>
         </section>
 
-        <Section name="Signals" eyebrow="PROOF OF MOVEMENT" title="Systems, experiments and output signals" headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
+        <Section name="Signals" eyebrow="PROOF OF MOVEMENT" title="Systems, explorations and output signals" headingTarget={pageHeadingTargets.Signals} pageHeadingOpacity={pageHeadingOpacities.Signals}>
           <div className="signals-grid">
             <div className="signals-board">
               <ScaleToFitWidth>
@@ -656,13 +656,13 @@ export function App() {
         </Section>
 
         <Section name="Studio" headingTarget={pageHeadingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
-          <StickyCardStack items={STUDIO} eyebrow="Experiments" title="Proof before scale"/>
+          <StickyCardStack items={STUDIO} eyebrow="Explorations" title="Proof before scale"/>
         </Section>
 
         <Section name="Summon" eyebrow="Open Line" title="Follow the signal" headingTarget={pageHeadingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>
           <div className="summon-grid">
             <p className="lede">
-              If you are building, backing, or reshaping how organisations work, the line is open. Follow the systems, watch the experiments, or start a conversation.
+              If you are building, backing, or reshaping how organisations work, the line is open. Follow the systems, watch the explorations, or start a conversation.
             </p>
             <div className="summon-actions">
               <a className="btn primary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</a>
