@@ -19,6 +19,7 @@ permissions:
 env:
   NODE_VERSION: '22'
   STAGING_DOMAIN: staging.sindustries.co.nz
+  PRODUCTION_DOMAIN: www.sindustries.co.nz
 
 jobs:
   deploy:
@@ -76,6 +77,7 @@ jobs:
         run: |
           if [ "${GITHUB_REF_NAME}" = "main" ]; then
             DEPLOY_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+            vercel alias set "$DEPLOY_URL" "$PRODUCTION_DOMAIN" --token="$VERCEL_TOKEN"
             TARGET="production"
           else
             DEPLOY_URL=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
@@ -94,6 +96,9 @@ jobs:
             echo "- Target: $TARGET"
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- URL: $DEPLOY_URL"
+            if [ "$TARGET" = "production" ]; then
+              echo "- Production URL: https://$PRODUCTION_DOMAIN"
+            fi
             if [ "$TARGET" = "staging" ]; then
               echo "- Stable staging URL: https://$STAGING_DOMAIN"
               echo "- Staging alias: $STAGING_ALIAS_STATUS"
