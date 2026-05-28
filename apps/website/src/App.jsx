@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { DetailSheet } from './components/DetailSheet.jsx';
 import { StickyCardStack } from './components/StickyCardStack.jsx';
 import {
   experimentsContent,
@@ -19,13 +20,9 @@ const CONTACT_EMAIL = 'hello@sindustries.co.nz';
 
 const published = (item) => item.visibility === 'published';
 
-const SHIPS = releasesContent.filter(published).map((release) => release.title);
+const SHIPS = releasesContent.filter(published);
 
-const STORIES = storiesContent.filter(published).map((story) => ({
-  title: story.title,
-  summary: story.dek,
-  url: story.canonicalUrl
-}));
+const STORIES = storiesContent.filter(published);
 
 const STUDIO = experimentsContent.filter(published).map((experiment) => ({
   name: experiment.title,
@@ -469,6 +466,9 @@ export function App() {
   const tabsRef = useRef(null);
   const [navHeadingTargets, setNavHeadingTargets] = useState({});
   const [pageHeadingTargets, setPageHeadingTargets] = useState({});
+  const [selectedDetail, setSelectedDetail] = useState(null);
+
+  const closeDetail = useCallback(() => setSelectedDetail(null), []);
 
   useLayoutEffect(() => {
     const measureHeadingTargets = () => {
@@ -578,10 +578,16 @@ export function App() {
         <Section name="Ships" eyebrow="Released to the world" title="Outputs that have left the dock" headingTarget={pageHeadingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
           <div className="ships-list">
             {SHIPS.map((ship, index) => (
-              <article className="ship-row" key={ship}>
+              <button
+                className="ship-row"
+                type="button"
+                key={ship.slug}
+                onClick={() => setSelectedDetail({ type: 'release', item: ship })}
+                aria-label={`Open release detail for ${ship.title}`}
+              >
                 <span>{String(index + 1).padStart(2, '0')}</span>
-                <p>{ship}</p>
-              </article>
+                <p>{ship.title}</p>
+              </button>
             ))}
           </div>
         </Section>
@@ -589,14 +595,18 @@ export function App() {
         <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={pageHeadingTargets.Stories} pageHeadingOpacity={pageHeadingOpacities.Stories}>
           <div className="stories-grid">
             {STORIES.map((story) => (
-              <article className="story-card" key={story.title}>
+              <button
+                className="story-card"
+                type="button"
+                key={story.slug}
+                onClick={() => setSelectedDetail({ type: 'story', item: story })}
+                aria-label={`Open story detail for ${story.title}`}
+              >
                 <p className="story-source">From X</p>
                 <h3>{story.title}</h3>
-                <p>{story.summary}</p>
-                <a className="story-link" href={story.url} target="_blank" rel="noreferrer">
-                  Read on X →
-                </a>
-              </article>
+                <p>{story.dek}</p>
+                <span className="story-link">Read detail</span>
+              </button>
             ))}
           </div>
         </Section>
@@ -620,6 +630,11 @@ export function App() {
 
       </main>
     </div>
+    <DetailSheet
+      type={selectedDetail?.type}
+      item={selectedDetail?.item}
+      onClose={closeDetail}
+    />
     <SiteFooter />
     </>
   );
