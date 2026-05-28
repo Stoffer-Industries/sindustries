@@ -1,0 +1,22 @@
+[
+  {
+    "title": "SIndustries v1 site",
+    "slug": "sindustries-v1-site",
+    "releasedAt": "2026-05-28",
+    "summary": "The first public SIndustries website shipped with sections for signals, systems, stacks, ships, stories, studio work, and contact.",
+    "type": "content",
+    "links": [],
+    "evidence": "Live website refresh completed before the content-ops migration.",
+    "visibility": "published"
+  },
+  {
+    "title": "Bookmark archiver skill",
+    "slug": "bookmark-archiver-skill",
+    "releasedAt": "2026-05-28",
+    "summary": "A workflow skill for turning saved signals into a more durable review and action pipeline.",
+    "type": "system",
+    "links": [],
+    "evidence": "Public homepage ships this as an existing release signal.",
+    "visibility": "published"
+  }
+]

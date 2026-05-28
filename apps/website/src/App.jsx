@@ -1,5 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { StickyCardStack } from './components/StickyCardStack.jsx';
+import {
+  experimentsContent,
+  releasesContent,
+  stacksContent,
+  storiesContent,
+  systemsContent
+} from './content/index.js';
 
 const SECTIONS = ['SIN', 'Signals', 'Systems', 'Stacks', 'Ships', 'Stories', 'Studio', 'Summon'];
 
@@ -10,90 +17,29 @@ const SOCIAL_LINKS = {
 
 const CONTACT_EMAIL = 'hello@sindustries.co.nz';
 
-const SHIPS = [
-  'SIndustries v1 site',
-  'Bookmark archiver skill'
-];
+const published = (item) => item.visibility === 'published';
 
-const STORIES = [
-  {
-    title: 'Turning an assistant into a chief of staff',
-    summary: 'A founder note on building Quinn/OpenClaw into an operating layer for delegation, memory, workflows, and leverage.',
-    url: 'https://x.com/stoff81/status/2055944314128314490'
-  },
-  {
-    title: 'Building in public before the business is obvious',
-    summary: 'Notes on SIndustries as a company-of-one exploration: systems first, proof of movement, and public signal before the model fully resolves.',
-    url: 'https://x.com/stoff81/status/2043866685258809478'
-  }
-];
+const SHIPS = releasesContent.filter(published).map((release) => release.title);
 
-const STUDIO = [
-  {
-    name: 'Drop 1',
-    tag: 'Commerce test',
-    image: '/brand/studio/drop-1-hero.png',
-    body: 'A small, real-world product drop to test demand, sourcing, positioning, and fulfilment without overbuilding.'
-  },
-  {
-    name: 'Social content',
-    tag: 'Channel exploration',
-    image: '/brand/studio/social-content-hero.png',
-    body: 'Short-form public signal to build distribution, sharpen narrative, and learn what people respond to.'
-  },
-  {
-    name: 'Product Market Scans',
-    tag: 'Opportunity radar',
-    image: '/brand/studio/product-market-scans-hero.png',
-    body: 'Recurring scans for gaps, pricing windows, underserved niches, and first-drop candidates.'
-  },
-  {
-    name: 'Plano model routing',
-    tag: 'Agent ops',
-    image: '/brand/studio/plano-model-routing-hero.png',
-    body: 'Local model routing for cheaper, faster, more autonomous agent work across routine operations.'
-  },
-  {
-    name: 'NZ Personal Banking App',
-    tag: 'Product concept',
-    image: '/brand/studio/nz-personal-banking-hero.png',
-    body: 'A visibility layer for household spending, budget drift, and real-time financial control.'
-  },
-  {
-    name: 'Roadmapping Scenarios App',
-    tag: 'Planning tool',
-    image: '/brand/studio/roadmapping-scenarios-hero.png',
-    body: 'A scenario-driven planning surface for comparing paths, trade-offs, and sequencing decisions.'
-  }
-];
+const STORIES = storiesContent.filter(published).map((story) => ({
+  title: story.title,
+  summary: story.dek,
+  url: story.canonicalUrl
+}));
 
+const STUDIO = experimentsContent.filter(published).map((experiment) => ({
+  name: experiment.title,
+  tag: experiment.tag,
+  image: experiment.image,
+  body: experiment.summary
+}));
 
-const SYSTEMS = [
-  {
-    name: 'OpenClaw',
-    tag: 'Agent runtime',
-    image: '/brand/systems/openclaw-lobster.jpg',
-    body: 'The operating layer for agents, memory, tools, messaging, and human-in-the-loop work.'
-  },
-  {
-    name: 'X bookmark reviews',
-    tag: 'Signal pipeline',
-    image: '/brand/systems/bookmark-bunker-manual.jpg',
-    body: 'A pipeline for turning saved signals into reviews, specs, tasks, and decisions.'
-  },
-  {
-    name: 'Tasks API',
-    tag: 'Workflow engine',
-    image: '/brand/systems/tasks-api-hero.png',
-    body: 'Task state, ownership, comments, reviews, and heartbeat-driven operating discipline.'
-  },
-  {
-    name: 'Design System',
-    tag: 'Brand operating layer',
-    image: '/brand/systems/design-system-hero.png',
-    body: 'Reusable visual language, components, and constraints for SIndustries products.'
-  }
-];
+const SYSTEMS = systemsContent.filter(published).map((system) => ({
+  name: system.title,
+  tag: system.tag,
+  image: system.image,
+  body: system.summary
+}));
 
 const SIGNALS = [
   { label: 'active explorations', value: STUDIO.length, href: '#studio' },
@@ -102,7 +48,7 @@ const SIGNALS = [
   { label: 'builder logs', value: STORIES.length, href: '#stories' }
 ];
 
-const STACKS = ['OpenClaw', 'Plano', 'Local models', 'Codex', 'MiniMax', 'Telegram', 'Tasks API', 'Vite', 'React'];
+const STACKS = stacksContent.filter(published).map((stack) => stack.name);
 
 const HEADER_TAB_TRIGGER_OFFSET_PX = 56;
 const HEADER_TAB_TRANSITION_PX = 24;
