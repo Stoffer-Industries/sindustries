@@ -28,6 +28,15 @@ export function normalizeComments(comments) {
 }
 
 /**
+ * Normalize history to array format
+ * @param {unknown} history
+ * @returns {Array<{id?: string|number, field: string, oldValue?: string|null, newValue?: string|null, actor: string, createdAt?: string}>}
+ */
+export function normalizeHistory(history) {
+  return Array.isArray(history) ? history : [];
+}
+
+/**
  * Format comment timestamp for display
  * @param {string|number|Date|null|undefined} value
  * @returns {string}
@@ -38,6 +47,8 @@ export function formatCommentTimestamp(value) {
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString();
 }
+
+export const formatHistoryTimestamp = formatCommentTimestamp;
 
 /**
  * Normalize task data for the editor form

@@ -156,7 +156,8 @@ describe('TaskEditor', () => {
 
   it('shows comments section', () => {
     render(<TaskEditor {...defaultProps} />);
-    expect(screen.getByText('Comments')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Comments' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'History' })).toBeInTheDocument();
   });
 
   it('shows no comments message when empty', () => {
@@ -179,6 +180,56 @@ describe('TaskEditor', () => {
 
     expect(screen.getByText('John')).toBeInTheDocument();
     expect(screen.getByText('Great work!')).toBeInTheDocument();
+  });
+
+  it('shows empty history state when no history exists', () => {
+    render(<TaskEditor {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }));
+
+    expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
+    expect(screen.getByText('No history yet')).toBeInTheDocument();
+    expect(screen.getByText('State changes will appear here after status, blocked, or ready changes.')).toBeInTheDocument();
+  });
+
+  it('displays history entries newest first', () => {
+    const propsWithHistory = {
+      ...defaultProps,
+      task: {
+        id: 1,
+        title: 'Test Task',
+        comments: [],
+        history: [
+          {
+            id: 'old',
+            field: 'ready',
+            oldValue: 'false',
+            newValue: 'true',
+            actor: 'tasks-api',
+            createdAt: '2024-01-15T10:00:00Z'
+          },
+          {
+            id: 'new',
+            field: 'status',
+            oldValue: 'ready',
+            newValue: 'doing',
+            actor: 'Rowan',
+            createdAt: '2024-01-15T11:00:00Z'
+          }
+        ]
+      }
+    };
+    render(<TaskEditor {...propsWithHistory} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'History' }));
+
+    const historyItems = screen.getAllByRole('listitem');
+    expect(historyItems[0]).toHaveTextContent('status');
+    expect(historyItems[0]).toHaveTextContent('ready -> doing');
+    expect(historyItems[0]).toHaveTextContent('Rowan');
+    expect(historyItems[1]).toHaveTextContent('ready');
+    expect(historyItems[1]).toHaveTextContent('off -> on');
+    expect(historyItems[1]).toHaveTextContent('tasks-api');
   });
 
   it('renders markdown in comments', () => {

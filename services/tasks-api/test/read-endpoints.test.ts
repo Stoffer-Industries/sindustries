@@ -11,6 +11,10 @@ const prismaMock = {
   taskComment: {
     create: vi.fn()
   },
+  taskHistory: {
+    createMany: vi.fn(),
+    findMany: vi.fn()
+  },
   taskTag: {
     deleteMany: vi.fn(),
     createMany: vi.fn()
@@ -123,6 +127,16 @@ describe('tasks api endpoints', () => {
             createdAt: new Date('2026-03-12T00:00:00.000Z'),
             updatedAt: new Date('2026-03-12T00:00:00.000Z')
           }
+        ],
+        history: [
+          {
+            id: 'history-1',
+            field: 'status',
+            oldValue: 'ready',
+            newValue: 'doing',
+            actor: 'Rowan',
+            createdAt: new Date('2026-03-13T00:00:00.000Z')
+          }
         ]
       })
     );
@@ -146,11 +160,24 @@ describe('tasks api endpoints', () => {
         author: 'Tom',
         text: 'Second note',
         createdAt: '2026-03-12T00:00:00.000Z',
-        updatedAt: '2026-03-12T00:00:00.000Z'
+          updatedAt: '2026-03-12T00:00:00.000Z'
+        }
+      ]);
+    expect(response.body.data.history).toEqual([
+      {
+        id: 'history-1',
+        field: 'status',
+        oldValue: 'ready',
+        newValue: 'doing',
+        actor: 'Rowan',
+        createdAt: '2026-03-13T00:00:00.000Z'
       }
     ]);
     expect(prismaMock.task.findFirst.mock.calls.at(-1)?.[0]?.include?.comments).toEqual({
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+    });
+    expect(prismaMock.task.findFirst.mock.calls.at(-1)?.[0]?.include?.history).toEqual({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
     });
   });
 
@@ -235,21 +262,97 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.create).toHaveBeenCalledTimes(1);
   });
 
-  it('PATCH /api/v1/tasks/:id updates task fields', async () => {
+  it('PATCH /api/v1/tasks/:id updates task fields and records state history', async () => {
     prismaMock.task.findFirst
-      .mockResolvedValueOnce(task())
-      .mockResolvedValueOnce(task({ title: 'Updated title', status: 'doing' }));
+      .mockResolvedValueOnce(task({ status: 'ready', blocked: false, ready: true }))
+      .mockResolvedValueOnce(task({ title: 'Updated title', status: 'doing', blocked: true, ready: false, history: [] }));
     prismaMock.task.update.mockResolvedValue(task({ title: 'Updated title', status: 'doing' }));
+    prismaMock.taskHistory.createMany.mockResolvedValue({ count: 3 });
 
     const app = createApp();
     const response = await request(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ title: 'Updated title', status: 'doing' });
+      .set('x-task-actor', 'Rowan')
+      .send({ title: 'Updated title', status: 'doing', blocked: true, ready: false });
 
     expect(response.status).toBe(200);
     expect(response.body.data.title).toBe('Updated title');
     expect(response.body.data.status).toBe('doing');
     expect(prismaMock.task.update).toHaveBeenCalledTimes(1);
+    expect(prismaMock.taskHistory.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          taskId: '11111111-1111-1111-1111-111111111111',
+          field: 'status',
+          oldValue: 'ready',
+          newValue: 'doing',
+          actor: 'Rowan'
+        },
+        {
+          taskId: '11111111-1111-1111-1111-111111111111',
+          field: 'blocked',
+          oldValue: 'false',
+          newValue: 'true',
+          actor: 'Rowan'
+        },
+        {
+          taskId: '11111111-1111-1111-1111-111111111111',
+          field: 'ready',
+          oldValue: 'true',
+          newValue: 'false',
+          actor: 'Rowan'
+        }
+      ]
+    });
+  });
+
+  it('PATCH /api/v1/tasks/:id skips history when watched values do not change', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task({ status: 'ready', blocked: false, ready: true }))
+      .mockResolvedValueOnce(task({ status: 'ready', blocked: false, ready: true, history: [] }));
+    prismaMock.task.update.mockResolvedValue(task({ status: 'ready', blocked: false, ready: true }));
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .send({ status: 'ready', blocked: false, ready: true });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskHistory.createMany).not.toHaveBeenCalled();
+  });
+
+  it('GET /api/v1/tasks/:id/history returns newest-first history', async () => {
+    prismaMock.task.findFirst.mockResolvedValueOnce(task());
+    prismaMock.taskHistory.findMany.mockResolvedValue([
+      {
+        id: 'history-2',
+        taskId: '11111111-1111-1111-1111-111111111111',
+        field: 'blocked',
+        oldValue: 'false',
+        newValue: 'true',
+        actor: 'tasks-api',
+        createdAt: new Date('2026-03-14T00:00:00.000Z')
+      }
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/v1/tasks/11111111-1111-1111-1111-111111111111/history');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      {
+        id: 'history-2',
+        field: 'blocked',
+        oldValue: 'false',
+        newValue: 'true',
+        actor: 'tasks-api',
+        createdAt: '2026-03-14T00:00:00.000Z'
+      }
+    ]);
+    expect(prismaMock.taskHistory.findMany).toHaveBeenCalledWith({
+      where: { taskId: '11111111-1111-1111-1111-111111111111' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+    });
   });
 
   it('DELETE /api/v1/tasks/:id archives task', async () => {

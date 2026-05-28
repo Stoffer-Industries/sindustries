@@ -61,6 +61,17 @@ function mapComment(comment) {
   };
 }
 
+function mapHistoryEntry(entry) {
+  return {
+    id: entry.id,
+    field: entry.field,
+    oldValue: entry.oldValue,
+    newValue: entry.newValue,
+    actor: entry.actor,
+    createdAt: entry.createdAt
+  };
+}
+
 function mapTask(task) {
   return {
     id: task.id,
@@ -86,7 +97,8 @@ function mapTask(task) {
     quinnApprovalPr: task.quinnApprovalPr ?? null,
     approvalOwners: task.approvalOwners ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
-    comments: task.comments?.map(mapComment) ?? []
+    comments: task.comments?.map(mapComment) ?? [],
+    history: task.history?.map(mapHistoryEntry) ?? []
   };
 }
 
@@ -120,6 +132,29 @@ async function connectTags(tagNames) {
       })
     )
   );
+}
+
+function normalizeHistoryValue(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
+}
+
+function buildHistoryEntry(taskId, field, oldValue, newValue, actor) {
+  return {
+    taskId,
+    field,
+    oldValue: normalizeHistoryValue(oldValue),
+    newValue: normalizeHistoryValue(newValue),
+    actor
+  };
+}
+
+function actorFromRequest(req) {
+  return normalizeString(req.body?.actor)
+    || normalizeString(req.get('x-task-actor'))
+    || normalizeString(req.get('x-actor'))
+    || 'tasks-api';
 }
 
 export const tasksRouter = Router();
@@ -311,6 +346,9 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
         },
         comments: {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+        },
+        history: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
         }
       }
     });
@@ -402,6 +440,8 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
     const updates = {};
+    const historyEntries = [];
+    const actor = actorFromRequest(req);
     const title = normalizeString(req.body?.title);
     const description = req.body?.description === undefined ? undefined : normalizeString(req.body.description);
     const assignee = req.body?.assignee === undefined ? undefined : normalizeString(req.body.assignee);
@@ -433,6 +473,9 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.status = req.body.status;
       updates.statusChangedAt = new Date();
       updates.completedAt = req.body.status === 'done' ? new Date() : null;
+      if (existing.status !== req.body.status) {
+        historyEntries.push(buildHistoryEntry(id, 'status', existing.status, req.body.status, actor));
+      }
     }
 
     if (req.body?.dueAt !== undefined) {
@@ -447,10 +490,16 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
     if (req.body?.blocked !== undefined) {
       updates.blocked = Boolean(req.body.blocked);
+      if (Boolean(existing.blocked) !== updates.blocked) {
+        historyEntries.push(buildHistoryEntry(id, 'blocked', existing.blocked, updates.blocked, actor));
+      }
     }
 
     if (req.body?.ready !== undefined) {
       updates.ready = Boolean(req.body.ready);
+      if (Boolean(existing.ready) !== updates.ready) {
+        historyEntries.push(buildHistoryEntry(id, 'ready', existing.ready, updates.ready, actor));
+      }
     }
 
     // Content ops fields
@@ -492,6 +541,10 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       }
     });
 
+    if (historyEntries.length > 0) {
+      await prisma.taskHistory.createMany({ data: historyEntries });
+    }
+
     if (req.body?.tags !== undefined) {
       const tags = normalizeTags(req.body.tags);
       if (!tags) return badRequest(res, 'INVALID_TAGS', 'tags must be an array of strings');
@@ -507,10 +560,30 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
     const task = await prisma.task.findFirst({
       where: { id },
-      include: { tags: { include: { tag: true } } }
+      include: {
+        tags: { include: { tag: true } },
+        history: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }
+      }
     });
 
     return res.status(200).json({ data: mapTask(task ?? updated) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+tasksRouter.get('/tasks/:id/history', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
+    if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
+
+    const history = await prisma.taskHistory.findMany({
+      where: { taskId: id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+    });
+
+    return res.status(200).json({ data: history.map(mapHistoryEntry) });
   } catch (error) {
     return next(error);
   }

@@ -16,6 +16,15 @@ export interface Comment {
   createdAt?: string;
 }
 
+export interface TaskHistoryEntry {
+  id?: string | number;
+  field: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  actor: string;
+  createdAt?: string;
+}
+
 export interface Task {
   id: string | number;
   title: string;
@@ -30,6 +39,7 @@ export interface Task {
   createdAt?: string | null;
   statusChangedAt?: string | null;
   comments?: Comment[];
+  history?: TaskHistoryEntry[];
 }
 
 export interface CreateTaskPayload {
@@ -52,6 +62,8 @@ export interface UpdateTaskPayload {
   dueAt?: string | null;
   tags?: string[];
   blocked?: boolean;
+  ready?: boolean;
+  actor?: string;
   // Note: 'ready' field removed — use status field instead
 }
 

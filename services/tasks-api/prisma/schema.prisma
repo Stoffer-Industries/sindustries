@@ -49,10 +49,25 @@ model Task {
 
   tags            TaskTag[]
   comments        TaskComment[]
+  history         TaskHistory[]
 
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
   @@index([dueAt])
+}
+
+model TaskHistory {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  field     String
+  oldValue  String?
+  newValue  String?
+  actor     String
+  createdAt DateTime @default(now())
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
 }
 
 model TaskComment {

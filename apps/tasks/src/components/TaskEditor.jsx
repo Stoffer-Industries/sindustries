@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS } from '../utils/constants.js';
-import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
+import { normalizeComments, normalizeHistory, formatCommentTimestamp, formatHistoryTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
 
 /**
@@ -29,6 +29,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
   const [commentDraft, setCommentDraft] = useState({ author: '', text: '' });
   const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [isDescriptionEditing, setIsDescriptionEditing] = useState(false);
+  const [activeTab, setActiveTab] = useState('comments');
 
   useEffect(() => {
     const textarea = descriptionRef.current;
@@ -72,7 +73,8 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
         .map((tag) => tag.trim())
         .filter(Boolean),
       blocked: draft.blocked,
-      ready: draft.ready
+      ready: draft.ready,
+      actor: 'tasks-ui'
     };
   }
 
@@ -141,6 +143,19 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
     if (timeDiff !== 0) return timeDiff;
     return String(b.id ?? '').localeCompare(String(a.id ?? ''));
   });
+
+  const history = [...normalizeHistory(task.history)].sort((a, b) => {
+    const timeDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return String(b.id ?? '').localeCompare(String(a.id ?? ''));
+  });
+
+  function formatHistoryValue(value) {
+    if (value === null || value === undefined || value === '') return 'empty';
+    if (value === 'true') return 'on';
+    if (value === 'false') return 'off';
+    return String(value);
+  }
 
   return (
     <div className="editor" onClick={(e) => e.stopPropagation()}>
@@ -283,73 +298,131 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
         </div>
 
         <div className="comments-section">
-          <div className="comments-header">
-            <h4 className="font-display">Comments</h4>
-            <div className="comments-header-actions">
-              <span className="small comments-count">{comments.length === 0 ? 'No comments yet' : `${comments.length} comment${comments.length === 1 ? '' : 's'}`}</span>
-              <button
-                className={`${isCommentComposerOpen ? 'tertiary-btn' : 'primary-btn font-display'}`}
-                type="button"
-                aria-expanded={isCommentComposerOpen}
-                aria-controls="task-comment-composer"
-                onClick={() => setIsCommentComposerOpen((current) => !current)}
-              >
-                {isCommentComposerOpen ? 'Close' : 'Comment'}
-              </button>
-            </div>
+          <div className="task-tabs" role="tablist" aria-label="Task activity">
+            <button
+              id="task-comments-tab"
+              type="button"
+              className={`task-tab ${activeTab === 'comments' ? 'active' : ''}`}
+              role="tab"
+              aria-selected={activeTab === 'comments'}
+              aria-controls="task-comments-panel"
+              onClick={() => setActiveTab('comments')}
+            >
+              Comments
+            </button>
+            <button
+              id="task-history-tab"
+              type="button"
+              className={`task-tab ${activeTab === 'history' ? 'active' : ''}`}
+              role="tab"
+              aria-selected={activeTab === 'history'}
+              aria-controls="task-history-panel"
+              onClick={() => setActiveTab('history')}
+            >
+              History
+            </button>
           </div>
 
-          {isCommentComposerOpen ? (
-            <div id="task-comment-composer" className="comment-composer">
-              <label>
-                <span className="small">Comment author</span>
-                <input
-                  className="edit-control"
-                  aria-label="Comment author"
-                  value={commentDraft.author}
-                  onChange={(e) => setCommentDraft((current) => ({ ...current, author: e.target.value }))}
-                  onMouseDown={stopPropagation}
-                  onTouchStart={stopPropagation}
-                />
-              </label>
-              <label>
-                <span className="small">Comment</span>
-                <textarea
-                  className="edit-control"
-                  aria-label="Comment text"
-                  value={commentDraft.text}
-                  rows={3}
-                  onChange={(e) => setCommentDraft((current) => ({ ...current, text: e.target.value }))}
-                  onMouseDown={stopPropagation}
-                  onTouchStart={stopPropagation}
-                />
-              </label>
-              <div className="actions">
-                <button
-                  className="primary-btn font-display"
-                  type="button"
-                  onClick={() => void handleAddComment()}
-                  disabled={isSubmittingComment || !commentDraft.author.trim() || !commentDraft.text.trim()}
-                >
-                  {isSubmittingComment ? 'Adding…' : 'Add comment'}
-                </button>
+          {activeTab === 'comments' ? (
+            <div id="task-comments-panel" role="tabpanel" aria-labelledby="task-comments-tab">
+              <div className="comments-header">
+                <h4 className="font-display">Comments</h4>
+                <div className="comments-header-actions">
+                  <span className="small comments-count">{comments.length === 0 ? 'No comments yet' : `${comments.length} comment${comments.length === 1 ? '' : 's'}`}</span>
+                  <button
+                    className={`${isCommentComposerOpen ? 'tertiary-btn' : 'primary-btn font-display'}`}
+                    type="button"
+                    aria-expanded={isCommentComposerOpen}
+                    aria-controls="task-comment-composer"
+                    onClick={() => setIsCommentComposerOpen((current) => !current)}
+                  >
+                    {isCommentComposerOpen ? 'Close' : 'Comment'}
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : null}
 
-          {comments.length > 0 ? (
-            <ol className="comments-list" aria-label="Task comments">
-              {comments.map((comment) => (
-                <li key={comment.id} className="comment-card">
-                  <div className="comment-meta">
-                    <strong>{comment.author}</strong>
-                    <time className="small" dateTime={comment.createdAt}>{formatCommentTimestamp(comment.createdAt)}</time>
+              {isCommentComposerOpen ? (
+                <div id="task-comment-composer" className="comment-composer">
+                  <label>
+                    <span className="small">Comment author</span>
+                    <input
+                      className="edit-control"
+                      aria-label="Comment author"
+                      value={commentDraft.author}
+                      onChange={(e) => setCommentDraft((current) => ({ ...current, author: e.target.value }))}
+                      onMouseDown={stopPropagation}
+                      onTouchStart={stopPropagation}
+                    />
+                  </label>
+                  <label>
+                    <span className="small">Comment</span>
+                    <textarea
+                      className="edit-control"
+                      aria-label="Comment text"
+                      value={commentDraft.text}
+                      rows={3}
+                      onChange={(e) => setCommentDraft((current) => ({ ...current, text: e.target.value }))}
+                      onMouseDown={stopPropagation}
+                      onTouchStart={stopPropagation}
+                    />
+                  </label>
+                  <div className="actions">
+                    <button
+                      className="primary-btn font-display"
+                      type="button"
+                      onClick={() => void handleAddComment()}
+                      disabled={isSubmittingComment || !commentDraft.author.trim() || !commentDraft.text.trim()}
+                    >
+                      {isSubmittingComment ? 'Adding…' : 'Add comment'}
+                    </button>
                   </div>
-                  <MarkdownContent markdown={comment.text} className="comment-body" />
-                </li>
-              ))}
-            </ol>
-          ) : null}
+                </div>
+              ) : null}
+
+              {comments.length > 0 ? (
+                <ol className="comments-list" aria-label="Task comments">
+                  {comments.map((comment) => (
+                    <li key={comment.id} className="comment-card">
+                      <div className="comment-meta">
+                        <strong>{comment.author}</strong>
+                        <time className="small" dateTime={comment.createdAt}>{formatCommentTimestamp(comment.createdAt)}</time>
+                      </div>
+                      <MarkdownContent markdown={comment.text} className="comment-body" />
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+            </div>
+          ) : (
+            <div id="task-history-panel" role="tabpanel" aria-labelledby="task-history-tab">
+              <div className="comments-header">
+                <h4 className="font-display">History</h4>
+                <span className="small comments-count">{history.length === 0 ? 'No history yet' : `${history.length} change${history.length === 1 ? '' : 's'}`}</span>
+              </div>
+
+              {history.length > 0 ? (
+                <ol className="history-list" aria-label="Task history">
+                  {history.map((entry) => (
+                    <li key={entry.id} className="history-card">
+                      <div className="history-dot" aria-hidden="true" />
+                      <div className="history-content">
+                        <div className="history-main">
+                          <strong>{entry.field}</strong>
+                          <span>{formatHistoryValue(entry.oldValue)} -&gt; {formatHistoryValue(entry.newValue)}</span>
+                        </div>
+                        <div className="comment-meta">
+                          <strong>{entry.actor}</strong>
+                          <time className="small" dateTime={entry.createdAt}>{formatHistoryTimestamp(entry.createdAt)}</time>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="comments-empty">State changes will appear here after status, blocked, or ready changes.</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
