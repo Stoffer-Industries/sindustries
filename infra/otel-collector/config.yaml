@@ -6,7 +6,7 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-# Derive Prometheus RED-style metrics from traces (used by Grafana dashboard plano-requests-overview).
+# Derive Prometheus RED-style metrics from traces (used by Grafana dashboard requests-overview).
 connectors:
   spanmetrics:
     dimensions:
