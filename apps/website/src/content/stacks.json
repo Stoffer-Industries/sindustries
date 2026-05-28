@@ -1,0 +1,92 @@
+[
+  {
+    "name": "OpenClaw",
+    "category": "agent",
+    "summary": "Agent runtime and operating layer for SIndustries workflows.",
+    "whyWeUseIt": "It gives agents memory, tools, messaging, and human-in-the-loop boundaries.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "Plano",
+    "category": "model",
+    "summary": "Model routing infrastructure for local and hosted model workflows.",
+    "whyWeUseIt": "It lets routine work use cheaper, faster routes while preserving stronger models for harder calls.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "Local models",
+    "category": "model",
+    "summary": "Locally hosted model capacity for recurring automation work.",
+    "whyWeUseIt": "Local routes can reduce cost, latency, and dependency on external capacity for suitable tasks.",
+    "status": "testing",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "Codex",
+    "category": "agent",
+    "summary": "Coding agent surface for implementing and reviewing software changes.",
+    "whyWeUseIt": "It can read the repo, make scoped changes, run checks, and produce PR-ready work.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "MiniMax",
+    "category": "model",
+    "summary": "Model route used for selected agent and infrastructure workflows.",
+    "whyWeUseIt": "It provides another practical model option for routine execution and resilience.",
+    "status": "testing",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "Telegram",
+    "category": "app",
+    "summary": "Messaging channel for agent interaction and operational updates.",
+    "whyWeUseIt": "It keeps human review and task updates close to the channels already in use.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "Tasks API",
+    "category": "workflow",
+    "summary": "Task source of truth for status, ownership, comments, and review handoffs.",
+    "whyWeUseIt": "It gives agent work a shared operational backbone instead of scattered notes.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "Vite",
+    "category": "app",
+    "summary": "Frontend build tooling for the SIndustries website.",
+    "whyWeUseIt": "It keeps the website fast to develop, test, and deploy.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  },
+  {
+    "name": "React",
+    "category": "app",
+    "summary": "UI framework for the SIndustries website and app surfaces.",
+    "whyWeUseIt": "It supports component reuse and straightforward integration with structured content files.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-05-28",
+    "visibility": "published"
+  }
+]

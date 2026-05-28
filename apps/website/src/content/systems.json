@@ -1,0 +1,58 @@
+[
+  {
+    "title": "OpenClaw",
+    "slug": "openclaw",
+    "tag": "Agent runtime",
+    "status": "operating",
+    "summary": "The operating layer for agents, memory, tools, messaging, and human-in-the-loop work.",
+    "problem": "Delegated agent work needs continuity, tools, memory, and human review boundaries to become operationally useful.",
+    "howItWorks": "OpenClaw connects agents to workspace files, skills, messaging, tasks, and runtime context so work can move through explicit handoffs.",
+    "proof": "Used as the active operating layer for SIndustries agents and task execution.",
+    "updatedAt": "2026-05-28",
+    "links": [],
+    "image": "/brand/systems/openclaw-lobster.jpg",
+    "visibility": "published"
+  },
+  {
+    "title": "X bookmark reviews",
+    "slug": "x-bookmark-reviews",
+    "tag": "Signal pipeline",
+    "status": "operating",
+    "summary": "A pipeline for turning saved signals into reviews, specs, tasks, and decisions.",
+    "problem": "Useful external signals are easy to save and hard to convert into action.",
+    "howItWorks": "Bookmarks are reviewed, grouped, evaluated for usefulness, and promoted into specs or tasks when they warrant action.",
+    "proof": "The workflow already produces review state, implementation specs, and task proposals.",
+    "updatedAt": "2026-05-28",
+    "links": [],
+    "image": "/brand/systems/bookmark-bunker-manual.jpg",
+    "visibility": "published"
+  },
+  {
+    "title": "Tasks API",
+    "slug": "tasks-api",
+    "tag": "Workflow engine",
+    "status": "operating",
+    "summary": "Task state, ownership, comments, reviews, and heartbeat-driven operating discipline.",
+    "problem": "Agent work needs a shared source of truth for ownership, status, review, and handoff.",
+    "howItWorks": "The Tasks API tracks tasks, comments, tags, readiness, and status transitions for SIndustries work.",
+    "proof": "Current SIndustries implementation tasks are tracked through the API and used by agent heartbeat workflows.",
+    "updatedAt": "2026-05-28",
+    "links": [],
+    "image": "/brand/systems/tasks-api-hero.png",
+    "visibility": "published"
+  },
+  {
+    "title": "Design System",
+    "slug": "design-system",
+    "tag": "Brand operating layer",
+    "status": "building",
+    "summary": "Reusable visual language, components, and constraints for SIndustries products.",
+    "problem": "A product studio needs visual consistency without slowing down small experiments.",
+    "howItWorks": "Shared tokens, components, and design constraints keep new surfaces coherent while remaining easy to ship.",
+    "proof": "The website uses shared design tokens and reusable card-stack components.",
+    "updatedAt": "2026-05-28",
+    "links": [],
+    "image": "/brand/systems/design-system-hero.png",
+    "visibility": "published"
+  }
+]
