@@ -28,7 +28,8 @@ const STUDIO = experimentsContent.filter(published).map((experiment) => ({
   name: experiment.title,
   tag: experiment.tag,
   image: experiment.image,
-  body: experiment.summary
+  body: experiment.summary,
+  _source: experiment
 }));
 
 const SYSTEMS = systemsContent.filter(published).map((system) => ({
@@ -612,7 +613,12 @@ export function App() {
         </Section>
 
         <Section name="Studio" headingTarget={pageHeadingTargets.Studio} pageHeadingOpacity={pageHeadingOpacities.Studio}>
-          <StickyCardStack items={STUDIO} eyebrow="Explorations" title="Proof before scale"/>
+          <StickyCardStack
+            items={STUDIO}
+            eyebrow="Explorations"
+            title="Proof before scale"
+            onCardClick={(item) => setSelectedDetail({ type: 'experiment', item: item._source })}
+          />
         </Section>
 
         <Section name="Summon" eyebrow="Open Line" title="Follow the signal" headingTarget={pageHeadingTargets.Summon} pageHeadingOpacity={pageHeadingOpacities.Summon}>

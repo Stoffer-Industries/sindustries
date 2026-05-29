@@ -62,6 +62,39 @@ function ReleaseDetail({ item }) {
   );
 }
 
+function ExperimentDetail({ item }) {
+  return (
+    <>
+      <div className="detail-sheet-meta">
+        {item.status ? <span>{item.status}</span> : null}
+        {item.tag ? <span>{item.tag}</span> : null}
+      </div>
+      {item.summary ? <p className="detail-sheet-summary">{item.summary}</p> : null}
+      {item.why ? (
+        <section className="detail-sheet-section">
+          <h3>Why</h3>
+          {paragraphize(item.why).map((p) => <p key={p}>{p}</p>)}
+        </section>
+      ) : null}
+      {item.successCriteria ? (
+        <section className="detail-sheet-section">
+          <h3>Success criteria</h3>
+          {paragraphize(item.successCriteria).map((p) => <p key={p}>{p}</p>)}
+        </section>
+      ) : null}
+      {item.currentLearning?.length > 0 ? (
+        <section className="detail-sheet-section">
+          <h3>Current learning</h3>
+          {item.currentLearning.map((entry, i) => (
+            <p key={i}>{typeof entry === 'string' ? entry : entry.note ?? JSON.stringify(entry)}</p>
+          ))}
+        </section>
+      ) : null}
+      <DetailLinks links={item.links} />
+    </>
+  );
+}
+
 function StoryDetail({ item }) {
   const publishedDate = formatDate(item.publishedAt);
   const draftedDate = formatDate(item.draftedAt);
@@ -172,9 +205,9 @@ export function DetailSheet({ item, type, onClose }) {
         <button className="detail-sheet-close" type="button" aria-label="Close detail sheet" onClick={onClose}>
           ×
         </button>
-        <p className="eyebrow">{type === 'release' ? 'Release detail' : 'Story detail'}</p>
+        <p className="eyebrow">{type === 'release' ? 'Release detail' : type === 'experiment' ? 'Exploration detail' : 'Story detail'}</p>
         <h2 id={titleId}>{item.title}</h2>
-        {type === 'release' ? <ReleaseDetail item={item} /> : <StoryDetail item={item} />}
+        {type === 'release' ? <ReleaseDetail item={item} /> : type === 'experiment' ? <ExperimentDetail item={item} /> : <StoryDetail item={item} />}
       </article>
     </div>
   );
