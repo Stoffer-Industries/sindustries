@@ -74,7 +74,6 @@ function mapTask(task) {
     assignee: task.assignee,
     archivedAt: task.archivedAt,
     blocked: task.blocked ?? false,
-    ready: task.ready ?? false,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     taskType: task.taskType ?? null,
@@ -128,7 +127,6 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       dueBefore,
       dueAfter,
       blocked,
-      ready,
       includeArchived,
       limit: rawLimit,
       cursor,
@@ -213,8 +211,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
             }
           }
         : {}),
-      ...(blocked !== undefined ? { blocked: blocked === 'true' } : {}),
-      ...(ready !== undefined ? { ready: ready === 'true' } : {})
+      ...(blocked !== undefined ? { blocked: blocked === 'true' } : {})
     };
 
     const queryWhere = decodedCursor
@@ -328,7 +325,6 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     const dueAt = req.body?.dueAt ? parseDate(req.body.dueAt) : null;
     const tags = normalizeTags(req.body?.tags);
     const blocked = req.body?.blocked ?? false;
-    const ready = req.body?.ready ?? false;
     const taskType = req.body?.taskType || null;
 
     // Validation
@@ -358,7 +354,6 @@ tasksRouter.post('/tasks', async (req, res, next) => {
         statusChangedAt: now,
         completedAt: status === 'done' ? now : null,
         blocked,
-        ready,
         taskType,
         tags: {
           create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
@@ -431,10 +426,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
     if (req.body?.blocked !== undefined) {
       updates.blocked = Boolean(req.body.blocked);
-    }
-
-    if (req.body?.ready !== undefined) {
-      updates.ready = Boolean(req.body.ready);
     }
 
     if (req.body?.taskType !== undefined) {

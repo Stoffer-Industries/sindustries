@@ -112,8 +112,7 @@ describe('tasksApi', () => {
         dueAt: '2024-01-15',
         assignee: 'John',
         tags: ['tag1'],
-        blocked: true,
-        ready: true
+        blocked: true
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
@@ -126,8 +125,7 @@ describe('tasksApi', () => {
             dueAt: '2024-01-15',
             assignee: 'John',
             tags: ['tag1'],
-            blocked: true,
-            ready: true
+            blocked: true
           }))
         })
       );

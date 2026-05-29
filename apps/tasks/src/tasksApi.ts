@@ -26,6 +26,7 @@ export interface Task {
   dueAt?: string | null;
   tags?: Array<{ name: string } | string>;
   blocked?: boolean;
+  taskType?: 'content' | 'code' | 'research' | null;
   archivedAt?: string | null;
   createdAt?: string | null;
   statusChangedAt?: string | null;
@@ -40,6 +41,7 @@ export interface CreateTaskPayload {
   assignee?: string | null;
   tags?: string[];
   blocked?: boolean;
+  taskType?: 'content' | 'code' | 'research' | null;
   // Note: 'ready' field removed — use status='triage' or status='ready' instead
 }
 
@@ -52,6 +54,7 @@ export interface UpdateTaskPayload {
   dueAt?: string | null;
   tags?: string[];
   blocked?: boolean;
+  taskType?: 'content' | 'code' | 'research' | null;
   // Note: 'ready' field removed — use status field instead
 }
 

@@ -8,6 +8,10 @@ import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS }
 import { createConfettiPieces, normalizeTaskForEditor, assigneeInitial } from './utils/helpers.js';
 import { getStoredView, setStoredView } from './utils/storage.js';
 
+function isReadyTask(task) {
+  return task.status === 'ready';
+}
+
 export function App() {
   const [view, setView] = useState(getStoredView);
   const [selectedId, setSelectedId] = useState(null);
@@ -176,8 +180,8 @@ export function App() {
       columns[status].sort((a, b) => {
         const priorityDiff = (PRIORITY_SCORE[a.priority] ?? 99) - (PRIORITY_SCORE[b.priority] ?? 99);
         if (priorityDiff !== 0) return priorityDiff;
-        // Secondary sort: ready tasks first, then by date created
-        if (a.ready !== b.ready) return a.ready ? -1 : 1;
+        // Secondary sort: ready status first, then by date created
+        if (isReadyTask(a) !== isReadyTask(b)) return isReadyTask(a) ? -1 : 1;
         return new Date(a.createdAt) - new Date(b.createdAt);
       });
     }
@@ -190,7 +194,7 @@ export function App() {
     return [...filtered].sort((a, b) => {
       const priorityDiff = (PRIORITY_SCORE[a.priority] ?? 99) - (PRIORITY_SCORE[b.priority] ?? 99);
       if (priorityDiff !== 0) return priorityDiff;
-      if (a.ready !== b.ready) return a.ready ? -1 : 1;
+      if (isReadyTask(a) !== isReadyTask(b)) return isReadyTask(a) ? -1 : 1;
       return new Date(a.createdAt) - new Date(b.createdAt);
     });
   }, [tasks, filters.priority]);
@@ -725,7 +729,7 @@ export function App() {
                   <li key={task.id}>
                     <article 
                       ref={(el) => { if (el) taskCardRefs.current[String(task.id)] = el; }}
-                      className={`task-card ${task.archivedAt ? 'archived' : ''} ${task.blocked ? 'blocked' : ''} ${task.ready ? 'ready' : ''} ${isSelected ? 'is-editing' : ''} card-tilt-${index % 3}`}
+                      className={`task-card ${task.archivedAt ? 'archived' : ''} ${task.blocked ? 'blocked' : ''} ${isReadyTask(task) ? 'ready' : ''} ${isSelected ? 'is-editing' : ''} card-tilt-${index % 3}`}
                       onClick={() => {
                         if (!isSelected) openTask(task.id);
                       }}
@@ -814,7 +818,7 @@ export function App() {
                             <article
                               ref={(el) => { if (el) taskCardRefs.current[String(task.id)] = el; }}
                               data-testid={`card-${task.id}`}
-                              className={`board-card ${task.archivedAt ? 'archived' : ''} ${task.blocked ? 'blocked' : ''} ${task.ready ? 'ready' : ''} ${isSelected ? 'is-editing' : ''} card-tilt-${index % 3}`}
+                              className={`board-card ${task.archivedAt ? 'archived' : ''} ${task.blocked ? 'blocked' : ''} ${isReadyTask(task) ? 'ready' : ''} ${isSelected ? 'is-editing' : ''} card-tilt-${index % 3}`}
                               draggable={!isSelected}
                               onDragStart={(e) => {
                                 if (!isSelected) e.dataTransfer.setData('text/plain', task.id);
@@ -843,7 +847,7 @@ export function App() {
                                 {taskTags.map((tag) => <span key={tag} className="pill tag-pill">#{tag}</span>)}
                                 <div className="board-card-meta-right">
                                   {hasDraft ? <span className="pill draft-pill">Unsaved</span> : null}
-                                  {task.ready ? <span className="ready-dot" aria-label="Ready">✓</span> : null}
+                                  {isReadyTask(task) ? <span className="ready-dot" aria-label="Ready">✓</span> : null}
                                   {assigneeLetter ? <span className="avatar-dot" title={assignee} aria-label={`Assignee ${assignee}`}>{assigneeLetter}</span> : null}
                                   <span className="small">{String(task.statusChangedAt).slice(0, 10)}</span>
                                 </div>

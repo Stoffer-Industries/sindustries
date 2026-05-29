@@ -11,7 +11,6 @@ test('priority filter on Kanban board filters displayed tasks', async ({ page })
       priority: 'urgent',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -22,7 +21,6 @@ test('priority filter on Kanban board filters displayed tasks', async ({ page })
       priority: 'high',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -33,7 +31,6 @@ test('priority filter on Kanban board filters displayed tasks', async ({ page })
       priority: 'medium',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -44,7 +41,6 @@ test('priority filter on Kanban board filters displayed tasks', async ({ page })
       priority: 'low',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];
@@ -139,7 +135,6 @@ test('priority filter combines with status column visibility on Kanban board', a
       priority: 'urgent',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -150,7 +145,6 @@ test('priority filter combines with status column visibility on Kanban board', a
       priority: 'high',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -161,7 +155,6 @@ test('priority filter combines with status column visibility on Kanban board', a
       priority: 'urgent',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];
@@ -212,7 +205,6 @@ test('priority filter works on backlog view', async ({ page }) => {
       priority: 'urgent',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -223,7 +215,6 @@ test('priority filter works on backlog view', async ({ page }) => {
       priority: 'low',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];

@@ -179,6 +179,10 @@ fi
 echo "Applying Prisma migrations for MODE=$MODE..."
 ensure_tasks_api_deps
 run_prisma_migrate_with_auto_recover
+(
+  cd "$API_DIR"
+  DATABASE_URL="$DATABASE_URL" npm run prisma:generate
+)
 
 echo "Migration complete for MODE=$MODE."
 if [[ "$DB_EXISTS" == "1" ]]; then
