@@ -25,7 +25,6 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
   const dueAtRef = useRef(null);
   const tagsRef = useRef(null);
   const blockedRef = useRef(null);
-  const readyRef = useRef(null);
   const [commentDraft, setCommentDraft] = useState({ author: '', text: '' });
   const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [isDescriptionEditing, setIsDescriptionEditing] = useState(false);
@@ -71,8 +70,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean),
-      blocked: draft.blocked,
-      ready: draft.ready
+      blocked: draft.blocked
     };
   }
 
@@ -84,8 +82,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
     assigneeRef,
     dueAtRef,
     tagsRef,
-    blockedRef,
-    readyRef
+    blockedRef
   ];
 
   /**
@@ -253,17 +250,6 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
               onKeyDown={(e) => handleKeyDown(e, blockedRef)}
             />
             <span>Blocked</span>
-          </label>
-          <label className="toggle-label">
-            <input
-              ref={readyRef}
-              aria-label="Detail ready"
-              type="checkbox"
-              checked={draft.ready}
-              onChange={(e) => update('ready', e.target.checked)}
-              onKeyDown={(e) => handleKeyDown(e, readyRef)}
-            />
-            <span>Ready</span>
           </label>
         </div>
       </div>

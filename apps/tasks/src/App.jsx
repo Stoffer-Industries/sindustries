@@ -76,7 +76,7 @@ export function App() {
   // Toast notifications
   const { toasts, showToast } = useToast();
 
-  const [newTask, setNewTask] = useState({ title: '', expanded: false, description: '', priority: 'medium', assignee: '', dueAt: '', tagsText: '', blocked: false, ready: false });
+  const [newTask, setNewTask] = useState({ title: '', expanded: false, description: '', priority: 'medium', assignee: '', dueAt: '', tagsText: '', blocked: false, taskType: '' });
   const [confettiBursts, setConfettiBursts] = useState([]);
   const [submittingCommentForTaskId, setSubmittingCommentForTaskId] = useState(null);
   const confettiTimeoutsRef = useRef(new Map());
@@ -209,9 +209,9 @@ export function App() {
           .map((tag) => tag.trim())
           .filter(Boolean),
         blocked: newTask.blocked,
-        ready: newTask.ready
+        taskType: newTask.taskType || null
       });
-      setNewTask({ title: '', expanded: false, description: '', priority: 'medium', assignee: '', dueAt: '', tagsText: '', blocked: false, ready: false });
+      setNewTask({ title: '', expanded: false, description: '', priority: 'medium', assignee: '', dueAt: '', tagsText: '', blocked: false, taskType: '' });
       showToast('Task created', 'success');
     } catch {
       showToast('Failed to create task', 'error');
@@ -674,6 +674,15 @@ export function App() {
                 <span className="small">Tags</span>
                 <input className="edit-control" value={newTask.tagsText} onChange={(e) => setNewTask((current) => ({ ...current, tagsText: e.target.value }))} placeholder="api, pulse" />
               </label>
+              <label>
+                <span className="small">Content type</span>
+                <select className="edit-control" value={newTask.taskType} onChange={(e) => setNewTask((current) => ({ ...current, taskType: e.target.value }))}>
+                  <option value="">None</option>
+                  <option value="content">Content</option>
+                  <option value="code">Code</option>
+                  <option value="research">Research</option>
+                </select>
+              </label>
             </div>
 
             <div className="editor-toggles">
@@ -684,14 +693,6 @@ export function App() {
                   onChange={(e) => setNewTask((current) => ({ ...current, blocked: e.target.checked }))}
                 />
                 <span>Blocked</span>
-              </label>
-              <label className="toggle-label">
-                <input
-                  type="checkbox"
-                  checked={newTask.ready}
-                  onChange={(e) => setNewTask((current) => ({ ...current, ready: e.target.checked }))}
-                />
-                <span>Ready</span>
               </label>
             </div>
 
