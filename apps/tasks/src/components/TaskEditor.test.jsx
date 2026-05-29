@@ -11,8 +11,7 @@ const defaultProps = {
     assignee: '',
     dueAt: '',
     tagsText: '',
-    blocked: false,
-    ready: false
+    blocked: false
   },
   task: {
     id: 1,
@@ -147,11 +146,6 @@ describe('TaskEditor', () => {
   it('renders blocked checkbox', () => {
     render(<TaskEditor {...defaultProps} />);
     expect(screen.getByLabelText('Detail blocked')).not.toBeChecked();
-  });
-
-  it('renders ready checkbox', () => {
-    render(<TaskEditor {...defaultProps} />);
-    expect(screen.getByLabelText('Detail ready')).not.toBeChecked();
   });
 
   it('shows comments section', () => {

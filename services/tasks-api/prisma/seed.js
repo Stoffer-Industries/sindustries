@@ -102,11 +102,10 @@ async function main() {
     data: {
       title: 'Comment Test Task',
       description: 'Purpose-built seed task for validating the comments UI demo flow',
-      status: 'open',
+      status: 'ready',
       priority: 'high',
       statusChangedAt: new Date(),
       assignee: 'Rowan',
-      ready: true,
       comments: {
         create: [
           {
@@ -133,7 +132,7 @@ async function main() {
         '## Basics',
         '',
         '- **Bold** and _italic_ and ~~strikethrough~~',
-        '- Inline code: `const ready = true`',
+        '- Inline code: `const status = "ready"`',
         '- Link: [Sindustries](https://example.com)',
         '',
         '## Checklists',
@@ -168,11 +167,10 @@ async function main() {
         '| Code blocks | Sage bg + porcelain text |',
         '| Background | Matches edit field |'
       ].join('\n'),
-      status: 'open',
+      status: 'ready',
       priority: 'urgent',
       statusChangedAt: new Date(),
       assignee: 'Tom',
-      ready: true,
       comments: {
         create: [
           {

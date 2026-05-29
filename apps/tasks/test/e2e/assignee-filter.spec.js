@@ -83,7 +83,6 @@ const baseTasks = [
     assignee: 'Quinn',
     archivedAt: null,
     blocked: false,
-    ready: false,
     tags: []
   },
   {
@@ -95,7 +94,6 @@ const baseTasks = [
     assignee: 'Rowan',
     archivedAt: null,
     blocked: false,
-    ready: false,
     tags: []
   },
   {
@@ -107,7 +105,6 @@ const baseTasks = [
     assignee: 'Lox',
     archivedAt: null,
     blocked: false,
-    ready: false,
     tags: []
   },
   {
@@ -119,7 +116,6 @@ const baseTasks = [
     assignee: 'Tom',
     archivedAt: null,
     blocked: false,
-    ready: false,
     tags: []
   },
   {
@@ -131,7 +127,6 @@ const baseTasks = [
     assignee: null,
     archivedAt: null,
     blocked: false,
-    ready: false,
     tags: []
   }
 ];
@@ -213,7 +208,6 @@ test('AC3: combinable with other filters', async ({ page }) => {
       assignee: 'Quinn',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -225,7 +219,6 @@ test('AC3: combinable with other filters', async ({ page }) => {
       assignee: 'Quinn',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     },
     {
@@ -237,7 +230,6 @@ test('AC3: combinable with other filters', async ({ page }) => {
       assignee: 'Rowan',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];

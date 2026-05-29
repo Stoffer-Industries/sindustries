@@ -12,7 +12,6 @@ test('happy path: create task, move to doing, archive', async ({ page }) => {
       priority: 'medium',
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];
@@ -43,7 +42,6 @@ test('happy path: create task, move to doing, archive', async ({ page }) => {
         assignee: body.assignee ?? null,
         dueAt: body.dueAt ?? null,
         blocked: body.blocked ?? false,
-        ready: body.ready ?? false,
         tags: (body.tags ?? []).map((tag) => ({ name: tag })),
         archivedAt: null
       };
@@ -112,7 +110,6 @@ test('archived filter stays right-aligned on narrow screens', async ({ page }) =
             priority: 'medium',
             archivedAt: null,
             blocked: false,
-            ready: false,
             tags: []
           }
         ]
@@ -149,7 +146,6 @@ test('happy path: create and render a task comment', async ({ page }) => {
       priority: 'medium',
       archivedAt: null,
       blocked: false,
-      ready: true,
       tags: [],
       comments: []
     }

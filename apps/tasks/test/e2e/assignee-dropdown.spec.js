@@ -13,7 +13,6 @@ test('AC2: assignee dropdown shows reserved options', async ({ page }) => {
       assignee: null,
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];
@@ -63,7 +62,6 @@ test('AC3: can select assignee from dropdown', async ({ page }) => {
       assignee: null,
       archivedAt: null,
       blocked: false,
-      ready: false,
       tags: []
     }
   ];

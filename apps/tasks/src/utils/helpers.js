@@ -53,8 +53,7 @@ export function normalizeTaskForEditor(task) {
     assignee: task.assignee ?? '',
     dueAt: task.dueAt ? String(task.dueAt).slice(0, 10) : '',
     tagsText: Array.isArray(task.tags) ? task.tags.map((tag) => tag.name ?? tag).join(', ') : '',
-    blocked: task.blocked ?? false,
-    ready: task.ready ?? false
+    blocked: task.blocked ?? false
   };
 }
 

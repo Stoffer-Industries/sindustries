@@ -82,6 +82,7 @@ SQL
   cd "$API_DIR"
   ensure_tasks_api_deps
   DATABASE_URL="$DATABASE_URL" npm run prisma:migrate
+  DATABASE_URL="$DATABASE_URL" npm run prisma:generate
 
   if [[ "$SEED_DB" == "true" ]]; then
     echo "Seeding database (SEED_DB=true)..."

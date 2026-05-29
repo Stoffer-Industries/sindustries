@@ -14,9 +14,25 @@ function mockTask(overrides = {}) {
   };
 }
 
+function ensureLocalStorage() {
+  if (window.localStorage) return;
+
+  const store = new Map();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      clear: () => store.clear(),
+      getItem: (key) => store.get(key) ?? null,
+      removeItem: (key) => store.delete(key),
+      setItem: (key, value) => store.set(key, String(value))
+    }
+  });
+}
+
 describe('tasks ui', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    ensureLocalStorage();
     window.localStorage.clear();
   });
 
@@ -174,8 +190,8 @@ describe('tasks ui', () => {
         ok: true,
         json: async () => ({
           data: [
-            mockTask({ id: 'newer', title: 'Newer', status: 'ready', priority: 'medium', ready: false, createdAt: '2026-03-02T00:00:00.000Z' }),
-            mockTask({ id: 'older', title: 'Older', status: 'ready', priority: 'medium', ready: false, createdAt: '2026-03-01T00:00:00.000Z' })
+            mockTask({ id: 'newer', title: 'Newer', status: 'ready', priority: 'medium', createdAt: '2026-03-02T00:00:00.000Z' }),
+            mockTask({ id: 'older', title: 'Older', status: 'ready', priority: 'medium', createdAt: '2026-03-01T00:00:00.000Z' })
           ]
         })
       })
@@ -360,7 +376,7 @@ describe('tasks ui', () => {
         return {
           ok: true,
           json: async () => ({
-            data: mockTask({ id: 'editor-task', title: 'Editor task', description: 'Line one', ready: true })
+            data: mockTask({ id: 'editor-task', title: 'Editor task', description: 'Line one', status: 'ready' })
           })
         };
       }
@@ -390,10 +406,6 @@ describe('tasks ui', () => {
 
     screen.getByLabelText('Detail blocked').focus();
     fireEvent.keyDown(screen.getByLabelText('Detail blocked'), { key: 'Enter', code: 'Enter', charCode: 13 });
-    expect(screen.getByLabelText('Detail ready')).toHaveFocus();
-
-    screen.getByLabelText('Detail ready').focus();
-    fireEvent.keyDown(screen.getByLabelText('Detail ready'), { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/tasks/editor-task'), expect.objectContaining({ method: 'PATCH' })));
   });
