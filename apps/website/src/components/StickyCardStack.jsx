@@ -1,6 +1,6 @@
 import { ScrollLinkedCardStack } from './scroll-linked-card-stack/index.js';
 
-export function StickyCardStack({ items, eyebrow, title, subTitle }) {
+export function StickyCardStack({ items, eyebrow, title, subTitle, onCardClick }) {
   return (
     <ScrollLinkedCardStack
       className="si-sticky-card-stack"
@@ -20,20 +20,35 @@ export function StickyCardStack({ items, eyebrow, title, subTitle }) {
           {subTitle ? <p className="section-subtitle">{subTitle}</p> : null}
         </div>
       )}
-      renderCard={(item) => (
-        <>
-          <div
-            className={`sticky-card-visual ${item.image ? 'has-image' : ''}`}
-            aria-hidden="true"
-            style={item.image ? { '--sticky-card-image': `url(${item.image})` } : undefined}
-          />
-          <div className="sticky-card-copy">
-            <p className="sticky-card-tag">{item.tag}</p>
-            <h3>{item.name}</h3>
-            <p>{item.body}</p>
-          </div>
-        </>
-      )}
+      renderCard={(item) => {
+        const inner = (
+          <>
+            <div
+              className={`sticky-card-visual ${item.image ? 'has-image' : ''}`}
+              aria-hidden="true"
+              style={item.image ? { '--sticky-card-image': `url(${item.image})` } : undefined}
+            />
+            <div className="sticky-card-copy">
+              <p className="sticky-card-tag">{item.tag}</p>
+              <h3>{item.name}</h3>
+              <p>{item.body}</p>
+            </div>
+          </>
+        );
+        if (onCardClick) {
+          return (
+            <button
+              className="sticky-card-button"
+              type="button"
+              onClick={() => onCardClick(item)}
+              aria-label={`Open detail for ${item.name}`}
+            >
+              {inner}
+            </button>
+          );
+        }
+        return inner;
+      }}
     />
   );
 }
