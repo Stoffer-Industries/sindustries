@@ -427,6 +427,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--panel-2); outlin
 .card-tilt-2 { --card-tilt: -0.25deg; --card-hover-tilt: -0.6deg; }
 
 .task-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.task-type-icon { margin-right: 4px; font-style: normal; }
+
 .task-title-btn {
   background: transparent;
   border: 0;
