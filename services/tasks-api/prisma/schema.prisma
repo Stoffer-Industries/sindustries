@@ -38,14 +38,6 @@ model Task {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  // Content ops metadata
-  sourceReview    String?
-  targetRepo      String?
-  publicRisk      String?      // low | medium | high
-  channel         String?      // website | linkedin | x | youtube | newsletter
-  tomApprovalPr   String?
-  quinnApprovalPr String?
-  approvalOwners  String?      // tom | quinn | both
   taskType        String?      // content | code | research
 
   tags            TaskTag[]

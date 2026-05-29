@@ -77,14 +77,6 @@ function mapTask(task) {
     ready: task.ready ?? false,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
-    // Content ops metadata
-    sourceReview: task.sourceReview ?? null,
-    targetRepo: task.targetRepo ?? null,
-    publicRisk: task.publicRisk ?? null,
-    channel: task.channel ?? null,
-    tomApprovalPr: task.tomApprovalPr ?? null,
-    quinnApprovalPr: task.quinnApprovalPr ?? null,
-    approvalOwners: task.approvalOwners ?? null,
     taskType: task.taskType ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
     comments: task.comments?.map(mapComment) ?? []
@@ -337,13 +329,6 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     const tags = normalizeTags(req.body?.tags);
     const blocked = req.body?.blocked ?? false;
     const ready = req.body?.ready ?? false;
-    const sourceReview = req.body?.sourceReview || null;
-    const targetRepo = req.body?.targetRepo || null;
-    const publicRisk = req.body?.publicRisk || null;
-    const channel = req.body?.channel || null;
-    const tomApprovalPr = req.body?.tomApprovalPr || null;
-    const quinnApprovalPr = req.body?.quinnApprovalPr || null;
-    const approvalOwners = req.body?.approvalOwners || null;
     const taskType = req.body?.taskType || null;
 
     // Validation
@@ -374,13 +359,6 @@ tasksRouter.post('/tasks', async (req, res, next) => {
         completedAt: status === 'done' ? now : null,
         blocked,
         ready,
-        sourceReview,
-        targetRepo,
-        publicRisk,
-        channel,
-        tomApprovalPr,
-        quinnApprovalPr,
-        approvalOwners,
         taskType,
         tags: {
           create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
@@ -459,32 +437,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.ready = Boolean(req.body.ready);
     }
 
-    // Content ops fields
-    if (req.body?.sourceReview !== undefined) updates.sourceReview = req.body.sourceReview || null;
-    if (req.body?.targetRepo !== undefined) updates.targetRepo = req.body.targetRepo || null;
-    if (req.body?.publicRisk !== undefined) {
-      const validRisks = ['low', 'medium', 'high'];
-      if (req.body.publicRisk && !validRisks.includes(req.body.publicRisk)) {
-        return badRequest(res, 'INVALID_PUBLIC_RISK', 'publicRisk must be low, medium, or high');
-      }
-      updates.publicRisk = req.body.publicRisk || null;
-    }
-    if (req.body?.channel !== undefined) {
-      const validChannels = ['website', 'linkedin', 'x', 'youtube', 'newsletter'];
-      if (req.body.channel && !validChannels.includes(req.body.channel)) {
-        return badRequest(res, 'INVALID_CHANNEL', 'channel must be website, linkedin, x, youtube, or newsletter');
-      }
-      updates.channel = req.body.channel || null;
-    }
-    if (req.body?.tomApprovalPr !== undefined) updates.tomApprovalPr = req.body.tomApprovalPr || null;
-    if (req.body?.quinnApprovalPr !== undefined) updates.quinnApprovalPr = req.body.quinnApprovalPr || null;
-    if (req.body?.approvalOwners !== undefined) {
-      const validOwners = ['tom', 'quinn', 'both'];
-      if (req.body.approvalOwners && !validOwners.includes(req.body.approvalOwners)) {
-        return badRequest(res, 'INVALID_APPROVAL_OWNERS', 'approvalOwners must be tom, quinn, or both');
-      }
-      updates.approvalOwners = req.body.approvalOwners || null;
-    }
     if (req.body?.taskType !== undefined) {
       const validTypes = ['content', 'code', 'research'];
       if (req.body.taskType && !validTypes.includes(req.body.taskType)) {
