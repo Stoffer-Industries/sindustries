@@ -730,13 +730,14 @@ export function App() {
                       }}
                     >
                       <div className="task-row">
-                        <button 
-                          className="task-title-btn" 
+                        <button
+                          className="task-title-btn"
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleTask(task.id, isSelected);
                           }}
                         >
+                          {task.taskType === 'content' ? <span className="task-type-icon" aria-label="Content task">📝</span> : task.taskType === 'code' ? <span className="task-type-icon" aria-label="Code task">💻</span> : task.taskType === 'research' ? <span className="task-type-icon" aria-label="Research task">🔍</span> : null}
                           {task.title}
                         </button>
                         <div className="assignee-chip">
@@ -825,13 +826,14 @@ export function App() {
                               }}
                             >
                               <div className="task-row board-card-row">
-                                <button 
-                                  className="task-title-btn" 
+                                <button
+                                  className="task-title-btn"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     toggleTask(task.id, isSelected);
                                   }}
                                 >
+                                  {task.taskType === 'content' ? <span className="task-type-icon" aria-label="Content task">📝</span> : task.taskType === 'code' ? <span className="task-type-icon" aria-label="Code task">💻</span> : task.taskType === 'research' ? <span className="task-type-icon" aria-label="Research task">🔍</span> : null}
                                   {task.title}
                                 </button>
                               </div>

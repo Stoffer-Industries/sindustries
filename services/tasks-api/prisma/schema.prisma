@@ -46,6 +46,7 @@ model Task {
   tomApprovalPr   String?
   quinnApprovalPr String?
   approvalOwners  String?      // tom | quinn | both
+  taskType        String?      // content | code | research
 
   tags            TaskTag[]
   comments        TaskComment[]

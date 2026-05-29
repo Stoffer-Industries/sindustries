@@ -85,6 +85,7 @@ function mapTask(task) {
     tomApprovalPr: task.tomApprovalPr ?? null,
     quinnApprovalPr: task.quinnApprovalPr ?? null,
     approvalOwners: task.approvalOwners ?? null,
+    taskType: task.taskType ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
     comments: task.comments?.map(mapComment) ?? []
   };
@@ -343,9 +344,13 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     const tomApprovalPr = req.body?.tomApprovalPr || null;
     const quinnApprovalPr = req.body?.quinnApprovalPr || null;
     const approvalOwners = req.body?.approvalOwners || null;
+    const taskType = req.body?.taskType || null;
 
     // Validation
     if (!title) return badRequest(res, 'TITLE_REQUIRED', 'title is required');
+    if (taskType && !['content', 'code', 'research'].includes(taskType)) {
+      return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, or research');
+    }
     if (!validStatuses.has(status)) return badRequest(res, 'INVALID_STATUS_VALUE', 'Invalid status value');
     if (!validPriorities.has(priority)) return badRequest(res, 'INVALID_PRIORITY_VALUE', 'Invalid priority value');
     if (req.body?.dueAt && !dueAt) return badRequest(res, 'INVALID_DUE_AT', 'Invalid dueAt value');
@@ -376,6 +381,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
         tomApprovalPr,
         quinnApprovalPr,
         approvalOwners,
+        taskType,
         tags: {
           create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
         }
@@ -478,6 +484,13 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         return badRequest(res, 'INVALID_APPROVAL_OWNERS', 'approvalOwners must be tom, quinn, or both');
       }
       updates.approvalOwners = req.body.approvalOwners || null;
+    }
+    if (req.body?.taskType !== undefined) {
+      const validTypes = ['content', 'code', 'research'];
+      if (req.body.taskType && !validTypes.includes(req.body.taskType)) {
+        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, or research');
+      }
+      updates.taskType = req.body.taskType || null;
     }
 
     const updated = await prisma.task.update({
