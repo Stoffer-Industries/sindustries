@@ -155,15 +155,17 @@ export function DetailSheet({ item, type, onClose }) {
 
   const handleTouchStart = (event) => {
     const touch = event.touches[0];
+    const atTop = !sheetRef.current || sheetRef.current.scrollTop === 0;
     touchStartRef.current = {
       y: touch.clientY,
-      time: performance.now()
+      time: performance.now(),
+      atTop,
     };
     setDragOffset(0);
   };
 
   const handleTouchMove = (event) => {
-    if (!touchStartRef.current) return;
+    if (!touchStartRef.current || !touchStartRef.current.atTop) return;
     const touch = event.touches[0];
     const offset = Math.max(0, touch.clientY - touchStartRef.current.y);
     setDragOffset(offset);
