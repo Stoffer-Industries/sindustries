@@ -48,14 +48,14 @@ Output format:
 [Actionable suggestions]
 
 🐦 X POST OPTIONS (3)
-1. [tweet1]
-2. [tweet2]
-3. [tweet3]
+1. ```[tweet1]```
+2. ```[tweet2]```
+3. ```[tweet3]```
 
 Keep concise, practical, no fluff.
 
 # notify-soft-fails
+Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/notify-soft-fails/SKILL.md and follow it.
 After generating the brief:
-- If any tool call returned an auth error, a non-zero exit code, or output containing 'error', 'failed', 'exception', 'traceback', or 'unauthorized' — use the sessions_send tool to send a message to session key 'agent:lox:main' with the text:
-  'Morning Brief soft failure: <brief summary of what failed, e.g. "gog calendar auth error — 401 Unauthorized">'
+- If any tool call returned an auth error, a non-zero exit code, or output containing 'error', 'failed', 'exception', 'traceback', or 'unauthorized': send failure notification as described in the skill with text: 'Morning Brief soft failure: <brief summary of what failed, e.g. "gog calendar auth error — 401 Unauthorized">'
 - If everything succeeded, do nothing further.
