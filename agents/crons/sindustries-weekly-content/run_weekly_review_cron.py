@@ -13,9 +13,11 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 WORKSPACE = Path(__file__).resolve().parents[5]
 PIPELINE = Path(__file__).resolve().parent / "sindustries-weekly-content.lobster.yaml"
+OPENCLAW_CONFIG = Path.home() / ".openclaw" / "openclaw.json"
 
 DEFAULT_ARGS = {
     "reviewsRoot": "brain/content/sindustries-weekly-content",
@@ -40,13 +42,26 @@ def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
         pipe.close()
 
 
+def openclaw_config() -> dict[str, Any]:
+    if not OPENCLAW_CONFIG.exists():
+        return {}
+    try:
+        return json.loads(OPENCLAW_CONFIG.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
 def run_lobster(args: dict) -> int:
-    gateway_port = os.environ.get("OPENCLAW_GATEWAY_PORT", "18789")
+    config = openclaw_config()
+    gateway_port = os.environ.get("OPENCLAW_GATEWAY_PORT") or str(config.get("gateway", {}).get("port") or "18789")
+    gateway_token = os.environ.get("OPENCLAW_TOKEN") or config.get("gateway", {}).get("auth", {}).get("token")
     env = {
         **os.environ,
-        "TASKS_API_BASE_URL": os.environ.get("TASKS_API_BASE_URL", "http://localhost:4001/api/v1"),
         "OPENCLAW_URL": os.environ.get("OPENCLAW_URL") or f"http://localhost:{gateway_port}",
+        "TASKS_API_BASE_URL": os.environ.get("TASKS_API_BASE_URL", "http://localhost:4001/api/v1"),
     }
+    if gateway_token:
+        env["OPENCLAW_TOKEN"] = gateway_token
     cmd = [
         "lobster", "run",
         "--file", str(PIPELINE),

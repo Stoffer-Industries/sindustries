@@ -12,8 +12,8 @@ steps:
       python3 codebases/sindustries/agents/crons/sindustries-weekly-content/collect_daily_notes.py
 
   - id: distil
-    pipeline: >-
-      llm.invoke --provider openclaw --prompt "Classify these SIndustries weekly ops notes into a structured content review. Input is JSON with a daily_notes array. Each note has format: - [date] **slug** — description | why: reason | ref: path. Classify each into tom_approval (first-person voice, strategic claims, revenue/customer references, public commitments) or quinn_approval (factual updates, stack changes, technical milestones, experiment status with evidence). Preserve the slug and key context in each bullet. Output ONLY valid JSON with no markdown fences: {\"tom_approval\":[\"- bullet\",...],\"quinn_approval\":[\"- bullet\",...],\"review_date\":\"YYYY-MM-DD\"} where review_date comes from the input JSON."
+    command: >-
+      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/distil_with_llm_task.py
     stdin: $collect_daily_notes.stdout
 
   - id: create_review_file
