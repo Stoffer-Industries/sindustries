@@ -41,9 +41,11 @@ def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
 
 
 def run_lobster(args: dict) -> int:
+    gateway_port = os.environ.get("OPENCLAW_GATEWAY_PORT", "18789")
     env = {
         **os.environ,
         "TASKS_API_BASE_URL": os.environ.get("TASKS_API_BASE_URL", "http://localhost:4001/api/v1"),
+        "OPENCLAW_URL": os.environ.get("OPENCLAW_URL") or f"http://localhost:{gateway_port}",
     }
     cmd = [
         "lobster", "run",
