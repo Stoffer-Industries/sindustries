@@ -35,11 +35,11 @@ SCHEMA: dict[str, Any] = {
     "properties": {
         "tom_approval": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {},
         },
         "quinn_approval": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {},
         },
         "review_date": {"type": "string"},
     },
@@ -164,7 +164,19 @@ def normalize_llm_json(data: dict[str, Any]) -> dict[str, Any]:
 def list_items(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(item) for item in value if str(item).strip()]
+    items: list[str] = []
+    for raw in value:
+        if isinstance(raw, dict):
+            bullet = classification_bullet(raw)
+            if bullet:
+                items.append(bullet)
+                continue
+            text = str(raw).strip()
+        else:
+            text = str(raw).strip()
+        if text:
+            items.append(text)
+    return items
 
 
 def classification_bullet(item: dict[str, Any]) -> str:
