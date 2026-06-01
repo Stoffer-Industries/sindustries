@@ -25,9 +25,10 @@ def main() -> None:
         "TASKS_API_BASE_URL": os.environ.get("TASKS_API_BASE_URL", "http://localhost:4001/api/v1"),
     }
 
+    client = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "tasks-api-ops" / "tasks_api_client.py"
     subprocess.run(
         [
-            "python3", str(WORKSPACE / "scripts" / "tasks_api_client.py"), "create",
+            "python3", str(client), "create",
             "--title", f"Weekly content review — {review_date}",
             "--type", "content",
             "--description", f"Weekly SIndustries content notes ready for triage: {review_path}",
