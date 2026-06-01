@@ -43,9 +43,8 @@ def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
 def run_lobster(args: dict) -> int:
     env = {**os.environ, "TASKS_API_BASE_URL": os.environ.get("TASKS_API_BASE_URL", "http://localhost:4001/api/v1")}
 
-    cmd = ["lobster", "run", str(PIPELINE)]
-    for k, v in args.items():
-        cmd += [f"--{k}", str(v).lower() if isinstance(v, bool) else str(v)]
+    import json as _json
+    cmd = ["lobster", "run", "--file", str(PIPELINE), "--args-json", _json.dumps(args)]
 
     log(f"starting lobster: {' '.join(cmd)}")
     proc = subprocess.Popen(
