@@ -81,7 +81,7 @@ print(f"Appended note to {notes_path}")
 Run:
 
 ```
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/crons/sindustries-weekly-review/check_stale_content.py
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/content-notes/check_stale_content.py
 ```
 
 For each `STALE:` line in the output, append a daily note with the format:
