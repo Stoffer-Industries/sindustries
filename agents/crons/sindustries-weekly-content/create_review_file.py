@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Step 2 of sindustries-weekly-review lobster.
+Step 2 of sindustries-weekly-content lobster.
 
 Reads Tom's notes from stdin (lobster approval response),
-creates the weekly review file at brain/content/sindustries-weekly-content/YYYY-MM-DD.md,
+creates the weekly content file at brain/content/sindustries-weekly-content/YYYY-MM-DD.md,
 and passes the file path + raw notes to stdout.
 """
 from __future__ import annotations
@@ -17,38 +17,24 @@ from pathlib import Path
 WORKSPACE = Path(__file__).resolve().parents[5]
 
 TEMPLATE = """\
-# SIndustries Weekly Review — {date}
+# SIndustries Weekly Content — {date}
 
 ## Needs approval from Tom
 
-_Items here require Tom's personal sign-off before becoming content tasks.
-These include first-person voice copy, strategic claims, revenue/customer references,
-or anything that could be read as a public commitment._
+_First-person voice, strategic claims, revenue/customer references, public commitments._
 
 <!-- append items here as bullet points -->
 
 ## Needs approval from Quinn
 
-_Items Quinn can approve without escalating to Tom.
-Stack additions, factual metadata updates, experiment status changes with task evidence._
+_Factual updates, stack/status changes, experiment status with supporting evidence._
 
 <!-- append items here as bullet points -->
-
-## Daily notes
-
-_Raw notes appended by heartbeat. Not yet triaged._
-
-<!-- heartbeat appends here with date stamps -->
-
-## Tom's notes this week
-
-{raw_notes}
 """
 
 
 def review_date() -> date:
     today = date.today()
-    # Most recent Friday (or today if Friday)
     days_since_friday = (today.weekday() - 4) % 7
     return today - timedelta(days=days_since_friday)
 
@@ -60,8 +46,7 @@ def main() -> None:
     args = parser.parse_args()
 
     stdin_data = json.load(sys.stdin)
-    raw_notes = stdin_data.get("approvalResponse", "").strip() or stdin_data.get("prompt", "")
-    week = stdin_data.get("week", str(date.today()))
+    raw_notes = stdin_data.get("approvalResponse", "").strip()
 
     rd = review_date()
     reviews_root = WORKSPACE / args.reviews_root
@@ -69,13 +54,8 @@ def main() -> None:
     review_path = reviews_root / f"{rd}.md"
 
     if not args.dry_run:
-        if review_path.exists():
-            # Append Tom's notes to existing file rather than overwriting
-            existing = review_path.read_text()
-            if "## Tom's notes this week" not in existing:
-                review_path.write_text(existing.rstrip() + f"\n\n## Tom's notes this week\n\n{raw_notes}\n")
-        else:
-            review_path.write_text(TEMPLATE.format(date=rd, raw_notes=raw_notes))
+        if not review_path.exists():
+            review_path.write_text(TEMPLATE.format(date=rd))
 
     result = {
         "review_path": str(review_path.relative_to(WORKSPACE)),

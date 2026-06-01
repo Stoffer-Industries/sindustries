@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Cron entry point for the SIndustries weekly review.
-Triggered every Friday 4pm NZST via OpenClaw cron.
+Cron entry point for the SIndustries weekly content review.
 
-Runs sindustries-weekly-review.lobster.yaml, which prompts Tom for his weekly
-notes, creates the review file, and opens a PR against brain/reviews/.
+Runs sindustries-weekly-content.lobster.yaml, which prompts Tom for his weekly
+notes, creates the weekly content file, and creates a content task in the Tasks API.
 """
 from __future__ import annotations
 
@@ -16,10 +15,10 @@ import threading
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[5]
-PIPELINE = Path(__file__).resolve().parent / "sindustries-weekly-review.lobster.yaml"
+PIPELINE = Path(__file__).resolve().parent / "sindustries-weekly-content.lobster.yaml"
 
 DEFAULT_ARGS = {
-    "reviewsRoot": "brain/reviews/website-content",
+    "reviewsRoot": "brain/content/sindustries-weekly-content",
     "dryRun": False,
 }
 
