@@ -3,7 +3,7 @@
 Step 2 of sindustries-weekly-review lobster.
 
 Reads Tom's notes from stdin (lobster approval response),
-creates the weekly review file at brain/reviews/website-content/YYYY-MM-DD.md,
+creates the weekly review file at brain/content/sindustries-weekly-content/YYYY-MM-DD.md,
 and passes the file path + raw notes to stdout.
 """
 from __future__ import annotations
@@ -55,7 +55,7 @@ def review_date() -> date:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reviews-root", default="brain/reviews/website-content")
+    parser.add_argument("--reviews-root", default="brain/content/sindustries-weekly-content")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
