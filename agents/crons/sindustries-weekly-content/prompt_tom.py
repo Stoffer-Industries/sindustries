@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Step 1 of sindustries-weekly-review lobster.
+Step 1 of sindustries-weekly-content lobster.
 
 Emits the approval prompt text that the lobster runtime presents to Tom.
-Tom's answer becomes the raw notes for this week's review.
+Tom's answer becomes the raw notes for this week's content file.
 """
 from __future__ import annotations
 

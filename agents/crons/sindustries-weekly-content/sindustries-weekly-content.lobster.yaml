@@ -29,18 +29,6 @@ steps:
 
   - id: create_content_task
     command: >-
-      python3 -c "
-      import json, subprocess, sys, os
-      data = json.load(sys.stdin)
-      review_path = data.get('review_path', '')
-      review_date = data.get('review_date', '')
-      env = {**os.environ, 'TASKS_API_BASE_URL': os.environ.get('TASKS_API_BASE_URL', 'http://localhost:4001/api/v1')}
-      subprocess.run(['python3', 'scripts/tasks_api_client.py', 'create',
-        '--title', f'Weekly content review — {review_date}',
-        '--type', 'content',
-        '--description', f'Weekly SIndustries content notes ready for triage: {review_path}',
-        '--priority', 'normal'], env=env, check=True)
-      print(json.dumps(data))
-      "
+      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/create_content_task.py
     stdin: $distil_daily_notes.stdout
     condition: $prompt_tom.approved
