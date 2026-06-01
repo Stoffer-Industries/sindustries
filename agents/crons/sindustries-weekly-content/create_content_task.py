@@ -30,9 +30,10 @@ def main() -> None:
         [
             "python3", str(client), "create",
             "--title", f"Weekly content review — {review_date}",
-            "--type", "content",
             "--description", f"Weekly SIndustries content notes ready for triage: {review_path}",
-            "--priority", "normal",
+            "--status", "ready",
+            "--priority", "medium",
+            "--tags", "content", "weekly-review", f"review-{review_date}",
         ],
         env=env,
         check=True,
