@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 """
-Step 3 of sindustries-weekly-content lobster.
+Step 1 of sindustries-weekly-content lobster.
 
-Reads the daily notes from brain/ops/notes/ for the current week and passes
-them alongside the review file path to stdout. The lobster agent uses this
-output to triage notes into the Tom/Quinn approval sections before the
-create_content_task step.
+Collects raw ops notes from brain/ops/notes/ for the current week
+(Friday–Thursday) and emits them as JSON for the llm.invoke distil step.
 """
 from __future__ import annotations
 
 import datetime
 import json
-import sys
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[5]
 
 
-def collect_weekly_notes(workspace: Path) -> list[str]:
-    notes_root = workspace / "brain" / "ops" / "notes"
+def review_date() -> datetime.date:
     today = datetime.date.today()
     days_since_friday = (today.weekday() - 4) % 7
-    week_start = today - datetime.timedelta(days=days_since_friday + 6)
+    return today - datetime.timedelta(days=days_since_friday)
+
+
+def collect_weekly_notes(workspace: Path) -> list[str]:
+    notes_root = workspace / "brain" / "ops" / "notes"
+    rd = review_date()
+    week_start = rd - datetime.timedelta(days=6)
 
     notes: list[str] = []
     if not notes_root.exists():
@@ -39,16 +41,12 @@ def collect_weekly_notes(workspace: Path) -> list[str]:
 
 
 def main() -> None:
-    stdin_data = json.load(sys.stdin)
-
-    daily_notes = collect_weekly_notes(WORKSPACE)
-
-    result = {
-        **stdin_data,
-        "daily_notes": daily_notes,
-        "daily_notes_count": len(daily_notes),
-    }
-    print(json.dumps(result))
+    notes = collect_weekly_notes(WORKSPACE)
+    print(json.dumps({
+        "daily_notes": notes,
+        "daily_notes_count": len(notes),
+        "review_date": str(review_date()),
+    }))
 
 
 if __name__ == "__main__":

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Step 2 of sindustries-weekly-content lobster.
+Step 3 of sindustries-weekly-content lobster.
 
-Reads Tom's notes from stdin (lobster approval response),
-creates the weekly content file at brain/content/sindustries-weekly-content/YYYY-MM-DD.md,
-and passes the file path + raw notes to stdout.
+Reads classified notes JSON from stdin (output of llm_task.invoke distil step),
+writes the weekly content review file, and passes the file path to stdout.
+
+Expected stdin JSON:
+  {
+    "tom_approval": ["- bullet ...", ...],
+    "quinn_approval": ["- bullet ...", ...],
+    "review_date": "YYYY-MM-DD"   # optional, calculated locally if absent
+  }
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -23,14 +30,16 @@ TEMPLATE = """\
 
 _First-person voice, strategic claims, revenue/customer references, public commitments._
 
-<!-- append items here as bullet points -->
+{tom_section}
 
 ## Needs approval from Quinn
 
 _Factual updates, stack/status changes, experiment status with supporting evidence._
 
-<!-- append items here as bullet points -->
+{quinn_section}
 """
+
+EMPTY_SECTION = "<!-- no items this week -->"
 
 
 def review_date() -> date:
@@ -39,31 +48,47 @@ def review_date() -> date:
     return today - timedelta(days=days_since_friday)
 
 
+def strip_markdown_fences(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reviews-root", default="brain/content/sindustries-weekly-content")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    stdin_data = json.load(sys.stdin)
-    raw_notes = stdin_data.get("approvalResponse", "").strip()
+    raw = sys.stdin.read()
+    data = json.loads(strip_markdown_fences(raw))
 
-    rd = review_date()
+    tom_items: list[str] = data.get("tom_approval") or []
+    quinn_items: list[str] = data.get("quinn_approval") or []
+
+    rd_str = data.get("review_date")
+    rd = date.fromisoformat(rd_str) if rd_str else review_date()
+
+    tom_section = "\n".join(tom_items) if tom_items else EMPTY_SECTION
+    quinn_section = "\n".join(quinn_items) if quinn_items else EMPTY_SECTION
+
+    content = TEMPLATE.format(date=rd, tom_section=tom_section, quinn_section=quinn_section)
+
     reviews_root = WORKSPACE / args.reviews_root
-    reviews_root.mkdir(parents=True, exist_ok=True)
     review_path = reviews_root / f"{rd}.md"
 
     if not args.dry_run:
-        if not review_path.exists():
-            review_path.write_text(TEMPLATE.format(date=rd))
+        reviews_root.mkdir(parents=True, exist_ok=True)
+        review_path.write_text(content)
 
-    result = {
+    print(json.dumps({
         "review_path": str(review_path.relative_to(WORKSPACE)),
         "review_date": str(rd),
-        "raw_notes": raw_notes,
+        "tom_count": len(tom_items),
+        "quinn_count": len(quinn_items),
         "dry_run": args.dry_run,
-    }
-    print(json.dumps(result))
+    }))
 
 
 if __name__ == "__main__":
