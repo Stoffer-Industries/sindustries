@@ -1,0 +1,46 @@
+name: sindustries-weekly-content
+
+args:
+  reviewsRoot:
+    default: brain/content/sindustries-weekly-content
+  dryRun:
+    default: false
+
+steps:
+  - id: prompt_tom
+    command: >-
+      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/prompt_tom.py --json
+    approval: required
+
+  - id: create_review_file
+    command: >-
+      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/create_review_file.py
+      --reviews-root ${reviewsRoot}
+      --dry-run ${dryRun}
+      --json
+    stdin: $prompt_tom.stdout
+    condition: $prompt_tom.approved
+
+  - id: distil_daily_notes
+    command: >-
+      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/distil_daily_notes.py --json
+    stdin: $create_review_file.stdout
+    condition: $prompt_tom.approved
+
+  - id: create_content_task
+    command: >-
+      python3 -c "
+      import json, subprocess, sys, os
+      data = json.load(sys.stdin)
+      review_path = data.get('review_path', '')
+      review_date = data.get('review_date', '')
+      env = {**os.environ, 'TASKS_API_BASE_URL': os.environ.get('TASKS_API_BASE_URL', 'http://localhost:4001/api/v1')}
+      subprocess.run(['python3', 'scripts/tasks_api_client.py', 'create',
+        '--title', f'Weekly content review — {review_date}',
+        '--type', 'content',
+        '--description', f'Weekly SIndustries content notes ready for triage: {review_path}',
+        '--priority', 'normal'], env=env, check=True)
+      print(json.dumps(data))
+      "
+    stdin: $distil_daily_notes.stdout
+    condition: $prompt_tom.approved
