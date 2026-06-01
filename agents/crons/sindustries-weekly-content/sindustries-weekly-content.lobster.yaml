@@ -7,28 +7,22 @@ args:
     default: false
 
 steps:
-  - id: prompt_tom
+  - id: collect_daily_notes
     command: >-
-      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/prompt_tom.py --json
-    approval: required
+      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/collect_daily_notes.py
+
+  - id: distil
+    pipeline: >-
+      llm_task.invoke --prompt "Classify these SIndustries weekly ops notes into a structured content review. Input is JSON with a daily_notes array. Each note has format: - [date] **slug** — description | why: reason | ref: path. Classify each into tom_approval (first-person voice, strategic claims, revenue/customer references, public commitments) or quinn_approval (factual updates, stack changes, technical milestones, experiment status with evidence). Preserve the slug and key context in each bullet. Output ONLY valid JSON with no markdown fences: {\"tom_approval\":[\"- bullet\",...],\"quinn_approval\":[\"- bullet\",...],\"review_date\":\"YYYY-MM-DD\"} where review_date comes from the input JSON."
+    stdin: $collect_daily_notes.stdout
 
   - id: create_review_file
     command: >-
       python3 codebases/sindustries/agents/crons/sindustries-weekly-content/create_review_file.py
       --reviews-root ${reviewsRoot}
-      --dry-run ${dryRun}
-      --json
-    stdin: $prompt_tom.stdout
-    condition: $prompt_tom.approved
-
-  - id: distil_daily_notes
-    command: >-
-      python3 codebases/sindustries/agents/crons/sindustries-weekly-content/distil_daily_notes.py --json
-    stdin: $create_review_file.stdout
-    condition: $prompt_tom.approved
+    stdin: $distil.stdout
 
   - id: create_content_task
     command: >-
       python3 codebases/sindustries/agents/crons/sindustries-weekly-content/create_content_task.py
-    stdin: $distil_daily_notes.stdout
-    condition: $prompt_tom.approved
+    stdin: $create_review_file.stdout
