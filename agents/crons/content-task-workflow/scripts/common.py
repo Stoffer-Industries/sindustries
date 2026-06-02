@@ -24,6 +24,8 @@ IVY_PRS_TAG = "[ivy-prs]"
 AUTHOR = "Lobster"
 STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
 PR_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)", re.I)
+PR_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\bPR\b.*$", re.I | re.M)
+CHECKBOX_RE = re.compile(r"^\s*-\s*\[([ xX])\]\s+(.+\S)\s*$", re.M)
 
 
 def log_debug(message: str) -> None:
@@ -184,6 +186,38 @@ def extract_pr_urls_from_text(text: str) -> list[str]:
     return urls
 
 
+def pr_heading_blocks(description: str) -> list[str]:
+    matches = list(PR_HEADING_RE.finditer(description or ""))
+    blocks: list[str] = []
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description)
+        blocks.append(description[start:end])
+    return blocks
+
+
+def pr_heading_block_url_failures(description: str) -> list[str]:
+    failures: list[str] = []
+    matches = list(PR_HEADING_RE.finditer(description or ""))
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description or "")
+        block = (description or "")[start:end]
+        heading = match.group(0).strip()
+        if not extract_pr_urls_from_text(heading + "\n" + block):
+            failures.append(f"{heading} has no GitHub PR URL.")
+    return failures
+
+
+def task_acceptance_criteria(description: str) -> list[str]:
+    criteria: list[str] = []
+    for match in CHECKBOX_RE.finditer(description or ""):
+        text = re.sub(r"\s+", " ", match.group(2)).strip()
+        if text and text not in criteria:
+            criteria.append(text)
+    return criteria
+
+
 def extract_ivy_pr_urls(task: dict[str, Any]) -> list[str]:
     urls: list[str] = []
     for comment in task_comments(task):
@@ -203,12 +237,86 @@ def parse_pr_url(url: str) -> tuple[str, str, str] | None:
     return match.group(1), match.group(2), match.group(3)
 
 
+def _run_gh_json(cmd: list[str]) -> Any:
+    proc = subprocess.run(cmd, text=True, capture_output=True, timeout=30)
+    error = (proc.stderr or proc.stdout or "").strip()
+    if proc.returncode != 0 and os.environ.get("GITHUB_TOKEN") and ("HTTP 401" in error or "Bad credentials" in error):
+        env = dict(os.environ)
+        env.pop("GITHUB_TOKEN", None)
+        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=30, env=env)
+        error = (proc.stderr or proc.stdout or "").strip()
+    if proc.returncode != 0:
+        raise RuntimeError(error or "gh command failed")
+    return json.loads(proc.stdout or "null")
+
+
 def gh_pr_view(url: str, fields: list[str]) -> dict[str, Any]:
     cmd = ["gh", "pr", "view", url, "--json", ",".join(fields)]
-    proc = subprocess.run(cmd, text=True, capture_output=True, timeout=30)
-    if proc.returncode != 0:
-        raise RuntimeError((proc.stderr or proc.stdout or "gh pr view failed").strip())
-    return json.loads(proc.stdout or "{}")
+    data = _run_gh_json(cmd)
+    return data if isinstance(data, dict) else {}
+
+
+def gh_api(path: str) -> Any:
+    return _run_gh_json(["gh", "api", path])
+
+
+def _check_name(check: dict[str, Any]) -> str:
+    return str(check.get("name") or check.get("context") or check.get("workflowName") or check.get("title") or check.get("app", {}).get("name") or "unnamed check")
+
+
+def _check_state(check: dict[str, Any]) -> str:
+    for key in ("state", "conclusion", "status"):
+        value = check.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return "UNKNOWN"
+
+
+def gh_pr_ci_checks(url: str) -> list[dict[str, str]]:
+    pr = gh_pr_view(url, ["statusCheckRollup"])
+    rollup = pr.get("statusCheckRollup")
+    if not isinstance(rollup, list):
+        return []
+    checks: list[dict[str, str]] = []
+    for item in rollup:
+        if isinstance(item, dict):
+            checks.append({"name": _check_name(item), "state": _check_state(item)})
+    return checks
+
+
+def gh_pr_ci_state(url: str) -> str:
+    checks = gh_pr_ci_checks(url)
+    if not checks:
+        return "UNKNOWN"
+    states = [check["state"] for check in checks]
+    if all(state == "SUCCESS" for state in states):
+        return "SUCCESS"
+    if any(state in {"FAILURE", "FAILED", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"} for state in states):
+        return "FAILURE"
+    if any(state in {"PENDING", "QUEUED", "IN_PROGRESS", "REQUESTED", "WAITING", "EXPECTED"} for state in states):
+        return "PENDING"
+    return "UNKNOWN"
+
+
+def gh_pr_body(url: str) -> str:
+    pr = gh_pr_view(url, ["body"])
+    body = pr.get("body")
+    return body if isinstance(body, str) else ""
+
+
+def gh_pr_review_decision(url: str) -> str:
+    pr = gh_pr_view(url, ["reviewDecision"])
+    decision = pr.get("reviewDecision")
+    return decision.strip().upper() if isinstance(decision, str) and decision.strip() else "UNKNOWN"
+
+
+def gh_pr_review_comments(url: str) -> list[dict[str, Any]]:
+    parsed = parse_pr_url(url)
+    if parsed is None:
+        raise RuntimeError(f"Invalid GitHub PR URL: {url}")
+    owner, repo, number = parsed
+    comments = gh_api(f"repos/{owner}/{repo}/pulls/{number}/comments")
+    return comments if isinstance(comments, list) else []
 
 
 def parse_iso(value: str | None) -> dt.datetime | None:
