@@ -125,7 +125,7 @@ def cmd_create(args):
     if args.tags:
         payload["tags"] = args.tags
     if getattr(args, "type", None) is not None:
-        payload["type"] = args.type
+        payload["taskType"] = args.type
     print(json.dumps(api_request("POST", base, "/tasks", payload), indent=2))
 
 
@@ -207,7 +207,7 @@ def build_parser():
     c = sub.add_parser("create")
     c.add_argument("--title", required=True)
     c.add_argument("--description")
-    c.add_argument("--status", default="todo")
+    c.add_argument("--status", default="open")
     c.add_argument("--priority", default="medium")
     c.add_argument("--tags", nargs="*")
     c.add_argument("--type")
