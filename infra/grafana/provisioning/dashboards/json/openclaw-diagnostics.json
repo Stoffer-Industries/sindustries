@@ -39,7 +39,7 @@
         {
           "expr": "sum(openclaw_message_processed_total)",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -82,7 +82,7 @@
         {
           "expr": "sum(openclaw_tokens_total)",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -125,7 +125,7 @@
         {
           "expr": "sum(openclaw_cost_usd_total)",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -169,7 +169,7 @@
         {
           "expr": "sum(openclaw_message_queued_total)",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -212,7 +212,7 @@
         {
           "expr": "sum(openclaw_webhook_error_total)",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -259,7 +259,7 @@
         {
           "expr": "sum(openclaw_session_stuck_total)",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -319,14 +319,14 @@
           "expr": "sum(increase(openclaw_tokens_total{openclaw_token=~\"input|cache_read\"}[$__rate_interval]))",
           "legendFormat": "input",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "sum(increase(openclaw_tokens_total{openclaw_token=\"output\"}[$__rate_interval]))",
           "legendFormat": "output",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -364,7 +364,7 @@
           "expr": "sum(rate(openclaw_cost_usd_total[5m])) by (model)",
           "legendFormat": "{{model}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -402,14 +402,14 @@
           "expr": "histogram_quantile(0.50, sum(rate(openclaw_context_tokens_bucket[$__rate_interval])) by (le, openclaw_context))",
           "legendFormat": "p50",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.95, sum(rate(openclaw_context_tokens_bucket[$__rate_interval])) by (le, openclaw_context))",
           "legendFormat": "p95",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -447,7 +447,7 @@
           "expr": "sum(increase(openclaw_tokens_total[$__rate_interval])) by (openclaw_model)",
           "legendFormat": "{{model}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -497,14 +497,14 @@
           "expr": "sum(rate(openclaw_message_queued_total[1m]))",
           "legendFormat": "queued",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "sum(rate(openclaw_message_processed_total[1m])) by (outcome)",
           "legendFormat": "{{outcome}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -542,21 +542,21 @@
           "expr": "histogram_quantile(0.50, rate(openclaw_message_duration_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p50",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.95, rate(openclaw_message_duration_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p95",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.99, rate(openclaw_message_duration_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p99",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -594,7 +594,7 @@
           "expr": "histogram_quantile(0.95, rate(openclaw_queue_depth_bucket[1m]))",
           "legendFormat": "p95 depth",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -631,14 +631,14 @@
           "expr": "sum(rate(openclaw_queue_lane_enqueue_total[1m])) by (lane)",
           "legendFormat": "enqueue {{lane}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "sum(rate(openclaw_queue_lane_dequeue_total[1m])) by (lane)",
           "legendFormat": "dequeue {{lane}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -676,14 +676,14 @@
           "expr": "histogram_quantile(0.50, rate(openclaw_queue_wait_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p50",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.95, rate(openclaw_queue_wait_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p95",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -733,21 +733,21 @@
           "expr": "histogram_quantile(0.50, sum(rate(openclaw_run_duration_ms_milliseconds_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p50",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.95, sum(rate(openclaw_run_duration_ms_milliseconds_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p95",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.99, sum(rate(openclaw_run_duration_ms_milliseconds_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p99",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -785,7 +785,7 @@
           "expr": "sum(rate(openclaw_run_attempt_total[5m])) by (attempt)",
           "legendFormat": "attempt {{attempt}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -835,7 +835,7 @@
           "expr": "sum(openclaw_session_state_total) by (state)",
           "legendFormat": "{{state}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -872,7 +872,7 @@
           "expr": "sum(openclaw_session_stuck_total) by (state)",
           "legendFormat": "{{state}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -910,7 +910,7 @@
           "expr": "histogram_quantile(0.95, rate(openclaw_session_stuck_age_ms_bucket[5m]))",
           "legendFormat": "p95 stuck age",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -961,14 +961,14 @@
           "expr": "sum(rate(openclaw_webhook_received_total[1m])) by (channel)",
           "legendFormat": "received {{channel}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "sum(rate(openclaw_webhook_error_total[1m])) by (channel)",
           "legendFormat": "error {{channel}}",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
@@ -1006,14 +1006,14 @@
           "expr": "histogram_quantile(0.50, rate(openclaw_webhook_duration_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p50",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         },
         {
           "expr": "histogram_quantile(0.95, rate(openclaw_webhook_duration_ms_milliseconds_bucket[5m]))",
           "legendFormat": "p95",
           "datasource": {
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           }
         }
       ],
