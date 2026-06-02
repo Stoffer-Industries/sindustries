@@ -1,0 +1,61 @@
+name: content-task-workflow
+
+args:
+  taskId:
+    required: true
+  tasksApiBaseUrl:
+    default: ${TASKS_API_BASE_URL}
+  sindustriesRepo:
+    default: /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+  ivyCapacityLimit:
+    default: 1
+  dryRun:
+    default: false
+  nudgeAfterHours:
+    default: 2
+
+steps:
+  - id: load_task
+    command: >-
+      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/crons/content-task-workflow/scripts/load_task.py
+      --base-url ${tasksApiBaseUrl}
+      --task-id ${taskId}
+      --json
+
+  - id: format_transition
+    command: >-
+      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/crons/content-task-workflow/scripts/format_transition.py
+      --base-url ${tasksApiBaseUrl}
+      --dry-run ${dryRun}
+      --json
+    stdin: $load_task.stdout
+
+  - id: capacity_transition
+    command: >-
+      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/crons/content-task-workflow/scripts/capacity_transition.py
+      --base-url ${tasksApiBaseUrl}
+      --ivy-capacity-limit ${ivyCapacityLimit}
+      --dry-run ${dryRun}
+      --json
+    stdin: $format_transition.stdout
+    condition: $format_transition.criteria_met
+
+  - id: pr_transition
+    command: >-
+      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/crons/content-task-workflow/scripts/pr_transition.py
+      --base-url ${tasksApiBaseUrl}
+      --nudge-after-hours ${nudgeAfterHours}
+      --dry-run ${dryRun}
+      --json
+    stdin: $capacity_transition.stdout
+    condition: $capacity_transition.criteria_met
+
+  - id: merge_transition
+    command: >-
+      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/crons/content-task-workflow/scripts/merge_transition.py
+      --base-url ${tasksApiBaseUrl}
+      --repo ${sindustriesRepo}
+      --dry-run ${dryRun}
+      --json
+    stdin: $pr_transition.stdout
+    condition: $pr_transition.criteria_met
