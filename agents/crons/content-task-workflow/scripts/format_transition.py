@@ -8,21 +8,10 @@ import sys
 import uuid
 from typing import Any
 
-from common import add_comment, dump_json, is_at, is_past, move_task, now_iso, patch_task, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
+from common import add_comment, dump_json, is_at, is_past, move_task, now_iso, patch_task, pr_heading_blocks, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
 
 REVIEW_LINK_RE = re.compile(r"(?:/Users/quinnstoffer/\.openclaw/workspace/)?brain/reviews/[^\s)\]]+\.md|https?://[^\s)\]]+", re.I)
-PR_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\bPR\b.*$", re.I | re.M)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+\S+", re.M)
-
-
-def pr_heading_blocks(description: str) -> list[str]:
-    matches = list(PR_HEADING_RE.finditer(description or ""))
-    blocks: list[str] = []
-    for idx, match in enumerate(matches):
-        start = match.end()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description)
-        blocks.append(description[start:end])
-    return blocks
 
 
 def check_format(task: dict[str, Any]) -> tuple[bool, list[str]]:

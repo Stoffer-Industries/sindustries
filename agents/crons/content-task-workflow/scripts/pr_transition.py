@@ -3,20 +3,27 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from common import (
     add_comment,
     dump_json,
     extract_ivy_pr_urls,
+    extract_pr_urls_from_text,
+    gh_pr_body,
+    gh_pr_ci_checks,
+    gh_pr_ci_state,
     hours_since,
     is_at,
     is_past,
     move_task,
     now_iso,
+    pr_heading_block_url_failures,
     read_first_json_value,
     refresh_task,
     status,
+    task_acceptance_criteria,
     transition_result,
     write_lobster_state,
 )
@@ -36,6 +43,46 @@ def maybe_nudge(task: dict, state: dict, nudge_after_hours: int) -> tuple[dict, 
     return state, "nudged_for_pr"
 
 
+def normalize_ac_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip().lower()
+
+
+def checked_pr_acceptance_criteria(pr_body: str) -> set[str]:
+    checked: set[str] = set()
+    for match in re.finditer(r"^\s*-\s*\[[xX]\]\s+(.+\S)\s*$", pr_body or "", re.M):
+        checked.add(normalize_ac_text(match.group(1)))
+    return checked
+
+
+def pr_heading_urls(task: dict) -> list[str]:
+    return extract_pr_urls_from_text(task.get("description") or "")
+
+
+def ci_failures_for_pr(url: str) -> tuple[list[str], list[dict[str, str]]]:
+    ci_state = gh_pr_ci_state(url)
+    checks = gh_pr_ci_checks(url)
+    if ci_state == "SUCCESS":
+        return [], checks
+    if not checks:
+        return [f"{url} has no CI status checks or CI status is unknown."], checks
+    failures = []
+    for check in checks:
+        state = check.get("state") or "UNKNOWN"
+        if state != "SUCCESS":
+            failures.append(f"{url} CI check `{check.get('name') or 'unnamed check'}` is {state}.")
+    if not failures:
+        failures.append(f"{url} CI status is {ci_state}.")
+    return failures, checks
+
+
+def ac_failures_for_pr(url: str, task_acs: list[str]) -> tuple[list[str], dict]:
+    body = gh_pr_body(url)
+    checked = checked_pr_acceptance_criteria(body)
+    missing = [ac for ac in task_acs if normalize_ac_text(ac) not in checked]
+    details = {"url": url, "checkedAcceptanceCriteria": sorted(checked), "missingAcceptanceCriteria": missing}
+    return [f"{url} PR description has unchecked/missing AC: {ac}" for ac in missing], details
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Doing -> Acceptance transition for Ivy PR detection")
     parser.add_argument("--base-url", default="")
@@ -49,6 +96,7 @@ def main() -> int:
     data = read_first_json_value(sys.stdin)
     task = data["task"]
     state = dict(data.get("lobster_state") or {})
+    description = task.get("description") or ""
 
     detected = extract_ivy_pr_urls(task)
     existing = [url for url in state.get("prUrls") or [] if isinstance(url, str)]
@@ -58,8 +106,43 @@ def main() -> int:
             pr_urls.append(url)
     state["prUrls"] = pr_urls
 
-    criteria_met = bool(pr_urls)
-    failures = [] if criteria_met else ["No `[ivy-prs]` task comment with a GitHub PR URL has been detected."]
+    failures: list[str] = []
+    pr_heading_failures = pr_heading_block_url_failures(description)
+    if pr_heading_failures:
+        failures.extend(pr_heading_failures)
+
+    heading_urls = pr_heading_urls(task)
+    for url in pr_urls:
+        if url not in heading_urls:
+            failures.append(f"{url} is recorded in Lobster state but missing from the task description PR heading blocks.")
+
+    if not pr_urls:
+        failures.append("No `[ivy-prs]` task comment with a GitHub PR URL has been detected.")
+
+    task_acs = task_acceptance_criteria(description)
+    pr_ci: list[dict] = []
+    pr_ac_details: list[dict] = []
+    if not task_acs:
+        failures.append("Task body has no acceptance criteria checkboxes to verify against PR descriptions.")
+
+    for url in pr_urls:
+        try:
+            ci_failures, checks = ci_failures_for_pr(url)
+            pr_ci.append({"url": url, "checks": checks})
+            failures.extend(ci_failures)
+        except Exception as exc:
+            failures.append(f"Could not inspect CI for {url}: {exc}")
+            pr_ci.append({"url": url, "error": str(exc)})
+        if task_acs:
+            try:
+                ac_failures, ac_details = ac_failures_for_pr(url, task_acs)
+                pr_ac_details.append(ac_details)
+                failures.extend(ac_failures)
+            except Exception as exc:
+                failures.append(f"Could not inspect PR description for {url}: {exc}")
+                pr_ac_details.append({"url": url, "error": str(exc)})
+
+    criteria_met = not failures
     already_past = is_past(task, "doing")
     action = "none"
 
@@ -95,7 +178,22 @@ def main() -> int:
     else:
         action = action if action != "none" else "criteria_not_met"
 
-    dump_json(transition_result(criteria_met, already_past, action, task, lobster_state=state, failures=failures, prUrls=pr_urls, current_status=status(task)))
+    dump_json(
+        transition_result(
+            criteria_met,
+            already_past,
+            action,
+            task,
+            lobster_state=state,
+            failures=failures,
+            prUrls=pr_urls,
+            prHeadingUrls=heading_urls,
+            acceptanceCriteria=task_acs,
+            prCi=pr_ci,
+            prAcceptanceCriteria=pr_ac_details,
+            current_status=status(task),
+        )
+    )
     return 0
 
 
