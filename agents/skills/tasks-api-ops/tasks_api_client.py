@@ -124,6 +124,8 @@ def cmd_create(args):
         payload["description"] = args.description
     if args.tags:
         payload["tags"] = args.tags
+    if getattr(args, "type", None) is not None:
+        payload["type"] = args.type
     print(json.dumps(api_request("POST", base, "/tasks", payload), indent=2))
 
 
@@ -208,6 +210,7 @@ def build_parser():
     c.add_argument("--status", default="todo")
     c.add_argument("--priority", default="medium")
     c.add_argument("--tags", nargs="*")
+    c.add_argument("--type")
     c.set_defaults(func=cmd_create)
 
     u = sub.add_parser("patch")
