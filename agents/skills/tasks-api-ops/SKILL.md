@@ -77,6 +77,46 @@ python3 tasks_api_client.py patch --id <task-id> --ready true
 python3 tasks_api_client.py archive --id <task-id>
 ```
 
+## Content task creation (weekly review approval)
+
+When Tom approves a weekly content review, create the task with `--type content` and use the following description format. Each change item must use a markdown checkbox (`- [ ]`).
+
+```bash
+python3 tasks_api_client.py create \
+  --title "SIndustries weekly content updates — YYYY-MM-DD" \
+  --priority high \
+  --type content \
+  --tags "weekly-review,content-ops" \
+  --description "$(cat <<'EOF'
+**Source:** brain/content/sindustries-weekly-content/YYYY-MM-DD.md
+
+**Review window:** YYYY-MM-DD to YYYY-MM-DD
+
+---
+
+## Quinn can execute
+
+- [ ] ADD/EDIT/REMOVE ...
+
+## Needs Tom approval
+
+- [ ] ADD/EDIT/REMOVE ...
+
+## Defer / needs more context
+
+- [ ] ...
+EOF
+)"
+```
+
+Rules:
+- `--type content` is required — the task will be rejected or miscategorised without it
+- Each change item from the review file becomes one `- [ ]` checkbox line
+- Omit sections that have no items rather than leaving them empty
+- `--tags "weekly-review,content-ops"` should always be included for weekly review tasks
+
+---
+
 ## Task transition check (heartbeat)
 
 Script that evaluates whether a task can transition to the next state; used during heartbeat to report readiness and failed criteria.
