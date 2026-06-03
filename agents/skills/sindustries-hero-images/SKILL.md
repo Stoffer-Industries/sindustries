@@ -9,7 +9,7 @@ Generate cinematic, ultra-premium hero images using the Sindustries brand prompt
 
 ## Model
 
-**openai/gpt-image-2** — hardcoded. Best quality available, 4K, up to 5 reference images.
+**openai/gpt-image-2** — hardcoded. Best quality available, 2K max, up to 5 reference images. Never use 4K — outputs exceed the 6MB limit.
 
 ## 3 Environment Variables
 
@@ -30,7 +30,7 @@ Generate cinematic, ultra-premium hero images using the Sindustries brand prompt
      --condensed
    ```
 2. The script outputs the full prompt and saves it to `brain/posts/heroes/{timestamp}-{object}.json`
-3. Call `image_generate` with model `openai/gpt-image-2`, aspect ratio `16:9`, size `2048x1152`
+3. Call `image_generate` with model `openai/gpt-image-2`, aspect ratio `16:9`, resolution `2K`, size `2048x1152`. Never use 4K.
 4. Save the output PNG to `brain/posts/heroes/`
 
 **Important:** Always use `--condensed` flag. The full brand prompt template causes timeouts with gpt-image-2.
