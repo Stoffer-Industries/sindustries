@@ -96,7 +96,7 @@ File structure:
 ```markdown
 # SIndustries Weekly Content — YYYY-MM-DD
 
-## Quinn can execute [PR #NN](https://github.com/Stoffer-Industries/sindustries/pull/NN)
+## Quinn can execute
 
 _Factual updates, status changes, currentLearning additions, release entries — no Tom needed._
 
@@ -104,7 +104,7 @@ _Factual updates, status changes, currentLearning additions, release entries —
 - ADD release — ...
 - ...
 
-## Needs Tom approval [PR #NN](https://github.com/Stoffer-Industries/sindustries/pull/NN)
+## Needs Tom approval
 
 _Narrative changes, summary rewrites, new experiments, strategic claims, first-person voice._
 
@@ -126,8 +126,6 @@ _Signals noted but insufficient detail to act on._
 [paste raw note bullets here, grouped by date]
 ```
 
-**Finding PR numbers:** Before writing the review file, check if PRs already exist for the current week's branches (`content/YYYY-MM-DD-quinn` and `content/YYYY-MM-DD-tom`). If they exist, include their numbers. If not yet created, use `PR #—` as a placeholder and the task creator (Quinn) will fill in the correct numbers when opening the PR.
-
 **Rules:**
 - If a section has no items, write `<!-- no items this week -->` rather than leaving it blank
 - Keep change items brief — one line each, enough for Tom to approve or redirect without reading paragraphs
@@ -147,7 +145,7 @@ Keep the notification to 2 lines maximum. Do not summarise all the change items 
 
 ## What NOT to do
 
-- Do not create Tasks API tasks — tasks are created only after Tom approves
+- Do not create Tasks API tasks — tasks are only created after Tom approves
 - Do not distil or classify notes with a separate LLM call — read and reason natively
 - Do not re-ingest the output review file as input on subsequent runs
 - Do not write vague items like "review the experiment" — every item must specify add/edit/remove and what changes
