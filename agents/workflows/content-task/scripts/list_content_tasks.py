@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PIPELINE = SCRIPT_DIR.parent / "content-task-workflow.lobster.yaml"
+PIPELINE = SCRIPT_DIR.parent / "content-task.yaml"
 
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -31,10 +31,10 @@ def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
         pipe.close()
 
 
-def run_lobster(task_id: str, capacity_limit: int, nudge_after_hours: int) -> dict:
+def run_workflow(task_id: str, capacity_limit: int, nudge_after_hours: int) -> dict:
     args_json = json.dumps({"taskId": task_id, "ivyCapacityLimit": capacity_limit, "nudgeAfterHours": nudge_after_hours})
     cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
-    log_debug("starting lobster pass for " + task_id)
+    log_debug("starting content-task pass for " + task_id)
     proc = subprocess.Popen(
         cmd,
         text=True,
@@ -58,9 +58,9 @@ def run_lobster(task_id: str, capacity_limit: int, nudge_after_hours: int) -> di
         try:
             result["envelope"] = json.loads(stdout)
         except json.JSONDecodeError as exc:
-            result["error"] = f"Could not parse Lobster JSON envelope: {exc}"
+            result["error"] = f"Could not parse content-task JSON envelope: {exc}"
     elif returncode != 0:
-        result["error"] = (stderr or stdout or "lobster run failed").strip()
+        result["error"] = (stderr or stdout or "content-task run failed").strip()
     return result
 
 
@@ -77,7 +77,7 @@ def discover_tasks(limit: int) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run one content task Lobster pass for every active content task")
+    parser = argparse.ArgumentParser(description="Run one content-task workflow pass for every active content task")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--capacity-limit", type=int, default=1)
     parser.add_argument("--nudge-after-hours", type=int, default=2)
@@ -85,7 +85,7 @@ def main() -> int:
     args = parser.parse_args()
 
     tasks = discover_tasks(args.limit)
-    results = [run_lobster(str(task["id"]), args.capacity_limit, args.nudge_after_hours) for task in tasks if task.get("id")]
+    results = [run_workflow(str(task["id"]), args.capacity_limit, args.nudge_after_hours) for task in tasks if task.get("id")]
     errors = [result for result in results if result.get("returncode") != 0 or result.get("error")]
     dump_json({"ok": not errors, "pipeline": str(PIPELINE), "count": len(tasks), "results": results, "errors": errors})
     return 0 if not errors else 1
