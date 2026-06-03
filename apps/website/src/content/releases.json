@@ -23,7 +23,7 @@
     "title": "Weekly content review pipeline",
     "slug": "weekly-content-review-pipeline",
     "releasedAt": "2026-06-01",
-    "summary": "An automated workflow that collects daily ops notes, distils them into a weekly review file, and creates structured content tasks ready for authoring and publication.",
+    "summary": "An automated workflow that collects daily ops notes, distils them into a weekly review file, and creates structured content tasks ready for authoring and publication to this website.",
     "type": "system",
     "links": [],
     "evidence": "Pipeline shipped 2026-06-01: daily ops note capture runs on each heartbeat cycle, weekly cron produces the review file and downstream content tasks.",
