@@ -18,5 +18,15 @@
     "links": [],
     "evidence": "Public homepage ships this as an existing release signal.",
     "visibility": "published"
+  },
+  {
+    "title": "Content-task workflow live",
+    "slug": "content-task-workflow",
+    "releasedAt": "2026-06-03",
+    "summary": "Reviews now route through ready and doing automatically, and active content work lands on Ivy's queue.",
+    "type": "system",
+    "links": [],
+    "evidence": "First end-to-end run completed via brain/reviews/test-content-workflow.md.",
+    "visibility": "draft"
   }
 ]
