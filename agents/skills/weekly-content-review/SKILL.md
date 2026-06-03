@@ -96,7 +96,7 @@ File structure:
 ```markdown
 # SIndustries Weekly Content — YYYY-MM-DD
 
-## Quinn can execute
+## Quinn can execute [PR #NN](https://github.com/Stoffer-Industries/sindustries/pull/NN)
 
 _Factual updates, status changes, currentLearning additions, release entries — no Tom needed._
 
@@ -104,7 +104,7 @@ _Factual updates, status changes, currentLearning additions, release entries —
 - ADD release — ...
 - ...
 
-## Needs Tom approval
+## Needs Tom approval [PR #NN](https://github.com/Stoffer-Industries/sindustries/pull/NN)
 
 _Narrative changes, summary rewrites, new experiments, strategic claims, first-person voice._
 
@@ -125,6 +125,8 @@ _Signals noted but insufficient detail to act on._
 
 [paste raw note bullets here, grouped by date]
 ```
+
+**Finding PR numbers:** Before writing the review file, check if PRs already exist for the current week's branches (`content/YYYY-MM-DD-quinn` and `content/YYYY-MM-DD-tom`). If they exist, include their numbers. If not yet created, use `PR #—` as a placeholder and the task creator (Quinn) will fill in the correct numbers when opening the PR.
 
 **Rules:**
 - If a section has no items, write `<!-- no items this week -->` rather than leaving it blank
