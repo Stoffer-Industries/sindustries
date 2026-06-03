@@ -44,28 +44,38 @@ def pr_heading_urls(task: dict) -> list[str]:
 
 
 def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
-    """Inject missing PR URLs under the first Tom/Quinn heading block that lacks a URL."""
+    """Inject PR URLs as markdown links into owner heading blocks in order.
+
+    First heading (Quinn) gets the first URL, second heading (Tom) gets the second URL.
+    Skips any URL that already appears in the description.
+    """
     if not pr_urls or not description:
         return description
     result = description
-    for url in pr_urls:
+    owner_matches = list(OWNER_HEADING_RE.finditer(result))
+    for idx, url in enumerate(pr_urls):
         if url in result:
             continue
-        # Find the first Tom/Quinn heading block that has no GitHub URL yet
-        matches = list(OWNER_HEADING_RE.finditer(result))
-        injected = False
-        for idx, match in enumerate(matches):
+        # PR number for display label
+        pr_num_match = re.search(r"pull/(\d+)", url or "")
+        pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
+        # Find the owner heading this URL should attach to
+        heading_idx = None
+        for h_idx, match in enumerate(owner_matches):
             start = match.end()
-            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(result)
+            end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else len(result)
             block = result[start:end]
             if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
-                # Insert URL on the line immediately after the heading
-                result = result[:start] + f"\n{url}" + result[start:]
-                injected = True
+                heading_idx = h_idx
                 break
-        if not injected:
-            # No suitable heading found — append to end
-            result = result.rstrip() + f"\n\n{url}\n"
+        if heading_idx is not None:
+            match = owner_matches[heading_idx]
+            start = match.end()
+            result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
+            # Refresh matches after mutation
+            owner_matches = list(OWNER_HEADING_RE.finditer(result))
+        else:
+            result = result.rstrip() + f"\n\n[{pr_label}]({url})\n"
     return result
 
 
