@@ -29,7 +29,8 @@ from common import (
 
 
 def normalize_ac_text(value: str) -> str:
-    return re.sub(r"\s+", " ", value or "").strip().lower()
+    # Lowercase, collapse whitespace, strip quote wrapper so "foo" and 'foo' both normalise to foo
+    return re.sub(r"[\"']+", "", re.sub(r"\s+", " ", value or "").strip().lower())
 
 
 def checked_pr_acceptance_criteria(pr_body: str) -> set[str]:
@@ -52,16 +53,22 @@ def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str
     if not pr_urls or not description:
         return description
     result = description
+    # Reverse the URL list so that when we assign sequentially to headings,
+    # the first URL (Tom's / quinn's section) lands on the Tom heading.
+    # Ivy's comment order: tom then quinn. Heading order: Quinn then Tom.
+    reversed_urls = list(reversed(pr_urls))
     owner_matches = list(OWNER_HEADING_RE.finditer(result))
-    for idx, url in enumerate(pr_urls):
+    for idx, url in enumerate(reversed_urls):
         if url in result:
             continue
-        # PR number for display label
         pr_num_match = re.search(r"pull/(\d+)", url or "")
         pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
-        # Find the owner heading this URL should attach to
+        # owner_matches are in description order (Quinn first, Tom second).
+        # reversed_urls gives us Tom's URL first, Quinn's URL second.
+        # We walk owner_matches in reverse so Tom's URL hits Tom's heading first.
         heading_idx = None
-        for h_idx, match in enumerate(owner_matches):
+        for h_idx in range(len(owner_matches) - 1, -1, -1):
+            match = owner_matches[h_idx]
             start = match.end()
             end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else len(result)
             block = result[start:end]
@@ -72,7 +79,6 @@ def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str
             match = owner_matches[heading_idx]
             start = match.end()
             result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
-            # Refresh matches after mutation
             owner_matches = list(OWNER_HEADING_RE.finditer(result))
         else:
             result = result.rstrip() + f"\n\n[{pr_label}]({url})\n"
