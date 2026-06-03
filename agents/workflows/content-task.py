@@ -70,7 +70,7 @@ def discover_tasks(limit: int) -> list[dict]:
     seen: set[str] = set()
     for state in ["open", "ready", "doing", "acceptance"]:
         for task in list_tasks(limit=limit, status=state):
-            if task.get("type") != "content":
+            if task.get("taskType") != "content":
                 continue
             task_id = str(task.get("id") or "")
             if task_id and task_id not in seen:

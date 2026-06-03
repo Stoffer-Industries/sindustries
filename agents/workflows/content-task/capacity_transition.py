@@ -15,7 +15,7 @@ def check_capacity(task: dict[str, Any], capacity_limit: int) -> tuple[bool, lis
     if assignee.lower() != "ivy":
         return False, ["Task must be assigned to Ivy before it can move to Doing."]
     doing = list_tasks(limit=100, status="doing", assignee="Ivy")
-    unblocked = [t for t in doing if t.get("blocked") is not True and t.get("type") == "content" and str(t.get("id")) != str(task.get("id"))]
+    unblocked = [t for t in doing if t.get("blocked") is not True and t.get("taskType") == "content" and str(t.get("id")) != str(task.get("id"))]
     if len(unblocked) >= capacity_limit:
         return False, [f"{assignee} already has {len(unblocked)} unblocked content task(s) in Doing; capacity limit is {capacity_limit}."]
     return True, []
