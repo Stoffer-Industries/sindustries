@@ -11,7 +11,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = SCRIPT_DIR / "content-task"
-PIPELINE = SCRIPT_DIR / "content-task.lobster.yaml"
+PIPELINE = SCRIPT_DIR / "scripts/content-task.lobster.yaml"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))

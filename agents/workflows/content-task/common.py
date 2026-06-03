@@ -99,7 +99,6 @@ def parse_lobster_state(task: dict[str, Any]) -> dict[str, Any]:
             latest = parsed
     latest.setdefault("version", 1)
     latest.setdefault("prUrls", [])
-    latest.setdefault("lastNudgedAt", None)
     return latest
 
 
