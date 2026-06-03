@@ -7,7 +7,7 @@ const MAX_LIMIT = 10000;
 
 const validStatuses = new Set(['open', 'ready', 'doing', 'acceptance', 'done']);
 const validPriorities = new Set(['low', 'medium', 'high', 'urgent']);
-const validAssignees = new Set(['Tom', 'Quinn', 'Rowan', 'Lox']);
+const validAssignees = new Set(['Tom', 'Quinn', 'Rowan', 'Lox', 'Ivy']);
 const validSorts = new Set(['priority', 'createdAt', 'updatedAt', 'dueAt', 'statusChangedAt']);
 
 const priorityOrder = {
