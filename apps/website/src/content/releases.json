@@ -18,5 +18,15 @@
     "links": [],
     "evidence": "Public homepage ships this as an existing release signal.",
     "visibility": "published"
+  },
+  {
+    "title": "Weekly content review pipeline",
+    "slug": "weekly-content-review-pipeline",
+    "releasedAt": "2026-06-01",
+    "summary": "Daily ops notes are now distilled into a weekly content review file and a Tasks API content task, which the content-task workflow picks up automatically.",
+    "type": "system",
+    "links": [],
+    "evidence": "Pipeline runs via codebases/sindustries/agents/crons/sindustries-weekly-content/ and produced the first review at brain/content/sindustries-weekly-content/2026-06-02.md.",
+    "visibility": "draft"
   }
 ]
