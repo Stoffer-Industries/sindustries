@@ -25,6 +25,7 @@ AUTHOR = "Lobster"
 STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
 PR_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)", re.I)
 PR_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\bPR\b.*$", re.I | re.M)
+OWNER_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\b(Tom|Quinn)\b.*$", re.I | re.M)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[([ xX])\]\s+(.+\S)\s*$", re.M)
 
 
@@ -198,6 +199,29 @@ def pr_heading_blocks(description: str) -> list[str]:
 def pr_heading_block_url_failures(description: str) -> list[str]:
     failures: list[str] = []
     matches = list(PR_HEADING_RE.finditer(description or ""))
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description or "")
+        block = (description or "")[start:end]
+        heading = match.group(0).strip()
+        if not extract_pr_urls_from_text(heading + "\n" + block):
+            failures.append(f"{heading} has no GitHub PR URL.")
+    return failures
+
+
+def owner_heading_blocks(description: str) -> list[str]:
+    matches = list(OWNER_HEADING_RE.finditer(description or ""))
+    blocks: list[str] = []
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description)
+        blocks.append(description[start:end])
+    return blocks
+
+
+def owner_heading_block_url_failures(description: str) -> list[str]:
+    failures: list[str] = []
+    matches = list(OWNER_HEADING_RE.finditer(description or ""))
     for idx, match in enumerate(matches):
         start = match.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description or "")
