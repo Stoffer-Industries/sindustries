@@ -29,8 +29,12 @@ from common import (
 
 
 def normalize_ac_text(value: str) -> str:
-    # Lowercase, collapse whitespace, strip quote wrapper so "foo" and 'foo' both normalise to foo
-    return re.sub(r"[\"']+", "", re.sub(r"\s+", " ", value or "").strip().lower())
+    # Collapse whitespace, strip quote/em-dash wrappers, normalise dashes.
+    # "ADD release — \"Weekly...\"" → "add release - weekly..."
+    v = re.sub(r"\s+", " ", value or "").strip().lower()
+    v = re.sub(r"[\"']+", "", v)  # strip quotes
+    v = re.sub(r"\s*[-—]\s*", " -", v)  # normalise em-dash/hyphen to hyphen with space
+    return re.sub(r"\s+", " ", v).strip()
 
 
 def checked_pr_acceptance_criteria(pr_body: str) -> set[str]:
