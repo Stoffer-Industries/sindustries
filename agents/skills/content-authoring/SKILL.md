@@ -80,6 +80,28 @@ These are non-negotiable:
 4. **No first-person Tom copy without explicit approval.** Write in third person by default.
 5. **No startup theater.** No "disrupting", "revolutionising", "game-changing".
 6. **No private context.** Don't mention inMusic, family, salary, or anything that isn't already public.
+7. **No implementation detail.** The audience is the public — they don't know or care about internal tooling. Never mention: local file paths (`brain/`, `~/.openclaw/`, `/workspace/`), internal service names or ports, agent names (Quinn, Rowan, Lobster), or infrastructure detail. Describe what a system *does for the business*. Reference other published Systems or Stacks by their public names instead.
+
+---
+
+## Images
+
+Experiments and systems **require an image**. If you are adding or updating one of these content types, you must provide the image file in the same PR.
+
+**How to create images:**
+Use the `sindustries-hero-images` skill:
+```
+~/.openclaw/workspace/codebases/sindustries/agents/skills/sindustries-hero-images/SKILL.md
+```
+
+**Where to save:**
+- Systems → `apps/website/public/brand/systems/<slug>-hero.jpg`
+- Experiments → `apps/website/public/brand/studio/<slug>-hero.jpg`
+
+**JSON field:**
+Set `"image": "/brand/systems/<slug>-hero.jpg"` (or `/brand/studio/...`).
+
+A PR with an `image` field that points to a non-existent file will fail CI. Do not use a placeholder path.
 
 ---
 
@@ -94,8 +116,8 @@ Each output maps to a JSON file in that directory:
 
 | Type | File | Required fields |
 |---|---|---|
-| experiment | `experiments.json` | title, slug, status, summary, why, successCriteria, updatedAt, visibility |
-| system | `systems.json` | title, slug, status, summary, problem, howItWorks, updatedAt, visibility |
+| experiment | `experiments.json` | title, slug, status, summary, why, successCriteria, updatedAt, image, visibility |
+| system | `systems.json` | title, slug, status, summary, problem, howItWorks, updatedAt, image, visibility |
 | release | `releases.json` | title, slug, releasedAt, summary, type, visibility |
 | story | `stories/[slug].json` | title, slug, dek, body, source, visibility |
 | stack | `stacks.json` | title, slug, category, summary, updatedAt, visibility |
