@@ -7,18 +7,15 @@ import re
 import sys
 
 from common import (
-    add_comment,
     dump_json,
     extract_ivy_pr_urls,
     extract_pr_urls_from_text,
     gh_pr_body,
     gh_pr_ci_checks,
     gh_pr_ci_state,
-    hours_since,
     is_at,
     is_past,
     move_task,
-    now_iso,
     pr_heading_block_url_failures,
     read_first_json_value,
     refresh_task,
@@ -27,20 +24,6 @@ from common import (
     transition_result,
     write_lobster_state,
 )
-
-
-def maybe_nudge(task: dict, state: dict, nudge_after_hours: int) -> tuple[dict, str | None]:
-    elapsed = hours_since(state.get("lastNudgedAt"))
-    if elapsed is not None and elapsed < nudge_after_hours:
-        return state, None
-    state = dict(state)
-    state["lastNudgedAt"] = now_iso()
-    add_comment(
-        str(task["id"]),
-        "[lobster-nudge] Ivy PRs are not detected yet. Add a task comment tagged `[ivy-prs]` with the GitHub PR URL when implementation PRs are ready.",
-    )
-    write_lobster_state(str(task["id"]), state, note="Recorded content task workflow nudge.")
-    return state, "nudged_for_pr"
 
 
 def normalize_ac_text(value: str) -> str:
@@ -86,7 +69,6 @@ def ac_failures_for_pr(url: str, task_acs: list[str]) -> tuple[list[str], dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Doing -> Acceptance transition for Ivy PR detection")
     parser.add_argument("--base-url", default="")
-    parser.add_argument("--nudge-after-hours", type=int, default=24)
     parser.add_argument("--dry-run", default="false")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -165,12 +147,7 @@ def main() -> int:
             task = move_task(task, "doing", "Ivy PR criteria are no longer met: " + "; ".join(failures), state)
             action = "moved_back_to_doing"
     elif not criteria_met and is_at(task, "doing"):
-        state, nudge_action = (state, None) if str(args.dry_run).lower() == "true" else maybe_nudge(task, state, max(1, args.nudge_after_hours))
-        if nudge_action:
-            task = refresh_task(str(task["id"]))
-            action = nudge_action
-        else:
-            action = "criteria_not_met"
+        action = "criteria_not_met"
     elif criteria_met and already_past:
         action = action if action != "none" else "already_past"
     elif criteria_met:
