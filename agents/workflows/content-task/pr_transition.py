@@ -13,6 +13,7 @@ from common import (
     extract_ivy_pr_urls,
     extract_pr_urls_from_text,
     gh_pr_body,
+    gh_pr_assignees,
     gh_pr_ci_checks,
     gh_pr_ci_state,
     is_at,
@@ -271,6 +272,18 @@ def main() -> int:
                     ac_fails, ac_details = ac_failures_for_pr(url, heading_idx, task_acs, description)
                     pr_ac_details.append(ac_details)
                     failures.extend(ac_fails)
+                    # Assignee check: heading_idx 0 = Quinn's section, 1 = Tom's section
+                    assignees = gh_pr_assignees(url)
+                    expected_assignees = {
+                        0: {"quinnstoffer"},  # Quinn's PR → assign to Quinn
+                        1: {"Stoff81"},       # Tom's PR → assign to Tom
+                    }
+                    expected = expected_assignees.get(heading_idx, set())
+                    if expected and not expected.intersection(set(assignees)):
+                        failures.append(
+                            f"{url} is not assigned to {expected} — "
+                            f"PR must be assigned to the owner ({'Quinn' if heading_idx == 0 else 'Tom'})."
+                        )
             except Exception as exc:
                 failures.append(f"Could not inspect PR description for {url}: {exc}")
                 pr_ac_details.append({"url": url, "error": str(exc)})
