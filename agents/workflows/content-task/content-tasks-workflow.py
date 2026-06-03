@@ -10,10 +10,11 @@ import threading
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PIPELINE = SCRIPT_DIR.parent / "content-task.yaml"
+SCRIPTS_DIR = SCRIPT_DIR / "scripts"
+PIPELINE = SCRIPTS_DIR / "content-task.lobster.yaml"
 
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 from common import dump_json, list_tasks, log_debug  # noqa: E402
 
