@@ -279,6 +279,13 @@ def gh_pr_view(url: str, fields: list[str]) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def gh_pr_assignees(url: str) -> list[str]:
+    """Return list of GitHub login names assigned to the PR."""
+    data = gh_pr_view(url, ["assignees"])
+    assignees = data.get("assignees") or []
+    return [a.get("login") for a in assignees if a.get("login")]
+
+
 def gh_api(path: str) -> Any:
     return _run_gh_json(["gh", "api", path])
 
