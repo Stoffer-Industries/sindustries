@@ -117,25 +117,23 @@ def url_to_heading_index(url: str, pr_urls: list[str]) -> int | None:
 def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
     """Inject PR URLs as markdown links into owner heading blocks in order.
 
-    First heading (Quinn) gets the first URL, second heading (Tom) gets the second URL.
-    Skips any URL that already appears in the description.
+    pr_urls order: [Tom's PR URL, Quinn's PR URL] (from Ivy's [ivy-prs] comment).
+    Heading order: ## Quinn can execute (idx 0), ## Needs Tom approval (idx 1).
+    So the first URL (Tom's) goes to heading idx 1, second URL (Quinn's) goes to heading idx 0.
+    We walk h_idx in reverse to find the first empty heading from the end.
     """
     if not pr_urls or not description:
         return description
     result = description
-    # Reverse the URL list so that when we assign sequentially to headings,
-    # the first URL (Tom's / quinn's section) lands on the Tom heading.
-    # Ivy's comment order: tom then quinn. Heading order: Quinn then Tom.
-    reversed_urls = list(reversed(pr_urls))
+    # Do NOT reverse pr_urls — order is already [Tom's, Quinn's].
+    # Walking h_idx in reverse (1→0) assigns first URL to Tom heading, second to Quinn heading.
     owner_matches = list(OWNER_HEADING_RE.finditer(result))
-    for idx, url in enumerate(reversed_urls):
+    for url in pr_urls:
         if url in result:
             continue
         pr_num_match = re.search(r"pull/(\d+)", url or "")
         pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
-        # owner_matches are in description order (Quinn first, Tom second).
-        # reversed_urls gives us Tom's URL first, Quinn's URL second.
-        # We walk owner_matches in reverse so Tom's URL hits Tom's heading first.
+        # Walk h_idx in reverse: h_idx=1 (Tom heading) first, then h_idx=0 (Quinn heading).
         heading_idx = None
         for h_idx in range(len(owner_matches) - 1, -1, -1):
             match = owner_matches[h_idx]
