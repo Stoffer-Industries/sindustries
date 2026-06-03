@@ -10,8 +10,15 @@ from typing import Any
 
 from common import add_comment, dump_json, is_at, is_past, move_task, now_iso, patch_task, pr_heading_blocks, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
 
-REVIEW_LINK_RE = re.compile(r"(?:/Users/quinnstoffer/\.openclaw/workspace/)?brain/reviews/[^\s)\]]+\.md|https?://[^\s)\]]+", re.I)
+REVIEW_FILE_RE = re.compile(r"(?:/Users/quinnstoffer/\.openclaw/workspace/)?(brain/reviews/[^\s)\]]+\.md)", re.I)
+REVIEW_URL_RE = re.compile(r"https?://[^\s)\]]+", re.I)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+\S+", re.M)
+WORKSPACE = "/Users/quinnstoffer/.openclaw/workspace"
+
+
+def find_review_file(description: str) -> str | None:
+    m = REVIEW_FILE_RE.search(description)
+    return m.group(1) if m else None
 
 
 def check_format(task: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -20,7 +27,13 @@ def check_format(task: dict[str, Any]) -> tuple[bool, list[str]]:
     if not description.strip():
         failures.append("Task body is empty.")
         return False, failures
-    if not REVIEW_LINK_RE.search(description):
+    review_path = find_review_file(description)
+    has_review_url = bool(REVIEW_URL_RE.search(description))
+    if review_path:
+        full_path = os.path.join(WORKSPACE, review_path)
+        if not os.path.isfile(full_path):
+            failures.append(f"Review file does not exist: {review_path}")
+    elif not has_review_url:
         failures.append("Task body must include a review file link, usually `brain/reviews/...md`.")
     blocks = pr_heading_blocks(description)
     if not blocks:
