@@ -7,6 +7,7 @@ import re
 import sys
 
 from common import (
+    CHECKBOX_RE,
     OWNER_HEADING_RE,
     dump_json,
     extract_ivy_pr_urls,
