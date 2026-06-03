@@ -54,5 +54,19 @@
     "links": [],
     "image": "/brand/systems/design-system-hero.png",
     "visibility": "published"
+  },
+  {
+    "title": "Content ops pipeline",
+    "slug": "content-ops-pipeline",
+    "tag": "Content operations",
+    "status": "operating",
+    "summary": "A signal-to-publish loop that turns daily ops notes into weekly content reviews and Tasks API content tasks.",
+    "problem": "Operating signal is captured in chat and workspace notes, but converting it into reviewed, approved, and published website content requires explicit routing and ownership.",
+    "howItWorks": "Heartbeat appends structured rows to brain/ops/notes/YYYY-MM-DD.md. A weekly cron distils the rolling seven-day window into brain/content/sindustries-weekly-content/YYYY-MM-DD.md and creates a Tasks API content task. The content-task workflow routes that task through ready, doing, and acceptance with PR-based authoring, and merges the result on approval.",
+    "proof": "First weekly cycle produced brain/content/sindustries-weekly-content/2026-06-02.md and the linked Tasks API content task, which Ivy is now authoring against.",
+    "updatedAt": "2026-06-01",
+    "links": [],
+    "image": "/brand/systems/content-ops-pipeline.png",
+    "visibility": "draft"
   }
 ]
