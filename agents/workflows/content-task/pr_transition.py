@@ -7,7 +7,7 @@ import re
 import sys
 
 from common import (
-    PR_HEADING_RE,
+    OWNER_HEADING_RE,
     dump_json,
     extract_ivy_pr_urls,
     extract_pr_urls_from_text,
@@ -17,8 +17,8 @@ from common import (
     is_at,
     is_past,
     move_task,
+    owner_heading_block_url_failures,
     patch_task,
-    pr_heading_block_url_failures,
     read_first_json_value,
     refresh_task,
     status,
@@ -44,15 +44,15 @@ def pr_heading_urls(task: dict) -> list[str]:
 
 
 def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
-    """Append any missing PR URLs to the first PR heading block that lacks a URL."""
+    """Inject missing PR URLs under the first Tom/Quinn heading block that lacks a URL."""
     if not pr_urls or not description:
         return description
     result = description
     for url in pr_urls:
         if url in result:
             continue
-        # Find the first PR heading block that has no GitHub URL yet
-        matches = list(PR_HEADING_RE.finditer(result))
+        # Find the first Tom/Quinn heading block that has no GitHub URL yet
+        matches = list(OWNER_HEADING_RE.finditer(result))
         injected = False
         for idx, match in enumerate(matches):
             start = match.end()
@@ -124,7 +124,7 @@ def main() -> int:
         description = updated_description
 
     failures: list[str] = []
-    pr_heading_failures = pr_heading_block_url_failures(description)
+    pr_heading_failures = owner_heading_block_url_failures(description)
     if pr_heading_failures:
         failures.extend(pr_heading_failures)
 

@@ -36,7 +36,7 @@ steps:
       --dry-run ${dryRun}
       --json
     stdin: $format_transition.stdout
-    condition: $format_transition.criteria_met
+    condition: $format_transition.json.criteria_met
 
   - id: pr_transition
     command: >-
@@ -45,7 +45,7 @@ steps:
       --dry-run ${dryRun}
       --json
     stdin: $capacity_transition.stdout
-    condition: $capacity_transition.criteria_met
+    condition: $capacity_transition.json.criteria_met
 
   - id: merge_transition
     command: >-
@@ -55,4 +55,4 @@ steps:
       --dry-run ${dryRun}
       --json
     stdin: $pr_transition.stdout
-    condition: $pr_transition.criteria_met
+    condition: $pr_transition.json.criteria_met

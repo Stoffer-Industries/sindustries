@@ -8,15 +8,15 @@ import sys
 import uuid
 from typing import Any
 
-from common import add_comment, dump_json, is_at, is_past, move_task, now_iso, patch_task, pr_heading_blocks, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
+from common import OWNER_HEADING_RE, add_comment, dump_json, is_at, is_past, move_task, now_iso, owner_heading_blocks, patch_task, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
 
-REVIEW_FILE_RE = re.compile(r"(?:/Users/quinnstoffer/\.openclaw/workspace/)?(brain/reviews/[^\s)\]]+\.md)", re.I)
+REVIEW_FILE_RE = re.compile(r"(?:/Users/quinnstoffer/\.openclaw/workspace/)?(brain/[^\s)\]]+\.md)", re.I)
 REVIEW_URL_RE = re.compile(r"https?://[^\s)\]]+", re.I)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+\S+", re.M)
 WORKSPACE = "/Users/quinnstoffer/.openclaw/workspace"
 
 
-def find_review_file(description: str) -> str | None:
+def find_source_file(description: str) -> str | None:
     m = REVIEW_FILE_RE.search(description)
     return m.group(1) if m else None
 
@@ -27,19 +27,19 @@ def check_format(task: dict[str, Any]) -> tuple[bool, list[str]]:
     if not description.strip():
         failures.append("Task body is empty.")
         return False, failures
-    review_path = find_review_file(description)
+    source_path = find_source_file(description)
     has_review_url = bool(REVIEW_URL_RE.search(description))
-    if review_path:
-        full_path = os.path.join(WORKSPACE, review_path)
+    if source_path:
+        full_path = os.path.join(WORKSPACE, source_path)
         if not os.path.isfile(full_path):
-            failures.append(f"Review file does not exist: {review_path}")
+            failures.append(f"Source file does not exist: {source_path}")
     elif not has_review_url:
-        failures.append("Task body must include a review file link, usually `brain/reviews/...md`.")
-    blocks = pr_heading_blocks(description)
+        failures.append("Task body must include a source file link (brain/...md) or a URL.")
+    blocks = owner_heading_blocks(description)
     if not blocks:
-        failures.append("Task body must include one or more headings containing `PR`.")
+        failures.append("Task body must include one or more headings containing 'Tom' or 'Quinn'.")
     elif not all(CHECKBOX_RE.search(block) for block in blocks):
-        failures.append("Each PR heading must have acceptance criteria checkbox lines beneath it.")
+        failures.append("Each Tom/Quinn heading must have acceptance criteria checkbox lines beneath it.")
     return not failures, failures
 
 
