@@ -328,6 +328,29 @@ def gh_pr_ci_state(url: str) -> str:
     return "UNKNOWN"
 
 
+def mark_quinn_acs_done(task_id: str, description: str, base_url: str | None = None) -> str:
+    """Mark all unchecked checkboxes in the Quinn can execute section as done.
+
+    Returns the updated description string.
+    """
+    quinn_heading = "## Quinn can execute"
+    idx = description.find(quinn_heading)
+    if idx == -1:
+        return description
+    # Find next heading or end of string
+    next_heading = re.search(r"\n## ", description[idx + len(quinn_heading):])
+    if next_heading:
+        end = idx + len(quinn_heading) + next_heading.start()
+    else:
+        end = len(description)
+    section = description[idx:end]
+    updated_section = re.sub(r"\- \[ \]", "- [x]", section)
+    updated_description = description[:idx] + updated_section + description[end:]
+    if updated_description != description:
+        patch_task(task_id, {"description": updated_description}, base_url=base_url)
+    return updated_description
+
+
 def gh_pr_body(url: str) -> str:
     pr = gh_pr_view(url, ["body"])
     body = pr.get("body")
