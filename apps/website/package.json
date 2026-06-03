@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:content-links": "node scripts/check-content-links.js"
   },
   "dependencies": {
     "@sindustries/design-tokens": "file:../../packages/design-tokens",
