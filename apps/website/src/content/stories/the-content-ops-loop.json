@@ -1,0 +1,12 @@
+{
+  "title": "The content ops loop",
+  "slug": "the-content-ops-loop",
+  "dek": "How SIndustries built a system that turns daily work into weekly public signal — without it becoming a second job.",
+  "body": "The problem with building in public is that it takes time you don't have.\n\nYou're already doing the work. Shipping things, making decisions, running experiments. The useful signal is all there — in commits, in notes, in the day-to-day operational record of what's actually happening. The gap isn't content. It's conversion.\n\nFor a long time, turning that work into something publishable meant sitting down, writing it up, reviewing it, and posting it. That step kept getting deprioritised. Not because it wasn't valuable — because it was manual, and everything else was more urgent.\n\nSo we built a system to close the gap.\n\nThe loop works like this: daily signals are captured automatically as work happens. Each week, those notes are distilled into a structured review — what shipped, what changed, what's worth telling the world about. From that review, content tasks are created and assigned for authoring. The authored drafts come back for a single approval pass, then merge.\n\nThe human time in the loop is one review, once a week.\n\nWhat changed isn't just efficiency. It's reliability. Public signal that depends on someone finding time to write it is actually no signal at all — it's aspirational. Signal that runs on a weekly cadence, from a system that captures work as it happens, is something you can actually build on.\n\nThis content update is the first full cycle of that loop. The system captured the week, distilled it, created the tasks, authored the content, and delivered it for approval. The work you're reading is the output.",
+  "source": "internal",
+  "topics": ["SIndustries", "content-ops", "systems", "build-in-public"],
+  "draftedAt": "2026-06-03",
+  "publishedAt": null,
+  "displayOrder": 3,
+  "visibility": "draft"
+}
