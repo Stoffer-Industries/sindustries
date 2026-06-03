@@ -14,8 +14,8 @@ def check_capacity(task: dict[str, Any], capacity_limit: int) -> tuple[bool, lis
     assignee = (task.get("assignee") or "").strip()
     if assignee.lower() != "ivy":
         return False, ["Task must be assigned to Ivy before it can move to Doing."]
-    doing = list_tasks(limit=100, status="doing", assignee="Ivy", taskType="content")
-    unblocked = [t for t in doing if t.get("blocked") is not True and str(t.get("id")) != str(task.get("id"))]
+    doing = list_tasks(limit=100, status="doing", assignee="Ivy")
+    unblocked = [t for t in doing if t.get("blocked") is not True and t.get("type") == "content" and str(t.get("id")) != str(task.get("id"))]
     if len(unblocked) >= capacity_limit:
         return False, [f"{assignee} already has {len(unblocked)} unblocked content task(s) in Doing; capacity limit is {capacity_limit}."]
     return True, []
@@ -50,7 +50,8 @@ def main() -> int:
         else:
             task = move_task(task, "doing", "Ivy capacity criteria are met; recorded workflowRunId.", state)
             action = "moved_ready_to_doing"
-    elif not criteria_met and already_past:
+    elif not criteria_met and is_at(task, "doing"):
+        # Only roll back doing→ready; never touch acceptance or later states
         if str(args.dry_run).lower() == "true":
             action = "dry_run_move_back_to_ready"
         else:

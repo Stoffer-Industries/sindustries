@@ -10,8 +10,8 @@ import threading
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCRIPTS_DIR = SCRIPT_DIR / "scripts"
-PIPELINE = SCRIPTS_DIR / "content-task.lobster.yaml"
+SCRIPTS_DIR = SCRIPT_DIR / "content-task"
+PIPELINE = SCRIPT_DIR / "content-task.lobster.yaml"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -32,8 +32,8 @@ def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
         pipe.close()
 
 
-def run_workflow(task_id: str, capacity_limit: int, nudge_after_hours: int) -> dict:
-    args_json = json.dumps({"taskId": task_id, "ivyCapacityLimit": capacity_limit, "nudgeAfterHours": nudge_after_hours})
+def run_workflow(task_id: str, capacity_limit: int) -> dict:
+    args_json = json.dumps({"taskId": task_id, "ivyCapacityLimit": capacity_limit})
     cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
     log_debug("starting content-task pass for " + task_id)
     proc = subprocess.Popen(
@@ -69,7 +69,9 @@ def discover_tasks(limit: int) -> list[dict]:
     tasks: list[dict] = []
     seen: set[str] = set()
     for state in ["open", "ready", "doing", "acceptance"]:
-        for task in list_tasks(limit=limit, status=state, taskType="content"):
+        for task in list_tasks(limit=limit, status=state):
+            if task.get("type") != "content":
+                continue
             task_id = str(task.get("id") or "")
             if task_id and task_id not in seen:
                 seen.add(task_id)
@@ -81,12 +83,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run one content-task workflow pass for every active content task")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--capacity-limit", type=int, default=1)
-    parser.add_argument("--nudge-after-hours", type=int, default=2)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     tasks = discover_tasks(args.limit)
-    results = [run_workflow(str(task["id"]), args.capacity_limit, args.nudge_after_hours) for task in tasks if task.get("id")]
+    results = [run_workflow(str(task["id"]), args.capacity_limit) for task in tasks if task.get("id")]
     errors = [result for result in results if result.get("returncode") != 0 or result.get("error")]
     dump_json({"ok": not errors, "pipeline": str(PIPELINE), "count": len(tasks), "results": results, "errors": errors})
     return 0 if not errors else 1
