@@ -218,15 +218,15 @@ def task_acceptance_criteria(description: str) -> list[str]:
 
 
 def extract_ivy_pr_urls(task: dict[str, Any]) -> list[str]:
-    urls: list[str] = []
+    # Only read the most recent [ivy-prs] comment — newer comment supersedes older ones
+    latest = None
     for comment in task_comments(task):
         text = comment_text(comment)
-        if IVY_PRS_TAG not in text:
-            continue
-        for url in extract_pr_urls_from_text(text):
-            if url not in urls:
-                urls.append(url)
-    return urls
+        if IVY_PRS_TAG in text:
+            latest = text
+    if not latest:
+        return []
+    return list(dict.fromkeys(extract_pr_urls_from_text(latest)))
 
 
 def parse_pr_url(url: str) -> tuple[str, str, str] | None:
