@@ -39,6 +39,48 @@ def normalize_ac_text(value: str) -> str:
     return re.sub(r"\s+", " ", v).strip()
 
 
+def ac_signature(ac_text: str) -> str:
+    """Extract the ACTION SLUG (action + resource path) from an AC string.
+
+    Both task-format (UPPERCASE) and PR-format (lowercase) are handled.
+    Examples:
+      'ADD story/content-review-pipeline — add first-person narrative...'
+      → 'add story/content-review-pipeline'
+      'add system/content-ops-pipeline — publish a new operating system...'
+      → 'add system/content-ops-pipeline'
+      'EDIT system/openclaw — update proof: ...'
+      → 'edit system/openclaw'
+    """
+    m = re.match(r"^([A-Za-z]+\s+[\w/.-]+)", ac_text.strip())
+    if m:
+        return m.group(1).lower()
+    return normalize_ac_text(ac_text)
+
+
+def owner_sections(description: str) -> list[tuple[str, int]]:
+    """Return (owner_heading_block, heading_index) for each owner heading found.
+
+    Blocks are ordered as they appear in the description (Quinn first, Tom second).
+    """
+    sections: list[tuple[str, int]] = []
+    heading_indices: list[tuple[int, re.Match]] = [
+        (m.start(), m) for m in OWNER_HEADING_RE.finditer(description)
+    ]
+    for idx, (start, match) in enumerate(heading_indices):
+        end = heading_indices[idx + 1][0] if idx + 1 < len(heading_indices) else len(description)
+        sections.append((description[start:end], idx))
+    return sections
+
+
+def acs_for_heading(block_text: str) -> list[str]:
+    """Extract unchecked AC checkbox texts from a section block."""
+    return [
+        m.group(1)
+        for m in CHECKBOX_RE.finditer(block_text)
+        if m.group(0).strip().startswith("-[ ]") or m.group(0).strip().startswith("* [ ]")
+    ]
+
+
 def checked_pr_acceptance_criteria(pr_body: str) -> set[str]:
     checked: set[str] = set()
     for match in re.finditer(r"^\s*-\s*\[[xX]\]\s+(.+\S)\s*$", pr_body or "", re.M):
@@ -46,8 +88,29 @@ def checked_pr_acceptance_criteria(pr_body: str) -> set[str]:
     return checked
 
 
+def checked_pr_ac_signatures(pr_body: str) -> set[str]:
+    """Extract AC slugs from checked PR acceptance criteria."""
+    checked: set[str] = set()
+    for match in re.finditer(r"^\s*-\s*\[[xX]\]\s+(.+\S)\s*$", pr_body or "", re.M):
+        checked.add(ac_signature(match.group(1)))
+    return checked
+
+
 def pr_heading_urls(task: dict) -> list[str]:
     return extract_pr_urls_from_text(task.get("description") or "")
+
+
+def url_to_heading_index(url: str, pr_urls: list[str]) -> int | None:
+    """Map a PR URL to its position in the ordered pr_urls list (0=first heading, 1=second heading).
+
+    Ivy's [ivy-prs] comment order is: tom: #N (first), quinn: #M (second).
+    Heading order is: Quinn (index 0), Tom (index 1).
+    So reversed index: pr_urls[0] (Tom's) → heading 1, pr_urls[1] (Quinn's) → heading 0.
+    """
+    if not url or url not in pr_urls:
+        return None
+    pos = pr_urls.index(url)
+    return 1 - pos  # 0→1, 1→0
 
 
 def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
@@ -108,12 +171,39 @@ def ci_failures_for_pr(url: str) -> tuple[list[str], list[dict[str, str]]]:
     return failures, checks
 
 
-def ac_failures_for_pr(url: str, task_acs: list[str]) -> tuple[list[str], dict]:
-    body = gh_pr_body(url)
-    checked = checked_pr_acceptance_criteria(body)
-    missing = [ac for ac in task_acs if normalize_ac_text(ac) not in checked]
-    details = {"url": url, "checkedAcceptanceCriteria": sorted(checked), "missingAcceptanceCriteria": missing}
-    return [f"{url} PR description has unchecked/missing AC: {ac}" for ac in missing], details
+def ac_failures_for_pr(url: str, heading_idx: int, task_acs: list[str], description: str) -> tuple[list[str], dict]:
+    """Check ACs for one PR, scoped to the owner heading section.
+
+    - heading_idx 0 (Quinn): check slugs from task ACs that appear in the Quinn section.
+    - heading_idx 1 (Tom): check slugs from task ACs that appear in the Tom section.
+    Only ACs belonging to the PR's owner section are validated against the PR.
+    """
+    sections = owner_sections(description)
+    if heading_idx >= len(sections):
+        return [f"{url} has no corresponding owner heading in task description."], {}
+
+    block_text = sections[heading_idx][0]
+    section_acs = acs_for_heading(block_text)
+
+    if not section_acs:
+        return [], {"url": url, "headingIndex": heading_idx, "checkedSignatures": [], "missingSignatures": []}
+
+    section_signatures = {ac_signature(ac) for ac in section_acs}
+    checked_sigs = checked_pr_ac_signatures(gh_pr_body(url))
+
+    missing = [sig for sig in section_signatures if sig not in checked_sigs]
+    checked_normalized = checked_pr_acceptance_criteria(gh_pr_body(url))
+
+    details = {
+        "url": url,
+        "headingIndex": heading_idx,
+        "sectionACs": section_acs,
+        "sectionSignatures": sorted(section_signatures),
+        "checkedSignatures": sorted(checked_sigs),
+        "missingSignatures": missing,
+        "checkedAcceptanceCriteria": sorted(checked_normalized),
+    }
+    return [f"{url} PR is missing AC: {sig}" for sig in missing], details
 
 
 def main() -> int:
@@ -174,9 +264,14 @@ def main() -> int:
             pr_ci.append({"url": url, "error": str(exc)})
         if task_acs:
             try:
-                ac_failures, ac_details = ac_failures_for_pr(url, task_acs)
-                pr_ac_details.append(ac_details)
-                failures.extend(ac_failures)
+                heading_idx = url_to_heading_index(url, pr_urls)
+                if heading_idx is None:
+                    failures.append(f"{url} has no mapped owner heading — cannot determine which ACs to validate.")
+                    pr_ac_details.append({"url": url, "error": "no heading index"})
+                else:
+                    ac_fails, ac_details = ac_failures_for_pr(url, heading_idx, task_acs, description)
+                    pr_ac_details.append(ac_details)
+                    failures.extend(ac_fails)
             except Exception as exc:
                 failures.append(f"Could not inspect PR description for {url}: {exc}")
                 pr_ac_details.append({"url": url, "error": str(exc)})
