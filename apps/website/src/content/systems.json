@@ -7,8 +7,8 @@
     "summary": "The operating layer for agents, memory, tools, messaging, and human-in-the-loop work.",
     "problem": "Delegated agent work needs continuity, tools, memory, and human review boundaries to become operationally useful.",
     "howItWorks": "OpenClaw connects agents to workspace files, skills, messaging, tasks, and runtime context so work can move through explicit handoffs.",
-    "proof": "Used as the active operating layer for SIndustries agents and task execution.",
-    "updatedAt": "2026-05-28",
+    "proof": "Active operating layer for SIndustries agents, task execution, daily ops note capture, and weekly content review workflows.",
+    "updatedAt": "2026-06-01",
     "links": [],
     "image": "/brand/systems/openclaw-lobster.jpg",
     "visibility": "published"
@@ -35,8 +35,8 @@
     "summary": "Task state, ownership, comments, reviews, and heartbeat-driven operating discipline.",
     "problem": "Agent work needs a shared source of truth for ownership, status, review, and handoff.",
     "howItWorks": "The Tasks API tracks tasks, comments, tags, readiness, and status transitions for SIndustries work.",
-    "proof": "Current SIndustries implementation tasks are tracked through the API and used by agent heartbeat workflows.",
-    "updatedAt": "2026-05-28",
+    "proof": "SIndustries tasks are tracked through the API and driven by agent heartbeat and cron workflows. Task automation tooling is now maintained in the SIndustries repo as the canonical location.",
+    "updatedAt": "2026-06-01",
     "links": [],
     "image": "/brand/systems/tasks-api-hero.png",
     "visibility": "published"
