@@ -54,5 +54,19 @@
     "links": [],
     "image": "/brand/systems/design-system-hero.png",
     "visibility": "published"
+  },
+  {
+    "title": "Content Ops Pipeline",
+    "slug": "content-ops-pipeline",
+    "tag": "Content operating layer",
+    "status": "operating",
+    "summary": "A system that turns daily operational signals into published website content — without manual coordination.",
+    "problem": "Building a product studio generates constant signal: shipped work, decisions, experiments, lessons. None of it reaches a public audience unless someone manually converts notes into content. That conversion was the bottleneck.",
+    "howItWorks": "Daily signals are captured automatically as work happens. Each week, those notes are distilled into a structured review that identifies what's worth publishing and who needs to approve it. Content tasks are created automatically, assigned for authoring, and tracked through a review-and-merge workflow. Ops activity becomes public signal on a weekly cadence, with a single human approval step.",
+    "proof": "Pipeline shipped 2026-06-01. The first full weekly cycle ran the week of 2026-05-27, producing this content update.",
+    "updatedAt": "2026-06-01",
+    "links": [],
+    "image": "/brand/systems/content-ops-pipeline.png",
+    "visibility": "draft"
   }
 ]
