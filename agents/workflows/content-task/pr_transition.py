@@ -29,11 +29,13 @@ from common import (
 
 
 def normalize_ac_text(value: str) -> str:
-    # Collapse whitespace, strip quote/em-dash wrappers, normalise dashes.
-    # "ADD release — \"Weekly...\"" → "add release - weekly..."
+    # Lowercase, collapse whitespace, strip straight quotes and double quotes.
+    # Only touch dashes that are surrounded by spaces (em-dash / word-boundary hyphens).
     v = re.sub(r"\s+", " ", value or "").strip().lower()
-    v = re.sub(r"[\"']+", "", v)  # strip quotes
-    v = re.sub(r"\s*[-—]\s*", " -", v)  # normalise em-dash/hyphen to hyphen with space
+    v = re.sub(r"['\"]+", "", v)  # strip quote chars
+    # Normalise em-dash and spaced hyphens: "foo — bar" or "foo - bar" → "foo - bar"
+    v = re.sub(r"\s+[-—]\s+", " - ", v)
+    # Collapse any remaining multiple spaces
     return re.sub(r"\s+", " ", v).strip()
 
 
