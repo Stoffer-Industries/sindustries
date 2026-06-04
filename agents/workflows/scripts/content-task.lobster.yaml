@@ -15,14 +15,14 @@ args:
 steps:
   - id: load_task
     command: >-
-      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-task/load_task.py
+      python3 ${sindustriesRepo}/agents/workflows/content-task/load_task.py
       --base-url ${tasksApiBaseUrl}
       --task-id ${taskId}
       --json
 
   - id: format_transition
     command: >-
-      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-task/format_transition.py
+      python3 ${sindustriesRepo}/agents/workflows/content-task/format_transition.py
       --base-url ${tasksApiBaseUrl}
       --dry-run ${dryRun}
       --json
@@ -30,7 +30,7 @@ steps:
 
   - id: capacity_transition
     command: >-
-      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-task/capacity_transition.py
+      python3 ${sindustriesRepo}/agents/workflows/content-task/capacity_transition.py
       --base-url ${tasksApiBaseUrl}
       --ivy-capacity-limit ${ivyCapacityLimit}
       --dry-run ${dryRun}
@@ -40,7 +40,7 @@ steps:
 
   - id: pr_transition
     command: >-
-      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-task/pr_transition.py
+      python3 ${sindustriesRepo}/agents/workflows/content-task/pr_transition.py
       --base-url ${tasksApiBaseUrl}
       --dry-run ${dryRun}
       --json
@@ -49,7 +49,7 @@ steps:
 
   - id: merge_transition
     command: >-
-      python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-task/merge_transition.py
+      python3 ${sindustriesRepo}/agents/workflows/content-task/merge_transition.py
       --base-url ${tasksApiBaseUrl}
       --repo ${sindustriesRepo}
       --dry-run ${dryRun}
