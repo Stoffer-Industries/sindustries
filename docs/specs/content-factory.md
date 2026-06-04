@@ -11,11 +11,12 @@
 The content factory is the operating system for keeping the SIndustries website alive. As work happens — experiments ship, systems evolve, lessons land — the factory turns internal progress into public signal without Tom having to manually remember every update.
 
 The core loop:
-1. Quinn captures candidate notes during the week
-2. Tom adds weekly context via a Lobster resume prompt
-3. A weekly review is produced and approved items become Tasks API content tasks
-4. Ivy picks up content tasks, writes the copy, and opens PRs
-5. Quinn and Tom review and merge
+1. Quinn captures candidate notes during the week as daily ops notes
+2. A weekly review is produced from those notes for Tom's triage
+3. Tom approves, rejects, or redirects review items
+4. Approved items become Tasks API content tasks
+5. Ivy picks up content tasks, writes the copy, and opens PRs
+6. Quinn and Tom review and merge
 
 Nothing publishes without review. Nothing requires Tom to write copy.
 
@@ -27,8 +28,8 @@ Nothing publishes without review. Nothing requires Tom to write copy.
 
 - Captures content signals during the week (heartbeat)
 - Runs the weekly editorial sweep (cron, every Friday 4pm NZST)
-- Prompts Tom for weekly input before finalising the review
-- Creates content tasks in the Tasks API from approved review items
+- Posts the weekly review location for Tom's triage
+- Creates content tasks in the Tasks API after Tom approves review items
 - Reviews and merges Quinn-approval PRs
 - Runs the content-task Lobster each heartbeat to drive tasks forward
 
@@ -48,9 +49,9 @@ Quinn does not write final website copy. She is the orchestrator, not the author
 
 ### Tom — Approval Authority
 
-- Provides weekly context before the review is finalised
+- Provides context, approvals, and redirects during weekly review triage
+- Reviews the generated weekly review artifact before content tasks are created
 - Approves and merges Tom-approval PRs (strategic copy, stories, first-person voice)
-- Reviews Quinn's weekly review artifact before content tasks are created
 
 ### The Lobster (content-task workflow)
 
@@ -71,6 +72,7 @@ Bounded bets and explorations. Website placement: Studio, optionally Signals.
 {
   "title": "...",
   "slug": "...",
+  "tag": "...",
   "status": "idea | active | paused | shipped | killed",
   "summary": "...",
   "why": "...",
@@ -94,6 +96,7 @@ Repeatable operating assets that compound. Website placement: Systems, optionall
 {
   "title": "...",
   "slug": "...",
+  "tag": "...",
   "status": "designing | building | operating | retired",
   "summary": "...",
   "problem": "...",
@@ -137,10 +140,10 @@ Narrative posts: founder notes, lessons, build-in-public reflections. Website pl
   "slug": "...",
   "dek": "...",
   "body": "...",
-  "source": "original | x-thread | bookmark-review | project-retro | release-note",
+  "source": "internal | original | x-thread | bookmark-review | project-retro | release-note",
   "topics": [],
   "draftedAt": "YYYY-MM-DD",
-  "publishedAt": "YYYY-MM-DD",
+  "publishedAt": "YYYY-MM-DD | null",
   "canonicalUrl": "...",
   "displayOrder": 0,
   "visibility": "draft | review | published | archived"
@@ -158,7 +161,6 @@ Tools and operating choices behind the company. Website placement: Stacks.
 ```json
 {
   "name": "...",
-  "slug": "...",
   "category": "agent | model | infra | app | workflow | design",
   "summary": "...",
   "whyWeUseIt": "...",
@@ -177,22 +179,31 @@ File: `apps/website/src/content/stacks.json`
 
 ### During the week (Quinn heartbeat)
 
-Quinn's heartbeat appends short candidate notes to the current weekly content review file under a `Daily notes` section. One line per signal. Format: `[content-type] [slug if known] — [what changed and why it matters]`.
+Quinn appends short candidate notes to daily ops note files. One line per signal, with enough context for the weekly cron to understand it without session history.
 
-File location: `brain/reviews/website-content/YYYY-MM-DD.md`
+File location: `brain/ops/notes/YYYY-MM-DD.md`
+
+Format:
+
+```markdown
+- [YYYY-MM-DD] **<system or experiment slug>** — <what happened or changed> | why: <why this is content-relevant> | ref: <memory file, brain file, or workspace path relevant to this note>
+```
 
 ### Friday 4pm NZST (weekly cron)
 
 1. Cron fires the weekly review prompt
-2. Quinn prompts Tom: *"What changed this week that SIndustries should remember?"*
-3. Tom's reply (via Lobster resume token) is bundled into the review notes
-4. Quinn produces the weekly review with exactly two sections:
-   - `Needs approval from Tom`
-   - `Needs approval from Quinn`
-   - (plus `Daily notes` if raw appends exist)
-5. Review is posted to the Sindustries channel for Tom to read and respond
-6. Tom approves items (or requests changes)
+2. Quinn reads the last 7 days of `brain/ops/notes/*.md`
+3. Quinn compares the notes against current website content
+4. Quinn writes the weekly review with these sections:
+   - `Quinn can execute`
+   - `Needs Tom approval`
+   - `Defer / needs more context`
+   - `Reference — Daily notes collected (...)`
+5. Quinn posts a short notification with the review file path
+6. Tom approves items, redirects them, or provides missing context
 7. Approved items become content tasks in the Tasks API
+
+Review file location: `brain/content/sindustries-weekly-content/YYYY-MM-DD.md`
 
 ### Content task creation
 
@@ -208,7 +219,7 @@ python3 tasks_api_client.py create \
 Task description format:
 
 ```
-**Source:** brain/reviews/website-content/YYYY-MM-DD.md
+**Source:** brain/content/sindustries-weekly-content/YYYY-MM-DD.md
 
 **Review window:** YYYY-MM-DD to YYYY-MM-DD
 
@@ -221,6 +232,10 @@ Task description format:
 ## Needs Tom approval
 
 - [ ] ADD/EDIT/REMOVE ...
+
+## Defer / needs more context
+
+- [ ] ...
 ```
 
 ---
@@ -235,12 +250,12 @@ The Lobster evaluates one task per pass and applies at most one transition.
 
 | Transition | Criteria |
 |---|---|
-| `open → ready` | Task body has ACs under PR headings and a source review file link |
-| `ready → doing` | Ivy's current `doing` task count is below capacity limit (default: 1) |
-| `doing → acceptance` | Ivy has posted `[ivy-prs]` comment; PR URLs recorded on task metadata |
-| `acceptance → done` | All PRs merged; branches cleaned up |
+| `open → ready` | Task body has a source `brain/...md` file or URL, plus one or more Tom/Quinn owner headings with checkbox ACs. Lobster assigns the task to Ivy. |
+| `ready → doing` | Task is assigned to Ivy and Ivy's current unblocked `doing` content task count is below the capacity limit (default: 1). |
+| `doing → acceptance` | Ivy has posted the latest `[ivy-prs]` comment; Lobster records the PR URLs, injects them under the owner headings if missing, verifies every owner heading has a PR URL, verifies PR CI is successful, verifies each PR body has checked AC signatures for that owner section, and verifies Quinn/Tom PRs are assigned to `quinnstoffer`/`Stoff81`. |
+| `acceptance → done` | All recorded PRs are merged to `main` and no outstanding review decision or inline review comments still require Ivy revision. |
 
-If earlier criteria regress, the Lobster moves the task backwards and posts a comment explaining why.
+If earlier criteria regress, the Lobster moves the task backwards and posts a comment explaining why. While a task is in `acceptance`, the Lobster can also route PR review feedback back to Ivy by posting a task comment.
 
 **Lobster invocation (Quinn heartbeat):**
 
@@ -259,9 +274,11 @@ Each heartbeat, Ivy queries:
 
 ```
 assignee=Ivy AND status=doing AND taskType=content
+assignee=Ivy AND status=acceptance AND taskType=content
+assignee=Ivy AND blocked=true
 ```
 
-For each task, checks if `[ivy-prs]` comment already posted. If not, proceeds to produce content and open PRs.
+For each `doing` content task, Ivy checks if `[ivy-prs]` has already been posted. If not, she proceeds to produce content and open PRs. For each `acceptance` task, she monitors linked PRs for review feedback and updates the same branches. Blocked tasks are escalated to Quinn rather than resolved directly by Ivy.
 
 ### PR naming
 
@@ -286,9 +303,9 @@ Immediately after opening PRs, Ivy posts a task comment:
 [ivy-prs] tom: <url>, quinn: <url>
 ```
 
-(or just one URL if only one PR was opened)
+If both PRs exist, keep the order `tom` then `quinn`. If only one PR was opened, include just that labelled URL.
 
-The Lobster parses this comment on the next pass to advance the task to `acceptance`.
+The Lobster parses the latest `[ivy-prs]` comment on the next pass, records the URLs in Lobster state, injects the links into the task description owner sections when needed, and advances the task to `acceptance` once all `doing → acceptance` criteria pass.
 
 ### Review iteration
 
@@ -342,8 +359,8 @@ agents/skills/sindustries-hero-images/SKILL.md
 ```
 
 Save to:
-- Systems: `apps/website/public/brand/systems/<slug>-hero.jpg`
-- Experiments: `apps/website/public/brand/studio/<slug>-hero.jpg`
+- Systems: `apps/website/public/brand/systems/<slug>-hero.jpg` or `.png`
+- Experiments: `apps/website/public/brand/studio/<slug>-hero.jpg` or `.png`
 
 A PR with an `image` field pointing to a non-existent file will fail CI.
 
@@ -374,6 +391,7 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 | What | Where |
 |---|---|
 | Content files | `apps/website/src/content/` |
+| Content notes skill | `agents/skills/content-notes/SKILL.md` |
 | Content authoring skill | `agents/skills/content-authoring/SKILL.md` |
 | Weekly content review skill | `agents/skills/weekly-content-review/SKILL.md` |
 | Lobster YAML | `agents/workflows/scripts/content-task.lobster.yaml` |
@@ -381,12 +399,14 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 | Transition scripts | `agents/workflows/content-task/` |
 | Hero image skill | `agents/skills/sindustries-hero-images/SKILL.md` |
 | Ivy agent docs | `workspace: agents/ivy/` |
-| Weekly review files | `workspace: brain/reviews/website-content/YYYY-MM-DD.md` |
+| Daily ops notes | `workspace: brain/ops/notes/YYYY-MM-DD.md` |
+| Weekly review files | `workspace: brain/content/sindustries-weekly-content/YYYY-MM-DD.md` |
 
 ---
 
 ## Known Gaps
 
-- `canonicalUrl` field defined in spec for stories but not yet populated in content files or skill field mapping — relevant when stories appear on external platforms (X threads, etc.)
+- Story files are loaded and rendered, but story JSON is not schema-validated in `apps/website/src/content/index.js` yet.
+- `canonicalUrl` is optional for stories and populated only when there is an external canonical source.
 - Content authoring skill field mapping table shows minimum fields only; Ivy should refer to the JSON schema examples in this doc for the full field list
-- Weekly review is currently delivered as a channel message, not a PR against `brain/reviews/` — the PR-based review flow is the target model but not yet implemented
+- Some supporting docs still have stale wording or paths: Ivy workspace docs point at older source/spec paths (`brain/reviews/...` or `brain/specs/...`), and the content-notes skill summary says the weekly cron creates tasks even though the current weekly-review skill only writes the review file. This `content-factory` spec should become the canonical reference going forward.
