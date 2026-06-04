@@ -77,9 +77,9 @@ def owner_sections(description: str) -> list[tuple[str, int]]:
 def acs_for_heading(block_text: str) -> list[str]:
     """Extract unchecked AC checkbox texts from a section block."""
     return [
-        m.group(1)
+        m.group(2)
         for m in CHECKBOX_RE.finditer(block_text)
-        if m.group(0).strip().startswith("-[ ]") or m.group(0).strip().startswith("* [ ]")
+        if m.group(1) == " "
     ]
 
 
@@ -102,17 +102,24 @@ def pr_heading_urls(task: dict) -> list[str]:
     return extract_pr_urls_from_text(task.get("description") or "")
 
 
-def url_to_heading_index(url: str, pr_urls: list[str]) -> int | None:
-    """Map a PR URL to its position in the ordered pr_urls list (0=first heading, 1=second heading).
+def url_to_heading_index(url: str, pr_urls: list[str], description: str = "") -> int | None:
+    """Map a PR URL to its owner heading index.
+
+    Prefers scanning the owner sections in the description to find which block contains
+    the URL (reliable regardless of how many PRs exist). Falls back to the reversed-position
+    formula when description is unavailable (requires exactly 2 URLs to be correct).
 
     Ivy's [ivy-prs] comment order is: tom: #N (first), quinn: #M (second).
     Heading order is: Quinn (index 0), Tom (index 1).
-    So reversed index: pr_urls[0] (Tom's) → heading 1, pr_urls[1] (Quinn's) → heading 0.
     """
     if not url or url not in pr_urls:
         return None
+    if description:
+        for idx, (block_text, _) in enumerate(owner_sections(description)):
+            if url in block_text:
+                return idx
     pos = pr_urls.index(url)
-    return 1 - pos  # 0→1, 1→0
+    return 1 - pos  # fallback: pr_urls[0] (Tom's) → 1, pr_urls[1] (Quinn's) → 0
 
 
 def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
@@ -264,7 +271,7 @@ def main() -> int:
             pr_ci.append({"url": url, "error": str(exc)})
         if task_acs:
             try:
-                heading_idx = url_to_heading_index(url, pr_urls)
+                heading_idx = url_to_heading_index(url, pr_urls, description)
                 if heading_idx is None:
                     failures.append(f"{url} has no mapped owner heading — cannot determine which ACs to validate.")
                     pr_ac_details.append({"url": url, "error": "no heading index"})

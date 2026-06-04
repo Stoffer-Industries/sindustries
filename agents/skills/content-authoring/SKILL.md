@@ -77,10 +77,10 @@ These are non-negotiable:
 1. **Specific beats clever.** "Reduced deploy time from 45 min to 8 min" beats "dramatically faster deploys".
 2. **Proof beats promise.** Link evidence. If there's no evidence, say so rather than imply it.
 3. **No fake certainty.** Don't write "proven" or "best-in-class" without data.
-4. **No first-person Tom copy without explicit approval.** Write in third person by default.
+4. **No first-person Tom copy without explicit approval** — except in stories, where first-person voice is fine and quotes are welcome. Stories are routed for Tom's approval via PRs before publishing.
 5. **No startup theater.** No "disrupting", "revolutionising", "game-changing".
 6. **No private context.** Don't mention inMusic, family, salary, or anything that isn't already public.
-7. **No implementation detail.** The audience is the public — they don't know or care about internal tooling. Never mention: local file paths (`brain/`, `~/.openclaw/`, `/workspace/`), internal service names or ports, agent names (Quinn, Rowan, Lobster), or infrastructure detail. Describe what a system *does for the business*. Reference other published Systems or Stacks by their public names instead.
+7. **No implementation detail.** The audience is the public — they don't know or care about internal tooling. Never mention: local file paths (`brain/`, `~/.openclaw/`, `/workspace/`), internal service names or ports, or infrastructure detail. Agent names (Ivy, Rowan, Quinn) are fine to use — they add personality. Describe what a system *does for the business*. Reference other published Systems or Stacks by their public names instead.
 
 ---
 

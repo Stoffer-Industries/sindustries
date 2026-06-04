@@ -143,18 +143,6 @@ Keep the notification to 2 lines maximum. Do not summarise all the change items 
 
 ---
 
-## Step 7 — Assign PRs
-
-After opening PRs, assign each one to the relevant owner:
-- **Quinn's PR** (the one from `## Quinn can execute`) → assign to `quinnstoffer`
-- **Tom's PR** (the one from `## Needs Tom approval`) → assign to `Stoff81`
-
-Use `gh pr edit <url> --add-assignee <username>` for each PR.
-
-This is mandatory before the task can move to acceptance — unassigned PRs will fail the acceptance check.
-
----
-
 ## What NOT to do
 
 - Do not create Tasks API tasks — tasks are only created after Tom approves
