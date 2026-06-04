@@ -27,18 +27,18 @@ Nothing publishes without review. Nothing requires Tom to write copy.
 ### Quinn — Orchestrator
 
 - Captures content signals during the week (heartbeat)
-- Runs the weekly editorial sweep (cron, every Friday 4pm NZST)
+- Runs the weekly editorial sweep via the `sindustries-weekly-content` cron prompt
 - Posts the weekly review location for Tom's triage
 - Creates content tasks in the Tasks API after Tom approves review items
 - Reviews and merges Quinn-approval PRs
-- Runs the content-task Lobster each heartbeat to drive tasks forward
+- Runs the content-task workflow from heartbeat; the wrapper discovers active content tasks and drives each through the Lobster step chain
 
-Quinn does not write final website copy. She is the orchestrator, not the author.
+Quinn normally does not write final website copy. She is the orchestrator, not the author. The `content-authoring` skill still allows Quinn to handle one-off content tasks directly when explicitly needed.
 
 ### Ivy — Content Agent
 
 - Discovers assigned content tasks via her own heartbeat
-- Produces all website copy: card copy, long-form, meta description, title/dek
+- Produces website copy for normal content tasks: card copy, long-form, meta description, title/dek
 - Authors both PRs (Tom-approval and Quinn-approval) under her own GitHub identity (`ivystoffer`)
 - Monitors PRs for review comments and iterates
 - Posts `[ivy-prs]` task comment so the Lobster can detect her work
@@ -55,7 +55,7 @@ Quinn does not write final website copy. She is the orchestrator, not the author
 
 ### The Lobster (content-task workflow)
 
-A resumable workflow runner that drives content tasks through their lifecycle. Quinn's heartbeat fires one Lobster pass per active content task.
+A resumable workflow runner that drives content tasks through their lifecycle. Quinn's heartbeat runs the `content-task.py` wrapper, which discovers all active content tasks and runs the Lobster step chain for each task.
 
 **Script:** `agents/workflows/scripts/content-task.lobster.yaml`  
 **Entry point:** `agents/workflows/content-task.py`
@@ -189,7 +189,7 @@ Format:
 - [YYYY-MM-DD] **<system or experiment slug>** — <what happened or changed> | why: <why this is content-relevant> | ref: <memory file, brain file, or workspace path relevant to this note>
 ```
 
-### Friday 4pm NZST (weekly cron)
+### Weekly cron
 
 1. Cron fires the weekly review prompt
 2. Quinn reads the last 7 days of `brain/ops/notes/*.md`
@@ -246,18 +246,18 @@ Task description format:
 open → ready → doing → acceptance → done
 ```
 
-The Lobster evaluates one task per pass and applies at most one transition.
+The `content-task.py` wrapper discovers active `content` tasks in `open`, `ready`, `doing`, and `acceptance`, then runs the Lobster step chain for each one. A task can pass through multiple consecutive gates in one wrapper run when later criteria are already satisfied.
 
 | Transition | Criteria |
 |---|---|
 | `open → ready` | Task body has a source `brain/...md` file or URL, plus one or more Tom/Quinn owner headings with checkbox ACs. Lobster assigns the task to Ivy. |
 | `ready → doing` | Task is assigned to Ivy and Ivy's current unblocked `doing` content task count is below the capacity limit (default: 1). |
 | `doing → acceptance` | Ivy has posted the latest `[ivy-prs]` comment; Lobster records the PR URLs, injects them under the owner headings if missing, verifies every owner heading has a PR URL, verifies PR CI is successful, verifies each PR body has checked AC signatures for that owner section, and verifies Quinn/Tom PRs are assigned to `quinnstoffer`/`Stoff81`. |
-| `acceptance → done` | All recorded PRs are merged to `main` and no outstanding review decision or inline review comments still require Ivy revision. |
+| `acceptance → done` | All recorded PRs are merged to `main`. Before merge, the current implementation treats `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or any returned inline review comments on an unmerged PR as Ivy revision work and routes that feedback back to Ivy. |
 
 If earlier criteria regress, the Lobster moves the task backwards and posts a comment explaining why. While a task is in `acceptance`, the Lobster can also route PR review feedback back to Ivy by posting a task comment.
 
-**Lobster invocation (Quinn heartbeat):**
+**Workflow invocation (Quinn heartbeat):**
 
 ```bash
 TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 \
@@ -270,15 +270,15 @@ TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 \
 
 ### Discovery
 
-Each heartbeat, Ivy queries:
+Each heartbeat, Ivy queries Tasks API by assignee/status:
 
 ```
-assignee=Ivy AND status=doing AND taskType=content
-assignee=Ivy AND status=acceptance AND taskType=content
+assignee=Ivy AND status=doing
+assignee=Ivy AND status=acceptance
 assignee=Ivy AND blocked=true
 ```
 
-For each `doing` content task, Ivy checks if `[ivy-prs]` has already been posted. If not, she proceeds to produce content and open PRs. For each `acceptance` task, she monitors linked PRs for review feedback and updates the same branches. Blocked tasks are escalated to Quinn rather than resolved directly by Ivy.
+Ivy's workflow is scoped to content tasks; the current CLI query does not expose a `taskType` filter, so Ivy filters by task type after reading the returned tasks. For each `doing` content task, Ivy checks if `[ivy-prs]` has already been posted. If not, she proceeds to produce content and open PRs. For each `acceptance` task, she monitors linked PRs for review feedback and updates the same branches. Blocked tasks are escalated to Quinn rather than resolved directly by Ivy.
 
 ### PR naming
 
@@ -408,5 +408,6 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 
 - Story files are loaded and rendered, but story JSON is not schema-validated in `apps/website/src/content/index.js` yet.
 - `canonicalUrl` is optional for stories and populated only when there is an external canonical source.
-- Content authoring skill field mapping table shows minimum fields only; Ivy should refer to the JSON schema examples in this doc for the full field list
+- Content authoring skill field mapping table shows minimum fields only; Ivy should refer to the JSON schema examples in this doc for the full field list.
+- The content-authoring skill is stricter than this spec in one place: it routes release entries as `medium` risk/Tom approval, while the website content contribution guide and this spec allow Quinn to approve low-risk release entries for already-completed public work.
 - Some supporting docs still have stale wording or paths: Ivy workspace docs point at older source/spec paths (`brain/reviews/...` or `brain/specs/...`), and the content-notes skill summary says the weekly cron creates tasks even though the current weekly-review skill only writes the review file. This `content-factory` spec should become the canonical reference going forward.
