@@ -25,14 +25,15 @@
     "status": "active",
     "summary": "Short-form public signal to build distribution, sharpen narrative, and learn what people respond to.",
     "why": "Distribution is a structural problem. Without an audience or a reliable channel, every other experiment runs in a vacuum. Getting early signal about what earns attention is more valuable than optimising content quality in isolation.\n\nX/Twitter is the first channel because the audience overlap with builders, founders, and technical practitioners is highest. The format — short-form threads and notes — is low-friction to produce and easy to iterate.\n\nThe goal isn't growth for its own sake. It's to understand which topics, formats, and claims earn useful engagement from people who might eventually become customers, collaborators, or advocates.",
-    "successCriteria": "A repeatable posting cadence is established and maintained for at least 30 days. Each piece of content generates observable signal: impressions, replies, follows, or link clicks.\n\nBy the end of the first cycle, I should be able to answer: What topics generate the most engagement from the right audience? What formats work best (threads vs. single posts vs. images)? What claims or framings earn the strongest reactions?\n\nThe secondary outcome is narrative sharpening — publishing forces clarity that internal thinking doesn't.",
+    "successCriteria": "A repeatable posting cadence is established and maintained for at least 30 days. Each piece of content generates observable signal: impressions, replies, follows, or link clicks.\n\nBy the end of the first cycle, I should be able to answer: What topics generate the most engagement from the right audience? What formats work best (threads vs. single posts vs. images)? What claims or framings earn the strongest reactions?\n\nThe secondary outcome is narrative sharpening — publishing forces clarity that internal thinking doesn't.\n\nCadence target revised in light of the content factory: the website ships a structured weekly update on a reliable cycle. Social posting should treat each weekly drop as source material for short-form distribution, not compete with it. Target: 1-2 social posts per week sourced from the weekly website update, plus standalone experiments when something warrants immediate signal.",
     "currentLearning": [
       "Initial posts about OpenClaw and AI operations earned higher engagement than general SIndustries positioning content.",
       "Build-in-public framing (showing the process, not just the result) consistently outperforms polished announcement-style posts.",
-      "Posting cadence target: 3-4 times per week. Current actual: 1-2 times per week. Gap needs addressing."
+      "The content factory changes the channel plan: weekly website updates are now a reliable source of short-form social material. Treating the website as the source of truth and social as the distribution layer removes the manual writing bottleneck that kept cadence at 1-2 posts per week.",
+      "Original cadence target (3-4 standalone posts per week) is being replaced by 1-2 distribution posts per week sourced from the weekly update. Quality and reliability matter more than raw post count."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-05-28",
+    "updatedAt": "2026-06-05",
     "links": [],
     "image": "/brand/studio/social-content-hero.png",
     "visibility": "published"
