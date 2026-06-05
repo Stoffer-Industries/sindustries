@@ -28,6 +28,16 @@
     "links": [],
     "evidence": "Pipeline shipped 2026-06-01: daily ops note capture runs on each heartbeat cycle, weekly cron produces the review file and downstream content tasks.",
     "visibility": "published"
+  },
+  {
+    "title": "Content factory v1",
+    "slug": "content-factory-v1",
+    "releasedAt": "2026-06-04",
+    "summary": "First full content cycle completed end-to-end: Quinn orchestrates, Ivy authors, Tom approves, and Lobster auto-merges. Signal to published content without manual coordination.",
+    "type": "system",
+    "links": [],
+    "evidence": "Full cycle completed 2026-06-04: content task created, Ivy PR authored, Tom review passed, Lobster merge executed.",
+    "visibility": "published"
   }
 ]
 
