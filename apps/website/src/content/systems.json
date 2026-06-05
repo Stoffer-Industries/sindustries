@@ -7,8 +7,8 @@
     "summary": "The operating layer for agents, memory, tools, messaging, and human-in-the-loop work.",
     "problem": "Delegated agent work needs continuity, tools, memory, and human review boundaries to become operationally useful.",
     "howItWorks": "OpenClaw connects agents to workspace files, skills, messaging, tasks, and runtime context so work can move through explicit handoffs.",
-    "proof": "Active operating layer for SIndustries agents, task execution, daily ops note capture, and weekly content review workflows.",
-    "updatedAt": "2026-06-01",
+    "proof": "Active operating layer for SIndustries agents, task execution, daily ops note capture, weekly content review workflows, and multi-agent content operations — Quinn orchestrates, Ivy authors, Tom approves, Lobster merges.",
+    "updatedAt": "2026-06-05",
     "links": [],
     "image": "/brand/systems/openclaw-lobster.jpg",
     "visibility": "published"
@@ -63,8 +63,8 @@
     "summary": "A system that turns daily operational signals into published website content — without manual coordination.",
     "problem": "Building a product studio generates constant signal: shipped work, decisions, experiments, lessons. None of it reaches a public audience unless someone manually converts notes into content. That conversion was the bottleneck.",
     "howItWorks": "Daily signals are captured automatically as work happens. Each week, those notes are distilled into a structured review that identifies what's worth publishing and who needs to approve it. Content tasks are created automatically, assigned for authoring, and tracked through a review-and-merge workflow. Ops activity becomes public signal on a weekly cadence, with a single human approval step.",
-    "proof": "Pipeline shipped 2026-06-01. The first full weekly cycle ran the week of 2026-05-27, producing this content update.",
-    "updatedAt": "2026-06-01",
+    "proof": "Pipeline shipped 2026-06-01. First full content cycle completed end-to-end on 2026-06-04: Quinn orchestration, Ivy authoring, Tom approval, and Lobster auto-merge.",
+    "updatedAt": "2026-06-05",
     "links": [],
     "image": "/brand/systems/content-ops-pipeline.png",
     "visibility": "draft"
