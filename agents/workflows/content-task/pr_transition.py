@@ -19,6 +19,7 @@ from common import (
     is_at,
     is_past,
     move_task,
+    next_heading_pos,
     owner_heading_block_url_failures,
     patch_task,
     read_first_json_value,
@@ -69,7 +70,7 @@ def owner_sections(description: str) -> list[tuple[str, int]]:
         (m.start(), m) for m in OWNER_HEADING_RE.finditer(description)
     ]
     for idx, (start, match) in enumerate(heading_indices):
-        end = heading_indices[idx + 1][0] if idx + 1 < len(heading_indices) else len(description)
+        end = heading_indices[idx + 1][0] if idx + 1 < len(heading_indices) else next_heading_pos(description, match.end())
         sections.append((description[start:end], idx))
     return sections
 
@@ -146,7 +147,7 @@ def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str
         for h_idx in range(len(owner_matches) - 1, -1, -1):
             match = owner_matches[h_idx]
             start = match.end()
-            end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else len(result)
+            end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else next_heading_pos(result, start)
             block = result[start:end]
             if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
                 heading_idx = h_idx
