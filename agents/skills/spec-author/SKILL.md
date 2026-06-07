@@ -9,7 +9,7 @@ Write an implementation spec from a reviewed item. This skill runs with full too
 
 ## Inputs
 
-The caller must supply:
+The caller may provide any of these and any number of additional reference docs:
 
 | Input | Description |
 |---|---|
@@ -26,29 +26,22 @@ Before writing anything, read these files:
 
 **Always:**
 - `/Users/quinnstoffer/.openclaw/workspace/docs/state-of-the-nation.md` — current frictions, active projects, what's already being worked on
-- `bookmark_path` — the source material the spec is derived from
-- `review_path` — the review analysis and decision
+- Any source material provided (bookmark, review, reference docs)
 
 **Sindustries system specs (already-implemented systems):**
-- Read the listing at `codebases/sindustries/docs/specs/` — these describe what actually exists and is live. Skim titles and read any that look relevant to the topic. These are the ground truth for what to build on or supersede.
+- Read all specs at `codebases/sindustries/docs/specs/` — these describe what actually exists and is live. Read all of them; they are the ground truth for what to build on or supersede.
 
-**Sindustries implementation specs (other specs in the repo):**
-- `codebases/sindustries/docs/specs/content-factory.md` — always read if topic is `app-assistant` or `app-tasks`
-- Any other spec that looks relevant from the listing
-
-The goal: walk in knowing what the source material says, what the review decided, what systems already exist, and what frictions are live. A spec that duplicates an existing system or proposes something at odds with current state is a quality failure.
+The goal: walk in knowing what the source material says, what systems already exist, and what frictions are live. A spec that duplicates an existing system or proposes something at odds with current state is a quality failure.
 
 ## Step 2 — Assess Before Writing
 
 Before drafting:
 
-1. **Is the bookmark's framing preserved?** The spec's center of gravity is the bookmark and review — not our frictions. If the bookmark covers multiple ideas, all of them must appear. Frictions and system state are relevance signals, not targets to reshape the bookmark onto.
+1. **Does this overlap with something already implemented?** If an existing sindustries spec already covers the ground, either propose a narrower complementary slice and name what it builds on, or explain why a replacement is warranted.
 
-2. **Is the review decision right?** If the bookmark is only partially relevant (one useful idea out of four), say so in `## Why` and flag whether the review should be reclassified to `monitor` instead of producing a spec that drops most of the source material.
+2. **Are current frictions reflected honestly?** Use the state-of-the-nation as a relevance filter, not a target list to reshape the spec onto.
 
-3. **Does this overlap with something already implemented?** Read the sindustries system specs first. If an existing system already covers the ground, either propose a narrower complementary slice and name what it builds on, or explain why a replacement is warranted.
-
-4. **How many specs?** Default to one. Split only when the work naturally separates into tracks with independent delivery value — different codebases, different rollout timelines, or clearly separable outcomes. Do not split by acceptance criterion alone.
+3. **How many specs?** Default to one. Split only when the work naturally separates into tracks with independent delivery value — different codebases, different rollout timelines, or clearly separable outcomes. Do not split by acceptance criterion alone.
 
 ## Step 3 — Write the Spec
 
@@ -87,7 +80,7 @@ One paragraph: what is demonstrably different after this ships? Name the capabil
 
 ## Why
 
-Why this is worth doing now, grounded in the bookmark and review. If only a subset of the bookmark is relevant, name it here. If the review decision looks wrong (partial relevance that should be `monitor`), say so.
+Why this is worth doing now, grounded in the source material.
 
 ## Acceptance Criteria
 
@@ -95,7 +88,7 @@ Why this is worth doing now, grounded in the bookmark and review. If only a subs
 - [ ] AC2: ...
 
 Rules:
-- 2–6 ACs per spec
+- Up to 10 ACs per spec, prefer fewer unless necessary
 - ACs are outcomes, not steps ("X is functional/visible/tested", not "write a script for X")
 - Sub-ACs for multi-codebase work:
   - [ ] AC2.1 workspace: ...
@@ -111,28 +104,6 @@ One short paragraph on the intended approach and a brief stack touchpoints line.
 
 **Stack touchpoints:** `path/to/file.py` (what changes), `lobster/example.yaml` (pattern to follow).
 ```
-
-### Proposed Tasks (add when warranted)
-
-```markdown
-## Proposed Tasks
-
-### <Task Title>
-
-- **Priority:** `high | medium | low`
-- **Assignee:** _blank_
-- **Why:** One sentence — what problem does this task solve, and why now?
-- **Deliverable:** The concrete artifact or change that lands in the PR.
-- **Acceptance Criteria:**
-  - Matches a parent AC or sub-AC from the spec above
-  - ...
-```
-
-Task rules:
-- 1–3 tasks per spec; more only if work clearly separates into distinct PRs with independent value
-- Each task maps to a single reviewable PR with a noticeable outcome — not a phase, not a spike
-- A task that re-builds something already live must name the existing thing and explain why
-- Assignee is always blank
 
 ## Step 4 — Return Metadata
 
@@ -163,11 +134,9 @@ If invoked interactively, skip the JSON — just confirm the path written.
 
 ## Quality Bar
 
-**Faithfulness:** The spec reflects the bookmark's framing. If the bookmark describes four ideas, all four appear — even if only one maps to a known friction.
-
 **Grounded in what exists:** Specs reference actual files and systems from the sindustries repo. "Extend `scripts/bookmarks/common.py`" beats "extend the pipeline".
 
-**Honest scope:** If this spec only covers part of the bookmark, say why. Don't silently drop half the source material.
+**Honest scope:** If this spec only covers part of the source material, say why.
 
 **No placeholder language:** "validate", "explore", "refine" only appear with a concrete deliverable. "Validate the schema by running it against fixture data" is fine. "Validate approach" is not.
 
@@ -175,8 +144,8 @@ If invoked interactively, skip the JSON — just confirm the path written.
 
 ## Anti-patterns
 
-- Writing the spec before reading the sindustries system specs — duplication is the most common quality failure
-- Reshaping the bookmark around known frictions (frictions are context, not spec targets)
+- Writing the spec before reading all sindustries system specs — duplication is the most common quality failure
+- Using current frictions as targets to reshape the spec onto (frictions are context, not spec drivers)
 - Proposed tasks that are just ACs reworded as deliverables
 - Vague stack touchpoints like "the bookmark pipeline" — name the actual file
 - Splitting specs or tasks to match AC count rather than delivery boundaries
