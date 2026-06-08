@@ -1,0 +1,213 @@
+.token-specimen-shell {
+  min-height: 100vh;
+  background: var(--si-color-bg-canvas);
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-body);
+}
+
+.token-specimen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--si-color-border-subtle);
+  background: var(--si-color-bg-surface);
+}
+
+.token-specimen-back {
+  color: var(--si-color-text-secondary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.token-specimen-back:hover {
+  color: var(--si-color-text-primary);
+}
+
+.token-specimen-eyebrow {
+  margin: 0;
+  color: var(--si-color-brand-500);
+  font-family: var(--si-font-ui);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.token-specimen-page {
+  display: grid;
+  gap: 20px;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+
+.token-specimen-panel {
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-lg);
+  background: var(--si-color-bg-surface);
+  padding: 20px;
+}
+
+.token-specimen-intro h1 {
+  margin: 0 0 10px;
+  font-family: var(--si-font-display);
+  font-size: clamp(1.75rem, 4vw, 2.4rem);
+  line-height: 1.1;
+}
+
+.token-specimen-intro p {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--si-color-text-secondary);
+  line-height: 1.5;
+}
+
+.token-specimen-intro code,
+.token-swatch-card code {
+  color: var(--si-color-brand-200);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.token-section {
+  display: grid;
+  gap: 18px;
+}
+
+.token-swatch-grid,
+.radius-grid,
+.token-component-row {
+  display: grid;
+  gap: 14px;
+}
+
+.token-swatch-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.token-swatch-card,
+.token-mini-card,
+.token-chip {
+  border: 1px solid var(--si-color-border-subtle);
+  background: var(--si-color-bg-canvas-alt);
+  border-radius: var(--si-radius-lg);
+}
+
+.token-swatch-card {
+  display: grid;
+  gap: 8px;
+  padding: var(--si-space-4);
+}
+
+.token-swatch {
+  display: block;
+  height: 72px;
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-md);
+}
+
+.token-display {
+  margin: 0;
+  font-family: var(--si-font-display);
+  font-size: 2.6rem;
+  line-height: 1;
+  color: var(--si-color-text-primary);
+}
+
+.token-ui {
+  margin: 0;
+  font-family: var(--si-font-ui);
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--si-color-brand-500);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.token-body {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--si-color-text-secondary);
+}
+
+.token-specimen-two-up {
+  display: grid;
+  gap: 20px;
+}
+
+@media (min-width: 900px) {
+  .token-specimen-two-up {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.space-stack {
+  display: flex;
+  align-items: end;
+  gap: var(--si-space-3);
+  min-height: 72px;
+}
+
+.space-stack span {
+  display: block;
+  height: 56px;
+  background: var(--si-color-brand-500);
+  border-radius: var(--si-radius-sm);
+}
+
+.radius-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.radius-grid span {
+  display: grid;
+  min-height: 64px;
+  place-items: center;
+  background: rgb(0 212 255 / 12%);
+  color: var(--si-color-info-200);
+  font-weight: 800;
+}
+
+.token-component-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.token-mini-card {
+  padding: var(--si-space-4);
+}
+
+.token-mini-card p {
+  margin: 8px 0 0;
+  color: var(--si-color-text-secondary);
+}
+
+.token-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--si-space-4);
+  color: var(--si-color-text-primary);
+  font-weight: 800;
+}
+
+.token-primary-btn {
+  border: 0;
+  border-radius: var(--si-radius-pill);
+  background: var(--si-color-cta-primary);
+  color: var(--si-color-cta-primary-text);
+  font-family: var(--si-font-ui);
+  font-size: 0.95rem;
+  font-weight: 800;
+  min-height: 44px;
+  padding: 0 20px;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .token-component-row {
+    grid-template-columns: 1fr;
+  }
+}
