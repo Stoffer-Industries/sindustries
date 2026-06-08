@@ -1,16 +1,28 @@
 /**
- * Strip `imports` from packages/design-tokens/design-systems.pen.
- * Token variables are merged by `npm run build` in @sindustries/design-tokens;
- * this file must not depend on `tokens.pen` so it can be saved as a Pencil library.
+ * Regenerate packages/design-tokens/design-systems.pen from tokens.json.
+ * The package build injects token variables/themes and refreshes the generated
+ * token specimen while preserving hand-authored component sections.
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
-import { repoRootFromThisScript, serializePenDocument } from './pen-token-kit.mjs';
+import { repoRootFromThisScript } from './pen-token-kit.mjs';
 
 const repoRoot = repoRootFromThisScript(import.meta.url);
-const penPath = resolve(repoRoot, 'packages/design-tokens/design-systems.pen');
+const buildScript = resolve(repoRoot, 'packages/design-tokens/scripts/build-tokens.mjs');
 
-const doc = JSON.parse(await readFile(penPath, 'utf8'));
-delete doc.imports;
-await writeFile(penPath, serializePenDocument(doc));
+await new Promise((resolveBuild, rejectBuild) => {
+  const child = spawn(process.execPath, [buildScript], {
+    cwd: repoRoot,
+    stdio: 'inherit'
+  });
+
+  child.on('error', rejectBuild);
+  child.on('exit', (code, signal) => {
+    if (code === 0) {
+      resolveBuild();
+      return;
+    }
+    rejectBuild(new Error(`design token build failed${signal ? ` from signal ${signal}` : ` with exit code ${code}`}`));
+  });
+});

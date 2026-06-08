@@ -7,7 +7,6 @@ const tokensPath = resolve(packageRoot, 'tokens.json');
 const cssPath = resolve(packageRoot, 'styles.css');
 const tsPath = resolve(packageRoot, 'src/tokens.ts');
 const penTokensJsonPath = resolve(packageRoot, 'pen-tokens.json');
-const pencilPenPath = resolve(packageRoot, 'tokens.pen');
 const designSystemsPenPath = resolve(packageRoot, 'design-systems.pen');
 
 const tokens = JSON.parse(await readFile(tokensPath, 'utf8'));
@@ -209,7 +208,30 @@ function normalizeDesignSystemsDocument(doc) {
   const root = doc.children?.[0];
   if (root?.type === 'frame' && root.id === 'vtHps') {
     root.theme = { Mode: 'Light' };
+    const specimen = buildPencilSpecimenDocumentChildren({
+      introContent:
+        'Generated in design-systems.pen from tokens.json. Import this document in product .pen files for variables + components; compare with web /tokens and the React Native Token Specimen screen.'
+    })[0];
+    const specimenIndex = root.children?.findIndex((child) => child.id === 'siSpecRoot' || hasTextContent(child, 'Pencil token specimen'));
+    if (specimenIndex >= 0) {
+      root.children[specimenIndex] = specimen;
+    } else if (Array.isArray(root.children)) {
+      root.children.push(specimen);
+    }
   }
+}
+
+function hasTextContent(node, content) {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'text' && node.content === content) return true;
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      if (value.some((child) => hasTextContent(child, content))) return true;
+    } else if (value && typeof value === 'object' && hasTextContent(value, content)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function mergeVariablesIntoDesignSystemsPen() {
@@ -240,12 +262,6 @@ const penTokensPayload = {
 // Pencil specimen document
 // ---------------------------------------------------------------------------
 
-function chunk(arr, size) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 const strokeSubtle = {
   align: 'inside',
   thickness: 1,
@@ -256,7 +272,9 @@ const strokeSubtle = {
  * Full token specimen (colors, type, space, radius, UI sample) generated from `resolved`.
  * Product .pen files import this document for variables; open this file to review tokens in Pencil.
  */
-function buildPencilSpecimenDocumentChildren() {
+function buildPencilSpecimenDocumentChildren({
+  introContent = 'Generated in design-systems.pen from tokens.json. Import design-systems.pen (library) in product UI for variables + components; compare with web /tokens and the React Native Token Specimen screen.'
+} = {}) {
   const fonts = resolved.semantic.font;
   const sp = resolved.core.space;
   const rad = resolved.core.radius;
@@ -264,17 +282,24 @@ function buildPencilSpecimenDocumentChildren() {
   // Curated swatch lists: which tokens to spotlight in the specimen is an
   // editorial choice, so this stays hand-maintained. The build script does not
   // require any of these entries to exist — missing names are skipped.
-  const swatches = [
-    ['Canvas', 'si-color-bg-canvas'],
-    ['Surface', 'si-color-bg-surface'],
-    ['Primary text', 'si-color-text-primary'],
-    ['Muted text', 'si-color-text-muted'],
-    ['Brand', 'si-color-brand-500'],
-    ['Success', 'si-color-success-500'],
-    ['Danger', 'si-color-danger-500'],
-    ['Sage', 'si-color-sage-500'],
-    ['Accent pink', 'si-color-accent-500']
+  const swatchRowsSource = [
+    [
+      ['Canvas', 'si-color-bg-canvas'],
+      ['Surface', 'si-color-bg-surface'],
+      ['Primary text', 'si-color-text-primary'],
+      ['Muted text', 'si-color-text-muted']
+    ],
+    [
+      ['Brand', 'si-color-brand-500'],
+      ['Accent Pink', 'si-color-accent-500'],
+      ['Sage', 'si-color-sage-500']
+    ],
+    [
+      ['Success', 'si-color-success-500'],
+      ['Danger', 'si-color-danger-500']
+    ]
   ];
+  const swatches = swatchRowsSource.flat();
 
   const labelSwatches = [
     ['Green', 'si-color-label-green'],
@@ -317,7 +342,7 @@ function buildPencilSpecimenDocumentChildren() {
     ]
   }));
 
-  const swatchRows = chunk(swatchCards, 4).map((row, ri) => ({
+  const swatchRows = swatchRowsSource.map((rowSource, ri) => ({
     type: 'frame',
     id: `siSwRow${ri}`,
     width: 'fill_container',
@@ -325,7 +350,7 @@ function buildPencilSpecimenDocumentChildren() {
     layout: 'horizontal',
     gap: 12,
     alignItems: 'center',
-    children: row
+    children: rowSource.map(([, key]) => swatchCards[swatches.findIndex(([, swatchKey]) => swatchKey === key)])
   }));
 
   const labelCards = labelSwatches.map(([label, key], i) => ({
@@ -487,8 +512,7 @@ function buildPencilSpecimenDocumentChildren() {
               fontFamily: 'Work Sans',
               fontSize: 15,
               fontWeight: 'normal',
-              content:
-                'Generated in tokens.pen from tokens.json. For product UI, import design-systems.pen (library) for variables + components; compare with web /tokens and the React Native Token Specimen screen.'
+              content: introContent
             }
           ]
         },
@@ -667,13 +691,6 @@ function buildPencilSpecimenDocumentChildren() {
   ];
 }
 
-const pencilDocument = {
-  version: '2.10',
-  themes: { Mode: ['Light', 'Dark'] },
-  variables: pencilVariables,
-  children: buildPencilSpecimenDocumentChildren()
-};
-
 // ---------------------------------------------------------------------------
 // styles.css
 // ---------------------------------------------------------------------------
@@ -834,5 +851,4 @@ await mkdir(dirname(tsPath), { recursive: true });
 await writeFile(cssPath, css);
 await writeFile(tsPath, ts);
 await writeFile(penTokensJsonPath, `${JSON.stringify(penTokensPayload, null, 2)}\n`);
-await writeFile(pencilPenPath, `${JSON.stringify(pencilDocument, null, 2)}\n`);
 await mergeVariablesIntoDesignSystemsPen();
