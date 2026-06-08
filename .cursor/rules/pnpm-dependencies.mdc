@@ -1,0 +1,22 @@
+---
+description: Use pnpm add/remove for dependencies; do not hand-edit package.json dependency blocks
+globs: "**/package.json"
+alwaysApply: false
+---
+
+# Dependencies: use pnpm
+
+Do **not** add, remove, or bump versions by editing `dependencies` / `devDependencies` / `peerDependencies` / `optionalDependencies` in `package.json` by hand. Use the package manager so the lockfile and install tree stay consistent.
+
+## Commands
+
+- **Add** (root / default package): `pnpm add <pkg>` or dev: `pnpm add -D <pkg>`
+- **Remove**: `pnpm remove <pkg>`
+- **Workspace package** (use the `name` field from that package’s `package.json`):  
+  `pnpm add <pkg> --filter <workspace-package-name>`  
+  Example: `pnpm add expo-camera --filter budget-mobile`
+- **Optional / peer**: `pnpm add -O …` / `pnpm add …` with peer flags as needed
+
+## If you are only changing scripts, `private`, `engines`, or metadata
+
+Manual edits to those non-dependency fields are fine. For anything under dependency-related keys, use `pnpm add` / `pnpm remove` (or `pnpm update` for version bumps) instead.
