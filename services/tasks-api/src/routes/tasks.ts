@@ -61,6 +61,17 @@ function mapComment(comment) {
   };
 }
 
+function mapHistoryEntry(entry) {
+  return {
+    id: entry.id,
+    field: entry.field,
+    oldValue: entry.oldValue,
+    newValue: entry.newValue,
+    actor: entry.actor,
+    createdAt: entry.createdAt
+  };
+}
+
 function mapTask(task) {
   return {
     id: task.id,
@@ -86,7 +97,8 @@ function mapTask(task) {
     quinnApprovalPr: task.quinnApprovalPr ?? null,
     approvalOwners: task.approvalOwners ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
-    comments: task.comments?.map(mapComment) ?? []
+    comments: task.comments?.map(mapComment) ?? [],
+    history: task.history?.map(mapHistoryEntry) ?? []
   };
 }
 
@@ -106,6 +118,19 @@ function normalizeTags(tags) {
     .map((tag) => tag.toLowerCase());
 
   return [...new Set(normalized)];
+}
+
+function normalizeActor(req) {
+  return normalizeString(req.body?.actor)
+    || normalizeString(req.body?.historyActor)
+    || normalizeString(req.get('x-task-actor'))
+    || normalizeString(req.get('x-actor'))
+    || 'Tasks API';
+}
+
+function stringifyHistoryValue(value) {
+  if (value === null || value === undefined) return null;
+  return String(value);
 }
 
 async function connectTags(tagNames) {
@@ -311,6 +336,9 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
         },
         comments: {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+        },
+        history: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
         }
       }
     });
@@ -453,6 +481,19 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.ready = Boolean(req.body.ready);
     }
 
+    const historyEntries = [];
+    const actor = normalizeActor(req);
+    for (const field of ['status', 'blocked', 'ready']) {
+      if (updates[field] === undefined || existing[field] === updates[field]) continue;
+      historyEntries.push({
+        taskId: id,
+        field,
+        oldValue: stringifyHistoryValue(existing[field]),
+        newValue: stringifyHistoryValue(updates[field]),
+        actor
+      });
+    }
+
     // Content ops fields
     if (req.body?.sourceReview !== undefined) updates.sourceReview = req.body.sourceReview || null;
     if (req.body?.targetRepo !== undefined) updates.targetRepo = req.body.targetRepo || null;
@@ -480,16 +521,24 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.approvalOwners = req.body.approvalOwners || null;
     }
 
-    const updated = await prisma.task.update({
-      where: { id },
-      data: updates,
-      include: {
-        tags: {
-          include: {
-            tag: true
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.task.update({
+        where: { id },
+        data: updates,
+        include: {
+          tags: {
+            include: {
+              tag: true
+            }
           }
         }
+      });
+
+      if (historyEntries.length > 0) {
+        await tx.taskHistory.createMany({ data: historyEntries });
       }
+
+      return saved;
     });
 
     if (req.body?.tags !== undefined) {
@@ -507,7 +556,10 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
     const task = await prisma.task.findFirst({
       where: { id },
-      include: { tags: { include: { tag: true } } }
+      include: {
+        tags: { include: { tag: true } },
+        history: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }
+      }
     });
 
     return res.status(200).json({ data: mapTask(task ?? updated) });
