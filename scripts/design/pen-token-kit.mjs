@@ -1,8 +1,9 @@
 /**
  * Shared helpers for .pen files that touch @sindustries/design-tokens Pencil outputs.
- * `tokens.pen` and `design-systems.pen` use local variables named `si-color-*`, `si-radius-*`, …
+ * `design-systems.pen` uses local variables named `si-color-*`, `si-radius-*`, …
  * On-canvas references use `$si-color-bg-canvas`, `$si-radius-md`, etc.
- * `design-systems.pen` is merged by `npm run build` and must not import `tokens.pen` (Pencil library constraint).
+ * Product files should import `design-systems.pen`; it carries both token variables and components.
+ * `design-systems.pen` is merged by `npm run build` and must not use nested imports (Pencil library constraint).
  * Use stripRootVariables only for product files that must not carry a duplicate variable table.
  */
 import { dirname, relative, resolve } from 'node:path';
@@ -12,13 +13,18 @@ export function repoRootFromThisScript(metaUrl) {
   return resolve(dirname(fileURLToPath(metaUrl)), '../..');
 }
 
-export function designTokensPenAbs(repoRoot) {
-  return resolve(repoRoot, 'packages/design-tokens/tokens.pen');
+export function designSystemsPenAbs(repoRoot) {
+  return resolve(repoRoot, 'packages/design-tokens/design-systems.pen');
 }
 
-/** Relative POSIX path from the importing .pen file to tokens.pen */
+/** Backwards-compatible name for callers that mean "the token-carrying Pencil library". */
+export function designTokensPenAbs(repoRoot) {
+  return designSystemsPenAbs(repoRoot);
+}
+
+/** Relative POSIX path from the importing .pen file to design-systems.pen */
 export function importPathToDesignTokens(fromPenAbsPath, repoRoot) {
-  const kit = designTokensPenAbs(repoRoot);
+  const kit = designSystemsPenAbs(repoRoot);
   let rel = relative(dirname(fromPenAbsPath), kit);
   if (!rel.startsWith('.') && rel !== '') rel = `./${rel}`;
   return rel.split('\\').join('/');
