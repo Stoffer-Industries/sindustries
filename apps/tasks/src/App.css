@@ -160,6 +160,12 @@ button {
   min-width: 0;
 }
 
+a.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .nav-btn {
   border: 2px solid var(--line);
   background: var(--panel);

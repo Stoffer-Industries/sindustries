@@ -402,6 +402,7 @@ export function App() {
             </label>
             <button className={`nav-btn ${view === 'backlog' ? 'active' : ''}`} onClick={() => setView('backlog')}>Backlog</button>
             <button className={`nav-btn ${view === 'board' ? 'active' : ''}`} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Kanban</button>
+            <a href="/tokens" className="nav-btn">Tokens</a>
             <button type="button" className="primary-btn font-display" onClick={() => setNewTask((current) => ({ ...current, expanded: true }))}>+ New Task</button>
           </div>
         </div>
