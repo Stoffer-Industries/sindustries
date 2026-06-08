@@ -337,7 +337,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     if (req.body?.dueAt && !dueAt) return badRequest(res, 'INVALID_DUE_AT', 'Invalid dueAt value');
     if (req.body?.tags && !tags) return badRequest(res, 'INVALID_TAGS', 'tags must be an array of strings');
     if (assignee && !validAssignees.has(assignee)) {
-      return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox');
+      return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox, Ivy');
     }
 
     const tagRecords = await connectTags(tags);
@@ -393,7 +393,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (description !== undefined) updates.description = description || null;
     if (assignee !== undefined) {
       if (assignee && !validAssignees.has(assignee)) {
-        return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox');
+        return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox, Ivy');
       }
       updates.assignee = assignee || null;
     }
