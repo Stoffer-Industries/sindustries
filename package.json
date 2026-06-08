@@ -1,9 +1,16 @@
 {
   "name": "sindustries",
   "private": true,
+  "scripts": {
+    "sync:budgeting-pen": "node scripts/design/sync-budgeting-pen.mjs",
+    "sync:design-systems-pen": "node scripts/design/sync-design-systems-pen.mjs"
+  },
   "workspaces": [
     "apps/*",
     "packages/*",
     "services/*"
-  ]
+  ],
+  "devDependencies": {
+    "jsdom": "^29.0.1"
+  }
 }

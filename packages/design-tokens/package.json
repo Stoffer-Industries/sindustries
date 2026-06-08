@@ -3,7 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "node scripts/build-tokens.mjs"
+  },
   "exports": {
-    "./styles.css": "./styles.css"
-  }
+    "./styles.css": "./styles.css",
+    "./tokens": "./src/tokens.ts",
+    "./tokens.json": "./tokens.json",
+    "./pen-tokens.json": "./pen-tokens.json",
+    "./tokens.pen": "./tokens.pen",
+    "./design-systems.pen": "./design-systems.pen"
+  },
+  "files": [
+    "src",
+    "styles.css",
+    "tokens.json",
+    "pen-tokens.json",
+    "tokens.pen",
+    "design-systems.pen"
+  ]
 }
