@@ -523,6 +523,26 @@
   width: 32px;
 }
 
+.si-font-display {
+  font-family: var(--si-font-display);
+}
+
+.si-alert {
+  border: 2px solid var(--si-color-border-strong);
+  border-radius: var(--si-radius-xs);
+  font-family: var(--si-font-ui);
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0;
+  padding: var(--si-space-3) var(--si-space-4);
+}
+
+.si-alert--error {
+  background: color-mix(in srgb, var(--si-color-status-danger) 12%, var(--si-color-bg-surface));
+  border-color: var(--si-color-status-danger);
+  color: var(--si-color-text-primary);
+}
+
 .si-field {
   display: grid;
   gap: var(--si-space-1);

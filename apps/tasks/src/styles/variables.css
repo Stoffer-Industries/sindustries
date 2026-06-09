@@ -1,21 +1,4 @@
 :root {
-  --bg: var(--si-color-border-strong);
-  --panel: var(--si-color-bg-surface);
-  --panel-2: var(--si-color-bg-canvas);
-  --text: var(--si-color-text-primary);
-  --muted: var(--si-color-text-muted);
-  --line: var(--si-color-border-strong);
-  --amber: var(--si-color-brand-500);
-  --cyan: var(--si-color-info-500);
-  --pink: var(--si-color-accent-500);
-  --green: var(--si-color-success-500);
-  --danger: var(--si-color-danger-500);
-  --accent: var(--si-color-focus);
-  --fg: var(--si-color-text-primary);
-  --font-body: var(--si-font-body);
-  --font-ui: var(--si-font-ui);
-  --font-display: var(--si-font-display);
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --si-canvas-gradient: linear-gradient(
     180deg,
     var(--si-color-bg-surface-contrast) 0%,
