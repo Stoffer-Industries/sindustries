@@ -267,7 +267,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
 
         <div className="comments-section">
           <div className="comments-header">
-            <h4 className="font-display">Comments</h4>
+            <h4 className="si-font-display">Comments</h4>
             <div className="comments-header-actions">
               <span className="small comments-count">{comments.length === 0 ? 'No comments yet' : `${comments.length} comment${comments.length === 1 ? '' : 's'}`}</span>
               <Button

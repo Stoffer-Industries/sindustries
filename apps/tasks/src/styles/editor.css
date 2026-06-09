@@ -172,7 +172,7 @@
 .markdown-body h5,
 .markdown-body h6 {
   margin: 0.6em 0 0.3em;
-  font-family: var(--font-display, inherit);
+  font-family: var(--si-font-display, inherit);
   color: var(--si-color-text-primary);
 }
 

@@ -1,12 +1,14 @@
+import '@testing-library/jest-dom/vitest';
+import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { DesignSystemPage } from './TokensPage.jsx';
+import { DesignSystemPage } from './DesignSystemPage.jsx';
 
 describe('DesignSystemPage', () => {
   it('renders the design system specimen', async () => {
     const user = userEvent.setup();
-    render(<DesignSystemPage />);
+    render(<DesignSystemPage backHref="/" backLabel="← Tasks" />);
 
     expect(screen.getByRole('heading', { name: 'Sindustries design system' })).toBeInTheDocument();
     expect(screen.getByText('Components')).toBeInTheDocument();

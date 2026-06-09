@@ -29,8 +29,6 @@ button {
   font: inherit;
 }
 
-.font-display { font-family: var(--font-display); }
-
 .sr-only {
   position: absolute;
   width: 1px;

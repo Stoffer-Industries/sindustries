@@ -466,7 +466,7 @@ export function App() {
           <div className="brand-wrap">
             <button
               type="button"
-              className="brand brand-btn font-display"
+              className="brand brand-btn si-font-display"
               onClick={launchPulseCelebration}
               onPointerEnter={updatePulseHoverMotion}
               onPointerMove={updatePulseHoverMotion}
@@ -733,7 +733,7 @@ export function App() {
         {newTask.expanded ? (
           <Card as="form" variant="pulse" onSubmit={createTask} className="task-card stack create-card content-inset" aria-label="New task form">
             <div className="task-create-header">
-              <h2 className="font-display">New Task</h2>
+              <h2 className="si-font-display">New Task</h2>
               <Button
                 type="button"
                 variant="ghost"
@@ -799,7 +799,7 @@ export function App() {
           </Card>
         ) : null}
 
-        {error ? <p role="alert" className="error content-inset">{error}</p> : null}
+        {error ? <p role="alert" className="si-alert si-alert--error content-inset">{error}</p> : null}
 
         {isLoading && tasks.length === 0 ? (
           <div className="loading-spinner content-inset" role="status" aria-label="Loading tasks">
@@ -884,7 +884,7 @@ export function App() {
                   }}
                 >
                   <CardContainer.Header>
-                    <h3 className="font-display si-card-container__title">{STATUS_LABELS[status]}</h3>
+                    <h3 className="si-font-display si-card-container__title">{STATUS_LABELS[status]}</h3>
                     <Badge variant="count">{boardColumns[status].length}</Badge>
                   </CardContainer.Header>
                   <CardContainer.Content>
