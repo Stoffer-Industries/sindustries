@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""List bookmarks needing spec work for Quinn's heartbeat dispatch.
+
+Covers two cases:
+- spec_requested: fresh spec needed, no existing spec on disk
+- revision_requested: existing spec needs revision per latestRevisionRequest
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from common import STATE_PATH, dump_json, load_state
+
+
+def main() -> int:
+    state = load_state(Path(STATE_PATH))
+    items = state.get("items", {})
+    requests = []
+    for key, item in items.items():
+        status = item.get("reviewStatus")
+        if status == "spec_requested":
+            if not item.get("analysis"):
+                continue
+            requests.append({
+                "bookmarkKey": key,
+                "title": item.get("title", ""),
+                "topic": item.get("topic", "general"),
+                "path": item.get("path", ""),
+                "reviewDoc": item.get("reviewDoc", ""),
+                "analysis": item.get("analysis"),
+                "link": item.get("link", ""),
+                "tags": item.get("tags", []),
+                "requestType": "new",
+                "existingSpecDocs": [],
+                "revisionRequest": None,
+            })
+        elif status == "revision_requested":
+            revision_text = str(item.get("latestRevisionRequest") or "").strip()
+            if not revision_text:
+                continue
+            if not item.get("analysis"):
+                continue
+            requests.append({
+                "bookmarkKey": key,
+                "title": item.get("title", ""),
+                "topic": item.get("topic", "general"),
+                "path": item.get("path", ""),
+                "reviewDoc": item.get("reviewDoc", ""),
+                "analysis": item.get("analysis"),
+                "link": item.get("link", ""),
+                "tags": item.get("tags", []),
+                "requestType": "revision",
+                "existingSpecDocs": item.get("specDocs") or [],
+                "revisionRequest": revision_text,
+            })
+    dump_json({"ok": True, "specRequests": requests, "count": len(requests)})
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
