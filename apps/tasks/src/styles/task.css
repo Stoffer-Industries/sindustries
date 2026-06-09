@@ -1,38 +1,10 @@
-/* Task cards — neubrutalist pulse cards */
+/* Task card layout */
 .task-card,
 .board-card {
   color: var(--si-color-ink-950);
   display: grid;
   gap: 12px;
   width: 100%;
-}
-
-.task-card.si-card--interactive,
-.board-card.si-card--interactive {
-  cursor: pointer;
-}
-
-.task-card.archived,
-.board-card.archived {
-  opacity: 0.6;
-}
-
-.task-card.blocked,
-.board-card.blocked {
-  background: color-mix(in srgb, var(--si-color-accent-500) 28%, var(--si-color-bg-surface-contrast));
-}
-
-.task-card.is-editing,
-.board-card.is-editing {
-  --si-card-rotate: 0deg;
-  box-shadow: 6px 6px 0 var(--si-color-ink-950);
-  cursor: default;
-  transform: rotate(0deg);
-}
-
-.task-card.si-card--ready,
-.board-card.si-card--ready {
-  border-color: var(--si-color-ink-950);
 }
 
 .task-card-title {
@@ -82,81 +54,6 @@
   white-space: nowrap;
 }
 
-.task-card-footer .task-card-assignee,
-.task-card-footer .si-avatar {
-  background: var(--si-color-brand-500);
-  border: 2px solid var(--si-color-ink-950);
-  border-radius: var(--si-radius-pill);
-  color: var(--si-color-ink-950);
-  flex-shrink: 0;
-  font-family: var(--si-font-ui);
-  font-size: 0.875rem;
-  font-weight: 500;
-  height: 32px;
-  width: 32px;
-}
-
-.task-card-footer .pill,
-.task-card-footer .si-badge {
-  border: 2px solid var(--si-color-ink-950);
-  border-radius: 0;
-  color: var(--si-color-ink-950);
-  font-family: var(--si-font-ui);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1.1428571428571428;
-  min-height: 24px;
-  padding: 4px 8px;
-  text-transform: none;
-}
-
-.task-card-footer .pill.priority-pill,
-.task-card-footer .si-badge.priority-pill {
-  font-weight: 800;
-  padding: 8px;
-  text-transform: uppercase;
-}
-
-.task-card-footer .pill.urgent,
-.task-card-footer .si-badge--urgent {
-  background: var(--si-color-accent-200);
-  color: var(--si-color-ink-950);
-}
-
-.task-card-footer .pill.high,
-.task-card-footer .si-badge--high {
-  background: var(--si-color-brand-200);
-  color: var(--si-color-ink-950);
-}
-
-.task-card-footer .pill.medium,
-.task-card-footer .si-badge--medium {
-  background: var(--si-color-info-200);
-  color: var(--si-color-ink-950);
-}
-
-.task-card-footer .pill.low,
-.task-card-footer .si-badge--low {
-  background: var(--si-color-success-200);
-  color: var(--si-color-ink-950);
-}
-
-.task-card-footer .pill.draft-pill,
-.task-card-footer .si-badge--draft {
-  background: var(--si-color-brand-200);
-  color: var(--si-color-ink-950);
-}
-
-.task-card-footer .pill.task-tag,
-.task-card-footer .si-badge--tag {
-  background: var(--si-color-bg-glass);
-  border-color: var(--si-color-ink-950);
-  color: var(--si-color-ink-950);
-  font-weight: 700;
-  text-transform: lowercase;
-}
-
 /* Task list (backlog view) */
 .task-list {
   display: grid;
@@ -190,118 +87,7 @@
   width: 100%;
 }
 
-.column {
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
-}
-
-.column.si-card-container,
-.filter-container.si-card-container {
-  width: 100%;
-}
-
-.column.si-card-container {
-  background: var(--si-color-bg-surface);
-  border: 2px solid var(--si-color-ink-950);
-  box-shadow: none;
-  grid-template-rows: auto 1fr;
-  height: 100%;
-  min-height: 100%;
-  overflow: hidden;
-}
-
-.filter-container.si-card-container {
-  background: var(--si-color-bg-surface-alt);
-  border: 2px solid var(--si-color-border-subtle);
-  box-shadow: none;
-  height: auto;
-  min-height: 0;
-  overflow: visible;
-}
-
-.filter-container {
-  border-left: 0;
-  border-right: 0;
-  margin-bottom: 16px;
-  max-width: none;
-  overflow: visible;
-  position: relative;
-  z-index: 20;
-}
-
-.filter-container .si-card-container__header,
-.filter-container .si-card-container__content {
-  background: var(--si-color-bg-surface-alt);
-}
-
-.filter-container .si-card-container__content,
-.filter-container .filter-row,
-.filter-container .filter-controls,
-.filter-container .status-filter {
-  overflow: visible;
-}
-
-.filter-container .si-card-container__content {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 0;
-  min-height: 0;
-  padding: 12px;
-}
-
-.column.hidden {
-  display: none;
-}
-
-.column .si-card-container__header {
-  background: var(--si-color-bg-canvas);
-  padding: 12px;
-}
-
-.column-head {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.column-head .si-card-container__title {
-  color: var(--si-color-text-primary);
-  font-family: var(--font-display);
-  font-size: 0.95rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.column .count-pill {
-  background: var(--si-color-cta-secondary);
-  border: 1px solid var(--si-color-border-subtle);
-  border-radius: var(--si-radius-pill);
-  box-shadow: 0 2px 3.5px -1px rgb(0 0 0 / 0.06);
-  color: var(--si-color-text-secondary);
-  font-family: var(--si-font-ui);
-  font-size: 0.875rem;
-  font-weight: 700;
-  line-height: 1.4285714285714286;
-  min-height: auto;
-  padding: 6px 12px;
-  text-transform: none;
-}
-
-.column .si-card-container__content {
-  background: var(--si-color-bg-surface);
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 12px;
-}
-
-.column ol {
+.si-card-container--column ol {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -309,11 +95,6 @@
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.board-card.is-editing,
-.board-card:focus-within {
-  overflow: visible;
 }
 
 /* Create card */

@@ -33,17 +33,12 @@ function priorityVariant(priority) {
   return ['urgent', 'high', 'medium', 'low'].includes(priority) ? priority : 'neutral';
 }
 
-function cardStateClasses(task, isSelected) {
-  return cx({
-    archived: task.archivedAt,
-    blocked: task.blocked,
-    ready: isReadyTask(task),
-    'is-editing': isSelected,
-    'si-card--archived': task.archivedAt,
-    'si-card--blocked': task.blocked,
-    'si-card--ready': isReadyTask(task),
-    'si-card--editing': isSelected
-  });
+function cardState(task, isSelected) {
+  if (task.archivedAt) return 'archived';
+  if (isSelected) return 'editing';
+  if (task.blocked) return 'blocked';
+  if (isReadyTask(task)) return 'ready';
+  return undefined;
 }
 
 function taskCardDate(task) {
@@ -73,20 +68,19 @@ function TaskCardSummary({ task, hasDraft, onTitleClick }) {
           <Badge
             variant={priorityVariant(task.priority)}
             tone="pulse"
-            className={cx('pill', 'priority-pill', task.priority)}
           >
             {task.priority}
           </Badge>
           {tags.map((tag) => (
-            <Badge key={tag} variant="tag" tone="pulse" className="pill task-tag">
+            <Badge key={tag} variant="tag" tone="pulse">
               {tag}
             </Badge>
           ))}
-          {hasDraft ? <Badge variant="draft" tone="pulse" className="pill draft-pill">Unsaved</Badge> : null}
+          {hasDraft ? <Badge variant="draft" tone="pulse">Unsaved</Badge> : null}
         </div>
         <div className="task-card-footer-meta">
           {assignee ? (
-            <Avatar className="task-card-assignee" aria-label={`Assignee ${task.assignee}`}>
+            <Avatar aria-label={`Assignee ${task.assignee}`}>
               {assignee}
             </Avatar>
           ) : null}
@@ -507,7 +501,7 @@ export function App() {
       </header>
 
       <section className="content">
-        <CardContainer className="filter-container">
+        <CardContainer variant="filter">
           <CardContainer.Content>
             <div className="filter-row">
               <div className="filter-controls">
@@ -753,7 +747,6 @@ export function App() {
             <div className="editor-grid">
               <Field label="Title" style={{ gridColumn: '1 / -1' }}>
                 <Input
-                  className="edit-control"
                   aria-label="New task title"
                   value={newTask.title}
                   onChange={(e) => setNewTask((current) => ({ ...current, title: e.target.value }))}
@@ -761,26 +754,26 @@ export function App() {
                 />
               </Field>
               <Field label="Description" style={{ gridColumn: '1 / -1' }}>
-                <Input className="edit-control" value={newTask.description} onChange={(e) => setNewTask((current) => ({ ...current, description: e.target.value }))} />
+                <Input value={newTask.description} onChange={(e) => setNewTask((current) => ({ ...current, description: e.target.value }))} />
               </Field>
               <Field label="Priority">
-                <Select className="edit-control" value={newTask.priority} onChange={(e) => setNewTask((current) => ({ ...current, priority: e.target.value }))}>
+                <Select value={newTask.priority} onChange={(e) => setNewTask((current) => ({ ...current, priority: e.target.value }))}>
                   {PRIORITIES.map((priority) => (
                     <option key={priority} value={priority}>{priority}</option>
                   ))}
                 </Select>
               </Field>
               <Field label="Assignee">
-                <Input className="edit-control" value={newTask.assignee} onChange={(e) => setNewTask((current) => ({ ...current, assignee: e.target.value }))} />
+                <Input value={newTask.assignee} onChange={(e) => setNewTask((current) => ({ ...current, assignee: e.target.value }))} />
               </Field>
               <Field label="Due date">
-                <Input className="edit-control" type="date" value={newTask.dueAt} onChange={(e) => setNewTask((current) => ({ ...current, dueAt: e.target.value }))} />
+                <Input type="date" value={newTask.dueAt} onChange={(e) => setNewTask((current) => ({ ...current, dueAt: e.target.value }))} />
               </Field>
               <Field label="Tags">
-                <Input className="edit-control" value={newTask.tagsText} onChange={(e) => setNewTask((current) => ({ ...current, tagsText: e.target.value }))} placeholder="api, pulse" />
+                <Input value={newTask.tagsText} onChange={(e) => setNewTask((current) => ({ ...current, tagsText: e.target.value }))} placeholder="api, pulse" />
               </Field>
               <Field label="Content type">
-                <Select className="edit-control" value={newTask.taskType} onChange={(e) => setNewTask((current) => ({ ...current, taskType: e.target.value }))}>
+                <Select value={newTask.taskType} onChange={(e) => setNewTask((current) => ({ ...current, taskType: e.target.value }))}>
                   <option value="">None</option>
                   <option value="content">Content</option>
                   <option value="code">Code</option>
@@ -830,8 +823,9 @@ export function App() {
                       variant="pulse"
                       interactive
                       tilt={isSelected ? undefined : taskCardTilt(task.id)}
+                      state={cardState(task, isSelected)}
                       ref={(el) => { if (el) taskCardRefs.current[String(task.id)] = el; }}
-                      className={cx('task-card', cardStateClasses(task, isSelected))}
+                      className="task-card"
                       onClick={() => {
                         if (!isSelected) openTask(task.id);
                       }}
@@ -879,18 +873,19 @@ export function App() {
               {STATUSES.map((status) => (
                 <CardContainer
                   as="div"
+                  variant="column"
                   key={status}
                   data-testid={`column-${status}`}
-                  className={cx('column', !selectedStatuses.has(status) && 'hidden')}
+                  className={cx(!selectedStatuses.has(status) && 'si-card-container--hidden')}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     const id = e.dataTransfer.getData('text/plain');
                     if (id) patchTask(id, { status });
                   }}
                 >
-                  <CardContainer.Header className="column-head">
+                  <CardContainer.Header>
                     <h3 className="font-display si-card-container__title">{STATUS_LABELS[status]}</h3>
-                    <Badge variant="count" className="count-pill">{boardColumns[status].length}</Badge>
+                    <Badge variant="count">{boardColumns[status].length}</Badge>
                   </CardContainer.Header>
                   <CardContainer.Content>
                     <ol>
@@ -905,9 +900,10 @@ export function App() {
                               variant="pulse"
                               interactive
                               tilt={isSelected ? undefined : taskCardTilt(task.id)}
+                              state={cardState(task, isSelected)}
                               ref={(el) => { if (el) taskCardRefs.current[String(task.id)] = el; }}
                               data-testid={`card-${task.id}`}
-                              className={cx('board-card', cardStateClasses(task, isSelected))}
+                              className="board-card"
                               draggable={!isSelected}
                               onDragStart={(e) => {
                                 if (!isSelected) e.dataTransfer.setData('text/plain', task.id);
@@ -970,7 +966,7 @@ export function App() {
       </nav>
 
       {/* Toast notifications */}
-      <ToastViewport className="toast-container" aria-live="polite" aria-atomic="true">
+      <ToastViewport aria-live="polite" aria-atomic="true">
         {toasts.map((toast) => (
           <Toast key={toast.id} type={toast.type} className={`toast toast-${toast.type}`}>
             {toast.message}
