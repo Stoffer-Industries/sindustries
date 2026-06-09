@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button, Card, Field, Input, Select, Textarea } from '@sindustries/ui/react';
 import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS } from '../utils/constants.js';
 import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
@@ -143,12 +144,11 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
     <div className="editor" onClick={(e) => e.stopPropagation()}>
       <div className="editor-fields">
         <div className="title-row">
-          <label>
-            <span className="small">Title</span>
-            <input ref={titleRef} className="edit-control" aria-label="Detail title" value={draft.title} onChange={(e) => update('title', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, titleRef, false)} autoFocus />
-          </label>
+          <Field label="Title">
+            <Input ref={titleRef} className="edit-control" aria-label="Detail title" value={draft.title} onChange={(e) => update('title', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, titleRef, false)} autoFocus />
+          </Field>
           {/* AC6: Close button in title section */}
-          <button className="tertiary-btn title-close-btn" onClick={onClose}>Close</button>
+          <Button type="button" variant="ghost" tone="display" className="title-close-btn" onClick={onClose}>Close</Button>
         </div>
 
         <div className="description-field">
@@ -156,7 +156,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
             <span className="small">Description</span>
           </div>
           {isDescriptionEditing ? (
-            <textarea
+            <Textarea
               ref={descriptionRef}
               className="edit-control auto-grow-textarea"
               aria-label="Detail description"
@@ -200,44 +200,39 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
         </div>
 
         <div className="editor-grid">
-          <label>
-            <span className="small">Status</span>
-            <select ref={statusRef} className="edit-control" aria-label="Detail status" value={draft.status} onChange={(e) => update('status', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, statusRef)}>
+          <Field label="Status">
+            <Select ref={statusRef} className="edit-control" aria-label="Detail status" value={draft.status} onChange={(e) => update('status', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, statusRef)}>
               {STATUSES.map((status) => (
                 <option key={status} value={status}>{STATUS_LABELS[status]}</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label>
-            <span className="small">Priority</span>
-            <select ref={priorityRef} className="edit-control" aria-label="Detail priority" value={draft.priority} onChange={(e) => update('priority', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, priorityRef)}>
+          <Field label="Priority">
+            <Select ref={priorityRef} className="edit-control" aria-label="Detail priority" value={draft.priority} onChange={(e) => update('priority', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, priorityRef)}>
               {PRIORITIES.map((priority) => (
                 <option key={priority} value={priority}>{priority}</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label>
-            <span className="small">Assignee</span>
-            <select ref={assigneeRef} className="edit-control" aria-label="Detail assignee" value={draft.assignee} onChange={(e) => update('assignee', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, assigneeRef, false)}>
+          <Field label="Assignee">
+            <Select ref={assigneeRef} className="edit-control" aria-label="Detail assignee" value={draft.assignee} onChange={(e) => update('assignee', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, assigneeRef, false)}>
               <option value="">Unassigned</option>
               {ASSIGNEE_OPTIONS.map((assignee) => (
                 <option key={assignee} value={assignee}>{assignee}</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
 
-          <label>
-            <span className="small">Due date</span>
-            <input ref={dueAtRef} className="edit-control" aria-label="Detail due date" type="date" value={draft.dueAt} onChange={(e) => update('dueAt', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, dueAtRef)} />
-          </label>
+          <Field label="Due date">
+            <Input ref={dueAtRef} className="edit-control" aria-label="Detail due date" type="date" value={draft.dueAt} onChange={(e) => update('dueAt', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, dueAtRef)} />
+          </Field>
         </div>
 
-        <label>
-          <span className="small">Tags (comma separated)</span>
-          <input ref={tagsRef} className="edit-control" aria-label="Detail tags" value={draft.tagsText} onChange={(e) => update('tagsText', e.target.value)} placeholder="api, ui, urgent" onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, tagsRef, false)} />
-        </label>
+        <Field label="Tags (comma separated)">
+          <Input ref={tagsRef} className="edit-control" aria-label="Detail tags" value={draft.tagsText} onChange={(e) => update('tagsText', e.target.value)} placeholder="api, ui, urgent" onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, tagsRef, false)} />
+        </Field>
 
         <div className="editor-toggles">
           <label className="toggle-label">
@@ -256,15 +251,17 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
 
       <div className="actions editor-actions">
         <div className="editor-primary-actions">
-          <button
-            className="primary-btn font-display"
+          <Button
+            type="button"
+            variant="primary"
+            tone="display"
             onClick={() => onSave(buildSavePayload())}
           >
             Save changes
-          </button>
+          </Button>
           <div className="editor-secondary-actions">
-            <button className="secondary-btn font-display" onClick={onArchive}>Archive task</button>
-            <button className="tertiary-btn" onClick={onClose}>Close</button>
+            <Button type="button" variant="outline" tone="display" onClick={onArchive}>Archive task</Button>
+            <Button type="button" variant="ghost" tone="display" onClick={onClose}>Close</Button>
           </div>
         </div>
 
@@ -273,23 +270,23 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
             <h4 className="font-display">Comments</h4>
             <div className="comments-header-actions">
               <span className="small comments-count">{comments.length === 0 ? 'No comments yet' : `${comments.length} comment${comments.length === 1 ? '' : 's'}`}</span>
-              <button
-                className={`${isCommentComposerOpen ? 'tertiary-btn' : 'primary-btn font-display'}`}
+              <Button
+                variant={isCommentComposerOpen ? 'ghost' : 'primary'}
+                tone="display"
                 type="button"
                 aria-expanded={isCommentComposerOpen}
                 aria-controls="task-comment-composer"
                 onClick={() => setIsCommentComposerOpen((current) => !current)}
               >
                 {isCommentComposerOpen ? 'Close' : 'Comment'}
-              </button>
+              </Button>
             </div>
           </div>
 
           {isCommentComposerOpen ? (
             <div id="task-comment-composer" className="comment-composer">
-              <label>
-                <span className="small">Comment author</span>
-                <input
+              <Field label="Comment author">
+                <Input
                   className="edit-control"
                   aria-label="Comment author"
                   value={commentDraft.author}
@@ -297,10 +294,9 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
                   onMouseDown={stopPropagation}
                   onTouchStart={stopPropagation}
                 />
-              </label>
-              <label>
-                <span className="small">Comment</span>
-                <textarea
+              </Field>
+              <Field label="Comment">
+                <Textarea
                   className="edit-control"
                   aria-label="Comment text"
                   value={commentDraft.text}
@@ -309,16 +305,17 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
                   onMouseDown={stopPropagation}
                   onTouchStart={stopPropagation}
                 />
-              </label>
+              </Field>
               <div className="actions">
-                <button
-                  className="primary-btn font-display"
+                <Button
+                  variant="primary"
+                  tone="display"
                   type="button"
                   onClick={() => void handleAddComment()}
                   disabled={isSubmittingComment || !commentDraft.author.trim() || !commentDraft.text.trim()}
                 >
                   {isSubmittingComment ? 'Adding…' : 'Add comment'}
-                </button>
+                </Button>
               </div>
             </div>
           ) : null}
@@ -326,12 +323,14 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
           {comments.length > 0 ? (
             <ol className="comments-list" aria-label="Task comments">
               {comments.map((comment) => (
-                <li key={comment.id} className="comment-card">
-                  <div className="comment-meta">
-                    <strong>{comment.author}</strong>
-                    <time className="small" dateTime={comment.createdAt}>{formatCommentTimestamp(comment.createdAt)}</time>
-                  </div>
-                  <MarkdownContent markdown={comment.text} className="comment-body" />
+                <li key={comment.id}>
+                  <Card variant="pulse" className="comment-card">
+                    <div className="comment-meta">
+                      <strong>{comment.author}</strong>
+                      <time className="small" dateTime={comment.createdAt}>{formatCommentTimestamp(comment.createdAt)}</time>
+                    </div>
+                    <MarkdownContent markdown={comment.text} className="comment-body" />
+                  </Card>
                 </li>
               ))}
             </ol>

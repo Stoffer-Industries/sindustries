@@ -68,3 +68,11 @@ export function assigneeInitial(assignee) {
   const initial = trimmed.charAt(0);
   return initial ? initial.toUpperCase() : null;
 }
+
+/** Stable pulse-card tilt bucket (0–2) from a task id. */
+export function taskCardTilt(taskId) {
+  const id = String(taskId ?? '');
+  let sum = 0;
+  for (let i = 0; i < id.length; i += 1) sum += id.charCodeAt(i);
+  return sum % 3;
+}

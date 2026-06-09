@@ -65,6 +65,10 @@
       "type": "color",
       "value": "#FF3E8A"
     },
+    "si-color-success-200": {
+      "type": "color",
+      "value": "#9EE9B0"
+    },
     "si-color-success-500": {
       "type": "color",
       "value": "#31C76A"
@@ -169,6 +173,40 @@
         },
         {
           "value": "#2B2F34",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-bg-surface-alt": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F0EEEA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#161A1E",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-bg-surface-contrast": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F5F2E8",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#F3F1EC",
           "theme": {
             "Mode": "Dark"
           }

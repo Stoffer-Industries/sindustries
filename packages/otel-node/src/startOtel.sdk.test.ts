@@ -27,40 +27,46 @@ describe('startOtel when SDK starts', () => {
     return { NodeSDK, startOtel };
   }
 
+  function getSdkResource(NodeSDK: Awaited<ReturnType<typeof load>>['NodeSDK']) {
+    const cfg = vi.mocked(NodeSDK).mock.calls[0]?.[0];
+    expect(cfg?.resource).toBeDefined();
+    return cfg!.resource!;
+  }
+
   it('builds resource from options and env', async () => {
     process.env.OTEL_SERVICE_NAMESPACE = 'my-ns';
     process.env.OTEL_ENVIRONMENT = 'staging';
     const { NodeSDK, startOtel } = await load();
     startOtel({ serviceName: 'api-test' });
     expect(startFn).toHaveBeenCalledTimes(1);
-    const cfg = vi.mocked(NodeSDK).mock.calls[0]?.[0];
-    expect(cfg?.resource.attributes[ATTR_SERVICE_NAME]).toBe('api-test');
-    expect(cfg?.resource.attributes[ATTR_SERVICE_NAMESPACE]).toBe('my-ns');
-    expect(cfg?.resource.attributes['deployment.environment']).toBe('staging');
+    const resource = getSdkResource(NodeSDK);
+    expect(resource.attributes[ATTR_SERVICE_NAME]).toBe('api-test');
+    expect(resource.attributes[ATTR_SERVICE_NAMESPACE]).toBe('my-ns');
+    expect(resource.attributes['deployment.environment']).toBe('staging');
   });
 
   it('prefers options.serviceName over OTEL_SERVICE_NAME', async () => {
     process.env.OTEL_SERVICE_NAME = 'env-name';
     const { NodeSDK, startOtel } = await load();
     startOtel({ serviceName: 'opt-name' });
-    const cfg = vi.mocked(NodeSDK).mock.calls[0]?.[0];
-    expect(cfg?.resource.attributes[ATTR_SERVICE_NAME]).toBe('opt-name');
+    const resource = getSdkResource(NodeSDK);
+    expect(resource.attributes[ATTR_SERVICE_NAME]).toBe('opt-name');
   });
 
   it('uses OTEL_SERVICE_NAME when options omit serviceName', async () => {
     process.env.OTEL_SERVICE_NAME = 'tasks-api';
     const { NodeSDK, startOtel } = await load();
     startOtel();
-    const cfg = vi.mocked(NodeSDK).mock.calls[0]?.[0];
-    expect(cfg?.resource.attributes[ATTR_SERVICE_NAME]).toBe('tasks-api');
+    const resource = getSdkResource(NodeSDK);
+    expect(resource.attributes[ATTR_SERVICE_NAME]).toBe('tasks-api');
   });
 
   it('defaults service name and namespace', async () => {
     const { NodeSDK, startOtel } = await load();
     startOtel();
-    const cfg = vi.mocked(NodeSDK).mock.calls[0]?.[0];
-    expect(cfg?.resource.attributes[ATTR_SERVICE_NAME]).toBe('unknown-service');
-    expect(cfg?.resource.attributes[ATTR_SERVICE_NAMESPACE]).toBe('sindustries');
+    const resource = getSdkResource(NodeSDK);
+    expect(resource.attributes[ATTR_SERVICE_NAME]).toBe('unknown-service');
+    expect(resource.attributes[ATTR_SERVICE_NAMESPACE]).toBe('sindustries');
   });
 
   it('falls back deployment.environment to NODE_ENV', async () => {
@@ -68,8 +74,8 @@ describe('startOtel when SDK starts', () => {
     process.env.NODE_ENV = 'production';
     const { NodeSDK, startOtel } = await load();
     startOtel();
-    const cfg = vi.mocked(NodeSDK).mock.calls[0]?.[0];
-    expect(cfg?.resource.attributes['deployment.environment']).toBe('production');
+    const resource = getSdkResource(NodeSDK);
+    expect(resource.attributes['deployment.environment']).toBe('production');
   });
 
   it('is idempotent: only one SDK construction and start', async () => {

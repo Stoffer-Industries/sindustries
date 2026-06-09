@@ -206,13 +206,20 @@ describe('tasks ui', () => {
     expect(cards[1]).toHaveTextContent('Newer');
   });
 
-  it('shows assignee avatar on collapsed kanban cards', async () => {
+  it('shows tags, priority, assignee, and date on collapsed kanban cards', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          data: [mockTask({ id: 'assigned', title: 'Assigned', assignee: 'Quinn' })]
+          data: [mockTask({
+            id: 'assigned',
+            title: 'Assigned',
+            assignee: 'Quinn',
+            priority: 'urgent',
+            tags: [{ name: 'api' }, { name: 'backend' }],
+            statusChangedAt: '2026-03-07T00:00:00.000Z'
+          })]
         })
       })
     );
@@ -220,7 +227,12 @@ describe('tasks ui', () => {
     render(<App />);
 
     const card = await screen.findByTestId('card-assigned');
+    expect(within(card).getByRole('button', { name: 'Assigned' })).toBeInTheDocument();
+    expect(within(card).getByText('api')).toBeInTheDocument();
+    expect(within(card).getByText('backend')).toBeInTheDocument();
+    expect(within(card).getByText('urgent')).toBeInTheDocument();
     expect(within(card).getByLabelText('Assignee Quinn')).toHaveTextContent('Q');
+    expect(within(card).getByText('2026-03-07')).toBeInTheDocument();
   });
 
   it('refreshes tasks when the window regains focus', async () => {

@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { normalizeDesignSystemsDocument } from './pen-document.mjs';
+
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tokensPath = resolve(packageRoot, 'tokens.json');
 const cssPath = resolve(packageRoot, 'styles.css');
@@ -141,99 +143,6 @@ function buildPencilVariables() {
 
 const pencilVariables = buildPencilVariables();
 
-/** Hand-authored components + merged token variables (no `imports`; safe as a Pencil library). */
-function normalizeDesignSystemsDocument(doc) {
-  delete doc.imports;
-
-  doc.themes = {
-    Mode: ['Light', 'Dark']
-  };
-  doc.variables = JSON.parse(JSON.stringify(pencilVariables));
-
-  function normalizeString(s) {
-    if (typeof s !== 'string') return s;
-    return s.split('$si:si-').join('$si-');
-  }
-
-  function normalizeThemeObject(t) {
-    if (!t || typeof t !== 'object' || Array.isArray(t)) return;
-    if (Object.prototype.hasOwnProperty.call(t, 'si:Mode')) {
-      t.Mode = t['si:Mode'];
-      delete t['si:Mode'];
-    }
-  }
-
-  function walk(node) {
-    if (node === null || node === undefined) return;
-    if (typeof node === 'string') return;
-    if (Array.isArray(node)) {
-      for (let i = 0; i < node.length; i++) {
-        const el = node[i];
-        if (typeof el === 'string') node[i] = normalizeString(el);
-        else walk(el);
-      }
-      return;
-    }
-    if (typeof node !== 'object') return;
-
-    if (node.theme && typeof node.theme === 'object') normalizeThemeObject(node.theme);
-
-    for (const k of Object.keys(node)) {
-      if (k === 'theme') continue;
-      const v = node[k];
-      if (typeof v === 'string') node[k] = normalizeString(v);
-      else walk(v);
-    }
-  }
-
-  walk(doc);
-
-  function fixEmptyThemes(node) {
-    if (!node || typeof node !== 'object') return;
-    if (node.theme && typeof node.theme === 'object' && !Array.isArray(node.theme) && Object.keys(node.theme).length === 0) {
-      node.theme = { Mode: 'Light' };
-    }
-    if (Array.isArray(node)) {
-      for (const item of node) fixEmptyThemes(item);
-      return;
-    }
-    for (const k of Object.keys(node)) {
-      if (k === 'theme') continue;
-      fixEmptyThemes(node[k]);
-    }
-  }
-
-  fixEmptyThemes(doc);
-
-  const root = doc.children?.[0];
-  if (root?.type === 'frame' && root.id === 'vtHps') {
-    root.theme = { Mode: 'Light' };
-    const specimen = buildPencilSpecimenDocumentChildren({
-      introContent:
-        'Generated in design-systems.pen from tokens.json. Import this document in product .pen files for variables + components; compare with web /tokens and the React Native Token Specimen screen.'
-    })[0];
-    const specimenIndex = root.children?.findIndex((child) => child.id === 'siSpecRoot' || hasTextContent(child, 'Pencil token specimen'));
-    if (specimenIndex >= 0) {
-      root.children[specimenIndex] = specimen;
-    } else if (Array.isArray(root.children)) {
-      root.children.push(specimen);
-    }
-  }
-}
-
-function hasTextContent(node, content) {
-  if (!node || typeof node !== 'object') return false;
-  if (node.type === 'text' && node.content === content) return true;
-  for (const value of Object.values(node)) {
-    if (Array.isArray(value)) {
-      if (value.some((child) => hasTextContent(child, content))) return true;
-    } else if (value && typeof value === 'object' && hasTextContent(value, content)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 async function mergeVariablesIntoDesignSystemsPen() {
   let raw;
   try {
@@ -242,7 +151,14 @@ async function mergeVariablesIntoDesignSystemsPen() {
     return;
   }
   const doc = JSON.parse(raw);
-  normalizeDesignSystemsDocument(doc);
+  normalizeDesignSystemsDocument(doc, {
+    pencilVariables,
+    buildSpecimen: () =>
+      buildPencilSpecimenDocumentChildren({
+        introContent:
+          'Generated in design-systems.pen from tokens.json. Import this document in product .pen files for variables + components; compare with web /tokens and the React Native Token Specimen screen.'
+      })
+  });
   const ordered = {
     version: doc.version,
     children: doc.children,
@@ -286,6 +202,8 @@ function buildPencilSpecimenDocumentChildren({
     [
       ['Canvas', 'si-color-bg-canvas'],
       ['Surface', 'si-color-bg-surface'],
+      ['Surface alt', 'si-color-bg-surface-alt'],
+      ['Surface contrast', 'si-color-bg-surface-contrast'],
       ['Primary text', 'si-color-text-primary'],
       ['Muted text', 'si-color-text-muted']
     ],

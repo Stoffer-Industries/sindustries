@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { getStoredView, setStoredView } from '../utils/storage.js';
+import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from '../utils/storage.js';
 
 const VIEW_STORAGE_KEY = 'tasks-app-view';
+const THEME_STORAGE_KEY = 'tasks-app-theme';
 
 describe('storage', () => {
   let localStorageMock;
@@ -71,6 +72,47 @@ describe('storage', () => {
         throw new Error('Storage error');
       });
       expect(() => setStoredView('board')).not.toThrow();
+    });
+  });
+
+  describe('getStoredTheme', () => {
+    it('returns "dark" when nothing stored', () => {
+      localStorageMock.getItem.mockReturnValue(null);
+      expect(getStoredTheme()).toBe('dark');
+    });
+
+    it('returns "dark" for invalid stored value', () => {
+      localStorageMock.getItem.mockReturnValue('system');
+      expect(getStoredTheme()).toBe('dark');
+    });
+
+    it('returns stored "light" value', () => {
+      localStorageMock.getItem.mockReturnValue('light');
+      expect(getStoredTheme()).toBe('light');
+    });
+
+    it('handles localStorage error gracefully', () => {
+      localStorageMock.getItem.mockImplementation(() => {
+        throw new Error('Storage error');
+      });
+      expect(getStoredTheme()).toBe('dark');
+    });
+  });
+
+  describe('setStoredTheme', () => {
+    it('stores theme preference', () => {
+      setStoredTheme('light');
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        THEME_STORAGE_KEY,
+        'light'
+      );
+    });
+
+    it('handles localStorage error gracefully', () => {
+      localStorageMock.setItem.mockImplementation(() => {
+        throw new Error('Storage error');
+      });
+      expect(() => setStoredTheme('dark')).not.toThrow();
     });
   });
 });

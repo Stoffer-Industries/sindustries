@@ -1,19 +1,105 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  CardContainer,
+  Dropdown,
+  DropdownDivider,
+  DropdownOption,
+  Field,
+  Input,
+  SearchInput,
+  Select,
+  Toast,
+  ToastViewport,
+  cx
+} from '@sindustries/ui/react';
 import { useTasks } from './useTasks.js';
 import { useTaskDrafts } from './useTaskDrafts.js';
 import { useDebounce } from './hooks/useDebounce.js';
 import { useToast } from './hooks/useToast.js';
 import { TaskEditor } from './components/TaskEditor.jsx';
 import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS } from './utils/constants.js';
-import { createConfettiPieces, normalizeTaskForEditor, assigneeInitial } from './utils/helpers.js';
-import { getStoredView, setStoredView } from './utils/storage.js';
+import { createConfettiPieces, normalizeTaskForEditor, assigneeInitial, taskCardTilt } from './utils/helpers.js';
+import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from './utils/storage.js';
 
 function isReadyTask(task) {
   return task.status === 'ready';
 }
 
+function priorityVariant(priority) {
+  return ['urgent', 'high', 'medium', 'low'].includes(priority) ? priority : 'neutral';
+}
+
+function cardStateClasses(task, isSelected) {
+  return cx({
+    archived: task.archivedAt,
+    blocked: task.blocked,
+    ready: isReadyTask(task),
+    'is-editing': isSelected,
+    'si-card--archived': task.archivedAt,
+    'si-card--blocked': task.blocked,
+    'si-card--ready': isReadyTask(task),
+    'si-card--editing': isSelected
+  });
+}
+
+function taskCardDate(task) {
+  const raw = task.dueAt ?? task.statusChangedAt;
+  return raw ? String(raw).slice(0, 10) : '';
+}
+
+function taskCardTags(task) {
+  if (!Array.isArray(task.tags)) return [];
+  return task.tags
+    .map((tag) => (typeof tag === 'string' ? tag : tag?.name ?? ''))
+    .filter(Boolean);
+}
+
+function TaskCardSummary({ task, hasDraft, onTitleClick }) {
+  const date = taskCardDate(task);
+  const tags = taskCardTags(task);
+  const assignee = assigneeInitial(task.assignee);
+
+  return (
+    <>
+      <button type="button" className="task-card-title" onClick={onTitleClick}>
+        {task.title}
+      </button>
+      <div className="task-card-footer">
+        <div className="task-card-footer-tags">
+          <Badge
+            variant={priorityVariant(task.priority)}
+            tone="pulse"
+            className={cx('pill', 'priority-pill', task.priority)}
+          >
+            {task.priority}
+          </Badge>
+          {tags.map((tag) => (
+            <Badge key={tag} variant="tag" tone="pulse" className="pill task-tag">
+              {tag}
+            </Badge>
+          ))}
+          {hasDraft ? <Badge variant="draft" tone="pulse" className="pill draft-pill">Unsaved</Badge> : null}
+        </div>
+        <div className="task-card-footer-meta">
+          {assignee ? (
+            <Avatar className="task-card-assignee" aria-label={`Assignee ${task.assignee}`}>
+              {assignee}
+            </Avatar>
+          ) : null}
+          {date ? <time className="task-card-date" dateTime={date}>{date}</time> : null}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function App() {
   const [view, setView] = useState(getStoredView);
+  const [theme, setTheme] = useState(getStoredTheme);
   const [selectedId, setSelectedId] = useState(null);
   const initialStatusSelection = ['open', 'ready', 'doing', 'acceptance'];
   const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', includeArchived: false });
@@ -73,6 +159,10 @@ export function App() {
   useEffect(() => {
     setStoredView(view);
   }, [view]);
+
+  useEffect(() => {
+    setStoredTheme(theme);
+  }, [theme]);
 
   // Debounce search filter
   const debouncedSearch = useDebounce(filters.q, 300);
@@ -372,8 +462,10 @@ export function App() {
     element.style.removeProperty('--pulse-speed');
   }
 
+  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-si-theme={theme}>
       <header className="hero-header">
         <div className="hero-pattern" aria-hidden="true" />
         <div className="hero-content">
@@ -391,30 +483,40 @@ export function App() {
             </button>
           </div>
           <div className="hero-controls">
-            <label className="search-wrap" aria-label="Search tasks">
-              <span className="search-icon">⌕</span>
-              <input
-                aria-label="Search"
-                placeholder="Search title or description"
-                value={filters.q}
-                onChange={(e) => setFilters((current) => ({ ...current, q: e.target.value }))}
-              />
-            </label>
-            <button className={`nav-btn ${view === 'backlog' ? 'active' : ''}`} onClick={() => setView('backlog')}>Backlog</button>
-            <button className={`nav-btn ${view === 'board' ? 'active' : ''}`} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Kanban</button>
-            <a href="/tokens" className="nav-btn">Tokens</a>
-            <button type="button" className="primary-btn font-display" onClick={() => setNewTask((current) => ({ ...current, expanded: true }))}>+ New Task</button>
+            <SearchInput
+              className="header-search"
+              label="Search"
+              placeholder="Search title or description"
+              value={filters.q}
+              onChange={(e) => setFilters((current) => ({ ...current, q: e.target.value }))}
+            />
+            <Button variant="nav" active={view === 'backlog'} onClick={() => setView('backlog')}>Backlog</Button>
+            <Button variant="nav" active={view === 'board'} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Kanban</Button>
+            <Button as="a" href="/design-system" variant="nav">Design System</Button>
+            <Button
+              type="button"
+              variant="outline"
+              aria-label={`Switch to ${nextTheme} theme`}
+              onClick={() => setTheme(nextTheme)}
+            >
+              {theme === 'dark' ? 'Dark' : 'Light'}
+            </Button>
+            <Button type="button" variant="primary" tone="display" onClick={() => setNewTask((current) => ({ ...current, expanded: true }))}>+ New Task</Button>
           </div>
         </div>
       </header>
 
       <section className="content">
-        <div className="filter-row panel">
-          <div className="filter-controls">
+        <CardContainer className="filter-container">
+          <CardContainer.Content>
+            <div className="filter-row">
+              <div className="filter-controls">
             <div className="status-filter" ref={statusMenuRef}>
-              <button
+              <Button
                 type="button"
-                className={`status-filter-trigger ${selectedStatuses.size === STATUSES.length ? '' : 'is-filtered'}`.trim()}
+                variant="filter"
+                active={selectedStatuses.size !== STATUSES.length}
+                className="filter-trigger"
                 aria-label="Status filter"
                 aria-haspopup="menu"
                 aria-expanded={openFilterMenu === 'status'}
@@ -427,11 +529,11 @@ export function App() {
                     : selected.map((s) => STATUS_LABELS[s]).join(', ');
                   return `STATUS: ${label.toUpperCase()}`;
                 })()}
-              </button>
+              </Button>
 
               {openFilterMenu === 'status' ? (
-                <div className="status-filter-menu" role="menu" aria-label="Status filter menu">
-                  <label className="status-filter-option" role="menuitemcheckbox" aria-checked={selectedStatuses.size === STATUSES.length}>
+                <Dropdown className="filter-menu" role="menu" aria-label="Status filter menu">
+                  <DropdownOption as="label" role="menuitemcheckbox" aria-checked={selectedStatuses.size === STATUSES.length}>
                     <input
                       type="checkbox"
                       checked={selectedStatuses.size === STATUSES.length}
@@ -443,12 +545,12 @@ export function App() {
                       }}
                     />
                     <span>All</span>
-                  </label>
+                  </DropdownOption>
 
-                  <div className="status-filter-divider" aria-hidden="true" />
+                  <DropdownDivider />
 
                   {STATUSES.map((status) => (
-                    <label key={status} className="status-filter-option" role="menuitemcheckbox" aria-checked={selectedStatuses.has(status)}>
+                    <DropdownOption as="label" key={status} role="menuitemcheckbox" aria-checked={selectedStatuses.has(status)}>
                       <input
                         type="checkbox"
                         checked={selectedStatuses.has(status)}
@@ -467,27 +569,28 @@ export function App() {
                         }}
                       />
                       <span>{STATUS_LABELS[status].toUpperCase()}</span>
-                    </label>
+                    </DropdownOption>
                   ))}
-                </div>
+                </Dropdown>
               ) : null}
             </div>
             <div className="status-filter" ref={priorityMenuRef}>
-              <button
+              <Button
                 type="button"
-                className={`status-filter-trigger ${filters.priority ? 'is-filtered' : ''}`.trim()}
+                variant="filter"
+                active={Boolean(filters.priority)}
+                className="filter-trigger"
                 aria-label="Priority filter"
                 aria-haspopup="menu"
                 aria-expanded={openFilterMenu === 'priority'}
                 onClick={() => setOpenFilterMenu((current) => (current === 'priority' ? null : 'priority'))}
               >
                 {`PRIORITY: ${(filters.priority ? filters.priority : 'All priorities').toUpperCase()}`}
-              </button>
+              </Button>
               {openFilterMenu === 'priority' ? (
-                <div className="status-filter-menu" role="menu" aria-label="Priority filter menu">
-                  <button
+                <Dropdown className="filter-menu" role="menu" aria-label="Priority filter menu">
+                  <DropdownOption
                     type="button"
-                    className="status-filter-option"
                     role="menuitemradio"
                     aria-checked={!filters.priority}
                     onClick={() => {
@@ -496,13 +599,12 @@ export function App() {
                     }}
                   >
                     ALL PRIORITIES
-                  </button>
-                  <div className="status-filter-divider" aria-hidden="true" />
+                  </DropdownOption>
+                  <DropdownDivider />
                   {PRIORITIES.map((priority) => (
-                    <button
+                    <DropdownOption
                       key={priority}
                       type="button"
-                      className="status-filter-option"
                       role="menuitemradio"
                       aria-checked={filters.priority === priority}
                       onClick={() => {
@@ -511,28 +613,29 @@ export function App() {
                       }}
                     >
                       {priority.toUpperCase()}
-                    </button>
+                    </DropdownOption>
                   ))}
-                </div>
+                </Dropdown>
               ) : null}
             </div>
 
             <div className="status-filter" ref={assigneeMenuRef}>
-              <button
+              <Button
                 type="button"
-                className={`status-filter-trigger ${filters.assignee ? 'is-filtered' : ''}`.trim()}
+                variant="filter"
+                active={Boolean(filters.assignee)}
+                className="filter-trigger"
                 aria-label="Assignee filter"
                 aria-haspopup="menu"
                 aria-expanded={openFilterMenu === 'assignee'}
                 onClick={() => setOpenFilterMenu((current) => (current === 'assignee' ? null : 'assignee'))}
               >
                 {`ASSIGNEE: ${(filters.assignee ? (filters.assignee === 'unassigned' ? 'Unassigned' : filters.assignee) : 'All').toUpperCase()}`}
-              </button>
+              </Button>
               {openFilterMenu === 'assignee' ? (
-                <div className="status-filter-menu" role="menu" aria-label="Assignee filter menu">
-                  <button
+                <Dropdown className="filter-menu" role="menu" aria-label="Assignee filter menu">
+                  <DropdownOption
                     type="button"
-                    className="status-filter-option"
                     role="menuitemradio"
                     aria-checked={!filters.assignee}
                     onClick={() => {
@@ -541,10 +644,9 @@ export function App() {
                     }}
                   >
                     ALL
-                  </button>
-                  <button
+                  </DropdownOption>
+                  <DropdownOption
                     type="button"
-                    className="status-filter-option"
                     role="menuitemradio"
                     aria-checked={filters.assignee === 'unassigned'}
                     onClick={() => {
@@ -553,13 +655,12 @@ export function App() {
                     }}
                   >
                     UNASSIGNED
-                  </button>
-                  <div className="status-filter-divider" aria-hidden="true" />
+                  </DropdownOption>
+                  <DropdownDivider />
                   {ASSIGNEE_OPTIONS.map((assignee) => (
-                    <button
+                    <DropdownOption
                       key={assignee}
                       type="button"
-                      className="status-filter-option"
                       role="menuitemradio"
                       aria-checked={filters.assignee === assignee}
                       onClick={() => {
@@ -568,29 +669,30 @@ export function App() {
                       }}
                     >
                       {assignee.toUpperCase()}
-                    </button>
+                    </DropdownOption>
                   ))}
-                </div>
+                </Dropdown>
               ) : null}
             </div>
 
             {allTags.length > 0 ? (
               <div className="status-filter" ref={tagMenuRef}>
-                <button
+                <Button
                   type="button"
-                  className={`status-filter-trigger ${filters.tag ? 'is-filtered' : ''}`.trim()}
+                  variant="filter"
+                  active={Boolean(filters.tag)}
+                  className="filter-trigger"
                   aria-label="Tag filter"
                   aria-haspopup="menu"
                   aria-expanded={openFilterMenu === 'tag'}
                   onClick={() => setOpenFilterMenu((current) => (current === 'tag' ? null : 'tag'))}
                 >
                   {`TAG: ${(filters.tag ? filters.tag : 'All tags').toUpperCase()}`}
-                </button>
+                </Button>
                 {openFilterMenu === 'tag' ? (
-                  <div className="status-filter-menu" role="menu" aria-label="Tag filter menu">
-                    <button
+                  <Dropdown className="filter-menu" role="menu" aria-label="Tag filter menu">
+                    <DropdownOption
                       type="button"
-                      className="status-filter-option"
                       role="menuitemradio"
                       aria-checked={!filters.tag}
                       onClick={() => {
@@ -599,13 +701,12 @@ export function App() {
                       }}
                     >
                       ALL TAGS
-                    </button>
-                    <div className="status-filter-divider" aria-hidden="true" />
+                    </DropdownOption>
+                    <DropdownDivider />
                     {allTags.map((tag) => (
-                      <button
+                      <DropdownOption
                         key={tag}
                         type="button"
-                        className="status-filter-option"
                         role="menuitemradio"
                         aria-checked={filters.tag === tag}
                         onClick={() => {
@@ -614,80 +715,78 @@ export function App() {
                         }}
                       >
                         {tag.toUpperCase()}
-                      </button>
+                      </DropdownOption>
                     ))}
-                  </div>
+                  </Dropdown>
                 ) : null}
               </div>
             ) : null}
           </div>
           <div className="filter-actions">
-            <button
-              className={`ghost-btn archived-toggle ${filters.includeArchived ? 'archived-active' : ''}`}
+            <Button
+              variant="ghost"
+              tone="display"
+              active={filters.includeArchived}
               onClick={() => setFilters((current) => ({ ...current, includeArchived: !current.includeArchived }))}
             >
               {filters.includeArchived ? 'Hide archived' : 'Show archived'}
-            </button>
+            </Button>
           </div>
-        </div>
+            </div>
+          </CardContainer.Content>
+        </CardContainer>
 
         {newTask.expanded ? (
-          <form onSubmit={createTask} className="task-card stack create-card" aria-label="New task form">
+          <Card as="form" variant="pulse" onSubmit={createTask} className="task-card stack create-card content-inset" aria-label="New task form">
             <div className="task-create-header">
               <h2 className="font-display">New Task</h2>
-              <button
+              <Button
                 type="button"
-                className="ghost-btn"
+                variant="ghost"
+                tone="display"
                 onClick={() => setNewTask((current) => ({ ...current, expanded: false }))}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
 
             <div className="editor-grid">
-              <label style={{ gridColumn: '1 / -1' }}>
-                <span className="small">Title</span>
-                <input
+              <Field label="Title" style={{ gridColumn: '1 / -1' }}>
+                <Input
                   className="edit-control"
                   aria-label="New task title"
                   value={newTask.title}
                   onChange={(e) => setNewTask((current) => ({ ...current, title: e.target.value }))}
                   required
                 />
-              </label>
-              <label style={{ gridColumn: '1 / -1' }}>
-                <span className="small">Description</span>
-                <input className="edit-control" value={newTask.description} onChange={(e) => setNewTask((current) => ({ ...current, description: e.target.value }))} />
-              </label>
-              <label>
-                <span className="small">Priority</span>
-                <select className="edit-control" value={newTask.priority} onChange={(e) => setNewTask((current) => ({ ...current, priority: e.target.value }))}>
+              </Field>
+              <Field label="Description" style={{ gridColumn: '1 / -1' }}>
+                <Input className="edit-control" value={newTask.description} onChange={(e) => setNewTask((current) => ({ ...current, description: e.target.value }))} />
+              </Field>
+              <Field label="Priority">
+                <Select className="edit-control" value={newTask.priority} onChange={(e) => setNewTask((current) => ({ ...current, priority: e.target.value }))}>
                   {PRIORITIES.map((priority) => (
                     <option key={priority} value={priority}>{priority}</option>
                   ))}
-                </select>
-              </label>
-              <label>
-                <span className="small">Assignee</span>
-                <input className="edit-control" value={newTask.assignee} onChange={(e) => setNewTask((current) => ({ ...current, assignee: e.target.value }))} />
-              </label>
-              <label>
-                <span className="small">Due date</span>
-                <input className="edit-control" type="date" value={newTask.dueAt} onChange={(e) => setNewTask((current) => ({ ...current, dueAt: e.target.value }))} />
-              </label>
-              <label>
-                <span className="small">Tags</span>
-                <input className="edit-control" value={newTask.tagsText} onChange={(e) => setNewTask((current) => ({ ...current, tagsText: e.target.value }))} placeholder="api, pulse" />
-              </label>
-              <label>
-                <span className="small">Content type</span>
-                <select className="edit-control" value={newTask.taskType} onChange={(e) => setNewTask((current) => ({ ...current, taskType: e.target.value }))}>
+                </Select>
+              </Field>
+              <Field label="Assignee">
+                <Input className="edit-control" value={newTask.assignee} onChange={(e) => setNewTask((current) => ({ ...current, assignee: e.target.value }))} />
+              </Field>
+              <Field label="Due date">
+                <Input className="edit-control" type="date" value={newTask.dueAt} onChange={(e) => setNewTask((current) => ({ ...current, dueAt: e.target.value }))} />
+              </Field>
+              <Field label="Tags">
+                <Input className="edit-control" value={newTask.tagsText} onChange={(e) => setNewTask((current) => ({ ...current, tagsText: e.target.value }))} placeholder="api, pulse" />
+              </Field>
+              <Field label="Content type">
+                <Select className="edit-control" value={newTask.taskType} onChange={(e) => setNewTask((current) => ({ ...current, taskType: e.target.value }))}>
                   <option value="">None</option>
                   <option value="content">Content</option>
                   <option value="code">Code</option>
                   <option value="research">Research</option>
-                </select>
-              </label>
+                </Select>
+              </Field>
             </div>
 
             <div className="editor-toggles">
@@ -702,65 +801,51 @@ export function App() {
             </div>
 
             <div className="actions">
-              <button type="submit" className="primary-btn font-display">Create task</button>
+              <Button type="submit" variant="primary" tone="display">Create task</Button>
             </div>
-          </form>
+          </Card>
         ) : null}
 
-        {error ? <p role="alert" className="error">{error}</p> : null}
+        {error ? <p role="alert" className="error content-inset">{error}</p> : null}
 
         {isLoading && tasks.length === 0 ? (
-          <div className="loading-spinner" role="status" aria-label="Loading tasks">
+          <div className="loading-spinner content-inset" role="status" aria-label="Loading tasks">
             <div className="spinner" />
             <span className="sr-only">Loading tasks...</span>
           </div>
         ) : null}
 
         {view === 'backlog' ? (
-          <section>
+          <section className="content-inset">
 
             <ul aria-label="Backlog list" className="task-list">
                {sortedBacklogTasks.map((task, index) => {  
                 const isSelected = selectedId === task.id;
                 const draft = getDraft(task);
                 const hasDraft = isTaskDirty(task);
-                const taskTags = Array.isArray(task.tags) ? task.tags.map((tag) => tag.name ?? String(tag)) : [];
-                const assignee = task.assignee ?? 'Unassigned';
                 return (
-                  <li key={task.id}>
-                    <article 
+                  <li key={task.id ?? `${task.status}-${task.title}-${index}`}>
+                    <Card
+                      as="article"
+                      variant="pulse"
+                      interactive
+                      tilt={isSelected ? undefined : taskCardTilt(task.id)}
                       ref={(el) => { if (el) taskCardRefs.current[String(task.id)] = el; }}
-                      className={`task-card ${task.archivedAt ? 'archived' : ''} ${task.blocked ? 'blocked' : ''} ${isReadyTask(task) ? 'ready' : ''} ${isSelected ? 'is-editing' : ''} card-tilt-${index % 3}`}
+                      className={cx('task-card', cardStateClasses(task, isSelected))}
                       onClick={() => {
                         if (!isSelected) openTask(task.id);
                       }}
                     >
-                      <div className="task-row">
-                        <button
-                          className="task-title-btn"
-                          onClick={(e) => {
+                      {!isSelected ? (
+                        <TaskCardSummary
+                          task={task}
+                          hasDraft={hasDraft}
+                          onTitleClick={(e) => {
                             e.stopPropagation();
                             toggleTask(task.id, isSelected);
                           }}
-                        >
-                          {task.taskType === 'content' ? <span className="task-type-icon" aria-label="Content task">📝</span> : task.taskType === 'code' ? <span className="task-type-icon" aria-label="Code task">💻</span> : task.taskType === 'research' ? <span className="task-type-icon" aria-label="Research task">🔍</span> : null}
-                          {task.title}
-                        </button>
-                        <div className="assignee-chip">
-                          {assigneeInitial(task.assignee) ? <span className="avatar-dot">{assigneeInitial(task.assignee)}</span> : null}
-                          <span className="small">{assignee}</span>
-                        </div>
-                      </div>
-
-                      <div className="badges">
-                        <span className={`pill ${task.priority}`}>{task.priority}</span>
-                        <span className="pill status">{task.status}</span>
-                        {hasDraft ? <span className="pill draft-pill">Unsaved</span> : null}
-                        {task.dueAt ? <span className="pill">Due {String(task.dueAt).slice(0, 10)}</span> : null}
-                        {taskTags.map((tag) => <span key={`${task.id}-${tag}`} className="pill">#{tag}</span>)}
-                      </div>
-
-                      {isSelected ? (
+                        />
+                      ) : (
                         <TaskEditor
                           draft={draft}
                           task={task}
@@ -781,8 +866,8 @@ export function App() {
                           onAddComment={(payload) => createTaskComment(task.id, payload)}
                           isSubmittingComment={submittingCommentForTaskId === task.id}
                         />
-                      ) : null}
-                    </article>
+                      )}
+                    </Card>
                   </li>
                 );
               })}
@@ -792,34 +877,37 @@ export function App() {
           <section aria-label="Kanban board" className="board-wrap">
             <div className="board" style={{ '--visible-columns': visibleColumnCount }}>
               {STATUSES.map((status) => (
-                <div
+                <CardContainer
+                  as="div"
                   key={status}
                   data-testid={`column-${status}`}
-                  className={`column ${!selectedStatuses.has(status) ? 'hidden' : ''}`}
+                  className={cx('column', !selectedStatuses.has(status) && 'hidden')}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     const id = e.dataTransfer.getData('text/plain');
                     if (id) patchTask(id, { status });
                   }}
                 >
-                  <div className="column-head">
-                    <h3 className="font-display">{STATUS_LABELS[status]}</h3>
-                    <span className="count-pill">{boardColumns[status].length}</span>
-                  </div>
-                  <ol>
+                  <CardContainer.Header className="column-head">
+                    <h3 className="font-display si-card-container__title">{STATUS_LABELS[status]}</h3>
+                    <Badge variant="count" className="count-pill">{boardColumns[status].length}</Badge>
+                  </CardContainer.Header>
+                  <CardContainer.Content>
+                    <ol>
                       {boardColumns[status].map((task, index) => {
                         const isSelected = selectedId === task.id;
                         const draft = getDraft(task);
                         const hasDraft = isTaskDirty(task);
-                        const assigneeLetter = assigneeInitial(task.assignee);
-                        const assignee = task.assignee?.trim() || 'Unassigned';
-                        const taskTags = Array.isArray(task.tags) ? task.tags.map((tag) => tag.name ?? String(tag)) : [];
                         return (
-                          <li key={task.id}>
-                            <article
+                          <li key={task.id ?? `${status}-${task.title}-${index}`}>
+                            <Card
+                              as="article"
+                              variant="pulse"
+                              interactive
+                              tilt={isSelected ? undefined : taskCardTilt(task.id)}
                               ref={(el) => { if (el) taskCardRefs.current[String(task.id)] = el; }}
                               data-testid={`card-${task.id}`}
-                              className={`board-card ${task.archivedAt ? 'archived' : ''} ${task.blocked ? 'blocked' : ''} ${isReadyTask(task) ? 'ready' : ''} ${isSelected ? 'is-editing' : ''} card-tilt-${index % 3}`}
+                              className={cx('board-card', cardStateClasses(task, isSelected))}
                               draggable={!isSelected}
                               onDragStart={(e) => {
                                 if (!isSelected) e.dataTransfer.setData('text/plain', task.id);
@@ -831,29 +919,16 @@ export function App() {
                                 }
                               }}
                             >
-                              <div className="task-row board-card-row">
-                                <button
-                                  className="task-title-btn"
-                                  onClick={(e) => {
+                              {!isSelected ? (
+                                <TaskCardSummary
+                                  task={task}
+                                  hasDraft={hasDraft}
+                                  onTitleClick={(e) => {
                                     e.stopPropagation();
                                     toggleTask(task.id, isSelected);
                                   }}
-                                >
-                                  {task.taskType === 'content' ? <span className="task-type-icon" aria-label="Content task">📝</span> : task.taskType === 'code' ? <span className="task-type-icon" aria-label="Code task">💻</span> : task.taskType === 'research' ? <span className="task-type-icon" aria-label="Research task">🔍</span> : null}
-                                  {task.title}
-                                </button>
-                              </div>
-                              <div className="board-card-meta">
-                                <span className={`pill ${task.priority}`}>{task.priority}</span>
-                                {taskTags.map((tag) => <span key={tag} className="pill tag-pill">#{tag}</span>)}
-                                <div className="board-card-meta-right">
-                                  {hasDraft ? <span className="pill draft-pill">Unsaved</span> : null}
-                                  {isReadyTask(task) ? <span className="ready-dot" aria-label="Ready">✓</span> : null}
-                                  {assigneeLetter ? <span className="avatar-dot" title={assignee} aria-label={`Assignee ${assignee}`}>{assigneeLetter}</span> : null}
-                                  <span className="small">{String(task.statusChangedAt).slice(0, 10)}</span>
-                                </div>
-                              </div>
-                              {isSelected ? (
+                                />
+                              ) : (
                                 <TaskEditor
                                   draft={draft}
                                   task={task}
@@ -874,13 +949,14 @@ export function App() {
                                   onAddComment={(payload) => createTaskComment(task.id, payload)}
                                   isSubmittingComment={submittingCommentForTaskId === task.id}
                                 />
-                              ) : null}
-                            </article>
+                              )}
+                            </Card>
                           </li>
                         );
                       })}
                     </ol>
-                </div>
+                  </CardContainer.Content>
+                </CardContainer>
               ))}
             </div>
           </section>
@@ -888,19 +964,19 @@ export function App() {
       </section>
 
       <nav className="mobile-nav" aria-label="Primary">
-        <button className={view === 'backlog' ? 'active' : ''} onClick={() => setView('backlog')}>List</button>
-        <button className="fab font-display" onClick={() => setNewTask((current) => ({ ...current, expanded: true }))}>＋</button>
-        <button className={view === 'board' ? 'active' : ''} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Board</button>
+        <Button variant="ghost" tone="display" active={view === 'backlog'} onClick={() => setView('backlog')}>List</Button>
+        <Button variant="primary" tone="display" className="fab" onClick={() => setNewTask((current) => ({ ...current, expanded: true }))}>＋</Button>
+        <Button variant="ghost" tone="display" active={view === 'board'} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Board</Button>
       </nav>
 
       {/* Toast notifications */}
-      <div className="toast-container" aria-live="polite" aria-atomic="true">
+      <ToastViewport className="toast-container" aria-live="polite" aria-atomic="true">
         {toasts.map((toast) => (
-          <div key={toast.id} className={`toast toast-${toast.type}`}>
+          <Toast key={toast.id} type={toast.type} className={`toast toast-${toast.type}`}>
             {toast.message}
-          </div>
+          </Toast>
         ))}
-      </div>
+      </ToastViewport>
 
       {/* Accessibility: announce task count to screen readers */}
       <div className="sr-only" role="status" aria-live="polite">
