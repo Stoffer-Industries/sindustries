@@ -21,6 +21,7 @@ describe('DesignSystemPage', () => {
     expect(screen.getByRole('button', { name: 'Display primary' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Display outline' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Display ghost' })).toBeInTheDocument();
+    expect(screen.getByText('Tertiary headers')).toBeInTheDocument();
     expect(screen.getByText('Color')).toBeInTheDocument();
     expect(screen.getByText('Color labels')).toBeInTheDocument();
     expect(screen.getByText('Space')).toBeInTheDocument();

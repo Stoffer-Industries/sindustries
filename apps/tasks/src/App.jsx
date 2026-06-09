@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Avatar,
-  Badge,
   Button,
   Card,
   CardContainer,
@@ -14,23 +12,21 @@ import {
   Select,
   Toast,
   ToastViewport,
+  Tooltip,
   cx
 } from '@sindustries/ui/react';
 import { useTasks } from './useTasks.js';
 import { useTaskDrafts } from './useTaskDrafts.js';
 import { useDebounce } from './hooks/useDebounce.js';
 import { useToast } from './hooks/useToast.js';
+import { TaskCardSummary } from './components/TaskCardSummary.jsx';
 import { TaskEditor } from './components/TaskEditor.jsx';
 import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS } from './utils/constants.js';
-import { createConfettiPieces, normalizeTaskForEditor, assigneeInitial, taskCardTilt } from './utils/helpers.js';
+import { createConfettiPieces, normalizeTaskForEditor, taskCardTilt } from './utils/helpers.js';
 import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from './utils/storage.js';
 
 function isReadyTask(task) {
   return task.status === 'ready';
-}
-
-function priorityVariant(priority) {
-  return ['urgent', 'high', 'medium', 'low'].includes(priority) ? priority : 'neutral';
 }
 
 function cardState(task, isSelected) {
@@ -39,56 +35,6 @@ function cardState(task, isSelected) {
   if (task.blocked) return 'blocked';
   if (isReadyTask(task)) return 'ready';
   return undefined;
-}
-
-function taskCardDate(task) {
-  const raw = task.dueAt ?? task.statusChangedAt;
-  return raw ? String(raw).slice(0, 10) : '';
-}
-
-function taskCardTags(task) {
-  if (!Array.isArray(task.tags)) return [];
-  return task.tags
-    .map((tag) => (typeof tag === 'string' ? tag : tag?.name ?? ''))
-    .filter(Boolean);
-}
-
-function TaskCardSummary({ task, hasDraft, onTitleClick }) {
-  const date = taskCardDate(task);
-  const tags = taskCardTags(task);
-  const assignee = assigneeInitial(task.assignee);
-
-  return (
-    <>
-      <button type="button" className="task-card-title" onClick={onTitleClick}>
-        {task.title}
-      </button>
-      <div className="task-card-footer">
-        <div className="task-card-footer-tags">
-          <Badge
-            variant={priorityVariant(task.priority)}
-            tone="pulse"
-          >
-            {task.priority}
-          </Badge>
-          {tags.map((tag) => (
-            <Badge key={tag} variant="tag" tone="pulse">
-              {tag}
-            </Badge>
-          ))}
-          {hasDraft ? <Badge variant="draft" tone="pulse">Unsaved</Badge> : null}
-        </div>
-        <div className="task-card-footer-meta">
-          {assignee ? (
-            <Avatar aria-label={`Assignee ${task.assignee}`}>
-              {assignee}
-            </Avatar>
-          ) : null}
-          {date ? <time className="task-card-date" dateTime={date}>{date}</time> : null}
-        </div>
-      </div>
-    </>
-  );
 }
 
 export function App() {
@@ -154,7 +100,8 @@ export function App() {
     setStoredView(view);
   }, [view]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    document.documentElement.setAttribute('data-si-theme', theme);
     setStoredTheme(theme);
   }, [theme]);
 
@@ -459,7 +406,7 @@ export function App() {
   const nextTheme = theme === 'dark' ? 'light' : 'dark';
 
   return (
-    <main className="app-shell" data-si-theme={theme}>
+    <main className="app-shell">
       <header className="hero-header">
         <div className="hero-pattern" aria-hidden="true" />
         <div className="hero-content">
@@ -885,7 +832,7 @@ export function App() {
                 >
                   <CardContainer.Header>
                     <h3 className="si-font-display si-card-container__title">{STATUS_LABELS[status]}</h3>
-                    <Badge variant="count">{boardColumns[status].length}</Badge>
+                    <Tooltip>{boardColumns[status].length}</Tooltip>
                   </CardContainer.Header>
                   <CardContainer.Content>
                     <ol>

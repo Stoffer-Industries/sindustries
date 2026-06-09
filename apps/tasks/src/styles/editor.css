@@ -1,8 +1,71 @@
 /* Task editor */
-.editor {
-  border-top: 2px solid var(--si-color-ink-950);
-  margin-top: 4px;
-  padding-top: 14px;
+.task-card-editor {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.task-card-editor .si-button {
+  text-transform: none;
+}
+
+.task-editor-view-card {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.task-editor-view-card .task-card-title {
+  cursor: inherit;
+  pointer-events: none;
+}
+
+.task-editor-title-field {
+  margin: 0;
+}
+
+.task-editor-title-row {
+  align-items: stretch;
+  display: flex;
+  gap: 8px;
+}
+
+.task-editor-title-row .task-card-title-input.si-input {
+  background: var(--si-color-bg-field);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  color: var(--si-color-text-secondary);
+  flex: 1;
+  font-family: var(--si-font-ui);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.4285714285714286;
+  min-height: 40px;
+  padding: var(--si-space-2) var(--si-space-3);
+}
+
+.task-editor-title-row .task-card-title-input.si-input:focus,
+.task-editor-title-row .task-card-title-input.si-input:focus-visible {
+  border-color: var(--si-color-cta-primary);
+  outline: none;
+}
+
+.task-editor-title-row .title-close-btn {
+  align-self: stretch;
+}
+
+.title-close-btn {
+  flex-shrink: 0;
+  min-width: 80px;
 }
 
 .editor-fields {
@@ -10,63 +73,65 @@
   gap: 12px;
 }
 
-.title-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-
-.title-row label {
-  flex: 1;
-}
-
-.title-close-btn {
-  flex-shrink: 0;
-  align-self: flex-end;
-  min-width: 80px;
-}
-
 /* Editor actions */
 .editor-actions {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   margin-top: 16px;
+  min-width: 0;
+  width: 100%;
 }
 
 .editor-primary-actions {
+  align-items: center;
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
   margin-bottom: 12px;
+  width: 100%;
 }
 
 .editor-secondary-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
 /* Comments section */
 .comments-section {
-  padding-top: 16px;
-  border-top: 2px dashed var(--si-color-border-strong);
+  align-self: stretch;
+  min-width: 0;
+  padding-top: 4px;
+  width: 100%;
 }
 
 .comments-header {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
   margin-bottom: 12px;
+  min-width: 0;
+  width: 100%;
 }
 
 .comments-header h4 {
-  margin: 0;
-  font-size: 0.95rem;
-  text-transform: uppercase;
   color: var(--si-color-text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+  text-transform: uppercase;
 }
 
 .comments-header-actions {
-  display: flex;
   align-items: center;
+  display: flex;
+  flex: 1 1 auto;
   gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .comments-count {
@@ -74,27 +139,33 @@
 }
 
 .comment-composer {
-  background: var(--si-color-bg-canvas-alt);
-  border: 2px solid var(--si-color-border-strong);
-  border-radius: var(--si-radius-xs);
-  padding: 12px;
+  background: var(--si-color-bg-field);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
   display: grid;
   margin-bottom: 12px;
+  padding: 12px;
+  width: 100%;
 }
 
 .comments-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
 }
 
-.comment-card {
-  background: var(--si-color-bg-surface);
-  border: 2px solid var(--si-color-border-strong);
-  border-radius: var(--si-radius-xs);
+.si-card--pulse.comment-card {
+  background: var(--si-color-bg-field);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  box-shadow: none;
+  color: var(--si-color-text-secondary);
+  padding: 10px 12px;
+  transform: none;
 }
 
 .comment-meta {
@@ -132,8 +203,8 @@
 
 .description-preview {
   background: var(--si-color-bg-field);
-  color: var(--si-color-text-primary);
-  border: 1px solid var(--si-color-border-subtle);
+  color: var(--si-color-text-secondary);
+  border: 2px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-sm);
   padding: 10px 12px;
   min-height: 40px;
@@ -142,12 +213,12 @@
 }
 
 .description-preview:hover {
-  border-color: var(--si-color-focus);
+  border-color: var(--si-color-cta-primary);
 }
 
 .description-preview:focus {
+  border-color: var(--si-color-cta-primary);
   outline: none;
-  border-color: var(--si-color-focus);
 }
 
 .description-empty {
@@ -199,7 +270,7 @@
 }
 
 .markdown-body a {
-  color: var(--si-color-focus);
+  color: var(--si-color-text-primary);
   text-decoration: underline;
 }
 
@@ -208,9 +279,9 @@
 }
 
 .markdown-body code {
-  background: color-mix(in srgb, var(--si-color-text-muted) 18%, var(--si-color-bg-canvas-alt));
-  border: 1px solid var(--si-color-border-subtle);
-  color: var(--si-color-text-primary);
+  background: var(--si-color-sage-500);
+  border: none;
+  color: var(--si-color-bg-surface);
   border-radius: var(--si-radius-xs);
   padding: 1px 5px;
   font-size: 0.88em;
@@ -218,9 +289,9 @@
 }
 
 .markdown-body pre {
-  background: color-mix(in srgb, var(--si-color-text-muted) 18%, var(--si-color-bg-canvas-alt));
-  border: 1px solid var(--si-color-border-subtle);
-  color: var(--si-color-text-primary);
+  background: var(--si-color-sage-500);
+  border: none;
+  color: var(--si-color-bg-surface);
   border-radius: var(--si-radius-xs);
   padding: 10px 12px;
   overflow-x: auto;
@@ -271,8 +342,8 @@
 .markdown-body blockquote {
   margin: 0.4em 0;
   padding: 4px 12px;
-  border-left: 3px solid var(--si-color-focus);
-  color: var(--si-color-text-muted);
+  border-left: 3px solid var(--si-color-sage-500);
+  color: var(--si-color-text-tertiary);
 }
 
 .markdown-body hr {
@@ -316,7 +387,7 @@
 .markdown-body del,
 .markdown-body s {
   text-decoration: line-through;
-  color: var(--si-color-text-muted);
+  color: var(--si-color-text-tertiary);
 }
 
 /* Comment body markdown overrides */
@@ -328,4 +399,9 @@
 .actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.comment-composer .actions {
+  justify-content: flex-start;
 }

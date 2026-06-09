@@ -52,6 +52,10 @@ export function Badge({ variant = 'neutral', tone, className, ...props }) {
   );
 }
 
+export function Tooltip({ className, ...props }) {
+  return <span className={cx('si-tooltip', className)} {...props} />;
+}
+
 export const Card = React.forwardRef(function Card({
   as: Component = 'article',
   variant = 'default',
@@ -168,6 +172,10 @@ export function DropdownOption({ as: Component = 'button', className, ...props }
 
 export function DropdownDivider(props) {
   return <div className="si-dropdown__divider" aria-hidden="true" {...props} />;
+}
+
+export function Divider({ variant = 'subtle', className, ...props }) {
+  return <hr className={cx('si-divider', `si-divider--${variant}`, className)} aria-hidden="true" {...props} />;
 }
 
 export function Avatar({ children, className, ...props }) {
