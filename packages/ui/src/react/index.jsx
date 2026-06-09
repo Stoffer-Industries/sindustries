@@ -79,12 +79,17 @@ export const Card = React.forwardRef(function Card({
 
 export const CardContainer = React.forwardRef(function CardContainer({
   as: Component = 'article',
+  variant,
   className,
   children,
   ...props
 }, ref) {
   return (
-    <Component ref={ref} className={cx('si-card-container', className)} {...props}>
+    <Component
+      ref={ref}
+      className={cx('si-card-container', variant && `si-card-container--${variant}`, className)}
+      {...props}
+    >
       {children}
     </Component>
   );

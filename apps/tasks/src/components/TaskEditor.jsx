@@ -145,7 +145,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
       <div className="editor-fields">
         <div className="title-row">
           <Field label="Title">
-            <Input ref={titleRef} className="edit-control" aria-label="Detail title" value={draft.title} onChange={(e) => update('title', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, titleRef, false)} autoFocus />
+            <Input ref={titleRef} aria-label="Detail title" value={draft.title} onChange={(e) => update('title', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, titleRef, false)} autoFocus />
           </Field>
           {/* AC6: Close button in title section */}
           <Button type="button" variant="ghost" tone="display" className="title-close-btn" onClick={onClose}>Close</Button>
@@ -158,7 +158,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
           {isDescriptionEditing ? (
             <Textarea
               ref={descriptionRef}
-              className="edit-control auto-grow-textarea"
+              className="auto-grow-textarea"
               aria-label="Detail description"
               value={draft.description}
               rows={1}
@@ -201,7 +201,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
 
         <div className="editor-grid">
           <Field label="Status">
-            <Select ref={statusRef} className="edit-control" aria-label="Detail status" value={draft.status} onChange={(e) => update('status', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, statusRef)}>
+            <Select ref={statusRef} aria-label="Detail status" value={draft.status} onChange={(e) => update('status', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, statusRef)}>
               {STATUSES.map((status) => (
                 <option key={status} value={status}>{STATUS_LABELS[status]}</option>
               ))}
@@ -209,7 +209,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
           </Field>
 
           <Field label="Priority">
-            <Select ref={priorityRef} className="edit-control" aria-label="Detail priority" value={draft.priority} onChange={(e) => update('priority', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, priorityRef)}>
+            <Select ref={priorityRef} aria-label="Detail priority" value={draft.priority} onChange={(e) => update('priority', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, priorityRef)}>
               {PRIORITIES.map((priority) => (
                 <option key={priority} value={priority}>{priority}</option>
               ))}
@@ -217,7 +217,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
           </Field>
 
           <Field label="Assignee">
-            <Select ref={assigneeRef} className="edit-control" aria-label="Detail assignee" value={draft.assignee} onChange={(e) => update('assignee', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, assigneeRef, false)}>
+            <Select ref={assigneeRef} aria-label="Detail assignee" value={draft.assignee} onChange={(e) => update('assignee', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, assigneeRef, false)}>
               <option value="">Unassigned</option>
               {ASSIGNEE_OPTIONS.map((assignee) => (
                 <option key={assignee} value={assignee}>{assignee}</option>
@@ -226,12 +226,12 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
           </Field>
 
           <Field label="Due date">
-            <Input ref={dueAtRef} className="edit-control" aria-label="Detail due date" type="date" value={draft.dueAt} onChange={(e) => update('dueAt', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, dueAtRef)} />
+            <Input ref={dueAtRef} aria-label="Detail due date" type="date" value={draft.dueAt} onChange={(e) => update('dueAt', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, dueAtRef)} />
           </Field>
         </div>
 
         <Field label="Tags (comma separated)">
-          <Input ref={tagsRef} className="edit-control" aria-label="Detail tags" value={draft.tagsText} onChange={(e) => update('tagsText', e.target.value)} placeholder="api, ui, urgent" onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, tagsRef, false)} />
+          <Input ref={tagsRef} aria-label="Detail tags" value={draft.tagsText} onChange={(e) => update('tagsText', e.target.value)} placeholder="api, ui, urgent" onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, tagsRef, false)} />
         </Field>
 
         <div className="editor-toggles">
@@ -287,7 +287,6 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
             <div id="task-comment-composer" className="comment-composer">
               <Field label="Comment author">
                 <Input
-                  className="edit-control"
                   aria-label="Comment author"
                   value={commentDraft.author}
                   onChange={(e) => setCommentDraft((current) => ({ ...current, author: e.target.value }))}
@@ -297,7 +296,6 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
               </Field>
               <Field label="Comment">
                 <Textarea
-                  className="edit-control"
                   aria-label="Comment text"
                   value={commentDraft.text}
                   rows={3}

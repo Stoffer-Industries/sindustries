@@ -55,7 +55,7 @@ describe('@sindustries/ui/react', () => {
 
   it('renders card container sections with canvas header', () => {
     render(
-      <CardContainer data-testid="card-container">
+      <CardContainer variant="column" data-testid="card-container">
         <CardContainer.Header title="Mission Control" />
         <CardContainer.Content>Body copy</CardContainer.Content>
         <CardContainer.Actions>
@@ -64,10 +64,20 @@ describe('@sindustries/ui/react', () => {
       </CardContainer>
     );
 
-    expect(screen.getByTestId('card-container')).toHaveClass('si-card-container');
+    expect(screen.getByTestId('card-container')).toHaveClass('si-card-container', 'si-card-container--column');
     expect(screen.getByRole('heading', { name: 'Mission Control' })).toHaveClass('si-card-container__title');
     expect(screen.getByText('Body copy').closest('.si-card-container__content')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Install' }).closest('.si-card-container__actions')).toBeInTheDocument();
+  });
+
+  it('renders filter card container variant', () => {
+    render(
+      <CardContainer variant="filter" data-testid="filter-container">
+        <CardContainer.Content>Filters</CardContainer.Content>
+      </CardContainer>
+    );
+
+    expect(screen.getByTestId('filter-container')).toHaveClass('si-card-container--filter');
   });
 
   it('renders form, badge, dropdown, avatar, and toast primitives', () => {

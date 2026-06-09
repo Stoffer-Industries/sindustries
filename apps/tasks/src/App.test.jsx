@@ -507,7 +507,7 @@ describe('tasks ui', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show archived' }));
 
     const archivedCard = await screen.findByTestId('card-archived-task');
-    expect(archivedCard).toHaveClass('archived');
+    expect(archivedCard).toHaveClass('si-card--archived');
     expect(within(archivedCard).getByRole('button', { name: 'Archived task' })).toBeInTheDocument();
   });
 });
