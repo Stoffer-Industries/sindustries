@@ -25,6 +25,7 @@
   --si-color-info-500: #00d4ff;
   --si-color-accent-200: #ff8ab4;
   --si-color-accent-500: #ff3e8a;
+  --si-color-success-200: #9ee9b0;
   --si-color-success-500: #31c76a;
   --si-color-danger-500: #ff5252;
 
@@ -34,6 +35,8 @@
   --si-color-bg-canvas: #111213;
   --si-color-bg-canvas-alt: #161a1e;
   --si-color-bg-surface: #2b2f34;
+  --si-color-bg-surface-alt: #161a1e;
+  --si-color-bg-surface-contrast: #f3f1ec;
   --si-color-bg-glass: rgba(43, 47, 52, 0.68);
   --si-color-text-primary: #f3f1ec;
   --si-color-text-secondary: #d5d3cd;
@@ -90,6 +93,8 @@
   --si-color-bg-canvas: #F4F1EA;
   --si-color-bg-canvas-alt: #E8E4DC;
   --si-color-bg-surface: #FFFFFF;
+  --si-color-bg-surface-alt: #F0EEEA;
+  --si-color-bg-surface-contrast: #F5F2E8;
   --si-color-bg-glass: rgba(255, 255, 255, 0.72);
   --si-color-text-primary: #111213;
   --si-color-text-secondary: #3D444D;

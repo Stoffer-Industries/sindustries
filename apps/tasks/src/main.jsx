@@ -1,14 +1,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@sindustries/design-tokens/styles.css';
+import '@sindustries/ui/react/styles.css';
 import './index.css';
-import './App.css';
 import { App } from './App.jsx';
-import { TokensPage } from './pages/TokensPage.jsx';
+import { DesignSystemPage } from './pages/TokensPage.jsx';
 
 function Root() {
-  if (window.location.pathname === '/tokens') {
-    return <TokensPage />;
+  if (window.location.pathname === '/design-system') {
+    return <DesignSystemPage />;
   }
   return <App />;
 }

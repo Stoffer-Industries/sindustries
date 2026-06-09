@@ -99,6 +99,74 @@
   gap: 18px;
 }
 
+.component-specimen-grid {
+  display: grid;
+  gap: var(--si-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.component-specimen-card,
+.component-task-card {
+  display: grid;
+  gap: var(--si-space-4);
+}
+
+.component-specimen-card {
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-lg);
+  background: var(--si-color-bg-canvas-alt);
+  padding: var(--si-space-4);
+}
+
+.component-specimen-card h2 {
+  margin: 0;
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-ui);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.component-task-card {
+  align-self: start;
+}
+
+.component-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--si-space-2);
+}
+
+.component-specimen-note {
+  margin: var(--si-space-2) 0 0;
+  color: var(--si-color-text-muted);
+  font-family: var(--si-font-ui);
+  font-size: 0.82rem;
+}
+
+.component-task-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--si-space-3);
+}
+
+.component-task-card strong {
+  font-family: var(--si-font-ui);
+}
+
+.component-task-card p {
+  margin: 0;
+  color: var(--si-color-text-secondary);
+}
+
+.component-form-grid,
+.component-toast-stack {
+  display: grid;
+  gap: var(--si-space-3);
+}
+
 .token-swatch-grid,
 .radius-grid {
   display: grid;

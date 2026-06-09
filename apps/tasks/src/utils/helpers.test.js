@@ -4,7 +4,8 @@ import {
   normalizeComments,
   formatCommentTimestamp,
   normalizeTaskForEditor,
-  assigneeInitial
+  assigneeInitial,
+  taskCardTilt
 } from '../utils/helpers.js';
 
 describe('helpers', () => {
@@ -168,6 +169,14 @@ describe('helpers', () => {
 
     it('trims whitespace', () => {
       expect(assigneeInitial('  john  ')).toBe('J');
+    });
+  });
+
+  describe('taskCardTilt', () => {
+    it('returns a stable bucket between 0 and 2', () => {
+      expect(taskCardTilt('assigned')).toBe(taskCardTilt('assigned'));
+      expect(taskCardTilt('assigned')).toBeGreaterThanOrEqual(0);
+      expect(taskCardTilt('assigned')).toBeLessThan(3);
     });
   });
 });

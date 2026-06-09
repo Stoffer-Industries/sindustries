@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-tokens.mjs"
+    "build": "node scripts/build-tokens.mjs",
+    "test": "node --test scripts/pen-document.test.mjs"
   },
   "exports": {
     "./styles.css": "./styles.css",

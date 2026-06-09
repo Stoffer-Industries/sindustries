@@ -43,6 +43,7 @@ export const tokens = {
         "500": "#ff3e8a"
       },
       "success": {
+        "200": "#9ee9b0",
         "500": "#31c76a"
       },
       "danger": {
@@ -84,6 +85,8 @@ export const tokens = {
         "bgCanvas": "#F4F1EA",
         "bgCanvasAlt": "#E8E4DC",
         "bgSurface": "#FFFFFF",
+        "bgSurfaceAlt": "#F0EEEA",
+        "bgSurfaceContrast": "#F5F2E8",
         "bgGlass": "rgba(255, 255, 255, 0.72)",
         "textPrimary": "#111213",
         "textSecondary": "#3D444D",
@@ -112,6 +115,8 @@ export const tokens = {
         "bgCanvas": "#111213",
         "bgCanvasAlt": "#161a1e",
         "bgSurface": "#2b2f34",
+        "bgSurfaceAlt": "#161a1e",
+        "bgSurfaceContrast": "#f3f1ec",
         "bgGlass": "rgba(43, 47, 52, 0.68)",
         "textPrimary": "#f3f1ec",
         "textSecondary": "#d5d3cd",
@@ -182,6 +187,8 @@ export const colors = {
   bgCanvas: dark.bgCanvas,
   bgCanvasAlt: dark.bgCanvasAlt,
   bgSurface: dark.bgSurface,
+  bgSurfaceAlt: dark.bgSurfaceAlt,
+  bgSurfaceContrast: dark.bgSurfaceContrast,
   bgGlass: dark.bgGlass,
   textPrimary: dark.textPrimary,
   textSecondary: dark.textSecondary,
@@ -227,6 +234,8 @@ export const colorsLight = {
   bgCanvas: light.bgCanvas,
   bgCanvasAlt: light.bgCanvasAlt,
   bgSurface: light.bgSurface,
+  bgSurfaceAlt: light.bgSurfaceAlt,
+  bgSurfaceContrast: light.bgSurfaceContrast,
   bgGlass: light.bgGlass,
   textPrimary: light.textPrimary,
   textSecondary: light.textSecondary,

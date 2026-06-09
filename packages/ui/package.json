@@ -1,0 +1,29 @@
+{
+  "name": "@sindustries/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./react": "./src/react/index.jsx",
+    "./react/styles.css": "./src/react/styles.css"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "react": "^18.3.1 || ^19.0.0",
+    "react-dom": "^18.3.1 || ^19.0.0"
+  },
+  "dependencies": {
+    "@sindustries/design-tokens": "file:../design-tokens"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "vitest": "^2.1.2",
+    "jsdom": "^25.0.1"
+  },
+  "scripts": {
+    "test": "vitest run --environment jsdom"
+  }
+}
