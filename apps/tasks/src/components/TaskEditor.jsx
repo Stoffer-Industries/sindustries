@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, Field, Input, Select, Textarea } from '@sindustries/ui/react';
+import { Button, Card, Divider, Field, Input, Select, Textarea } from '@sindustries/ui/react';
 import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS } from '../utils/constants.js';
 import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
+import { TaskCardSummary } from './TaskCardSummary.jsx';
 
 /**
  * TaskEditor - Inline editor for task details
@@ -141,16 +142,38 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
   });
 
   return (
-    <div className="editor" onClick={(e) => e.stopPropagation()}>
-      <div className="editor-fields">
-        <div className="title-row">
-          <Field label="Title">
-            <Input ref={titleRef} aria-label="Detail title" value={draft.title} onChange={(e) => update('title', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, titleRef, false)} autoFocus />
-          </Field>
-          {/* AC6: Close button in title section */}
-          <Button type="button" variant="ghost" tone="display" className="title-close-btn" onClick={onClose}>Close</Button>
-        </div>
+    <div className="task-card-editor" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="task-editor-view-card"
+        onClick={onClose}
+        aria-label="Close task editor and show card view"
+      >
+        <TaskCardSummary task={task} hasDraft={isDirty} />
+      </button>
 
+      <Divider variant="dashed" />
+
+      <Field label="Title" className="task-editor-title-field">
+        <div className="task-editor-title-row">
+          <Input
+            ref={titleRef}
+            className="task-card-title-input"
+            aria-label="Detail title"
+            value={draft.title}
+            onChange={(e) => update('title', e.target.value)}
+            onMouseDown={stopPropagation}
+            onTouchStart={stopPropagation}
+            onKeyDown={(e) => handleKeyDown(e, titleRef, false)}
+            autoFocus
+          />
+          <Button type="button" variant="ghost" tone="display" className="title-close-btn" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </Field>
+
+      <div className="editor-fields">
         <div className="description-field">
           <div className="description-header">
             <span className="small">Description</span>
@@ -249,7 +272,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
         </div>
       </div>
 
-      <div className="actions editor-actions">
+      <div className="editor-actions">
         <div className="editor-primary-actions">
           <Button
             type="button"
@@ -264,6 +287,8 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
             <Button type="button" variant="ghost" tone="display" onClick={onClose}>Close</Button>
           </div>
         </div>
+
+        <Divider variant="dashed" />
 
         <div className="comments-section">
           <div className="comments-header">

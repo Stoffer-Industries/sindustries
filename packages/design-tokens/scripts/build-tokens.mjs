@@ -526,6 +526,17 @@ function buildPencilSpecimenDocumentChildren({
             },
             {
               type: 'text',
+              id: 'siSpecTertiary',
+              fill: '$si-color-text-tertiary',
+              content: 'Tertiary headers',
+              fontFamily: fonts.display,
+              fontSize: 15,
+              fontWeight: 'normal',
+              letterSpacing: 1.2,
+              textGrowth: 'auto'
+            },
+            {
+              type: 'text',
               id: 'siSpecBody',
               fill: '$si-color-text-secondary',
               content: 'Body copy with text.secondary for longer readable text.',

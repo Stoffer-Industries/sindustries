@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { Avatar, Badge, Button, Card, CardContainer, DropdownOption, Field, Input, SearchInput, Toast } from './index.jsx';
+import { Avatar, Badge, Button, Card, CardContainer, Divider, DropdownOption, Field, Input, SearchInput, Toast, Tooltip } from './index.jsx';
 
 describe('@sindustries/ui/react', () => {
   it('renders Pulse button variants with accessible props', () => {
@@ -87,6 +87,7 @@ describe('@sindustries/ui/react', () => {
           <Input aria-label="Title" />
         </Field>
         <Badge variant="urgent">urgent</Badge>
+        <Tooltip>3</Tooltip>
         <DropdownOption type="button">Open</DropdownOption>
         <Avatar aria-label="Assignee Q">Q</Avatar>
         <Toast type="success">Saved</Toast>
@@ -96,9 +97,22 @@ describe('@sindustries/ui/react', () => {
     expect(screen.getByText('Title')).toHaveClass('si-field__label');
     expect(screen.getByLabelText('Title')).toHaveClass('si-input');
     expect(screen.getByText('urgent')).toHaveClass('si-badge--urgent');
+    expect(screen.getByText('3')).toHaveClass('si-tooltip');
     expect(screen.getByRole('button', { name: 'Open' })).toHaveClass('si-dropdown__option');
     expect(screen.getByLabelText('Assignee Q')).toHaveClass('si-avatar');
     expect(screen.getByText('Saved')).toHaveClass('si-toast--success');
+  });
+
+  it('renders dashed and subtle dividers', () => {
+    const { container } = render(
+      <>
+        <Divider variant="dashed" data-testid="dashed-divider" />
+        <Divider variant="subtle" data-testid="subtle-divider" />
+      </>
+    );
+
+    expect(container.querySelector('[data-testid="dashed-divider"]')).toHaveClass('si-divider--dashed');
+    expect(container.querySelector('[data-testid="subtle-divider"]')).toHaveClass('si-divider--subtle');
   });
 
   it('renders search and filter controls from design-system classes', () => {

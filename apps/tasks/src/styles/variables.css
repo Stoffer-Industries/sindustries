@@ -1,8 +1,16 @@
-:root {
+:root,
+[data-si-theme='dark'] {
   --si-canvas-gradient: linear-gradient(
     180deg,
-    var(--si-color-bg-surface-contrast) 0%,
-    var(--si-color-bg-canvas-alt) 48%,
+    var(--si-color-bg-surface) 0%,
+    var(--si-color-bg-canvas) 100%
+  );
+}
+
+[data-si-theme='light'] {
+  --si-canvas-gradient: linear-gradient(
+    180deg,
+    var(--si-color-bg-surface) 0%,
     var(--si-color-bg-canvas) 100%
   );
 }

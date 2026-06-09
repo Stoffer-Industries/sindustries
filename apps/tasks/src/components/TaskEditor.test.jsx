@@ -127,11 +127,32 @@ describe('TaskEditor', () => {
     const onClose = vi.fn();
     render(<TaskEditor {...defaultProps} onClose={onClose} />);
 
-    // There are two Close buttons - click the one in editor-actions (not title-close-btn)
     const closeButtons = screen.getAllByText('Close');
     fireEvent.click(closeButtons[1]);
 
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('calls onClose when the view card is clicked', () => {
+    const onClose = vi.fn();
+    render(<TaskEditor {...defaultProps} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close task editor and show card view' }));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('renders the saved task in the view card preview', () => {
+    render(
+      <TaskEditor
+        {...defaultProps}
+        draft={{ ...defaultProps.draft, title: 'Draft title' }}
+        task={{ ...defaultProps.task, title: 'Saved title', priority: 'high' }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Close task editor and show card view' })).toHaveTextContent('Saved title');
+    expect(screen.getByLabelText('Detail title')).toHaveValue('Draft title');
   });
 
   it('calls onArchive when archive button clicked', () => {

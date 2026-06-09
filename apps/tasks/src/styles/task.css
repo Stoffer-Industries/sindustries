@@ -1,16 +1,29 @@
 /* Task card layout */
 .task-card,
 .board-card {
-  color: var(--si-color-ink-950);
+  color: var(--si-color-text-primary);
   display: grid;
   gap: 12px;
   width: 100%;
 }
 
+.si-card--blocked.task-card,
+.si-card--blocked.board-card {
+  color: var(--si-color-on-danger-fg);
+}
+
+.si-card--blocked .task-card-title {
+  color: inherit;
+}
+
+.si-card--blocked .task-card-date {
+  color: color-mix(in srgb, var(--si-color-on-danger-fg) 72%, transparent);
+}
+
 .task-card-title {
   background: none;
   border: 0;
-  color: var(--si-color-ink-950);
+  color: var(--si-color-text-primary);
   cursor: pointer;
   font-family: var(--si-font-display);
   font-size: 1rem;
@@ -20,6 +33,26 @@
   padding: 0;
   text-align: left;
   width: 100%;
+}
+
+.task-card-title-input.si-input {
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 0;
+  color: var(--si-color-text-primary);
+  flex: 1;
+  font-family: var(--si-font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  min-height: auto;
+  padding: 0;
+}
+
+.task-card-title-input.si-input:focus,
+.task-card-title-input.si-input:focus-visible {
+  border-color: var(--si-color-cta-primary);
+  outline: none;
 }
 
 .task-card-footer {
@@ -99,7 +132,7 @@
 
 /* Create card */
 .create-card {
-  border-color: var(--si-color-ink-950);
+  border-color: var(--si-color-bg-canvas);
   cursor: default;
 }
 

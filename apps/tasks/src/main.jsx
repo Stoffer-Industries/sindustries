@@ -5,6 +5,9 @@ import '@sindustries/ui/react/styles.css';
 import './index.css';
 import { App } from './App.jsx';
 import { DesignSystemPage } from '@sindustries/ui/specimen';
+import { getStoredTheme } from './utils/storage.js';
+
+document.documentElement.setAttribute('data-si-theme', getStoredTheme());
 
 function Root() {
   if (window.location.pathname === '/design-system') {

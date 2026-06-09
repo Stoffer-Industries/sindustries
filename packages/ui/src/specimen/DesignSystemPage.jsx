@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Divider,
   Dropdown,
   DropdownDivider,
   DropdownOption,
@@ -11,7 +12,8 @@ import {
   Input,
   Select,
   Textarea,
-  Toast
+  Toast,
+  Tooltip
 } from '../react/index.jsx';
 import {
   SPECIMEN_COLOR_ROWS,
@@ -75,13 +77,14 @@ export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
             </article>
 
             <article className="si-specimen-card">
-              <h2>Badges and avatar</h2>
+              <h2>Badges, tooltip, and avatar</h2>
               <div className="si-specimen-row">
                 <Badge variant="urgent" tone="pulse">urgent</Badge>
                 <Badge variant="high" tone="pulse">high</Badge>
                 <Badge variant="medium" tone="pulse">medium</Badge>
                 <Badge variant="low" tone="pulse">low</Badge>
                 <Badge variant="tag" tone="pulse">#design</Badge>
+                <Tooltip>3</Tooltip>
                 <Avatar aria-label="Assignee Rowan">R</Avatar>
               </div>
             </article>
@@ -115,6 +118,20 @@ export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
                 <Field label="Notes">
                   <Textarea rows={3} placeholder="Describe the work" />
                 </Field>
+              </div>
+            </article>
+
+            <article className="si-specimen-card">
+              <h2>Dividers</h2>
+              <div className="si-specimen-form-grid">
+                <div>
+                  <p className="si-specimen-note">Dashed — task card sections</p>
+                  <Divider variant="dashed" />
+                </div>
+                <div>
+                  <p className="si-specimen-note">Subtle — inline separators</p>
+                  <Divider variant="subtle" />
+                </div>
               </div>
             </article>
 
@@ -173,6 +190,7 @@ export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
           <p className="si-specimen-eyebrow">Typography</p>
           <p className="si-specimen-type-display">Display face</p>
           <p className="si-specimen-type-ui">UI label and controls</p>
+          <p className="si-specimen-type-tertiary">Tertiary headers</p>
           <p className="si-specimen-type-body">Body copy for longer readable text.</p>
         </article>
 

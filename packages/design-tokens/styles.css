@@ -9,6 +9,7 @@
 [data-si-theme="dark"] {
   color-scheme: dark;
 
+  --si-color-ink-800: #1a1f24;
   --si-color-ink-900: #161a1e;
   --si-color-ink-950: #111213;
   --si-color-surface-800: #2b2f34;
@@ -36,10 +37,11 @@
   --si-color-bg-canvas-alt: #161a1e;
   --si-color-bg-surface: #2b2f34;
   --si-color-bg-surface-alt: #161a1e;
-  --si-color-bg-surface-contrast: #f3f1ec;
+  --si-color-bg-surface-contrast: #1a1f24;
   --si-color-bg-glass: rgba(43, 47, 52, 0.68);
-  --si-color-text-primary: #f3f1ec;
-  --si-color-text-secondary: #d5d3cd;
+  --si-color-text-primary: #ece3cc;
+  --si-color-text-secondary: #8f969e;
+  --si-color-text-tertiary: #ffc935;
   --si-color-text-muted: #8f969e;
   --si-color-border-strong: #8f969e;
   --si-color-border-subtle: rgba(143, 150, 158, 0.18);
@@ -52,7 +54,7 @@
   --si-color-label-orange: #f59e0b;
   --si-color-label-purple: #a78bfa;
   --si-color-label-gray: #8f969e;
-  --si-color-bg-field: #111213;
+  --si-color-bg-field: #161a1e;
   --si-color-bg-pagination-active: #111213;
   --si-color-bg-image-placeholder: #111213;
   --si-color-on-danger-fg: #f3f1ec;
@@ -96,8 +98,9 @@
   --si-color-bg-surface-alt: #F0EEEA;
   --si-color-bg-surface-contrast: #F5F2E8;
   --si-color-bg-glass: rgba(255, 255, 255, 0.72);
-  --si-color-text-primary: #111213;
+  --si-color-text-primary: #2b2f34;
   --si-color-text-secondary: #3D444D;
+  --si-color-text-tertiary: #7a8b7c;
   --si-color-text-muted: #5C6670;
   --si-color-border-strong: #9CA3AF;
   --si-color-border-subtle: rgba(0, 0, 0, 0.06);
@@ -110,7 +113,7 @@
   --si-color-label-orange: #f59e0b;
   --si-color-label-purple: #a78bfa;
   --si-color-label-gray: #8f969e;
-  --si-color-bg-field: #FFFFFF;
+  --si-color-bg-field: #F0EEEA;
   --si-color-bg-pagination-active: #E4E0D8;
   --si-color-bg-image-placeholder: #EDEAE4;
   --si-color-on-danger-fg: #FFFFFF;

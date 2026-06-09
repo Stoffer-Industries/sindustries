@@ -199,6 +199,16 @@
   text-transform: uppercase;
 }
 
+.si-specimen-type-tertiary {
+  color: var(--si-color-text-tertiary);
+  font-family: var(--si-font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  margin: 0;
+  text-transform: uppercase;
+}
+
 .si-specimen-type-body {
   color: var(--si-color-text-secondary);
   margin: 0;
