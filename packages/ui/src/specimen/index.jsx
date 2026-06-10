@@ -4,4 +4,4 @@ export {
   SPECIMEN_LABEL_COLORS,
   SPECIMEN_RADII,
   SPECIMEN_SPACES
-} from './manifest.js';
+} from './generated/manifest.js';

@@ -186,8 +186,63 @@ export function Avatar({ children, className, ...props }) {
   );
 }
 
-export function Toast({ type = 'info', className, ...props }) {
-  return <div className={cx('si-toast', `si-toast--${type}`, className)} {...props} />;
+function ToastIcon({ type }) {
+  const icons = {
+    info: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+        <path d="M12 16v-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="12" cy="8" r="0.5" fill="currentColor" stroke="currentColor" />
+      </svg>
+    ),
+    success: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path
+          d="M12 3l7 3v5c0 5-3.5 8.5-7 10C8.5 19.5 5 16 5 11V6l7-3z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path d="m9 12 2 2 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+    warning: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path
+          d="M12 3 2.5 19h19L12 3z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path d="M12 9v4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="currentColor" />
+      </svg>
+    ),
+    error: (
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+        <path d="m9 9 6 6M15 9l-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    )
+  };
+
+  return <span className={cx('si-toast__icon', `si-toast__icon--${type}`)}>{icons[type] ?? icons.info}</span>;
+}
+
+export function Toast({ type = 'info', title, description, className, children, ...props }) {
+  const heading = title ?? children;
+
+  return (
+    <div className={cx('si-toast', `si-toast--${type}`, className)} role="status" {...props}>
+      <ToastIcon type={type} />
+      <div className="si-toast__body">
+        {heading ? <p className="si-toast__title">{heading}</p> : null}
+        {description ? <p className="si-toast__description">{description}</p> : null}
+      </div>
+    </div>
+  );
 }
 
 export function ToastViewport({ className, ...props }) {

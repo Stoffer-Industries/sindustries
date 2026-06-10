@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-tokens.mjs",
-    "test": "node --test scripts/pen-document.test.mjs"
+    "test": "node --test scripts/*.test.mjs"
   },
   "exports": {
     "./styles.css": "./styles.css",
@@ -19,6 +19,7 @@
     "styles.css",
     "tokens.json",
     "pen-tokens.json",
-    "design-systems.pen"
+    "design-systems.pen",
+    "specimen-layout.json"
   ]
 }

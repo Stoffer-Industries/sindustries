@@ -1,3 +1,16 @@
+export function isGeneratedSpecimenFrame(node) {
+  if (!node || node.type !== 'frame') return false;
+  if (node.id === 'siSpecRoot' || node.id === 'siReactSpecPulse' || node.id === 'zq4EP') return true;
+  if (node.id?.startsWith('siReactSpec')) return true;
+  if (node.name === 'Design tokens specimen') return true;
+  return hasTextContent(node, 'Pencil token specimen') || hasTextContent(node, 'Pulse React specimen');
+}
+
+/** @deprecated use isGeneratedSpecimenFrame */
+export function isSpecimenFrame(node) {
+  return isGeneratedSpecimenFrame(node);
+}
+
 export function hasTextContent(node, content) {
   if (!node || typeof node !== 'object') return false;
   if (node.type === 'text' && node.content === content) return true;
@@ -9,13 +22,6 @@ export function hasTextContent(node, content) {
     }
   }
   return false;
-}
-
-export function isSpecimenFrame(node) {
-  if (!node || node.type !== 'frame') return false;
-  if (node.id === 'siSpecRoot' || node.id === 'zq4EP') return true;
-  if (node.name === 'Design tokens specimen') return true;
-  return hasTextContent(node, 'Pencil token specimen');
 }
 
 function normalizeString(s) {
@@ -81,11 +87,12 @@ function walkNormalizeStrings(node) {
 
 function preserveSpecimenLayout(existing, generated) {
   const merged = { ...generated };
-  merged.id = existing.id ?? generated.id;
+  merged.id = generated.id ?? existing.id;
   if (existing.x !== undefined) merged.x = existing.x;
   if (existing.y !== undefined) merged.y = existing.y;
   if (existing.width !== undefined) merged.width = existing.width;
   if (existing.height !== undefined) merged.height = existing.height;
+  if (existing.name !== undefined && generated.name === undefined) merged.name = existing.name;
   if (
     existing.theme &&
     typeof existing.theme === 'object' &&
@@ -97,22 +104,21 @@ function preserveSpecimenLayout(existing, generated) {
   return merged;
 }
 
-function findSpecimenIndex(children) {
+function findFrameIndexById(children, frameId) {
   if (!Array.isArray(children)) return -1;
-  return children.findIndex(isSpecimenFrame);
+  return children.findIndex((child) => child?.id === frameId);
 }
 
-function removeSpecimenFrames(children) {
+function removeGeneratedSpecimenFrames(children) {
   if (!Array.isArray(children)) return children;
-  return children.filter((child) => !isSpecimenFrame(child));
+  return children.filter((child) => !isGeneratedSpecimenFrame(child));
 }
 
 /**
- * Merge token variables/themes into design-systems.pen and refresh the token
- * specimen in place. The specimen lives as a top-level sibling frame (id zq4EP),
- * not inside the components artboard (vtHps).
+ * Merge token variables/themes into design-systems.pen and refresh generated
+ * specimen frames in place (tokens + React pack specimens).
  */
-export function normalizeDesignSystemsDocument(doc, { pencilVariables, buildSpecimen }) {
+export function normalizeDesignSystemsDocument(doc, { pencilVariables, buildSpecimenFrames }) {
   delete doc.imports;
 
   doc.themes = {
@@ -123,42 +129,42 @@ export function normalizeDesignSystemsDocument(doc, { pencilVariables, buildSpec
   walkNormalizeStrings(doc);
   stripEmptyThemes(doc);
 
-  const generated = buildSpecimen()[0];
-  const topLevelIndex = findSpecimenIndex(doc.children);
+  const generatedFrames = buildSpecimenFrames();
+  const generatedIds = new Set(generatedFrames.map((frame) => frame.id));
 
-  if (topLevelIndex >= 0) {
-    doc.children[topLevelIndex] = preserveSpecimenLayout(doc.children[topLevelIndex], generated);
-  } else {
-    const componentsFrame = doc.children?.find((child) => child?.id === 'vtHps');
-    const nestedIndex = findSpecimenIndex(componentsFrame?.children);
-    if (nestedIndex >= 0) {
-      componentsFrame.children[nestedIndex] = preserveSpecimenLayout(
-        componentsFrame.children[nestedIndex],
-        generated
-      );
-    } else if (Array.isArray(doc.children)) {
-      doc.children.push(generated);
+  if (!Array.isArray(doc.children)) {
+    doc.children = [];
+  }
+
+  for (const generated of generatedFrames) {
+    const topLevelIndex = findFrameIndexById(doc.children, generated.id);
+    if (topLevelIndex >= 0) {
+      doc.children[topLevelIndex] = preserveSpecimenLayout(doc.children[topLevelIndex], generated);
+      continue;
     }
+
+    const legacyIndex = generated.id === 'siSpecRoot'
+      ? doc.children.findIndex(isGeneratedSpecimenFrame)
+      : -1;
+    if (legacyIndex >= 0 && doc.children[legacyIndex]?.id !== generated.id) {
+      doc.children[legacyIndex] = preserveSpecimenLayout(doc.children[legacyIndex], generated);
+      continue;
+    }
+
+    doc.children.push(generated);
   }
 
-  // Drop stray generated copies that were previously pushed into vtHps.
-  const componentsFrame = doc.children?.find((child) => child?.id === 'vtHps');
+  doc.children = doc.children.filter((child) => {
+    if (!isGeneratedSpecimenFrame(child)) return true;
+    return generatedIds.has(child.id);
+  });
+
+  const componentsFrame = doc.children.find((child) => child?.id === 'vtHps');
   if (componentsFrame?.children) {
-    componentsFrame.children = removeSpecimenFrames(componentsFrame.children);
+    componentsFrame.children = removeGeneratedSpecimenFrames(componentsFrame.children);
   }
 
-  // Keep a single top-level specimen if duplicates exist.
-  if (Array.isArray(doc.children)) {
-    let kept = false;
-    doc.children = doc.children.filter((child) => {
-      if (!isSpecimenFrame(child)) return true;
-      if (kept) return false;
-      kept = true;
-      return true;
-    });
-  }
-
-  const componentsRoot = doc.children?.find((child) => child?.id === 'vtHps');
+  const componentsRoot = doc.children.find((child) => child?.id === 'vtHps');
   if (componentsRoot?.type === 'frame') {
     componentsRoot.theme = { Mode: 'Light' };
   }

@@ -90,7 +90,7 @@ describe('@sindustries/ui/react', () => {
         <Tooltip>3</Tooltip>
         <DropdownOption type="button">Open</DropdownOption>
         <Avatar aria-label="Assignee Q">Q</Avatar>
-        <Toast type="success">Saved</Toast>
+        <Toast type="success" title="Saved" />
       </>
     );
 
@@ -100,7 +100,8 @@ describe('@sindustries/ui/react', () => {
     expect(screen.getByText('3')).toHaveClass('si-tooltip');
     expect(screen.getByRole('button', { name: 'Open' })).toHaveClass('si-dropdown__option');
     expect(screen.getByLabelText('Assignee Q')).toHaveClass('si-avatar');
-    expect(screen.getByText('Saved')).toHaveClass('si-toast--success');
+    expect(screen.getByText('Saved')).toHaveClass('si-toast__title');
+    expect(screen.getByText('Saved').closest('.si-toast')).toHaveClass('si-toast--success');
   });
 
   it('renders dashed and subtle dividers', () => {

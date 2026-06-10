@@ -84,6 +84,15 @@
 
   --si-shadow-soft: 0 18px 60px rgb(0 0 0 / 22%);
   --si-shadow-hard: 4px 4px 0 #111213;
+
+  --si-surface-page: var(--si-color-bg-canvas);
+  --si-surface-section: var(--si-color-bg-surface);
+  --si-surface-group: var(--si-color-bg-canvas-alt);
+  --si-surface-inset: var(--si-color-bg-surface-contrast);
+  --si-surface-0: var(--si-surface-page);
+  --si-surface-1: var(--si-surface-section);
+  --si-surface-2: var(--si-surface-group);
+  --si-surface-3: var(--si-surface-inset);
 }
 
 [data-si-theme="light"] {
@@ -157,3 +166,8 @@ a {
 #root {
   min-height: 100vh;
 }
+
+[data-si-surface="page"] { background: var(--si-surface-page); }
+[data-si-surface="section"] { background: var(--si-surface-section); }
+[data-si-surface="group"] { background: var(--si-surface-group); }
+[data-si-surface="inset"] { background: var(--si-surface-inset); }

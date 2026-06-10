@@ -574,6 +574,74 @@
         }
       ]
     },
+    "si-surface-page": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F4F1EA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#111213",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-surface-section": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#FFFFFF",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#2B2F34",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-surface-group": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#E8E4DC",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#161A1E",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-surface-inset": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F5F2E8",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#1A1F24",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
     "si-font-body": {
       "type": "string",
       "value": "Work Sans"

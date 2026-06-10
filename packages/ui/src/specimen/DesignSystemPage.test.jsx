@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { DesignSystemPage } from './DesignSystemPage.jsx';
@@ -11,8 +11,27 @@ describe('DesignSystemPage', () => {
     render(<DesignSystemPage backHref="/" backLabel="← Tasks" />);
 
     expect(screen.getByRole('heading', { name: 'Sindustries design system' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Pulse / React' })).toBeInTheDocument();
     expect(screen.getByText('Components')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Buttons' })).toBeInTheDocument();
+    expect(screen.queryByText('Code catalog')).not.toBeInTheDocument();
+    const componentsSection = screen.getByText('Components').closest('section');
+    expect(within(componentsSection).getByRole('heading', { name: 'Buttons' })).toBeInTheDocument();
+    expect(within(componentsSection).getByRole('heading', { name: 'Form controls' })).toBeInTheDocument();
+    expect(within(componentsSection).getAllByText('CODE').length).toBeGreaterThan(1);
+    expect(within(componentsSection).getByText(/pen:xBc88/)).toBeInTheDocument();
+    expect(within(componentsSection).getByText(/variants: primary, secondary/)).toBeInTheDocument();
+    expect(within(componentsSection).getByText(/pen:Tn1Ii/)).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Modal/Task Card')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Input Group/Title')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Select Group/Priority')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Divider/Dashed')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Divider/Subtle')).toBeInTheDocument();
+    expect(within(componentsSection).getByRole('heading', { name: 'Dropdown' })).toBeInTheDocument();
+    expect(within(componentsSection).getByText(/pen:vsaL0/)).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Toast/Info')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Toast/Success')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Toast/Error')).toBeInTheDocument();
+    expect(within(componentsSection).getByText('Rover status update')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Default' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Secondary' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Destructive' })).toBeInTheDocument();
@@ -21,6 +40,8 @@ describe('DesignSystemPage', () => {
     expect(screen.getByRole('button', { name: 'Display primary' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Display outline' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Display ghost' })).toBeInTheDocument();
+    expect(screen.getByText('Button/Default')).toBeInTheDocument();
+    expect(screen.getByText('Button/Display/Primary')).toBeInTheDocument();
     expect(screen.getByText('Tertiary headers')).toBeInTheDocument();
     expect(screen.getByText('Color')).toBeInTheDocument();
     expect(screen.getByText('Color labels')).toBeInTheDocument();
