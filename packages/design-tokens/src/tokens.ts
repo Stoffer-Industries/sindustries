@@ -150,6 +150,12 @@ export const tokens = {
     "shadow": {
       "soft": "0 18px 60px rgb(0 0 0 / 22%)",
       "hard": "4px 4px 0 #111213"
+    },
+    "surfaceStack": {
+      "page": "bgCanvas",
+      "section": "bgSurface",
+      "group": "bgCanvasAlt",
+      "inset": "bgSurfaceContrast"
     }
   },
   "platform": {
@@ -284,3 +290,22 @@ export const fonts = tokens.semantic.font;
 export const space = tokens.core.space;
 export const radius = tokens.core.radius;
 export const platform = tokens.platform;
+
+/** Semantic surface stack roles → mode color keys (see tokens.semantic.surfaceStack). */
+export const surfaceStackRoles = tokens.semantic.surfaceStack;
+
+/** Resolved surface colors for dark mode (page → section → group → inset). */
+export const surfaces = {
+  page: dark.bgCanvas,
+  section: dark.bgSurface,
+  group: dark.bgCanvasAlt,
+  inset: dark.bgSurfaceContrast,
+} as const;
+
+/** Resolved surface colors for light mode. */
+export const surfacesLight = {
+  page: light.bgCanvas,
+  section: light.bgSurface,
+  group: light.bgCanvasAlt,
+  inset: light.bgSurfaceContrast,
+} as const;

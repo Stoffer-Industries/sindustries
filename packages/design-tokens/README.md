@@ -5,13 +5,16 @@ Single source of truth for design tokens used across **web**, **React Native**, 
 ## How it fits together
 
 ```text
-tokens.json   ← EDIT HERE (values)
+tokens.json              ← EDIT HERE (token values)
+specimen-layout.json     ← section order for pen + web specimens
+packages/ui/component-catalog.json  ← React components per pack
      │
      ▼ npm run build
      ├── styles.css              CSS custom properties (web)
      ├── src/tokens.ts           TypeScript object (React Native / Node)
      ├── pen-tokens.json         Pencil variable payload (tooling / MCP)
-     └── design-systems.pen      UI kit: variables + generated specimen + hand-authored components (Pencil **library**; no nested `imports`)
+     ├── design-systems.pen      UI kit: variables + generated specimens + hand-authored components
+     └── packages/ui/src/specimen/generated/*   web specimen manifest (consumed by /design-system)
 ```
 
 `scripts/build-tokens.mjs` auto-emits every key it finds in `tokens.json`:
@@ -20,7 +23,11 @@ tokens.json   ← EDIT HERE (values)
 - `semantic.modes.{light,dark}.<camelKey>` → `--si-color-<kebab>` (themed) + Pencil themed var + `colors.<camelKey>` / `colorsLight.<camelKey>` in TS.
 - `core.space.*` / `core.radius.*` / `semantic.font.*` / `semantic.shadow.*` → corresponding `--si-space-*` / `--si-radius-*` / `--si-font-*` / `--si-shadow-*` vars.
 
-You only need to touch `build-tokens.mjs` if you want a **renamed/grouped accessor** in the TS export (e.g. `colors.labels.green` aliasing `colors.labelGreen`) or want a token to **appear in the Pencil specimen swatches** — see `swatches` / `labelSwatches` arrays in `buildPencilSpecimenDocumentChildren`.
+You only need to touch `build-tokens.mjs` if you want a **renamed/grouped accessor** in the TS export (e.g. `colors.labels.green` aliasing `colors.labelGreen`).
+
+**Specimen layout** is driven by `specimen-layout.json` (token + React page sections) and `packages/ui/component-catalog.json` (component registry, demo groups, pen names). Edit those files, then rebuild — do not hand-edit generated pen specimen frames or `packages/ui/src/specimen/generated/*`.
+
+**Surface stack** (`semantic.surfaceStack` in `tokens.json`) maps nesting roles to mode colors: `page` → `bgCanvas`, `section` → `bgSurface`, `group` → `bgCanvasAlt`, `inset` → `bgSurfaceContrast`. Build emits `--si-surface-{role}` / `--si-surface-{0-3}` CSS vars, Pencil `$si-surface-*` aliases, and `[data-si-surface="…"]` utilities.
 
 Build:
 
@@ -42,9 +49,8 @@ That overwrites `styles.css`, `src/tokens.ts`, `pen-tokens.json`, and keeps `des
 2. **Run `npm run build`** and commit the regenerated outputs. New keys flow into `styles.css`, `pen-tokens.json`, `src/tokens.ts`, and **into `design-systems.pen` variables + generated specimen** automatically.
 
 3. **(Optional) feature it in a specimen** if you want the new token visible in the design preview:
-   - Pencil: add a row to `swatches` / `labelSwatches` in `scripts/build-tokens.mjs` → `buildPencilSpecimenDocumentChildren`.
-   - Web: `apps/tasks/src/pages/TokensPage.jsx` (`TOKEN_SWATCH_ROWS` / `TOKEN_LABELS`).
-   - Mobile: `apps/budget-mobile/src/screens/TokenSpecimenScreen.tsx` (`swatches` / `labelSwatches`).
+   - Add swatch rows to `specimen-layout.json` → `swatches`.
+   - Rebuild; token swatches appear in `design-systems.pen` (`siSpecRoot`) and `/design-system`.
 
 ## Consumers
 
@@ -52,12 +58,33 @@ That overwrites `styles.css`, `src/tokens.ts`, `pen-tokens.json`, and keeps `des
 |----------|--------|-------|
 | `apps/website` | `@sindustries/design-tokens/styles.css` | `var(--si-color-bg-canvas)` in CSS |
 | `apps/budget-mobile` | `@sindustries/design-tokens/tokens` | `import { colors, space, radius } from '…'` |
-| `docs/designs/budgeting/main.pen` | `imports.ui` → `design-systems.pen` | Components (`ui:…` refs) + `$si-color-*` / `$si-radius-*` on art (variables live in the same library) |
-| `packages/design-tokens/design-systems.pen` | *(none)* | Hand-edited components + generated token specimen; **do not** add `imports` — build injects `variables` / `themes` |
+| `apps/tasks` | `@sindustries/ui/specimen` | `/design-system` mirrors pen layout (tokens + Pulse React) |
+| `docs/designs/budgeting/main.pen` | `imports.ui` → `design-systems.pen` | Components (`ui:…` refs) + `$si-color-*` / `$si-radius-*` on art |
+| `packages/design-tokens/design-systems.pen` | *(none)* | Hand-edited components + generated specimens; build injects `variables` / `themes` |
+
+## Generated pen specimens
+
+| Frame id | Source | Contents |
+|----------|--------|----------|
+| `siSpecRoot` | `specimen-layout.json` + `tokens.json` | Color, type, space, radius swatches |
+| `siReactSpecPulse` | `component-catalog.json` | Pulse React demos + code catalog (paths to `@sindustries/ui/react`) |
+
+Legacy shadcn components under frame `vtHps` are hand-authored archive — not part of the sync target.
+
+### What the build overwrites in `design-systems.pen`
+
+| Zone | Safe to hand-edit layout / children? | What rebuild does |
+|------|--------------------------------------|---------------------|
+| `siSpecRoot`, `siReactSpecPulse` (and any `siReactSpec*` frame) | **No** — specimen content is regenerated | Replaces frame **children** from `specimen-layout.json` + `component-catalog.json`. Preserves only position/size (`x`, `y`, `width`, `height`) and theme on the frame shell. |
+| `vtHps` (design system components) | **Yes** — move, group, duplicate components freely | Does **not** reorder or replace component children. Only strips accidental generated-specimen frames if they ended up inside `vtHps`, and sets `vtHps.theme.Mode` to `Light`. |
+| Component refs / art anywhere else in the file | **Yes** | String normalize (`$si:si-` → `$si-`), empty `theme: {}` cleanup |
+| Root `variables` / `themes` | **No** (values) | Replaced from `tokens.json` each build |
+
+**Linking `vtHps` components into specimen sections:** add `penRef` on each demo in `component-catalog.json` → `specimenGroups` (see the Buttons group). Rebuild copies refs from `vtHps` into `siReactSpecPulse` on every build. Optional `penComponentId` on a component entry is used in the code catalog row.
 
 ## Pencil notes
 
-- **`design-systems.pen`** — UI components + merged variables + generated token specimen. Use **`$si-color-*`**, **`$si-radius-*`**, etc. No nested library import so this file can be marked as a **Pencil library**.
+- **`design-systems.pen`** — UI components + merged variables + generated specimens (`siSpecRoot`, `siReactSpecPulse`). Use **`$si-color-*`**, **`$si-radius-*`**, etc. No nested library import so this file can be marked as a **Pencil library**.
 - **`pen-tokens.json`** — same variable data as JSON for tooling (Pencil MCP `set_variables`, CI checks, etc.).
 - Repo-root scripts (not run by this package's build):
   - `npm run sync:budgeting-pen` — set `docs/designs/budgeting/main.pen` `imports.ui` → `design-systems.pen`, strip duplicate root `variables`, remove legacy frame `q4Jkj` if present.
@@ -75,4 +102,10 @@ That overwrites `styles.css`, `src/tokens.ts`, `pen-tokens.json`, and keeps `des
 
 ## CI
 
-Run `npm run build --workspace @sindustries/design-tokens` in CI after changes to `tokens.json` or `scripts/build-tokens.mjs`, and fail if `git diff` reports unstaged changes to `styles.css`, `src/tokens.ts`, `pen-tokens.json`, or **`design-systems.pen`** (variable section / imports/specimen).
+Run `npm run build --workspace @sindustries/design-tokens` after changes to token or specimen sources, and fail if generated outputs drift. From repo root:
+
+```sh
+npm run check:design-sync
+```
+
+This validates `component-catalog.json` ↔ React exports, rebuilds, and checks `styles.css`, `src/tokens.ts`, `pen-tokens.json`, `design-systems.pen`, and `packages/ui/src/specimen/generated/*`.

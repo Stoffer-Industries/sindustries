@@ -1,5 +1,5 @@
 .si-specimen-shell {
-  background: var(--si-color-bg-canvas);
+  background: var(--si-surface-page);
   color: var(--si-color-text-primary);
   font-family: var(--si-font-body);
   min-height: 100vh;
@@ -47,10 +47,11 @@
   margin: 0 auto;
   max-width: 1080px;
   padding: 24px 20px 48px;
+  width: 100%;
 }
 
 .si-specimen-panel {
-  background: var(--si-color-bg-surface);
+  background: var(--si-surface-section);
   border: 1px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-lg);
   padding: 20px;
@@ -82,16 +83,100 @@
   gap: 18px;
 }
 
-.si-specimen-component-grid {
+.si-specimen-section-title {
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-ui);
+  font-size: 1.25rem;
+  font-weight: 800;
+  margin: 0;
+}
+
+.si-specimen-component-stack {
   display: grid;
   gap: var(--si-space-4);
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.si-specimen-group-panel {
+  background: var(--si-surface-group);
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-md);
+  display: grid;
+  gap: var(--si-space-2);
+  padding: 14px;
+}
+
+[data-si-surface='group'] {
+  background: var(--si-surface-group);
+}
+
+[data-si-surface='inset'] {
+  background: var(--si-surface-inset);
+}
+
+.si-specimen-group-title {
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-ui);
+  font-size: 0.875rem;
+  font-weight: 800;
+  margin: 0;
+}
+
+.si-specimen-group-panel__body {
+  display: grid;
+  gap: 12px;
+}
+
+.si-specimen-group-panel__demos {
+  display: grid;
+  gap: var(--si-space-2);
+}
+
+.si-specimen-group-panel__catalog {
+  border-radius: var(--si-radius-md);
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.si-specimen-catalog-inline-entry + .si-specimen-catalog-inline-entry {
+  border-top: 1px solid var(--si-color-border-subtle);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.si-specimen-code-label {
+  color: var(--si-color-brand-500);
+  font-family: var(--si-font-ui);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.si-specimen-catalog-line {
+  color: var(--si-color-text-secondary);
+  font-family: var(--si-font-ui);
+  font-size: 0.625rem;
+  font-weight: 400;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.si-specimen-catalog-line--path {
+  color: var(--si-color-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.si-specimen-catalog-line--pen {
+  color: var(--si-color-text-tertiary);
 }
 
 .si-specimen-card,
 .si-specimen-task-card {
   display: grid;
-  gap: var(--si-space-4);
+  gap: 12px;
 }
 
 .si-specimen-card {
@@ -114,11 +199,32 @@
   align-self: start;
 }
 
+.si-specimen-demo-block {
+  display: grid;
+  gap: var(--si-space-2);
+}
+
 .si-specimen-row {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: var(--si-space-2);
+}
+
+.si-specimen-pen-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--si-space-2);
+}
+
+.si-specimen-pen-ref {
+  background: var(--si-color-bg-canvas);
+  border: 1px dashed var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  color: var(--si-color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  padding: 2px 8px;
 }
 
 .si-specimen-note {
@@ -128,20 +234,45 @@
   margin: var(--si-space-2) 0 0;
 }
 
-.si-specimen-task-card__header {
+.si-specimen-task-card .task-card-title {
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.si-specimen-task-card .task-card-footer {
   align-items: center;
   display: flex;
-  gap: var(--si-space-3);
+  gap: 12px;
   justify-content: space-between;
 }
 
-.si-specimen-task-card strong {
-  font-family: var(--si-font-ui);
+.si-specimen-task-card .task-card-footer-tags {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
-.si-specimen-task-card p {
-  color: var(--si-color-text-secondary);
-  margin: 0;
+.si-specimen-task-card .task-card-footer-meta {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.si-specimen-task-card .task-card-date {
+  color: var(--si-color-text-muted);
+  font-family: var(--si-font-ui);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  white-space: nowrap;
 }
 
 .si-specimen-form-grid,
@@ -253,4 +384,52 @@
   font-weight: 800;
   min-height: 64px;
   place-items: center;
+}
+
+.si-specimen-page-block {
+  display: grid;
+  gap: 20px;
+}
+
+.si-specimen-catalog {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.si-specimen-catalog-row {
+  background: var(--si-color-bg-canvas-alt);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.si-specimen-catalog-row__head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.si-specimen-catalog-status {
+  font-family: var(--si-font-ui);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.si-specimen-catalog-status--implemented {
+  color: var(--si-color-status-success);
+}
+
+.si-specimen-catalog-path {
+  color: var(--si-color-text-muted);
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
 }

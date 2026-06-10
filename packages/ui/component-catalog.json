@@ -1,0 +1,419 @@
+{
+  "exportPath": "@sindustries/ui/react",
+  "sourcePath": "packages/ui/src/react/index.jsx",
+  "stylesPath": "packages/ui/src/react/styles.css",
+  "components": {
+    "Button": {
+      "cssPrefix": "si-button",
+      "penComponentId": "xBc88",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": ["primary", "secondary", "outline", "ghost", "destructive", "nav", "filter"],
+          "tones": ["display"],
+          "penNames": ["Button/Default", "Button/Large/Default", "Button/Display/Primary", "Button/Display/Outline", "Button/Display/Ghost"]
+        }
+      }
+    },
+    "Badge": {
+      "cssPrefix": "si-badge",
+      "penComponentId": "Tn1Ii",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": ["urgent", "high", "medium", "low", "tag", "draft", "blocked", "neutral", "status"],
+          "tones": ["pulse"],
+          "penNames": ["Label/Priority", "Label/Priority/High", "Label/Priority/Medium", "Label/Priority/Low", "Label/Tag"]
+        }
+      }
+    },
+    "Tooltip": {
+      "cssPrefix": "si-tooltip",
+      "penComponentId": "cqxgS",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Tooltip"]
+        }
+      }
+    },
+    "Card": {
+      "cssPrefix": "si-card",
+      "penComponentId": "Q7WW3w",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": ["default", "pulse"],
+          "tones": [],
+          "states": ["ready", "blocked", "editing", "archived"],
+          "penNames": ["Modal/Task Card", "Card"]
+        }
+      }
+    },
+    "CardContainer": {
+      "cssPrefix": "si-card-container",
+      "penComponentId": "mK9pR",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": ["column", "filter"],
+          "tones": [],
+          "penNames": ["Card Conatiner"]
+        }
+      }
+    },
+    "Field": {
+      "cssPrefix": "si-field",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Input Group/Default", "Select Group/Default", "Textarea Group/Default"]
+        }
+      }
+    },
+    "Input": {
+      "cssPrefix": "si-input",
+      "penComponentId": "uEeaR",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Input Group/Default"]
+        }
+      }
+    },
+    "Select": {
+      "cssPrefix": "si-select",
+      "penComponentId": "gqrFC",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Select Group/Default"]
+        }
+      }
+    },
+    "Textarea": {
+      "cssPrefix": "si-textarea",
+      "penComponentId": "5QESV",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Textarea Group/Default"]
+        }
+      }
+    },
+    "SearchInput": {
+      "cssPrefix": "si-search",
+      "penComponentId": "xUnz2",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["List Search Box/Filled"]
+        }
+      }
+    },
+    "Dropdown": {
+      "cssPrefix": "si-dropdown",
+      "penComponentId": "vsaL0",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Dropdown"]
+        }
+      }
+    },
+    "DropdownOption": {
+      "cssPrefix": "si-dropdown__option",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": []
+        }
+      }
+    },
+    "DropdownDivider": {
+      "cssPrefix": "si-dropdown__divider",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Dropdown Divider"]
+        }
+      }
+    },
+    "Divider": {
+      "cssPrefix": "si-divider",
+      "penComponentId": "DvDsh",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": ["subtle", "dashed"],
+          "tones": [],
+          "penNames": ["Divider/Dashed", "Divider/Subtle"]
+        }
+      }
+    },
+    "Avatar": {
+      "cssPrefix": "si-avatar",
+      "penComponentId": "vP6oo",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": ["Avatar/Text", "Avatar/Pulse"]
+        }
+      }
+    },
+    "Toast": {
+      "cssPrefix": "si-toast",
+      "penComponentId": "90yrf",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "types": ["info", "success", "warning", "error"],
+          "penNames": ["Toast/Info", "Toast/Success", "Toast/Warning", "Toast/Error"]
+        }
+      }
+    },
+    "ToastViewport": {
+      "cssPrefix": "si-toast-viewport",
+      "packs": {
+        "pulse": {
+          "status": "implemented",
+          "variants": [],
+          "tones": [],
+          "penNames": []
+        }
+      }
+    }
+  },
+  "specimenGroups": [
+    {
+      "id": "buttons",
+      "title": "Buttons",
+      "pack": "pulse",
+      "catalogComponent": "Button",
+      "note": "Display variants — square corners, hard shadow, display face.",
+      "rows": [
+        {
+          "demos": [
+            {
+              "component": "Button",
+              "props": { "variant": "primary", "children": "Default" },
+              "penRef": { "id": "xBc88", "name": "Button/Default" }
+            },
+            {
+              "component": "Button",
+              "props": { "variant": "secondary", "children": "Secondary" },
+              "penRef": { "ref": "xBc88", "name": "Button/Secondary" }
+            },
+            {
+              "component": "Button",
+              "props": { "variant": "destructive", "children": "Destructive" },
+              "penRef": { "ref": "xBc88", "name": "Button/Destructive" }
+            },
+            {
+              "component": "Button",
+              "props": { "variant": "outline", "children": "Outline" },
+              "penRef": { "ref": "xBc88", "name": "Button/Outline" }
+            },
+            {
+              "component": "Button",
+              "props": { "variant": "ghost", "children": "Ghost" },
+              "penRef": { "ref": "xBc88", "name": "Button/Ghost" }
+            }
+          ]
+        },
+        {
+          "demos": [
+            {
+              "component": "Button",
+              "props": { "variant": "primary", "tone": "display", "children": "Display primary" },
+              "penRef": { "id": "BdDpP", "name": "Button/Display/Primary" }
+            },
+            {
+              "component": "Button",
+              "props": { "variant": "outline", "tone": "display", "children": "Display outline" },
+              "penRef": { "id": "BdDpO", "name": "Button/Display/Outline" }
+            },
+            {
+              "component": "Button",
+              "props": { "variant": "ghost", "tone": "display", "children": "Display ghost" },
+              "penRef": { "id": "BdDpG", "name": "Button/Display/Ghost" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "badges-tooltip-avatar",
+      "title": "Badges, tooltip, and avatar",
+      "pack": "pulse",
+      "catalogComponents": ["Badge", "Tooltip", "Avatar"],
+      "rows": [
+        {
+          "demos": [
+            {
+              "component": "Badge",
+              "props": { "variant": "urgent", "tone": "pulse", "children": "urgent" },
+              "penRef": { "ref": "qHX3A", "name": "Label/Priority" }
+            },
+            {
+              "component": "Badge",
+              "props": { "variant": "high", "tone": "pulse", "children": "high" },
+              "penRef": { "id": "LbPHi", "name": "Label/Priority/High" }
+            },
+            {
+              "component": "Badge",
+              "props": { "variant": "medium", "tone": "pulse", "children": "medium" },
+              "penRef": { "id": "LbPMd", "name": "Label/Priority/Medium" }
+            },
+            {
+              "component": "Badge",
+              "props": { "variant": "low", "tone": "pulse", "children": "low" },
+              "penRef": { "id": "LbPLo", "name": "Label/Priority/Low" }
+            },
+            {
+              "component": "Badge",
+              "props": { "variant": "tag", "tone": "pulse", "children": "#design" },
+              "penRef": { "id": "LbTag", "name": "Label/Tag" }
+            },
+            {
+              "component": "Tooltip",
+              "props": { "children": "3" },
+              "penRef": { "id": "cqxgS", "name": "Tooltip" }
+            },
+            {
+              "component": "Avatar",
+              "props": { "children": "R", "aria-label": "Assignee Rowan" },
+              "penRef": { "id": "vP6oo", "name": "Avatar/Text" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pulse-task-card",
+      "title": "Pulse task card",
+      "pack": "pulse",
+      "kind": "pulseTaskCard",
+      "catalogComponents": ["Card", "CardContainer"],
+      "rows": [
+        {
+          "demos": [
+            {
+              "component": "Card",
+              "props": {},
+              "penRef": { "id": "Q7WW3w", "name": "Modal/Task Card" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "form-controls",
+      "title": "Form controls",
+      "pack": "pulse",
+      "kind": "formControls",
+      "catalogComponents": ["Field", "Input", "Select", "Textarea", "SearchInput"],
+      "rows": [
+        {
+          "demos": [
+            { "penRef": { "id": "FmInT", "name": "Input Group/Title" } }
+          ]
+        },
+        {
+          "demos": [
+            { "penRef": { "id": "FmSelP", "name": "Select Group/Priority" } }
+          ]
+        },
+        {
+          "demos": [
+            { "penRef": { "id": "FmTaN", "name": "Textarea Group/Notes" } }
+          ]
+        },
+        {
+          "demos": [
+            { "penRef": { "id": "FmSrc", "name": "List Search Box/Specimen" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dividers",
+      "title": "Dividers",
+      "pack": "pulse",
+      "kind": "dividers",
+      "catalogComponent": "Divider",
+      "rows": [
+        {
+          "demos": [
+            { "penRef": { "id": "DvDsh", "name": "Divider/Dashed" } }
+          ]
+        },
+        {
+          "demos": [
+            { "penRef": { "id": "DvSub", "name": "Divider/Subtle" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dropdown",
+      "title": "Dropdown",
+      "pack": "pulse",
+      "kind": "dropdown",
+      "catalogComponents": ["Dropdown", "DropdownOption", "DropdownDivider"],
+      "rows": [
+        {
+          "demos": [
+            { "penRef": { "id": "vsaL0", "name": "Dropdown" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "toast",
+      "title": "Toast",
+      "pack": "pulse",
+      "kind": "toast",
+      "catalogComponents": ["Toast", "ToastViewport"],
+      "rows": [
+        {
+          "demos": [
+            { "penRef": { "id": "90yrf", "name": "Toast/Info" } }
+          ]
+        },
+        {
+          "demos": [
+            { "penRef": { "id": "ZRLup", "name": "Toast/Success" } }
+          ]
+        },
+        {
+          "demos": [
+            { "penRef": { "id": "YLlSf", "name": "Toast/Error" } }
+          ]
+        }
+      ]
+    }
+  ]
+}
