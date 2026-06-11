@@ -27,7 +27,7 @@
           "clip": true,
           "width": 360,
           "height": 16,
-          "fill": "$si-color-bg-canvas-alt",
+          "fill": "$si-color-bg-section-header",
           "cornerRadius": "$si-radius-pill",
           "layout": "none",
           "children": [
@@ -800,15 +800,13 @@
           "name": "Toast/Info",
           "reusable": true,
           "width": 640,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-md",
           "stroke": "$si-color-info-500",
           "strokeWidth": {
             "left": 2
           },
           "strokeAlignment": "inner",
-          "layout": "horizontal",
-          "alignItems": "flex-start",
           "gap": 12,
           "padding": [
             16,
@@ -824,7 +822,7 @@
               "height": 24,
               "fill": {
                 "type": "color",
-                "color": "$si-color-bg-surface",
+                "color": "$si-color-bg-section",
                 "enabled": false
               },
               "layout": "none",
@@ -922,7 +920,7 @@
           "reusable": true,
           "clip": true,
           "width": 480,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": "$si-color-border-subtle",
           "strokeWidth": 1,
@@ -1224,11 +1222,16 @@
           "x": 1010,
           "y": 1528.386544152001,
           "name": "Toast/Success",
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "flipX": false,
           "flipY": false,
           "width": 640,
           "height": "fit_content",
+          "stroke": "$si-color-success-500",
+          "strokeWidth": {
+            "left": 2
+          },
+          "strokeAlignment": "inner",
           "descendants": {
             "tH8a1": {
               "fill": "$si-color-success-500",
@@ -1243,12 +1246,7 @@
               "content": "Your request to rent the Curiosity-X rover has been confirmed. Deployment scheduled for Sol 482.",
               "fill": "$si-color-text-secondary"
             }
-          },
-          "stroke": "$si-color-success-500",
-          "strokeWidth": {
-            "left": 2
-          },
-          "strokeAlignment": "inner"
+          }
         },
         {
           "id": "wuzQC",
@@ -1258,11 +1256,16 @@
           "x": 1010,
           "y": 1676.2251985672012,
           "name": "Toast/Warning",
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "flipX": false,
           "flipY": false,
           "width": 640,
           "height": "fit_content",
+          "stroke": "$si-color-brand-500",
+          "strokeWidth": {
+            "left": 2
+          },
+          "strokeAlignment": "inner",
           "descendants": {
             "tH8a1": {
               "fill": "$si-color-brand-500",
@@ -1277,12 +1280,7 @@
               "content": "The selected route crosses an area with loose regolith. Proceed with caution or reroute to a safer path.",
               "fill": "$si-color-text-secondary"
             }
-          },
-          "stroke": "$si-color-brand-500",
-          "strokeWidth": {
-            "left": 2
-          },
-          "strokeAlignment": "inner"
+          }
         },
         {
           "id": "YLlSf",
@@ -1292,11 +1290,16 @@
           "x": 1010,
           "y": 1824.0638529824014,
           "name": "Toast/Error",
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "flipX": false,
           "flipY": false,
           "width": 640,
           "height": "fit_content",
+          "stroke": "$si-color-danger-500",
+          "strokeWidth": {
+            "left": 2
+          },
+          "strokeAlignment": "inner",
           "descendants": {
             "tH8a1": {
               "fill": "$si-color-danger-500",
@@ -1311,12 +1314,7 @@
               "content": "Rover telemetry signal interrupted. Check your base antenna alignment or retry connection in 10 minutes.",
               "fill": "$si-color-text-secondary"
             }
-          },
-          "stroke": "$si-color-danger-500",
-          "strokeWidth": {
-            "left": 2
-          },
-          "strokeAlignment": "inner"
+          }
         },
         {
           "id": "OLaVT",
@@ -1650,7 +1648,7 @@
           "id": "nXlJM",
           "x": 2102,
           "y": 75,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "width": 180,
           "height": 430
         },
@@ -2219,7 +2217,7 @@
           "ref": "Axg1e",
           "x": 481,
           "y": 798.1834605201682,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "effect": [],
           "name": "Tab Item/Inactive",
           "cornerRadius": "$si-radius-pill",
@@ -2247,7 +2245,7 @@
           "clip": true,
           "width": 120,
           "height": 56,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-pill",
           "stroke": "$si-color-border-subtle",
           "strokeWidth": 1,
@@ -2448,7 +2446,7 @@
               "name": "Icon Base",
               "width": 48,
               "height": 48,
-              "fill": "$si-color-bg-canvas-alt",
+              "fill": "$si-color-bg-section-header",
               "cornerRadius": "$si-radius-pill",
               "gap": 10,
               "justifyContent": "center",
@@ -2490,7 +2488,7 @@
               "clip": true,
               "width": 16,
               "height": 16,
-              "fill": "$si-color-bg-surface",
+              "fill": "$si-color-bg-section",
               "cornerRadius": "$si-radius-xs",
               "stroke": "$si-color-border-strong",
               "strokeWidth": 1,
@@ -2525,7 +2523,7 @@
           "height": 24,
           "descendants": {
             "D1yxy": {
-              "fill": "$si-color-bg-surface",
+              "fill": "$si-color-bg-section",
               "stroke": "$si-color-border-strong",
               "strokeWidth": 1,
               "strokeLinejoin": "miter",
@@ -2625,7 +2623,7 @@
           "height": "fit_content",
           "descendants": {
             "dX8wO": {
-              "fill": "$si-color-bg-canvas-alt",
+              "fill": "$si-color-bg-section-header",
               "justifyContent": "start",
               "alignItems": "center"
             }
@@ -2688,7 +2686,7 @@
           "descendants": {
             "ebczk": {
               "stroke": "$si-color-border-strong",
-              "fill": "$si-color-bg-surface",
+              "fill": "$si-color-bg-section",
               "strokeWidth": 1,
               "strokeLinejoin": "miter",
               "strokeLinecap": "butt",
@@ -3078,7 +3076,7 @@
           "width": 464,
           "name": "Card Action",
           "stroke": [],
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "strokeWidth": 1,
           "strokeLinejoin": "miter",
@@ -3156,7 +3154,7 @@
           "y": 3443.2966827596947,
           "width": 400,
           "stroke": [],
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "effect": [],
           "cornerRadius": "$si-radius-lg",
           "name": "Card Plain",
@@ -3231,7 +3229,7 @@
           "width": 400,
           "effect": [],
           "stroke": [],
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "name": "Card Image",
           "cornerRadius": "$si-radius-lg",
           "strokeWidth": 1,
@@ -3334,7 +3332,7 @@
           "width": 530,
           "height": 546,
           "name": "Card Conatiner",
-          "fill": "$si-color-bg-surface-contrast",
+          "fill": "$si-color-bg-section",
           "cornerRadius": 0,
           "stroke": "#000000ff",
           "effect": [],
@@ -3346,7 +3344,7 @@
           "flipY": false,
           "descendants": {
             "SaWqo": {
-              "fill": "$si-color-bg-canvas-alt",
+              "fill": "$si-color-bg-section-header",
               "height": "fit_content",
               "padding": 12,
               "justifyContent": "center",
@@ -3411,7 +3409,7 @@
           "id": "J6SnDd",
           "x": 2174,
           "y": 1996,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "width": 450,
           "height": 430
         },
@@ -3424,7 +3422,7 @@
           "reusable": true,
           "width": 256,
           "height": "fill_container(639)",
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "stroke": "$si-color-border-subtle",
           "strokeWidth": 1,
           "strokeAlignment": "inner",
@@ -3616,7 +3614,7 @@
           "name": "Sidebar Item/Active",
           "reusable": true,
           "width": 224,
-          "fill": "$si-color-bg-canvas-alt",
+          "fill": "$si-color-bg-section-header",
           "cornerRadius": "$si-radius-2xl",
           "gap": 8,
           "padding": [
@@ -3678,7 +3676,7 @@
           "name": "List Search Box/Filled",
           "reusable": true,
           "width": 260,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-pill",
           "stroke": "$si-color-border-subtle",
           "strokeWidth": 2,
@@ -3799,7 +3797,7 @@
                   "clip": true,
                   "width": 16,
                   "height": 16,
-                  "fill": "$si-color-bg-surface",
+                  "fill": "$si-color-bg-section",
                   "layout": "none",
                   "children": [
                     {
@@ -3856,7 +3854,7 @@
                   "clip": true,
                   "width": 16,
                   "height": 16,
-                  "fill": "$si-color-bg-surface",
+                  "fill": "$si-color-bg-section",
                   "layout": "none",
                   "children": [
                     {
@@ -4108,7 +4106,7 @@
           ],
           "width": 1024,
           "height": 300,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-md",
           "stroke": "$si-color-border-subtle",
           "strokeWidth": 1,
@@ -4308,7 +4306,7 @@
           "name": "Dropdown",
           "reusable": true,
           "width": 220,
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-md",
           "stroke": "$si-color-border-subtle",
           "strokeWidth": 2,
@@ -4334,7 +4332,6 @@
               "width": "fill_container",
               "height": 32,
               "cornerRadius": "$si-radius-sm",
-              "layout": "horizontal",
               "padding": 8,
               "alignItems": "center",
               "children": [
@@ -4359,7 +4356,6 @@
               "width": "fill_container",
               "height": 32,
               "cornerRadius": "$si-radius-sm",
-              "layout": "horizontal",
               "padding": 8,
               "alignItems": "center",
               "children": [
@@ -4392,7 +4388,6 @@
               "width": "fill_container",
               "height": 32,
               "cornerRadius": "$si-radius-sm",
-              "layout": "horizontal",
               "padding": 8,
               "alignItems": "center",
               "children": [
@@ -4597,7 +4592,7 @@
           "rotation": 0.6583287114526105,
           "width": 480,
           "height": "fit_content",
-          "fill": "$si-color-bg-surface",
+          "fill": "$si-color-bg-section",
           "cornerRadius": 0,
           "stroke": "$si-color-bg-canvas",
           "strokeWidth": 2,
@@ -4897,7 +4892,7 @@
       "y": 22,
       "width": 960,
       "height": 1347,
-      "fill": "$si-surface-page",
+      "fill": "$si-color-bg-canvas",
       "cornerRadius": "$si-radius-xl",
       "layout": "vertical",
       "gap": 18,
@@ -4907,7 +4902,7 @@
           "type": "frame",
           "id": "siSpecRootHdr",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -4957,7 +4952,7 @@
           "type": "frame",
           "id": "siSpecColorSec",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -4992,7 +4987,7 @@
                   "id": "siSws0",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5028,7 +5023,7 @@
                   "id": "siSws1",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5045,13 +5040,13 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-surface"
+                      "fill": "$si-color-bg-section"
                     },
                     {
                       "type": "text",
                       "id": "siSws1t",
                       "fill": "$si-color-text-primary",
-                      "content": "Surface",
+                      "content": "Section",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "800",
@@ -5064,7 +5059,7 @@
                   "id": "siSws2",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5081,13 +5076,13 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-surface-alt"
+                      "fill": "$si-color-bg-section-header"
                     },
                     {
                       "type": "text",
                       "id": "siSws2t",
                       "fill": "$si-color-text-primary",
-                      "content": "Surface alt",
+                      "content": "Section header",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "800",
@@ -5100,7 +5095,7 @@
                   "id": "siSws3",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5117,13 +5112,13 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-surface-contrast"
+                      "fill": "$si-color-bg-surface"
                     },
                     {
                       "type": "text",
                       "id": "siSws3t",
                       "fill": "$si-color-text-primary",
-                      "content": "Surface contrast",
+                      "content": "Surface",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "800",
@@ -5136,7 +5131,7 @@
                   "id": "siSws4",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5153,49 +5148,13 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-text-primary"
+                      "fill": "$si-color-bg-field"
                     },
                     {
                       "type": "text",
                       "id": "siSws4t",
                       "fill": "$si-color-text-primary",
-                      "content": "Primary text",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "siSws5",
-                  "width": 104,
-                  "height": 86,
-                  "fill": "$si-surface-group",
-                  "cornerRadius": "$si-radius-md",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-color-border-subtle"
-                  },
-                  "layout": "vertical",
-                  "gap": 6,
-                  "padding": 8,
-                  "children": [
-                    {
-                      "type": "rectangle",
-                      "id": "siSws5q",
-                      "width": "fill_container",
-                      "height": 28,
-                      "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-text-muted"
-                    },
-                    {
-                      "type": "text",
-                      "id": "siSws5t",
-                      "fill": "$si-color-text-primary",
-                      "content": "Muted text",
+                      "content": "Field",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "800",
@@ -5216,10 +5175,46 @@
               "children": [
                 {
                   "type": "frame",
+                  "id": "siSws5",
+                  "width": 104,
+                  "height": 86,
+                  "fill": "$si-color-bg-surface",
+                  "cornerRadius": "$si-radius-md",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "$si-color-border-subtle"
+                  },
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "siSws5q",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": "$si-radius-sm",
+                      "fill": "$si-color-text-primary"
+                    },
+                    {
+                      "type": "text",
+                      "id": "siSws5t",
+                      "fill": "$si-color-text-primary",
+                      "content": "Primary text",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "800",
+                      "textGrowth": "auto"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
                   "id": "siSws6",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5236,85 +5231,13 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-brand-500"
+                      "fill": "$si-color-text-muted"
                     },
                     {
                       "type": "text",
                       "id": "siSws6t",
                       "fill": "$si-color-text-primary",
-                      "content": "Brand",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "siSws7",
-                  "width": 104,
-                  "height": 86,
-                  "fill": "$si-surface-group",
-                  "cornerRadius": "$si-radius-md",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-color-border-subtle"
-                  },
-                  "layout": "vertical",
-                  "gap": 6,
-                  "padding": 8,
-                  "children": [
-                    {
-                      "type": "rectangle",
-                      "id": "siSws7q",
-                      "width": "fill_container",
-                      "height": 28,
-                      "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-accent-500"
-                    },
-                    {
-                      "type": "text",
-                      "id": "siSws7t",
-                      "fill": "$si-color-text-primary",
-                      "content": "Accent Pink",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "siSws8",
-                  "width": 104,
-                  "height": 86,
-                  "fill": "$si-surface-group",
-                  "cornerRadius": "$si-radius-md",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-color-border-subtle"
-                  },
-                  "layout": "vertical",
-                  "gap": 6,
-                  "padding": 8,
-                  "children": [
-                    {
-                      "type": "rectangle",
-                      "id": "siSws8q",
-                      "width": "fill_container",
-                      "height": 28,
-                      "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-sage-500"
-                    },
-                    {
-                      "type": "text",
-                      "id": "siSws8t",
-                      "fill": "$si-color-text-primary",
-                      "content": "Sage",
+                      "content": "Muted text",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "800",
@@ -5335,10 +5258,82 @@
               "children": [
                 {
                   "type": "frame",
+                  "id": "siSws7",
+                  "width": 104,
+                  "height": 86,
+                  "fill": "$si-color-bg-surface",
+                  "cornerRadius": "$si-radius-md",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "$si-color-border-subtle"
+                  },
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "siSws7q",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": "$si-radius-sm",
+                      "fill": "$si-color-brand-500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "siSws7t",
+                      "fill": "$si-color-text-primary",
+                      "content": "Brand",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "800",
+                      "textGrowth": "auto"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "siSws8",
+                  "width": 104,
+                  "height": 86,
+                  "fill": "$si-color-bg-surface",
+                  "cornerRadius": "$si-radius-md",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "$si-color-border-subtle"
+                  },
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "siSws8q",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": "$si-radius-sm",
+                      "fill": "$si-color-accent-500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "siSws8t",
+                      "fill": "$si-color-text-primary",
+                      "content": "Accent Pink",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "800",
+                      "textGrowth": "auto"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
                   "id": "siSws9",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5355,26 +5350,37 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-success-500"
+                      "fill": "$si-color-sage-500"
                     },
                     {
                       "type": "text",
                       "id": "siSws9t",
                       "fill": "$si-color-text-primary",
-                      "content": "Success",
+                      "content": "Sage",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "800",
                       "textGrowth": "auto"
                     }
                   ]
-                },
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "siSwRow3",
+              "width": "fill_container",
+              "height": 94,
+              "layout": "horizontal",
+              "gap": 12,
+              "alignItems": "center",
+              "children": [
                 {
                   "type": "frame",
                   "id": "siSws10",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5391,11 +5397,47 @@
                       "width": "fill_container",
                       "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-danger-500"
+                      "fill": "$si-color-success-500"
                     },
                     {
                       "type": "text",
                       "id": "siSws10t",
+                      "fill": "$si-color-text-primary",
+                      "content": "Success",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "800",
+                      "textGrowth": "auto"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "siSws11",
+                  "width": 104,
+                  "height": 86,
+                  "fill": "$si-color-bg-surface",
+                  "cornerRadius": "$si-radius-md",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "$si-color-border-subtle"
+                  },
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "siSws11q",
+                      "width": "fill_container",
+                      "height": 28,
+                      "cornerRadius": "$si-radius-sm",
+                      "fill": "$si-color-danger-500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "siSws11t",
                       "fill": "$si-color-text-primary",
                       "content": "Danger",
                       "fontFamily": "Inter",
@@ -5413,7 +5455,7 @@
           "type": "frame",
           "id": "siSpecLabelSec",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -5448,7 +5490,7 @@
                   "id": "siLbl0",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5484,7 +5526,7 @@
                   "id": "siLbl1",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5520,7 +5562,7 @@
                   "id": "siLbl2",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5556,7 +5598,7 @@
                   "id": "siLbl3",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5592,7 +5634,7 @@
                   "id": "siLbl4",
                   "width": 104,
                   "height": 86,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": "$si-radius-md",
                   "stroke": {
                     "align": "inside",
@@ -5631,7 +5673,7 @@
           "type": "frame",
           "id": "siSpecTypeSec",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -5702,7 +5744,7 @@
           "type": "frame",
           "id": "siSpecSpaceSec",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -6001,7 +6043,7 @@
           "type": "frame",
           "id": "siSpecRadSec",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -6036,7 +6078,7 @@
                   "id": "siRdksm",
                   "width": 76,
                   "height": 76,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": 12,
                   "stroke": {
                     "align": "inside",
@@ -6064,7 +6106,7 @@
                   "id": "siRdkmd",
                   "width": 76,
                   "height": 76,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": 18,
                   "stroke": {
                     "align": "inside",
@@ -6092,7 +6134,7 @@
                   "id": "siRdklg",
                   "width": 76,
                   "height": 76,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": 22,
                   "stroke": {
                     "align": "inside",
@@ -6120,7 +6162,7 @@
                   "id": "siRdkxl",
                   "width": 76,
                   "height": 76,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": 28,
                   "stroke": {
                     "align": "inside",
@@ -6148,7 +6190,7 @@
                   "id": "siRdkpill",
                   "width": 76,
                   "height": 76,
-                  "fill": "$si-surface-group",
+                  "fill": "$si-color-bg-surface",
                   "cornerRadius": 999,
                   "stroke": {
                     "align": "inside",
@@ -6187,8 +6229,8 @@
       "x": -548,
       "y": 22,
       "width": 960,
-      "height": 3782,
-      "fill": "$si-surface-page",
+      "height": 4083,
+      "fill": "$si-color-bg-canvas",
       "cornerRadius": "$si-radius-xl",
       "layout": "vertical",
       "gap": 18,
@@ -6198,7 +6240,7 @@
           "type": "frame",
           "id": "siReactSpecPulseHdr",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -6246,9 +6288,209 @@
         },
         {
           "type": "frame",
+          "id": "siReactSpecPulseSurfPage",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "children": [
+            {
+              "type": "frame",
+              "id": "siReactSpecPulseSurfPageHdr",
+              "width": "fill_container",
+              "layout": "horizontal",
+              "alignItems": "center",
+              "gap": 12,
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "siReactSpecPulseSurfPageTitle",
+                  "fill": "$si-color-text-primary",
+                  "content": "Surfaces",
+                  "fontFamily": "Dela Gothic One",
+                  "fontSize": 28,
+                  "fontWeight": "normal",
+                  "textGrowth": "auto"
+                },
+                {
+                  "type": "text",
+                  "id": "siReactSpecPulseSurfPageMeta",
+                  "fill": "$si-color-brand-500",
+                  "content": "PAGE · Canvas · --si-color-bg-canvas",
+                  "fontFamily": "Inter",
+                  "fontSize": 9,
+                  "fontWeight": "800",
+                  "letterSpacing": 0.8,
+                  "textAlign": "right",
+                  "textGrowth": "auto"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "siReactSpecPulseSurfSection",
+              "width": "fill_container",
+              "fill": "$si-color-bg-section",
+              "cornerRadius": 0,
+              "stroke": {
+                "align": "inside",
+                "thickness": 2,
+                "fill": "$si-color-ink-950"
+              },
+              "layout": "vertical",
+              "clip": true,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "siReactSpecPulseSurfSecHdr",
+                  "width": "fill_container",
+                  "fill": "$si-color-bg-section-header",
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "siReactSpecPulseSurfSecHdrRow",
+                      "width": "fill_container",
+                      "layout": "horizontal",
+                      "alignItems": "center",
+                      "gap": 12,
+                      "justifyContent": "space_between",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "siReactSpecPulseSurfSecTitle",
+                          "fill": "$si-color-text-primary",
+                          "content": "SURFACE SECTION HEADER",
+                          "fontFamily": "Dela Gothic One",
+                          "fontSize": 13,
+                          "fontWeight": "700",
+                          "letterSpacing": 0.6,
+                          "textGrowth": "auto"
+                        },
+                        {
+                          "type": "text",
+                          "id": "siReactSpecPulseSurfSecMeta",
+                          "fill": "$si-color-brand-500",
+                          "content": "SECTION · Kanban column · --si-color-bg-section",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "800",
+                          "letterSpacing": 0.8,
+                          "textAlign": "right",
+                          "textGrowth": "auto"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "siReactSpecPulseSurfSecBody",
+                  "width": "fill_container",
+                  "fill": "$si-color-bg-section",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "siReactSpecPulseSurfGroup",
+                      "width": "fill_container",
+                      "fill": "$si-color-bg-surface",
+                      "cornerRadius": 0,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 2,
+                        "fill": "$si-color-ink-950"
+                      },
+                      "layout": "vertical",
+                      "gap": 10,
+                      "padding": 14,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "siReactSpecPulseSurfGroupHdr",
+                          "width": "fill_container",
+                          "layout": "horizontal",
+                          "alignItems": "center",
+                          "gap": 12,
+                          "justifyContent": "space_between",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "siReactSpecPulseSurfGroupTitle",
+                              "fill": "$si-color-text-primary",
+                              "content": "Section Header",
+                              "fontFamily": "Dela Gothic One",
+                              "fontSize": 14,
+                              "fontWeight": "700",
+                              "textGrowth": "fixed-width",
+                              "width": 320,
+                              "lineHeight": 1.35
+                            },
+                            {
+                              "type": "text",
+                              "id": "siReactSpecPulseSurfGroupMeta",
+                              "fill": "$si-color-brand-500",
+                              "content": "GROUP · Task card · --si-color-bg-surface",
+                              "fontFamily": "Inter",
+                              "fontSize": 9,
+                              "fontWeight": "800",
+                              "letterSpacing": 0.8,
+                              "textAlign": "right",
+                              "textGrowth": "auto"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "siReactSpecPulseSurfFieldsHdr",
+                          "width": "fill_container",
+                          "layout": "horizontal",
+                          "alignItems": "center",
+                          "gap": 12,
+                          "justifyContent": "space_between",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "siReactSpecPulseSurfFields",
+                              "width": "fill_container",
+                              "height": 40,
+                              "fill": "$si-color-bg-field",
+                              "cornerRadius": "$si-radius-sm",
+                              "stroke": {
+                                "align": "inside",
+                                "thickness": 1,
+                                "fill": "$si-color-border-subtle"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "id": "siReactSpecPulseSurfFieldsMeta",
+                              "fill": "$si-color-brand-500",
+                              "content": "FIELDS · Task fields · --si-color-bg-field",
+                              "fontFamily": "Inter",
+                              "fontSize": 9,
+                              "fontWeight": "800",
+                              "letterSpacing": 0.8,
+                              "textAlign": "right",
+                              "textGrowth": "auto"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
           "id": "siReactSpecPulseComponents",
           "width": "fill_container",
-          "fill": "$si-surface-section",
+          "fill": "$si-color-bg-section",
           "cornerRadius": "$si-radius-lg",
           "stroke": {
             "align": "inside",
@@ -6273,7 +6515,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp0",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -6458,7 +6700,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp0cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -6559,7 +6801,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp1",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -6774,7 +7016,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp1cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -7037,7 +7279,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp2",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -7087,7 +7329,7 @@
                               "name": "Modal/Task Card",
                               "width": 480,
                               "height": "fit_content",
-                              "fill": "$si-color-bg-surface",
+                              "fill": "$si-color-bg-section",
                               "cornerRadius": 0,
                               "stroke": "$si-color-bg-canvas",
                               "strokeWidth": 2,
@@ -7230,7 +7472,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp2cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -7412,7 +7654,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp3",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -7569,7 +7811,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp3cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -7994,7 +8236,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp4",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -8082,7 +8324,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp4cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -8183,7 +8425,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp5",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -8253,7 +8495,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp5cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -8516,7 +8758,7 @@
               "type": "frame",
               "id": "siReactSpecPulseGrp6",
               "width": "fill_container",
-              "fill": "$si-surface-group",
+              "fill": "$si-color-bg-surface",
               "cornerRadius": "$si-radius-md",
               "stroke": {
                 "align": "inside",
@@ -8582,9 +8824,14 @@
                               "type": "ref",
                               "ref": "90yrf",
                               "name": "Toast/Success",
-                              "fill": "$si-color-bg-surface",
+                              "fill": "$si-color-bg-section",
                               "width": 640,
                               "height": "fit_content",
+                              "stroke": "$si-color-success-500",
+                              "strokeWidth": {
+                                "left": 2
+                              },
+                              "strokeAlignment": "inner",
                               "descendants": {
                                 "tH8a1": {
                                   "fill": "$si-color-success-500",
@@ -8599,12 +8846,7 @@
                                   "content": "Your request to rent the Curiosity-X rover has been confirmed. Deployment scheduled for Sol 482.",
                                   "fill": "$si-color-text-secondary"
                                 }
-                              },
-                              "stroke": "$si-color-success-500",
-                              "strokeWidth": {
-                                "left": 2
-                              },
-                              "strokeAlignment": "inner"
+                              }
                             }
                           ]
                         },
@@ -8621,9 +8863,14 @@
                               "type": "ref",
                               "ref": "90yrf",
                               "name": "Toast/Error",
-                              "fill": "$si-color-bg-surface",
+                              "fill": "$si-color-bg-section",
                               "width": 640,
                               "height": "fit_content",
+                              "stroke": "$si-color-danger-500",
+                              "strokeWidth": {
+                                "left": 2
+                              },
+                              "strokeAlignment": "inner",
                               "descendants": {
                                 "tH8a1": {
                                   "fill": "$si-color-danger-500",
@@ -8638,12 +8885,7 @@
                                   "content": "Rover telemetry signal interrupted. Check your base antenna alignment or retry connection in 10 minutes.",
                                   "fill": "$si-color-text-secondary"
                                 }
-                              },
-                              "stroke": "$si-color-danger-500",
-                              "strokeWidth": {
-                                "left": 2
-                              },
-                              "strokeAlignment": "inner"
+                              }
                             }
                           ]
                         },
@@ -8664,7 +8906,7 @@
                       "type": "frame",
                       "id": "siReactSpecPulseGrp6cat",
                       "width": "fill_container",
-                      "fill": "$si-surface-inset",
+                      "fill": "$si-color-bg-field",
                       "cornerRadius": "$si-radius-md",
                       "layout": "vertical",
                       "gap": 8,
@@ -8934,6 +9176,117 @@
       "type": "color",
       "value": "#FF5252"
     },
+    "si-color-white-pure": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "si-color-bone-canvas": {
+      "type": "color",
+      "value": "#F4F1EA"
+    },
+    "si-color-bone-surface": {
+      "type": "color",
+      "value": "#F5F2E8"
+    },
+    "si-color-bone-field": {
+      "type": "color",
+      "value": "#F0EEEA"
+    },
+    "si-color-bone-sectionHeader": {
+      "type": "color",
+      "value": "#E8E4DC"
+    },
+    "si-color-bone-ui": {
+      "type": "color",
+      "value": "#EDEBE6"
+    },
+    "si-color-bone-placeholder": {
+      "type": "color",
+      "value": "#EDEAE4"
+    },
+    "si-color-bone-pagination": {
+      "type": "color",
+      "value": "#E4E0D8"
+    },
+    "si-color-graphite-400": {
+      "type": "color",
+      "value": "#9CA3AF"
+    },
+    "si-color-graphite-600": {
+      "type": "color",
+      "value": "#5C6670"
+    },
+    "si-color-graphite-700": {
+      "type": "color",
+      "value": "#3D444D"
+    },
+    "si-color-label-blue": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#60A5FA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#60A5FA",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-label-orange": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F59E0B",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#F59E0B",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-label-purple": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#A78BFA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#A78BFA",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-glass-light": {
+      "type": "color",
+      "value": "#FFFFFFB8"
+    },
+    "si-color-glass-dark": {
+      "type": "color",
+      "value": "#2B2F34AD"
+    },
+    "si-color-alpha-borderSubtleLight": {
+      "type": "color",
+      "value": "#0000000F"
+    },
+    "si-color-alpha-borderSubtleDark": {
+      "type": "color",
+      "value": "#8F969E2E"
+    },
     "si-color-cta-primary": {
       "type": "color",
       "value": [
@@ -9002,7 +9355,7 @@
         }
       ]
     },
-    "si-color-bg-canvas-alt": {
+    "si-color-bg-section-header": {
       "type": "color",
       "value": [
         {
@@ -9019,7 +9372,7 @@
         }
       ]
     },
-    "si-color-bg-surface": {
+    "si-color-bg-section": {
       "type": "color",
       "value": [
         {
@@ -9053,7 +9406,7 @@
         }
       ]
     },
-    "si-color-bg-surface-contrast": {
+    "si-color-bg-surface": {
       "type": "color",
       "value": [
         {
@@ -9274,57 +9627,6 @@
         }
       ]
     },
-    "si-color-label-blue": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#60A5FA",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#60A5FA",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-color-label-orange": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#F59E0B",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#F59E0B",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-color-label-purple": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#A78BFA",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#A78BFA",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
     "si-color-label-gray": {
       "type": "color",
       "value": [
@@ -9421,74 +9723,6 @@
         },
         {
           "value": "#F3F1EC",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-page": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#F4F1EA",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#111213",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-section": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#FFFFFF",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#2B2F34",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-group": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#E8E4DC",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#161A1E",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-inset": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#F5F2E8",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#1A1F24",
           "theme": {
             "Mode": "Dark"
           }

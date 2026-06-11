@@ -30,7 +30,7 @@ function sectionPanel(id, title, children) {
     type: 'frame',
     id,
     width: 'fill_container',
-    fill: '$si-surface-section',
+    fill: penColorVar('bgSection'),
     cornerRadius: '$si-radius-lg',
     stroke: strokeSubtle,
     layout: 'vertical',
@@ -58,7 +58,7 @@ function buildSwatchCards(swatches, idPrefix = 'siSws') {
     id: `${idPrefix}${i}`,
     width: 104,
     height: 86,
-    fill: '$si-surface-group',
+    fill: penColorVar('bgSurface'),
     cornerRadius: '$si-radius-md',
     stroke: strokeSubtle,
     layout: 'vertical',
@@ -85,6 +85,194 @@ function buildSwatchCards(swatches, idPrefix = 'siSws') {
       }
     ]
   }));
+}
+
+const strokeInk = {
+  align: 'inside',
+  thickness: 2,
+  fill: '$si-color-ink-950'
+};
+
+const modeKeyKebab = (modeKey) => modeKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+const penColorVar = (modeKey) => `$si-color-${modeKeyKebab(modeKey)}`;
+const cssColorRef = (modeKey) => `--si-color-${modeKeyKebab(modeKey)}`;
+
+function surfaceMetaText(id, label, description, modeKey) {
+  return {
+    type: 'text',
+    id,
+    fill: '$si-color-brand-500',
+    content: `${label.toUpperCase()} · ${description} · ${cssColorRef(modeKey)}`,
+    fontFamily: 'Inter',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textAlign: 'right',
+    textGrowth: 'auto'
+  };
+}
+
+function surfaceHeaderRow(id, titleNode, metaNode) {
+  return {
+    type: 'frame',
+    id,
+    width: 'fill_container',
+    layout: 'horizontal',
+    alignItems: 'center',
+    gap: 12,
+    justifyContent: 'space_between',
+    children: [titleNode, metaNode]
+  };
+}
+
+function buildSurfaceStackDemo(resolved, layout, idPrefix) {
+  const fonts = resolved.semantic.font;
+  const stack = layout.surfaceStack ?? [];
+  const page = stack.find((entry) => entry.token === 'bgCanvas');
+  const sectionRole = stack.find((entry) => entry.token === 'bgSection');
+  const group = stack.find((entry) => entry.token === 'bgSurface');
+  const fields = stack.find((entry) => entry.token === 'bgField');
+
+  const fieldsFrame = {
+    type: 'frame',
+    id: `${idPrefix}SurfFields`,
+    width: 'fill_container',
+    height: 40,
+    fill: penColorVar('bgField'),
+    cornerRadius: '$si-radius-sm',
+    stroke: strokeSubtle
+  };
+
+  const groupFrame = {
+    type: 'frame',
+    id: `${idPrefix}SurfGroup`,
+    width: 'fill_container',
+    fill: penColorVar('bgSurface'),
+    cornerRadius: 0,
+    stroke: strokeInk,
+    layout: 'vertical',
+    gap: 10,
+    padding: 14,
+    children: [
+      surfaceHeaderRow(
+        `${idPrefix}SurfGroupHdr`,
+        {
+          type: 'text',
+          id: `${idPrefix}SurfGroupTitle`,
+          fill: '$si-color-text-primary',
+          content: group?.headerSample ?? 'Section Header',
+          fontFamily: fonts.display,
+          fontSize: 14,
+          fontWeight: '700',
+          textGrowth: 'fixed-width',
+          width: 320,
+          lineHeight: 1.35
+        },
+        surfaceMetaText(
+          `${idPrefix}SurfGroupMeta`,
+          group?.label ?? 'Group',
+          group?.description ?? 'Task card',
+          'bgSurface'
+        )
+      ),
+      surfaceHeaderRow(
+        `${idPrefix}SurfFieldsHdr`,
+        fieldsFrame,
+        surfaceMetaText(
+          `${idPrefix}SurfFieldsMeta`,
+          fields?.label ?? 'Fields',
+          fields?.description ?? 'Task fields',
+          fields?.token ?? 'bgField'
+        )
+      )
+    ]
+  };
+
+  const sectionFrame = {
+    type: 'frame',
+    id: `${idPrefix}SurfSection`,
+    width: 'fill_container',
+    fill: penColorVar('bgSection'),
+    cornerRadius: 0,
+    stroke: strokeInk,
+    layout: 'vertical',
+    clip: true,
+    children: [
+      {
+        type: 'frame',
+        id: `${idPrefix}SurfSecHdr`,
+        width: 'fill_container',
+        fill: '$si-color-bg-section-header',
+        padding: 12,
+        children: [
+          surfaceHeaderRow(
+            `${idPrefix}SurfSecHdrRow`,
+            {
+              type: 'text',
+              id: `${idPrefix}SurfSecTitle`,
+              fill: '$si-color-text-primary',
+              content: (sectionRole?.headerSample ?? 'Surface Section Header').toUpperCase(),
+              fontFamily: fonts.display,
+              fontSize: 13,
+              fontWeight: '700',
+              letterSpacing: 0.6,
+              textGrowth: 'auto'
+            },
+            surfaceMetaText(
+              `${idPrefix}SurfSecMeta`,
+              sectionRole?.label ?? 'Section',
+              sectionRole?.description ?? 'Kanban column',
+              'bgSection'
+            )
+          )
+        ]
+      },
+      {
+        type: 'frame',
+        id: `${idPrefix}SurfSecBody`,
+        width: 'fill_container',
+        fill: penColorVar('bgSection'),
+        layout: 'vertical',
+        gap: 10,
+        padding: 12,
+        children: [groupFrame]
+      }
+    ]
+  };
+
+  return {
+    type: 'frame',
+    id: `${idPrefix}SurfPage`,
+    width: 'fill_container',
+    layout: 'vertical',
+    gap: 14,
+    children: [
+      surfaceHeaderRow(
+        `${idPrefix}SurfPageHdr`,
+        {
+          type: 'text',
+          id: `${idPrefix}SurfPageTitle`,
+          fill: '$si-color-text-primary',
+          content: page?.headerSample ?? 'Surfaces',
+          fontFamily: fonts.display,
+          fontSize: 28,
+          fontWeight: 'normal',
+          textGrowth: 'auto'
+        },
+        surfaceMetaText(
+          `${idPrefix}SurfPageMeta`,
+          page?.label ?? 'Page',
+          page?.description ?? 'Canvas',
+          'bgCanvas'
+        )
+      ),
+      sectionFrame
+    ]
+  };
+}
+
+function buildReactSurfaceStackBlock(resolved, layout, section, page) {
+  return buildSurfaceStackDemo(resolved, layout, page.penFrameId);
 }
 
 function buildTokenSections(resolved, layout) {
@@ -161,7 +349,7 @@ function buildTokenSections(resolved, layout) {
       id: `siRdk${k}`,
       width: 76,
       height: 76,
-      fill: '$si-surface-group',
+      fill: penColorVar('bgSurface'),
       cornerRadius: Number(r),
       stroke: strokeSubtle,
       layout: 'vertical',
@@ -429,7 +617,7 @@ function buildInlineCatalogPanel(group, index, page, catalog) {
     type: 'frame',
     id: `${page.penFrameId}Grp${index}cat`,
     width: 'fill_container',
-    fill: '$si-surface-inset',
+    fill: penColorVar('bgField'),
     cornerRadius: '$si-radius-md',
     layout: 'vertical',
     gap: 8,
@@ -499,7 +687,7 @@ function buildComponentGroupCard(group, index, page, penLibraryIndex, catalog) {
     type: 'frame',
     id: `${page.penFrameId}Grp${index}`,
     width: 'fill_container',
-    fill: '$si-surface-group',
+    fill: penColorVar('bgSurface'),
     cornerRadius: '$si-radius-md',
     stroke: strokeSubtle,
     layout: 'vertical',
@@ -528,12 +716,12 @@ function buildComponentGroupCard(group, index, page, penLibraryIndex, catalog) {
   };
 }
 
-function buildPageFrame(page, sectionNodes, catalog, penLibraryIndex) {
+function buildPageFrame(page, sectionNodes, catalog, penLibraryIndex, resolved, layout) {
   const header = {
     type: 'frame',
     id: `${page.penFrameId}Hdr`,
     width: 'fill_container',
-    fill: '$si-surface-section',
+    fill: penColorVar('bgSection'),
     cornerRadius: '$si-radius-lg',
     stroke: strokeSubtle,
     layout: 'vertical',
@@ -600,7 +788,9 @@ function buildPageFrame(page, sectionNodes, catalog, penLibraryIndex) {
 
   const children = [header];
   for (const section of page.sections) {
-    if (section.type === 'componentGroups') {
+    if (section.type === 'surfaceStack') {
+      children.push(buildReactSurfaceStackBlock(resolved, layout, section, page));
+    } else if (section.type === 'componentGroups') {
       if (componentGroupCards.length) {
         children.push(sectionPanel(`${page.penFrameId}Components`, section.title, componentGroupCards));
       }
@@ -618,7 +808,10 @@ function buildPageFrame(page, sectionNodes, catalog, penLibraryIndex) {
           .filter((g) => g.pack === page.pack)
           .reduce((sum, group) => sum + (group.rows?.length ?? 0), 0) * 48
       : 0;
-  const height = page.pack ? 320 + sectionCount * 220 + penRowBonus : 320 + sectionCount * 180;
+  const surfaceStackBonus = page.sections.some((section) => section.type === 'surfaceStack') ? 380 : 0;
+  const height = page.pack
+    ? 320 + sectionCount * 220 + penRowBonus + surfaceStackBonus
+    : 320 + sectionCount * 180;
 
   return {
     type: 'frame',
@@ -629,7 +822,7 @@ function buildPageFrame(page, sectionNodes, catalog, penLibraryIndex) {
     y: page.layout.y,
     width: page.layout.width,
     height,
-    fill: '$si-surface-page',
+    fill: penColorVar('bgCanvas'),
     cornerRadius: '$si-radius-xl',
     layout: 'vertical',
     gap: 18,
@@ -643,8 +836,8 @@ export function buildPenSpecimenFrames({ resolved, layout, catalog, penLibraryCh
   const penLibraryIndex = buildPenLibraryIndex(penLibraryChildren);
   return layout.pages.map((page) => {
     if (page.id === 'tokens') {
-      return buildPageFrame(page, tokenSections, null, penLibraryIndex);
+      return buildPageFrame(page, tokenSections, null, penLibraryIndex, resolved, layout);
     }
-    return buildPageFrame(page, {}, catalog, penLibraryIndex);
+    return buildPageFrame(page, {}, catalog, penLibraryIndex, resolved, layout);
   });
 }

@@ -16,7 +16,7 @@ const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumenta
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
 const { PeriodicExportingMetricReader } = require('@opentelemetry/sdk-metrics');
-const { Resource } = require('@opentelemetry/resources');
+const { resourceFromAttributes } = require('@opentelemetry/resources');
 const { ATTR_SERVICE_NAME, ATTR_SERVICE_NAMESPACE } = require('@opentelemetry/semantic-conventions');
 
 const serviceName = process.env.OTEL_SERVICE_NAME || 'unknown-service';
@@ -24,7 +24,7 @@ const namespace = process.env.OTEL_SERVICE_NAMESPACE || 'sindustries';
 const environment = process.env.OTEL_ENVIRONMENT || process.env.NODE_ENV || 'development';
 
 const sdk = new NodeSDK({
-  resource: new Resource({
+  resource: resourceFromAttributes({
     [ATTR_SERVICE_NAME]: serviceName,
     [ATTR_SERVICE_NAMESPACE]: namespace,
     'deployment.environment': environment,

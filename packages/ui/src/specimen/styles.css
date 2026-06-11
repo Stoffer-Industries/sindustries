@@ -1,5 +1,5 @@
 .si-specimen-shell {
-  background: var(--si-surface-page);
+  background: var(--si-color-bg-canvas);
   color: var(--si-color-text-primary);
   font-family: var(--si-font-body);
   min-height: 100vh;
@@ -7,7 +7,7 @@
 
 .si-specimen-header {
   align-items: center;
-  background: var(--si-color-bg-surface);
+  background: var(--si-color-bg-section);
   border-bottom: 1px solid var(--si-color-border-subtle);
   display: flex;
   gap: 16px;
@@ -51,7 +51,7 @@
 }
 
 .si-specimen-panel {
-  background: var(--si-surface-section);
+  background: var(--si-color-bg-section);
   border: 1px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-lg);
   padding: 20px;
@@ -83,6 +83,110 @@
   gap: 18px;
 }
 
+.si-specimen-surface-block {
+  display: grid;
+  gap: var(--si-space-4);
+  max-width: 1080px;
+  width: 100%;
+}
+
+.si-specimen-surface-block > .si-card-container__title {
+  margin: 0;
+}
+
+.si-specimen-surface-stack {
+  display: grid;
+  gap: var(--si-space-4);
+}
+
+.si-specimen-surface-page-title {
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 400;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.si-specimen-surface-header-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.si-specimen-surface-header-row__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.si-specimen-surface-meta {
+  align-items: baseline;
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.si-specimen-surface-meta__role {
+  color: var(--si-color-brand-500);
+  font-family: var(--si-font-ui);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.si-specimen-surface-meta__detail {
+  color: var(--si-color-text-muted);
+  font-family: var(--si-font-ui);
+  font-size: 0.72rem;
+}
+
+.si-specimen-surface-meta__detail code {
+  color: var(--si-color-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+.si-specimen-surface-section.si-card-container--column {
+  max-width: 1080px;
+  width: 100%;
+}
+
+.si-specimen-surface-section-header {
+  width: 100%;
+}
+
+.si-specimen-surface-group-box {
+  background: var(--si-color-bg-surface);
+  border: 2px solid var(--si-color-ink-950);
+  border-radius: 0;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.si-specimen-surface-group-title {
+  color: var(--si-color-text-primary);
+  font-family: var(--si-font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.si-specimen-surface-field {
+  background: var(--si-color-bg-field);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  min-height: 40px;
+  width: 100%;
+}
+
 .si-specimen-section-title {
   color: var(--si-color-text-primary);
   font-family: var(--si-font-ui);
@@ -97,20 +201,12 @@
 }
 
 .si-specimen-group-panel {
-  background: var(--si-surface-group);
+  background: var(--si-color-bg-surface);
   border: 1px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-md);
   display: grid;
   gap: var(--si-space-2);
   padding: 14px;
-}
-
-[data-si-surface='group'] {
-  background: var(--si-surface-group);
-}
-
-[data-si-surface='inset'] {
-  background: var(--si-surface-inset);
 }
 
 .si-specimen-group-title {
@@ -132,6 +228,7 @@
 }
 
 .si-specimen-group-panel__catalog {
+  background: var(--si-color-bg-field);
   border-radius: var(--si-radius-md);
   display: grid;
   gap: 4px;
@@ -180,7 +277,7 @@
 }
 
 .si-specimen-card {
-  background: var(--si-color-bg-canvas-alt);
+  background: var(--si-color-bg-section-header);
   border: 1px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-lg);
   padding: var(--si-space-4);
@@ -297,7 +394,7 @@
 }
 
 .si-specimen-swatch-card {
-  background: var(--si-color-bg-canvas-alt);
+  background: var(--si-color-bg-section-header);
   border: 1px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-lg);
   display: grid;
@@ -400,7 +497,7 @@
 }
 
 .si-specimen-catalog-row {
-  background: var(--si-color-bg-canvas-alt);
+  background: var(--si-color-bg-section-header);
   border: 2px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-sm);
   display: grid;

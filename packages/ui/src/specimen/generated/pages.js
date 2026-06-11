@@ -60,6 +60,11 @@ export const SPECIMEN_PAGES = [
     },
     "sections": [
       {
+        "id": "surfaces",
+        "type": "surfaceStack",
+        "title": "Surfaces"
+      },
+      {
         "id": "components",
         "type": "componentGroups",
         "title": "Components",

@@ -74,7 +74,7 @@ const semanticModeColors = semanticModeKeys.map((modeKey) => ({
   darkValue: resolved.semantic.modes.dark[modeKey]
 }));
 
-const surfaceStackEntries = Object.entries(resolved.semantic.surfaceStack ?? {});
+const surfaceStackKeys = resolved.semantic.surfaceStack ?? [];
 
 // ---------------------------------------------------------------------------
 // Pencil variables
@@ -130,13 +130,6 @@ function buildPencilVariables() {
 
   for (const { cssName, lightValue, darkValue } of semanticModeColors) {
     v[cssName] = themedColorFromModes(lightValue, darkValue);
-  }
-
-  for (const [role, modeKey] of surfaceStackEntries) {
-    const colorVar = `si-color-${kebab(modeKey)}`;
-    if (v[colorVar]) {
-      v[`si-surface-${role}`] = JSON.parse(JSON.stringify(v[colorVar]));
-    }
   }
 
   v['si-font-body'] = { type: 'string', value: String(resolved.semantic.font.body) };
@@ -207,14 +200,8 @@ function pxVar(name, value) {
 const corePrimitiveLines = corePrimitiveColors.map(({ cssName, value }) => cssVar(cssName, value));
 const darkSemanticLines = semanticModeColors.map(({ cssName, darkValue }) => cssVar(cssName, darkValue));
 const lightSemanticLines = semanticModeColors.map(({ cssName, lightValue }) => cssVar(cssName, lightValue));
-const surfaceStackLines = [
-  ...surfaceStackEntries.map(([role, modeKey]) =>
-    cssVar(`si-surface-${role}`, `var(--si-color-${kebab(modeKey)})`)
-  ),
-  ...surfaceStackEntries.map(([role], index) => cssVar(`si-surface-${index}`, `var(--si-surface-${role})`))
-];
-const surfaceStackUtilityLines = surfaceStackEntries.map(
-  ([role]) => `[data-si-surface="${role}"] { background: var(--si-surface-${role}); }`
+const surfaceStackUtilityLines = surfaceStackKeys.map(
+  (modeKey) => `[data-si-surface="${modeKey}"] { background: var(--si-color-${kebab(modeKey)}); }`
 );
 
 const generatedCssBanner = `/*
@@ -244,9 +231,7 @@ ${[
   ...Object.entries(resolved.core.radius).map(([key, value]) => pxVar(`si-radius-${key}`, value)),
   '',
   cssVar('si-shadow-soft', resolved.semantic.shadow.soft),
-  cssVar('si-shadow-hard', resolved.semantic.shadow.hard),
-  '',
-  ...surfaceStackLines
+  cssVar('si-shadow-hard', resolved.semantic.shadow.hard)
 ].join('\n')}
 }
 
@@ -331,9 +316,7 @@ ${semantic}
 }
 
 function renderSurfaceBlock(modeAccessor) {
-  const lines = Object.entries(resolved.semantic.surfaceStack).map(
-    ([role, modeKey]) => `  ${role}: ${modeAccessor}.${modeKey},`
-  );
+  const lines = surfaceStackKeys.map((modeKey) => `  ${modeKey}: ${modeAccessor}.${modeKey},`);
   return `{\n${lines.join('\n')}\n} as const`;
 }
 
@@ -367,10 +350,10 @@ export const space = tokens.core.space;
 export const radius = tokens.core.radius;
 export const platform = tokens.platform;
 
-/** Semantic surface stack roles → mode color keys (see tokens.semantic.surfaceStack). */
-export const surfaceStackRoles = tokens.semantic.surfaceStack;
+/** Surface stack color keys (see tokens.semantic.surfaceStack). */
+export const surfaceStack = tokens.semantic.surfaceStack;
 
-/** Resolved surface colors for dark mode (page → section → group → inset). */
+/** Resolved surface colors for dark mode. */
 export const surfaces = ${renderSurfaceBlock('dark')};
 
 /** Resolved surface colors for light mode. */

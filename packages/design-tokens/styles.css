@@ -29,15 +29,33 @@
   --si-color-success-200: #9ee9b0;
   --si-color-success-500: #31c76a;
   --si-color-danger-500: #ff5252;
+  --si-color-white-pure: #FFFFFF;
+  --si-color-bone-canvas: #F4F1EA;
+  --si-color-bone-surface: #F5F2E8;
+  --si-color-bone-field: #F0EEEA;
+  --si-color-bone-sectionHeader: #E8E4DC;
+  --si-color-bone-ui: #EDEBE6;
+  --si-color-bone-placeholder: #EDEAE4;
+  --si-color-bone-pagination: #E4E0D8;
+  --si-color-graphite-400: #9CA3AF;
+  --si-color-graphite-600: #5C6670;
+  --si-color-graphite-700: #3D444D;
+  --si-color-label-blue: #60a5fa;
+  --si-color-label-orange: #f59e0b;
+  --si-color-label-purple: #a78bfa;
+  --si-color-glass-light: rgba(255, 255, 255, 0.72);
+  --si-color-glass-dark: rgba(43, 47, 52, 0.68);
+  --si-color-alpha-borderSubtleLight: rgba(0, 0, 0, 0.06);
+  --si-color-alpha-borderSubtleDark: rgba(143, 150, 158, 0.18);
 
   --si-color-cta-primary: #ffc935;
   --si-color-cta-primary-text: #111213;
   --si-color-cta-secondary: #7a8b7c;
   --si-color-bg-canvas: #111213;
-  --si-color-bg-canvas-alt: #161a1e;
-  --si-color-bg-surface: #2b2f34;
+  --si-color-bg-section-header: #161a1e;
+  --si-color-bg-section: #2b2f34;
   --si-color-bg-surface-alt: #161a1e;
-  --si-color-bg-surface-contrast: #1a1f24;
+  --si-color-bg-surface: #1a1f24;
   --si-color-bg-glass: rgba(43, 47, 52, 0.68);
   --si-color-text-primary: #ece3cc;
   --si-color-text-secondary: #8f969e;
@@ -84,15 +102,6 @@
 
   --si-shadow-soft: 0 18px 60px rgb(0 0 0 / 22%);
   --si-shadow-hard: 4px 4px 0 #111213;
-
-  --si-surface-page: var(--si-color-bg-canvas);
-  --si-surface-section: var(--si-color-bg-surface);
-  --si-surface-group: var(--si-color-bg-canvas-alt);
-  --si-surface-inset: var(--si-color-bg-surface-contrast);
-  --si-surface-0: var(--si-surface-page);
-  --si-surface-1: var(--si-surface-section);
-  --si-surface-2: var(--si-surface-group);
-  --si-surface-3: var(--si-surface-inset);
 }
 
 [data-si-theme="light"] {
@@ -102,10 +111,10 @@
   --si-color-cta-primary-text: #FFFFFF;
   --si-color-cta-secondary: #ffc935;
   --si-color-bg-canvas: #F4F1EA;
-  --si-color-bg-canvas-alt: #E8E4DC;
-  --si-color-bg-surface: #FFFFFF;
+  --si-color-bg-section-header: #E8E4DC;
+  --si-color-bg-section: #FFFFFF;
   --si-color-bg-surface-alt: #F0EEEA;
-  --si-color-bg-surface-contrast: #F5F2E8;
+  --si-color-bg-surface: #F5F2E8;
   --si-color-bg-glass: rgba(255, 255, 255, 0.72);
   --si-color-text-primary: #2b2f34;
   --si-color-text-secondary: #3D444D;
@@ -167,7 +176,6 @@ a {
   min-height: 100vh;
 }
 
-[data-si-surface="page"] { background: var(--si-surface-page); }
-[data-si-surface="section"] { background: var(--si-surface-section); }
-[data-si-surface="group"] { background: var(--si-surface-group); }
-[data-si-surface="inset"] { background: var(--si-surface-inset); }
+[data-si-surface="bgCanvas"] { background: var(--si-color-bg-canvas); }
+[data-si-surface="bgSection"] { background: var(--si-color-bg-section); }
+[data-si-surface="bgSurface"] { background: var(--si-color-bg-surface); }

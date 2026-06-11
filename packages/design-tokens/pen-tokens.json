@@ -81,6 +81,117 @@
       "type": "color",
       "value": "#FF5252"
     },
+    "si-color-white-pure": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "si-color-bone-canvas": {
+      "type": "color",
+      "value": "#F4F1EA"
+    },
+    "si-color-bone-surface": {
+      "type": "color",
+      "value": "#F5F2E8"
+    },
+    "si-color-bone-field": {
+      "type": "color",
+      "value": "#F0EEEA"
+    },
+    "si-color-bone-sectionHeader": {
+      "type": "color",
+      "value": "#E8E4DC"
+    },
+    "si-color-bone-ui": {
+      "type": "color",
+      "value": "#EDEBE6"
+    },
+    "si-color-bone-placeholder": {
+      "type": "color",
+      "value": "#EDEAE4"
+    },
+    "si-color-bone-pagination": {
+      "type": "color",
+      "value": "#E4E0D8"
+    },
+    "si-color-graphite-400": {
+      "type": "color",
+      "value": "#9CA3AF"
+    },
+    "si-color-graphite-600": {
+      "type": "color",
+      "value": "#5C6670"
+    },
+    "si-color-graphite-700": {
+      "type": "color",
+      "value": "#3D444D"
+    },
+    "si-color-label-blue": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#60A5FA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#60A5FA",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-label-orange": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F59E0B",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#F59E0B",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-label-purple": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#A78BFA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#A78BFA",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-glass-light": {
+      "type": "color",
+      "value": "#FFFFFFB8"
+    },
+    "si-color-glass-dark": {
+      "type": "color",
+      "value": "#2B2F34AD"
+    },
+    "si-color-alpha-borderSubtleLight": {
+      "type": "color",
+      "value": "#0000000F"
+    },
+    "si-color-alpha-borderSubtleDark": {
+      "type": "color",
+      "value": "#8F969E2E"
+    },
     "si-color-cta-primary": {
       "type": "color",
       "value": [
@@ -149,7 +260,7 @@
         }
       ]
     },
-    "si-color-bg-canvas-alt": {
+    "si-color-bg-section-header": {
       "type": "color",
       "value": [
         {
@@ -166,7 +277,7 @@
         }
       ]
     },
-    "si-color-bg-surface": {
+    "si-color-bg-section": {
       "type": "color",
       "value": [
         {
@@ -200,7 +311,7 @@
         }
       ]
     },
-    "si-color-bg-surface-contrast": {
+    "si-color-bg-surface": {
       "type": "color",
       "value": [
         {
@@ -421,57 +532,6 @@
         }
       ]
     },
-    "si-color-label-blue": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#60A5FA",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#60A5FA",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-color-label-orange": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#F59E0B",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#F59E0B",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-color-label-purple": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#A78BFA",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#A78BFA",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
     "si-color-label-gray": {
       "type": "color",
       "value": [
@@ -568,74 +628,6 @@
         },
         {
           "value": "#F3F1EC",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-page": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#F4F1EA",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#111213",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-section": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#FFFFFF",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#2B2F34",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-group": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#E8E4DC",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#161A1E",
-          "theme": {
-            "Mode": "Dark"
-          }
-        }
-      ]
-    },
-    "si-surface-inset": {
-      "type": "color",
-      "value": [
-        {
-          "value": "#F5F2E8",
-          "theme": {
-            "Mode": "Light"
-          }
-        },
-        {
-          "value": "#1A1F24",
           "theme": {
             "Mode": "Dark"
           }

@@ -9,7 +9,7 @@ export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
   const nextTheme = theme === 'dark' ? 'light' : 'dark';
 
   return (
-    <main className="si-specimen-shell" data-si-theme={theme} data-si-pack="pulse" data-si-surface="page">
+    <main className="si-specimen-shell" data-si-theme={theme} data-si-pack="pulse" data-si-surface="bgCanvas">
       <header className="si-specimen-header">
         <a href={backHref} className="si-specimen-back">
           {backLabel}

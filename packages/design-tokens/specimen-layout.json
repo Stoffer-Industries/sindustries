@@ -3,9 +3,12 @@
     "colorRows": [
       [
         ["Canvas", "si-color-bg-canvas"],
+        ["Section", "si-color-bg-section"],
+        ["Section header", "si-color-bg-section-header"],
         ["Surface", "si-color-bg-surface"],
-        ["Surface alt", "si-color-bg-surface-alt"],
-        ["Surface contrast", "si-color-bg-surface-contrast"],
+        ["Field", "si-color-bg-field"]
+      ],
+      [
         ["Primary text", "si-color-text-primary"],
         ["Muted text", "si-color-text-muted"]
       ],
@@ -29,6 +32,31 @@
     "spaces": ["1", "2", "3", "4", "5", "6", "7", "8", "10"],
     "radii": ["sm", "md", "lg", "xl", "pill"]
   },
+  "surfaceStack": [
+    {
+      "token": "bgCanvas",
+      "label": "Page",
+      "description": "Canvas",
+      "headerSample": "Surfaces"
+    },
+    {
+      "token": "bgSection",
+      "label": "Section",
+      "description": "Kanban column",
+      "headerSample": "Surface Section Header"
+    },
+    {
+      "token": "bgSurface",
+      "label": "Group",
+      "description": "Task card",
+      "headerSample": "Section Header"
+    },
+    {
+      "token": "bgField",
+      "label": "Fields",
+      "description": "Task fields"
+    }
+  ],
   "pages": [
     {
       "id": "tokens",
@@ -57,6 +85,7 @@
       "pack": "pulse",
       "layout": { "x": 1024, "y": 32, "width": 960 },
       "sections": [
+        { "id": "surfaces", "type": "surfaceStack", "title": "Surfaces" },
         { "id": "components", "type": "componentGroups", "title": "Components", "groupPack": "pulse" },
         { "id": "catalog", "type": "codeCatalog", "title": "Code catalog", "groupPack": "pulse" }
       ]

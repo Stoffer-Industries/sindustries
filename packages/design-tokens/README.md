@@ -27,7 +27,7 @@ You only need to touch `build-tokens.mjs` if you want a **renamed/grouped access
 
 **Specimen layout** is driven by `specimen-layout.json` (token + React page sections) and `packages/ui/component-catalog.json` (component registry, demo groups, pen names). Edit those files, then rebuild — do not hand-edit generated pen specimen frames or `packages/ui/src/specimen/generated/*`.
 
-**Surface stack** (`semantic.surfaceStack` in `tokens.json`) maps nesting roles to mode colors: `page` → `bgCanvas`, `section` → `bgSurface`, `group` → `bgCanvasAlt`, `inset` → `bgSurfaceContrast`. Build emits `--si-surface-{role}` / `--si-surface-{0-3}` CSS vars, Pencil `$si-surface-*` aliases, and `[data-si-surface="…"]` utilities.
+**Surface stack** (`semantic.surfaceStack` in `tokens.json`) lists nesting background keys: `bgCanvas`, `bgSection`, `bgSurface`. Section chrome uses `bgSectionHeader`; form fields use `bgField`. Build emits `[data-si-surface="bgCanvas"]` (etc.) utilities that point at the matching `--si-color-bg-*` vars.
 
 Build:
 

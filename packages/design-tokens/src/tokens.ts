@@ -49,6 +49,36 @@ export const tokens = {
       },
       "danger": {
         "500": "#ff5252"
+      },
+      "white": {
+        "pure": "#FFFFFF"
+      },
+      "bone": {
+        "canvas": "#F4F1EA",
+        "surface": "#F5F2E8",
+        "field": "#F0EEEA",
+        "sectionHeader": "#E8E4DC",
+        "ui": "#EDEBE6",
+        "placeholder": "#EDEAE4",
+        "pagination": "#E4E0D8"
+      },
+      "graphite": {
+        "400": "#9CA3AF",
+        "600": "#5C6670",
+        "700": "#3D444D"
+      },
+      "label": {
+        "blue": "#60a5fa",
+        "orange": "#f59e0b",
+        "purple": "#a78bfa"
+      },
+      "glass": {
+        "light": "rgba(255, 255, 255, 0.72)",
+        "dark": "rgba(43, 47, 52, 0.68)"
+      },
+      "alpha": {
+        "borderSubtleLight": "rgba(0, 0, 0, 0.06)",
+        "borderSubtleDark": "rgba(143, 150, 158, 0.18)"
       }
     },
     "font": {
@@ -84,10 +114,10 @@ export const tokens = {
         "ctaPrimaryText": "#FFFFFF",
         "ctaSecondary": "#ffc935",
         "bgCanvas": "#F4F1EA",
-        "bgCanvasAlt": "#E8E4DC",
-        "bgSurface": "#FFFFFF",
+        "bgSectionHeader": "#E8E4DC",
+        "bgSection": "#FFFFFF",
         "bgSurfaceAlt": "#F0EEEA",
-        "bgSurfaceContrast": "#F5F2E8",
+        "bgSurface": "#F5F2E8",
         "bgGlass": "rgba(255, 255, 255, 0.72)",
         "textPrimary": "#2b2f34",
         "textSecondary": "#3D444D",
@@ -115,10 +145,10 @@ export const tokens = {
         "ctaPrimaryText": "#111213",
         "ctaSecondary": "#7a8b7c",
         "bgCanvas": "#111213",
-        "bgCanvasAlt": "#161a1e",
-        "bgSurface": "#2b2f34",
+        "bgSectionHeader": "#161a1e",
+        "bgSection": "#2b2f34",
         "bgSurfaceAlt": "#161a1e",
-        "bgSurfaceContrast": "#1a1f24",
+        "bgSurface": "#1a1f24",
         "bgGlass": "rgba(43, 47, 52, 0.68)",
         "textPrimary": "#ece3cc",
         "textSecondary": "#8f969e",
@@ -151,12 +181,11 @@ export const tokens = {
       "soft": "0 18px 60px rgb(0 0 0 / 22%)",
       "hard": "4px 4px 0 #111213"
     },
-    "surfaceStack": {
-      "page": "bgCanvas",
-      "section": "bgSurface",
-      "group": "bgCanvasAlt",
-      "inset": "bgSurfaceContrast"
-    }
+    "surfaceStack": [
+      "bgCanvas",
+      "bgSection",
+      "bgSurface"
+    ]
   },
   "platform": {
     "mobile": {
@@ -194,10 +223,10 @@ export const colors = {
   ctaPrimaryText: dark.ctaPrimaryText,
   ctaSecondary: dark.ctaSecondary,
   bgCanvas: dark.bgCanvas,
-  bgCanvasAlt: dark.bgCanvasAlt,
-  bgSurface: dark.bgSurface,
+  bgSectionHeader: dark.bgSectionHeader,
+  bgSection: dark.bgSection,
   bgSurfaceAlt: dark.bgSurfaceAlt,
-  bgSurfaceContrast: dark.bgSurfaceContrast,
+  bgSurface: dark.bgSurface,
   bgGlass: dark.bgGlass,
   textPrimary: dark.textPrimary,
   textSecondary: dark.textSecondary,
@@ -242,10 +271,10 @@ export const colorsLight = {
   ctaPrimaryText: light.ctaPrimaryText,
   ctaSecondary: light.ctaSecondary,
   bgCanvas: light.bgCanvas,
-  bgCanvasAlt: light.bgCanvasAlt,
-  bgSurface: light.bgSurface,
+  bgSectionHeader: light.bgSectionHeader,
+  bgSection: light.bgSection,
   bgSurfaceAlt: light.bgSurfaceAlt,
-  bgSurfaceContrast: light.bgSurfaceContrast,
+  bgSurface: light.bgSurface,
   bgGlass: light.bgGlass,
   textPrimary: light.textPrimary,
   textSecondary: light.textSecondary,
@@ -291,21 +320,19 @@ export const space = tokens.core.space;
 export const radius = tokens.core.radius;
 export const platform = tokens.platform;
 
-/** Semantic surface stack roles → mode color keys (see tokens.semantic.surfaceStack). */
-export const surfaceStackRoles = tokens.semantic.surfaceStack;
+/** Surface stack color keys (see tokens.semantic.surfaceStack). */
+export const surfaceStack = tokens.semantic.surfaceStack;
 
-/** Resolved surface colors for dark mode (page → section → group → inset). */
+/** Resolved surface colors for dark mode. */
 export const surfaces = {
-  page: dark.bgCanvas,
-  section: dark.bgSurface,
-  group: dark.bgCanvasAlt,
-  inset: dark.bgSurfaceContrast,
+  bgCanvas: dark.bgCanvas,
+  bgSection: dark.bgSection,
+  bgSurface: dark.bgSurface,
 } as const;
 
 /** Resolved surface colors for light mode. */
 export const surfacesLight = {
-  page: light.bgCanvas,
-  section: light.bgSurface,
-  group: light.bgCanvasAlt,
-  inset: light.bgSurfaceContrast,
+  bgCanvas: light.bgCanvas,
+  bgSection: light.bgSection,
+  bgSurface: light.bgSurface,
 } as const;
