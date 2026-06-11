@@ -884,7 +884,7 @@ li {
 .btn.secondary {
   background: transparent;
   border-color: rgb(243 241 236 / 36%);
-  color: var(--si-color-cream-100);
+  color: var(--si-color-bone-100);
 }
 
 .btn.secondary.light {
@@ -925,7 +925,7 @@ li {
 }
 
 .site-footer a {
-  color: var(--si-color-cream-100);
+  color: var(--si-color-bone-100);
   font-weight: 900;
   text-decoration: underline;
   text-decoration-color: rgb(255 201 53 / 70%);
@@ -947,7 +947,7 @@ li {
   border: 1px solid rgb(243 241 236 / 18%);
   border-radius: var(--si-radius-pill);
   background: rgb(243 241 236 / 7%);
-  color: var(--si-color-cream-100);
+  color: var(--si-color-bone-100);
   font-size: 1.05rem;
   line-height: 1;
   text-decoration: none;

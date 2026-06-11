@@ -494,7 +494,7 @@
 }
 
 .si-card-container--filter {
-  background: var(--si-color-bg-surface-alt);
+  background: var(--si-color-bg-surface);
   border-left: 0;
   border-right: 0;
   border-top: 2px solid var(--si-color-ink-950);
@@ -512,7 +512,7 @@
 
 .si-card-container--filter .si-card-container__header,
 .si-card-container--filter .si-card-container__content {
-  background: var(--si-color-bg-surface-alt);
+  background: var(--si-color-bg-surface);
 }
 
 .si-card-container--filter .si-card-container__content {
