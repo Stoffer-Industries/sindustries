@@ -10,17 +10,23 @@ export const SPECIMEN_COLOR_ROWS = [
       "var(--si-color-bg-canvas)"
     ],
     [
+      "Section",
+      "var(--si-color-bg-section)"
+    ],
+    [
+      "Section header",
+      "var(--si-color-bg-section-header)"
+    ],
+    [
       "Surface",
       "var(--si-color-bg-surface)"
     ],
     [
-      "Surface alt",
-      "var(--si-color-bg-surface-alt)"
-    ],
-    [
-      "Surface contrast",
-      "var(--si-color-bg-surface-contrast)"
-    ],
+      "Field",
+      "var(--si-color-bg-field)"
+    ]
+  ],
+  [
     [
       "Primary text",
       "var(--si-color-text-primary)"
@@ -97,4 +103,30 @@ export const SPECIMEN_RADII = [
   "lg",
   "xl",
   "pill"
+];
+
+export const SPECIMEN_SURFACE_STACK = [
+  {
+    "token": "bgCanvas",
+    "label": "Page",
+    "description": "Canvas",
+    "headerSample": "Surfaces"
+  },
+  {
+    "token": "bgSection",
+    "label": "Section",
+    "description": "Kanban column",
+    "headerSample": "Surface Section Header"
+  },
+  {
+    "token": "bgSurface",
+    "label": "Group",
+    "description": "Task card",
+    "headerSample": "Section Header"
+  },
+  {
+    "token": "bgField",
+    "label": "Fields",
+    "description": "Task fields"
+  }
 ];

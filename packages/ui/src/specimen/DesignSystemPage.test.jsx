@@ -43,6 +43,16 @@ describe('DesignSystemPage', () => {
     expect(screen.getByText('Button/Default')).toBeInTheDocument();
     expect(screen.getByText('Button/Display/Primary')).toBeInTheDocument();
     expect(screen.getByText('Tertiary headers')).toBeInTheDocument();
+    const pulsePage = screen.getByRole('heading', { name: 'Pulse / React' }).closest('section');
+    expect(pulsePage).toBeTruthy();
+    const surfacesBlock = within(pulsePage).getByRole('heading', { name: 'Surfaces' }).closest('.si-specimen-surface-block');
+    expect(surfacesBlock).toBeTruthy();
+    expect(within(surfacesBlock).getByRole('heading', { name: 'Surface Section Header' })).toBeInTheDocument();
+    expect(within(surfacesBlock).getByText('Section Header')).toBeInTheDocument();
+    expect(within(surfacesBlock).getByText('Fields')).toBeInTheDocument();
+    expect(within(surfacesBlock).queryByLabelText('Title')).not.toBeInTheDocument();
+    const componentsHeading = within(pulsePage).getByText('Components');
+    expect(surfacesBlock.compareDocumentPosition(componentsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Color')).toBeInTheDocument();
     expect(screen.getByText('Color labels')).toBeInTheDocument();
     expect(screen.getByText('Space')).toBeInTheDocument();

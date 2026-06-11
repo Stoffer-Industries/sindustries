@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  CardContainer,
   Divider,
   Dropdown,
   DropdownDivider,
@@ -21,7 +22,8 @@ import {
   SPECIMEN_COLOR_ROWS,
   SPECIMEN_LABEL_COLORS,
   SPECIMEN_RADII,
-  SPECIMEN_SPACES
+  SPECIMEN_SPACES,
+  SPECIMEN_SURFACE_STACK
 } from './generated/manifest.js';
 
 const COMPONENT_MAP = {
@@ -129,14 +131,14 @@ function SpecimenGroupPanel({ group, pack }) {
   const catalogNames = groupCatalogComponents(group);
 
   return (
-    <div className="si-specimen-group-panel" data-si-surface="group">
+    <div className="si-specimen-group-panel" data-si-surface="bgSurface">
       <h2 className="si-specimen-group-title">{group.title}</h2>
       <div className="si-specimen-group-panel__body">
         <div className="si-specimen-group-panel__demos">
           <SpecimenGroupContent group={group} />
         </div>
         {catalogNames.length ? (
-          <div className="si-specimen-group-panel__catalog" data-si-surface="inset">
+          <div className="si-specimen-group-panel__catalog">
             <p className="si-specimen-code-label">CODE</p>
             {catalogNames.map((name) => {
               const entry = COMPONENT_CATALOG.components[name];
@@ -248,6 +250,96 @@ function SpecimenGroupContent({ group }) {
   );
 }
 
+function modeKeyToCssVar(modeKey) {
+  return `--si-color-${modeKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
+}
+
+function SurfaceRoleMeta({ token, label, description }) {
+  return (
+    <div className="si-specimen-surface-meta">
+      <span className="si-specimen-surface-meta__role">{label}</span>
+      <span className="si-specimen-surface-meta__detail">
+        {description} · <code>{modeKeyToCssVar(token)}</code>
+      </span>
+    </div>
+  );
+}
+
+function SurfaceHeaderRow({ meta, children }) {
+  return (
+    <div className="si-specimen-surface-header-row">
+      <div className="si-specimen-surface-header-row__title">{children}</div>
+      {meta}
+    </div>
+  );
+}
+
+function SurfaceStackSection({ section }) {
+  const page = SPECIMEN_SURFACE_STACK.find((entry) => entry.token === 'bgCanvas');
+  const sectionRole = SPECIMEN_SURFACE_STACK.find((entry) => entry.token === 'bgSection');
+  const group = SPECIMEN_SURFACE_STACK.find((entry) => entry.token === 'bgSurface');
+  const fields = SPECIMEN_SURFACE_STACK.find((entry) => entry.token === 'bgField');
+
+  return (
+    <div className="si-specimen-surface-block">
+      <div className="si-specimen-surface-stack" data-si-surface="bgCanvas">
+        {page ? (
+          <SurfaceHeaderRow
+            meta={
+              <SurfaceRoleMeta token={page.token} label={page.label} description={page.description} />
+            }
+          >
+            <h2 className="si-specimen-surface-page-title">{page.headerSample}</h2>
+          </SurfaceHeaderRow>
+        ) : null}
+        <CardContainer variant="column" className="si-specimen-surface-section" data-si-surface="bgSection">
+          {sectionRole ? (
+            <CardContainer.Header className="si-specimen-surface-section-header">
+              <SurfaceHeaderRow
+                meta={
+                  <SurfaceRoleMeta
+                    token={sectionRole.token}
+                    label={sectionRole.label}
+                    description={sectionRole.description}
+                  />
+                }
+              >
+                <h3 className="si-font-display si-card-container__title">{sectionRole.headerSample}</h3>
+              </SurfaceHeaderRow>
+            </CardContainer.Header>
+          ) : null}
+          <CardContainer.Content>
+            <div className="si-specimen-surface-group-box">
+              {group ? (
+                <SurfaceHeaderRow
+                  meta={
+                    <SurfaceRoleMeta token={group.token} label={group.label} description={group.description} />
+                  }
+                >
+                  <p className="si-specimen-surface-group-title">{group.headerSample}</p>
+                </SurfaceHeaderRow>
+              ) : null}
+              {fields ? (
+                <SurfaceHeaderRow
+                  meta={
+                    <SurfaceRoleMeta
+                      token={fields.token}
+                      label={fields.label}
+                      description={fields.description}
+                    />
+                  }
+                >
+                  <div className="si-specimen-surface-field" aria-hidden="true" />
+                </SurfaceHeaderRow>
+              ) : null}
+            </div>
+          </CardContainer.Content>
+        </CardContainer>
+      </div>
+    </div>
+  );
+}
+
 function CodeCatalogSection({ pack }) {
   const inline = inlineCatalogComponents(pack);
   const rows = Object.entries(COMPONENT_CATALOG.components)
@@ -272,6 +364,8 @@ function CodeCatalogSection({ pack }) {
 
 export function SpecimenSection({ section, page }) {
   switch (section.type) {
+    case 'surfaceStack':
+      return <SurfaceStackSection section={section} />;
     case 'colorSwatches':
       return (
         <section className="si-specimen-panel si-specimen-section">
@@ -347,7 +441,7 @@ export function SpecimenSection({ section, page }) {
       const pack = section.groupPack ?? page.pack;
       const groups = COMPONENT_CATALOG.specimenGroups.filter((group) => group.pack === pack);
       return (
-        <section className="si-specimen-panel si-specimen-section" data-si-surface="section">
+        <section className="si-specimen-panel si-specimen-section" data-si-surface="bgSection">
           <p className="si-specimen-section-title">{section.title}</p>
           <div className="si-specimen-component-stack">
             {groups.map((group) => (

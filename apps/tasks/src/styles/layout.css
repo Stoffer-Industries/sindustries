@@ -183,7 +183,7 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--si-color-bg-surface);
+  background: var(--si-color-bg-section);
   border-top: 2px solid var(--si-color-border-strong);
   padding: 8px 16px;
   justify-content: space-between;

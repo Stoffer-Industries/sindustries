@@ -7,7 +7,9 @@ import {
 const startFn = vi.fn();
 
 vi.mock('@opentelemetry/sdk-node', () => ({
-  NodeSDK: vi.fn().mockImplementation(() => ({ start: startFn })),
+  NodeSDK: vi.fn(function MockNodeSDK() {
+    return { start: startFn };
+  }),
 }));
 
 describe('startOtel when SDK starts', () => {

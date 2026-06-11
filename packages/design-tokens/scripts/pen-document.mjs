@@ -24,9 +24,25 @@ export function hasTextContent(node, content) {
   return false;
 }
 
+const PEN_SURFACE_TOKEN_PLACEHOLDER = '__SI_SURFACE_TOKEN__';
+
+function migratePenColorTokens(s) {
+  return s
+    .split('$si-color-bg-canvas-alt').join('$si-color-bg-section-header')
+    .split('$si-color-bg-surface-contrast').join(PEN_SURFACE_TOKEN_PLACEHOLDER)
+    .split('$si-color-bg-surface').join('$si-color-bg-section')
+    .split(PEN_SURFACE_TOKEN_PLACEHOLDER).join('$si-color-bg-surface')
+    .split('$si-surface-page').join('$si-color-bg-canvas')
+    .split('$si-surface-section').join('$si-color-bg-section')
+    .split('$si-surface-group').join('$si-color-bg-surface')
+    .split('--si-surface-page').join('--si-color-bg-canvas')
+    .split('--si-surface-section').join('--si-color-bg-section')
+    .split('--si-surface-group').join('--si-color-bg-surface');
+}
+
 function normalizeString(s) {
   if (typeof s !== 'string') return s;
-  return s.split('$si:si-').join('$si-');
+  return migratePenColorTokens(s.split('$si:si-').join('$si-'));
 }
 
 function normalizeThemeObject(theme) {

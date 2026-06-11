@@ -28,6 +28,8 @@ export const SPECIMEN_LABEL_COLORS = ${JSON.stringify(labelColors, null, 2)};
 export const SPECIMEN_SPACES = ${JSON.stringify(layout.swatches.spaces, null, 2)};
 
 export const SPECIMEN_RADII = ${JSON.stringify(layout.swatches.radii, null, 2)};
+
+export const SPECIMEN_SURFACE_STACK = ${JSON.stringify(layout.surfaceStack ?? [], null, 2)};
 `;
 
   const pagesJs = `${generatedBanner}

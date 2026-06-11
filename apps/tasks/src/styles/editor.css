@@ -281,7 +281,7 @@
 .markdown-body code {
   background: var(--si-color-sage-500);
   border: none;
-  color: var(--si-color-bg-surface);
+  color: var(--si-color-bg-section);
   border-radius: var(--si-radius-xs);
   padding: 1px 5px;
   font-size: 0.88em;
@@ -291,7 +291,7 @@
 .markdown-body pre {
   background: var(--si-color-sage-500);
   border: none;
-  color: var(--si-color-bg-surface);
+  color: var(--si-color-bg-section);
   border-radius: var(--si-radius-xs);
   padding: 10px 12px;
   overflow-x: auto;
@@ -367,7 +367,7 @@
 }
 
 .markdown-body th {
-  background: var(--si-color-bg-surface);
+  background: var(--si-color-bg-section);
   font-weight: 600;
 }
 
