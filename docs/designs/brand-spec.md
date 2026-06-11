@@ -1,4 +1,4 @@
-Brand Spec v0.2 — Stoffer Industries (SIN)
+Brand Spec v0.3 — Stoffer Industries (SIN)
 
 ---
 
@@ -80,171 +80,159 @@ The goal: precision with a hint of workshop materiality — bone surface, graphi
 
 ## 5. Color System
 
-**Palette**
+**Source of truth:** `packages/design-tokens/tokens.json`  
+Primitives become CSS variables (`--si-color-bone-100`, etc.); product code should prefer semantic tokens (`--si-color-bg-canvas`, `--si-color-text-primary`, …).
 
-- Soft Steel — `#8F969E` Mid Grey (bg/line)
-- Graphite — `#2b2f34` Dark Grey (panel)
-- Slate — `#111213` Black (panel-2)
-- Porcelain — `#F3F1EC` Off white (text)
-- Amber — `#FFC935` (accent)
-- Sage Grey — `#7A8B7C` (accent-2)
+**Mantra:** bone surface, graphite structure, amber signal.
 
-Think of the system like a workshop bench. Most of it is matte metal. The ochre is the one calibrated tool you reach for.
-
-**Overall Ratio**
-
-A healthy balance for this palette:
-
-- **70% Soft Steel** — Primary background and primary line
-- **15% Graphite** -  Surfaces, panels, containers
-- **15% Slate** — Headings, surfaces when ontop of graphite
-- **10% Porcelain** — Text, icons, primary legibility, surfaces on Gray.
-- **1% Amber** — Accent only.
-- **1% Sage Grey** — Accent only.
-
-This ratio is what makes the brand feel confident rather than decorative.  
-When accents become common, they stop being accents.
+Think of the system like a workshop bench — mostly warm bone and cool graphite metal. Amber is the one calibrated tool you reach for. Pink, cyan, and status greens/reds are instrument panel lights: loud on purpose, rare by design.
 
 ---
 
-### 5.1 Website / Product UI
+### 5.1 Core primitives
 
-Deep Ink should dominate the environment. It gives the brand its seriousness.
+Numbered scales run **higher = darker** unless noted.
 
-Typical layout might look like:
+#### Surfaces & structure
 
-- **Background** → Deep Ink
-- **Cards / modules** → Slate
-- **Text** → Porcelain
-- **Secondary text** → Soft Steel
-- **Interactive highlight** → Ochre
+| Family | Key steps | Character | Role |
+|--------|-----------|-----------|------|
+| **Bone** | `50` `#f4f2ee` → `400` `#d5d3cd` | Warm off-white workshop surface | Light-mode backgrounds, fields, section chrome |
+| **Ink** | `950` `#111213` → `800` `#1a1f24` | Near-black, subtle cool undertone | Dark canvas, deepest cards, hard shadows, Pulse ink borders |
+| **Graphite** | `800` `#2b2f34` → `400` `#9CA3AF` | Cool blue-grey structure | Text on bone, borders, lifted dark sections, muted copy |
+| **Paper** | `200` `#ece3cc` | Warm parchment | Dark-mode primary text (distinct from bone) |
+| **Neutral** | `0` `#FFFFFF`, `200`/`300` greys | Flat neutral | Pure white sections, utility greys |
 
-Use ochre for things like:
+Ink and graphite share the same cool hue family; ink is environment depth, graphite is visible structure on top of it.
 
-- active nav item
-- focus state
-- primary button
-- progress indicators
-- key metrics
+#### Signal & status
 
-Never make large surfaces ochre. It works best as a sharp signal, not a field.
+| Family | Key steps | Role |
+|--------|-----------|------|
+| **Brand** (amber) | `500` `#ffc935`, `200` `#ffe891` | Secondary CTAs, dark-mode primary CTA, tertiary text in dark, priority badges |
+| **Sage** | `500` `#7a8b7c` | Light-mode primary CTA, tertiary text in light |
+| **Accent** (pink) | `500` `#ff3e8a`, `200` `#ff8ab4` | Urgent/blocked/draft Pulse badges |
+| **Info** (cyan) | `500` `#00d4ff`, `200` `#9ee9ff` | Focus rings, informational toasts/tags, medium-priority badge fills |
+| **Success** | `500` `#31c76a`, `200` `#9ee9b0` | Success status, ready/low badges |
+| **Danger** | `500` `#ff5252` | Errors, destructive status |
+| **Label** | blue / orange / purple | Tag and taxonomy chips (green aliases success) |
 
----
+#### Utilities
 
-### 5.2 Typography
-
-Porcelain for primary headings and body copy.  
-Soft Steel for:
-
-- metadata
-- timestamps
-- secondary explanations
-- grid labels
-
-Avoid using Slate as text. It should remain structural.
+- **Glass** — frosted overlays (`light` / `dark`)
+- **Alpha** — subtle border tints for light and dark modes
 
 ---
 
-### 5.3 UI Elements
+### 5.2 Semantic tokens (how product code uses color)
+
+Light and dark modes share the same semantic keys; values swap via `data-si-theme` on `:root`.
+
+**Surface stack** (nesting, outside → in): `bgCanvas` → `bgSection` → `bgSurface`  
+Related: `bgSectionHeader` (column chrome), `bgField` (inputs), `bgGlass`, `bgPaginationActive`, `bgImagePlaceholder`.
+
+| Semantic token | Light mode | Dark mode |
+|----------------|------------|-----------|
+| `bgCanvas` | bone.100 | ink.950 |
+| `bgSection` | bone.50 | graphite.800 |
+| `bgSurface` | bone.150 | ink.800 |
+| `bgSectionHeader` | bone.250 | ink.900 |
+| `bgField` | bone.200 | ink.900 |
+| `textPrimary` | graphite.800 | paper.200 |
+| `textSecondary` | graphite.700 | graphite.500 |
+| `textMuted` | graphite.600 | graphite.600 |
+| `textTertiary` | sage.500 | brand.500 |
+| `borderStrong` | graphite.400 | graphite.500 |
+| `ctaPrimary` | sage.500 | brand.500 |
+| `ctaPrimaryText` | neutral.0 | ink.950 |
+| `ctaSecondary` | brand.500 | sage.500 |
+| `focus` | info.500 | info.500 |
+
+Use semantic tokens in components. Reach for primitives when you need a fixed swatch (e.g. hard `ink.950` shadow offset on Pulse cards).
+
+---
+
+### 5.3 Where each mode shows up
+
+**Light mode (bone + graphite)** — default for Pulse / tasks and the design-system specimen. Operator tools sit on a warm workshop surface with graphite type and structure. Sage carries the primary action; amber is the secondary signal.
+
+**Dark mode (ink + graphite + paper)** — available in tasks via theme toggle. Canvas is deep ink; columns lift on graphite.800; cards sit on ink.800. Body copy reads in warm paper, not cold white.
+
+**Marketing site** — bone-forward (`bone.50` canvas, subtle amber radial wash). Dark ink panels and amber/yellow CTAs provide contrast on top of the bone base. Composes primitives directly for editorial layouts rather than the full semantic surface stack.
+
+---
+
+### 5.4 UI element guidance
 
 **Buttons**
 
-- **Primary button** — Porcelain text on Ochre background
-- **Secondary button** — Porcelain outline on Deep Ink
-- **Tertiary button** — Soft Steel text
+- **Primary (light)** — white text on sage (`ctaPrimary`)
+- **Primary (dark)** — ink text on amber (`ctaPrimary`)
+- **Secondary** — amber (light) or sage (dark)
+- **Pulse / brand chrome** — amber fills with `ink.950` borders and hard offset shadows
 
-**Badges / chips**
+**Focus** — always cyan (`info.500`). Never amber. Amber is brand signal, not accessibility chrome.
 
-- **Background** → Slate  
-- **Text** → Porcelain  
-- **Active** → Ochre border
+**Badges (Pulse)**
 
-**Graphs and data**
+- Priority medium / count → `info.200` fill
+- High → `brand.200`
+- Low / ready / success → `success.200`
+- Blocked / draft → `accent.500`
+- Tags → glass background or `statusInfo` outline
 
-- Neutral lines → Soft Steel
-- Primary data → Ochre
-- Secondary data → Porcelain
+**Text hierarchy**
 
----
-
-### 5.4 Brand Graphics
-
-In marketing graphics or brand assets, use mostly monochrome compositions.
-
-Example structure:
-
-- Deep Ink background
-- Porcelain typography
-- Soft Steel grid lines
-- Ochre highlight slash or marker
-
-This creates that industrial editorial feel. Think architecture magazines or design studios.
+- On bone, use `textPrimary` / `textSecondary` / `textMuted` — not raw ink
+- On dark panels, `paper.200` for primary text; reserve bone for light surfaces and on-danger foregrounds
 
 ---
 
-### 5.5 Physical / Print Feel
+### 5.5 Ratio & restraint
 
-If this brand ever becomes physical (stickers, notebooks, packaging), this palette would translate beautifully.
+A healthy product screen is mostly **bone or ink environment + graphite text**, with accents as punctuation:
 
-- **Paper** → Porcelain
-- **Ink** → Deep Ink
-- **Stamp** → Ochre
+- **~85%** surfaces & structure (bone / ink / graphite)
+- **~12%** text hierarchy (graphite / paper)
+- **≤3%** amber, sage, cyan, pink, status hues combined
 
-That combination quietly screams craft.
+When accents become common, they stop being accents.
 
-**One important restraint rule**
+**Rules**
 
-Never use ochre text on Deep Ink for long paragraphs.  
-It’s visually loud and tires the eye.  
-Use Ochre for short signals, never blocks of reading.
+- Never large amber fields — sharp signal, not wallpaper
+- Never amber body text on ink for paragraphs — tiring; amber is for labels, metrics, and short markers
+- Cyan is for focus and info, not brand decoration
+- Pink is for urgency/blocking, not general emphasis
 
-**A small brand trick**
+**Brand graphics & print**
 
-Introduce a recurring ochre marker gesture.
+Monochrome ink + graphite compositions with a single amber marker (chevron, bar, underline) still read as on-brand. Physical materials map naturally: bone/paper stock, ink type, amber stamp.
 
-Examples:
-
-- a small vertical bar before headings
-- a chevron accent
-- a thin underline
-- a slash through section titles
-
-That repeated gesture becomes a signature without needing a logo everywhere.
+**Signature gesture** — a recurring amber marker (vertical bar, chevron, slash) before headings works across web, product, and print without relying on the logo everywhere.
 
 ---
 
 ## 6. Typography System
 
-Typography should reflect engineering clarity.
+**Source of truth:** `core.font` in `tokens.json`
 
-**Display**
+| Token | Family | Role |
+|-------|--------|------|
+| `display` | Dela Gothic One | Hero words, Pulse button labels, stamped uppercase marks |
+| `body` | Work Sans | Marketing copy, task content, long-form UI |
+| `ui` | Inter | Dense controls, metadata, form labels, specimens |
 
-Wide modern grotesk.
-
-Examples:
-
-- Space Grotesk
-- Sora
-- Eurostile-inspired families
-
-Usage:
-
-- Section headings
-- Product names
-- Hero text
-
-**Body**
-
-- Inter — clean, readable, neutral.
+Typography should reflect engineering clarity — machined, not expressive.
 
 **Styling rules**
 
-- Uppercase for labels and UI tags
-- Tight tracking on headings
+- Uppercase for labels, UI tags, and Pulse CTAs
+- Dela Gothic One sparingly; it is the accent voice, not the workhorse
 - Strict grid alignment
 - No decorative typography
 
-Text should feel engineered, not expressive.
+Text should feel engineered, not playful.
 
 ---
 
@@ -337,18 +325,18 @@ Tools built by someone who uses them.
 
 **Principles**
 
-- Dark-first interface
+- Theme-aware: light bone for daily operator work, dark ink when users want low-glare focus
 - Dense but legible information
-- Clear hierarchy
-- Minimal decoration
+- Clear hierarchy via semantic color tokens, not one-off hex
+- Minimal decoration — material comes from bone texture and graphite type, not ornament
 
 **UI traits**
 
-- Sharp borders
-- Minimal corner radius
-- Bold status indicators
-- Clear labels
-- High-contrast data views
+- Pulse pack: sharp `ink.950` borders, hard offset shadows, near-zero radius on cards
+- Semantic surface stack for layout nesting (`bgCanvas` / `bgSection` / `bgSurface`)
+- Bold status indicators (amber, cyan, pink, sage, success green)
+- Cyan focus rings on all interactive elements
+- Clear labels; metadata steps down `textSecondary` → `textMuted`
 
 **Motion**
 

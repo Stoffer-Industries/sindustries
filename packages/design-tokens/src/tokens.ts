@@ -6,66 +6,56 @@
 export const tokens = {
   "core": {
     "color": {
+      "bone": {
+        "50": "#f4f2ee",
+        "100": "#f4f1ea",
+        "150": "#f5f2e8",
+        "200": "#edebe6",
+        "250": "#e8e4dc",
+        "300": "#e4e0d8",
+        "400": "#d5d3cd"
+      },
+      "graphite": {
+        "400": "#9CA3AF",
+        "500": "#8f969e",
+        "600": "#5C6670",
+        "700": "#3D444D",
+        "800": "#2b2f34"
+      },
       "ink": {
         "800": "#1a1f24",
         "900": "#161a1e",
         "950": "#111213"
       },
-      "surface": {
-        "800": "#2b2f34"
-      },
-      "slate": {
-        "500": "#8f969e"
-      },
-      "sage": {
-        "500": "#7a8b7c"
-      },
-      "cream": {
-        "100": "#f3f1ec",
-        "200": "#d5d3cd"
-      },
-      "paper": {
-        "200": "#ece3cc"
-      },
       "neutral": {
+        "0": "#FFFFFF",
         "200": "#dddddd",
         "300": "#d3d3d3"
       },
-      "brand": {
-        "200": "#ffe891",
-        "500": "#ffc935"
-      },
-      "info": {
-        "200": "#9ee9ff",
-        "500": "#00d4ff"
+      "paper": {
+        "200": "#ece3cc"
       },
       "accent": {
         "200": "#ff8ab4",
         "500": "#ff3e8a"
       },
-      "success": {
-        "200": "#9ee9b0",
-        "500": "#31c76a"
+      "brand": {
+        "200": "#ffe891",
+        "500": "#ffc935"
+      },
+      "sage": {
+        "500": "#7a8b7c"
       },
       "danger": {
         "500": "#ff5252"
       },
-      "white": {
-        "pure": "#FFFFFF"
+      "info": {
+        "200": "#9ee9ff",
+        "500": "#00d4ff"
       },
-      "bone": {
-        "canvas": "#F4F1EA",
-        "surface": "#F5F2E8",
-        "field": "#F0EEEA",
-        "sectionHeader": "#E8E4DC",
-        "ui": "#EDEBE6",
-        "placeholder": "#EDEAE4",
-        "pagination": "#E4E0D8"
-      },
-      "graphite": {
-        "400": "#9CA3AF",
-        "600": "#5C6670",
-        "700": "#3D444D"
+      "success": {
+        "200": "#9ee9b0",
+        "500": "#31c76a"
       },
       "label": {
         "blue": "#60a5fa",
@@ -113,11 +103,10 @@ export const tokens = {
         "ctaPrimary": "#7a8b7c",
         "ctaPrimaryText": "#FFFFFF",
         "ctaSecondary": "#ffc935",
-        "bgCanvas": "#F4F1EA",
-        "bgSectionHeader": "#E8E4DC",
-        "bgSection": "#FFFFFF",
-        "bgSurfaceAlt": "#F0EEEA",
-        "bgSurface": "#F5F2E8",
+        "bgCanvas": "#f4f1ea",
+        "bgSectionHeader": "#e8e4dc",
+        "bgSection": "#f4f2ee",
+        "bgSurface": "#f5f2e8",
         "bgGlass": "rgba(255, 255, 255, 0.72)",
         "textPrimary": "#2b2f34",
         "textSecondary": "#3D444D",
@@ -134,11 +123,11 @@ export const tokens = {
         "labelOrange": "#f59e0b",
         "labelPurple": "#a78bfa",
         "labelGray": "#8f969e",
-        "bgField": "#F0EEEA",
-        "bgPaginationActive": "#E4E0D8",
-        "bgImagePlaceholder": "#EDEAE4",
+        "bgField": "#edebe6",
+        "bgPaginationActive": "#e4e0d8",
+        "bgImagePlaceholder": "#edebe6",
         "onDangerFg": "#FFFFFF",
-        "creamUi": "#EDEBE6"
+        "boneUi": "#edebe6"
       },
       "dark": {
         "ctaPrimary": "#ffc935",
@@ -147,13 +136,12 @@ export const tokens = {
         "bgCanvas": "#111213",
         "bgSectionHeader": "#161a1e",
         "bgSection": "#2b2f34",
-        "bgSurfaceAlt": "#161a1e",
         "bgSurface": "#1a1f24",
         "bgGlass": "rgba(43, 47, 52, 0.68)",
         "textPrimary": "#ece3cc",
         "textSecondary": "#8f969e",
         "textTertiary": "#ffc935",
-        "textMuted": "#8f969e",
+        "textMuted": "#5C6670",
         "borderStrong": "#8f969e",
         "borderSubtle": "rgba(143, 150, 158, 0.18)",
         "focus": "#00d4ff",
@@ -168,8 +156,8 @@ export const tokens = {
         "bgField": "#161a1e",
         "bgPaginationActive": "#111213",
         "bgImagePlaceholder": "#111213",
-        "onDangerFg": "#f3f1ec",
-        "creamUi": "#f3f1ec"
+        "onDangerFg": "#f4f1ea",
+        "boneUi": "#f4f1ea"
       }
     },
     "font": {
@@ -225,7 +213,6 @@ export const colors = {
   bgCanvas: dark.bgCanvas,
   bgSectionHeader: dark.bgSectionHeader,
   bgSection: dark.bgSection,
-  bgSurfaceAlt: dark.bgSurfaceAlt,
   bgSurface: dark.bgSurface,
   bgGlass: dark.bgGlass,
   textPrimary: dark.textPrimary,
@@ -247,7 +234,7 @@ export const colors = {
   bgPaginationActive: dark.bgPaginationActive,
   bgImagePlaceholder: dark.bgImagePlaceholder,
   onDangerFg: dark.onDangerFg,
-  creamUi: dark.creamUi,
+  boneUi: dark.boneUi,
   brand: tokens.core.color.brand[500],
   /** Solid ink for labels/icons on brand yellow (not themed canvas). */
   ink950: tokens.core.color.ink[950],
@@ -273,7 +260,6 @@ export const colorsLight = {
   bgCanvas: light.bgCanvas,
   bgSectionHeader: light.bgSectionHeader,
   bgSection: light.bgSection,
-  bgSurfaceAlt: light.bgSurfaceAlt,
   bgSurface: light.bgSurface,
   bgGlass: light.bgGlass,
   textPrimary: light.textPrimary,
@@ -295,7 +281,7 @@ export const colorsLight = {
   bgPaginationActive: light.bgPaginationActive,
   bgImagePlaceholder: light.bgImagePlaceholder,
   onDangerFg: light.onDangerFg,
-  creamUi: light.creamUi,
+  boneUi: light.boneUi,
   brand: tokens.core.color.brand[500],
   /** Solid ink for labels/icons on brand yellow (not themed canvas). */
   ink950: tokens.core.color.ink[950],
