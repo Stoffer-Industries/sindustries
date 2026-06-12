@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import STATE_PATH, WORKSPACE, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
+from common import STATE_PATH, WORKSPACE, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic, clear_approval_lock
 
 TOM_SENDER_NUM = 6435140143
 APPROVE_RE = re.compile(r"\bapprove\b", re.IGNORECASE)
@@ -563,6 +563,7 @@ def main() -> int:
                 })
                 continue
             revision = apply_revision_request(state, matched_id, revision_text)
+            clear_approval_lock(state, matched_id)
             save_state(state, Path(STATE_PATH))
             rebuilt = None
             rebuild_error = None
@@ -632,6 +633,7 @@ def main() -> int:
                 # any mutations done by downstream workflow steps.
                 state = load_state(Path(STATE_PATH))
                 cleared = force_clear_approval_lock(state, matched_id, decision == "approve")
+                clear_approval_lock(state, matched_id)
                 pending = pending_by_approval_id(state)
             outcome = summarize_post_resume_state(state, matched_id, decision, expected_bookmark_keys) if not err else None
             if outcome is not None:

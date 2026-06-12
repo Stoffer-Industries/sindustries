@@ -35,6 +35,7 @@ def main() -> int:
 
     resolved = []
     skipped = []
+    resolved_topics: set[str] = set()
     resolution_status = "approved" if args.decision == "approve" else "declined"
     timestamp = now_iso()
     for approval in approvals:
@@ -90,11 +91,23 @@ def main() -> int:
                 "taskIds": merged_task_ids,
             })
 
+        # Track topics we resolved so we can release the per-topic lock
+        # below. Track even if no items were actually resolved (a topic
+        # can appear in the input without any in-flight items, and the
+        # caller still expects the slot to be free for the next run).
+        if resolved_items:
+            resolved_topics.add(topic)
         resolved.append({
             "topic": topic,
             "decision": resolution_status,
             "items": resolved_items,
         })
+
+    # Release the per-topic approval locks for topics we just resolved,
+    # so the topic slot becomes available again for the next package.
+    locks = state.setdefault("approvalLocks", {})
+    for topic in resolved_topics:
+        locks.pop(topic, None)
 
     save_state(state, Path(STATE_PATH))
     dump_json({

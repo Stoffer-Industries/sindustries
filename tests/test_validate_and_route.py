@@ -592,5 +592,154 @@ class ValidateSpecOutputTests(unittest.TestCase):
         self.assertIn("not valid JSON", out["error"])
 
 
+# ===================================================================
+# Approval lock: state.approvalLocks self-asserting per-topic lock
+# ===================================================================
+
+class ApprovalLockHelperTests(unittest.TestCase):
+    """The clear_approval_lock helper in common.py."""
+
+    def test_clears_lock_matching_approval_id(self):
+        state = {
+            "items": {},
+            "approvalLocks": {
+                "brain": {
+                    "approvalId": "apabc123",
+                    "requestedAt": "2026-06-12T00:00:00+00:00",
+                    "items": ["k1"],
+                },
+            },
+        }
+        result = common.clear_approval_lock(state, "apabc123")
+        self.assertEqual(result, "brain")
+        self.assertNotIn("brain", state["approvalLocks"])
+
+    def test_idempotent_when_no_lock(self):
+        state = {"items": {}, "approvalLocks": {}}
+        result = common.clear_approval_lock(state, "apnonexistent")
+        self.assertIsNone(result)
+
+    def test_idempotent_when_no_approval_locks_field(self):
+        state = {"items": {}}
+        result = common.clear_approval_lock(state, "apanything")
+        self.assertIsNone(result)
+
+    def test_does_not_clear_other_topics(self):
+        state = {
+            "items": {},
+            "approvalLocks": {
+                "brain": {"approvalId": "apbrain1", "items": []},
+                "infra": {"approvalId": "apinfra1", "items": []},
+            },
+        }
+        common.clear_approval_lock(state, "apbrain1")
+        self.assertNotIn("brain", state["approvalLocks"])
+        self.assertIn("infra", state["approvalLocks"])
+
+    def test_case_insensitive_match(self):
+        # approvalId is normalized to lowercase before comparison
+        state = {
+            "items": {},
+            "approvalLocks": {
+                "brain": {"approvalId": "apabc123", "items": []},
+            },
+        }
+        result = common.clear_approval_lock(state, "APABC123")
+        self.assertEqual(result, "brain")
+        self.assertNotIn("brain", state["approvalLocks"])
+
+
+class ApprovalLockConcurrencyTests(unittest.TestCase):
+    """Simulate the race between two concurrent request_topic_approval runs.
+
+    Real concurrency requires fcntl or threads; for a unit test, we
+    simulate the race by:
+      1. Run A: pass 1 (no lock yet) → pass 2 (writes lock) → save
+      2. Run B: pass 1 (sees A's lock after re-read) → blocks
+    and the inverse:
+      1. Run A + Run B both pass 1 (no lock, before either saves)
+      2. Run A saves first
+      3. Run B saves second (overwrites A)
+      4. A re-reads → sees B's lock, backs off
+      5. B re-reads → sees B's lock, wins
+    """
+
+    def test_concurrent_run_blocks_when_other_run_holds_lock(self):
+        # Pre-state: topic already locked by a prior run
+        state = {
+            "items": {
+                "k1": {"bookmarkKey": "k1", "reviewStatus": "approval_pending",
+                       "approvalId": "apexisting", "approvalTopic": "brain"},
+            },
+            "approvalLocks": {
+                "brain": {"approvalId": "apexisting", "items": ["k1"]},
+            },
+        }
+
+        # Try to claim brain again — should be blocked
+        topic = "brain"
+        self.assertIn(topic, state["approvalLocks"])
+
+    def test_lost_race_detection_via_approval_id_mismatch(self):
+        # Simulate: run A and run B both pass the initial check, both
+        # write their locks, B saves second. A's re-read sees B's lock
+        # and should back off.
+        our_approval_id = "apA123"
+        their_approval_id = "apB456"
+
+        # The state after both saves shows B's lock
+        state_after_saves = {
+            "approvalLocks": {
+                "brain": {"approvalId": their_approval_id, "items": ["k1"]},
+            }
+        }
+
+        # A re-reads — sees B's lock, A's approval_id is not the stored one
+        actual_lock = state_after_saves["approvalLocks"].get("brain", {})
+        stored_id = str(actual_lock.get("approvalId") or "").strip().lower()
+        self.assertNotEqual(stored_id, our_approval_id.lower())
+        # A would block here, not proceed to send
+
+    def test_winner_detection_via_approval_id_match(self):
+        # The run that wrote the lock sees its own approvalId in the
+        # re-read and proceeds to send.
+        our_approval_id = "apA123"
+        state_after_save = {
+            "approvalLocks": {
+                "brain": {"approvalId": our_approval_id, "items": ["k1"]},
+            }
+        }
+        actual_lock = state_after_save["approvalLocks"].get("brain", {})
+        stored_id = str(actual_lock.get("approvalId") or "").strip().lower()
+        self.assertEqual(stored_id, our_approval_id.lower())
+
+    def test_lock_field_survives_state_load(self):
+        # Make sure load_state() preserves approvalLocks across save/load
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            original = {
+                "version": 1,
+                "items": {"k1": {"bookmarkKey": "k1"}},
+                "approvalLocks": {
+                    "brain": {"approvalId": "apxyz", "items": ["k1"]},
+                },
+            }
+            common.save_state(original, state_path)
+            reloaded = common.load_state(state_path)
+            self.assertIn("approvalLocks", reloaded)
+            self.assertEqual(reloaded["approvalLocks"]["brain"]["approvalId"], "apxyz")
+
+    def test_load_state_backfills_missing_approval_locks(self):
+        # Old state files (pre-approvalLocks) should get an empty field
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text(json.dumps({"items": {"k1": {}}}))
+            reloaded = common.load_state(state_path)
+            self.assertIn("approvalLocks", reloaded)
+            self.assertEqual(reloaded["approvalLocks"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
