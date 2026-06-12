@@ -40,13 +40,12 @@ from pathlib import Path
 from typing import Any
 
 from common import (
+    FOCUS_CONFIG_PATH,
     STATE_PATH,
     WORKSPACE,
     dump_json,
     load_state,
 )
-
-FOCUS_CONFIG_PATH = WORKSPACE / "brain" / "state" / "focus-config.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "activeTopics": ["brain", "infra"],
