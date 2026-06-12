@@ -154,8 +154,8 @@
     </section>
 
     <section class="panel" style="margin-bottom:18px">
-      <h2>Pipeline Flow</h2>
-      <div class="subtle">How bookmarks move through the pipeline — all topics, all time</div>
+      <h2>Curation Pipeline Flow</h2>
+      <div class="subtle">From summarization through curator verdict → spec generation → Tom's decision. Legacy `reviewed` items show as a side branch.</div>
       <div id="sankey" class="sankey-wrap"></div>
     </section>
 
@@ -268,36 +268,78 @@
     }
 
     function computeSankeyData() {
-      const counts = countBy(itemList(), statusOf);
-      const total = itemList().length;
+      const items = itemList();
+      const total = items.length;
       if (!total) return null;
 
-      const monitoring = counts.monitoring || 0;
-      const reviewed = counts.reviewed || 0;
-      const declined = counts.declined || 0;
-      const specActive = (counts.spec_created || 0) + (counts.spec_requested || 0);
-      const tasked = counts.tasked || 0;
-      const toSpec = specActive + tasked;
-      const toReview = reviewed + declined + toSpec;
+      // Bucket items by current pipeline position. The Sankey shows the
+      // curation pipeline end-to-end: items flow from "Awaiting curation"
+      // through curator verdict → spec generation → Tom's decision. The
+      // legacy `reviewed` status is shown as a side branch for visibility.
+      const threshold = 7;
+      const buckets = {
+        awaiting: 0,
+        curatedWaiting: 0,
+        curatedImplement: 0,
+        specRequested: 0,
+        specCreated: 0,
+        approvalPending: 0,
+        tasked: 0,
+        declined: 0,
+        reviewed: 0,
+      };
+      for (const item of items) {
+        const status = item.reviewStatus;
+        const c = item.curation;
+        const hasCuration = !!c;
+        const score = c ? Number(c.score || 0) : 0;
+        const highScore = hasCuration && score >= threshold;
+        if (status === "spec_requested") buckets.specRequested++;
+        else if (status === "spec_created") buckets.specCreated++;
+        else if (status === "approval_pending" || status === "revision_staged") buckets.approvalPending++;
+        else if (status === "tasked") buckets.tasked++;
+        else if (status === "declined") buckets.declined++;
+        else if (status === "reviewed") buckets.reviewed++;
+        else if (highScore) buckets.curatedImplement++;
+        else if (hasCuration) buckets.curatedWaiting++;
+        else buckets.awaiting++;
+      }
 
-      const nodes = [
-        { name: `Ingested`, label: `${total}`, color: "#0d1526" },
-        { name: `Monitoring`, label: `${monitoring}`, color: "#b46a00" },
-        { name: `Advanced`, label: `${toReview}`, color: "#2f75d6" },
-        { name: `Reviewed`, label: `${reviewed}`, color: "#275dba" },
-        { name: `Declined`, label: `${declined}`, color: "#a3312b" },
-        { name: `Specs`, label: `${toSpec}`, color: "#bd1e66" },
-        { name: `Tasked`, label: `${tasked}`, color: "#148f46" },
+      const nodeDefs = [
+        { name: "Awaiting curation", value: buckets.awaiting, color: "#5a6b83" },
+        { name: "Curated: waiting", value: buckets.curatedWaiting, color: "#b46a00" },
+        { name: "Curated: implement-bound", value: buckets.curatedImplement, color: "#2f75d6" },
+        { name: "Spec requested", value: buckets.specRequested, color: "#5e3f8a" },
+        { name: "Spec created", value: buckets.specCreated, color: "#bd1e66" },
+        { name: "Awaiting approval", value: buckets.approvalPending, color: "#d9257a" },
+        { name: "Tasked", value: buckets.tasked, color: "#148f46" },
+        { name: "Declined", value: buckets.declined, color: "#a3312b" },
+        { name: "Reviewed (legacy)", value: buckets.reviewed, color: "#275dba" },
       ];
+      const nodes = nodeDefs.filter(n => n.value > 0);
 
-      const links = [
-        { source: 0, target: 1, value: monitoring },
-        { source: 0, target: 2, value: toReview },
-        { source: 2, target: 3, value: reviewed },
-        { source: 2, target: 4, value: declined },
-        { source: 2, target: 5, value: toSpec },
-        { source: 5, target: 6, value: tasked },
-      ].filter(l => l.value > 0);
+      const linkDefs = [
+        // Main pipeline
+        { source: "Awaiting curation", target: "Curated: waiting", value: buckets.curatedWaiting },
+        { source: "Awaiting curation", target: "Curated: implement-bound", value: buckets.curatedImplement },
+        { source: "Curated: implement-bound", target: "Spec requested", value: buckets.specRequested },
+        { source: "Spec requested", target: "Spec created", value: buckets.specCreated },
+        // Direct path for items where the heartbeat wrote the spec before we
+        // ever saw the item as spec_requested (skip the transient stage).
+        { source: "Curated: implement-bound", target: "Spec created", value: 0 },
+        { source: "Spec created", target: "Awaiting approval", value: buckets.approvalPending },
+        { source: "Awaiting approval", target: "Tasked", value: buckets.tasked },
+        { source: "Awaiting approval", target: "Declined", value: buckets.declined },
+        // Legacy path: items that became terminal in the old pipeline
+        { source: "Awaiting curation", target: "Reviewed (legacy)", value: buckets.reviewed },
+      ];
+      const links = linkDefs
+        .filter(l => l.value > 0)
+        .map(l => ({
+          source: nodes.findIndex(n => n.name === l.source),
+          target: nodes.findIndex(n => n.name === l.target),
+          value: l.value,
+        }));
 
       return { nodes, links };
     }
@@ -387,7 +429,7 @@
         .attr("text-anchor", "start")
         .attr("fill", "#6f819b")
         .attr("font-size", "11")
-        .text(d => d.label);
+        .text(d => d.value);
     }
 
     function renderFunnel() {
