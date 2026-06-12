@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
@@ -159,23 +160,76 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         mock_llm.assert_not_called()
 
-    def test_filter_curation_routes_summarized_items_correctly(self):
+    def test_filter_curation_routes_by_curation_score(self):
+        """filter_curation routes on curation.score + freshness, not reviewStatus.
+
+        New model: the verdict lives in item.curation. The status is just
+        where the item is in the pipeline. Items with a fresh high-score
+        curation go to implement; low-score go to monitoring; missing
+        curation goes to monitoring (heartbeat will refresh); terminal
+        statuses go to reviewed.
+        """
         import filter_curation
         state = common.state_template()
-        state["items"]["abc123"] = {
-            "bookmarkKey": "abc123",
+
+        # Fresh curation, high score → implement
+        state["items"]["high_score"] = {
+            "bookmarkKey": "high_score",
+            "reviewStatus": "summarized",
+            "curation": {
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "topic": "brain",
+                "score": 8.5,
+                "reasoning": "test",
+                "relevanceScores": [],
+                "activeTopics": ["brain"],
+                "threshold": 7.0,
+            },
+        }
+
+        # Fresh curation, low score → monitoring
+        state["items"]["low_score"] = {
+            "bookmarkKey": "low_score",
+            "reviewStatus": "summarized",
+            "curation": {
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "topic": "brain",
+                "score": 3.0,
+                "reasoning": "test",
+                "relevanceScores": [],
+                "activeTopics": ["brain"],
+                "threshold": 7.0,
+            },
+        }
+
+        # No curation → monitoring (heartbeat will refresh)
+        state["items"]["no_curation"] = {
+            "bookmarkKey": "no_curation",
             "reviewStatus": "summarized",
         }
-        state["items"]["def456"] = {
-            "bookmarkKey": "def456",
-            "reviewStatus": "queued_for_spec",
+
+        # Terminal status → reviewed (curation ignored)
+        state["items"]["tasked"] = {
+            "bookmarkKey": "tasked",
+            "reviewStatus": "tasked",
+            "curation": {
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "topic": "brain",
+                "score": 10.0,
+                "reasoning": "test",
+                "relevanceScores": [],
+                "activeTopics": ["brain"],
+                "threshold": 7.0,
+            },
         }
+
         common.save_state(state, self.state_path)
 
-        # summarize outputs 'summaries' key
         summaries = [
-            {"bookmarkKey": "abc123", "reviewStatus": "summarized"},
-            {"bookmarkKey": "def456", "reviewStatus": "queued_for_spec"},
+            {"bookmarkKey": "high_score"},
+            {"bookmarkKey": "low_score"},
+            {"bookmarkKey": "no_curation"},
+            {"bookmarkKey": "tasked"},
         ]
         stdin = io.StringIO(json.dumps({"summaries": summaries}))
         stdout = io.StringIO()
@@ -187,10 +241,14 @@ class SummarizeTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
-        # summarized items go to reviewed bucket (no classification)
-        self.assertEqual(len([i for i in payload["reviewed"] if i["bookmarkKey"] == "abc123"]), 1)
-        # queued_for_spec goes to implement
-        self.assertEqual(len([i for i in payload["implement"] if i["bookmarkKey"] == "def456"]), 1)
+
+        def in_bucket(bucket, key):
+            return any(i["bookmarkKey"] == key for i in payload[bucket])
+
+        self.assertTrue(in_bucket("implement", "high_score"))
+        self.assertTrue(in_bucket("monitoring", "low_score"))
+        self.assertTrue(in_bucket("monitoring", "no_curation"))
+        self.assertTrue(in_bucket("reviewed", "tasked"))
 
 
 if __name__ == "__main__":

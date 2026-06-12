@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from common import STATE_PATH, dump_json, load_state, now_iso
+from common import STATE_PATH, dump_json, load_state, now_iso, get_approval_topic
 
 
 def main() -> int:
@@ -16,7 +16,7 @@ def main() -> int:
     items = state.get("items", {})
 
     approval_pending_topics = {
-        str(v.get("approvalTopic") or v.get("topic") or "general")
+        str(get_approval_topic(v))
         for v in items.values()
         if v.get("reviewStatus") in {"approval_pending", "revision_staged"}
     }

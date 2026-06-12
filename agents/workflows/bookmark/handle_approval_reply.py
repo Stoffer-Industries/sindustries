@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import STATE_PATH, WORKSPACE, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path
+from common import STATE_PATH, WORKSPACE, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
 
 TOM_SENDER_NUM = 6435140143
 APPROVE_RE = re.compile(r"\bapprove\b", re.IGNORECASE)
@@ -185,7 +185,7 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
         previous_status = item.get("reviewStatus")
         item["approvalResumeToken"] = None
         item["approvalId"] = None
-        item["approvalTopic"] = item.get("approvalTopic") or item.get("topic") or "general"
+        # approvalTopic removed; readers use get_approval_topic() helper
         item["approvalStatus"] = "approved" if approved else "declined"
         item["approvalResolvedAt"] = now_iso()
         if not approved:
@@ -257,7 +257,7 @@ def apply_revision_request(state: dict, approval_id: str, revision_text: str) ->
             "bookmarkKey": key,
             "title": item.get("title"),
             "specDocs": item.get("specDocs") or [],
-            "topic": item.get("approvalTopic") or item.get("topic") or "general",
+            "topic": get_approval_topic(item),
         })
     return {
         "approvalId": approval_id,
@@ -362,11 +362,11 @@ def build_approval_payload_from_state(state: dict, approval_id: str) -> dict:
             continue
         if str(item.get("approvalId") or "").strip().lower() != approval_id:
             continue
-        topic = item.get("approvalTopic") or item.get("topic") or "general"
+        topic = get_approval_topic(item)
         items.append({
             "bookmarkKey": key,
             "approvalId": item.get("approvalId"),
-            "approvalTopic": item.get("approvalTopic"),
+            "approvalTopic": get_approval_topic(item),
             "topic": item.get("topic"),
             "title": item.get("title"),
             "path": item.get("path"),

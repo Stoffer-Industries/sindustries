@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path
+from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
 
 
 def update_item(state_items: dict, bookmark_key: str, reason: str, state_path: Path, **fields: object) -> bool:
@@ -72,7 +72,7 @@ def main() -> int:
                 f"queued because approval blocked: {reason}",
                 Path(STATE_PATH),
                 reviewStatus="spec_created",
-                approvalTopic=topic,
+
             ):
                 finalized["queued"].append(bookmark_key)
 

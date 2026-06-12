@@ -29,6 +29,8 @@ STATE_OF_NATION_PATH = WORKSPACE / "docs" / "state-of-the-nation.md"
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", re.DOTALL)
 KV_RE = re.compile(r"^([A-Za-z0-9_]+):\s*(.*)$")
 
+FOCUS_CONFIG_PATH = WORKSPACE / "brain" / "state" / "focus-config.json"
+
 
 class LLMInvocationError(RuntimeError):
     pass
@@ -59,6 +61,28 @@ def load_text(path: Path) -> str:
 
 def dump_json(data: Any) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def get_approval_topic(item: dict[str, Any] | None) -> str:
+    """Return the topic used by the approval gate for an item.
+
+    Resolution order:
+      1. item.curation.topic   (the curator's verdict, current model)
+      2. item.approvalTopic    (legacy alias from the old schema)
+      3. item.relevanceTopic   (legacy alias from the old schema)
+      4. item.topic            (the bookmark's ingested topic)
+      5. "general"             (last-resort default)
+    """
+    if not item:
+        return "general"
+    curation = item.get("curation") or {}
+    return (
+        curation.get("topic")
+        or item.get("approvalTopic")
+        or item.get("relevanceTopic")
+        or item.get("topic")
+        or "general"
+    )
 
 
 def read_first_json_value(stream: Any, timeout_seconds: float = 5.0) -> Any:
