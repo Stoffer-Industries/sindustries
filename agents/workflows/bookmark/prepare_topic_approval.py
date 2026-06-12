@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import STATE_PATH, dump_json, load_state, now_iso
+from common import STATE_PATH, dump_json, load_state, now_iso, get_approval_topic
 
 
 def build_item_summary(item: dict) -> dict:
@@ -41,7 +41,7 @@ def main() -> int:
 
     # Single source of truth for approval lock is an active approval state.
     pending_topics = {
-        (item.get("approvalTopic") or item.get("topic") or "general")
+        (get_approval_topic(item))
         for item in state_items.values()
         if item.get("reviewStatus") in {"approval_pending", "revision_staged"}
     }

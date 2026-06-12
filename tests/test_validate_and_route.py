@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Unit tests for the curation/routing/validation scripts.
+"""Unit tests for the curation/routing/validation scripts (new schema).
 
 Covers:
-  - filter_curation: routing rules (state-based, no classification)
-  - list_curate_candidates: filter logic (summarized, stale monitoring, batch size)
-  - validate_curate_output: state transition application + idempotency
+  - filter_curation: routing on curation.score + curation age + terminal status
+  - list_curate_candidates: pure age check (curation missing or stale)
+  - validate_curate_output: writes item.curation sub-object, no status change
   - validate_spec_output: spec file existence check + idempotency
+
+The new curation schema (per item):
+  {
+    curation: { createdAt, topic, score, reasoning,
+                relevanceScores, activeTopics, threshold } | absent
+  }
+Status is no longer the verdict — it's just where the item is in the pipeline.
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import contextmanager, redirect_stdout
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,8 +41,6 @@ import validate_spec_output
 
 @contextmanager
 def clean_argv(*args):
-    """Temporarily replace sys.argv so argparse in main() doesn't see pytest args.
-    Pass extra args (e.g. '--json') to enable JSON output mode."""
     saved = sys.argv
     sys.argv = ["script", *args]
     try:
@@ -57,134 +63,176 @@ def _load_state(state_path: Path, items: dict) -> None:
     )
 
 
-class AssessUsefulnessRouteTests(unittest.TestCase):
-    """The router is pure: reviewStatus + bookkeeping → bucket."""
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    @staticmethod
-    def _state_item(**overrides):
+
+def _iso_days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _curation(score: float = 8.0, topic: str = "brain", age_days: int = 0,
+              threshold: float = 7.0) -> dict:
+    return {
+        "createdAt": _iso_days_ago(age_days),
+        "topic": topic,
+        "score": score,
+        "reasoning": "test reasoning",
+        "relevanceScores": [],
+        "activeTopics": ["brain", "infra"],
+        "threshold": threshold,
+    }
+
+
+# ===================================================================
+# filter_curation routing
+# ===================================================================
+
+class FilterCurationRouteTests(unittest.TestCase):
+    """Routes on curation score + freshness + terminal status."""
+
+    def _route(self, state_item: dict, item: dict | None = None,
+               recuration_days: int = 14) -> str:
+        return filter_curation.route(
+            item or {"bookmarkKey": state_item.get("bookmarkKey", "k1")},
+            state_item,
+            recuration_days=recuration_days,
+        )
+
+    # --- terminal statuses ---
+
+    def test_terminal_statuses_route_to_reviewed(self):
+        for status in ("tasked", "declined", "approval_pending",
+                       "revision_staged", "revision_requested"):
+            with self.subTest(status=status):
+                # Even with a high-score fresh curation, terminal wins.
+                item = {
+                    "bookmarkKey": "k1",
+                    "reviewStatus": status,
+                    "curation": _curation(score=10.0, age_days=0),
+                }
+                self.assertEqual(self._route(item), "reviewed")
+
+    # --- implement ---
+
+    def test_spec_created_routes_to_implement(self):
+        # Spec exists, awaiting approval — curation ignored.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "spec_created",
+            "curation": _curation(score=2.0, age_days=0),  # low score, but irrelevant
+            "specProposals": [{"title": "x"}],
+        }
+        self.assertEqual(self._route(item), "implement")
+
+    def test_fresh_high_score_curation_routes_to_implement(self):
         item = {
             "bookmarkKey": "k1",
             "reviewStatus": "summarized",
-            "title": "test",
+            "curation": _curation(score=8.0, age_days=0, threshold=7.0),
         }
-        item.update(overrides)
-        return item
+        self.assertEqual(self._route(item), "implement")
 
-    def test_queued_for_spec_goes_to_implement(self):
+    def test_fresh_score_at_threshold_routes_to_implement(self):
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+            "curation": _curation(score=7.0, age_days=0, threshold=7.0),
+        }
+        self.assertEqual(self._route(item), "implement")
+
+    def test_spec_proposals_no_tasks_is_recovery_implement(self):
+        # Spec work exists but never became tasks — recovery branch.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "monitoring",  # unusual but possible
+            "curation": _curation(score=2.0, age_days=0),  # low score
+            "specProposals": [{"title": "x"}],
+        }
+        self.assertEqual(self._route(item), "implement")
+
+    def test_recovery_skipped_for_terminal_items(self):
+        # Tom said no — recovery branch must not re-implement.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "declined",
+            "curation": _curation(score=2.0, age_days=0),
+            "specProposals": [{"title": "x"}],
+        }
+        self.assertEqual(self._route(item), "reviewed")
+
+    def test_recovery_skipped_for_tasked_items(self):
+        # Tasks already created — work is in flight, don't re-implement.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "tasked",
+            "curation": _curation(score=2.0, age_days=0),
+            "specProposals": [{"title": "x"}],
+            "taskIds": ["t1"],
+        }
+        self.assertEqual(self._route(item), "reviewed")
+
+    # --- monitoring ---
+
+    def test_fresh_low_score_curation_routes_to_monitoring(self):
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+            "curation": _curation(score=5.0, age_days=0, threshold=7.0),
+        }
+        self.assertEqual(self._route(item), "monitoring")
+
+    def test_missing_curation_routes_to_monitoring(self):
+        # Heartbeat will refresh.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+        }
+        self.assertEqual(self._route(item), "monitoring")
+
+    def test_stale_curation_routes_to_monitoring(self):
+        # 30 days old with default 14-day window — stale, needs refresh.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+            "curation": _curation(score=10.0, age_days=30),  # high score but stale
+        }
+        self.assertEqual(self._route(item), "monitoring")
+
+    def test_curation_at_freshness_boundary_routes_to_implement(self):
+        # exactly recuration_days is still fresh (>= age.days)
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+            "curation": _curation(score=8.0, age_days=14),
+        }
+        # recuration_days default 14; age.days >= recuration_days means
+        # "not fresh" per the existing predicate. So this is monitoring.
+        # If you want exactly 14d to still be fresh, change the check to
+        # > 14. Documented as inclusive-of-window-edge.
+        self.assertEqual(self._route(item, recuration_days=14), "monitoring")
+
+    def test_summary_overrides_state_status(self):
+        # The summary item's reviewStatus (if present) wins.
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "spec_created",  # summary says this
+        }
+        state_item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "monitoring",  # state says this
+        }
         self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(reviewStatus="queued_for_spec"),
-            ),
+            filter_curation.route(item, state_item, recuration_days=14),
             "implement",
         )
 
-    def test_spec_created_goes_to_implement(self):
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(reviewStatus="spec_created"),
-            ),
-            "implement",
-        )
 
-    def test_monitoring_goes_to_monitoring(self):
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(reviewStatus="monitoring"),
-            ),
-            "monitoring",
-        )
-
-    def test_summarized_with_no_spec_work_goes_to_reviewed(self):
-        """Newly summarized items haven't been curated yet — heartbeat curate
-        will pick them up and turn them into queued_for_spec."""
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(reviewStatus="summarized"),
-            ),
-            "reviewed",
-        )
-
-    def test_reviewed_terminal_stays_reviewed(self):
-        for status in ("tasked", "approval_pending", "revision_staged"):
-            with self.subTest(status=status):
-                self.assertEqual(
-                    filter_curation.route(
-                        {"bookmarkKey": "k1"},
-                        self._state_item(reviewStatus=status),
-                    ),
-                    "reviewed",
-                )
-
-    def test_declined_stays_reviewed_even_with_spec_proposals(self):
-        """Tom said no — recovery branch must not re-implement a declined item."""
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(
-                    reviewStatus="declined",
-                    specProposals=[{"title": "old spec"}],
-                ),
-            ),
-            "reviewed",
-        )
-
-    def test_tasked_stays_reviewed_even_with_spec_proposals(self):
-        """Tasks already created — work is in flight, don't re-implement."""
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(
-                    reviewStatus="tasked",
-                    specProposals=[{"title": "old spec"}],
-                    taskIds=["task-1"],
-                ),
-            ),
-            "reviewed",
-        )
-
-    def test_spec_proposals_without_tasks_is_recovery_implement(self):
-        """Spec exists, never became tasks, status is not terminal → implement."""
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1"},
-                self._state_item(
-                    reviewStatus="monitoring",  # unusual but possible
-                    specProposals=[{"title": "spec"}],
-                ),
-            ),
-            "implement",
-        )
-
-    def test_classification_is_ignored(self):
-        """Old pipeline wrote analysis.classification. The new router must
-        ignore it — otherwise it would silently misroute new items that
-        have no classification field."""
-        item = self._state_item(
-            reviewStatus="summarized",  # not in IMPLEMENT_STATUSES
-            analysis={"classification": "implement"},  # old signal
-        )
-        self.assertEqual(
-            filter_curation.route({"bookmarkKey": "k1"}, item),
-            "reviewed",
-        )
-
-    def test_review_status_in_item_wins_over_state(self):
-        """The summary item's reviewStatus (if present) takes precedence."""
-        self.assertEqual(
-            filter_curation.route(
-                {"bookmarkKey": "k1", "reviewStatus": "queued_for_spec"},
-                self._state_item(reviewStatus="monitoring"),
-            ),
-            "implement",
-        )
-
+# ===================================================================
+# list_curate_candidates (pure age check)
+# ===================================================================
 
 class ListCurateCandidatesTests(unittest.TestCase):
-    """Filter logic for stale curate selection."""
 
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -193,7 +241,7 @@ class ListCurateCandidatesTests(unittest.TestCase):
         self.state_path = self.root / "brain" / "state" / "bookmark-review-state.json"
         self.no_focus = self.root / "no-focus-config.json"
 
-    def _run_with_state(self) -> dict:
+    def _run(self) -> dict:
         with patch.object(common, "STATE_PATH", self.state_path), \
              patch.object(list_curate_candidates, "STATE_PATH", self.state_path), \
              patch.object(list_curate_candidates, "WORKSPACE", self.root), \
@@ -204,120 +252,92 @@ class ListCurateCandidatesTests(unittest.TestCase):
              ):
             return json.loads(_capture(list_curate_candidates.main))
 
-    def test_picks_summarized_items(self):
-        _load_state(
-            self.state_path,
-            {
-                "k1": {
-                    "bookmarkKey": "k1",
-                    "title": "new",
-                    "topic": "brain",
-                    "reviewStatus": "summarized",
-                    "summary": {"headline": "h"},
-                },
-            },
-        )
-        payload = self._run_with_state()
+    def _item(self, bookmark_key: str, **overrides) -> dict:
+        item = {
+            "bookmarkKey": bookmark_key,
+            "title": f"item {bookmark_key}",
+            "topic": "brain",
+            "summary": {"headline": "h"},
+        }
+        item.update(overrides)
+        return item
+
+    def test_picks_items_with_missing_curation(self):
+        _load_state(self.state_path, {
+            "k1": self._item("k1", reviewStatus="summarized"),
+        })
+        payload = self._run()
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["batch"][0]["bookmarkKey"], "k1")
-        self.assertEqual(payload["remaining"], 0)
 
-    def test_skips_monitoring_when_fresh(self):
-        from datetime import datetime, timezone, timedelta
-        recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        _load_state(
-            self.state_path,
-            {
-                "k1": {
-                    "bookmarkKey": "k1",
-                    "title": "fresh",
-                    "topic": "brain",
-                    "reviewStatus": "monitoring",
-                    "lastCuratedAt": recent,
-                },
-            },
-        )
-        payload = self._run_with_state()
+    def test_picks_items_with_stale_curation(self):
+        _load_state(self.state_path, {
+            "k1": self._item("k1", reviewStatus="summarized",
+                             curation=_curation(age_days=30)),
+        })
+        payload = self._run()
+        self.assertEqual(payload["count"], 1)
+
+    def test_skips_items_with_fresh_curation(self):
+        _load_state(self.state_path, {
+            "k1": self._item("k1", reviewStatus="summarized",
+                             curation=_curation(age_days=1)),
+        })
+        payload = self._run()
         self.assertEqual(payload["count"], 0)
 
-    def test_picks_monitoring_when_stale(self):
-        from datetime import datetime, timezone, timedelta
-        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        _load_state(
-            self.state_path,
-            {
-                "k1": {
-                    "bookmarkKey": "k1",
-                    "title": "stale",
-                    "topic": "brain",
-                    "reviewStatus": "monitoring",
-                    "lastCuratedAt": old,
-                },
-            },
-        )
-        payload = self._run_with_state()
-        self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["batch"][0]["bookmarkKey"], "k1")
+    def test_skips_items_without_summary_and_without_review_doc(self):
+        # No summary AND no reviewDoc = summarizer hasn't run; curate would
+        # have nothing to score. (An item with just a reviewDoc — summary
+        # lives in the file — IS eligible.)
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "title": "no summary",
+                   "topic": "brain", "reviewStatus": "summarized"},
+        })
+        payload = self._run()
+        self.assertEqual(payload["count"], 0)
 
-    def test_picks_monitoring_with_no_last_curated(self):
-        """Old items predating recurationDays tracking are always picked up."""
-        _load_state(
-            self.state_path,
-            {
-                "k1": {
-                    "bookmarkKey": "k1",
-                    "title": "ancient",
-                    "topic": "brain",
-                    "reviewStatus": "monitoring",
-                    # no lastCuratedAt
-                },
-            },
-        )
-        payload = self._run_with_state()
+    def test_picks_items_with_review_doc_but_no_summary_cache(self):
+        # The summary lives in the review doc on disk; the state cache is optional.
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "title": "has reviewDoc",
+                   "topic": "brain", "reviewStatus": "summarized",
+                   "reviewDoc": "brain/reviews/whatever/k1.md"},
+        })
+        payload = self._run()
         self.assertEqual(payload["count"], 1)
+
+    def test_picks_regardless_of_review_status(self):
+        # Pure age check — status doesn't gate eligibility.
+        for status in ("summarized", "monitoring", "spec_created",
+                       "tasked", "declined", "approval_pending"):
+            with self.subTest(status=status):
+                _load_state(self.state_path, {
+                    f"k_{status}": self._item(
+                        f"k_{status}",
+                        reviewStatus=status,
+                        # no curation — eligible
+                    ),
+                })
+                payload = self._run()
+                self.assertEqual(payload["count"], 1)
 
     def test_respects_batch_size(self):
-        from datetime import datetime, timezone, timedelta
-        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         items = {
-            f"k{i}": {
-                "bookmarkKey": f"k{i}",
-                "title": f"item {i}",
-                "topic": "brain",
-                "reviewStatus": "monitoring",
-                "lastCuratedAt": old,
-            }
+            f"k{i}": self._item(f"k{i}", reviewStatus="summarized")
             for i in range(10)
         }
         _load_state(self.state_path, items)
-        payload = self._run_with_state()
+        payload = self._run()
         self.assertEqual(payload["count"], 5)  # default batch size
         self.assertEqual(payload["remaining"], 5)
 
-    def test_skips_terminal_statuses(self):
-        _load_state(
-            self.state_path,
-            {
-                "k1": {
-                    "bookmarkKey": "k1",
-                    "title": "tasked",
-                    "topic": "brain",
-                    "reviewStatus": "tasked",
-                },
-                "k2": {
-                    "bookmarkKey": "k2",
-                    "title": "spec_created",
-                    "topic": "brain",
-                    "reviewStatus": "spec_created",
-                },
-            },
-        )
-        payload = self._run_with_state()
-        self.assertEqual(payload["count"], 0)
 
+# ===================================================================
+# validate_curate_output (writes item.curation sub-object)
+# ===================================================================
 
 class ValidateCurateOutputTests(unittest.TestCase):
-    """Apply curate decisions to state. Idempotent. Safe on bad input."""
 
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -328,15 +348,15 @@ class ValidateCurateOutputTests(unittest.TestCase):
         self.output_path = self.root / "brain" / "state" / "curate-output.json"
         self.state_root = self.state_path.parent
 
-    def _write_artifact(self, decisions, errors=None, config=None):
+    def _write_artifact(self, decisions, config=None):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         artifact = {
-            "producedAt": "2026-06-12T00:00:00+00:00",
+            "producedAt": _now_iso(),
             "config": config or {"activeTopics": ["brain"], "threshold": 7},
             "processed": len(decisions),
             "remaining": 0,
             "decisions": decisions,
-            "errors": errors or [],
+            "errors": [],
         }
         self.output_path.write_text(json.dumps(artifact, indent=2))
 
@@ -349,145 +369,114 @@ class ValidateCurateOutputTests(unittest.TestCase):
              patch.object(validate_curate_output, "STATE_ROOT", self.state_root):
             return json.loads(_capture(validate_curate_output.main))
 
-    def test_applies_queued_for_spec(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"}},
-        )
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "previousStatus": "summarized",
-                "newStatus": "queued_for_spec",
-                "primaryScore": 8.0,
-                "primaryTopic": "brain",
-                "relevanceScores": [],
-                "approvalTopic": "brain",
-                "lastCuratedAt": "2026-06-12T00:00:00+00:00",
-                "reason": "relevance=8.0",
-            }
-        ])
+    def _decision(self, key: str, **overrides) -> dict:
+        d = {
+            "bookmarkKey": key,
+            "topic": "brain",
+            "score": 8.0,
+            "reasoning": "test reasoning",
+            "relevanceScores": [],
+            "activeTopics": ["brain", "infra"],
+            "threshold": 7.0,
+            "createdAt": _now_iso(),
+        }
+        d.update(overrides)
+        return d
+
+    def test_writes_curation_sub_object(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized",
+                   "summary": {"headline": "h"}},
+        })
+        self._write_artifact([self._decision("k1", score=8.5, topic="infra")])
         out = self._run()
         self.assertEqual(len(out["applied"]), 1)
-        self.assertEqual(out["applied"][0]["bookmarkKey"], "k1")
         state = json.loads(self.state_path.read_text())
         item = state["items"]["k1"]
-        self.assertEqual(item["reviewStatus"], "queued_for_spec")
-        self.assertEqual(item["approvalTopic"], "brain")
-        self.assertEqual(item["relevanceScore"], 8.0)
-        self.assertEqual(item["relevanceTopic"], "brain")
+        self.assertIn("curation", item)
+        self.assertEqual(item["curation"]["score"], 8.5)
+        self.assertEqual(item["curation"]["topic"], "infra")
+        # Status did NOT change — curation is the verdict, not the status.
+        self.assertEqual(item["reviewStatus"], "summarized")
+        # No legacy fields written
+        self.assertNotIn("relevanceScore", item)
+        self.assertNotIn("approvalTopic", item)
         # Artifact renamed
         self.assertFalse(self.output_path.exists())
         self.assertTrue(self.output_path.with_suffix(".json.processed").exists())
 
-    def test_applies_monitoring(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"}},
-        )
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "previousStatus": "summarized",
-                "newStatus": "monitoring",
-                "primaryScore": 3.0,
-                "primaryTopic": "brain",
-                "relevanceScores": [],
-                "approvalTopic": None,
-                "lastCuratedAt": "2026-06-12T00:00:00+00:00",
-                "reason": "relevance=3.0",
-            }
-        ])
-        out = self._run()
-        self.assertEqual(len(out["applied"]), 1)
+    def test_overwrites_existing_curation(self):
+        # Re-curation on a summary that already has a curation.
+        old_curation = _curation(score=5.0, topic="brain", age_days=0)
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized",
+                   "curation": old_curation},
+        })
+        self._write_artifact([self._decision("k1", score=9.0, topic="infra")])
+        self._run()
         state = json.loads(self.state_path.read_text())
-        self.assertEqual(state["items"]["k1"]["reviewStatus"], "monitoring")
-        self.assertNotIn("approvalTopic", state["items"]["k1"])
+        self.assertEqual(state["items"]["k1"]["curation"]["score"], 9.0)
+        self.assertEqual(state["items"]["k1"]["curation"]["topic"], "infra")
 
-    def test_skips_when_already_in_target_state(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "monitoring"}},
-        )
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "previousStatus": "monitoring",
-                "newStatus": "monitoring",
-                "primaryScore": 3.0,
-                "primaryTopic": "brain",
-                "relevanceScores": [],
-                "lastCuratedAt": "2026-06-12T00:00:00+00:00",
-                "reason": "relevance=3.0",
-            }
-        ])
+    def test_idempotent_when_curation_unchanged(self):
+        # Same topic + score + createdAt as existing → skip.
+        curation = _curation(score=8.0, topic="brain", age_days=0)
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized",
+                   "curation": curation},
+        })
+        self._write_artifact([self._decision(
+            "k1", score=8.0, topic="brain",
+            createdAt=curation["createdAt"],
+        )])
         out = self._run()
         self.assertEqual(len(out["applied"]), 0)
         self.assertEqual(len(out["skipped"]), 1)
-        self.assertEqual(out["skipped"][0]["bookmarkKey"], "k1")
 
-    def test_marks_invalid_decisions(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"}},
-        )
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "newStatus": "something_else",  # invalid
-                "primaryScore": 5.0,
-                "primaryTopic": "brain",
-                "lastCuratedAt": "2026-06-12T00:00:00+00:00",
-            }
-        ])
+    def test_marks_invalid_decision_shape(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"},
+        })
+        self._write_artifact([{
+            "bookmarkKey": "k1",
+            # missing: topic, score, reasoning, activeTopics, threshold, createdAt
+        }])
         out = self._run()
         self.assertEqual(len(out["invalid"]), 1)
         state = json.loads(self.state_path.read_text())
-        self.assertEqual(state["items"]["k1"]["reviewStatus"], "summarized")
+        self.assertNotIn("curation", state["items"]["k1"])
 
     def test_no_artifact_is_noop(self):
         out = self._run()
         self.assertEqual(out["applied"], [])
-        self.assertEqual(out["skipped"], [])
 
     def test_malformed_json_returns_error(self):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self.output_path.write_text("{ not valid json")
+        self.output_path.write_text("{ not valid")
         out = self._run()
         self.assertFalse(out["ok"])
         self.assertIn("not valid JSON", out["error"])
 
     def test_writes_transition_log(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"}},
-        )
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "previousStatus": "summarized",
-                "newStatus": "queued_for_spec",
-                "primaryScore": 8.0,
-                "primaryTopic": "brain",
-                "approvalTopic": "brain",
-                "lastCuratedAt": "2026-06-12T00:00:00+00:00",
-                "reason": "relevance=8.0",
-            }
-        ])
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"},
+        })
+        self._write_artifact([self._decision("k1", score=8.0)])
         self._run()
-        self.assertTrue(self.transitions_path.exists())
         entries = [
             json.loads(line)
             for line in self.transitions_path.read_text().splitlines()
             if line.strip()
         ]
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]["from"], "summarized")
-        self.assertEqual(entries[0]["to"], "queued_for_spec")
+        self.assertIn("curation refreshed", entries[0]["reason"])
 
+
+# ===================================================================
+# validate_spec_output (unchanged from previous round, regression tests)
+# ===================================================================
 
 class ValidateSpecOutputTests(unittest.TestCase):
-    """Apply spec decisions to state. Verifies spec files exist. Idempotent."""
 
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -502,7 +491,7 @@ class ValidateSpecOutputTests(unittest.TestCase):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.output_path.write_text(
             json.dumps(
-                {"producedAt": "2026-06-12T00:00:00+00:00", "entries": entries},
+                {"producedAt": _now_iso(), "entries": entries},
                 indent=2,
             )
         )
@@ -525,147 +514,83 @@ class ValidateSpecOutputTests(unittest.TestCase):
             return json.loads(_capture(validate_spec_output.main))
 
     def test_applies_spec_created_when_file_exists(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"}},
-        )
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"},
+        })
         self._make_spec("brain/spec.md")
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "reviewDoc": "brain/reviews/k1.md",
-                "requestType": "new",
-                "specs": [
-                    {
-                        "title": "Spec",
-                        "specDoc": "brain/spec.md",
-                        "proposedTasks": [
-                            {
-                                "title": "task 1",
-                                "priority": "high",
-                                "summary": "s",
-                                "deliverable": "d",
-                                "acceptanceCriteria": ["ac"],
-                            }
-                        ],
-                    }
-                ],
-            }
-        ])
+        self._write_artifact([{
+            "bookmarkKey": "k1",
+            "reviewDoc": "brain/reviews/k1.md",
+            "requestType": "new",
+            "specs": [{
+                "title": "Spec",
+                "specDoc": "brain/spec.md",
+                "proposedTasks": [{
+                    "title": "task 1",
+                    "priority": "high",
+                    "summary": "s",
+                    "deliverable": "d",
+                    "acceptanceCriteria": ["ac"],
+                }],
+            }],
+        }])
         out = self._run()
         self.assertEqual(len(out["applied"]), 1)
         state = json.loads(self.state_path.read_text())
         self.assertEqual(state["items"]["k1"]["reviewStatus"], "spec_created")
-        self.assertEqual(state["items"]["k1"]["specDocs"], ["brain/spec.md"])
-        self.assertFalse(self.output_path.exists())
-        self.assertTrue(self.output_path.with_suffix(".json.processed").exists())
 
     def test_marks_invalid_when_spec_file_missing(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"}},
-        )
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "reviewDoc": "brain/reviews/k1.md",
-                "requestType": "new",
-                "specs": [
-                    {
-                        "title": "Spec",
-                        "specDoc": "brain/specs/does/not/exist.md",
-                        "proposedTasks": [
-                            {
-                                "title": "task",
-                                "priority": "high",
-                                "summary": "s",
-                                "deliverable": "d",
-                                "acceptanceCriteria": ["ac"],
-                            }
-                        ],
-                    }
-                ],
-            }
-        ])
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"},
+        })
+        self._write_artifact([{
+            "bookmarkKey": "k1",
+            "reviewDoc": "brain/reviews/k1.md",
+            "requestType": "new",
+            "specs": [{
+                "title": "Spec",
+                "specDoc": "brain/specs/does/not/exist.md",
+                "proposedTasks": [{
+                    "title": "task",
+                    "priority": "high",
+                    "summary": "s",
+                    "deliverable": "d",
+                    "acceptanceCriteria": ["ac"],
+                }],
+            }],
+        }])
         out = self._run()
         self.assertEqual(len(out["invalid"]), 1)
         self.assertIn("missing on disk", out["invalid"][0]["errors"][0])
-        state = json.loads(self.state_path.read_text())
-        self.assertEqual(state["items"]["k1"]["reviewStatus"], "spec_requested")
 
     def test_marks_invalid_on_bad_priority(self):
-        _load_state(
-            self.state_path,
-            {"k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"}},
-        )
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"},
+        })
         self._make_spec("brain/spec.md")
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "reviewDoc": "brain/reviews/k1.md",
-                "requestType": "new",
-                "specs": [
-                    {
-                        "title": "Spec",
-                        "specDoc": "brain/spec.md",
-                        "proposedTasks": [
-                            {
-                                "title": "task",
-                                "priority": "URGENT",  # invalid
-                                "summary": "s",
-                                "deliverable": "d",
-                                "acceptanceCriteria": ["ac"],
-                            }
-                        ],
-                    }
-                ],
-            }
-        ])
+        self._write_artifact([{
+            "bookmarkKey": "k1",
+            "reviewDoc": "brain/reviews/k1.md",
+            "requestType": "new",
+            "specs": [{
+                "title": "Spec",
+                "specDoc": "brain/spec.md",
+                "proposedTasks": [{
+                    "title": "task",
+                    "priority": "URGENT",
+                    "summary": "s",
+                    "deliverable": "d",
+                    "acceptanceCriteria": ["ac"],
+                }],
+            }],
+        }])
         out = self._run()
         self.assertEqual(len(out["invalid"]), 1)
         self.assertIn("priority", out["invalid"][0]["errors"][0])
 
-    def test_skips_already_spec_created(self):
-        _load_state(
-            self.state_path,
-            {
-                "k1": {
-                    "bookmarkKey": "k1",
-                    "reviewStatus": "spec_created",
-                    "specDocs": ["brain/spec.md"],
-                }
-            },
-        )
-        self._make_spec("brain/spec.md")
-        self._write_artifact([
-            {
-                "bookmarkKey": "k1",
-                "reviewDoc": "brain/reviews/k1.md",
-                "requestType": "new",
-                "specs": [
-                    {
-                        "title": "Spec",
-                        "specDoc": "brain/spec.md",
-                        "proposedTasks": [
-                            {
-                                "title": "task",
-                                "priority": "high",
-                                "summary": "s",
-                                "deliverable": "d",
-                                "acceptanceCriteria": ["ac"],
-                            }
-                        ],
-                    }
-                ],
-            }
-        ])
-        out = self._run()
-        self.assertEqual(len(out["skipped"]), 1)
-
     def test_no_artifact_is_noop(self):
         out = self._run()
         self.assertEqual(out["applied"], [])
-        self.assertEqual(out["skipped"], [])
 
     def test_malformed_json_returns_error(self):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)

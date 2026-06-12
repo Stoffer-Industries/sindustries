@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Validate curate decisions artifact and apply state transitions.
+Validate curate decisions artifact and apply curations to state.
 
-Reads `brain/state/curate-output.json` (produced by Quinn's heartbeat BOOKMARK CURATION step) and applies
-the proposed transitions to bookmark state:
-  - mutates `lastCuratedAt`, `relevanceScore`, `relevanceTopic`,
-    `relevanceScores`, `reviewStatus`, and optionally `approvalTopic`
-  - logs the transition in bookmark-transitions.jsonl
-  - saves bookmark-review-state.json
+Reads `brain/state/curate-output.json` (produced by Quinn's heartbeat BOOKMARK
+CURATION step) and applies the proposed curations to bookmark state:
+  - writes `item.curation` (a living take: createdAt, topic, score, reasoning,
+    relevanceScores, activeTopics, threshold)
+  - does NOT change reviewStatus  (the verdict lives in curation now;
+    the lobster's filter_curation step reads the curation on every run)
+  - logs a no-op "curation refresh" transition for audit
 
 Idempotent:
-  - skips decisions whose bookmark is already in the target `reviewStatus`
+  - skips decisions whose bookmark already has an identical curation
+    (same topic + score + createdAt)
   - renames the artifact to `<output>.processed` after applying so a
     re-run (or concurrent run) won't double-apply
 
@@ -20,6 +22,7 @@ mirrors the architecture used by validate_spec_output.py.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 from pathlib import Path
 from typing import Any
@@ -37,13 +40,14 @@ from common import (
 
 DEFAULT_OUTPUT = STATE_ROOT / "curate-output.json"
 
-VALID_NEW_STATUSES = {"queued_for_spec", "monitoring"}
 REQUIRED_DECISION_KEYS = {
     "bookmarkKey",
-    "newStatus",
-    "primaryScore",
-    "primaryTopic",
-    "lastCuratedAt",
+    "topic",
+    "score",
+    "reasoning",
+    "activeTopics",
+    "threshold",
+    "createdAt",
 }
 
 
@@ -53,45 +57,74 @@ def validate_decision_shape(decision: dict[str, Any]) -> list[str]:
     missing = REQUIRED_DECISION_KEYS - set(decision.keys())
     if missing:
         errors.append(f"missing keys: {sorted(missing)}")
-    if decision.get("newStatus") not in VALID_NEW_STATUSES:
-        errors.append(
-            f"newStatus must be one of {sorted(VALID_NEW_STATUSES)}, "
-            f"got {decision.get('newStatus')!r}"
-        )
-    score = decision.get("primaryScore")
+    score = decision.get("score")
     if not isinstance(score, (int, float)):
-        errors.append(f"primaryScore must be a number, got {type(score).__name__}")
+        errors.append(f"score must be a number, got {type(score).__name__}")
+    if not isinstance(decision.get("activeTopics"), list):
+        errors.append("activeTopics must be a list")
+    if not isinstance(decision.get("threshold"), (int, float)):
+        errors.append("threshold must be a number")
     return errors
 
 
-def apply_decision(state: dict[str, Any], decision: dict[str, Any]) -> str:
-    """Apply one decision to state. Returns the new reviewStatus."""
+def build_curation(decision: dict[str, Any]) -> dict[str, Any]:
+    """Convert a decision into a curation sub-object."""
+    return {
+        "createdAt": decision["createdAt"],
+        "topic": decision["topic"],
+        "score": float(decision["score"]),
+        "reasoning": decision.get("reasoning", ""),
+        "relevanceScores": decision.get("relevanceScores", []),
+        "activeTopics": decision.get("activeTopics", []),
+        "threshold": float(decision["threshold"]),
+    }
+
+
+def curation_equals(a: dict[str, Any] | None, b: dict[str, Any]) -> bool:
+    """True if the proposed curation is the same as the current one.
+
+    Compares topic, score, and createdAt — the three fields that actually
+    affect downstream routing. Reasoning and relevanceScores can vary
+    (e.g. LLM non-determinism) without changing the verdict.
+    """
+    if not a:
+        return False
+    return (
+        a.get("topic") == b.get("topic")
+        and _approx_eq(a.get("score"), b.get("score"))
+        and a.get("createdAt") == b.get("createdAt")
+    )
+
+
+def _approx_eq(a, b, tol: float = 1e-6) -> bool:
+    try:
+        return abs(float(a) - float(b)) < tol
+    except (TypeError, ValueError):
+        return a == b
+
+
+def apply_curation(state: dict[str, Any], decision: dict[str, Any]) -> tuple[str, str]:
+    """Apply one decision to state. Returns (curation_topic, action)."""
     bookmark_key = decision["bookmarkKey"]
     items = state["items"]
     item = items.get(bookmark_key)
     if item is None:
-        # No state row yet — create a minimal one so the transition is still logged.
         item = {"bookmarkKey": bookmark_key}
 
-    new_status = decision["newStatus"]
-
-    item["lastCuratedAt"] = decision["lastCuratedAt"]
-    item["relevanceScore"] = float(decision["primaryScore"])
-    item["relevanceTopic"] = decision["primaryTopic"]
-    if "relevanceScores" in decision:
-        item["relevanceScores"] = decision["relevanceScores"]
-    item["reviewStatus"] = new_status
-    if new_status == "queued_for_spec" and decision.get("approvalTopic"):
-        item["approvalTopic"] = decision["approvalTopic"]
+    new_curation = build_curation(decision)
+    old_curation = item.get("curation")
+    item["curation"] = new_curation
     item["lastUpdatedAt"] = now_iso()
-
     items[bookmark_key] = item
-    return new_status
+    return (
+        new_curation["topic"],
+        "unchanged" if curation_equals(old_curation, new_curation) else "refreshed",
+    )
 
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="Validate curate-output.json and apply state transitions"
+        description="Validate curate-output.json and apply curations to state"
     )
     p.add_argument(
         "--input",
@@ -155,36 +188,31 @@ def main() -> int:
             continue
 
         bookmark_key = decision["bookmarkKey"]
-        new_status = decision["newStatus"]
-        previous_status = (
-            decision.get("previousStatus")
-            or items.get(bookmark_key, {}).get("reviewStatus")
-        )
+        new_curation = build_curation(decision)
+        old_curation = items.get(bookmark_key, {}).get("curation")
 
-        # Idempotency: if the bookmark is already in the target state, skip.
-        current = items.get(bookmark_key, {}).get("reviewStatus")
-        if current == new_status:
+        # Idempotency: if the proposed curation matches the current one, skip.
+        if curation_equals(old_curation, new_curation):
             skipped.append({
                 "bookmarkKey": bookmark_key,
-                "reason": "already in target reviewStatus",
-                "reviewStatus": current,
+                "reason": "curation already current",
+                "topic": new_curation["topic"],
             })
             continue
 
-        apply_decision(state, decision)
+        topic, action = apply_curation(state, decision)
         log_transition(
             bookmark_key,
-            previous_status,
-            new_status,
-            decision.get("reason", ""),
+            None,
+            None,
+            f"curation {action} (topic={topic} score={new_curation['score']})",
             transitions_path=transitions_path,
         )
         applied.append({
             "bookmarkKey": bookmark_key,
-            "previousStatus": previous_status,
-            "newStatus": new_status,
-            "primaryScore": decision.get("primaryScore"),
-            "primaryTopic": decision.get("primaryTopic"),
+            "action": action,
+            "topic": topic,
+            "score": new_curation["score"],
         })
 
     if applied:
@@ -195,8 +223,6 @@ def main() -> int:
         try:
             input_path.rename(processed_path)
         except OSError:
-            # Last-resort: leave the file in place. Next run will be a no-op
-            # because every decision will be skipped.
             pass
 
     payload = {

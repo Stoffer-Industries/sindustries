@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path
+from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
 
 
 def task_ids_for_bookmark(created: list[dict], bookmark_key: str) -> list[str]:
@@ -51,7 +51,7 @@ def main() -> int:
             if state_item.get("reviewStatus") != "approval_pending":
                 skipped.append({"bookmarkKey": bookmark_key, "topic": topic, "reason": "item is not currently approval_pending"})
                 continue
-            state_topic = state_item.get("approvalTopic") or state_item.get("topic") or "general"
+            state_topic = get_approval_topic(state_item)
             if state_topic != topic:
                 skipped.append({
                     "bookmarkKey": bookmark_key,
