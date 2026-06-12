@@ -89,14 +89,17 @@ def _curation(score: float = 8.0, topic: str = "brain", age_days: int = 0,
 # ===================================================================
 
 class FilterCurationRouteTests(unittest.TestCase):
-    """Routes on curation score + freshness + terminal status."""
+    """Routes on curation score + terminal status. No freshness check.
 
-    def _route(self, state_item: dict, item: dict | None = None,
-               recuration_days: int = 14) -> str:
+    Freshness is the heartbeat's concern — filter_curation just trusts the
+    verdict on disk. If the curator hasn't refreshed, that's a heartbeat
+    cadence issue, not filter_curation's problem.
+    """
+
+    def _route(self, state_item: dict, item: dict | None = None) -> str:
         return filter_curation.route(
             item or {"bookmarkKey": state_item.get("bookmarkKey", "k1")},
             state_item,
-            recuration_days=recuration_days,
         )
 
     # --- terminal statuses ---
@@ -105,7 +108,7 @@ class FilterCurationRouteTests(unittest.TestCase):
         for status in ("tasked", "declined", "approval_pending",
                        "revision_staged", "revision_requested"):
             with self.subTest(status=status):
-                # Even with a high-score fresh curation, terminal wins.
+                # Even with a high-score curation, terminal wins.
                 item = {
                     "bookmarkKey": "k1",
                     "reviewStatus": status,
@@ -125,7 +128,7 @@ class FilterCurationRouteTests(unittest.TestCase):
         }
         self.assertEqual(self._route(item), "implement")
 
-    def test_fresh_high_score_curation_routes_to_implement(self):
+    def test_high_score_curation_routes_to_implement(self):
         item = {
             "bookmarkKey": "k1",
             "reviewStatus": "summarized",
@@ -133,11 +136,22 @@ class FilterCurationRouteTests(unittest.TestCase):
         }
         self.assertEqual(self._route(item), "implement")
 
-    def test_fresh_score_at_threshold_routes_to_implement(self):
+    def test_score_at_threshold_routes_to_implement(self):
         item = {
             "bookmarkKey": "k1",
             "reviewStatus": "summarized",
             "curation": _curation(score=7.0, age_days=0, threshold=7.0),
+        }
+        self.assertEqual(self._route(item), "implement")
+
+    def test_stale_high_score_curation_routes_to_implement(self):
+        # Curations are kept fresh by the heartbeat. If for some reason
+        # filter_curation sees a stale curation, it still trusts the verdict.
+        # (Heartbeat will refresh it on its next pass.)
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+            "curation": _curation(score=10.0, age_days=180),  # very stale
         }
         self.assertEqual(self._route(item), "implement")
 
@@ -174,7 +188,7 @@ class FilterCurationRouteTests(unittest.TestCase):
 
     # --- monitoring ---
 
-    def test_fresh_low_score_curation_routes_to_monitoring(self):
+    def test_low_score_curation_routes_to_monitoring(self):
         item = {
             "bookmarkKey": "k1",
             "reviewStatus": "summarized",
@@ -183,34 +197,12 @@ class FilterCurationRouteTests(unittest.TestCase):
         self.assertEqual(self._route(item), "monitoring")
 
     def test_missing_curation_routes_to_monitoring(self):
-        # Heartbeat will refresh.
+        # Heartbeat will create one.
         item = {
             "bookmarkKey": "k1",
             "reviewStatus": "summarized",
         }
         self.assertEqual(self._route(item), "monitoring")
-
-    def test_stale_curation_routes_to_monitoring(self):
-        # 30 days old with default 14-day window — stale, needs refresh.
-        item = {
-            "bookmarkKey": "k1",
-            "reviewStatus": "summarized",
-            "curation": _curation(score=10.0, age_days=30),  # high score but stale
-        }
-        self.assertEqual(self._route(item), "monitoring")
-
-    def test_curation_at_freshness_boundary_routes_to_implement(self):
-        # exactly recuration_days is still fresh (>= age.days)
-        item = {
-            "bookmarkKey": "k1",
-            "reviewStatus": "summarized",
-            "curation": _curation(score=8.0, age_days=14),
-        }
-        # recuration_days default 14; age.days >= recuration_days means
-        # "not fresh" per the existing predicate. So this is monitoring.
-        # If you want exactly 14d to still be fresh, change the check to
-        # > 14. Documented as inclusive-of-window-edge.
-        self.assertEqual(self._route(item, recuration_days=14), "monitoring")
 
     def test_summary_overrides_state_status(self):
         # The summary item's reviewStatus (if present) wins.
@@ -223,7 +215,7 @@ class FilterCurationRouteTests(unittest.TestCase):
             "reviewStatus": "monitoring",  # state says this
         }
         self.assertEqual(
-            filter_curation.route(item, state_item, recuration_days=14),
+            filter_curation.route(item, state_item),
             "implement",
         )
 
