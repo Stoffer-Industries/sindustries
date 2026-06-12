@@ -11,6 +11,18 @@ on:
       - 'package-lock.json'
       - 'vercel.json'
       - '.github/workflows/website-deploy.yml'
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+    paths:
+      - 'apps/website/**'
+      - 'packages/design-tokens/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vercel.json'
+      - '.github/workflows/website-deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -25,7 +37,8 @@ jobs:
   deploy:
     name: Deploy website to Vercel
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    environment: ${{ (github.ref_name == 'main' || github.event_name == 'pull_request') && 'production' || 'staging' }}
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
