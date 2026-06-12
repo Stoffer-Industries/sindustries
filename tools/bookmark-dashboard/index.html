@@ -316,7 +316,9 @@
         { name: "Declined", value: buckets.declined, color: "#a3312b" },
         { name: "Reviewed (legacy)", value: buckets.reviewed, color: "#275dba" },
       ];
-      const nodes = nodeDefs.filter(n => n.value > 0);
+      // Keep all nodes (including 0-value) so the chain stays connected.
+      // d3-sankey renders 0-value nodes at 0 height (invisible but valid).
+      const nodes = nodeDefs.map(d => Object.assign({}, d));
 
       const linkDefs = [
         // Main pipeline
@@ -333,11 +335,13 @@
         // Legacy path: items that became terminal in the old pipeline
         { source: "Awaiting curation", target: "Reviewed (legacy)", value: buckets.reviewed },
       ];
+      // Use node references (not indices) so links stay valid even if a
+      // 0-value node gets the same object as the one in `nodes`.
       const links = linkDefs
         .filter(l => l.value > 0)
         .map(l => ({
-          source: nodes.findIndex(n => n.name === l.source),
-          target: nodes.findIndex(n => n.name === l.target),
+          source: nodes.find(n => n.name === l.source),
+          target: nodes.find(n => n.name === l.target),
           value: l.value,
         }));
 
