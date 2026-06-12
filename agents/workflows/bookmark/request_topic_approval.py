@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from common import STATE_PATH, WORKSPACE, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path
 
@@ -308,19 +309,38 @@ def main() -> int:
     data = json.load(__import__("sys").stdin)
     ready = data.get("readyPackages", [])
     stage_only = bool(data.get("stageOnly"))
-    state = load_state(Path(STATE_PATH))
-    items = state.get("items", {})
 
-    approvals = []
-    blocked_packages = list(data.get("blockedPackages", []))
-    missing_resume_tokens = []
+    state = load_state(Path(STATE_PATH))
+    items = state["items"]
+    approval_locks = state.setdefault("approvalLocks", {})
+
+    approvals: list[dict[str, Any]] = []
+    blocked_packages: list[dict[str, Any]] = list(data.get("blockedPackages", []))
+    missing_resume_tokens: list[dict[str, Any]] = []
+    approval_ids_out: list[dict[str, Any]] = []
     timestamp = now_iso()
-    approval_ids_out = []
+
+    # Pass 1: validate inputs, check existing locks, generate approvalIds.
+    # The actual write happens in pass 2; only the run whose approvalId
+    # is the one stored after save will proceed to send the message.
+    candidates: list[dict[str, Any]] = []
     for package in ready:
         topic = normalize_topic(package.get("approvalTopic") or package.get("topic"))
-        package_tasks = package.get("proposedTasks", [])
-        resume_token = package.get("resumeToken") or package.get("lobsterResumeToken") or data.get("resumeToken")
+        resume_token = (
+            package.get("resumeToken")
+            or package.get("lobsterResumeToken")
+            or data.get("resumeToken")
+        )
 
+        # Existing-lock check is the primary guard against concurrent runs.
+        # We also keep the per-item scan as a defense-in-depth check (in
+        # case the lock field was cleared but items still in flight).
+        if topic in approval_locks:
+            blocked_packages.append({
+                **package,
+                "reason": "approval already pending for topic",
+            })
+            continue
         topic_already_pending = any(
             (state_item.get("approvalTopic") or state_item.get("topic") or "general") == topic
             and state_item.get("reviewStatus") in {"approval_pending", "revision_staged"}
@@ -355,13 +375,66 @@ def main() -> int:
             })
             continue
 
-        # Generate one approvalId per topic/package
         approval_id = _generate_approval_id(topic)
+        candidates.append({
+            "package": package,
+            "topic": topic,
+            "approval_id": approval_id,
+            "resume_token": resume_token,
+        })
         approval_ids_out.append({
             "topic": topic,
             "approvalId": approval_id,
             "itemCount": len(package.get("items", [])),
         })
+
+    # Pass 2: write the locks to state. Multiple concurrent runs may each
+    # write their own lock, but the last writer wins per topic. After save
+    # we re-read and only the run whose approvalId is the stored one
+    # proceeds — the others back off.
+    for cand in candidates:
+        package = cand["package"]
+        topic = cand["topic"]
+        approval_locks[topic] = {
+            "approvalId": cand["approval_id"],
+            "requestedAt": timestamp,
+            "items": [item["bookmarkKey"] for item in package.get("items", []) if item.get("bookmarkKey")],
+        }
+
+    save_state(state, Path(STATE_PATH))
+
+    # Re-read to detect lost writes. If our approvalId is not the one stored,
+    # another concurrent run won the race for this topic. We back off
+    # without writing anything else (no items touched, no message sent).
+    state_after_save = load_state(Path(STATE_PATH))
+    locks_after_save = state_after_save.get("approvalLocks", {})
+
+    winners: list[dict[str, Any]] = []
+    for cand in candidates:
+        topic = cand["topic"]
+        approval_id = cand["approval_id"]
+        actual_lock = locks_after_save.get(topic)
+        if not isinstance(actual_lock, dict):
+            blocked_packages.append({
+                **cand["package"],
+                "reason": f"topic lock {topic!r} disappeared after write — another run cleared it",
+            })
+            continue
+        stored_id = str(actual_lock.get("approvalId") or "").strip().lower()
+        if stored_id != approval_id:
+            blocked_packages.append({
+                **cand["package"],
+                "reason": "lost approval-slot race to another concurrent run",
+            })
+            continue
+        winners.append(cand)
+
+    # Pass 3: only winners apply per-item state changes and send the message.
+    for cand in winners:
+        package = cand["package"]
+        topic = cand["topic"]
+        approval_id = cand["approval_id"]
+        resume_token = cand["resume_token"]
 
         delivery, delivery_error = resolve_delivery_config(topic)
         delivery_result = None
@@ -459,7 +532,10 @@ def main() -> int:
             "deliveryError": delivery_error,
         })
 
-    save_state(state, Path(STATE_PATH))
+    # Save the per-item state changes (winners only).
+    if winners:
+        save_state(state, Path(STATE_PATH))
+
     dump_json({
         "ok": True,
         "generatedAt": now_iso(),
@@ -470,7 +546,7 @@ def main() -> int:
         "monitoring": data.get("monitoring", []),
         "reviewed": data.get("reviewed", []),
         "stageOnly": stage_only,
-        "note": "Approval delivery uses openclaw message send on Telegram forum topics, preferring brain/state/bookmark-approval-topics.json for chat/topic routing and falling back to env overrides only when needed. Approval staging is resume-token only; packages without a Lobster resumeToken are blocked instead of using any fallback resolution path.",
+        "note": "Self-asserting per-topic lock via state.approvalLocks[topic].approvalId. Concurrent runs race to claim a topic; only the run whose approvalId is the one stored after save proceeds to send the message. Others back off without writing items or sending.",
     })
     return 0
 

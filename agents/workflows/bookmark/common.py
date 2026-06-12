@@ -197,6 +197,7 @@ def state_template() -> dict[str, Any]:
         "version": 1,
         "updatedAt": now_iso(),
         "items": {},
+        "approvalLocks": {},
     }
 
 
@@ -209,6 +210,8 @@ def load_state(state_path: Path = STATE_PATH) -> dict[str, Any]:
         return state_template()
     if "items" not in data or not isinstance(data["items"], dict):
         data["items"] = {}
+    if "approvalLocks" not in data or not isinstance(data["approvalLocks"], dict):
+        data["approvalLocks"] = {}
     return data
 
 
@@ -220,6 +223,30 @@ def save_state(state: dict[str, Any], state_path: Path = STATE_PATH) -> None:
 
 def transition_log_path(state_path: Path = STATE_PATH) -> Path:
     return Path(state_path).with_name(TRANSITIONS_PATH.name)
+
+
+def clear_approval_lock(state: dict, approval_id: str) -> str | None:
+    """Remove the approvalLocks entry whose approvalId matches. Returns the
+    topic that was locked, or None if no match was found.
+
+    Used by handle_approval_reply, resolve_topic_approval, and the
+    revision-request flow to release the self-asserting per-topic lock
+    once the approval is resolved. Idempotent — calling on a state
+    without the lock is a no-op.
+    """
+    if not approval_id:
+        return None
+    locks = state.get("approvalLocks")
+    if not isinstance(locks, dict):
+        return None
+    target = str(approval_id).strip().lower()
+    for topic, lock in list(locks.items()):
+        if not isinstance(lock, dict):
+            continue
+        if str(lock.get("approvalId") or "").strip().lower() == target:
+            del locks[topic]
+            return topic
+    return None
 
 
 def log_transition(
