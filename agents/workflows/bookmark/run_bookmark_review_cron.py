@@ -10,7 +10,7 @@ from pathlib import Path
 
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
-PIPELINE = WORKSPACE / "lobster" / "x-bookmarks-review-pipeline.lobster.yaml"
+PIPELINE = WORKSPACE / "codebases" / "sindustries" / "lobster" / "x-bookmarks-review-pipeline.lobster.yaml"
 REQUEST_APPROVAL = Path(__file__).resolve().parent / "request_topic_approval.py"
 STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
 DEFAULT_ARGS = {
