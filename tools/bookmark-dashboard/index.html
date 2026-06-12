@@ -80,6 +80,27 @@
     .swatch { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
     .recent { margin-top: 12px; display: grid; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .transition { padding: 8px 10px; border: 1px solid #e2e8f2; border-radius: 5px; background: #fbfcfe; overflow-wrap: anywhere; }
+    .pending-approvals { background: var(--amber); color: #fff; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; box-shadow: 0 1px 0 rgba(16,24,39,.08); }
+    .pending-approvals h3 { margin: 0 0 8px; font-size: 14px; }
+    .pending-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .pending-item { background: rgba(255,255,255,.18); border-radius: 6px; padding: 8px 12px; }
+    .pending-item .topic { font-weight: 800; }
+    .pending-item .meta { font-size: 12px; opacity: .9; margin-top: 2px; }
+    .curation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+    .curation-block { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; overflow: hidden; }
+    .curation-header { padding: 10px 14px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; }
+    .curation-header .count { font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+    .curation-header.implement-bound { background: rgba(20,143,70,.12); color: #0a5a2c; }
+    .curation-header.curated-waiting { background: rgba(180,106,0,.12); color: #7a4500; }
+    .curation-header.uncurated { background: rgba(90,107,131,.12); color: #3a4a63; }
+    .curation-items { padding: 6px 0; max-height: 240px; overflow-y: auto; font-size: 12px; }
+    .curation-item { padding: 6px 14px; display: grid; grid-template-columns: 1fr auto; gap: 6px; border-bottom: 1px solid #eef2f7; }
+    .curation-item:last-child { border-bottom: none; }
+    .curation-item .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .curation-item .meta { font-size: 11px; color: var(--muted); }
+    .curation-item .score-pill { align-self: start; padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .score-pill.high { background: rgba(20,143,70,.15); color: #0a5a2c; }
+    .score-pill.low { background: rgba(180,106,0,.15); color: #7a4500; }
     .empty, .error { color: var(--muted); padding: 18px 0; }
     .error { color: var(--red); font-weight: 700; }
     .sankey-node text { font: 12px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--ink); }
@@ -123,7 +144,14 @@
     </section>
 
     <section id="status"></section>
+    <section id="pending-approvals" hidden></section>
     <section id="kpis" class="kpis" aria-label="State counts"></section>
+
+    <section class="panel" style="margin-bottom:18px">
+      <h2>Curations</h2>
+      <div class="subtle">Verdicts on each summary. Curations live in state as <code>item.curation = { createdAt, topic, score, reasoning }</code>; heartbeat keeps them fresh by re-curating any summary whose curation is older than <code>recurationDays</code>.</div>
+      <div id="curations" class="curation-grid"></div>
+    </section>
 
     <section class="panel" style="margin-bottom:18px">
       <h2>Pipeline Flow</h2>
@@ -159,10 +187,10 @@
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
   <script>
-    const order = ["pending", "ingested", "queued_for_spec", "spec_requested", "reviewed", "monitoring", "spec_created", "revision_staged", "approval_pending", "tasked", "declined"];
+    const order = ["pending", "ingested", "spec_requested", "monitoring", "spec_created", "revision_staged", "approval_pending", "tasked", "declined"];
     const colors = {
-      pending: "#8aa0bd", ingested: "#5a6b83", queued_for_spec: "#2f75d6", spec_requested: "#2f75d6",
-      reviewed: "#275dba", monitoring: "#b46a00",
+      pending: "#8aa0bd", ingested: "#5a6b83", spec_requested: "#2f75d6",
+      monitoring: "#b46a00",
       spec_created: "#bd1e66", revision_staged: "#7254bd", approval_pending: "#d9257a", tasked: "#148f46", declined: "#a3312b"
     };
     const state = { snapshot: { items: {} }, transitions: [] };
@@ -455,19 +483,161 @@
         .filter((event) => inScopeTransition(event, byKey, true))
         .sort((a, b) => parseDate(b.at) - parseDate(a.at))
         .slice(0, 20);
-      $("recent").innerHTML = rows.map((event) => `
-        <div class="transition">${escapeHtml(event.at || "")} | ${escapeHtml(event.key || "")} | ${escapeHtml(event.from || "new")} → ${escapeHtml(event.to || "")} | ${escapeHtml(event.reason || "")}</div>
-      `).join("") || `<div class="empty">No transition log entries match the current filters.</div>`;
+      $("recent").innerHTML = rows.map((event) => {
+        const time = escapeHtml(event.at || "");
+        const key = escapeHtml(event.key || "");
+        let middle;
+        if (event.from && event.to) {
+          middle = `${escapeHtml(event.from)} → ${escapeHtml(event.to)}`;
+        } else if (event.to) {
+          middle = `→ ${escapeHtml(event.to)}`;
+        } else if (event.from) {
+          middle = `${escapeHtml(event.from)} →`;
+        } else {
+          // No status transition (e.g. curation refresh). The reason
+          // IS the description; show it standalone rather than paired
+          // with an empty from/to arrow.
+          middle = escapeHtml(event.reason || "(no change)");
+          return `<div class="transition">${time} | ${key} | ${middle}</div>`;
+        }
+        const reason = escapeHtml(event.reason || "");
+        return `<div class="transition">${time} | ${key} | ${middle} | ${reason}</div>`;
+      }).join("") || `<div class="empty">No transition log entries match the current filters.</div>`;
+    }
+
+    function curationGroups() {
+      // Bucket items by their curation verdict, not by status. Status is
+      // pipeline position; curation is the verdict. filter_curation reads
+      // the verdict to decide what flows to spec generation.
+      const focusThreshold = (() => {
+        // Best-effort read of the relevanceThreshold from focus config;
+        // not exposed via /api yet, so default to 7.
+        return 7;
+      })();
+      const implementBound = [];
+      const curatedWaiting = [];
+      const uncurated = [];
+      for (const item of itemList()) {
+        if (!inScopeItem(item)) continue;
+        const c = item.curation;
+        if (!c) { uncurated.push(item); continue; }
+        const score = Number(c.score || 0);
+        if (score >= focusThreshold) implementBound.push(item);
+        else curatedWaiting.push(item);
+      }
+      const sortByRecency = (a, b) => {
+        const ta = a.curation ? new Date(a.curation.createdAt || 0).getTime() : 0;
+        const tb = b.curation ? new Date(b.curation.createdAt || 0).getTime() : 0;
+        return tb - ta;
+      };
+      const sortByScore = (a, b) => (b.curation?.score || 0) - (a.curation?.score || 0);
+      implementBound.sort(sortByScore);
+      curatedWaiting.sort(sortByRecency);
+      uncurated.sort((a, b) => (b.lastUpdatedAt || "").localeCompare(a.lastUpdatedAt || ""));
+      return { implementBound, curatedWaiting, uncurated, threshold: focusThreshold };
+    }
+
+    function curationItemRow(item) {
+      const c = item.curation;
+      const title = escapeHtml(item.title || item.key);
+      const topic = c ? escapeHtml(c.topic || "general") : "";
+      const score = c ? Number(c.score || 0) : null;
+      const created = c && c.createdAt ? formatRelativeAge(c.createdAt) : "";
+      const status = item.reviewStatus ? `<span class="meta">${escapeHtml(item.reviewStatus)}</span>` : "";
+      let pill = "";
+      if (score !== null) {
+        const cls = score >= 7 ? "high" : "low";
+        pill = `<span class="score-pill ${cls}">${score.toFixed(1)}</span>`;
+      }
+      return `<div class="curation-item">
+        <div>
+          <div class="title" title="${escapeHtml(item.key)}">${title}</div>
+          <div class="meta">${topic}${topic && created ? " · " : ""}${created}${status ? " · " : ""}${status}</div>
+        </div>
+        ${pill}
+      </div>`;
+    }
+
+    function renderCurations() {
+      const { implementBound, curatedWaiting, uncurated, threshold } = curationGroups();
+      const blocks = [
+        { key: "implementBound", label: "Implement-bound", className: "implement-bound",
+          hint: `curator said yes (score ≥ ${threshold})`,
+          items: implementBound },
+        { key: "curatedWaiting", label: "Curated, waiting", className: "curated-waiting",
+          hint: "curator said not now (score < threshold)",
+          items: curatedWaiting },
+        { key: "uncurated", label: "Uncurated", className: "uncurated",
+          hint: "no verdict yet — heartbeat will curate on next pass",
+          items: uncurated },
+      ];
+      $("curations").innerHTML = blocks.map((b) => `
+        <div class="curation-block">
+          <div class="curation-header ${b.className}">
+            <span>${escapeHtml(b.label)}<br><span class="meta" style="font-weight:400;color:inherit;opacity:.85">${escapeHtml(b.hint)}</span></span>
+            <span class="count">${b.items.length}</span>
+          </div>
+          <div class="curation-items">${
+            b.items.slice(0, 30).map(curationItemRow).join("") ||
+            `<div class="empty" style="padding:12px 14px">No items in this group.</div>`
+          }</div>
+        </div>`).join("");
+    }
+
+    function renderPendingApprovals() {
+      const locks = state.snapshot.approvalLocks || {};
+      const entries = Object.entries(locks);
+      const el = $("pending-approvals");
+      if (!entries.length) { el.hidden = true; el.innerHTML = ""; return; }
+      el.hidden = false;
+      el.innerHTML = `
+        <h3>Pending approvals — waiting on you</h3>
+        <div class="pending-list">
+          ${entries.map(([topic, lock]) => `
+            <div class="pending-item">
+              <div class="topic">${escapeHtml(topic)}</div>
+              <div class="meta">${(lock.items || []).length} item${(lock.items || []).length === 1 ? "" : "s"} · ${formatRelativeAge(lock.requestedAt || "")} ago</div>
+            </div>`).join("")}
+        </div>`;
+    }
+
+    function formatRelativeAge(iso) {
+      if (!iso) return "";
+      const then = new Date(iso).getTime();
+      if (Number.isNaN(then)) return "";
+      const diffMs = Date.now() - then;
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes < 1) return "just now";
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h`;
+      const days = Math.floor(hours / 24);
+      if (days < 30) return `${days}d`;
+      return `${Math.floor(days / 30)}mo`;
     }
 
     function render() {
       renderKpis();
+      renderCurations();
+      renderPendingApprovals();
       renderSankey();
       renderFunnel();
       renderTopics();
       renderChart();
       renderRecent();
     }
+
+    // Re-render pending approvals on a slow tick so the "X minutes ago"
+    // text stays fresh without hammering the server.
+    setInterval(() => {
+      if (!$("pending-approvals").hidden) renderPendingApprovals();
+      if ($("curations").children.length) {
+        // Refresh ages on visible curations
+        const items = document.querySelectorAll(".curation-item .meta");
+        // Cheap re-render: just trigger the existing render to recompute ages.
+        renderCurations();
+      }
+    }, 60000);
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
