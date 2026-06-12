@@ -1,20 +1,18 @@
 name: x-bookmarks-review-pipeline
 
+# Ingest and summarise new bookmarks.
+# Pipeline ends here — curation, spec generation, and approval
+# are handled by Quinn's heartbeat (curate.py → spec dispatch).
+
 args:
   sourceRoot:
     default: brain/bookmarks
   reviewsRoot:
     default: brain/reviews
-  specsRoot:
-    default: brain/specs
   limit:
     default: 25
   source:
     default: any
-  dryRun:
-    default: false
-  approvalTopic:
-    default: general
 
 steps:
   - id: collect_candidates
@@ -30,66 +28,9 @@ steps:
       python3 codebases/sindustries/agents/workflows/bookmark/ensure_non_empty.py --json
     stdin: $collect_candidates.stdout
 
-  - id: generate_reviews
+  - id: summarize
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/generate_reviews.py
+      python3 codebases/sindustries/agents/workflows/bookmark/summarize.py
       --reviews-root ${reviewsRoot}
       --json
     stdin: $collect_candidates.stdout
-
-  - id: assess_usefulness
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/assess_usefulness.py --json
-    stdin: $generate_reviews.stdout
-
-  - id: generate_specs
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/generate_specs.py
-      --specs-root ${specsRoot}
-      --json
-    stdin: $assess_usefulness.stdout
-
-  - id: build_task_proposals
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/build_task_proposals.py --json
-    stdin: $generate_specs.stdout
-
-  - id: prepare_topic_approval
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/prepare_topic_approval.py
-      --approval-topic ${approvalTopic}
-      --json
-    stdin: $build_task_proposals.stdout
-
-  - id: ensure_topic_slot_available
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/ensure_topic_slot_available.py --json
-    stdin: $prepare_topic_approval.stdout
-
-  - id: finalize_non_approval
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/finalize_review_cycle.py --json
-    stdin: $ensure_topic_slot_available.stdout
-
-  - id: approval_gate
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/compact_approval_preview.py
-    stdin: $ensure_topic_slot_available.stdout
-    approval: required
-
-  - id: create_tasks
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/create_tasks_from_proposals.py
-      --base-url ${TASKS_API_BASE_URL}
-      --json
-    stdin: $ensure_topic_slot_available.stdout
-    condition: $approval_gate.approved
-
-  - id: resolve_approved
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/resolve_topic_approval.py
-      --decision approve
-      --json
-    stdin: $create_tasks.stdout
-    condition: $approval_gate.approved
-
