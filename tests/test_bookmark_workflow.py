@@ -20,7 +20,7 @@ import common
 import create_tasks_from_proposals
 import list_review_candidates
 import assess_usefulness
-import generate_reviews
+import summarize as summarize_mod
 import finalize_review_cycle
 import generate_specs
 import prepare_topic_approval
@@ -74,59 +74,6 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         self.assertEqual(record["path"], "brain/bookmarks/infra/sample.md")
         self.assertEqual(record["bookmarkKey"], common.bookmark_key(bookmark_path, {"link": "https://example.com/outside"}))
-
-    def test_generate_reviews_uses_llm_analysis_and_updates_state(self):
-        review_analysis = {
-            "classification": "implement",
-            "headline": "Strong fit for the current bookmark pipeline",
-            "summary": "The bookmark describes a strong fit for OpenClaw's workflow architecture.",
-            "decisionRationale": "This is close enough to the existing bookmark-review flow that it should turn into implementation planning now.",
-            "stackJudgment": "It directly informs how to structure bookmark review and approval work in the existing Python and Lobster pipeline.",
-            "recommendation": "Draft implementation specs around review judgment and approval gating.",
-            "signals": ["Explicit discussion of workflow orchestration", "Applies to approval gating"],
-            "risks": ["May duplicate existing flow if not scoped tightly"],
-            "monitorTriggers": ["Revisit if approval volume starts creating queue contention"],
-            "implementationPaths": ["Improve review judgment and doc generation", "Harden topic approval packaging"],
-        }
-        stdin = io.StringIO(json.dumps({"candidates": [self.bookmark]}))
-        stdout = io.StringIO()
-        captured_payloads = []
-
-        def fake_invoke(_prompt, payload, _schema):
-            captured_payloads.append(payload)
-            return review_analysis
-
-        with patch.object(generate_reviews, "STATE_PATH", self.state_path), \
-             patch.object(generate_reviews, "REVIEWS_ROOT", self.reviews_root), \
-             patch.object(generate_reviews, "WORKSPACE", self.root), \
-             patch.object(generate_reviews, "invoke_llm_json", side_effect=fake_invoke), \
-             patch.object(generate_reviews, "llm_provenance", return_value={"path": "test-mock", "model": "unit"}):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["generate_reviews.py", "--json"]):
-                rc = generate_reviews.main()
-
-        self.assertEqual(rc, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["reviews"][0]["reviewStatus"], "queued_for_spec")
-
-        state = common.load_state(self.state_path)
-        item = state["items"][self.bookmark["bookmarkKey"]]
-        self.assertEqual(item["analysis"]["classification"], "implement")
-        self.assertEqual(item["reviewStatus"], "queued_for_spec")
-        self.assertIsNotNone(item.get("reviewProvenance"))
-        self.assertEqual(captured_payloads[0]["workspaceContext"]["topic"], "infra")
-        self.assertIn("scripts/bookmarks/*.py", captured_payloads[0]["workspaceContext"]["adjacentComponents"])
-
-        review_path = self.root / item["reviewDoc"]
-        self.assertTrue(review_path.exists())
-        review_text = review_path.read_text(encoding="utf-8")
-        self.assertIn("Why This Warrants Implementation", review_text)
-        self.assertIn("Stack Judgment", review_text)
-        self.assertIn("workflow orchestration", review_text)
-        self.assertIn("Bottom Line", review_text)
-        self.assertIn("**Review Engine:** `test-mock`", review_text)
-        self.assertIn("**Review Model:** `unit`", review_text)
-        self.assertIn("**Reviewed At:** `", review_text)
 
     def test_generate_specs_creates_multiple_docs_and_task_proposals_from_llm_output(self):
         bookmark_path = self.root / self.bookmark["path"]
@@ -183,7 +130,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
                     "outcome": "Reviews make explicit stack-aware decisions and stop reading like templates.",
                     "problemStatement": "Current reviews are templated instead of judged.",
                     "approach": "Introduce structured LLM analysis, richer workspace context, and a review renderer built around decision quality.",
-                    "stackTouchpoints": ["scripts/bookmarks/generate_reviews.py", "brain/state/bookmark-review-state.json"],
+                    "stackTouchpoints": ["scripts/bookmarks/summarize_mod.py", "brain/state/bookmark-review-state.json"],
                     "scopeBoundaries": ["Review stage only", "No task creation yet"],
                     "risksAndUnknowns": ["Prompt quality may need tuning"],
                     "incrementalRollout": ["Wire LLM call", "Persist analysis", "Exercise hourly workflow"],
@@ -342,82 +289,6 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(payload["readyPackages"], [])
         self.assertEqual(len(payload["blockedPackages"]), 1)
         self.assertEqual(payload["blockedPackages"][0]["reason"], "approval already pending for topic")
-
-    def test_generate_reviews_requeues_skip_review_spec_created_item_as_implement(self):
-        review_doc = self.reviews_root / "infra" / "agent-harness-note-abc123bookmark.md"
-        review_doc.parent.mkdir(parents=True, exist_ok=True)
-        review_doc.write_text("# existing review\n\nClassified as 'implement'\n", encoding="utf-8")
-
-        state = common.state_template()
-        state["items"][self.bookmark["bookmarkKey"]] = {
-            "bookmarkKey": self.bookmark["bookmarkKey"],
-            "path": self.bookmark["path"],
-            "topic": self.bookmark["topic"],
-            "source": self.bookmark["source"],
-            "title": self.bookmark["title"],
-            "reviewStatus": "spec_created",
-            "reviewDoc": "brain/reviews/infra/agent-harness-note-abc123bookmark.md",
-            "analysis": {
-                "classification": "implement",
-                "headline": "Worth building",
-                "summary": "Useful.",
-                "decisionRationale": "Still worth implementation.",
-                "stackJudgment": "Fits workflow automation.",
-                "recommendation": "Proceed.",
-                "signals": ["Relevant to OpenClaw"],
-                "risks": ["Needs scoping"],
-                "monitorTriggers": [],
-                "implementationPaths": ["Improve review quality"],
-            },
-            "reviewProvenance": {"path": "test-existing", "model": "unit"},
-            "specDocs": ["brain/specs/infra/agent-harness-note-abc123bookmark.md"],
-            "specProposals": [
-                {
-                    "title": "Approval package hardening",
-                    "specDoc": "brain/specs/infra/agent-harness-note-abc123bookmark.md",
-                    "proposedTasks": [
-                        {
-                            "title": "Retry approval delivery",
-                            "priority": "high",
-                            "assignee": None,
-                            "description": "Ensure failed approval delivery can be retried.",
-                        }
-                    ],
-                }
-            ],
-            "taskIds": [],
-            "firstSeenAt": common.now_iso(),
-            "reviewedAt": common.now_iso(),
-            "lastUpdatedAt": common.now_iso(),
-        }
-        common.save_state(state, self.state_path)
-
-        stdin = io.StringIO(json.dumps({
-            "candidates": [
-                {
-                    **self.bookmark,
-                    "skipReview": True,
-                    "existingState": state["items"][self.bookmark["bookmarkKey"]],
-                }
-            ]
-        }))
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-
-        with patch.object(generate_reviews, "STATE_PATH", self.state_path), \
-             patch.object(generate_reviews, "REVIEWS_ROOT", self.reviews_root), \
-             patch.object(generate_reviews, "WORKSPACE", self.root):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch("sys.stderr", stderr), patch.object(sys, "argv", ["generate_reviews.py", "--json"]):
-                rc = generate_reviews.main()
-
-        self.assertEqual(rc, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["reviews"][0]["reviewStatus"], "queued_for_spec")
-
-        updated = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
-        self.assertEqual(updated["reviewStatus"], "queued_for_spec")
-        self.assertIn("[SKIP REVIEW]", stderr.getvalue())
 
     def test_build_task_proposals_recovers_spec_created_items_for_approval_retry(self):
         state = common.state_template()
@@ -1857,58 +1728,6 @@ class ReviewNeverRewrittenTests(unittest.TestCase):
 
         # Should skip because not implement
         self.assertEqual(len(candidates), 0)
-
-    def test_generate_reviews_skips_rewrite_when_review_file_exists(self):
-        """When skipReview=True and review file exists, should NOT rewrite it."""
-        # Create state with existing review
-        state = common.state_template()
-        state["items"]["testabc"] = {
-            "bookmarkKey": "testabc",
-            "path": "brain/bookmarks/infra/test4.md",
-            "topic": "infra",
-            "title": "Test Bookmark 4",
-            "reviewDoc": "brain/reviews/infra/test4-review.md",
-            "analysis": {"classification": "implement", "headline": "Test"},
-            "reviewStatus": "reviewed",
-        }
-        common.save_state(state, self.state_path)
-
-        # Create actual review file with original timestamp
-        review_file = self.root / "brain/reviews/infra/test4-review.md"
-        original_content = "Original review content - never should change"
-        review_file.write_text(original_content)
-        original_mtime = review_file.stat().st_mtime
-
-        # Create bookmark file
-        bookmark_file = self.root / "brain/bookmarks/infra/test4.md"
-        bookmark_file.write_text("# Test 4")
-
-        # Run generate_reviews with skipReview=True
-        stdin_data = json.dumps({
-            "candidates": [{
-                "bookmarkKey": "testabc",
-                "path": "brain/bookmarks/infra/test4.md",
-                "topic": "infra",
-                "title": "Test Bookmark 4",
-                "skipReview": True,
-            }]
-        })
-
-        with patch.object(common, "WORKSPACE", self.root):
-            with patch.object(common, "STATE_PATH", self.state_path):
-                with patch.object(common, "REVIEWS_ROOT", self.root / "brain/reviews"):
-                    stdin = io.StringIO(stdin_data)
-                    stdout = io.StringIO()
-                    with patch("sys.stdin", stdin), patch("sys.stdout", stdout):
-                        rc = generate_reviews.main()
-
-        # Check that review file was NOT modified
-        current_content = review_file.read_text()
-        self.assertEqual(current_content, original_content)
-
-
-class SpecRegenerationTests(unittest.TestCase):
-    """Tests for regenerating specs when they are missing."""
 
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
