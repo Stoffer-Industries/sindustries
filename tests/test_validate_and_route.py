@@ -2,7 +2,7 @@
 """Unit tests for the curation/routing/validation scripts.
 
 Covers:
-  - assess_usefulness: routing rules (state-based, no classification)
+  - filter_curation: routing rules (state-based, no classification)
   - list_curate_candidates: filter logic (summarized, stale monitoring, batch size)
   - validate_curate_output: state transition application + idempotency
   - validate_spec_output: spec file existence check + idempotency
@@ -25,7 +25,7 @@ WORKFLOW_DIR = os.path.join(
 sys.path.insert(0, WORKFLOW_DIR)
 
 import common
-import assess_usefulness
+import filter_curation
 import list_curate_candidates
 import validate_curate_output
 import validate_spec_output
@@ -72,7 +72,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
 
     def test_queued_for_spec_goes_to_implement(self):
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(reviewStatus="queued_for_spec"),
             ),
@@ -81,7 +81,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
 
     def test_spec_created_goes_to_implement(self):
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(reviewStatus="spec_created"),
             ),
@@ -90,7 +90,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
 
     def test_monitoring_goes_to_monitoring(self):
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(reviewStatus="monitoring"),
             ),
@@ -101,7 +101,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
         """Newly summarized items haven't been curated yet — heartbeat curate
         will pick them up and turn them into queued_for_spec."""
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(reviewStatus="summarized"),
             ),
@@ -112,7 +112,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
         for status in ("tasked", "approval_pending", "revision_staged"):
             with self.subTest(status=status):
                 self.assertEqual(
-                    assess_usefulness.route(
+                    filter_curation.route(
                         {"bookmarkKey": "k1"},
                         self._state_item(reviewStatus=status),
                     ),
@@ -122,7 +122,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
     def test_declined_stays_reviewed_even_with_spec_proposals(self):
         """Tom said no — recovery branch must not re-implement a declined item."""
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(
                     reviewStatus="declined",
@@ -135,7 +135,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
     def test_tasked_stays_reviewed_even_with_spec_proposals(self):
         """Tasks already created — work is in flight, don't re-implement."""
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(
                     reviewStatus="tasked",
@@ -149,7 +149,7 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
     def test_spec_proposals_without_tasks_is_recovery_implement(self):
         """Spec exists, never became tasks, status is not terminal → implement."""
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1"},
                 self._state_item(
                     reviewStatus="monitoring",  # unusual but possible
@@ -168,14 +168,14 @@ class AssessUsefulnessRouteTests(unittest.TestCase):
             analysis={"classification": "implement"},  # old signal
         )
         self.assertEqual(
-            assess_usefulness.route({"bookmarkKey": "k1"}, item),
+            filter_curation.route({"bookmarkKey": "k1"}, item),
             "reviewed",
         )
 
     def test_review_status_in_item_wins_over_state(self):
         """The summary item's reviewStatus (if present) takes precedence."""
         self.assertEqual(
-            assess_usefulness.route(
+            filter_curation.route(
                 {"bookmarkKey": "k1", "reviewStatus": "queued_for_spec"},
                 self._state_item(reviewStatus="monitoring"),
             ),

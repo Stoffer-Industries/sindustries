@@ -159,8 +159,8 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         mock_llm.assert_not_called()
 
-    def test_assess_usefulness_routes_summarized_items_correctly(self):
-        import assess_usefulness
+    def test_filter_curation_routes_summarized_items_correctly(self):
+        import filter_curation
         state = common.state_template()
         state["items"]["abc123"] = {
             "bookmarkKey": "abc123",
@@ -180,10 +180,10 @@ class SummarizeTests(unittest.TestCase):
         stdin = io.StringIO(json.dumps({"summaries": summaries}))
         stdout = io.StringIO()
 
-        with patch.object(assess_usefulness, "STATE_PATH", self.state_path):
+        with patch.object(filter_curation, "STATE_PATH", self.state_path):
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), \
-                 patch.object(sys, "argv", ["assess_usefulness.py"]):
-                rc = assess_usefulness.main()
+                 patch.object(sys, "argv", ["filter_curation.py"]):
+                rc = filter_curation.main()
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
