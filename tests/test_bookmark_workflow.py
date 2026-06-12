@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflo
 import common
 import create_tasks_from_proposals
 import list_review_candidates
-import assess_usefulness
+import filter_curation
 import summarize as summarize_mod
 import finalize_review_cycle
 import generate_specs

@@ -44,9 +44,9 @@ steps:
       --json
     stdin: $collect_candidates.stdout
 
-  - id: assess_usefulness
+  - id: filter_curation
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/assess_usefulness.py --json
+      python3 codebases/sindustries/agents/workflows/bookmark/filter_curation.py --json
     stdin: $summarize.stdout
 
   - id: generate_specs
@@ -54,7 +54,7 @@ steps:
       python3 codebases/sindustries/agents/workflows/bookmark/generate_specs.py
       --specs-root ${specsRoot}
       --json
-    stdin: $assess_usefulness.stdout
+    stdin: $filter_curation.stdout
 
   - id: build_task_proposals
     command: >-
