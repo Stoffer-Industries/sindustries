@@ -38,6 +38,36 @@
     "links": [],
     "evidence": "Full cycle completed 2026-06-04: content task created, Ivy PR authored, Tom review passed, Lobster merge executed.",
     "visibility": "published"
+  },
+  {
+    "title": "Tasks history",
+    "slug": "tasks-history",
+    "releasedAt": "2026-06-08",
+    "summary": "Task history shipped across the Tasks API, schema, and UI tab. Past task changes are now queryable and visible.",
+    "type": "system",
+    "links": [],
+    "evidence": "Tasks API gained history endpoints, the schema was migrated to support history, and the UI added a History tab.",
+    "visibility": "published"
+  },
+  {
+    "title": "Pencil design system",
+    "slug": "pencil-design-system",
+    "releasedAt": "2026-06-09",
+    "summary": "Design-token pipeline and shared UI integration shipped. Colour and sync refinements followed on 2026-06-11.",
+    "type": "system",
+    "links": [],
+    "evidence": "Pencil design token library and token pipeline shipped 2026-06-09; tasks-app integrates @sindustries/ui; dark theme enabled. Colour refinements and sync consistency checks shipped 2026-06-11.",
+    "visibility": "published"
+  },
+  {
+    "title": "Bookmark pipeline dashboard",
+    "slug": "bookmark-pipeline-dashboard",
+    "releasedAt": "2026-06-10",
+    "summary": "Dashboard shipped for the bookmark-to-content pipeline, tracking review state, spec generation, and approvals in a single view.",
+    "type": "system",
+    "links": [],
+    "evidence": "Bookmark pipeline dashboard shipped 2026-06-10.",
+    "visibility": "published"
   }
 ]
 
