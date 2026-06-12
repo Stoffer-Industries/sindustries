@@ -1,31 +1,50 @@
 ---
 name: bookmark-curate
-description: Run the bookmark curation pass — scores summarized bookmarks for relevance against active focus topics and queues qualifying ones for spec generation. Use during heartbeat BOOKMARK CURATION step, or when asked to curate bookmarks, check what's queued for spec, or shift focus areas.
+description: Run the bookmark curation pass — Quinn scores summarized bookmarks for relevance against active focus topics and queues qualifying ones for spec generation. Use during heartbeat BOOKMARK CURATION step, or when asked to curate bookmarks, check what's queued for spec, or shift focus areas.
 ---
 
 # Bookmark Curation
 
-Scores `summarized` bookmarks (and stale `monitoring` items due for re-curation) against active focus topics. Items scoring at or above the relevance threshold for an active topic are promoted to `queued_for_spec`. Others remain `monitoring` with an updated `lastCuratedAt` timestamp.
+Quinn (heartbeat) scores `summarized` bookmarks (and stale `monitoring` items due for re-curation) against active focus topics. Items scoring at or above the relevance threshold for an active topic are promoted to `queued_for_spec`. Others remain `monitoring` with an updated `lastCuratedAt` timestamp.
 
-## Primary command
+The work is split into three discrete steps. Heartbeat orchestrates; nothing here writes state directly.
+
+## Step 1 — List candidates (filter only, no LLM)
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/curate.py --json
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/list_curate_candidates.py --json
 ```
 
 Output includes:
-- `processed`: how many items were scored this run
+- `count`: how many items are in this batch
 - `remaining`: how many still need curation (picked up next heartbeat)
-- `queued_for_spec`: bookmark keys promoted for spec generation
-- `monitoring`: bookmark keys that scored below threshold
+- `batch`: array of candidate objects with `bookmarkKey`, `title`, `topic`, `reviewStatus`, `lastCuratedAt`, `reviewDoc`, and `summary`
 
-## Dry run (no state changes)
+If `count == 0`, skip the scoring step and run step 3 (validate is a no-op when the artifact is absent).
+
+## Step 2 — Score the batch (Quinn's job)
+
+For each candidate in `batch`, Quinn reads the `summary` (and the `reviewDoc` if the summary is thin) and reasons about relevance to each active topic in the focus config. Scoring rubric:
+
+- 0: completely unrelated
+- 3: loosely adjacent, tangential connection
+- 5: relevant but not directly actionable now
+- 7: clearly relevant — meaningfully touches this area
+- 9–10: directly actionable right now
+
+Don't inflate vague connections. The previous LLM call was a thin wrapper — Quinn has the full bookmark context and can reason more accurately.
+
+Pick the highest-scoring topic as `primaryTopic`. If `primaryScore >= relevanceThreshold` and the topic is in `activeTopics`, decide `queued_for_spec`; else `monitoring`. For `queued_for_spec` items, set `approvalTopic` to the primary topic (the approval gate bucket).
+
+Write the decisions to `brain/state/curate-output.json` (overwrite — curate is single-batch).
+
+## Step 3 — Apply state (lobster-side state machine)
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/curate.py --json --dry-run
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/validate_curate_output.py --json
 ```
 
-Use dry run to preview what would be queued without committing changes.
+This reads the artifact, validates format, applies `queued_for_spec` / `monitoring` transitions, logs them to `bookmark-transitions.jsonl`, and renames the artifact to `.processed`. Idempotent — safe to re-run.
 
 ## Focus config
 
@@ -45,7 +64,7 @@ Default values:
 }
 ```
 
-Edit `activeTopics` to shift which areas get prioritised. Change `relevanceThreshold` to tighten or loosen the bar for spec promotion.
+Edit `activeTopics` to shift which areas get prioritised. Change `relevanceThreshold` to tighten or loosen the bar for spec promotion. `recurationDays` controls when `monitoring` items re-qualify for curation. `batchSize` caps how many items per heartbeat cycle.
 
 ## Guidance
 
