@@ -9,7 +9,7 @@ from common import STATE_PATH, dump_json, load_state, now_iso
 
 def main() -> int:
     data = json.load(__import__("sys").stdin)
-    reviews = data.get("reviews", [])
+    reviews = data.get("summaries") or data.get("reviews", [])
     state = load_state(Path(STATE_PATH))
     items = state.get("items", {})
 
