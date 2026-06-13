@@ -1,6 +1,6 @@
 ---
 name: spec-author
-description: "Write implementation specs for bookmark-reviewed items. Reads workspace context files directly to produce code-factory-aligned product specs under brain/specs/<topic>/."
+description: "Write implementation specs for bookmark-reviewed items. Reads workspace context files directly to produce code-factory-aligned product specs under brain/bookmarks/specs/."
 ---
 
 # Spec Author
@@ -124,7 +124,7 @@ If the caller expects pipeline-consumable output, print this JSON to stdout afte
   "specs": [
     {
       "title": "Spec title",
-      "specDoc": "brain/specs/<topic>/<slug>-<key>.md",
+      "specDoc": "brain/bookmarks/specs/<slug>-<key>.md",
       "specType": "infra workflow",
       "proposedTasks": [
         {
