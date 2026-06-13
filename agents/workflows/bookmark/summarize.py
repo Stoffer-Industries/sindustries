@@ -220,7 +220,7 @@ def main() -> int:
             bookmark_key,
             previous_status,
             "summarized",
-            f"signal={summary['signalQuality']}",
+            "summarized",
             transitions_path=transition_log_path(Path(STATE_PATH)),
         )
         generated.append({

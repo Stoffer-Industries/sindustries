@@ -149,9 +149,6 @@ SPEC_SCHEMA: dict[str, Any] = {
 }
 
 
-SPECS_REVISED_ROOT = WORKSPACE / "brain" / "specs-revised"
-
-
 def spec_doc_path(specs_root: Path, topic: str, spec_title: str, bookmark_key: str, index: int) -> Path:
     # flat — topic no longer appears in the file path
     suffix = "" if index == 0 else f"-part-{index + 1}"
@@ -159,8 +156,9 @@ def spec_doc_path(specs_root: Path, topic: str, spec_title: str, bookmark_key: s
 
 
 def revised_spec_doc_path(topic: str, spec_doc: str) -> Path:
-    spec_name = Path(spec_doc).name
-    return SPECS_REVISED_ROOT / topic / spec_name
+    # Revised specs live alongside current specs — flat, no topic subfolder
+    spec_name = Path(spec_doc).stem + "-prev.md"
+    return SPECS_ROOT / spec_name
 
 
 def next_revised_live_spec_doc(spec_doc: str) -> str:
