@@ -48,7 +48,7 @@ from common import (
 )
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "activeTopics": ["brain", "infra"],
+    "topics": ["brain", "infra", "crypto", "app-tasks", "app-assistant", "outreach", "design", "personal", "general"],
     "relevanceThreshold": 7,
     "recurationDays": 14,
     "batchSize": 5,
@@ -122,7 +122,7 @@ def main() -> int:
     args = p.parse_args()
 
     config = load_focus_config()
-    active_topics: list[str] = config.get("activeTopics", DEFAULT_CONFIG["activeTopics"])
+    topics: list[str] = config.get("topics", DEFAULT_CONFIG["topics"])
     threshold: int = int(config.get("relevanceThreshold", DEFAULT_CONFIG["relevanceThreshold"]))
     recuration_days: int = int(config.get("recurationDays", DEFAULT_CONFIG["recurationDays"]))
     batch_size: int = int(config.get("batchSize", DEFAULT_CONFIG["batchSize"]))
@@ -139,7 +139,7 @@ def main() -> int:
     payload = {
         "ok": True,
         "config": {
-            "activeTopics": active_topics,
+            "topics": topics,
             "relevanceThreshold": threshold,
             "recurationDays": recuration_days,
             "batchSize": batch_size,

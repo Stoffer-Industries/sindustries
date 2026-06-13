@@ -5,7 +5,7 @@ Validate curate decisions artifact and apply curations to state.
 Reads `brain/state/curate-output.json` (produced by Quinn's heartbeat BOOKMARK
 CURATION step) and applies the proposed curations to bookmark state:
   - writes `item.curation` (a living take: createdAt, topic, score, reasoning,
-    relevanceScores, activeTopics, threshold)
+    relevanceScores, threshold)
   - does NOT change reviewStatus  (the verdict lives in curation now;
     the lobster's filter_curation step reads the curation on every run)
   - logs a no-op "curation refresh" transition for audit
@@ -45,7 +45,6 @@ REQUIRED_DECISION_KEYS = {
     "topic",
     "score",
     "reasoning",
-    "activeTopics",
     "threshold",
     "createdAt",
 }
@@ -60,8 +59,6 @@ def validate_decision_shape(decision: dict[str, Any]) -> list[str]:
     score = decision.get("score")
     if not isinstance(score, (int, float)):
         errors.append(f"score must be a number, got {type(score).__name__}")
-    if not isinstance(decision.get("activeTopics"), list):
-        errors.append("activeTopics must be a list")
     if not isinstance(decision.get("threshold"), (int, float)):
         errors.append("threshold must be a number")
     return errors
@@ -75,7 +72,6 @@ def build_curation(decision: dict[str, Any]) -> dict[str, Any]:
         "score": float(decision["score"]),
         "reasoning": decision.get("reasoning", ""),
         "relevanceScores": decision.get("relevanceScores", []),
-        "activeTopics": decision.get("activeTopics", []),
         "threshold": float(decision["threshold"]),
     }
 
