@@ -15,7 +15,7 @@ REQUEST_APPROVAL = Path(__file__).resolve().parent / "request_topic_approval.py"
 STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
 DEFAULT_ARGS = {
     "sourceRoot": "brain/bookmarks",
-    "reviewsRoot": "brain/reviews",
+    "reviewsRoot": "brain/bookmarks/summaries",
     "specsRoot": "brain/specs",
     "limit": 5,
     "source": "any",

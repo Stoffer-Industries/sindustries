@@ -53,6 +53,16 @@ Before drafting:
 
 Use kebab-case for the slug, derived from the spec title.
 
+### Relative link paths — important
+
+The spec lives at `brain/specs/<topic>/`. The `brain/` directory is a symlink to iCloud. Markdown renderers (Obsidian, VS Code) do not re-enter the symlink after traversing above it, so links must stay **within** the `brain/` tree.
+
+- Bookmark link: `../../bookmarks/x/<filename>.md` — two levels up from `brain/specs/<topic>/` reaches `brain/`, then into bookmarks (flat, no topic subfolder)
+- Summary link: `../../bookmarks/summaries/<filename>.md` — same base, into summaries (flat, no topic subfolder)
+- Do **not** use `../../../brain/...` — that exits the symlink and breaks in all markdown viewers
+
+Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs) cannot be linked relatively from inside brain. Reference them by name only, no link.
+
 ### Format
 
 The spec follows the code-factory product spec template so it can be used directly as a product spec when Tom approves it. Notes is intentionally lean — implementation detail belongs in Rowan's tech design, not here.
@@ -61,8 +71,8 @@ The spec follows the code-factory product spec template so it can be used direct
 # Spec — <Title>
 
 ## Source
-- **Bookmark:** [<bookmark filename>](<bookmark_path>)
-- **Review:** [<review filename>](<review_path>)
+- **Bookmark:** [<bookmark filename>](../../bookmarks/x/<bookmark filename>)
+- **Summary:** [<summary filename>](../../bookmarks/summaries/<summary filename>)
 - **Topic:** `<topic>`
 - **Spec Type:** `<infra workflow | assistant feature | app feature | data pipeline | tooling>`
 - **Systems:** [<system name>](<path to relevant system spec or state file>) — omit if none

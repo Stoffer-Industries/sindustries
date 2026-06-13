@@ -12,38 +12,6 @@ const BOOKMARKS_DIR = process.env.OPENCLAW_WORKSPACE
   ? path.join(process.env.OPENCLAW_WORKSPACE, 'brain', 'bookmarks', 'x')
   : path.join(process.env.HOME || '/root', '.openclaw', 'workspace', 'brain', 'bookmarks', 'x');
 
-// Channel taxonomy passed to MiniMax each call.
-const CHANNEL_TAGS = {
-  'infra': [
-    'openclaw', 'infra', 'infrastructure', 'disk usage', 'cpu usage', 'memory usage',
-    'network usage', 'self-hosted', 'deployment', 'devops', 'tooling', 'prompts', 'tools', 'scripts'
-  ],
-  'brain': [
-    'obsidian', 'second brain', 'pkm', 'knowledge base', 'memory',
-    'embeddings', 'vector database', 'vector search', 'rag'
-  ],
-  'personal': [
-    'travel', 'family', 'health', 'fitness', 'lifestyle', 'learning',
-    'academy', 'certification', 'course', 'training'
-  ],
-  'app-assistant': [
-    'meeting notes', 'ai notes', 'meeting templates', 'calendar', 'transcript', 'summarization', 'granola'
-  ],
-  'app-tasks': [
-    'workflow', 'tasks', 'task management', 'task tracking', 'automation',
-    'kanban', 'todo', 'project management', 'product management', 'roadmap', 'backlog'
-  ],
-  'crypto': [
-    'crypto', 'blockchain', 'bitcoin', 'ethereum', 'wallet', 'exchange',
-    'defi', 'web3', 'x402'
-  ],
-  'outreach': [
-    'social media', 'content creation', 'audience', 'marketing', 'growth', 'distribution'
-  ],
-  'general': [
-    '*'
-  ]
-};
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -107,25 +75,23 @@ function ensureCsvWithHeader(csvPath, header) {
   }
 }
 
-function logTagsToCSV({ id, title, tags, summary, originalTweet, url, channel }) {
+function logTagsToCSV({ id, title, tags, originalTweet, url }) {
   const normalizedTags = normalizeTags(tags);
   const processedAt = new Date().toISOString();
   const domain = extractDomain(url || '');
 
   const csvPath = path.join(STATE_DIR, 'x-bookmark-tags-log.csv');
-  const header = 'processed_at,id,title,channel,tags_csv,tags_count,domain,url,,summary,original_tweet';
+  const header = 'processed_at,id,title,tags_csv,tags_count,domain,url,original_tweet';
   ensureCsvWithHeader(csvPath, header);
 
   const row = [
     csvEscape(processedAt),
     csvEscape(id),
     csvEscape(title),
-    csvEscape(channel),
     csvEscape(normalizedTags.join(';')),
     csvEscape(normalizedTags.length),
     csvEscape(domain),
     csvEscape(url),
-    csvEscape(summary),
     csvEscape(originalTweet)
   ].join(',') + '\n';
 
@@ -190,25 +156,6 @@ function getAcpxCommand() {
   return (process.env.BOOKMARK_LLM_ACPX_COMMAND || '/opt/homebrew/bin/acpx').trim();
 }
 
-function pickChannel({ url, title, tweetText, summary, tags }) {
-  const haystack = [url, title, tweetText, summary, ...(tags || [])]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  let best = { channel: 'general', score: 0 };
-  for (const [channel, terms] of Object.entries(CHANNEL_TAGS)) {
-    if (channel === 'general') continue;
-    let score = 0;
-    for (const term of terms) {
-      if (haystack.includes(String(term).toLowerCase())) score += 1;
-    }
-    if (score > best.score) best = { channel, score };
-  }
-
-  return best.score > 0 ? best.channel : 'general';
-}
-
 async function generateMetadata(url, tweetText, isTweetLink = false) {
   let title;
   if (isTweetLink) {
@@ -221,7 +168,7 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
   const text = String(tweetText || '');
   const MAX_LLM_CHARS = Number(process.env.BOOKMARK_LLM_MAX_CHARS || 12000);
   const llmText = text.length > MAX_LLM_CHARS
-    ? `${text.slice(0, Math.floor(MAX_LLM_CHARS * 0.75))}\n\n...[truncated for classification]...\n\n${text.slice(-Math.floor(MAX_LLM_CHARS * 0.25))}`
+    ? `${text.slice(0, Math.floor(MAX_LLM_CHARS * 0.75))}\n\n...[truncated]...\n\n${text.slice(-Math.floor(MAX_LLM_CHARS * 0.25))}`
     : text;
 
   function callViaAcpx() {
@@ -229,13 +176,10 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
     const model = (process.env.BOOKMARK_LLM_MODEL || 'minimax').trim();
     const timeoutMs = parseInt(process.env.BOOKMARK_LLM_TIMEOUT_SECONDS || '120', 10) * 1000;
     const prompt = [
-      'You are classifying X bookmarks for a second brain.',
-      `Return STRICT JSON only: {"summary":"...","tags":["..."],"channel":"..."}.`,
-      '- summary: 2-4 concise sentences',
-      '- tags: 3-8 lowercase tags',
-      `- channel must be one of: ${Object.keys(CHANNEL_TAGS).join(', ')}`,
-      '- if unsure, set channel to "general"',
-      `Channel hints: ${JSON.stringify(CHANNEL_TAGS)}`,
+      'You are tagging X bookmarks for a second brain.',
+      'Return STRICT JSON only: {"tags":["..."]}.',
+      '- tags: 3-8 lowercase keyword tags describing the content',
+      '- no topic classification, no summary, just tags',
       '',
       `URL: ${url}`,
       `Title: ${title || ''}`,
@@ -266,15 +210,9 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
     if (!parsed) throw new Error('acpx output did not contain valid JSON');
 
     const tags = normalizeTags(parsed.tags || []);
-    const summary = String(parsed.summary || '').trim();
-    const llmChannel = String(parsed.channel || '').trim().toLowerCase();
-    const guessedChannel = pickChannel({ url, title, tweetText: llmText, summary, tags });
-    const channel = Object.hasOwn(CHANNEL_TAGS, llmChannel) ? llmChannel : guessedChannel;
 
     return {
-      summary: summary || text.substring(0, 300),
       tags: tags.length ? tags : ['needs-review'],
-      channel,
       title
     };
   }
@@ -296,12 +234,9 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
     baseDomainTag && baseDomainTag !== 'x' ? baseDomainTag : '',
     'needs-review'
   ].filter(Boolean));
-  const fallbackSummary = (tweetText || '').substring(0, 300);
 
   return {
-    summary: fallbackSummary,
     tags: fallbackTags,
-    channel: pickChannel({ url, title, tweetText, summary: fallbackSummary, tags: fallbackTags }),
     title
   };
 }
@@ -316,18 +251,13 @@ async function processBookmark(bookmark) {
   }
 
   const metadata = await generateMetadata(url, bookmark.text || '', isTweetLink);
-  const channel = metadata.channel || 'general';
-  const categoryDir = path.join(BOOKMARKS_DIR, channel);
-  ensureDir(categoryDir);
 
   logTagsToCSV({
     id: bookmark.id,
     title: metadata.title,
     tags: metadata.tags,
-    summary: metadata.summary,
     originalTweet: bookmark.text,
-    url,
-    channel
+    url
   });
 
   const date = new Date().toISOString().split('T')[0];
@@ -335,25 +265,21 @@ async function processBookmark(bookmark) {
 
   const frontmatter = `---
 title: "${metadata.title || bookmark.id}"
-type: ${channel}
+source: x
 date_archived: ${date}
 source_tweet: https://x.com/i/web/status/${bookmark.id}
 link: ${url}
 tags: [${safeTags.map(t => `"${t}"`).join(', ')}]
 ---
 
-${metadata.summary}
-
----
-
 **Original Tweet:**
 ${bookmark.text || 'N/A'}
 `;
 
-  const filename = path.join(categoryDir, `${slugify(metadata.title || String(bookmark.id))}.md`);
+  const filename = path.join(BOOKMARKS_DIR, `${slugify(metadata.title || String(bookmark.id))}.md`);
   fs.writeFileSync(filename, frontmatter);
 
-  console.log(`Archived: ${metadata.title || bookmark.id} -> ${channel}/`);
+  console.log(`Archived: ${metadata.title || bookmark.id}`);
   return bookmark.id;
 }
 

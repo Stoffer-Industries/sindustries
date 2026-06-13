@@ -5,8 +5,8 @@ Generates faithful summaries of bookmark candidates.
 No classification, no stack judgment, no opinion on what to build.
 Just: what does this bookmark actually describe?
 
-Runs as a lobster exec step. Writes summary docs to brain/reviews/<topic>/
-and updates state with reviewStatus=summarized.
+Runs as a lobster exec step. Writes summary docs to brain/bookmarks/summaries/
+(flat, no topic subfolder) and updates state with reviewStatus=summarized.
 """
 from __future__ import annotations
 
@@ -49,8 +49,7 @@ Extract:
 - Any notable constraints or trade-offs
 
 Write like a concise technical note for future reference. Dense and specific beats vague and general.
-If the bookmark is fluffy or unclear, say so in signalQuality — but still extract whatever concrete signal exists.
-Do not reference whether we should build this. That judgment happens separately."""
+Do not judge signal quality or relevance. That judgment happens in curation, separately."""
 
 SUMMARY_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -62,14 +61,14 @@ SUMMARY_SCHEMA: dict[str, Any] = {
         "keyDetails": {"type": "array", "items": {"type": "string"}},
         "relevantTo": {"type": "string"},
         "constraints": {"type": "array", "items": {"type": "string"}},
-        "signalQuality": {"type": "string", "enum": ["high", "medium", "low"]},
     },
-    "required": ["headline", "problem", "approach", "valueProposition", "keyDetails", "relevantTo", "signalQuality"],
+    "required": ["headline", "problem", "approach", "valueProposition", "keyDetails", "relevantTo"],
 }
 
 
 def summary_doc_path(reviews_root: Path, topic: str, title: str, bookmark_key: str) -> Path:
-    return reviews_root / topic / f"{slugify(title)}-{bookmark_key}.md"
+    # flat — topic no longer appears in the file path
+    return reviews_root / f"{slugify(title)}-{bookmark_key}.md"
 
 
 def build_summary_md(record: dict[str, Any], summary: dict[str, Any], provenance: dict[str, Any]) -> str:
@@ -81,15 +80,12 @@ def build_summary_md(record: dict[str, Any], summary: dict[str, Any], provenance
     provenance_path = provenance.get("path") or "unknown"
     provenance_model = provenance.get("model") or provenance.get("agentId") or "default"
     summarised_at = record.get("reviewedAt") or ""
-    signal = summary.get("signalQuality", "medium")
 
     return f'''# Summary — {record["title"]}
 
 - **Bookmark:** {record.get("path", "")}
-- **Topic:** `{record.get("topic", "general")}`
 - **Source:** `{record.get("source", "")}`
 - **Link:** {record.get("link") or "_none_"}
-- **Signal Quality:** `{signal}`
 - **Summary Engine:** `{provenance_path}`
 - **Summary Model:** `{provenance_model}`
 - **Summarised At:** `{summarised_at}`
@@ -141,10 +137,6 @@ def summarise_record(record: dict[str, Any]) -> dict[str, Any]:
     }
     raw = invoke_llm_json(SUMMARY_PROMPT, payload, SUMMARY_SCHEMA)
 
-    signal = raw.get("signalQuality", "medium")
-    if signal not in {"high", "medium", "low"}:
-        signal = "medium"
-
     return {
         "headline": expect_string(raw.get("headline"), "headline"),
         "problem": expect_string(raw.get("problem"), "problem"),
@@ -153,7 +145,6 @@ def summarise_record(record: dict[str, Any]) -> dict[str, Any]:
         "keyDetails": expect_string_list(raw.get("keyDetails"), "keyDetails"),
         "relevantTo": expect_string(raw.get("relevantTo"), "relevantTo"),
         "constraints": expect_string_list(raw.get("constraints"), "constraints"),
-        "signalQuality": signal,
     }
 
 
@@ -214,7 +205,7 @@ def main() -> int:
             "dateArchived": record.get("dateArchived", ""),
             "bodyExcerpt": record.get("bodyExcerpt", ""),
             "reviewStatus": "summarized",
-            "summaryDoc": f"brain/reviews/{topic}/{doc_path.name}",
+            "summaryDoc": f"brain/bookmarks/summaries/{doc_path.name}",
             "summary": summary,
             "reviewProvenance": provenance,
             "specDocs": existing.get("specDocs", []),
