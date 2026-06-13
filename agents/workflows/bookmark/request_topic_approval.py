@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import subprocess
+from contextlib import contextmanager
+import fcntl
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,19 @@ def _generate_approval_id(topic: str) -> str:
     return f"ap{digest}"
 
 APPROVAL_TOPICS_PATH = WORKSPACE / "brain" / "state" / "bookmark-approval-topics.json"
+
+
+@contextmanager
+def approval_state_lock(state_path: Path):
+    """Serialize approval claim, delivery, and state persistence."""
+    lock_path = state_path.with_name(state_path.name + ".approval.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def normalize_topic(topic: str | None) -> str:
@@ -305,8 +320,7 @@ def deliver_approval_message(message: str, delivery: dict) -> dict:
     }
 
 
-def main() -> int:
-    data = json.load(__import__("sys").stdin)
+def _main_locked(data: dict[str, Any]) -> int:
     ready = data.get("readyPackages", [])
     stage_only = bool(data.get("stageOnly"))
 
@@ -320,9 +334,9 @@ def main() -> int:
     approval_ids_out: list[dict[str, Any]] = []
     timestamp = now_iso()
 
-    # Pass 1: validate inputs, check existing locks, generate approvalIds.
-    # The actual write happens in pass 2; only the run whose approvalId
-    # is the one stored after save will proceed to send the message.
+    # Validate inputs and claim each available topic while holding the
+    # process-wide state lock. The lock remains held through delivery and
+    # final persistence so another run cannot observe an intermediate state.
     candidates: list[dict[str, Any]] = []
     for package in ready:
         topic = normalize_topic(package.get("approvalTopic") or package.get("topic"))
@@ -388,10 +402,6 @@ def main() -> int:
             "itemCount": len(package.get("items", [])),
         })
 
-    # Pass 2: write the locks to state. Multiple concurrent runs may each
-    # write their own lock, but the last writer wins per topic. After save
-    # we re-read and only the run whose approvalId is the stored one
-    # proceeds — the others back off.
     for cand in candidates:
         package = cand["package"]
         topic = cand["topic"]
@@ -403,34 +413,7 @@ def main() -> int:
 
     save_state(state, Path(STATE_PATH))
 
-    # Re-read to detect lost writes. If our approvalId is not the one stored,
-    # another concurrent run won the race for this topic. We back off
-    # without writing anything else (no items touched, no message sent).
-    state_after_save = load_state(Path(STATE_PATH))
-    locks_after_save = state_after_save.get("approvalLocks", {})
-
-    winners: list[dict[str, Any]] = []
     for cand in candidates:
-        topic = cand["topic"]
-        approval_id = cand["approval_id"]
-        actual_lock = locks_after_save.get(topic)
-        if not isinstance(actual_lock, dict):
-            blocked_packages.append({
-                **cand["package"],
-                "reason": f"topic lock {topic!r} disappeared after write — another run cleared it",
-            })
-            continue
-        stored_id = str(actual_lock.get("approvalId") or "").strip().lower()
-        if stored_id != approval_id:
-            blocked_packages.append({
-                **cand["package"],
-                "reason": "lost approval-slot race to another concurrent run",
-            })
-            continue
-        winners.append(cand)
-
-    # Pass 3: only winners apply per-item state changes and send the message.
-    for cand in winners:
         package = cand["package"]
         topic = cand["topic"]
         approval_id = cand["approval_id"]
@@ -532,8 +515,7 @@ def main() -> int:
             "deliveryError": delivery_error,
         })
 
-    # Save the per-item state changes (winners only).
-    if winners:
+    if candidates:
         save_state(state, Path(STATE_PATH))
 
     dump_json({
@@ -546,9 +528,15 @@ def main() -> int:
         "monitoring": data.get("monitoring", []),
         "reviewed": data.get("reviewed", []),
         "stageOnly": stage_only,
-        "note": "Self-asserting per-topic lock via state.approvalLocks[topic].approvalId. Concurrent runs race to claim a topic; only the run whose approvalId is the one stored after save proceeds to send the message. Others back off without writing items or sending.",
+        "note": "Approval claim, delivery, and state persistence are serialized with an OS file lock. Existing approvalLocks entries block later runs by topic.",
     })
     return 0
+
+
+def main() -> int:
+    data = json.load(__import__("sys").stdin)
+    with approval_state_lock(Path(STATE_PATH)):
+        return _main_locked(data)
 
 
 if __name__ == "__main__":

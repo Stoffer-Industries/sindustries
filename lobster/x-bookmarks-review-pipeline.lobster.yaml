@@ -9,7 +9,7 @@ name: x-bookmarks-review-pipeline
 
 args:
   sourceRoot:
-    default: brain/bookmarks
+    default: brain/bookmarks/x
   reviewsRoot:
     default: brain/bookmarks/summaries
   specsRoot:

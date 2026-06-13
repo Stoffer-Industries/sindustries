@@ -152,7 +152,7 @@ def main() -> int:
         print(f"[CLEANUP] {'; '.join(parts)}", file=sys.stderr)
 
     p = argparse.ArgumentParser(description="List bookmark review candidates")
-    p.add_argument("--source-root", default=str(BOOKMARKS_ROOT))
+    p.add_argument("--source-root", default=str(BOOKMARKS_ROOT / "x"))
     p.add_argument("--source", default="any")
     p.add_argument("--limit", type=int, default=25)
     p.add_argument("--json", action="store_true")
@@ -160,7 +160,7 @@ def main() -> int:
 
     root = Path(args.source_root)
     if not root.is_absolute():
-        root = (Path(__file__).resolve().parents[2] / root).resolve()
+        root = (WORKSPACE / root).resolve()
     state = load_state(Path(STATE_PATH))
     items = state.get("items", {})
 

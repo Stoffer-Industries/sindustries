@@ -46,6 +46,13 @@ def move(src: Path, dst: Path, dry_run: bool) -> bool:
     return True
 
 
+def destination_is_safe(src: Path, dst: Path) -> bool:
+    """A state path can move only after its file moved, or after a prior run."""
+    if src.exists() and dst.exists():
+        return False
+    return dst.exists() or src.exists()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -99,7 +106,9 @@ def main() -> int:
             parts = old_path[len("brain/bookmarks/x/"):].split("/")
             if len(parts) == 2:  # topic/filename
                 new_path = f"brain/bookmarks/x/{parts[1]}"
-                if old_path != new_path:
+                src = WORKSPACE / old_path
+                dst = WORKSPACE / new_path
+                if old_path != new_path and destination_is_safe(src, dst):
                     if dry_run:
                         print(f"  WOULD UPDATE path [{key}]: {old_path} -> {new_path}")
                     else:
@@ -113,7 +122,9 @@ def main() -> int:
             if old_doc and old_doc.startswith("brain/reviews/"):
                 filename = Path(old_doc).name
                 new_doc = f"brain/bookmarks/summaries/{filename}"
-                if old_doc != new_doc:
+                src = WORKSPACE / old_doc
+                dst = WORKSPACE / new_doc
+                if old_doc != new_doc and destination_is_safe(src, dst):
                     if dry_run:
                         print(f"  WOULD UPDATE {field} [{key}]: {old_doc} -> {new_doc}")
                     else:

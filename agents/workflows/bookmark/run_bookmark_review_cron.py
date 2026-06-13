@@ -14,7 +14,7 @@ PIPELINE = WORKSPACE / "codebases" / "sindustries" / "lobster" / "x-bookmarks-re
 REQUEST_APPROVAL = Path(__file__).resolve().parent / "request_topic_approval.py"
 STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
 DEFAULT_ARGS = {
-    "sourceRoot": "brain/bookmarks",
+    "sourceRoot": "brain/bookmarks/x",
     "reviewsRoot": "brain/bookmarks/summaries",
     "specsRoot": "brain/bookmarks/specs",
     "limit": 5,
