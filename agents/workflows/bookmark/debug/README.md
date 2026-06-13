@@ -7,7 +7,7 @@ Use the real production path when testing bookmark approvals and revisions.
 Run the bookmark cron entrypoint manually:
 
 ```bash
-python3 scripts/bookmarks/run_bookmark_review_cron.py
+python3 codebases/sindustries/agents/workflows/bookmark/run_bookmark_review_cron.py
 ```
 
 That path is preferred because it exercises the full real flow:
@@ -29,22 +29,22 @@ The helper script is useful for ad hoc approval-request experiments, but it does
 Ad hoc helper moved here:
 
 ```bash
-python3 scripts/bookmarks/debug/request_single_spec_approval.py <bookmarkKey>
+python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spec_approval.py <bookmarkKey>
 ```
 
 Examples:
 
 ```bash
-python3 scripts/bookmarks/debug/request_single_spec_approval.py dummycrypto20260420 --reset-to-approval-ready
-python3 scripts/bookmarks/debug/request_single_spec_approval.py dummycrypto20260420
-python3 scripts/bookmarks/debug/request_single_spec_approval.py dummycrypto20260420 --allow-revision-requested
+python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spec_approval.py dummycrypto20260420 --reset-to-approval-ready
+python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spec_approval.py dummycrypto20260420
+python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spec_approval.py dummycrypto20260420 --allow-revision-requested
 ```
 
 ## Safe workflow for future fixture tests
 
 1. Reset the fixture bookmark to approval-ready state:
-   `python3 scripts/bookmarks/debug/request_single_spec_approval.py dummycrypto20260420 --reset-to-approval-ready`
-2. Run `python3 scripts/bookmarks/run_bookmark_review_cron.py`
+   `python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spec_approval.py dummycrypto20260420 --reset-to-approval-ready`
+2. Run `python3 codebases/sindustries/agents/workflows/bookmark/run_bookmark_review_cron.py`
 3. Wait for the real Telegram approval request
 4. Reply in Telegram with `approve`, `decline`, or `revise #apxxxxxx: ...`
 5. Only use the helper for isolated debugging, not as proof that the Lobster-backed revise flow works
