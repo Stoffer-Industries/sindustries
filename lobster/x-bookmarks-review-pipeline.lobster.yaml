@@ -11,7 +11,7 @@ args:
   sourceRoot:
     default: brain/bookmarks
   reviewsRoot:
-    default: brain/reviews
+    default: brain/bookmarks/summaries
   specsRoot:
     default: brain/specs
   limit:
