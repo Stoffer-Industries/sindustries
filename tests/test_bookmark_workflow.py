@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflo
 import common
 import create_tasks_from_proposals
 import list_review_candidates
+import list_spec_requests
+import migrate_flat_paths
 import filter_curation
 import summarize as summarize_mod
 import finalize_review_cycle
@@ -37,6 +39,13 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.approval_topics_path = self.root / "brain" / "state" / "bookmark-approval-topics.json"
         self.reviews_root = self.root / "brain" / "reviews"
         self.specs_root = self.root / "docs" / "specs"
+        audit_patcher = patch.object(
+            handle_approval_reply,
+            "AUDIT_LOG_PATH",
+            self.root / "brain/state/approval-reply-audit.csv",
+        )
+        audit_patcher.start()
+        self.addCleanup(audit_patcher.stop)
         self.bookmark = {
             "bookmarkKey": "abc123bookmark",
             "path": "brain/bookmarks/infra/sample.md",
@@ -624,7 +633,6 @@ class BookmarkWorkflowTests(unittest.TestCase):
         stdout = io.StringIO()
         with patch.object(generate_specs, "STATE_PATH", self.state_path), \
              patch.object(generate_specs, "SPECS_ROOT", specs_root), \
-             patch.object(generate_specs, "SPECS_REVISED_ROOT", revised_root), \
              patch.object(generate_specs, "WORKSPACE", self.root):
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["generate_specs.py", "--json", "--specs-root", str(specs_root)]):
                 rc = generate_specs.main()
@@ -1000,6 +1008,110 @@ class BookmarkWorkflowTests(unittest.TestCase):
         updated = common.load_state(self.state_path)
         self.assertEqual(updated["items"][self.bookmark["bookmarkKey"]]["specDocs"], [spec_rel])
 
+    def test_list_review_candidates_resolves_relative_source_root_from_workspace(self):
+        bookmark_path = self.root / "brain/bookmarks/x/sample.md"
+        bookmark_path.parent.mkdir(parents=True, exist_ok=True)
+        bookmark_path.write_text(
+            "---\ntitle: Relative Root\nlink: https://example.com/root\nsource: x\n---\n\nBody\n",
+            encoding="utf-8",
+        )
+
+        out = io.StringIO()
+        with patch.object(list_review_candidates, "WORKSPACE", self.root), \
+             patch.object(list_review_candidates, "STATE_PATH", self.state_path):
+            with patch("sys.stdout", out), patch.object(
+                sys,
+                "argv",
+                ["list_review_candidates.py", "--source-root", "brain/bookmarks/x", "--json"],
+            ):
+                rc = list_review_candidates.main()
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["candidates"][0]["title"], "Relative Root")
+
+    def test_list_spec_requests_uses_curation_topic(self):
+        state = common.state_template()
+        state["items"]["k1"] = {
+            "bookmarkKey": "k1",
+            "title": "Curated topic",
+            "topic": "general",
+            "curation": {"topic": "infra", "score": 9},
+            "reviewStatus": "spec_requested",
+            "analysis": {"headline": "Useful"},
+        }
+        common.save_state(state, self.state_path)
+
+        out = io.StringIO()
+        with patch.object(list_spec_requests, "STATE_PATH", self.state_path), \
+             patch("sys.stdout", out):
+            rc = list_spec_requests.main()
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["specRequests"][0]["topic"], "infra")
+
+    def test_flat_path_migration_does_not_repoint_colliding_item(self):
+        old_bookmarks_root = self.root / "brain/bookmarks/x"
+        old_reviews_root = self.root / "brain/reviews"
+        new_summaries_root = self.root / "brain/bookmarks/summaries"
+        old_reviews_root.mkdir(parents=True, exist_ok=True)
+        for topic, body in (("a", "first"), ("b", "second")):
+            path = old_bookmarks_root / topic / "same.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+
+        state = common.state_template()
+        state["items"] = {
+            "a": {"bookmarkKey": "a", "path": "brain/bookmarks/x/a/same.md"},
+            "b": {"bookmarkKey": "b", "path": "brain/bookmarks/x/b/same.md"},
+        }
+        common.save_state(state, self.state_path)
+
+        with patch.object(migrate_flat_paths, "WORKSPACE", self.root), \
+             patch.object(migrate_flat_paths, "STATE_PATH", self.state_path), \
+             patch.object(migrate_flat_paths, "OLD_BOOKMARKS_ROOT", old_bookmarks_root), \
+             patch.object(migrate_flat_paths, "NEW_BOOKMARKS_ROOT", old_bookmarks_root), \
+             patch.object(migrate_flat_paths, "OLD_REVIEWS_ROOT", old_reviews_root), \
+             patch.object(migrate_flat_paths, "NEW_SUMMARIES_ROOT", new_summaries_root), \
+             patch.object(sys, "argv", ["migrate_flat_paths.py"]):
+            rc = migrate_flat_paths.main()
+
+        self.assertEqual(rc, 0)
+        updated = common.load_state(self.state_path)
+        self.assertEqual(updated["items"]["a"]["path"], "brain/bookmarks/x/same.md")
+        self.assertEqual(updated["items"]["b"]["path"], "brain/bookmarks/x/b/same.md")
+        self.assertEqual((old_bookmarks_root / "same.md").read_text(), "first")
+        self.assertEqual((old_bookmarks_root / "b/same.md").read_text(), "second")
+
+    def test_approval_state_lock_serializes_callers(self):
+        lock_path = self.root / "brain/state/bookmark-review-state.json"
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        second_entered = threading.Event()
+
+        def first():
+            with request_topic_approval.approval_state_lock(lock_path):
+                first_entered.set()
+                release_first.wait(timeout=2)
+
+        def second():
+            first_entered.wait(timeout=2)
+            with request_topic_approval.approval_state_lock(lock_path):
+                second_entered.set()
+
+        first_thread = threading.Thread(target=first)
+        second_thread = threading.Thread(target=second)
+        first_thread.start()
+        second_thread.start()
+        self.assertTrue(first_entered.wait(timeout=1))
+        self.assertFalse(second_entered.wait(timeout=0.1))
+        release_first.set()
+        first_thread.join(timeout=1)
+        second_thread.join(timeout=1)
+        self.assertTrue(second_entered.is_set())
+
     def test_list_review_candidates_recovers_missing_spec_links_from_disk(self):
         state = common.state_template()
         key = "07d569e9f611226e"
@@ -1196,7 +1308,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["reviewStatus"], "spec_requested")
 
     def test_list_review_candidates_includes_spec_created_items_pending_approval(self):
-        bookmark_path = self.root / "brain/bookmarks/infra/spec-created.md"
+        bookmark_path = self.root / "brain/bookmarks/x/spec-created.md"
         bookmark_path.parent.mkdir(parents=True, exist_ok=True)
         bookmark_path.write_text(
             "---\n"
@@ -1214,7 +1326,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         state = common.state_template()
         state["items"][key] = {
             "bookmarkKey": key,
-            "path": "brain/bookmarks/infra/spec-created.md",
+            "path": "brain/bookmarks/x/spec-created.md",
             "topic": "infra",
             "title": "Spec created bookmark",
             "reviewDoc": "brain/reviews/infra/spec-created.md",

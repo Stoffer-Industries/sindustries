@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from common import STATE_PATH, dump_json, load_state
+from common import STATE_PATH, dump_json, get_approval_topic, load_state
 
 
 def main() -> int:
@@ -24,7 +24,7 @@ def main() -> int:
             requests.append({
                 "bookmarkKey": key,
                 "title": item.get("title", ""),
-                "topic": item.get("topic", "general"),
+                "topic": get_approval_topic(item),
                 "path": item.get("path", ""),
                 "reviewDoc": item.get("reviewDoc", ""),
                 "analysis": item.get("analysis"),
@@ -43,7 +43,7 @@ def main() -> int:
             requests.append({
                 "bookmarkKey": key,
                 "title": item.get("title", ""),
-                "topic": item.get("topic", "general"),
+                "topic": get_approval_topic(item),
                 "path": item.get("path", ""),
                 "reviewDoc": item.get("reviewDoc", ""),
                 "analysis": item.get("analysis"),

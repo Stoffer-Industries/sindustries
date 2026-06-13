@@ -16,6 +16,7 @@ from common import (
     gh_pr_assignees,
     gh_pr_ci_checks,
     gh_pr_ci_state,
+    heading_level,
     is_at,
     is_past,
     move_task,
@@ -70,7 +71,9 @@ def owner_sections(description: str) -> list[tuple[str, int]]:
         (m.start(), m) for m in OWNER_HEADING_RE.finditer(description)
     ]
     for idx, (start, match) in enumerate(heading_indices):
-        end = heading_indices[idx + 1][0] if idx + 1 < len(heading_indices) else next_heading_pos(description, match.end())
+        end = heading_indices[idx + 1][0] if idx + 1 < len(heading_indices) else next_heading_pos(
+            description, match.end(), heading_level(match.group(0))
+        )
         sections.append((description[start:end], idx))
     return sections
 
@@ -147,7 +150,9 @@ def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str
         for h_idx in range(len(owner_matches) - 1, -1, -1):
             match = owner_matches[h_idx]
             start = match.end()
-            end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else next_heading_pos(result, start)
+            end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else next_heading_pos(
+                result, start, heading_level(match.group(0))
+            )
             block = result[start:end]
             if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
                 heading_idx = h_idx

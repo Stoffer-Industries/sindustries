@@ -10,7 +10,7 @@ Covers:
 The new curation schema (per item):
   {
     curation: { createdAt, topic, score, reasoning,
-                relevanceScores, activeTopics, threshold } | absent
+                relevanceScores, threshold } | absent
   }
 Status is no longer the verdict — it's just where the item is in the pipeline.
 """
@@ -344,7 +344,7 @@ class ValidateCurateOutputTests(unittest.TestCase):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         artifact = {
             "producedAt": _now_iso(),
-            "config": config or {"activeTopics": ["brain"], "threshold": 7},
+            "config": config or {"topics": ["brain", "infra"], "relevanceThreshold": 7},
             "processed": len(decisions),
             "remaining": 0,
             "decisions": decisions,
@@ -367,12 +367,21 @@ class ValidateCurateOutputTests(unittest.TestCase):
             "topic": "brain",
             "score": 8.0,
             "reasoning": "test reasoning",
-            "relevanceScores": [],
-            "activeTopics": ["brain", "infra"],
             "threshold": 7.0,
             "createdAt": _now_iso(),
         }
         d.update(overrides)
+        if "relevanceScores" not in overrides:
+            selected_topic = d["topic"]
+            selected_score = d["score"]
+            d["relevanceScores"] = [
+                {
+                    "topic": topic,
+                    "score": selected_score if topic == selected_topic else min(float(selected_score) - 1, 6),
+                    "reasoning": "test score",
+                }
+                for topic in ("brain", "infra")
+            ]
         return d
 
     def test_writes_curation_sub_object(self):
@@ -435,6 +444,41 @@ class ValidateCurateOutputTests(unittest.TestCase):
         }])
         out = self._run()
         self.assertEqual(len(out["invalid"]), 1)
+
+    def test_rejects_missing_topic_scores(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"},
+        })
+        decision = self._decision("k1")
+        decision["relevanceScores"] = [{"topic": "brain", "score": 8}]
+        self._write_artifact([decision])
+        out = self._run()
+        self.assertEqual(len(out["invalid"]), 1)
+        self.assertIn("missing configured topics", " ".join(out["invalid"][0]["errors"]))
+
+    def test_rejects_selected_topic_that_is_not_maximum(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"},
+        })
+        decision = self._decision("k1", topic="brain", score=7)
+        decision["relevanceScores"] = [
+            {"topic": "brain", "score": 7},
+            {"topic": "infra", "score": 9},
+        ]
+        self._write_artifact([decision])
+        out = self._run()
+        self.assertEqual(len(out["invalid"]), 1)
+        self.assertIn("maximum relevance score", " ".join(out["invalid"][0]["errors"]))
+
+    def test_rejects_unconfigured_selected_topic(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"},
+        })
+        decision = self._decision("k1", topic="crypto", score=9)
+        self._write_artifact([decision])
+        out = self._run()
+        self.assertEqual(len(out["invalid"]), 1)
+        self.assertIn("configured topics", " ".join(out["invalid"][0]["errors"]))
         state = json.loads(self.state_path.read_text())
         self.assertNotIn("curation", state["items"]["k1"])
 

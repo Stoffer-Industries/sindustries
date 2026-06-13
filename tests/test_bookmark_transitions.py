@@ -73,7 +73,7 @@ class SummarizeTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.state_path = self.root / "brain" / "state" / "bookmark-review-state.json"
-        self.reviews_root = self.root / "brain" / "reviews"
+        self.reviews_root = self.root / "brain" / "bookmarks" / "summaries"
         self.bookmark = {
             "bookmarkKey": "abc123",
             "path": "brain/bookmarks/infra/sample.md",
@@ -123,14 +123,14 @@ class SummarizeTests(unittest.TestCase):
         state = common.load_state(self.state_path)
         item = state["items"]["abc123"]
         self.assertEqual(item["reviewStatus"], "summarized")
-        self.assertEqual(item["summary"]["signalQuality"], "high")
+        self.assertNotIn("signalQuality", item["summary"])
         self.assertIn("summaryDoc", item)
 
         doc_path = self.root / item["summaryDoc"]
         self.assertTrue(doc_path.exists())
         content = doc_path.read_text()
         self.assertIn("A local-first agent memory tool", content)
-        self.assertIn("Signal Quality", content)
+        self.assertNotIn("Signal Quality", content)
 
     def test_summarize_skips_item_with_existing_summary_on_disk(self):
         # Pre-populate state + doc so the skip-if-exists path is taken
