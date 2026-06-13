@@ -22,7 +22,7 @@ def _spec_doc_path(spec_doc: str) -> Path:
     spec_doc = (spec_doc or "").strip()
     if not spec_doc:
         return SPECS_ROOT
-    if spec_doc.startswith("brain/specs/"):
+    if spec_doc.startswith("brain/bookmarks/specs/") or spec_doc.startswith("brain/specs/"):
         return WORKSPACE / spec_doc
     return SPECS_ROOT / spec_doc
 
