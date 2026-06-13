@@ -61,7 +61,7 @@ def analyze(items: dict[str, dict[str, Any]]) -> dict[str, Any]:
             spec_items.append(compact)
         if review_status in {"approval_pending", "revision_staged"} or approval_status == "pending":
             approval_pending_items.append(compact)
-        if review_status in {"queued_for_spec", "spec_created", "approval_pending", "revision_staged"}:
+        if review_status in {"spec_created", "approval_pending", "revision_staged"}:
             stale_candidates.append(compact)
 
     latest_updates = sorted(

@@ -33,7 +33,7 @@ def approval_recoverable_items(state_items: dict, seen_keys: set[str]) -> list[d
             "path": item.get("path"),
             "topic": item.get("topic"),
             "title": item.get("title"),
-            "reviewStatus": "queued_for_spec",
+            "reviewStatus": "spec_created",
             "reviewDoc": item.get("reviewDoc"),
             "analysis": item.get("analysis") or {},
             "specDocs": item.get("specDocs") or [],

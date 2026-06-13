@@ -54,4 +54,4 @@ Combine filters when narrowing the report.
 - Prefer the analyzer for summaries, counts, and triage.
 - Read the raw JSON only when you need fields the analyzer does not expose.
 - If the user asks for a new bucket or metric repeatedly, extend `codebases/sindustries/agents/workflows/bookmark/analyze_state.py` rather than repeatedly loading the full state file.
-- Treat `queued_for_spec`, `spec_created`, and `approval_pending` as likely follow-up states unless the workflow semantics change.
+- Treat `spec_created` and `approval_pending` as likely follow-up states unless the workflow semantics change.

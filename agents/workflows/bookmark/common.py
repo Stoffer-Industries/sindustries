@@ -529,20 +529,6 @@ def find_bookmark_files(root: Path = BOOKMARKS_ROOT) -> list[Path]:
     return sorted([p for p in root.rglob("*.md") if p.is_file()])
 
 
-def review_status_from_classification(classification: str) -> str:
-    mapping = {
-        "ignore": "reviewed",
-        "monitor": "monitoring",
-        # "implement" is a review judgment, not a durable workflow state.
-        # Use an explicit queue state for downstream spec generation.
-        "implement": "queued_for_spec",
-    }
-    try:
-        return mapping[classification]
-    except KeyError as exc:
-        raise ValueError(f"unsupported bookmark classification: {classification}") from exc
-
-
 def llm_provenance() -> dict[str, Any] | None:
     return dict(_LAST_LLM_PROVENANCE) if _LAST_LLM_PROVENANCE else None
 
