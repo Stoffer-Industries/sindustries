@@ -33,8 +33,8 @@ def to_wiki_link(path: str) -> str:
     """Convert file path to Obsidian-style wiki link [[filename]].
     
     Examples:
-        brain/reviews/infra/foo.md -> [[foo.md]]
-        brain/specs/infra/bar.md -> [[bar.md]]
+        brain/bookmarks/summaries/foo.md -> [[foo.md]]
+        brain/bookmarks/specs/bar.md -> [[bar.md]]
     """
     if not path:
         return path
@@ -153,8 +153,9 @@ SPECS_REVISED_ROOT = WORKSPACE / "brain" / "specs-revised"
 
 
 def spec_doc_path(specs_root: Path, topic: str, spec_title: str, bookmark_key: str, index: int) -> Path:
+    # flat — topic no longer appears in the file path
     suffix = "" if index == 0 else f"-part-{index + 1}"
-    return specs_root / topic / f"{slugify(spec_title)}-{bookmark_key}{suffix}.md"
+    return specs_root / f"{slugify(spec_title)}-{bookmark_key}{suffix}.md"
 
 
 def revised_spec_doc_path(topic: str, spec_doc: str) -> Path:
@@ -584,7 +585,12 @@ def main() -> int:
             stored_total_tasks = sum(
                 len(p.get("proposedTasks", [])) for p in existing_spec_proposals
             )
-            spec_needs_sync = (disk_total_tasks != stored_total_tasks)
+            # Also force sync when stored tasks are empty but spec file exists —
+            # prevents a permanent stall when the LLM produced an empty proposedTasks
+            # array and the parser also returns 0 (both sides equal, sync never fires).
+            spec_needs_sync = (disk_total_tasks != stored_total_tasks) or (
+                stored_total_tasks == 0 and bool(valid_existing_spec_docs)
+            )
             if spec_needs_sync:
                 previous_status = state_item.get("reviewStatus")
                 revised_proposals = []

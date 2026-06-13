@@ -438,7 +438,7 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
             "stackFocus": "memory capture, review quality, information organization, and synthesis",
             "adjacentComponents": [
                 "brain/bookmarks/",
-                "brain/reviews/",
+                "brain/bookmarks/summaries/",
                 "MEMORY.md and daily memory files",
             ],
             "evaluationQuestions": [
@@ -476,8 +476,8 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "design": {
             "stackFocus": "taste, interface clarity, and differentiated product presentation",
             "adjacentComponents": [
-                "brain/reviews/",
-                "brain/specs/",
+                "brain/bookmarks/summaries/",
+                "brain/bookmarks/specs/",
                 "future product-facing surfaces",
             ],
             "evaluationQuestions": [
