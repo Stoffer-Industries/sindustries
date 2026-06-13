@@ -189,7 +189,9 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
         item["approvalStatus"] = "approved" if approved else "declined"
         item["approvalResolvedAt"] = now_iso()
         if not approved:
-            item["reviewStatus"] = "declined"
+            # Reset to summarised so the pipeline can re-curate and re-spec with updated review
+            item["reviewStatus"] = "summarised"
+            item["curation"] = None
         elif item.get("taskIds") or []:
             item["reviewStatus"] = "tasked"
         else:
@@ -306,7 +308,7 @@ def summarize_post_resume_state(state: dict, approval_id: str, decision: str, ex
         bookmark_keys.append(key)
         task_ids.extend(str(tid) for tid in (item.get("taskIds") or []))
         status = item.get("reviewStatus")
-        if status == "declined":
+        if item.get("approvalStatus") == "declined":
             declined += 1
         elif status == "tasked":
             tasked += 1
@@ -315,7 +317,7 @@ def summarize_post_resume_state(state: dict, approval_id: str, decision: str, ex
 
     unique_task_ids = list(dict.fromkeys(task_ids))
     if decision == "decline":
-        summary = f"Declined {approval_id} — marked {declined or len(bookmark_keys)} spec{'s' if (declined or len(bookmark_keys)) != 1 else ''} declined"
+        summary = f"Declined {approval_id} — reset {declined or len(bookmark_keys)} bookmark{'s' if (declined or len(bookmark_keys)) != 1 else ''} to summarised for re-curation"
     elif unique_task_ids:
         summary = f"Approved {approval_id} — created/linked {len(unique_task_ids)} task{'s' if len(unique_task_ids) != 1 else ''}"
     elif tasked:
