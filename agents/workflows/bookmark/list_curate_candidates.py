@@ -25,7 +25,7 @@ The heartbeat BOOKMARK CURATION step:
 
 Focus config lives in brain/state/focus-config.json:
   {
-    "activeTopics": ["brain", "infra"],
+    "topics": ["brain", "infra", "crypto", "app-tasks", "app-assistant", "outreach", "design", "personal", "general"],
     "relevanceThreshold": 7,
     "recurationDays": 14,
     "batchSize": 5
