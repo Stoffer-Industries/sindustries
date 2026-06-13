@@ -48,20 +48,20 @@ Before drafting:
 ### File location
 
 ```
-/Users/quinnstoffer/.openclaw/workspace/brain/specs/<topic>/<slug>-<bookmark_key>.md
+/Users/quinnstoffer/.openclaw/workspace/brain/bookmarks/specs/<slug>-<bookmark_key>.md
 ```
 
-Use kebab-case for the slug, derived from the spec title.
+Use kebab-case for the slug, derived from the spec title. No topic subfolder — flat.
 
 ### Relative link paths — important
 
-The spec lives at `brain/specs/<topic>/`. The `brain/` directory is a symlink to iCloud. Markdown renderers (Obsidian, VS Code) do not re-enter the symlink after traversing above it, so links must stay **within** the `brain/` tree.
+The spec lives at `brain/bookmarks/specs/` (one level inside `brain/bookmarks/`). The `brain/` directory is a symlink to iCloud. Links must stay **within** the `brain/` tree.
 
-- Bookmark link: `../../bookmarks/x/<filename>.md` — two levels up from `brain/specs/<topic>/` reaches `brain/`, then into bookmarks (flat, no topic subfolder)
-- Summary link: `../../bookmarks/summaries/<filename>.md` — same base, into summaries (flat, no topic subfolder)
-- Do **not** use `../../../brain/...` — that exits the symlink and breaks in all markdown viewers
+- Bookmark link: `../x/<filename>.md` — one level up reaches `brain/bookmarks/`, then `x/`
+- Summary link: `../summaries/<filename>.md` — same base, into `summaries/`
+- Do **not** use `../../brain/...` or deeper — that exits the symlink boundary
 
-Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs) cannot be linked relatively from inside brain. Reference them by name only, no link.
+Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs) cannot be linked relatively. Reference by name only, no link.
 
 ### Format
 
@@ -71,8 +71,8 @@ The spec follows the code-factory product spec template so it can be used direct
 # Spec — <Title>
 
 ## Source
-- **Bookmark:** [<bookmark filename>](../../bookmarks/x/<bookmark filename>)
-- **Summary:** [<summary filename>](../../bookmarks/summaries/<summary filename>)
+- **Bookmark:** [<bookmark filename>](../x/<bookmark filename>)
+- **Summary:** [<summary filename>](../summaries/<summary filename>)
 - **Topic:** `<topic>`
 - **Spec Type:** `<infra workflow | assistant feature | app feature | data pipeline | tooling>`
 - **Systems:** [<system name>](<path to relevant system spec or state file>) — omit if none

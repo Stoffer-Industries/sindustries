@@ -20,7 +20,7 @@ WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().par
 # brain is a symlink to iCloud - don't resolve it to avoid cross-device paths
 BOOKMARKS_ROOT = WORKSPACE / "brain" / "bookmarks"
 REVIEWS_ROOT = WORKSPACE / "brain" / "bookmarks" / "summaries"
-SPECS_ROOT = WORKSPACE / "brain" / "specs"
+SPECS_ROOT = WORKSPACE / "brain" / "bookmarks" / "specs"
 STATE_ROOT = WORKSPACE / "brain" / "state"
 STATE_PATH = STATE_ROOT / "bookmark-review-state.json"
 TRANSITIONS_PATH = STATE_ROOT / "bookmark-transitions.jsonl"

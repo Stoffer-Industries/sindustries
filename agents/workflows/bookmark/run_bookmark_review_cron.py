@@ -16,7 +16,7 @@ STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
 DEFAULT_ARGS = {
     "sourceRoot": "brain/bookmarks",
     "reviewsRoot": "brain/bookmarks/summaries",
-    "specsRoot": "brain/specs",
+    "specsRoot": "brain/bookmarks/specs",
     "limit": 5,
     "source": "any",
     "dryRun": False,
