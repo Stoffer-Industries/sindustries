@@ -422,14 +422,16 @@ class BookmarkWorkflowTests(unittest.TestCase):
         approval = requested["approvals"][0]
         self.assertEqual(approval["proposedTasks"][0]["title"], "Wire structured review analysis")
         self.assertEqual(approval["items"][0]["bookmarkKey"], self.bookmark["bookmarkKey"])
-        self.assertIn("No tasks will be created until you approve", approval["message"])
+        self.assertIn("Reply: `approve` / `decline`", approval["message"])
         self.assertIn("Wire structured review analysis", approval["message"])
         self.assertIsNone(approval["delivery"])
 
         updated_state = common.load_state(self.state_path)
-        self.assertEqual(updated_state["items"][self.bookmark["bookmarkKey"]]["approvalStatus"], "pending")
-        self.assertEqual(updated_state["items"][self.bookmark["bookmarkKey"]]["approvalResumeToken"], "resume-token-1")
-        self.assertEqual(updated_state["items"][self.bookmark["bookmarkKey"]]["reviewStatus"], "approval_pending")
+        item = updated_state["items"][self.bookmark["bookmarkKey"]]
+        self.assertNotIn("approvalStatus", item)
+        self.assertNotIn("approvalResumeToken", item)
+        self.assertEqual(item["reviewStatus"], "spec_created")
+        self.assertNotIn("infra", updated_state["approvalLocks"])
 
     def test_resolve_delivery_config_prefers_topic_file(self):
         self.approval_topics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -549,6 +551,58 @@ class BookmarkWorkflowTests(unittest.TestCase):
         sent_args = send_mock.call_args.args[0]
         self.assertIn("--thread-id", sent_args)
         self.assertIn("-1003262754118", sent_args)
+
+    def test_request_topic_approval_releases_claim_when_delivery_has_no_ids(self):
+        state = common.state_template()
+        state["items"][self.bookmark["bookmarkKey"]] = {
+            "bookmarkKey": self.bookmark["bookmarkKey"],
+            "topic": "infra",
+            "title": self.bookmark["title"],
+            "reviewStatus": "spec_created",
+            "specDocs": ["brain/bookmarks/specs/infra/example.md"],
+            "taskIds": [],
+        }
+        common.save_state(state, self.state_path)
+        prepared = {
+            "readyPackages": [{
+                "topic": "infra",
+                "approvalTopic": "infra",
+                "resumeToken": "resume-token-failed-delivery",
+                "items": [{
+                    "bookmarkKey": self.bookmark["bookmarkKey"],
+                    "specDocs": ["brain/bookmarks/specs/infra/example.md"],
+                    "proposedTasks": [],
+                }],
+                "proposedTasks": [],
+            }],
+            "blockedPackages": [],
+        }
+        delivery = {
+            "channel": "telegram",
+            "target": "-1003262754118",
+            "threadId": "2",
+        }
+
+        request_in = io.StringIO(json.dumps(prepared))
+        request_out = io.StringIO()
+        with patch.object(request_topic_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_topic_approval, "resolve_delivery_config", return_value=(delivery, None)), \
+             patch.object(request_topic_approval, "deliver_approval_message", return_value={
+                 "messageId": None,
+                 "threadId": None,
+                 "result": {"ok": False, "error": "telegram unavailable"},
+             }):
+            with patch("sys.stdin", request_in), patch("sys.stdout", request_out), patch.object(sys, "argv", ["request_topic_approval.py"]):
+                rc = request_topic_approval.main()
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(request_out.getvalue())
+        self.assertEqual(payload["approvals"][0]["deliveryError"], "telegram unavailable")
+        updated_state = common.load_state(self.state_path)
+        item = updated_state["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "spec_created")
+        self.assertNotIn("approvalId", item)
+        self.assertNotIn("infra", updated_state["approvalLocks"])
 
     def test_next_revised_live_spec_doc_adds_and_increments_rev_suffix(self):
         self.assertEqual(
@@ -763,6 +817,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "source": self.bookmark["source"],
             "title": self.bookmark["title"],
             "reviewStatus": "spec_created",
+            "specDocs": ["brain/bookmarks/specs/infra/example.md"],
             "taskIds": [],
         }
         common.save_state(state, self.state_path)
@@ -771,7 +826,11 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "readyPackages": [{
                 "topic": "infra",
                 "approvalTopic": "infra",
-                "items": [{"bookmarkKey": self.bookmark["bookmarkKey"], "proposedTasks": [{"title": "Implement harness review"}]}],
+                "items": [{
+                    "bookmarkKey": self.bookmark["bookmarkKey"],
+                    "specDocs": ["brain/bookmarks/specs/infra/example.md"],
+                    "proposedTasks": [{"title": "Implement harness review"}],
+                }],
                 "proposedTasks": [{"title": "Implement harness review"}],
             }],
             "blockedPackages": [],

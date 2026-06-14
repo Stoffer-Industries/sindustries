@@ -476,30 +476,31 @@ def _main_locked(data: dict[str, Any]) -> int:
                     result_payload = delivery_result.get("result") or {}
                     if isinstance(result_payload, dict) and result_payload.get("error"):
                         delivery_error = str(result_payload.get("error"))
-                delivery_confirmed = bool(delivered_message_id or delivered_thread_id)
-            except json.JSONDecodeError as exc:
+                delivery_confirmed = bool(delivered_message_id)
+            except Exception as exc:  # noqa: BLE001
                 delivery_error = str(exc)
         if delivery and not delivery_confirmed and not delivery_error:
-            delivery_error = "approval message did not return a messageId or threadId"
-        # Persist approval/revision-staged state whenever an approval package is generated.
-        # Delivery metadata is best-effort and may be absent in tests or when the transport
-        # returns no message/thread IDs, but the approval lock itself must still be recorded.
-        for bookmark_key, state_item in pending_state_updates:
-            previous_status = state_item.pop("_previousReviewStatus", None)
-            if delivered_message_id:
-                state_item["approvalMessageId"] = delivered_message_id
-            if delivered_thread_id:
-                state_item["approvalThreadId"] = delivered_thread_id
-            elif stage_only and delivery and delivery.get("threadId"):
-                state_item["approvalThreadId"] = delivery.get("threadId")
-            items[bookmark_key] = state_item
-            log_transition(
-                bookmark_key,
-                previous_status,
-                state_item.get("reviewStatus"),
-                f"approval request staged for topic={topic}; stageOnly={stage_only}",
-                transitions_path=transition_log_path(Path(STATE_PATH)),
-            )
+            delivery_error = "approval message did not return a messageId"
+        persist_claim = stage_only or delivery_confirmed
+        if persist_claim:
+            for bookmark_key, state_item in pending_state_updates:
+                previous_status = state_item.pop("_previousReviewStatus", None)
+                if delivered_message_id:
+                    state_item["approvalMessageId"] = delivered_message_id
+                if delivered_thread_id:
+                    state_item["approvalThreadId"] = delivered_thread_id
+                elif stage_only and delivery and delivery.get("threadId"):
+                    state_item["approvalThreadId"] = delivery.get("threadId")
+                items[bookmark_key] = state_item
+                log_transition(
+                    bookmark_key,
+                    previous_status,
+                    state_item.get("reviewStatus"),
+                    f"approval request staged for topic={topic}; stageOnly={stage_only}",
+                    transitions_path=transition_log_path(Path(STATE_PATH)),
+                )
+        else:
+            approval_locks.pop(topic, None)
         approvals.append({
             "topic": topic,
             "approvalId": approval_id,
@@ -526,7 +527,7 @@ def _main_locked(data: dict[str, Any]) -> int:
         "monitoring": data.get("monitoring", []),
         "reviewed": data.get("reviewed", []),
         "stageOnly": stage_only,
-        "note": "Approval claim, delivery, and state persistence are serialized with an OS file lock. Existing approvalLocks entries block later runs by topic.",
+        "note": "Approval claim, delivery, and state persistence are serialized with an OS file lock. Failed deliveries release their topic lock for retry.",
     })
     return 0
 
