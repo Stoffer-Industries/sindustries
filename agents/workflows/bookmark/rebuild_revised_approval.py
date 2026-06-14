@@ -9,13 +9,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-WORKSPACE = Path(__file__).resolve().parents[2]
+_env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
+WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
+_BOOKMARK_WF = WORKSPACE / 'codebases' / 'sindustries' / 'agents' / 'workflows' / 'bookmark'
 STATE_PATH = WORKSPACE / 'brain' / 'state' / 'bookmark-review-state.json'
-GENERATE_SPECS = WORKSPACE / 'scripts' / 'bookmarks' / 'generate_specs.py'
-BUILD_TASK_PROPOSALS = WORKSPACE / 'scripts' / 'bookmarks' / 'build_task_proposals.py'
-PREPARE_TOPIC_APPROVAL = WORKSPACE / 'scripts' / 'bookmarks' / 'prepare_topic_approval.py'
-ENSURE_TOPIC_SLOT_AVAILABLE = WORKSPACE / 'scripts' / 'bookmarks' / 'ensure_topic_slot_available.py'
-REQUEST_TOPIC_APPROVAL = WORKSPACE / 'scripts' / 'bookmarks' / 'request_topic_approval.py'
+GENERATE_SPECS = _BOOKMARK_WF / 'generate_specs.py'
+BUILD_TASK_PROPOSALS = _BOOKMARK_WF / 'build_task_proposals.py'
+PREPARE_TOPIC_APPROVAL = _BOOKMARK_WF / 'prepare_topic_approval.py'
+ENSURE_TOPIC_SLOT_AVAILABLE = _BOOKMARK_WF / 'ensure_topic_slot_available.py'
+REQUEST_TOPIC_APPROVAL = _BOOKMARK_WF / 'request_topic_approval.py'
 
 
 def run_json(cmd: list[str], stdin_data: dict | None = None, env: dict[str, str] | None = None) -> dict:
