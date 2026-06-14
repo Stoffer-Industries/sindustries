@@ -553,8 +553,6 @@ def main() -> int:
     for item in implement:
         state_item = items.get(item["bookmarkKey"], {})
         analysis = state_item.get("analysis") or item.get("analysis")
-        if not analysis:
-            raise RuntimeError(f"missing review analysis for bookmark {item['bookmarkKey']}")
         hydrated_item = merge_bookmark_context({**state_item, **item})
 
         # Reuse existing spec artifacts when they already exist and approval/tasking hasn't happened.

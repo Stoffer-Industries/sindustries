@@ -19,15 +19,13 @@ def main() -> int:
     for key, item in items.items():
         status = item.get("reviewStatus")
         if status == "spec_requested":
-            if not item.get("analysis"):
-                continue
             requests.append({
                 "bookmarkKey": key,
                 "title": item.get("title", ""),
                 "topic": get_approval_topic(item),
                 "path": item.get("path", ""),
                 "reviewDoc": item.get("reviewDoc", ""),
-                "analysis": item.get("analysis"),
+                "curation": item.get("curation"),
                 "link": item.get("link", ""),
                 "tags": item.get("tags", []),
                 "requestType": "new",
@@ -38,15 +36,13 @@ def main() -> int:
             revision_text = str(item.get("latestRevisionRequest") or "").strip()
             if not revision_text:
                 continue
-            if not item.get("analysis"):
-                continue
             requests.append({
                 "bookmarkKey": key,
                 "title": item.get("title", ""),
                 "topic": get_approval_topic(item),
                 "path": item.get("path", ""),
                 "reviewDoc": item.get("reviewDoc", ""),
-                "analysis": item.get("analysis"),
+                "curation": item.get("curation"),
                 "link": item.get("link", ""),
                 "tags": item.get("tags", []),
                 "requestType": "revision",
