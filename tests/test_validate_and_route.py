@@ -654,6 +654,52 @@ class ValidateSpecOutputTests(unittest.TestCase):
         self.assertEqual(len(out["invalid"]), 1)
         self.assertIn("priority", out["invalid"][0]["errors"][0])
 
+    def test_rejects_unknown_bookmark_key_without_creating_state(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"},
+        })
+        self._make_spec("brain/spec.md")
+        self._write_artifact([{
+            "bookmarkKey": "typo-k1",
+            "reviewDoc": "brain/reviews/k1.md",
+            "requestType": "new",
+            "specs": [{
+                "title": "Spec",
+                "specDoc": "brain/spec.md",
+                "proposedTasks": [],
+            }],
+        }])
+
+        out = self._run()
+
+        self.assertEqual(len(out["invalid"]), 1)
+        self.assertIn("does not exist", out["invalid"][0]["errors"][0])
+        state = json.loads(self.state_path.read_text())
+        self.assertNotIn("typo-k1", state["items"])
+
+    def test_rejects_bookmark_not_waiting_for_spec(self):
+        _load_state(self.state_path, {
+            "k1": {"bookmarkKey": "k1", "reviewStatus": "summarized"},
+        })
+        self._make_spec("brain/spec.md")
+        self._write_artifact([{
+            "bookmarkKey": "k1",
+            "reviewDoc": "brain/reviews/k1.md",
+            "requestType": "new",
+            "specs": [{
+                "title": "Spec",
+                "specDoc": "brain/spec.md",
+                "proposedTasks": [],
+            }],
+        }])
+
+        out = self._run()
+
+        self.assertEqual(len(out["invalid"]), 1)
+        self.assertIn("spec_requested or revision_requested", out["invalid"][0]["errors"][0])
+        state = json.loads(self.state_path.read_text())
+        self.assertEqual(state["items"]["k1"]["reviewStatus"], "summarized")
+
     def test_no_artifact_is_noop(self):
         out = self._run()
         self.assertEqual(out["applied"], [])
