@@ -255,7 +255,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         message = request_topic_approval.build_approval_message(package)
 
         self.assertIn("Approval request: infra", message)
-        self.assertIn("No tasks will be created until you approve", message)
+        self.assertIn("Reply: `approve` / `decline`", message)
         self.assertIn("Proposed tasks", message)
         self.assertIn("Spec path", message)
         self.assertIn("Reply: `approve` / `decline`", message)
@@ -1619,7 +1619,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "path": "brain/bookmarks/general/monitor.md",
             "topic": "general",
             "title": "Monitor",
-            "reviewStatus": "implement",
+            "reviewStatus": "monitoring",
         }
         common.save_state(state, self.state_path)
 
@@ -1642,7 +1642,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         updated_state = common.load_state(self.state_path)
         self.assertEqual(updated_state["items"]["reviewed-item"]["reviewStatus"], "reviewed")
-        self.assertEqual(updated_state["items"]["monitor-item"]["reviewStatus"], "monitoring")
+        self.assertEqual(updated_state["items"]["monitor-item"]["reviewStatus"], "summarized")
 
     def test_finalize_review_cycle_marks_blocked_packages_as_queued(self):
         state = common.state_template()
