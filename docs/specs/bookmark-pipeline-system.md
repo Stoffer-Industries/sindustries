@@ -80,7 +80,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 **Terminal statuses** (filter_curation skips these even with a high curation score):
 `tasked`, `declined`, `approval_pending`, `revision_staged`, `revision_requested`, `needs_research`
 
-> **Note on `declined`:** Declining is permanent. Use `revise: <changes>` if you want a revised spec instead. To manually re-enter a declined item, reset `reviewStatus` to `summarized` directly in `brain/state/bookmark-review-state.json`.
+> **Note on `declined`:** Declining is permanent. `handle_approval_reply.py` clears the approval claim and preserves `reviewStatus: declined`; it does not clear curation or re-enter the item for curation. Use `revise: <changes>` if you want a revised spec instead. To manually re-enter a declined item, reset `reviewStatus` to `summarized` directly in `brain/state/bookmark-review-state.json`.
 
 ---
 

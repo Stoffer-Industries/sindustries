@@ -189,9 +189,7 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
         item["approvalStatus"] = "approved" if approved else "declined"
         item["approvalResolvedAt"] = now_iso()
         if not approved:
-            # Reset to summarised so the pipeline can re-curate and re-spec with updated review
-            item["reviewStatus"] = "summarised"
-            item["curation"] = None
+            item["reviewStatus"] = "declined"
         elif item.get("taskIds") or []:
             item["reviewStatus"] = "tasked"
         else:
