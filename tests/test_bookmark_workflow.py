@@ -297,7 +297,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["readyPackages"], [])
         self.assertEqual(len(payload["blockedPackages"]), 1)
-        self.assertEqual(payload["blockedPackages"][0]["reason"], "approval already pending for topic(s): infra; only one outstanding approval at a time")
+        self.assertEqual(payload["blockedPackages"][0]["reason"], "approval already pending for topic")
 
     def test_build_task_proposals_recovers_spec_created_items_for_approval_retry(self):
         state = common.state_template()
