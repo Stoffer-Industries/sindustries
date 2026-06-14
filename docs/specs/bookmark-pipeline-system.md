@@ -16,21 +16,21 @@ Turn X/Twitter bookmarks into approved implementation specs and Tasks API tasks,
 
 ```
 ingest → summarize → curate → spec_requested → spec_created → approval_pending → tasked
-                                                                      ↓
-                                                             declined (terminal)
+   ↓          ↓                                                        ↓
+ingested  summarized                                          declined (terminal)
                                                              revision_requested → spec_created (loop)
 ```
 
 ### 1. Ingest
 - **Cron:** `bookmark-ingestion.md` (runs `run_x_ingest.py`)
 - Pulls new bookmarks from X, writes raw markdown to `brain/bookmarks/x/<slug>.md`
-- Sets `reviewStatus: summarized` (no analysis yet, just raw content)
+- Sets `reviewStatus: ingested`
 
 ### 2. Summarize
-- Lobster step: `summarize.py`
-- Reads the raw bookmark, runs LLM pass, writes summary to `brain/bookmarks/summaries/<slug>-<key>.md`
+- **Separate lobster cron** (runs `summarize.py`)
+- Picks up `ingested` items, runs LLM pass, writes summary to `brain/bookmarks/summaries/<slug>-<key>.md`
 - Summary shape: `headline`, `problem`, `approach`, `valueProposition`, `keyDetails`, `relevantTo`, `constraints`
-- Stores summary object on the state item; does NOT set an opinion on whether to implement
+- Sets `reviewStatus: summarized`; does NOT set an opinion on whether to implement
 
 ### 3. Curate
 - **Heartbeat step** (Quinn) — see `HEARTBEAT.md` → BOOKMARK CURATION
@@ -66,7 +66,8 @@ ingest → summarize → curate → spec_requested → spec_created → approval
 
 | Status | Description | Next states |
 |---|---|---|
-| `summarized` | Raw bookmark ingested and summarized | curate → `summarized` (low score) or → `spec_requested` |
+| `ingested` | Raw bookmark pulled from X; not yet summarized | → `summarized` (summarize cron) |
+| `summarized` | Summary written by lobster summarize cron | curate → stays `summarized` (low score) or → `spec_requested` |
 | `spec_requested` | Queued for Quinn heartbeat spec writing | → `spec_created` |
 | `spec_created` | Spec file exists on disk | → `approval_pending` |
 | `approval_pending` | Approval message sent to Tom | → `tasked`, `declined`, `revision_requested` |
