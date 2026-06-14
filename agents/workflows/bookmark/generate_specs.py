@@ -661,12 +661,23 @@ def main() -> int:
                 "lastUpdatedAt": now_iso(),
             })
             items[item["bookmarkKey"]] = state_item
+            tlog = transition_log_path(Path(STATE_PATH))
             log_transition(
                 item["bookmarkKey"],
                 previous_status,
                 "spec_requested",
                 "queued for Quinn heartbeat spec dispatch",
-                transitions_path=transition_log_path(Path(STATE_PATH)),
+                transitions_path=tlog,
+            )
+            # Log curation bucket exit so the dashboard chart can show
+            # "Curated: High Signal" decreasing as specs are requested.
+            # to=None means only the `from` side is adjusted in backward reconstruction.
+            log_transition(
+                item["bookmarkKey"],
+                "Curated: High Signal",
+                None,
+                "curation bucket exit → spec_requested",
+                transitions_path=tlog,
             )
 
     save_state(state, Path(STATE_PATH))

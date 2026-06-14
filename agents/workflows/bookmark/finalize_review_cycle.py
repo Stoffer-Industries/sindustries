@@ -49,14 +49,12 @@ def main() -> int:
             finalized["reviewed"].append(bookmark_key)
 
     for review in data.get("monitoring", []):
+        # reviewStatus="monitoring" is retired — curation score is the signal.
+        # Heal any item that somehow still carries the old status.
         bookmark_key = review.get("bookmarkKey")
-        if bookmark_key and update_item(
-            items,
-            bookmark_key,
-            "finalized monitoring item",
-            Path(STATE_PATH),
-            reviewStatus="monitoring",
-        ):
+        item = items.get(bookmark_key) if bookmark_key else None
+        if item and item.get("reviewStatus") == "monitoring":
+            update_item(items, bookmark_key, "heal: retired monitoring status → summarized", Path(STATE_PATH), reviewStatus="summarized")
             finalized["monitoring"].append(bookmark_key)
 
     for package in data.get("blockedPackages", []):
