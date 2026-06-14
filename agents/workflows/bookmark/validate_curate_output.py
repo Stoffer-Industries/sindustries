@@ -257,10 +257,16 @@ def main() -> int:
             continue
 
         topic, action = apply_curation(state, decision)
+        threshold = new_curation["threshold"]
+        new_bucket = "Curated: High Signal" if new_curation["score"] >= threshold else "Curated: Monitoring"
+        old_bucket = None
+        if old_curation:
+            old_thr = old_curation.get("threshold", threshold)
+            old_bucket = "Curated: High Signal" if old_curation.get("score", 0) >= old_thr else "Curated: Monitoring"
         log_transition(
             bookmark_key,
-            None,
-            None,
+            old_bucket,
+            new_bucket,
             f"curation {action} (topic={topic} score={new_curation['score']})",
             transitions_path=transitions_path,
         )

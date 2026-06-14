@@ -106,6 +106,16 @@
     .sankey-node text { font: 12px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--ink); }
     .sankey-link { fill: none; stroke-opacity: 0.25; }
     .sankey-link:hover { stroke-opacity: 0.45; }
+    #chart-tooltip {
+      position: fixed; pointer-events: none; display: none;
+      background: #fff; border: 1px solid var(--line); border-radius: 7px;
+      padding: 10px 13px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.10);
+      min-width: 160px; z-index: 100;
+    }
+    #chart-tooltip .tt-date { font-weight: 800; margin-bottom: 6px; color: var(--ink); }
+    #chart-tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; padding: 1px 0; }
+    #chart-tooltip .tt-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 5px; flex-shrink: 0; }
+    #chart-tooltip .tt-val { font-variant-numeric: tabular-nums; font-weight: 700; }
     @media (max-width: 760px) {
       .page { padding: 18px 12px 30px; }
       .grid { grid-template-columns: 1fr; }
@@ -184,18 +194,24 @@
     </section>
   </main>
 
+  <div id="chart-tooltip"></div>
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
   <script>
-    const order = ["pending", "ingested", "spec_requested", "monitoring", "spec_created", "revision_staged", "approval_pending", "tasked", "declined"];
+    const order = ["pending", "ingested", "summarized", "Curated: Monitoring", "Curated: High Signal", "spec_requested", "spec_created", "revision_staged", "approval_pending", "tasked", "declined"];
     const colors = {
-      pending: "#8aa0bd", ingested: "#5a6b83", spec_requested: "#2f75d6",
+      pending: "#8aa0bd", ingested: "#8aa0bd", summarized: "#5a6b83",
       monitoring: "#b46a00",
-      spec_created: "#bd1e66", revision_staged: "#7254bd", approval_pending: "#d9257a", tasked: "#148f46", declined: "#a3312b"
+      spec_requested: "#5e3f8a", spec_created: "#bd1e66",
+      revision_staged: "#7254bd", revision_requested: "#9a6fd8",
+      approval_pending: "#d9257a", tasked: "#148f46", declined: "#a3312b",
+      "Curated: Monitoring": "#b46a00", "Curated: High Signal": "#2f75d6",
+      // legacy states — muted so they're visible but clearly historical
+      reviewed: "#c8d0db", summarised: "#c8d0db", queued_for_spec: "#c8d0db",
     };
     const state = { snapshot: { items: {} }, transitions: [] };
     const $ = (id) => document.getElementById(id);
-    const fmtDate = (d) => d.toISOString().slice(0, 10);
+    const fmtDate = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
     const parseDate = (v) => v ? new Date(v) : null;
     const itemList = () => Object.entries(state.snapshot.items || {}).map(([key, item]) => ({ key, ...item }));
     const itemByKey = () => new Map(itemList().map((item) => [item.key, item]));
@@ -278,15 +294,15 @@
       // legacy `reviewed` status is shown as a side branch for visibility.
       const threshold = 7;
       const buckets = {
-        awaiting: 0,
-        curatedWaiting: 0,
+        ingested: 0,
+        summarized: 0,
+        monitoring: 0,
         curatedImplement: 0,
         specRequested: 0,
         specCreated: 0,
         approvalPending: 0,
         tasked: 0,
         declined: 0,
-        reviewed: 0,
       };
       for (const item of items) {
         const status = item.reviewStatus;
@@ -294,46 +310,56 @@
         const hasCuration = !!c;
         const score = c ? Number(c.score || 0) : 0;
         const highScore = hasCuration && score >= threshold;
+        const isSummarized = status === "summarized" || status === "summarised";
         if (status === "spec_requested") buckets.specRequested++;
         else if (status === "spec_created") buckets.specCreated++;
         else if (status === "approval_pending" || status === "revision_staged") buckets.approvalPending++;
         else if (status === "tasked") buckets.tasked++;
         else if (status === "declined") buckets.declined++;
-        else if (status === "reviewed") buckets.reviewed++;
         else if (highScore) buckets.curatedImplement++;
-        else if (hasCuration) buckets.curatedWaiting++;
-        else buckets.awaiting++;
+        else if (hasCuration) buckets.monitoring++;  // low-score curation verdict
+        else if (isSummarized) buckets.summarized++;
+        else buckets.ingested++;
       }
 
+      // count = items currently AT this bucket (matches funnel/chart)
+      // value = used by d3-sankey for visual sizing (set from linkDefs)
+      const summarizedCurrent = buckets.summarized + buckets.monitoring + buckets.curatedImplement;
       const nodeDefs = [
-        { name: "Awaiting curation", value: buckets.awaiting, color: "#5a6b83" },
-        { name: "Curated: waiting", value: buckets.curatedWaiting, color: "#b46a00" },
-        { name: "Curated: implement-bound", value: buckets.curatedImplement, color: "#2f75d6" },
-        { name: "Spec requested", value: buckets.specRequested, color: "#5e3f8a" },
-        { name: "Spec created", value: buckets.specCreated, color: "#bd1e66" },
-        { name: "Awaiting approval", value: buckets.approvalPending, color: "#d9257a" },
-        { name: "Tasked", value: buckets.tasked, color: "#148f46" },
-        { name: "Declined", value: buckets.declined, color: "#a3312b" },
-        { name: "Reviewed (legacy)", value: buckets.reviewed, color: "#275dba" },
+        { name: "Ingested",            count: buckets.ingested,        value: buckets.ingested,        color: "#8aa0bd" },
+        { name: "Summarized",          count: summarizedCurrent,       value: buckets.summarized,      color: "#5a6b83" },
+        { name: "Monitoring",          count: buckets.monitoring,      value: buckets.monitoring,      color: "#b46a00" },
+        { name: "Curated: High Signal",count: buckets.curatedImplement,value: buckets.curatedImplement,color: "#2f75d6" },
+        { name: "Spec requested",      count: buckets.specRequested,   value: buckets.specRequested,   color: "#5e3f8a" },
+        { name: "Spec created",        count: buckets.specCreated,     value: buckets.specCreated,     color: "#bd1e66" },
+        { name: "Awaiting approval",   count: buckets.approvalPending, value: buckets.approvalPending, color: "#d9257a" },
+        { name: "Tasked",              count: buckets.tasked,          value: buckets.tasked,          color: "#148f46" },
+        { name: "Declined",            count: buckets.declined,        value: buckets.declined,        color: "#a3312b" },
       ];
       // Keep all nodes (including 0-value) so the chain stays connected.
       // d3-sankey renders 0-value nodes at 0 height (invisible but valid).
       const nodes = nodeDefs.map(d => Object.assign({}, d));
 
+      // All link values use cumulative pass-through counts: each link value =
+      // items currently AT or PAST the target stage. This keeps every link
+      // visible even when items have moved on, and eliminates the artifact
+      // where transient nodes (Spec requested) appear occupied due to
+      // outgoing-only flow from downstream link values.
+      const approvalAndBeyond = buckets.approvalPending + buckets.tasked + buckets.declined;
+      const specCreatedAndBeyond = buckets.specCreated + approvalAndBeyond;
+      const specRequestedAndBeyond = buckets.specRequested + specCreatedAndBeyond;
+      const implementBoundTotal = buckets.curatedImplement + specRequestedAndBeyond;
+      const summarizedTotal = buckets.summarized + buckets.monitoring + implementBoundTotal;
+
       const linkDefs = [
-        // Main pipeline
-        { source: "Awaiting curation", target: "Curated: waiting", value: buckets.curatedWaiting },
-        { source: "Awaiting curation", target: "Curated: implement-bound", value: buckets.curatedImplement },
-        { source: "Curated: implement-bound", target: "Spec requested", value: buckets.specRequested },
-        { source: "Spec requested", target: "Spec created", value: buckets.specCreated },
-        // Direct path for items where the heartbeat wrote the spec before we
-        // ever saw the item as spec_requested (skip the transient stage).
-        { source: "Curated: implement-bound", target: "Spec created", value: 0 },
-        { source: "Spec created", target: "Awaiting approval", value: buckets.approvalPending },
+        { source: "Ingested", target: "Summarized", value: summarizedTotal },
+        { source: "Summarized", target: "Monitoring", value: buckets.monitoring },
+        { source: "Summarized", target: "Curated: High Signal", value: implementBoundTotal },
+        { source: "Curated: High Signal", target: "Spec requested", value: specRequestedAndBeyond },
+        { source: "Spec requested", target: "Spec created", value: specCreatedAndBeyond },
+        { source: "Spec created", target: "Awaiting approval", value: approvalAndBeyond },
         { source: "Awaiting approval", target: "Tasked", value: buckets.tasked },
         { source: "Awaiting approval", target: "Declined", value: buckets.declined },
-        // Legacy path: items that became terminal in the old pipeline
-        { source: "Awaiting curation", target: "Reviewed (legacy)", value: buckets.reviewed },
       ];
       // Use node references (not indices) so links stay valid even if a
       // 0-value node gets the same object as the one in `nodes`.
@@ -365,11 +391,16 @@
         .nodeWidth(18)
         .nodePadding(22)
         .extent([[pad.left, pad.top], [width - pad.right, height - pad.bottom]])
-        .nodeAlign(d3.sankeyJustify);
+        .nodeAlign(d3.sankeyLeft);
 
+      const nodesCopy = data.nodes.map(d => ({ ...d }));
       const { nodes, links } = sankey({
-        nodes: data.nodes.map(d => ({ ...d })),
-        links: data.links.map(d => ({ ...d })),
+        nodes: nodesCopy,
+        links: data.links.map(d => ({
+          ...d,
+          source: data.nodes.indexOf(d.source),
+          target: data.nodes.indexOf(d.target),
+        })),
       });
 
       const svg = d3.select(container).append("svg")
@@ -416,10 +447,10 @@
         .attr("fill", d => d.color)
         .attr("rx", 3);
 
-      // Labels: right of node, or left for right-edge nodes
+      // Labels: right of node — name, current count, in/out flow
       nodeG.append("text")
         .attr("x", d => d.x1 + 8)
-        .attr("y", d => (d.y0 + d.y1) / 2)
+        .attr("y", d => (d.y0 + d.y1) / 2 - 10)
         .attr("dy", "0.35em")
         .attr("text-anchor", "start")
         .attr("font-weight", "700")
@@ -428,12 +459,27 @@
 
       nodeG.append("text")
         .attr("x", d => d.x1 + 8)
-        .attr("y", d => (d.y0 + d.y1) / 2 + 14)
+        .attr("y", d => (d.y0 + d.y1) / 2 + 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "start")
         .attr("fill", "#6f819b")
-        .attr("font-size", "11")
-        .text(d => d.value);
+        .attr("font-size", "10")
+        .text(d => `${d.count} items`);
+
+      nodeG.append("text")
+        .attr("x", d => d.x1 + 8)
+        .attr("y", d => (d.y0 + d.y1) / 2 + 14)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", "start")
+        .attr("fill", "#9aaabb")
+        .attr("font-size", "10")
+        .text(d => {
+          const inFlow = d.targetLinks.reduce((s, l) => s + l.value, 0);
+          const outFlow = d.sourceLinks.reduce((s, l) => s + l.value, 0);
+          if (!inFlow) return `out: ${outFlow}`;
+          if (!outFlow) return `in: ${inFlow}`;
+          return `in: ${inFlow}  out: ${outFlow}`;
+        });
     }
 
     function renderFunnel() {
@@ -470,10 +516,21 @@
       const byKey = itemByKey();
       const scopedItems = itemList().filter((item) => $("topic").value === "all" || (item.topic || "general") === $("topic").value);
       const relevantKeys = new Set(scopedItems.map((item) => item.key));
-      const events = state.transitions
+      // Deduplicate consecutive same-direction transitions per item: the lobster
+      // can re-apply the same status (e.g. summarized→monitoring) on every run
+      // without changing actual state. Each duplicate inflates the event count
+      // and breaks the backward reconstruction (pushes counts below zero).
+      const rawEvents = state.transitions
         .filter((event) => relevantKeys.has(event.key))
         .filter((event) => parseDate(event.at))
         .sort((a, b) => parseDate(a.at) - parseDate(b.at));
+      const lastStateSeen = new Map(); // key → last "to" status
+      const events = rawEvents.filter((event) => {
+        if (!event.key || !event.to) return true;
+        if (lastStateSeen.get(event.key) === event.to) return false;
+        lastStateSeen.set(event.key, event.to);
+        return true;
+      });
       const dates = [];
       const start = cutoff() || parseDate(events[0]?.at) || new Date();
       const today = new Date();
@@ -482,6 +539,20 @@
 
       const statuses = [...new Set([...order, ...scopedItems.map(statusOf), ...events.flatMap((e) => [e.from, e.to]).filter(Boolean)])];
       const current = countBy(scopedItems, statusOf);
+      // Inject current curation bucket counts — transitions log will grow these
+      // historically from next heartbeat onwards (validate_curate_output.py now
+      // logs from/to = "Curated: Monitoring" / "Curated: High Signal").
+      const curThreshold = 7;
+      let curMonitoring = 0, curHighSignal = 0;
+      for (const item of scopedItems) {
+        const c = item.curation;
+        if (!c) continue;
+        const st = statusOf(item);
+        if (['spec_requested','spec_created','approval_pending','revision_staged','revision_requested','tasked','declined'].includes(st)) continue;
+        if (Number(c.score || 0) >= curThreshold) curHighSignal++; else curMonitoring++;
+      }
+      current['Curated: Monitoring'] = curMonitoring;
+      current['Curated: High Signal'] = curHighSignal;
       const points = dates.map((date) => {
         const counts = { ...current };
         const dayEnd = new Date(`${date}T23:59:59.999Z`);
@@ -497,30 +568,70 @@
 
     function renderChart() {
       const { statuses, points } = seriesData();
-      const width = 1000, height = 240, pad = { l: 42, r: 18, t: 16, b: 34 };
-      const maxY = Math.max(1, ...points.flatMap((p) => statuses.map((s) => p.counts[s] || 0)));
-      const x = (i) => pad.l + (points.length === 1 ? 0 : i * (width - pad.l - pad.r) / (points.length - 1));
-      const y = (v) => height - pad.b - (v / maxY) * (height - pad.t - pad.b);
-      const paths = statuses.map((status) => {
-        const d = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.counts[status] || 0).toFixed(1)}`).join(" ");
-        return `<path d="${d}" fill="none" stroke="${colors[status] || "#111827"}" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
-      }).join("");
-      const ticks = [0, Math.ceil(maxY / 2), maxY];
-      $("chart").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="State counts over time">
-        <line x1="${pad.l}" y1="${height - pad.b}" x2="${width - pad.r}" y2="${height - pad.b}" stroke="#cbd6e5"/>
-        <line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${height - pad.b}" stroke="#cbd6e5"/>
-        ${ticks.map((tick) => `<text x="${pad.l - 10}" y="${y(tick) + 4}" text-anchor="end" fill="#6f819b" font-size="11">${tick}</text>`).join("")}
-        ${paths}
-        ${labelDates(points, x, height - 12)}
-      </svg>`;
-      $("legend").innerHTML = statuses.map((status) => `<span><i class="swatch" style="background:${colors[status] || "#111827"}"></i>${escapeHtml(status)}</span>`).join("");
-    }
+      const container = $("chart");
+      container.innerHTML = "";
+      if (!points.length) { container.innerHTML = `<div class="empty">No data.</div>`; return; }
 
-    function labelDates(points, x, y) {
-      if (!points.length) return "";
+      const W = container.clientWidth || 900;
+      const H = 240, pad = { l: 42, r: 18, t: 16, b: 34 };
+      const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+      const maxY = Math.max(1, ...points.flatMap((p) => statuses.map((s) => p.counts[s] || 0)));
+      const xScale = (i) => points.length === 1 ? pad.l : pad.l + i * innerW / (points.length - 1);
+      const yScale = (v) => pad.t + innerH - (v / maxY) * innerH;
+
+      const svg = d3.select(container).append("svg")
+        .attr("width", W).attr("height", H)
+        .attr("viewBox", `0 0 ${W} ${H}`);
+
+      // Axes
+      svg.append("line").attr("x1", pad.l).attr("y1", H - pad.b).attr("x2", W - pad.r).attr("y2", H - pad.b).attr("stroke", "#cbd6e5");
+      svg.append("line").attr("x1", pad.l).attr("y1", pad.t).attr("x2", pad.l).attr("y2", H - pad.b).attr("stroke", "#cbd6e5");
+      [0, Math.ceil(maxY / 2), maxY].forEach((tick) => {
+        svg.append("text").attr("x", pad.l - 6).attr("y", yScale(tick) + 4).attr("text-anchor", "end").attr("fill", "#6f819b").attr("font-size", 11).text(tick);
+      });
       const step = Math.max(1, Math.floor(points.length / 4));
-      return points.map((p, i) => (i % step === 0 || i === points.length - 1)
-        ? `<text x="${x(i).toFixed(1)}" y="${y}" text-anchor="${i === 0 ? "start" : "middle"}" fill="#6f819b" font-size="11">${p.date.slice(5)}</text>` : "").join("");
+      points.forEach((p, i) => {
+        if (i % step === 0 || i === points.length - 1)
+          svg.append("text").attr("x", xScale(i)).attr("y", H - 6).attr("text-anchor", i === 0 ? "start" : "middle").attr("fill", "#6f819b").attr("font-size", 11).text(p.date.slice(5));
+      });
+
+      // Lines
+      const line = d3.line().x((_, i) => xScale(i)).y((p) => yScale(p.v));
+      statuses.forEach((status) => {
+        svg.append("path")
+          .datum(points.map((p) => ({ v: p.counts[status] || 0 })))
+          .attr("fill", "none")
+          .attr("stroke", colors[status] || "#111827")
+          .attr("stroke-width", 2.5)
+          .attr("d", line);
+      });
+
+
+      // Crosshair + tooltip
+      const crosshair = svg.append("line").attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#cbd6e5").attr("stroke-dasharray", "4,3").attr("display", "none");
+      const tooltip = document.getElementById("chart-tooltip");
+      svg.append("rect")
+        .attr("x", pad.l).attr("y", pad.t).attr("width", innerW + pad.r).attr("height", innerH)
+        .attr("fill", "none").attr("pointer-events", "all")
+        .on("mousemove", (event) => {
+          const [mx] = d3.pointer(event);
+          const idx = Math.max(0, Math.min(points.length - 1, Math.round((mx - pad.l) / innerW * (points.length - 1))));
+          const p = points[idx];
+          const cx = xScale(idx);
+          crosshair.attr("x1", cx).attr("x2", cx).attr("display", null);
+          const rows = statuses.filter((s) => p.counts[s]).sort((a, b) => (p.counts[b] || 0) - (p.counts[a] || 0));
+          tooltip.style.display = "block";
+          // Flip tooltip left if near right edge of screen
+          const nearRight = event.clientX > window.innerWidth - 220;
+          tooltip.style.left = nearRight ? (event.clientX - 180) + "px" : (event.clientX + 14) + "px";
+          tooltip.style.top = (event.clientY - 10) + "px";
+          tooltip.innerHTML = `<div class="tt-date">${p.date}</div>` + rows.map((s) =>
+            `<div class="tt-row"><span><i class="tt-swatch" style="background:${colors[s] || '#111827'}"></i>${escapeHtml(s)}</span><span class="tt-val">${p.counts[s]}</span></div>`
+          ).join("");
+        })
+        .on("mouseleave", () => { crosshair.attr("display", "none"); tooltip.style.display = "none"; });
+
+      $("legend").innerHTML = statuses.map((s) => `<span><i class="swatch" style="background:${colors[s] || "#111827"}"></i>${escapeHtml(s)}</span>`).join("");
     }
 
     function renderRecent() {
@@ -607,10 +718,10 @@
     function renderCurations() {
       const { implementBound, curatedWaiting, uncurated, threshold } = curationGroups();
       const blocks = [
-        { key: "implementBound", label: "Implement-bound", className: "implement-bound",
+        { key: "implementBound", label: "Curated: High Signal", className: "implement-bound",
           hint: `curator said yes (score ≥ ${threshold})`,
           items: implementBound },
-        { key: "curatedWaiting", label: "Curated, waiting", className: "curated-waiting",
+        { key: "curatedWaiting", label: "Monitoring", className: "curated-waiting",
           hint: "curator said not now (score < threshold)",
           items: curatedWaiting },
         { key: "uncurated", label: "Uncurated", className: "uncurated",
