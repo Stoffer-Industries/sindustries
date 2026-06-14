@@ -1717,6 +1717,32 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["approvalResumeToken"], None)
         self.assertEqual(item["reviewStatus"], "declined")
 
+    def test_force_clear_approval_lock_keeps_decline_terminal(self):
+        state = common.state_template()
+        state["items"][self.bookmark["bookmarkKey"]] = {
+            "bookmarkKey": self.bookmark["bookmarkKey"],
+            "approvalId": "apterminal1",
+            "approvalResumeToken": "resume-token-decline",
+            "approvalStatus": "pending",
+            "reviewStatus": "approval_pending",
+            "curation": {"score": 9, "threshold": 7},
+        }
+
+        with patch.object(handle_approval_reply, "STATE_PATH", self.state_path):
+            cleared = handle_approval_reply.force_clear_approval_lock(
+                state,
+                "apterminal1",
+                approved=False,
+            )
+
+        self.assertEqual(cleared, 1)
+        item = state["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "declined")
+        self.assertEqual(item["approvalStatus"], "declined")
+        self.assertEqual(item["curation"], {"score": 9, "threshold": 7})
+        self.assertIsNone(item["approvalId"])
+        self.assertIsNone(item["approvalResumeToken"])
+
     def test_resolve_topic_approval_approve_with_created_tasks_marks_tasked(self):
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
