@@ -18,6 +18,20 @@ except Exception:  # noqa: BLE001
     proposal_marker = None
 
 
+CURRENT_REVIEW_STATUSES = {
+    "ingested",
+    "summarized",
+    "needs_research",
+    "spec_requested",
+    "spec_created",
+    "approval_pending",
+    "revision_requested",
+    "revision_staged",
+    "tasked",
+    "declined",
+}
+
+
 def _spec_doc_path(spec_doc: str) -> Path:
     spec_doc = (spec_doc or "").strip()
     if not spec_doc:
@@ -92,7 +106,7 @@ def main() -> int:
     items = state.get("items", {})
     # Index spec files by bookmark key suffix in filename (*-<bookmarkKey>.md)
     inferred_specs_by_key = {}
-    for spec_path in (WORKSPACE / "brain" / "specs").glob("**/*.md"):
+    for spec_path in SPECS_ROOT.glob("**/*.md"):
         stem = spec_path.stem
         if "-" not in stem:
             continue
@@ -112,14 +126,15 @@ def main() -> int:
                 item.pop("analysis", None)
                 item.pop("reviewProvenance", None)
                 item.pop("reviewedAt", None)
-                # Clear reviewStatus too - without a review doc, it's not really reviewed
-                item.pop("reviewStatus", None)
+                if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("summaryDoc") and not item.get("taskIds"):
+                    item.pop("reviewStatus", None)
                 cleaned += 1
-        # Also check if reviewStatus exists but reviewDoc doesn't - orphan status.
-        # Only clear transitional statuses; leave terminal/task-backed ones alone.
+        # Also check if reviewStatus exists but reviewDoc doesn't.
+        # In the new curation pipeline, items in summarized/monitoring/spec states
+        # don't need a reviewDoc — curation score is the signal. Only clear status
+        # on items that used the old review classification system and now have no doc.
         elif item.get("reviewStatus"):
-            _safe_statuses = {"tasked", "declined", "approval_pending", "revision_staged", "revision_requested"}
-            if item.get("reviewStatus") not in _safe_statuses and not item.get("taskIds"):
+            if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("summaryDoc") and not item.get("taskIds"):
                 item.pop("reviewStatus", None)
                 cleaned += 1
         # Check specDocs - keep only valid paths
@@ -129,7 +144,12 @@ def main() -> int:
                 item["specDocs"] = valid_specs
                 # If specs are missing but review exists, keep the review - just allow specs to regenerate
                 # Only clear reviewStatus if there's no reviewDoc either
-                if not valid_specs and not item.get("reviewDoc"):
+                if (
+                    not valid_specs
+                    and not item.get("reviewDoc")
+                    and not item.get("summaryDoc")
+                    and item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES
+                ):
                     item.pop("reviewStatus", None)
                 cleaned += 1
 
@@ -188,7 +208,7 @@ def main() -> int:
                 curation = existing.get('curation') or {}
                 curation_score = float(curation.get('score') or 0)
                 curation_threshold = float(curation.get('threshold') or 7)
-                has_high_signal_curation = bool(existing.get('analysis')) and curation_score >= curation_threshold
+                has_high_signal_curation = curation_score >= curation_threshold
 
                 if has_implement_classification or has_high_signal_curation:
                     # Check if specs exist
