@@ -115,10 +115,13 @@ def main() -> int:
                 # Clear reviewStatus too - without a review doc, it's not really reviewed
                 item.pop("reviewStatus", None)
                 cleaned += 1
-        # Also check if reviewStatus exists but reviewDoc doesn't - orphan status
+        # Also check if reviewStatus exists but reviewDoc doesn't - orphan status.
+        # Only clear transitional statuses; leave terminal/task-backed ones alone.
         elif item.get("reviewStatus"):
-            item.pop("reviewStatus", None)
-            cleaned += 1
+            _safe_statuses = {"tasked", "declined", "approval_pending", "revision_staged", "revision_requested"}
+            if item.get("reviewStatus") not in _safe_statuses and not item.get("taskIds"):
+                item.pop("reviewStatus", None)
+                cleaned += 1
         # Check specDocs - keep only valid paths
         if item.get("specDocs"):
             valid_specs = [s for s in item.get("specDocs", []) if _spec_doc_path(s).exists()]
@@ -175,11 +178,19 @@ def main() -> int:
         if existing.get("reviewDoc"):
             review_path = WORKSPACE / existing["reviewDoc"]
             if review_path.exists():
-                # Review exists - check content to see if it's "implement" but no specs
+                # Review exists - check content to see if it's "implement" but no specs.
+                # Two signals: old explicit classification OR new curation score.
                 content = review_path.read_text()
-                has_implement_classification = "Classified as 'implement'" in content or str((existing.get('analysis') or {}).get('classification') or '').strip().lower() == 'implement'
-                
-                if has_implement_classification:
+                has_implement_classification = (
+                    "Classified as 'implement'" in content
+                    or str((existing.get('analysis') or {}).get('classification') or '').strip().lower() == 'implement'
+                )
+                curation = existing.get('curation') or {}
+                curation_score = float(curation.get('score') or 0)
+                curation_threshold = float(curation.get('threshold') or 7)
+                has_high_signal_curation = bool(existing.get('analysis')) and curation_score >= curation_threshold
+
+                if has_implement_classification or has_high_signal_curation:
                     # Check if specs exist
                     valid_specs = [s for s in existing.get("specDocs", []) if _spec_doc_path(s).exists()]
                     if not valid_specs:
