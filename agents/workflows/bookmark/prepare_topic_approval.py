@@ -68,10 +68,10 @@ def main() -> int:
             })
             continue
 
-        if topic in pending_topics:
+        if pending_topics:
             blocked_packages.append({
                 **package,
-                "reason": "approval already pending for topic",
+                "reason": f"approval already pending for topic(s): {', '.join(sorted(pending_topics))}; only one outstanding approval at a time",
             })
             continue
 
