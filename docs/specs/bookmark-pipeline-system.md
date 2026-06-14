@@ -15,10 +15,10 @@ Turn X/Twitter bookmarks into approved implementation specs and Tasks API tasks,
 ## Pipeline Stages
 
 ```
-ingest → summarize → curate → spec_requested → spec_created → approval_pending → tasked
-   ↓          ↓                                                        ↓
-ingested  summarized                                          declined (terminal)
-                                                             revision_requested → spec_created (loop)
+ingest → summarize → curate ─────────→ spec_requested → spec_created → approval_pending → tasked
+   ↓          ↓          ↓                                                       ↓
+ingested  summarized  needs_research (human-gated)                      declined (terminal)
+                                                                          revision_requested → spec_created (loop)
 ```
 
 ### 1. Ingest
@@ -68,6 +68,7 @@ ingested  summarized                                          declined (terminal
 |---|---|---|
 | `ingested` | Raw bookmark pulled from X; not yet summarized | → `summarized` (summarize cron) |
 | `summarized` | Summary written by lobster summarize cron | curate → stays `summarized` (low score) or → `spec_requested` |
+| `needs_research` | Broad reference material flagged by curation; awaiting manual review | human-gated — stays here until manually advanced or declined |
 | `spec_requested` | Queued for Quinn heartbeat spec writing | → `spec_created` |
 | `spec_created` | Spec file exists on disk | → `approval_pending` |
 | `approval_pending` | Approval message sent to Tom | → `tasked`, `declined`, `revision_requested` |
@@ -77,7 +78,7 @@ ingested  summarized                                          declined (terminal
 | `declined` | Tom declined the spec | **terminal** — will NOT re-enter pipeline |
 
 **Terminal statuses** (filter_curation skips these even with a high curation score):
-`tasked`, `declined`, `approval_pending`, `revision_staged`, `revision_requested`
+`tasked`, `declined`, `approval_pending`, `revision_staged`, `revision_requested`, `needs_research`
 
 > **Note on `declined`:** Declining is permanent. Use `revise: <changes>` if you want a revised spec instead. To manually re-enter a declined item, reset `reviewStatus` to `summarized` directly in `brain/state/bookmark-review-state.json`.
 

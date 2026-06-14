@@ -106,7 +106,7 @@ class FilterCurationRouteTests(unittest.TestCase):
 
     def test_terminal_statuses_route_to_reviewed(self):
         for status in ("tasked", "declined", "approval_pending",
-                       "revision_staged", "revision_requested"):
+                       "revision_staged", "revision_requested", "needs_research"):
             with self.subTest(status=status):
                 # Even with a high-score curation, terminal wins.
                 item = {
@@ -154,6 +154,36 @@ class FilterCurationRouteTests(unittest.TestCase):
             "curation": _curation(score=10.0, age_days=180),  # very stale
         }
         self.assertEqual(self._route(item), "implement")
+
+    def test_broad_reference_curation_routes_to_needs_research(self):
+        for reasoning in (
+            "This is too broad for immediate implementation.",
+            "A DENSE REFERENCE worth manual review.",
+            "Monitor this catalogue rather than build it.",
+            "Useful reference material.",
+            "Broad reference for future work.",
+        ):
+            with self.subTest(reasoning=reasoning):
+                item = {
+                    "bookmarkKey": "k1",
+                    "reviewStatus": "summarized",
+                    "curation": {
+                        **_curation(score=8.0, age_days=0, threshold=7.0),
+                        "reasoning": reasoning,
+                    },
+                }
+                self.assertEqual(self._route(item), "needs_research")
+
+    def test_low_score_broad_reference_stays_monitoring(self):
+        item = {
+            "bookmarkKey": "k1",
+            "reviewStatus": "summarized",
+            "curation": {
+                **_curation(score=5.0, age_days=0, threshold=7.0),
+                "reasoning": "Broad reference material.",
+            },
+        }
+        self.assertEqual(self._route(item), "monitoring")
 
     def test_spec_proposals_no_tasks_is_recovery_implement(self):
         # Spec work exists but never became tasks — recovery branch.

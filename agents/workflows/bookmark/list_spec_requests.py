@@ -18,6 +18,7 @@ def main() -> int:
     requests = []
     for key, item in items.items():
         status = item.get("reviewStatus")
+        # Human-gated states such as needs_research are intentionally excluded.
         if status == "spec_requested":
             requests.append({
                 "bookmarkKey": key,
