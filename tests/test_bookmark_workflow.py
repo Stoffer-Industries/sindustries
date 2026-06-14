@@ -976,7 +976,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         )
 
         spec_rel = "infra/agent-harness-note-abc123bookmark.md"
-        spec_path = self.root / "brain" / "specs" / spec_rel
+        spec_path = self.root / "brain" / "bookmarks" / "specs" / spec_rel
         spec_path.parent.mkdir(parents=True, exist_ok=True)
         spec_path.write_text("# Spec\n", encoding="utf-8")
 
@@ -998,7 +998,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         out = io.StringIO()
         with patch.object(list_review_candidates, "WORKSPACE", self.root), \
-             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/specs"), \
+             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/bookmarks/specs"), \
              patch.object(list_review_candidates, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
              patch.object(list_review_candidates, "STATE_PATH", self.state_path):
             with patch("sys.stdout", out), patch.object(sys, "argv", ["list_review_candidates.py", "--json"]):
@@ -1018,6 +1018,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         out = io.StringIO()
         with patch.object(list_review_candidates, "WORKSPACE", self.root), \
+             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/bookmarks/specs"), \
              patch.object(list_review_candidates, "STATE_PATH", self.state_path):
             with patch("sys.stdout", out), patch.object(
                 sys,
@@ -1129,7 +1130,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         common.save_state(state, self.state_path)
 
         # Spec exists on disk but state lost linkage
-        spec_path = self.root / "brain/specs/infra/bootstrap-vs-memory-split-optimization-07d569e9f611226e.md"
+        spec_path = self.root / "brain/bookmarks/specs/infra/bootstrap-vs-memory-split-optimization-07d569e9f611226e.md"
         spec_path.parent.mkdir(parents=True, exist_ok=True)
         spec_path.write_text("# Recovered Spec\n", encoding="utf-8")
 
@@ -1142,6 +1143,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         with patch.object(common, "WORKSPACE", self.root), \
              patch.object(common, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
              patch.object(list_review_candidates, "WORKSPACE", self.root), \
+             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/bookmarks/specs"), \
              patch.object(list_review_candidates, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
              patch.object(list_review_candidates, "STATE_PATH", self.state_path):
             with patch("sys.stdout", out), patch.object(sys, "argv", ["list_review_candidates.py", "--json"]):
@@ -1151,7 +1153,70 @@ class BookmarkWorkflowTests(unittest.TestCase):
         updated = common.load_state(self.state_path)
         item = updated["items"][key]
         self.assertEqual(item["reviewStatus"], "spec_created")
-        self.assertEqual(item["specDocs"], ["brain/specs/infra/bootstrap-vs-memory-split-optimization-07d569e9f611226e.md"])
+        self.assertEqual(item["specDocs"], ["brain/bookmarks/specs/infra/bootstrap-vs-memory-split-optimization-07d569e9f611226e.md"])
+
+    def test_list_review_candidates_preserves_current_statuses_without_review_doc(self):
+        state = common.state_template()
+        for status in sorted(list_review_candidates.CURRENT_REVIEW_STATUSES):
+            state["items"][status] = {
+                "bookmarkKey": status,
+                "reviewStatus": status,
+                "summaryDoc": f"brain/bookmarks/summaries/{status}.md",
+            }
+        common.save_state(state, self.state_path)
+
+        out = io.StringIO()
+        with patch.object(list_review_candidates, "WORKSPACE", self.root), \
+             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/bookmarks/specs"), \
+             patch.object(list_review_candidates, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
+             patch.object(list_review_candidates, "STATE_PATH", self.state_path):
+            with patch("sys.stdout", out), patch.object(sys, "argv", ["list_review_candidates.py", "--json"]):
+                rc = list_review_candidates.main()
+
+        self.assertEqual(rc, 0)
+        updated = common.load_state(self.state_path)
+        for status in list_review_candidates.CURRENT_REVIEW_STATUSES:
+            self.assertEqual(updated["items"][status]["reviewStatus"], status)
+
+    def test_list_review_candidates_uses_high_curation_without_legacy_analysis(self):
+        bookmark_path = self.root / "brain/bookmarks/x/high-curation.md"
+        bookmark_path.parent.mkdir(parents=True, exist_ok=True)
+        bookmark_path.write_text(
+            "---\ntitle: High curation\nlink: https://example.com/high\nsource: x\n---\n",
+            encoding="utf-8",
+        )
+        with patch.object(common, "WORKSPACE", self.root), patch.object(common, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"):
+            record = common.bookmark_record(bookmark_path)
+        key = record["bookmarkKey"]
+        review_doc = "brain/reviews/high-curation.md"
+        review_path = self.root / review_doc
+        review_path.parent.mkdir(parents=True, exist_ok=True)
+        review_path.write_text("# Legacy review without classification\n", encoding="utf-8")
+
+        state = common.state_template()
+        state["items"][key] = {
+            "bookmarkKey": key,
+            "reviewDoc": review_doc,
+            "reviewStatus": "summarized",
+            "curation": {"score": 9, "threshold": 7},
+        }
+        common.save_state(state, self.state_path)
+
+        out = io.StringIO()
+        with patch.object(common, "WORKSPACE", self.root), \
+             patch.object(common, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
+             patch.object(list_review_candidates, "WORKSPACE", self.root), \
+             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/bookmarks/specs"), \
+             patch.object(list_review_candidates, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
+             patch.object(list_review_candidates, "STATE_PATH", self.state_path):
+            with patch("sys.stdout", out), patch.object(sys, "argv", ["list_review_candidates.py", "--json"]):
+                rc = list_review_candidates.main()
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        matched = [item for item in payload["candidates"] if item["bookmarkKey"] == key]
+        self.assertEqual(len(matched), 1)
+        self.assertTrue(matched[0]["skipReview"])
 
     def test_read_first_json_value_does_not_require_stdin_close(self):
         read_fd, write_fd = os.pipe()
@@ -1331,7 +1396,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "title": "Spec created bookmark",
             "reviewDoc": "brain/reviews/infra/spec-created.md",
             "reviewStatus": "spec_created",
-            "specDocs": [f"brain/specs/infra/spec-created-{key}.md"],
+            "specDocs": [f"brain/bookmarks/specs/infra/spec-created-{key}.md"],
             "specProposals": [{"title": "Do it", "proposedTasks": [{"title": "task"}]}],
             "taskIds": [],
         }
@@ -1341,7 +1406,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         review_path.parent.mkdir(parents=True, exist_ok=True)
         review_path.write_text("Classified as 'implement'", encoding="utf-8")
 
-        spec_path = self.root / f"brain/specs/infra/spec-created-{key}.md"
+        spec_path = self.root / f"brain/bookmarks/specs/infra/spec-created-{key}.md"
         spec_path.parent.mkdir(parents=True, exist_ok=True)
         spec_path.write_text("# Spec", encoding="utf-8")
 
@@ -1349,6 +1414,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         with patch.object(common, "WORKSPACE", self.root), \
              patch.object(common, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
              patch.object(list_review_candidates, "WORKSPACE", self.root), \
+             patch.object(list_review_candidates, "SPECS_ROOT", self.root / "brain/bookmarks/specs"), \
              patch.object(list_review_candidates, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"), \
              patch.object(list_review_candidates, "STATE_PATH", self.state_path):
             with patch("sys.stdout", out), patch.object(sys, "argv", ["list_review_candidates.py", "--json"]):
