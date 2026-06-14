@@ -210,7 +210,7 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
 
 
 def rebuild_revised_approval(bookmark_key: str) -> dict | None:
-    script = WORKSPACE / "scripts" / "bookmarks" / "rebuild_revised_approval.py"
+    script = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmark" / "rebuild_revised_approval.py"
     proc = subprocess.run(
         [sys.executable, str(script), "--bookmark-key", bookmark_key, "--json"],
         text=True,
