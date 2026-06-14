@@ -102,7 +102,6 @@ def build_approval_message(package: dict, approval_id: str | None = None) -> str
                 task_line += f" — {deliverable}"
             todo_lines.append(task_line)
 
-    task_count = len(todo_lines)
     bookmark_label = bookmark_titles[0] if len(bookmark_titles) == 1 else f"{len(bookmark_titles)} bookmarks"
 
     lines = [f"Approval request: {topic}"]
@@ -111,7 +110,6 @@ def build_approval_message(package: dict, approval_id: str | None = None) -> str
     lines.extend(["", f"Bookmark: {bookmark_label}"])
     if approval_id:
         lines.append(f"Approval id: {approval_id}")
-    lines.append(f"Would stage {task_count} proposed todo(s). No tasks will be created until you approve.")
     lines.append("")
 
     if plan_links:
@@ -367,13 +365,13 @@ def _main_locked(data: dict[str, Any]) -> int:
             })
             continue
 
-        package_task_count = sum(
-            len(item.get("proposedTasks") or []) for item in package.get("items", [])
+        package_spec_count = sum(
+            len(item.get("specDocs") or []) for item in package.get("items", [])
         )
-        if package_task_count == 0:
+        if package_spec_count == 0:
             blocked_packages.append({
                 **package,
-                "reason": "no proposed tasks — specProposals missing or empty; spec needs to be re-linked",
+                "reason": "no spec docs — spec needs to be written before approval can be requested",
             })
             continue
 
