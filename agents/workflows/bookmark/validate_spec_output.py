@@ -16,7 +16,7 @@ Validations:
     acceptanceCriteria list)
 
 Idempotent:
-  - skips entries whose bookmark is already in `spec_created`
+  - rejects entries unless the existing bookmark is awaiting a spec
   - renames the artifact to `<name>.processed` after applying so a
     re-run (or concurrent run) won't double-apply
 
@@ -217,6 +217,25 @@ def main() -> int:
             continue
 
         bookmark_key = entry["bookmarkKey"]
+        item = items.get(bookmark_key)
+        if item is None:
+            invalid.append({
+                "bookmarkKey": bookmark_key,
+                "errors": ["bookmarkKey does not exist in review state"],
+            })
+            continue
+
+        current = item.get("reviewStatus")
+        if current not in {"spec_requested", "revision_requested"}:
+            invalid.append({
+                "bookmarkKey": bookmark_key,
+                "errors": [
+                    "bookmark reviewStatus must be spec_requested or revision_requested, "
+                    f"got {current!r}"
+                ],
+            })
+            continue
+
         spec_docs, spec_proposals = build_proposals(entry)
 
         # Spec files must exist on disk before we mark spec_created.
@@ -230,15 +249,6 @@ def main() -> int:
             })
             continue
 
-        current = items.get(bookmark_key, {}).get("reviewStatus")
-        if current == "spec_created":
-            skipped.append({
-                "bookmarkKey": bookmark_key,
-                "reason": "already spec_created",
-            })
-            continue
-
-        item = items.get(bookmark_key, {"bookmarkKey": bookmark_key})
         previous_status = item.get("reviewStatus")
         item.update({
             "reviewStatus": "spec_created",
