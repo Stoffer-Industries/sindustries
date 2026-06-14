@@ -10,7 +10,7 @@ import fcntl
 from pathlib import Path
 from typing import Any
 
-from common import STATE_PATH, WORKSPACE, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path
+from common import STATE_PATH, WORKSPACE, dump_json, get_approval_topic, load_state, log_transition, now_iso, save_state, transition_log_path
 
 
 def _generate_approval_id(topic: str) -> str:
@@ -354,7 +354,7 @@ def _main_locked(data: dict[str, Any]) -> int:
             })
             continue
         topic_already_pending = any(
-            (state_item.get("approvalTopic") or state_item.get("topic") or "general") == topic
+            get_approval_topic(state_item) == topic
             and state_item.get("reviewStatus") in {"approval_pending", "revision_staged"}
             for state_item in items.values()
         )

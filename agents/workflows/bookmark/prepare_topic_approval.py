@@ -51,7 +51,14 @@ def main() -> int:
     blocked_packages = []
 
     for item in data.get("implement", []):
-        topic = item.get("topic") or args.approval_topic or "general"
+        bookmark_key = item.get("bookmarkKey")
+        state_item = state_items.get(bookmark_key, {})
+        # get_approval_topic reads curation.topic first — the authoritative source.
+        # item.topic and state_item.topic may be stale filenames from before the
+        # flat-path migration; curation.topic is always the correct category.
+        topic = get_approval_topic({**state_item, **item})
+        if not topic or topic == "general":
+            topic = args.approval_topic or "general"
         package_item = build_item_summary(item)
         package = {
             "topic": topic,
