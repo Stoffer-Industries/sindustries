@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Route items to implement / monitoring / reviewed buckets for the lobster
+Route items to implement / needs_research / monitoring / reviewed buckets for the lobster
 pipeline. Pure verdict-reading — no freshness check, no LLM, no classification.
 
 A "curation" is the living take on each summary, written by the heartbeat.
@@ -17,7 +17,11 @@ Inputs:
 Routing rules:
   - reviewed:
       - reviewStatus in {tasked, declined, approval_pending,
-        revision_staged, revision_requested}  → terminal, no action
+        revision_staged, revision_requested, needs_research}
+        → terminal, no action
+  - needs_research:
+      - high-score curation reasoning flags broad reference material
+        → human-gated pause, no automatic transition
   - implement:
       - reviewStatus == spec_created  → spec exists, awaiting approval
       - has specProposals and not taskIds and not in terminal state
@@ -40,7 +44,10 @@ from common import (
     STATE_PATH,
     dump_json,
     load_state,
+    log_transition,
     now_iso,
+    save_state,
+    transition_log_path,
 )
 
 DEFAULT_THRESHOLD = 7
@@ -51,7 +58,22 @@ TERMINAL_STATUSES = {
     "approval_pending",
     "revision_staged",
     "revision_requested",
+    "needs_research",
 }
+
+RESEARCH_REASONING_PHRASES = (
+    "too broad",
+    "dense reference",
+    "monitor",
+    "catalogue",
+    "reference material",
+    "broad reference",
+)
+
+
+def curation_needs_research(curation: dict[str, Any]) -> bool:
+    reasoning = str(curation.get("reasoning") or "").casefold()
+    return any(phrase in reasoning for phrase in RESEARCH_REASONING_PHRASES)
 
 
 def route(item: dict[str, Any], state_item: dict[str, Any]) -> str:
@@ -61,7 +83,8 @@ def route(item: dict[str, Any], state_item: dict[str, Any]) -> str:
       1. Terminal status wins (even with high-score curation).
       2. spec_created wins (curation ignored — spec already exists).
       3. Recovery branch (specProposals + no taskIds + not terminal).
-      4. Curation verdict: high score → implement, low score → monitoring.
+      4. Curation verdict: high score broad references → needs_research;
+         other high scores → implement; low score → monitoring.
       5. No curation → monitoring (heartbeat will create one).
     """
     status = item.get("reviewStatus") or state_item.get("reviewStatus")
@@ -89,6 +112,8 @@ def route(item: dict[str, Any], state_item: dict[str, Any]) -> str:
 
     threshold = float(curation.get("threshold") or DEFAULT_THRESHOLD)
     if float(curation.get("score") or 0) >= threshold:
+        if curation_needs_research(curation):
+            return "needs_research"
         return "implement"
     return "monitoring"
 
@@ -101,9 +126,11 @@ def main() -> int:
 
     buckets: dict[str, list[dict[str, Any]]] = {
         "implement": [],
+        "needs_research": [],
         "monitoring": [],
         "reviewed": [],
     }
+    state_changed = False
     for item in summaries:
         bookmark_key = item.get("bookmarkKey")
         if not bookmark_key:
@@ -111,11 +138,30 @@ def main() -> int:
         state_item = items.get(bookmark_key, {})
         bucket = route(item, state_item)
         buckets[bucket].append(item)
+        if bucket == "needs_research":
+            previous_status = state_item.get("reviewStatus")
+            state_item.update({
+                "reviewStatus": "needs_research",
+                "lastUpdatedAt": now_iso(),
+            })
+            items[bookmark_key] = state_item
+            log_transition(
+                bookmark_key,
+                previous_status,
+                "needs_research",
+                "curation flagged as broad reference material",
+                transitions_path=transition_log_path(Path(STATE_PATH)),
+            )
+            state_changed = True
+
+    if state_changed:
+        save_state(state, Path(STATE_PATH))
 
     payload = {
         "ok": True,
         "generatedAt": now_iso(),
         "implement": buckets["implement"],
+        "needs_research": buckets["needs_research"],
         "monitoring": buckets["monitoring"],
         "reviewed": buckets["reviewed"],
         "statePath": str(STATE_PATH),

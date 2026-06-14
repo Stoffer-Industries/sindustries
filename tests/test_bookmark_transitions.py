@@ -223,6 +223,20 @@ class SummarizeTests(unittest.TestCase):
             },
         }
 
+        state["items"]["needs_research"] = {
+            "bookmarkKey": "needs_research",
+            "reviewStatus": "summarized",
+            "curation": {
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "topic": "brain",
+                "score": 8.0,
+                "reasoning": "Dense reference material that needs manual review.",
+                "relevanceScores": [],
+                "activeTopics": ["brain"],
+                "threshold": 7.0,
+            },
+        }
+
         common.save_state(state, self.state_path)
 
         summaries = [
@@ -230,6 +244,7 @@ class SummarizeTests(unittest.TestCase):
             {"bookmarkKey": "low_score"},
             {"bookmarkKey": "no_curation"},
             {"bookmarkKey": "tasked"},
+            {"bookmarkKey": "needs_research"},
         ]
         stdin = io.StringIO(json.dumps({"summaries": summaries}))
         stdout = io.StringIO()
@@ -249,6 +264,25 @@ class SummarizeTests(unittest.TestCase):
         self.assertTrue(in_bucket("monitoring", "low_score"))
         self.assertTrue(in_bucket("monitoring", "no_curation"))
         self.assertTrue(in_bucket("reviewed", "tasked"))
+        self.assertTrue(in_bucket("needs_research", "needs_research"))
+
+        updated_state = common.load_state(self.state_path)
+        self.assertEqual(
+            updated_state["items"]["needs_research"]["reviewStatus"],
+            "needs_research",
+        )
+        transitions = [
+            json.loads(line)
+            for line in self.state_path.with_name(
+                "bookmark-transitions.jsonl"
+            ).read_text().splitlines()
+        ]
+        self.assertTrue(any(
+            transition["key"] == "needs_research"
+            and transition["to"] == "needs_research"
+            and transition["reason"] == "curation flagged as broad reference material"
+            for transition in transitions
+        ))
 
 
 if __name__ == "__main__":
