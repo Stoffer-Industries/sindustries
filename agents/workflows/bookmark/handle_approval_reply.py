@@ -123,8 +123,13 @@ def pending_by_approval_id(state: dict) -> dict[str, dict]:
 
 def run_lobster_resume(token: str, approve: bool) -> tuple[dict | None, str | None]:
     args = ["lobster", "resume", "--token", token, "--approve", "yes" if approve else "no"]
+    env = os.environ.copy()
+    tasks_api_path = str(WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "tasks-api-ops")
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{tasks_api_path}:{existing}" if existing else tasks_api_path
+    env.setdefault("TASKS_API_BASE_URL", "http://localhost:4000/api/v1")
     try:
-        result = subprocess.run(args, check=True, capture_output=True, text=True, cwd=str(WORKSPACE))
+        result = subprocess.run(args, check=True, capture_output=True, text=True, cwd=str(WORKSPACE), env=env)
     except FileNotFoundError:
         return None, "lobster CLI not found"
     except subprocess.CalledProcessError as exc:
