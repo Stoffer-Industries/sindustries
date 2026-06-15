@@ -101,21 +101,21 @@ ingested  summarized  needs_research (human-gated)                      declined
 
 ## Key Scripts
 
-| Script | Stage | Notes |
-|---|---|---|
-| `agents/skills/x-bookmark-ingest/scripts/run_x_ingest.py` | Ingest | Called through the x-bookmark-ingest skill |
-| `summarize.py` | Summarize | Lobster step |
-| `list_curate_candidates.py` | Curate | Filter only — no LLM; outputs batch for Quinn |
-| `validate_curate_output.py` | Curate | Applies Quinn's curation output to state |
-| `filter_curation.py` | Spec | Routes items into lobster buckets |
-| `generate_specs.py` | Spec | Lobster step: reuses existing specs or sets `spec_requested` |
-| `list_spec_requests.py` | Spec | Quinn heartbeat: returns `spec_requested` items with `curation` field |
-| `validate_spec_output.py` | Spec | Applies Quinn's written specs to state |
-| `run_bookmark_review_cron.py` | Approval | Orchestrates lobster run + `request_topic_approval.py` |
-| `request_topic_approval.py` | Approval | Sends Telegram approval message; gates on `specDocs` presence |
-| `handle_approval_reply.py` | Approval | Parses Tom's reply |
-| `resolve_topic_approval.py` | Approval | Applies approve/decline/revise to state |
-| `create_tasks_from_proposals.py` | Task | Creates tasks in Tasks API after approval |
+| Script | Stage | Executed by | Notes |
+|---|---|---|---|
+| `agents/skills/x-bookmark-ingest/scripts/run_x_ingest.py` | Ingest | ingest cron | Called through the x-bookmark-ingest skill |
+| `summarize.py` | Summarize | review lobster | Lobster step |
+| `list_curate_candidates.py` | Curate | heartbeat | Filter only — no LLM; outputs batch for Quinn |
+| `validate_curate_output.py` | Curate | heartbeat | Applies Quinn's curation output to state |
+| `filter_curation.py` | Spec | review lobster | Routes items into lobster buckets |
+| `generate_specs.py` | Spec | review lobster | Reuses existing specs or sets `spec_requested` |
+| `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items with `curation` field |
+| `validate_spec_output.py` | Spec | heartbeat | Applies Quinn's written specs to state; transitions to `spec_created` |
+| `run_bookmark_review_cron.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` |
+| `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
+| `handle_approval_reply.py` | Approval | resumed lobster | Parses Tom's reply |
+| `resolve_topic_approval.py` | Approval | resumed lobster | Applies approve/decline/revise to state |
+| `create_tasks_from_proposals.py` | Task | resumed lobster | Creates tasks in Tasks API; reads task details from spec markdown |
 
 ---
 
