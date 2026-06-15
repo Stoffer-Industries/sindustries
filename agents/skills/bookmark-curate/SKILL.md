@@ -91,4 +91,4 @@ Edit `topics` to add or remove scoreable buckets. Change `relevanceThreshold` to
 - Run up to one batch per heartbeat. If `remaining > 0`, more items will be picked up next cycle.
 - Items with no curation at all are treated as needing curation regardless of age.
 - After curation, items scoring at or above threshold are picked up by the SPEC DISPATCH heartbeat step.
-- To inspect what needs curation: `analyze_state.py --status summarized` or `--status monitoring`.
+- To inspect what needs curation: `run_bookmark_state_analyzer.py --status summarized` or `--status monitoring`.

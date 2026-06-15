@@ -153,7 +153,7 @@ def main() -> int:
                     "Lobster preview was truncated or invalid JSON. The "
                     "underlying approval state is preserved (resumeToken "
                     "valid); the next cron run can re-attempt. Original "
-                    "crash bug fixed in run_bookmark_review_cron.py."
+                    "crash bug fixed in run_bookmark_curate.py."
                 ),
             }))
             return 0

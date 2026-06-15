@@ -7,7 +7,7 @@ Use the real production path when testing bookmark approvals and revisions.
 Run the bookmark cron entrypoint manually:
 
 ```bash
-python3 codebases/sindustries/agents/workflows/bookmark/run_bookmark_review_cron.py
+python3 codebases/sindustries/agents/skills/bookmark-curate/scripts/run_bookmark_curate.py
 ```
 
 That path is preferred because it exercises the full real flow:
@@ -44,7 +44,7 @@ python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spe
 
 1. Reset the fixture bookmark to approval-ready state:
    `python3 codebases/sindustries/agents/workflows/bookmark/debug/request_single_spec_approval.py dummycrypto20260420 --reset-to-approval-ready`
-2. Run `python3 codebases/sindustries/agents/workflows/bookmark/run_bookmark_review_cron.py`
+2. Run `python3 codebases/sindustries/agents/skills/bookmark-curate/scripts/run_bookmark_curate.py`
 3. Wait for the real Telegram approval request
 4. Reply in Telegram with `approve`, `decline`, or `revise #apxxxxxx: ...`
 5. Only use the helper for isolated debugging, not as proof that the Lobster-backed revise flow works
