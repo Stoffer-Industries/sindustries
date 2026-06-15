@@ -119,7 +119,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `lobster_compact_approval_preview.py` | Approval | review lobster | Renders the approval gate message; pauses pipeline |
 | `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in bookmark-curate skill) |
 | `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
-| `handle_approval_reply.py` | Approval | resumed lobster | Parses Tom's reply; routes to approve/decline/revise |
+| `handle_approval_reply.py` | Approval | openclaw extension | Parses Tom's reply; routes to approve/decline/revise (lives in `.openclaw/extensions/approval-reply/`) |
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
 | `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
 | `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown |
