@@ -13,10 +13,9 @@ _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
 _BOOKMARK_WF = WORKSPACE / 'codebases' / 'sindustries' / 'agents' / 'workflows' / 'bookmark'
 STATE_PATH = WORKSPACE / 'brain' / 'state' / 'bookmark-review-state.json'
-GENERATE_SPECS = _BOOKMARK_WF / 'generate_specs.py'
-BUILD_TASK_PROPOSALS = _BOOKMARK_WF / 'build_task_proposals.py'
-PREPARE_TOPIC_APPROVAL = _BOOKMARK_WF / 'prepare_topic_approval.py'
-ENSURE_TOPIC_SLOT_AVAILABLE = _BOOKMARK_WF / 'ensure_topic_slot_available.py'
+GENERATE_SPECS = _BOOKMARK_WF / 'lobster_generate_specs.py'
+PREPARE_TOPIC_APPROVAL = _BOOKMARK_WF / 'lobster_prepare_topic_approval.py'
+ENSURE_TOPIC_SLOT_AVAILABLE = _BOOKMARK_WF / 'lobster_ensure_topic_slot_available.py'
 REQUEST_TOPIC_APPROVAL = _BOOKMARK_WF / 'request_topic_approval.py'
 
 

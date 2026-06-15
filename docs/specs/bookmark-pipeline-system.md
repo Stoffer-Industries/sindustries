@@ -101,25 +101,23 @@ ingested  summarized  needs_research (human-gated)                      declined
 
 ## Key Scripts
 
-Lobster step IDs (prefixed `lobster_`) are the canonical identifiers for scripts run inside the lobster pipeline. Non-lobster scripts are referenced by filename.
-
-| Script / Step | Stage | Executed by | Notes |
+| Script | Stage | Executed by | Notes |
 |---|---|---|---|
 | `run_x_ingest.py` | Ingest | ingest cron | Called through the x-bookmark-ingest skill |
-| `lobster_summarize` | Summarize | review lobster | Faithful extraction; no classification |
+| `lobster_summarize.py` | Summarize | review lobster | Faithful extraction; no classification |
 | `list_curate_candidates.py` | Curate | heartbeat | Filter only — no LLM; outputs candidate batch for Quinn |
 | `validate_curate_output.py` | Curate | heartbeat | Applies Quinn's curation verdict to state |
-| `lobster_filter_curation` | Spec | review lobster | Routes high-score curated items into the pipeline |
-| `lobster_generate_specs` | Spec | review lobster | Reuses existing spec files or sets `spec_requested` |
+| `lobster_filter_curation.py` | Spec | review lobster | Routes high-score curated items into the pipeline |
+| `lobster_generate_specs.py` | Spec | review lobster | Reuses existing spec files or sets `spec_requested` |
 | `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write |
 | `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
-| `lobster_prepare_topic_approval` | Approval | review lobster | Builds approval package per topic |
+| `lobster_prepare_topic_approval.py` | Approval | review lobster | Builds approval package per topic |
 | `run_bookmark_review_cron.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` |
 | `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
 | `handle_approval_reply.py` | Approval | resumed lobster | Parses Tom's reply; routes to approve/decline/revise |
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
-| `lobster_resolve_topic_approval` | Approval | resumed lobster | Applies approved/declined/revision state change |
-| `lobster_create_tasks_from_proposals` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown |
+| `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
+| `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown |
 
 ---
 

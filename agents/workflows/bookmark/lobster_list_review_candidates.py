@@ -13,7 +13,7 @@ except Exception:  # noqa: BLE001
     list_tasks = None
 
 try:
-    from create_tasks_from_proposals import proposal_marker
+    from lobster_create_tasks_from_proposals import proposal_marker
 except Exception:  # noqa: BLE001
     proposal_marker = None
 

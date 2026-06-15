@@ -26,7 +26,7 @@ args:
 steps:
   - id: lobster_list_review_candidates
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/list_review_candidates.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_list_review_candidates.py
       --source-root ${sourceRoot}
       --source ${source}
       --limit ${limit}
@@ -34,54 +34,54 @@ steps:
 
   - id: lobster_ensure_non_empty
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/ensure_non_empty.py --json
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_ensure_non_empty.py --json
     stdin: $lobster_list_review_candidates.stdout
 
   - id: lobster_summarize
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/summarize.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_summarize.py
       --reviews-root ${reviewsRoot}
       --json
     stdin: $lobster_list_review_candidates.stdout
 
   - id: lobster_filter_curation
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/filter_curation.py --json
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_filter_curation.py --json
     stdin: $lobster_summarize.stdout
 
   - id: lobster_generate_specs
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/generate_specs.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_generate_specs.py
       --specs-root ${specsRoot}
       --json
     stdin: $lobster_filter_curation.stdout
 
   - id: lobster_prepare_topic_approval
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/prepare_topic_approval.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_prepare_topic_approval.py
       --approval-topic ${approvalTopic}
       --json
     stdin: $lobster_generate_specs.stdout
 
   - id: lobster_ensure_topic_slot_available
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/ensure_topic_slot_available.py --json
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_ensure_topic_slot_available.py --json
     stdin: $lobster_prepare_topic_approval.stdout
 
   - id: lobster_finalize_review_cycle
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/finalize_review_cycle.py --json
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_finalize_review_cycle.py --json
     stdin: $lobster_ensure_topic_slot_available.stdout
 
   - id: lobster_compact_approval_preview
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/compact_approval_preview.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_compact_approval_preview.py
     stdin: $lobster_ensure_topic_slot_available.stdout
     approval: required
 
   - id: lobster_create_tasks_from_proposals
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/create_tasks_from_proposals.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_create_tasks_from_proposals.py
       --base-url ${TASKS_API_BASE_URL}
       --json
     stdin: $lobster_ensure_topic_slot_available.stdout
@@ -89,7 +89,7 @@ steps:
 
   - id: lobster_resolve_topic_approval
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/resolve_topic_approval.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_resolve_topic_approval.py
       --decision approve
       --json
     stdin: $lobster_create_tasks_from_proposals.stdout
