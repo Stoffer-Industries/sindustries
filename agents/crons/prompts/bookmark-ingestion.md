@@ -1,5 +1,5 @@
-Run this exact command with the exec tool and base your reply only on its output:
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/run_x_ingest.py
+Read and follow:
+/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/x-bookmark-ingest/SKILL.md
 
 Do not reimplement the ingest flow. Do not add extra logic. Just run the script and report whether it succeeded or failed based on the command result.
 

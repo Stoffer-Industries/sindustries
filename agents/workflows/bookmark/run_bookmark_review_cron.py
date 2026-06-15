@@ -10,7 +10,7 @@ from pathlib import Path
 
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
-PIPELINE = WORKSPACE / "codebases" / "sindustries" / "lobster" / "x-bookmarks-review-pipeline.lobster.yaml"
+PIPELINE = Path(__file__).resolve().parent / "x-bookmarks-review-pipeline.lobster.yaml"
 REQUEST_APPROVAL = Path(__file__).resolve().parent / "request_topic_approval.py"
 STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
 DEFAULT_ARGS = {
@@ -193,7 +193,7 @@ def main() -> int:
         new_approvals = approval_result.get("approvals") or []
         blocked = approval_result.get("blockedPackages") or []
         all_deduped = not new_approvals and all(
-            b.get("reason") == "approval already pending for topic" for b in blocked
+            b.get("reason") == "approval already pending globally" for b in blocked
         )
         if all_deduped:
             print(json.dumps({

@@ -95,7 +95,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `brain/bookmarks/x/<slug>.md` | Raw bookmark files |
 | `brain/bookmarks/summaries/<slug>-<key>.md` | LLM-produced summaries |
 | `brain/bookmarks/specs/<slug>-<key>.md` | Spec files written by Quinn |
-| `lobster/x-bookmarks-review-pipeline.lobster.yaml` | Lobster pipeline definition |
+| `agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml` | Lobster pipeline definition |
 
 ---
 
@@ -103,7 +103,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 
 | Script | Stage | Notes |
 |---|---|---|
-| `run_x_ingest.py` | Ingest | Called by cron |
+| `agents/skills/x-bookmark-ingest/scripts/run_x_ingest.py` | Ingest | Called through the x-bookmark-ingest skill |
 | `summarize.py` | Summarize | Lobster step |
 | `list_curate_candidates.py` | Curate | Filter only — no LLM; outputs batch for Quinn |
 | `validate_curate_output.py` | Curate | Applies Quinn's curation output to state |

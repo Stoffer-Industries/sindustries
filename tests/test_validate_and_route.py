@@ -713,7 +713,7 @@ class ValidateSpecOutputTests(unittest.TestCase):
 
 
 # ===================================================================
-# Approval lock: state.approvalLocks self-asserting per-topic lock
+# Approval lock: state.approvalLocks self-asserting global lock
 # ===================================================================
 
 class ApprovalLockHelperTests(unittest.TestCase):

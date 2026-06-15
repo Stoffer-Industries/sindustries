@@ -1,37 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 
-const SKILL_DIR = path.join(__dirname, '..', '..');
-const STATE_DIR = process.env.OPENCLAW_STATE_DIR || path.join(SKILL_DIR, 'state');
-
-const LEGACY_DIRS = [
-  path.join(process.env.HOME || '/root', '.openclaw', 'state'),
-  path.join(process.env.HOME || '/root', '.openclaw', 'workspace', 'brain', 'state')
-];
+const WORKSPACE_DIR = process.env.OPENCLAW_WORKSPACE
+  || path.join(process.env.HOME || '/root', '.openclaw', 'workspace');
+const STATE_DIR = process.env.OPENCLAW_STATE_DIR
+  || path.join(WORKSPACE_DIR, 'brain', 'state');
 
 const PENDING_FILE = path.join(STATE_DIR, 'x-bookmark-pending.json');
 const PROCESSED_FILE = path.join(STATE_DIR, 'x-bookmark-processed.json');
-
-function migrateLegacyFile(filename) {
-  const targetPath = path.join(STATE_DIR, filename);
-  if (fs.existsSync(targetPath)) return;
-
-  for (const dir of LEGACY_DIRS) {
-    const legacyPath = path.join(dir, filename);
-    if (fs.existsSync(legacyPath)) {
-      fs.copyFileSync(legacyPath, targetPath);
-      return;
-    }
-  }
-}
 
 function ensureStateDir() {
   if (!fs.existsSync(STATE_DIR)) {
     fs.mkdirSync(STATE_DIR, { recursive: true });
   }
-
-  migrateLegacyFile('x-bookmark-pending.json');
-  migrateLegacyFile('x-bookmark-processed.json');
 }
 
 function readJSON(filepath, defaultValue = []) {
