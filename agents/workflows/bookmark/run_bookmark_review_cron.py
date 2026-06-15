@@ -193,7 +193,7 @@ def main() -> int:
         new_approvals = approval_result.get("approvals") or []
         blocked = approval_result.get("blockedPackages") or []
         all_deduped = not new_approvals and all(
-            b.get("reason") == "approval already pending globally" for b in blocked
+            b.get("reason") == "approval already pending for topic" for b in blocked
         )
         if all_deduped:
             print(json.dumps({

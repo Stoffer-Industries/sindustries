@@ -75,13 +75,13 @@ function ensureCsvWithHeader(csvPath, header) {
   }
 }
 
-function logTagsToCSV({ id, title, tags, originalTweet, url }) {
+function logTagsToCSV({ id, title, tags, summary, originalTweet, url }) {
   const normalizedTags = normalizeTags(tags);
   const processedAt = new Date().toISOString();
   const domain = extractDomain(url || '');
 
   const csvPath = path.join(STATE_DIR, 'x-bookmark-tags-log.csv');
-  const header = 'processed_at,id,title,tags_csv,tags_count,domain,url,original_tweet';
+  const header = 'processed_at,id,title,tags_csv,tags_count,domain,url,summary,original_tweet';
   ensureCsvWithHeader(csvPath, header);
 
   const row = [
@@ -92,6 +92,7 @@ function logTagsToCSV({ id, title, tags, originalTweet, url }) {
     csvEscape(normalizedTags.length),
     csvEscape(domain),
     csvEscape(url),
+    csvEscape(summary),
     csvEscape(originalTweet)
   ].join(',') + '\n';
 
@@ -176,10 +177,10 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
     const model = (process.env.BOOKMARK_LLM_MODEL || 'minimax').trim();
     const timeoutMs = parseInt(process.env.BOOKMARK_LLM_TIMEOUT_SECONDS || '120', 10) * 1000;
     const prompt = [
-      'You are tagging X bookmarks for a second brain.',
-      'Return STRICT JSON only: {"tags":["..."]}.',
-      '- tags: 3-8 lowercase keyword tags describing the content',
-      '- no topic classification, no summary, just tags',
+      'You are classifying X bookmarks for a second brain.',
+      'Return STRICT JSON only: {"summary":"...","tags":["..."]}.',
+      '- summary: 2-4 concise sentences describing the content and why it matters',
+      '- tags: 3-8 lowercase keyword tags',
       '',
       `URL: ${url}`,
       `Title: ${title || ''}`,
@@ -210,8 +211,10 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
     if (!parsed) throw new Error('acpx output did not contain valid JSON');
 
     const tags = normalizeTags(parsed.tags || []);
+    const summary = String(parsed.summary || '').trim();
 
     return {
+      summary: summary || text.substring(0, 300),
       tags: tags.length ? tags : ['needs-review'],
       title
     };
@@ -234,8 +237,10 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
     baseDomainTag && baseDomainTag !== 'x' ? baseDomainTag : '',
     'needs-review'
   ].filter(Boolean));
+  const fallbackSummary = (tweetText || '').substring(0, 300);
 
   return {
+    summary: fallbackSummary,
     tags: fallbackTags,
     title
   };
@@ -256,6 +261,7 @@ async function processBookmark(bookmark) {
     id: bookmark.id,
     title: metadata.title,
     tags: metadata.tags,
+    summary: metadata.summary,
     originalTweet: bookmark.text,
     url
   });
@@ -270,6 +276,10 @@ date_archived: ${date}
 source_tweet: https://x.com/i/web/status/${bookmark.id}
 link: ${url}
 tags: [${safeTags.map(t => `"${t}"`).join(', ')}]
+---
+
+${metadata.summary}
+
 ---
 
 **Original Tweet:**

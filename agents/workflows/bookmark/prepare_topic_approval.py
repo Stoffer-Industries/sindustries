@@ -75,10 +75,10 @@ def main() -> int:
             })
             continue
 
-        if pending_topics:
+        if topic in pending_topics:
             blocked_packages.append({
                 **package,
-                "reason": "approval already pending globally",
+                "reason": "approval already pending for topic",
             })
             continue
 
