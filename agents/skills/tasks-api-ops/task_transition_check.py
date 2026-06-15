@@ -20,6 +20,7 @@ import os
 import re
 import sys
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 # Import from workspace script; run from repo root or ensure script dir in path
@@ -596,10 +597,10 @@ def _csv_escape_field(value: str) -> str:
 
 def append_transition_log(task_id: str, payload: dict[str, Any]) -> None:
     """Append a single CSV row: timestamp, taskId, current_state, json."""
-    # Static, stable path relative to repo root.
-    log_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "memory", "task-transition-check.csv")
-    )
+    workspace_root = Path(
+        os.environ.get("OPENCLAW_WORKSPACE", str(Path.home() / ".openclaw" / "workspace"))
+    ).expanduser()
+    log_path = str(workspace_root / "brain" / "state" / "task-transition-check.csv")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
     ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")

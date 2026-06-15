@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
-WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
+WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path.home() / ".openclaw" / "workspace"
 SCRIPT = Path(__file__).resolve().parent / "x" / "run.cjs"
 BRAIN_ROOT = WORKSPACE / "brain"
 TRANSITIONS_PATH = BRAIN_ROOT / "state" / "bookmark-transitions.jsonl"

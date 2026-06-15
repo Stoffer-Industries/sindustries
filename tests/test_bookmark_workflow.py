@@ -30,6 +30,15 @@ import request_topic_approval
 import resolve_topic_approval
 import handle_approval_reply
 
+TASKS_OPS_DIR = Path(__file__).resolve().parents[1] / "agents" / "skills" / "tasks-api-ops"
+task_transition_spec = importlib.util.spec_from_file_location(
+    "task_transition_check",
+    TASKS_OPS_DIR / "task_transition_check.py",
+)
+task_transition_check = importlib.util.module_from_spec(task_transition_spec)
+assert task_transition_spec.loader is not None
+task_transition_spec.loader.exec_module(task_transition_check)
+
 
 class BookmarkWorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -260,7 +269,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertIn("Spec path", message)
         self.assertIn("Reply: `approve` / `decline`", message)
 
-    def test_prepare_topic_approval_blocks_when_topic_already_pending(self):
+    def test_prepare_topic_approval_blocks_when_any_topic_already_pending(self):
         state = common.state_template()
         state["items"]["existing"] = {
             "bookmarkKey": "existing",
@@ -279,7 +288,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "implement": [
                 {
                     "bookmarkKey": self.bookmark["bookmarkKey"],
-                    "topic": "infra",
+                    "topic": "brain",
                     "title": self.bookmark["title"],
                     "specDocs": ["brain/specs/infra/new.md"],
                     "proposedTasks": [],
@@ -297,7 +306,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["readyPackages"], [])
         self.assertEqual(len(payload["blockedPackages"]), 1)
-        self.assertEqual(payload["blockedPackages"][0]["reason"], "approval already pending for topic")
+        self.assertEqual(payload["blockedPackages"][0]["reason"], "approval already pending globally")
 
     def test_build_task_proposals_recovers_spec_created_items_for_approval_retry(self):
         state = common.state_template()
@@ -806,7 +815,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         send_mock.assert_not_called()
         requested = json.loads(request_out.getvalue())
         self.assertEqual(requested["approvals"], [])
-        self.assertEqual(requested["blockedPackages"][0]["reason"], "approval already pending for topic")
+        self.assertEqual(requested["blockedPackages"][0]["reason"], "approval already pending globally")
 
     def test_request_topic_approval_requires_resume_token(self):
         state = common.state_template()
@@ -1524,6 +1533,11 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertIn("source:bookmark-review-pipeline", request_payload["tags"])
         self.assertIn(f"bookmark:{self.bookmark['bookmarkKey']}", request_payload["tags"])
         self.assertTrue(any(tag.startswith("spec-task:") for tag in request_payload["tags"]))
+        transition_failures, _ = task_transition_check.check_open_to_ready({
+            "description": request_payload["description"],
+            "assignee": "quinn",
+        })
+        self.assertEqual(transition_failures, [])
 
     def test_create_tasks_from_proposals_reuses_existing_task_when_marker_matches(self):
         spec_doc = "brain/bookmarks/specs/llm-driven-bookmark-reviews-abc123bookmark.md"
@@ -1654,7 +1668,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "blockedPackages": [{
                 "topic": "infra",
                 "approvalTopic": "infra",
-                "reason": "approval already pending for topic",
+                "reason": "approval already pending globally",
                 "items": [{"bookmarkKey": self.bookmark["bookmarkKey"]}],
             }],
         }))

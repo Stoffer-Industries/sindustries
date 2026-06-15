@@ -272,7 +272,7 @@ def generate_spec_bundle(item: dict[str, Any], analysis: dict[str, Any]) -> dict
         "constraints": {
             "assignee": "blank",
             "taskCreation": "disabled for now",
-            "approval": "one pending approval per topic",
+            "approval": "one pending bookmark approval globally",
         },
     }
     raw = invoke_llm_json(SPEC_PROMPT, payload, SPEC_SCHEMA)

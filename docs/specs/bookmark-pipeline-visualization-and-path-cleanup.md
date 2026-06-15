@@ -114,7 +114,7 @@ The migration is mostly `git mv` with path updates in:
 
 - `brain/state/bookmark-review-state.json` — every `path` and `reviewDoc` field
 - `scripts/bookmarks/*.py` — any hard-coded path constants
-- `lobster/x-bookmarks-review-pipeline.lobster.yaml` — same
+- `agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml` — same
 
 I do **not** propose deleting the old top-level `brain/reviews/`, `brain/specs/`, etc. in the same PR. Instead:
 
@@ -139,7 +139,7 @@ The reason for phasing: a single mega-move that breaks every script and every st
 - `brain/specs/<topic>/` → `brain/bookmarks/<topic>/specs/`
 - `brain/posts/` → `brain/bookmarks/posts/` (or per-topic; see Scope)
 - `brain/specs-revised/` → delete or fold into `brain/bookmarks/<topic>/specs/revised/`
-- `lobster/x-bookmarks-review-pipeline.lobster.yaml` (path updates)
+- `agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml` (path updates)
 
 ## Scope Boundaries
 

@@ -320,7 +320,7 @@ def summarize_post_resume_state(state: dict, approval_id: str, decision: str, ex
 
     unique_task_ids = list(dict.fromkeys(task_ids))
     if decision == "decline":
-        summary = f"Declined {approval_id} — reset {declined or len(bookmark_keys)} bookmark{'s' if (declined or len(bookmark_keys)) != 1 else ''} to summarised for re-curation"
+        summary = f"Declined {approval_id} — marked {declined or len(bookmark_keys)} bookmark{'s' if (declined or len(bookmark_keys)) != 1 else ''} declined (terminal)"
     elif unique_task_ids:
         summary = f"Approved {approval_id} — created/linked {len(unique_task_ids)} task{'s' if len(unique_task_ids) != 1 else ''}"
     elif tasked:

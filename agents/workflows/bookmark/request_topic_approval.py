@@ -338,6 +338,12 @@ def _main_locked(data: dict[str, Any]) -> int:
     candidates: list[dict[str, Any]] = []
     for package in ready:
         topic = normalize_topic(package.get("approvalTopic") or package.get("topic"))
+        if candidates:
+            blocked_packages.append({
+                **package,
+                "reason": "single approval per run policy",
+            })
+            continue
         resume_token = (
             package.get("resumeToken")
             or package.get("lobsterResumeToken")
@@ -347,21 +353,20 @@ def _main_locked(data: dict[str, Any]) -> int:
         # Existing-lock check is the primary guard against concurrent runs.
         # We also keep the per-item scan as a defense-in-depth check (in
         # case the lock field was cleared but items still in flight).
-        if topic in approval_locks:
+        if approval_locks:
             blocked_packages.append({
                 **package,
-                "reason": "approval already pending for topic",
+                "reason": "approval already pending globally",
             })
             continue
-        topic_already_pending = any(
-            get_approval_topic(state_item) == topic
-            and state_item.get("reviewStatus") in {"approval_pending", "revision_staged"}
+        approval_already_pending = any(
+            state_item.get("reviewStatus") in {"approval_pending", "revision_staged"}
             for state_item in items.values()
         )
-        if topic_already_pending:
+        if approval_already_pending:
             blocked_packages.append({
                 **package,
-                "reason": "approval already pending for topic",
+                "reason": "approval already pending globally",
             })
             continue
 
@@ -399,17 +404,6 @@ def _main_locked(data: dict[str, Any]) -> int:
             "approvalId": approval_id,
             "itemCount": len(package.get("items", [])),
         })
-
-    for cand in candidates:
-        package = cand["package"]
-        topic = cand["topic"]
-        approval_locks[topic] = {
-            "approvalId": cand["approval_id"],
-            "requestedAt": timestamp,
-            "items": [item["bookmarkKey"] for item in package.get("items", []) if item.get("bookmarkKey")],
-        }
-
-    save_state(state, Path(STATE_PATH))
 
     for cand in candidates:
         package = cand["package"]
@@ -483,6 +477,15 @@ def _main_locked(data: dict[str, Any]) -> int:
             delivery_error = "approval message did not return a messageId"
         persist_claim = stage_only or delivery_confirmed
         if persist_claim:
+            approval_locks[topic] = {
+                "approvalId": approval_id,
+                "requestedAt": timestamp,
+                "items": [
+                    item["bookmarkKey"]
+                    for item in package.get("items", [])
+                    if item.get("bookmarkKey")
+                ],
+            }
             for bookmark_key, state_item in pending_state_updates:
                 previous_status = state_item.pop("_previousReviewStatus", None)
                 if delivered_message_id:

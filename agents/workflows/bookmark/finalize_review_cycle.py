@@ -59,7 +59,7 @@ def main() -> int:
 
     for package in data.get("blockedPackages", []):
         topic = package.get("approvalTopic") or package.get("topic") or "general"
-        reason = package.get("reason") or package.get("blockedReason") or "approval already pending for topic"
+        reason = package.get("reason") or package.get("blockedReason") or "approval already pending globally"
         for summary in package.get("items", []):
             bookmark_key = summary.get("bookmarkKey")
             if not bookmark_key:

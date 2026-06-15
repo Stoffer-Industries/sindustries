@@ -230,7 +230,7 @@ def clear_approval_lock(state: dict, approval_id: str) -> str | None:
     topic that was locked, or None if no match was found.
 
     Used by handle_approval_reply, resolve_topic_approval, and the
-    revision-request flow to release the self-asserting per-topic lock
+    revision-request flow to release the self-asserting global lock
     once the approval is resolved. Idempotent — calling on a state
     without the lock is a no-op.
     """
@@ -365,10 +365,10 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "owner": "Tom Stoffer",
         "framingReminder": "The bookmark's own framing is the spec's center of gravity. The state-of-the-nation document, frictions, and topic profile are relevance signals — they tell you whether the bookmark belongs in this topic's domain, not what the bookmark is about. Do not re-shape the bookmark onto our frictions. The spec generation prompt has the full faithfulness rule.",
         "currentState": [
-            "Bookmark ingest already exists via scripts/bookmarks/x/fetch.cjs and process.cjs",
-            "Review workflow scripts live under scripts/bookmarks/",
+            "Bookmark ingest lives in agents/skills/x-bookmark-ingest/scripts/",
+            "Review workflow scripts live under agents/workflows/bookmark/",
             "Review state is stored in brain/state/bookmark-review-state.json",
-            "Pipeline orchestration target is lobster/x-bookmarks-review-pipeline.lobster.yaml",
+            "Pipeline orchestration target is agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml",
         ],
         "goals": [
             "Automate repetitive work around planning, tasks, memory, and operations",
@@ -378,7 +378,7 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "constraints": [
             "No task creation yet",
             "Monitored bookmarks get a review only, with no spec, approval request, or tasks",
-            "Only one pending approval per topic",
+            "Only one bookmark approval may be pending globally",
             "Topic routing comes from brain/bookmarks/<topic>/...",
             "One bookmark may produce one or many specs when warranted",
         ],
@@ -393,9 +393,9 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "infra": {
             "stackFocus": "the OpenClaw runtime stack: agent orchestration, workflow plumbing, state files, observability, deployment, host hardening, and the scripts/lobsters that wire them together",
             "adjacentComponents": [
-                "scripts/bookmarks/*.py",
-                "scripts/bookmarks/x/*.cjs",
-                "lobster/x-bookmarks-review-pipeline.lobster.yaml",
+                "agents/workflows/bookmark/*.py",
+                "agents/skills/x-bookmark-ingest/scripts/x/*.cjs",
+                "agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml",
                 "brain/state/bookmark-review-state.json",
                 "infra/runbooks/ and infra/RUNBOOKS.md",
                 "codebases/sindustries/infra/ (Grafana, OTel, Prometheus)",

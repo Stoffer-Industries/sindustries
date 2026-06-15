@@ -83,6 +83,29 @@ def _extract_section(text: str, heading: str) -> str:
     return (section[:next_h.start()] if next_h else section).strip()
 
 
+def render_task_description(title: str, outcome: str, acceptance_criteria: str, spec_doc: str) -> str:
+    ac_lines = []
+    for line in acceptance_criteria.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r'^-\s+\[[ xX]\]\s+', stripped):
+            ac_lines.append(stripped)
+        else:
+            ac_lines.append(f'- [ ] {stripped.lstrip("- ").strip()}')
+    if not ac_lines:
+        ac_lines.append("- [ ] Implement the specification and verify its acceptance criteria")
+
+    why = outcome.strip() or f"Deliver the outcome defined in {spec_doc}."
+    ac_block = "\n".join(ac_lines)
+    return (
+        f"**What:** {title}\n"
+        f"**Why:** {why}\n\n"
+        f"**AC:**\n{ac_block}\n\n"
+        f"**Spec:** {spec_doc}"
+    )
+
+
 def build_task_from_spec(spec_doc: str, bookmark_key: str, topic: str) -> dict | None:
     """Read a spec markdown file and build a task dict (title + description)."""
     spec_path = WORKSPACE / spec_doc
@@ -99,21 +122,14 @@ def build_task_from_spec(spec_doc: str, bookmark_key: str, topic: str) -> dict |
     notes = _extract_section(text, 'Notes')
     outcome = _extract_section(text, 'Outcome')
 
-    parts = [
-        f'**Spec:** {spec_doc}',
-        f'**Topic:** {topic}',
-        f'**Bookmark:** {bookmark_key}',
-    ]
-    if outcome:
-        parts += ['', '---', '', outcome]
-    if acs:
-        parts += ['', '## Acceptance Criteria', '', acs]
+    description = render_task_description(title, outcome, acs, spec_doc)
     if notes:
-        parts += ['', '## Notes', '', notes]
+        description += f"\n\n## Notes\n\n{notes}"
+    description += f"\n\n**Topic:** {topic}\n**Bookmark:** {bookmark_key}"
 
     return {
         'title': title,
-        'description': '\n'.join(parts),
+        'description': description,
         'priority': 'high',
     }
 

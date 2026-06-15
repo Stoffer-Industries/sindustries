@@ -25,8 +25,8 @@ def main() -> int:
     blocked = []
     for package in packages:
         topic = package.get("approvalTopic") or package.get("topic") or "general"
-        if topic in approval_pending_topics:
-            blocked.append({**package, "blockedReason": "approval already pending for topic"})
+        if approval_pending_topics:
+            blocked.append({**package, "blockedReason": "approval already pending globally"})
         else:
             ready.append(package)
 
