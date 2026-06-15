@@ -269,7 +269,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertIn("Spec path", message)
         self.assertIn("Reply: `approve` / `decline`", message)
 
-    def test_prepare_topic_approval_blocks_when_any_topic_already_pending(self):
+    def test_prepare_topic_approval_blocks_same_topic_when_pending(self):
+        """Per-topic lock: an infra pending approval does NOT block a brain package,
+        but a brain pending approval blocks another brain package."""
         state = common.state_template()
         state["items"]["existing"] = {
             "bookmarkKey": "existing",
@@ -284,6 +286,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         }
         common.save_state(state, self.state_path)
 
+        # brain package: should NOT be blocked by infra pending
         stdin = io.StringIO(json.dumps({
             "implement": [
                 {
@@ -304,9 +307,47 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["readyPackages"], [])
-        self.assertEqual(len(payload["blockedPackages"]), 1)
-        self.assertEqual(payload["blockedPackages"][0]["reason"], "approval already pending globally")
+        # brain package is eligible — different topic from pending infra approval
+        self.assertEqual(len(payload["readyPackages"]), 1)
+        self.assertEqual(payload["readyPackages"][0]["topic"], "brain")
+
+        # Now add a brain pending and confirm a second brain package is blocked
+        state["items"]["existing_brain"] = {
+            "bookmarkKey": "existing_brain",
+            "path": "brain/bookmarks/brain/existing_brain.md",
+            "topic": "brain",
+            "source": "x",
+            "title": "Existing Brain",
+            "reviewStatus": "approval_pending",
+            "approvalTopic": "brain",
+            "specDocs": ["brain/specs/brain/existing_brain.md"],
+            "taskIds": [],
+        }
+        common.save_state(state, self.state_path)
+
+        stdin2 = io.StringIO(json.dumps({
+            "implement": [
+                {
+                    "bookmarkKey": self.bookmark["bookmarkKey"],
+                    "topic": "brain",
+                    "title": self.bookmark["title"],
+                    "specDocs": ["brain/specs/brain/new.md"],
+                    "proposedTasks": [],
+                }
+            ],
+            "monitoring": [],
+            "reviewed": [],
+        }))
+        stdout2 = io.StringIO()
+        with patch.object(prepare_topic_approval, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin2), patch("sys.stdout", stdout2), patch.object(sys, "argv", ["prepare_topic_approval.py", "--json"]):
+                rc2 = prepare_topic_approval.main()
+
+        self.assertEqual(rc2, 0)
+        payload2 = json.loads(stdout2.getvalue())
+        self.assertEqual(payload2["readyPackages"], [])
+        self.assertEqual(len(payload2["blockedPackages"]), 1)
+        self.assertEqual(payload2["blockedPackages"][0]["reason"], "approval already pending for topic")
 
     def test_build_task_proposals_recovers_spec_created_items_for_approval_retry(self):
         state = common.state_template()
