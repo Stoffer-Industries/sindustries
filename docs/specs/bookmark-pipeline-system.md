@@ -103,7 +103,9 @@ ingested  summarized  needs_research (human-gated)                      declined
 
 | Script | Stage | Executed by | Notes |
 |---|---|---|---|
-| `run_x_ingest.py` | Ingest | ingest cron | Called through the x-bookmark-ingest skill |
+| `run_x_ingest.py` | Ingest | ingest cron | Entry point via x-bookmark-ingest skill |
+| `lobster_list_review_candidates.py` | Ingest | review lobster | Collects candidate bookmarks for the pipeline |
+| `lobster_ensure_non_empty.py` | Ingest | review lobster | Guards against empty candidate sets; short-circuits early |
 | `lobster_summarize.py` | Summarize | review lobster | Faithful extraction; no classification |
 | `list_curate_candidates.py` | Curate | heartbeat | Filter only — no LLM; outputs candidate batch for Quinn |
 | `validate_curate_output.py` | Curate | heartbeat | Applies Quinn's curation verdict to state |
@@ -112,12 +114,16 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write |
 | `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
 | `lobster_prepare_topic_approval.py` | Approval | review lobster | Builds approval package per topic |
-| `run_bookmark_review_cron.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` |
+| `lobster_ensure_topic_slot_available.py` | Approval | review lobster | Dedup guard — blocks if an approval is already pending |
+| `lobster_finalize_review_cycle.py` | Approval | review lobster | Closes non-approval items for the current cycle |
+| `lobster_compact_approval_preview.py` | Approval | review lobster | Renders the approval gate message; pauses pipeline |
+| `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in bookmark-curate skill) |
 | `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
 | `handle_approval_reply.py` | Approval | resumed lobster | Parses Tom's reply; routes to approve/decline/revise |
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
 | `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
 | `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown |
+| `run_bookmark_state_analyzer.py` | Inspect | skill | Compact state summary without loading full JSON (in bookmark-state-analyzer skill) |
 
 ---
 
