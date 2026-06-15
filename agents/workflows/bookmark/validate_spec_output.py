@@ -20,16 +20,15 @@ Idempotent:
   - renames the artifact to `<name>.processed` after applying so a
     re-run (or concurrent run) won't double-apply
 
-For revision entries, also calls `rebuild_revised_approval.py` to
-regenerate the approval package for Tom — same behavior as the old
-inline call from heartbeat.
+Heartbeat's job ends at spec_created. The lobster cron detects spec_created
+items (including revisions) and sends the approval request with a proper
+resume token. Do not trigger approval delivery from here.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -121,34 +120,6 @@ def build_proposals(entry: dict[str, Any]) -> tuple[list[str], list[dict[str, An
     return spec_docs, spec_proposals
 
 
-def rebuild_revised_approval(bookmark_key: str) -> tuple[bool, str]:
-    """Call rebuild_revised_approval.py for revision entries."""
-    script = (
-        Path(__file__).resolve().parent / "rebuild_revised_approval.py"
-    )
-    if not script.exists():
-        return False, f"rebuild_revised_approval.py not found at {script}"
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(script),
-                "--bookmark-key",
-                bookmark_key,
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
-            return False, f"exit {result.returncode}: {result.stderr.strip()}"
-        return True, "ok"
-    except subprocess.TimeoutExpired:
-        return False, "timed out"
-    except Exception as e:  # pragma: no cover - defensive
-        return False, str(e)
-
 
 def main() -> int:
     p = argparse.ArgumentParser(
@@ -171,7 +142,6 @@ def main() -> int:
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
-    revision_rebuilds: list[dict[str, Any]] = []
 
     if not input_path.exists():
         payload = {
@@ -271,13 +241,8 @@ def main() -> int:
             "requestType": entry.get("requestType", "new"),
         })
 
-        if entry.get("requestType") == "revision":
-            ok, detail = rebuild_revised_approval(bookmark_key)
-            revision_rebuilds.append({
-                "bookmarkKey": bookmark_key,
-                "ok": ok,
-                "detail": detail,
-            })
+        # Revision approval re-send is the lobster's job — it detects spec_created
+        # and sends a new approval with a proper resume token on the next cron run.
 
     if applied:
         save_state(state, Path(STATE_PATH))
@@ -295,15 +260,13 @@ def main() -> int:
         "applied": applied,
         "skipped": skipped,
         "invalid": invalid,
-        "revisionRebuilds": revision_rebuilds,
     }
     if args.json:
         dump_json(payload)
     else:
         print(
             f"spec-validate: applied={len(applied)} "
-            f"skipped={len(skipped)} invalid={len(invalid)} "
-            f"revisions={len(revision_rebuilds)}"
+            f"skipped={len(skipped)} invalid={len(invalid)}"
         )
     return 0
 
