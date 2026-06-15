@@ -1486,17 +1486,19 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertTrue(matched[0].get("skipReview"))
 
     def test_create_tasks_from_proposals_creates_tasks_via_existing_api_path(self):
+        spec_doc = "brain/bookmarks/specs/llm-driven-bookmark-reviews-abc123bookmark.md"
+        spec_path = self.root / spec_doc
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text(
+            "# Spec — LLM Bookmark Reviews\n\n## Outcome\n\nFaithful extraction.\n\n## Acceptance Criteria\n\n- [ ] **AC1:** Reviews are generated.\n",
+            encoding="utf-8",
+        )
         approval_payload = {
             "approvals": [{
                 "topic": "infra",
                 "items": [{
                     "bookmarkKey": self.bookmark["bookmarkKey"],
-                    "specDocs": ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
-                    "proposedTasks": [{
-                        "title": "Wire structured review analysis",
-                        "priority": "high",
-                        "description": "Implement LLM-backed bookmark review output.",
-                    }],
+                    "specDocs": [spec_doc],
                 }],
             }],
             "blockedPackages": [],
@@ -1506,7 +1508,8 @@ class BookmarkWorkflowTests(unittest.TestCase):
         stdin = io.StringIO(json.dumps(approval_payload))
         stdout = io.StringIO()
 
-        with patch.object(create_tasks_from_proposals, "list_tasks", return_value=[]), \
+        with patch.object(create_tasks_from_proposals, "WORKSPACE", self.root), \
+             patch.object(create_tasks_from_proposals, "list_tasks", return_value=[]), \
              patch.object(create_tasks_from_proposals, "api_request", return_value={"data": {"id": "task-123"}}) as api_mock:
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["create_tasks_from_proposals.py", "--base-url", "http://api", "--json"]):
                 rc = create_tasks_from_proposals.main()
@@ -1520,26 +1523,17 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(request_payload["status"], "open")
         self.assertIn("source:bookmark-review-pipeline", request_payload["tags"])
         self.assertIn(f"bookmark:{self.bookmark['bookmarkKey']}", request_payload["tags"])
-        self.assertTrue(any(tag.startswith("proposal:") for tag in request_payload["tags"]))
+        self.assertTrue(any(tag.startswith("spec-task:") for tag in request_payload["tags"]))
 
     def test_create_tasks_from_proposals_reuses_existing_task_when_marker_matches(self):
-        proposal = {
-            "title": "Wire structured review analysis",
-            "priority": "high",
-            "description": "Implement LLM-backed bookmark review output.",
-        }
-        marker = create_tasks_from_proposals.proposal_marker(
-            self.bookmark["bookmarkKey"],
-            ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
-            proposal,
-        )
+        spec_doc = "brain/bookmarks/specs/llm-driven-bookmark-reviews-abc123bookmark.md"
+        marker = create_tasks_from_proposals.spec_marker(spec_doc)
         approval_payload = {
             "approvals": [{
                 "topic": "infra",
                 "items": [{
                     "bookmarkKey": self.bookmark["bookmarkKey"],
-                    "specDocs": ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
-                    "proposedTasks": [proposal],
+                    "specDocs": [spec_doc],
                 }],
             }],
             "blockedPackages": [],
@@ -1562,23 +1556,20 @@ class BookmarkWorkflowTests(unittest.TestCase):
         api_mock.assert_not_called()
 
     def test_create_tasks_from_proposals_does_not_reuse_done_task_when_marker_matches(self):
-        proposal = {
-            "title": "Wire structured review analysis",
-            "priority": "high",
-            "description": "Implement LLM-backed bookmark review output.",
-        }
-        marker = create_tasks_from_proposals.proposal_marker(
-            self.bookmark["bookmarkKey"],
-            ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
-            proposal,
+        spec_doc = "brain/bookmarks/specs/llm-driven-bookmark-reviews-abc123bookmark.md"
+        spec_path = self.root / spec_doc
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text(
+            "# Spec — LLM Bookmark Reviews\n\n## Acceptance Criteria\n\n- [ ] **AC1:** Reviews are generated.\n",
+            encoding="utf-8",
         )
+        marker = create_tasks_from_proposals.spec_marker(spec_doc)
         approval_payload = {
             "approvals": [{
                 "topic": "infra",
                 "items": [{
                     "bookmarkKey": self.bookmark["bookmarkKey"],
-                    "specDocs": ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
-                    "proposedTasks": [proposal],
+                    "specDocs": [spec_doc],
                 }],
             }],
             "blockedPackages": [],
@@ -1594,7 +1585,8 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "completedAt": "2026-03-31T00:00:00Z",
         }
 
-        with patch.object(create_tasks_from_proposals, "list_tasks", return_value=[existing_task]), \
+        with patch.object(create_tasks_from_proposals, "WORKSPACE", self.root), \
+             patch.object(create_tasks_from_proposals, "list_tasks", return_value=[existing_task]), \
              patch.object(create_tasks_from_proposals, "api_request", return_value={"data": {"id": "task-new"}}) as api_mock:
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["create_tasks_from_proposals.py", "--base-url", "http://api", "--json"]):
                 rc = create_tasks_from_proposals.main()
