@@ -300,13 +300,18 @@ def pr_tests_passing(owner: str, repo: str, head_sha: str, token: str) -> tuple[
     if runs is None:
         # API unavailable - fail closed
         return False, "GitHub API unavailable; cannot verify check runs"
-    if runs and "check_runs" in runs:
-        for run in runs.get("check_runs", []):
-            conclusion = (run.get("conclusion") or "").lower()
-            if conclusion == "failure" or conclusion == "cancelled" or conclusion == "timed_out":
-                return False, f"Check failed: {run.get('name', 'unknown')}"
-            if conclusion == "" and (run.get("status") or "").lower() == "in_progress":
-                return False, "GitHub check runs are still in progress; wait for them to complete in the PR before moving the task forward"
+    check_runs = runs.get("check_runs") or []
+    if not check_runs:
+        return False, "No check runs reported for this commit yet; wait for CI to start"
+    successful_conclusions = {"success", "neutral", "skipped"}
+    for run in check_runs:
+        name = run.get("name", "unknown")
+        run_status = (run.get("status") or "").lower()
+        conclusion = (run.get("conclusion") or "").lower()
+        if run_status != "completed":
+            return False, f"Check not completed: {name} ({run_status or 'unknown status'})"
+        if conclusion not in successful_conclusions:
+            return False, f"Check failed: {name}"
     return True, ""
 
 
