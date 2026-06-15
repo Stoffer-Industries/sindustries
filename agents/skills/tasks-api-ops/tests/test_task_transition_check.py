@@ -24,7 +24,17 @@ class PrTestsPassingTest(unittest.TestCase):
                     "name": "test",
                     "status": "completed",
                     "conclusion": "success",
-                }
+                },
+                {
+                    "name": "lint",
+                    "status": "completed",
+                    "conclusion": "neutral",
+                },
+                {
+                    "name": "optional",
+                    "status": "completed",
+                    "conclusion": "skipped",
+                },
             ]
         }
 
@@ -60,6 +70,47 @@ class PrTestsPassingTest(unittest.TestCase):
 
         self.assertFalse(passing)
         self.assertEqual(message, "Check failed: test")
+
+    @patch.object(task_transition_check, "github_check_runs")
+    @patch.object(task_transition_check, "github_commit_status")
+    def test_zero_legacy_statuses_reports_no_check_runs_yet(
+        self, commit_status, check_runs
+    ):
+        commit_status.return_value = {"state": "pending", "total_count": 0}
+        check_runs.return_value = {"check_runs": []}
+
+        passing, message = task_transition_check.pr_tests_passing(
+            "Stoffer-Industries", "sindustries", "abc123", "token"
+        )
+
+        self.assertFalse(passing)
+        self.assertEqual(
+            message,
+            "No check runs reported for this commit yet; wait for CI to start",
+        )
+
+    @patch.object(task_transition_check, "github_check_runs")
+    @patch.object(task_transition_check, "github_commit_status")
+    def test_zero_legacy_statuses_reports_queued_check_run(
+        self, commit_status, check_runs
+    ):
+        commit_status.return_value = {"state": "pending", "total_count": 0}
+        check_runs.return_value = {
+            "check_runs": [
+                {
+                    "name": "test",
+                    "status": "queued",
+                    "conclusion": None,
+                }
+            ]
+        }
+
+        passing, message = task_transition_check.pr_tests_passing(
+            "Stoffer-Industries", "sindustries", "abc123", "token"
+        )
+
+        self.assertFalse(passing)
+        self.assertEqual(message, "Check not completed: test (queued)")
 
 
 if __name__ == "__main__":
