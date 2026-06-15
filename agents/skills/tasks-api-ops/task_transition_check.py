@@ -171,6 +171,8 @@ def resolve_current_state(task: dict) -> str:
 DESC_WHAT = re.compile(r"\*\*What:\*\*\s*(.+)", re.IGNORECASE | re.DOTALL)
 DESC_WHY = re.compile(r"\*\*Why:\*\*\s*(.+)", re.IGNORECASE | re.DOTALL)
 DESC_AC = re.compile(r"\*\*AC:\*\*", re.IGNORECASE)
+# Spec-authored tasks use ## Acceptance Criteria instead of **AC:**
+DESC_AC_HEADING = re.compile(r"^##\s+Acceptance Criteria", re.IGNORECASE | re.MULTILINE)
 DESC_AC_ITEM = re.compile(r"^\s*-\s*\[[\sx]\].+", re.MULTILINE)
 DESC_SPEC = re.compile(r"\*\*Spec:\*\*\s*(.+?)(?=\n\*\*|\Z)", re.IGNORECASE | re.DOTALL)
 
@@ -178,13 +180,16 @@ DESC_SPEC = re.compile(r"\*\*Spec:\*\*\s*(.+?)(?=\n\*\*|\Z)", re.IGNORECASE | re
 def check_open_to_ready(task: dict) -> tuple[list[str], str]:
     failed = []
     desc = (task.get("description") or "").strip()
+    # Spec-authored tasks use **Spec:** header instead of **What:**/**Why:**
+    is_spec_task = bool(DESC_SPEC.search(desc)) and not DESC_WHAT.search(desc)
     if not desc:
         failed.append(MSG["READY"]["DESC"]["MISSING"])
-    if not DESC_WHAT.search(desc):
+    if not is_spec_task and not DESC_WHAT.search(desc):
         failed.append(MSG["READY"]["DESC"]["MISSING_WHAT"])
-    if not DESC_WHY.search(desc):
+    if not is_spec_task and not DESC_WHY.search(desc):
         failed.append(MSG["READY"]["DESC"]["MISSING_WHY"])
-    if not DESC_AC.search(desc):
+    has_ac = DESC_AC.search(desc) or DESC_AC_HEADING.search(desc)
+    if not has_ac:
         failed.append(MSG["READY"]["DESC"]["MISSING_AC"])
     else:
         ac_items = DESC_AC_ITEM.findall(desc)
