@@ -291,7 +291,8 @@ def pr_tests_passing(owner: str, repo: str, head_sha: str, token: str) -> tuple[
     if state == "success":
         return True, ""
     if state == "pending":
-        return False, "GitHub reports this commit's status as pending; wait for all required checks on the PR to finish before moving the task forward"
+        if status.get("total_count") != 0:
+            return False, "GitHub reports this commit's status as pending; wait for all required checks on the PR to finish before moving the task forward"
     if state == "failure" or state == "error":
         return False, "One or more checks failed"
     # Fall through to check runs if status returned but wasn't conclusive
