@@ -9,10 +9,43 @@
   align-items: center;
   background: var(--si-color-bg-section);
   border-bottom: 1px solid var(--si-color-border-subtle);
-  display: flex;
+  display: grid;
   gap: 16px;
-  justify-content: space-between;
+  grid-template-columns: auto 1fr auto;
   padding: 16px 20px;
+}
+
+.si-specimen-kit-tabs {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.si-specimen-kit-tab {
+  background: transparent;
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-pill);
+  color: var(--si-color-text-secondary);
+  cursor: pointer;
+  font-family: var(--si-font-ui);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  min-height: 36px;
+  padding: 0 14px;
+  text-transform: uppercase;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.si-specimen-kit-tab:hover {
+  border-color: color-mix(in srgb, var(--si-color-brand-500) 48%, transparent);
+  color: var(--si-color-text-primary);
+}
+
+.si-specimen-kit-tab--active {
+  background: color-mix(in srgb, var(--si-color-brand-500) 18%, transparent);
+  border-color: color-mix(in srgb, var(--si-color-brand-500) 56%, transparent);
+  color: var(--si-color-text-primary);
 }
 
 .si-specimen-back {

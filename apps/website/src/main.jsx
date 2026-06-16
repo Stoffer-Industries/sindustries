@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Analytics } from '@vercel/analytics/react';
-import '@sindustries/design-tokens/styles.css';
+import '@sindustries/ui/react/styles.css';
 import { App } from './App.jsx';
 import './App.css';
 

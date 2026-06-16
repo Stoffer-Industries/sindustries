@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Button, Card } from '@sindustries/ui/react';
 import { DetailSheet } from './components/DetailSheet.jsx';
 import { StickyCardStack } from './components/StickyCardStack.jsx';
 import {
@@ -420,17 +421,17 @@ function AboutPage() {
   return (
     <>
     <div className="site-shell about-shell">
-      <header className="about-hero">
+      <Card as="header" variant="ink" className="about-hero">
         <a className="about-home-link" href="/" aria-label="Back to SIndustries home"><LogoMark /></a>
         <p className="eyebrow">About</p>
         <h1>Tom Stoffer builds systems for staying relevant.</h1>
         <p className="lede">
           SIndustries is Tom’s AI-native builder/operator company: part product studio, part operating system, part public lab for compounding leverage.
         </p>
-      </header>
+      </Card>
 
       <main className="about-content">
-        <section className="about-card">
+        <Card as="section" variant="panel" className="about-card">
           <p className="eyebrow">Profile</p>
           <h2>Builder, engineering leader, systems thinker.</h2>
           <p>
@@ -439,18 +440,18 @@ function AboutPage() {
           <p>
             After years leading teams and shipping other people’s roadmaps, SIndustries is the vehicle for building his own IP in public: practical products, automation loops, AI-native workflows, and small explorations that can compound into a company of one.
           </p>
-        </section>
+        </Card>
 
-        <section className="about-card dark">
+        <Card as="section" variant="ink" className="about-card dark">
           <p className="eyebrow">What SIndustries is for</p>
           <p>
             The thesis is simple: stay relevant in an ever-changing world by building systems that learn, products that test demand, and public signal that compounds over time.
           </p>
           <div className="about-actions">
-            <a className="btn primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow on X</a>
-            <a className="btn secondary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</a>
+            <Button as="a" variant="primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow on X</Button>
+            <Button as="a" variant="outline" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</Button>
           </div>
-        </section>
+        </Card>
       </main>
 
     </div>
@@ -533,8 +534,8 @@ export function App() {
                 SINDUSTRIES is an AI-native builder/operator company: systems that compound, explorations that test reality, and signals that prove momentum.
               </p>
               <div className="hero-actions">
-                <a className="btn primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow Tom on X</a>
-                <a className="btn secondary" href="#signals">See the signal</a>
+                <Button as="a" variant="primary" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">Follow Tom on X</Button>
+                <Button as="a" variant="outline" href="#signals">See the signal</Button>
               </div>
             </div>
           </div>
@@ -579,7 +580,9 @@ export function App() {
         <Section name="Ships" eyebrow="Released to the world" title="Outputs that have left the dock" headingTarget={pageHeadingTargets.Ships} pageHeadingOpacity={pageHeadingOpacities.Ships}>
           <div className="ships-list">
             {SHIPS.map((ship, index) => (
-              <button
+              <Card
+                as="button"
+                interactive
                 className="ship-row"
                 type="button"
                 key={ship.slug}
@@ -588,7 +591,7 @@ export function App() {
               >
                 <span>{String(index + 1).padStart(2, '0')}</span>
                 <p>{ship.title}</p>
-              </button>
+              </Card>
             ))}
           </div>
         </Section>
@@ -596,7 +599,9 @@ export function App() {
         <Section name="Stories" eyebrow="Founder log" title="Notes from the edge of the build." headingTarget={pageHeadingTargets.Stories} pageHeadingOpacity={pageHeadingOpacities.Stories}>
           <div className="stories-grid">
             {STORIES.map((story) => (
-              <button
+              <Card
+                as="button"
+                interactive
                 className="story-card"
                 type="button"
                 key={story.slug}
@@ -607,7 +612,7 @@ export function App() {
                 <h3>{story.title}</h3>
                 <p>{story.dek}</p>
                 <span className="story-link">Read detail</span>
-              </button>
+              </Card>
             ))}
           </div>
         </Section>
@@ -627,9 +632,9 @@ export function App() {
               If you are building, backing, or reshaping how organisations work, the line is open. Follow the systems, watch the explorations, or start a conversation.
             </p>
             <div className="summon-actions">
-              <a className="btn primary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</a>
-              <a className="btn secondary light" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">X</a>
-              <a className="btn secondary light" href={SOCIAL_LINKS.tiktok} target="_blank" rel="noreferrer">TikTok</a>
+              <Button as="a" variant="primary" href={`mailto:${CONTACT_EMAIL}`}>Email Tom</Button>
+              <Button as="a" variant="outline" href={SOCIAL_LINKS.x} target="_blank" rel="noreferrer">X</Button>
+              <Button as="a" variant="outline" href={SOCIAL_LINKS.tiktok} target="_blank" rel="noreferrer">TikTok</Button>
             </div>
           </div>
         </Section>

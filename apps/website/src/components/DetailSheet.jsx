@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Badge } from '@sindustries/ui/react';
 
 const SWIPE_DISMISS_DISTANCE_PX = 72;
 const SWIPE_DISMISS_VELOCITY_PX_PER_MS = 0.55;
@@ -33,9 +34,9 @@ function DetailLinks({ links = [], canonicalUrl }) {
   return (
     <div className="detail-sheet-links" aria-label="Detail links">
       {detailLinks.map((link) => (
-        <a href={link.url} target="_blank" rel="noreferrer" key={`${link.label}-${link.url}`}>
+        <Badge as="a" href={link.url} target="_blank" rel="noreferrer" key={`${link.label}-${link.url}`}>
           {link.label}
-        </a>
+        </Badge>
       ))}
     </div>
   );
@@ -47,8 +48,8 @@ function ReleaseDetail({ item }) {
   return (
     <>
       <div className="detail-sheet-meta">
-        {item.type ? <span>{item.type}</span> : null}
-        {releaseDate ? <span>{releaseDate}</span> : null}
+        {item.type ? <Badge>{item.type}</Badge> : null}
+        {releaseDate ? <Badge>{releaseDate}</Badge> : null}
       </div>
       <p className="detail-sheet-summary">{item.summary}</p>
       {item.evidence ? (
@@ -66,8 +67,8 @@ function ExperimentDetail({ item }) {
   return (
     <>
       <div className="detail-sheet-meta">
-        {item.status ? <span>{item.status}</span> : null}
-        {item.tag ? <span>{item.tag}</span> : null}
+        {item.status ? <Badge>{item.status}</Badge> : null}
+        {item.tag ? <Badge>{item.tag}</Badge> : null}
       </div>
       {item.summary ? <p className="detail-sheet-summary">{item.summary}</p> : null}
       {item.why ? (
@@ -103,8 +104,8 @@ function StoryDetail({ item }) {
   return (
     <>
       <div className="detail-sheet-meta">
-        {item.source ? <span>{item.source.replaceAll('-', ' ')}</span> : null}
-        {publishedDate ? <span>{publishedDate}</span> : draftedDate ? <span>Drafted {draftedDate}</span> : null}
+        {item.source ? <Badge>{item.source.replaceAll('-', ' ')}</Badge> : null}
+        {publishedDate ? <Badge>{publishedDate}</Badge> : draftedDate ? <Badge>Drafted {draftedDate}</Badge> : null}
       </div>
       {item.dek ? <p className="detail-sheet-summary">{item.dek}</p> : null}
       {bodyParagraphs.length > 0 ? (
@@ -115,7 +116,7 @@ function StoryDetail({ item }) {
       ) : null}
       {item.topics?.length ? (
         <div className="detail-sheet-topics" aria-label="Story topics">
-          {item.topics.map((topic) => <span key={topic}>{topic}</span>)}
+          {item.topics.map((topic) => <Badge key={topic}>{topic}</Badge>)}
         </div>
       ) : null}
       <DetailLinks links={item.links} canonicalUrl={item.canonicalUrl} />

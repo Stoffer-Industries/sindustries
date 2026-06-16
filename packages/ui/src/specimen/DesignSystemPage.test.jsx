@@ -10,7 +10,20 @@ describe('DesignSystemPage', () => {
     const user = userEvent.setup();
     render(<DesignSystemPage backHref="/" backLabel="← Tasks" />);
 
+    expect(screen.getByRole('navigation', { name: 'Design kit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tokens' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { name: 'Sindustries design system' })).toBeInTheDocument();
+    expect(screen.getByText('Color')).toBeInTheDocument();
+    expect(screen.getByText('Color labels')).toBeInTheDocument();
+    expect(screen.getByText('Space')).toBeInTheDocument();
+    expect(screen.getByText('Radius')).toBeInTheDocument();
+    expect(screen.getByText('10')).toBeInTheDocument();
+    expect(screen.getByText('Tertiary headers')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Pulse / React' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Brand / React' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Pulse' }));
+    expect(screen.getByRole('button', { name: 'Pulse' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { name: 'Pulse / React' })).toBeInTheDocument();
     expect(screen.getByText('Components')).toBeInTheDocument();
     expect(screen.queryByText('Code catalog')).not.toBeInTheDocument();
@@ -42,7 +55,6 @@ describe('DesignSystemPage', () => {
     expect(screen.getByRole('button', { name: 'Display ghost' })).toBeInTheDocument();
     expect(screen.getByText('Button/Default')).toBeInTheDocument();
     expect(screen.getByText('Button/Display/Primary')).toBeInTheDocument();
-    expect(screen.getByText('Tertiary headers')).toBeInTheDocument();
     const pulsePage = screen.getByRole('heading', { name: 'Pulse / React' }).closest('section');
     expect(pulsePage).toBeTruthy();
     const surfacesBlock = within(pulsePage).getByRole('heading', { name: 'Surfaces' }).closest('.si-specimen-surface-block');
@@ -53,19 +65,29 @@ describe('DesignSystemPage', () => {
     expect(within(surfacesBlock).queryByLabelText('Title')).not.toBeInTheDocument();
     const componentsHeading = within(pulsePage).getByText('Components');
     expect(surfacesBlock.compareDocumentPosition(componentsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('Color')).toBeInTheDocument();
-    expect(screen.getByText('Color labels')).toBeInTheDocument();
-    expect(screen.getByText('Space')).toBeInTheDocument();
-    expect(screen.getByText('Radius')).toBeInTheDocument();
-    expect(screen.getByText('10')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Brand' }));
+    expect(screen.getByRole('button', { name: 'Brand' })).toHaveAttribute('aria-current', 'page');
+    const brandPage = screen.getByRole('heading', { name: 'Brand / React' }).closest('section');
+    expect(brandPage).toHaveAttribute('data-si-pack', 'brand');
+    expect(brandPage).toHaveAttribute('data-si-theme', 'light');
+    expect(within(brandPage).getByText('Brand components')).toBeInTheDocument();
+    expect(within(brandPage).getByRole('button', { name: 'Brand primary' })).toBeInTheDocument();
+    expect(within(brandPage).getByRole('button', { name: 'Brand outline' })).toBeInTheDocument();
+    expect(within(brandPage).getByRole('link', { name: 'canonical source' })).toBeInTheDocument();
+    expect(within(brandPage).getByText('Interactive card — story and ship surfaces')).toBeInTheDocument();
+    expect(within(brandPage).getByText('Ink card — dark industrial panel')).toBeInTheDocument();
+    expect(within(brandPage).getByText('Button/Brand/Primary')).toBeInTheDocument();
+    expect(within(brandPage).getByText('Card/Brand/Ink')).toBeInTheDocument();
+
     expect(screen.getByRole('link', { name: '← Tasks' })).toHaveAttribute('href', '/');
 
     const shell = screen.getByRole('main');
-    const toggle = screen.getByRole('button', { name: 'Switch to light theme' });
-
-    expect(shell).toHaveAttribute('data-si-theme', 'dark');
-    await user.click(toggle);
     expect(shell).toHaveAttribute('data-si-theme', 'light');
-    expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeInTheDocument();
+
+    const toggle = screen.getByRole('button', { name: 'Switch to dark theme' });
+    await user.click(toggle);
+    expect(shell).toHaveAttribute('data-si-theme', 'dark');
+    expect(screen.getByRole('button', { name: 'Switch to light theme' })).toBeInTheDocument();
   });
 });
