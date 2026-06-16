@@ -28,6 +28,18 @@ CURRENT_REVIEW_STATUSES = {
     "revision_requested",
     "revision_staged",
     "tasked",
+    "approved",
+    "declined",
+}
+
+# Terminal post-approval states. Once an item reaches one of these, the
+# pipeline is done with it — the lobster shouldn't try to re-curate, re-spec,
+# or re-derive approval state from it. `tasked` is the "approved + work in
+# flight" terminal; `approved` is the "Tom said yes, no tasks needed"
+# terminal. Both are downstream of the approval flow.
+POST_APPROVAL_TERMINAL = {
+    "tasked",
+    "approved",
     "declined",
 }
 
@@ -158,7 +170,7 @@ def main() -> int:
             inferred = inferred_specs_by_key.get(key, [])
             if inferred:
                 item["specDocs"] = sorted(inferred)
-                if (item.get("specProposals") or []) and item.get("reviewStatus") not in {"approval_pending", "revision_staged"} and not item.get("taskIds"):
+                if (item.get("specProposals") or []) and item.get("reviewStatus") not in {"approval_pending", "revision_staged"} and item.get("reviewStatus") not in POST_APPROVAL_TERMINAL and not item.get("taskIds"):
                     previous_status = item.get("reviewStatus")
                     item["reviewStatus"] = "spec_created"
                     log_transition(key, previous_status, "spec_created", "inferred specs found on disk; restoring spec_created", transitions_path=transition_log_path(STATE_PATH))
@@ -221,7 +233,7 @@ def main() -> int:
                         # hasn't happened yet, keep bookmark in pipeline for approval packaging.
                         has_unmaterialized_spec_work = (
                             (existing.get("specProposals") or [])
-                            and existing.get("reviewStatus") not in {"approval_pending", "revision_staged", "declined"}
+                            and existing.get("reviewStatus") not in {"approval_pending", "revision_staged", "declined", "approved"}
                             and existing.get("approvalStatus") != "declined"
                             and not (existing.get("taskIds") or [])
                         )

@@ -67,7 +67,14 @@ def main() -> int:
             if args.decision == "decline":
                 next_status = "declined"
             else:
-                next_status = "tasked" if merged_task_ids else "spec_created"
+                # Approve path. `tasked` means the spec has proposals and
+                # task IDs were created — work is in flight. `approved` is
+                # the terminal state for specs that Tom approved but
+                # generated no tasks (the spec is the artifact, no work
+                # needs to happen downstream). The dashboard buckets these
+                # distinctly so Tom can see at a glance what's done vs
+                # what's actively being worked.
+                next_status = "tasked" if merged_task_ids else "approved"
             state_item.update({
                 "approvalStatus": resolution_status,
                 "approvalResolvedAt": timestamp,

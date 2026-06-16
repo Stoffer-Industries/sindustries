@@ -16,7 +16,7 @@ Inputs:
 
 Routing rules:
   - reviewed:
-      - reviewStatus in {tasked, declined, approval_pending,
+      - reviewStatus in {tasked, approved, declined, approval_pending,
         revision_staged, revision_requested, needs_research}
         → terminal, no action
   - needs_research:
@@ -54,6 +54,7 @@ DEFAULT_THRESHOLD = 7
 
 TERMINAL_STATUSES = {
     "tasked",
+    "approved",
     "declined",
     "approval_pending",
     "revision_staged",
