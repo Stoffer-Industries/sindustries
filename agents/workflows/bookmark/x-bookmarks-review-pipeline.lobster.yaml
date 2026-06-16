@@ -51,27 +51,12 @@ steps:
       --json
     stdin: $list_curations.stdout
 
-  - id: prepare_topic_approval
+  - id: request_spec_approval
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/lobster_prepare_topic_approval.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_request_spec_approval.py
       --approval-topic ${approvalTopic}
       --json
     stdin: $generate_specs.stdout
-
-  - id: ensure_topic_slot_available
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/lobster_ensure_topic_slot_available.py --json
-    stdin: $prepare_topic_approval.stdout
-
-  - id: finalize_review_cycle
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/lobster_finalize_review_cycle.py --json
-    stdin: $ensure_topic_slot_available.stdout
-
-  - id: compact_approval_preview
-    command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/lobster_compact_approval_preview.py
-    stdin: $ensure_topic_slot_available.stdout
     approval: required
 
   - id: create_tasks_from_proposals
@@ -79,8 +64,8 @@ steps:
       python3 codebases/sindustries/agents/workflows/bookmark/lobster_create_tasks_from_proposals.py
       --base-url ${TASKS_API_BASE_URL}
       --json
-    stdin: $ensure_topic_slot_available.stdout
-    condition: $compact_approval_preview.approved
+    stdin: $request_spec_approval.stdout
+    condition: $request_spec_approval.approved
 
   - id: resolve_topic_approval
     command: >-
@@ -88,4 +73,4 @@ steps:
       --decision approve
       --json
     stdin: $create_tasks_from_proposals.stdout
-    condition: $compact_approval_preview.approved
+    condition: $request_spec_approval.approved

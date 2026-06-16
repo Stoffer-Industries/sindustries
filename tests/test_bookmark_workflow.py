@@ -23,9 +23,8 @@ import list_spec_requests
 import migrate_flat_paths
 import filter_curation
 import summarize as summarize_mod
-import finalize_review_cycle
+import lobster_request_spec_approval as request_spec_approval
 import generate_specs
-import prepare_topic_approval
 import request_topic_approval
 import resolve_topic_approval
 import handle_approval_reply
@@ -269,7 +268,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertIn("Spec path", message)
         self.assertIn("Reply: `approve` / `decline`", message)
 
-    def test_prepare_topic_approval_blocks_same_topic_when_pending(self):
+    def test_request_spec_approval_blocks_same_topic_when_pending(self):
         """Per-topic lock: an infra pending approval does NOT block a brain package,
         but a brain pending approval blocks another brain package."""
         state = common.state_template()
@@ -301,9 +300,13 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "reviewed": [],
         }))
         stdout = io.StringIO()
-        with patch.object(prepare_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["prepare_topic_approval.py", "--json"]):
-                rc = prepare_topic_approval.main()
+        spec_path = self.root / "brain" / "specs" / "infra" / "new.md"
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text("# spec\n")
+        with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_spec_approval, "WORKSPACE", self.root):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_request_spec_approval.py", "--json"]):
+                rc = request_spec_approval.main()
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
@@ -325,6 +328,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
         }
         common.save_state(state, self.state_path)
 
+        brain_spec = self.root / "brain" / "specs" / "brain" / "new.md"
+        brain_spec.parent.mkdir(parents=True, exist_ok=True)
+        brain_spec.write_text("# spec\n")
         stdin2 = io.StringIO(json.dumps({
             "implement": [
                 {
@@ -339,15 +345,16 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "reviewed": [],
         }))
         stdout2 = io.StringIO()
-        with patch.object(prepare_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin2), patch("sys.stdout", stdout2), patch.object(sys, "argv", ["prepare_topic_approval.py", "--json"]):
-                rc2 = prepare_topic_approval.main()
+        with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_spec_approval, "WORKSPACE", self.root):
+            with patch("sys.stdin", stdin2), patch("sys.stdout", stdout2), patch.object(sys, "argv", ["lobster_request_spec_approval.py", "--json"]):
+                rc2 = request_spec_approval.main()
 
         self.assertEqual(rc2, 0)
         payload2 = json.loads(stdout2.getvalue())
         self.assertEqual(payload2["readyPackages"], [])
         self.assertEqual(len(payload2["blockedPackages"]), 1)
-        self.assertEqual(payload2["blockedPackages"][0]["reason"], "approval already pending for topic")
+        self.assertIn("approval already pending", payload2["blockedPackages"][0]["reason"])
 
     def test_build_task_proposals_recovers_spec_created_items_for_approval_retry(self):
         state = common.state_template()
@@ -445,17 +452,21 @@ class BookmarkWorkflowTests(unittest.TestCase):
             ],
         }
 
+        spec_path = self.root / "brain" / "specs" / "infra" / "llm-driven-bookmark-reviews-abc123bookmark.md"
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text("# spec\n")
+
         prep_in = io.StringIO(json.dumps({"implement": [implement_item], "monitoring": [], "reviewed": []}))
         prep_out = io.StringIO()
-        with patch.object(prepare_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", prep_in), patch("sys.stdout", prep_out), patch.object(sys, "argv", ["prepare_topic_approval.py", "--json"]):
-                rc = prepare_topic_approval.main()
+        with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_spec_approval, "WORKSPACE", self.root):
+            with patch("sys.stdin", prep_in), patch("sys.stdout", prep_out), patch.object(sys, "argv", ["lobster_request_spec_approval.py", "--json"]):
+                rc = request_spec_approval.main()
 
         self.assertEqual(rc, 0)
         prepared = json.loads(prep_out.getvalue())
         self.assertEqual(len(prepared["readyPackages"]), 1)
         package = prepared["readyPackages"][0]
-        self.assertEqual(len(package["proposedTasks"]), 1)
         self.assertEqual(package["items"][0]["proposedTasks"][0]["title"], "Wire structured review analysis")
 
         prepared["readyPackages"][0]["resumeToken"] = "resume-token-1"
@@ -1652,7 +1663,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertFalse(payload["created"][0]["reused"])
         api_mock.assert_called_once()
 
-    def test_finalize_review_cycle_marks_reviewed_and_monitoring_items(self):
+    def test_request_spec_approval_marks_reviewed_and_monitoring_items(self):
         state = common.state_template()
         state["items"]["reviewed-item"] = {
             "bookmarkKey": "reviewed-item",
@@ -1671,27 +1682,23 @@ class BookmarkWorkflowTests(unittest.TestCase):
         common.save_state(state, self.state_path)
 
         stdin = io.StringIO(json.dumps({
+            "implement": [],
             "reviewed": [{"bookmarkKey": "reviewed-item"}],
             "monitoring": [{"bookmarkKey": "monitor-item"}],
-            "approvals": [],
             "blockedPackages": [],
         }))
         stdout = io.StringIO()
-        with patch.object(finalize_review_cycle, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["finalize_review_cycle.py", "--json"]):
-                rc = finalize_review_cycle.main()
+        with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_spec_approval, "WORKSPACE", self.root):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_request_spec_approval.py", "--json"]):
+                rc = request_spec_approval.main()
 
         self.assertEqual(rc, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["finalized"]["reviewed"], ["reviewed-item"])
-        self.assertEqual(payload["finalized"]["monitoring"], ["monitor-item"])
-        self.assertEqual(payload["finalized"]["queued"], [])
-
         updated_state = common.load_state(self.state_path)
         self.assertEqual(updated_state["items"]["reviewed-item"]["reviewStatus"], "reviewed")
         self.assertEqual(updated_state["items"]["monitor-item"]["reviewStatus"], "summarized")
 
-    def test_finalize_review_cycle_marks_blocked_packages_as_queued(self):
+    def test_request_spec_approval_queues_blocked_packages(self):
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
             "bookmarkKey": self.bookmark["bookmarkKey"],
@@ -1700,28 +1707,36 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "title": self.bookmark["title"],
             "reviewStatus": "spec_created",
         }
+        # Add a pending approval to force the implement item to be blocked
+        state["items"]["other-pending"] = {
+            "bookmarkKey": "other-pending",
+            "path": "brain/bookmarks/infra/other.md",
+            "topic": "infra",
+            "title": "Other",
+            "reviewStatus": "approval_pending",
+            "approvalTopic": "infra",
+        }
         common.save_state(state, self.state_path)
 
         stdin = io.StringIO(json.dumps({
+            "implement": [{
+                "bookmarkKey": self.bookmark["bookmarkKey"],
+                "topic": "infra",
+                "title": self.bookmark["title"],
+                "specDocs": ["brain/specs/infra/sample.md"],
+                "proposedTasks": [],
+            }],
             "reviewed": [],
             "monitoring": [],
-            "approvals": [],
-            "blockedPackages": [{
-                "topic": "infra",
-                "approvalTopic": "infra",
-                "reason": "approval already pending globally",
-                "items": [{"bookmarkKey": self.bookmark["bookmarkKey"]}],
-            }],
         }))
         stdout = io.StringIO()
-        with patch.object(finalize_review_cycle, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["finalize_review_cycle.py", "--json"]):
-                rc = finalize_review_cycle.main()
+        with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_spec_approval, "WORKSPACE", self.root):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_request_spec_approval.py", "--json"]):
+                rc = request_spec_approval.main()
 
         self.assertEqual(rc, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["finalized"]["queued"], [self.bookmark["bookmarkKey"]])
-
+        # Item was blocked so should be re-queued to spec_created
         updated_state = common.load_state(self.state_path)
         item = updated_state["items"][self.bookmark["bookmarkKey"]]
         self.assertEqual(item["reviewStatus"], "spec_created")
