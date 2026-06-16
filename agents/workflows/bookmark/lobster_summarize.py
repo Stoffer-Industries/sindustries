@@ -165,18 +165,40 @@ def main() -> int:
         bookmark_key = record["bookmarkKey"]
         topic = record.get("topic") or "general"
 
-        # Skip if already summarised and summary doc exists
+        # Skip if upstream signalled no review, or the item already has a
+        # summary doc on disk. The previous check only matched when
+        # reviewStatus == "summarized" — items in any downstream state
+        # (spec_created, approval_pending, tasked, approved, declined) that
+        # have a summaryDoc were being re-summarized every run, which rewound
+        # their reviewStatus to "summarized" and triggered noisy re-promote
+        # cycles through lobster_request_spec_approval.
         existing = items.get(bookmark_key, {})
-        if existing.get("reviewStatus") == "summarized" and existing.get("summaryDoc"):
+        if record.get("skipReview") is True:
+            existing_summary = existing.get("summary")
+            generated.append({
+                "bookmarkKey": bookmark_key,
+                "path": record["path"],
+                "topic": topic,
+                "reviewStatus": existing.get("reviewStatus") or "summarized",
+                "summaryDoc": existing.get("summaryDoc"),
+                "title": record["title"],
+                "summary": existing_summary,
+                "skipped": True,
+            })
+            continue
+
+        if existing.get("summaryDoc"):
             summary_path = WORKSPACE / existing["summaryDoc"]
             if summary_path.exists():
                 generated.append({
                     "bookmarkKey": bookmark_key,
                     "path": record["path"],
                     "topic": topic,
-                    "reviewStatus": "summarized",
+                    "reviewStatus": existing.get("reviewStatus") or "summarized",
                     "summaryDoc": existing["summaryDoc"],
                     "title": record["title"],
+                    "summary": existing.get("summary"),
+                    "skipped": True,
                 })
                 continue
 
