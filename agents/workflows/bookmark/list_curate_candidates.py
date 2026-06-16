@@ -14,7 +14,7 @@ Eligibility (the only signal that matters):
 
 That's it. The reviewStatus is irrelevant here — a summary with a stale
 curation needs a refresh whether it's in flight, monitored, or fresh from
-the summarizer. The lobster's filter_curation step will read the latest
+the summarizer. The lobster's list_curations step will read the latest
 curation and decide what to do with the item.
 
 The heartbeat BOOKMARK CURATION step:

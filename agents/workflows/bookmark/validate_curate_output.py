@@ -7,7 +7,7 @@ CURATION step) and applies the proposed curations to bookmark state:
   - writes `item.curation` (a living take: createdAt, topic, score, reasoning,
     relevanceScores, threshold)
   - does NOT change reviewStatus  (the verdict lives in curation now;
-    the lobster's filter_curation step reads the curation on every run)
+    the lobster's list_curations step reads the curation on every run)
   - logs a no-op "curation refresh" transition for audit
 
 Idempotent:
