@@ -5,15 +5,15 @@ Validate spec-generation artifact and apply state transitions.
 Reads `brain/state/spec-output.json` (produced by Quinn's heartbeat spec
 dispatch) and applies the proposed transitions to bookmark state:
   - mutates `reviewStatus` to `spec_created`
-  - stores `specDocs` and `specProposals`
+  - stores `specDocs` and `specProposals` (title + specDoc, no task data)
   - logs the transition in bookmark-transitions.jsonl
   - saves bookmark-review-state.json
 
+Task proposals are read directly from the spec markdown at approval time
+(by lobster_create_tasks_from_proposals.py). They are not stored here.
+
 Validations:
   - each `specDoc` must exist on disk before the state is updated
-  - each entry's `proposedTasks` (if present) must be a list of
-    well-formed task dicts (title, priority, summary, deliverable,
-    acceptanceCriteria list)
 
 Idempotent:
   - rejects entries unless the existing bookmark is awaiting a spec
@@ -46,21 +46,7 @@ from common import (
 )
 
 DEFAULT_OUTPUT = STATE_ROOT / "spec-output.json"
-VALID_PRIORITIES = {"high", "medium", "low"}
-REQUIRED_TASK_KEYS = {"title", "priority", "summary", "deliverable", "acceptanceCriteria"}
-REQUIRED_SPEC_KEYS = {"title", "specDoc", "proposedTasks"}
-
-
-def render_task_description(task: dict, spec_doc: str, review_doc: str) -> str:
-    ac_lines = "\n".join(f"- [ ] {line}" for line in task["acceptanceCriteria"])
-    return (
-        f"**What:** {task['title']}\n"
-        f"**Why:** {task['summary']}\n\n"
-        f"**Deliverable:** {task['deliverable']}\n\n"
-        f"**AC:**\n{ac_lines}\n\n"
-        f"**Spec:** {spec_doc}\n"
-        f"**Source Review:** {review_doc}"
-    )
+REQUIRED_SPEC_KEYS = {"title", "specDoc"}
 
 
 def validate_entry_shape(entry: dict[str, Any]) -> list[str]:
@@ -77,45 +63,18 @@ def validate_entry_shape(entry: dict[str, Any]) -> list[str]:
         missing = REQUIRED_SPEC_KEYS - set(spec.keys())
         if missing:
             errors.append(f"specs[{i}] missing keys: {sorted(missing)}")
-            continue
-        tasks = spec.get("proposedTasks") or []
-        for j, task in enumerate(tasks):
-            task_missing = REQUIRED_TASK_KEYS - set(task.keys())
-            if task_missing:
-                errors.append(
-                    f"specs[{i}].proposedTasks[{j}] missing keys: {sorted(task_missing)}"
-                )
-            if task.get("priority") not in VALID_PRIORITIES:
-                errors.append(
-                    f"specs[{i}].proposedTasks[{j}].priority must be one of "
-                    f"{sorted(VALID_PRIORITIES)}, got {task.get('priority')!r}"
-                )
-            if not isinstance(task.get("acceptanceCriteria"), list):
-                errors.append(
-                    f"specs[{i}].proposedTasks[{j}].acceptanceCriteria must be a list"
-                )
     return errors
 
 
 def build_proposals(entry: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
     spec_docs: list[str] = []
     spec_proposals: list[dict[str, Any]] = []
-    review_doc = entry.get("reviewDoc", "")
     for spec in entry["specs"]:
         spec_doc = spec["specDoc"]
         spec_docs.append(spec_doc)
-        proposed_tasks = []
-        for task in spec.get("proposedTasks") or []:
-            proposed_tasks.append({
-                "title": task["title"],
-                "priority": task["priority"],
-                "assignee": None,
-                "description": render_task_description(task, spec_doc, review_doc),
-            })
         spec_proposals.append({
             "title": spec["title"],
             "specDoc": spec_doc,
-            "proposedTasks": proposed_tasks,
         })
     return spec_docs, spec_proposals
 
