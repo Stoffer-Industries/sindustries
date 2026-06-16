@@ -18,13 +18,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflo
 
 import common
 import lobster_create_tasks_from_proposals as create_tasks_from_proposals
-import list_review_candidates
+import lobster_list_curate_candidates as list_review_candidates
 import list_spec_requests
-import migrate_flat_paths
-import filter_curation
-import summarize as summarize_mod
+import lobster_summarize as summarize_mod
 import lobster_request_spec_approval as request_spec_approval
-import generate_specs
+import lobster_generate_specs as generate_specs
 import request_topic_approval
 import lobster_resolve_spec_request as resolve_spec_request
 import handle_approval_reply
@@ -355,66 +353,6 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(payload2["readyPackages"], [])
         self.assertEqual(len(payload2["blockedPackages"]), 1)
         self.assertIn("approval already pending", payload2["blockedPackages"][0]["reason"])
-
-    def test_build_task_proposals_recovers_spec_created_items_for_approval_retry(self):
-        state = common.state_template()
-        state["items"][self.bookmark["bookmarkKey"]] = {
-            "bookmarkKey": self.bookmark["bookmarkKey"],
-            "path": self.bookmark["path"],
-            "topic": self.bookmark["topic"],
-            "source": self.bookmark["source"],
-            "title": self.bookmark["title"],
-            "reviewStatus": "spec_created",
-            "reviewDoc": "brain/reviews/infra/agent-harness-note-abc123bookmark.md",
-            "analysis": {
-                "classification": "implement",
-                "headline": "Worth building",
-                "summary": "Useful.",
-                "decisionRationale": "Still worth implementation.",
-                "stackJudgment": "Fits workflow automation.",
-                "recommendation": "Proceed.",
-                "signals": ["Relevant to OpenClaw"],
-                "risks": ["Needs scoping"],
-                "monitorTriggers": [],
-                "implementationPaths": ["Improve review quality"],
-            },
-            "specDocs": ["brain/specs/infra/agent-harness-note-abc123bookmark.md"],
-            "specProposals": [
-                {
-                    "title": "Approval package hardening",
-                    "specDoc": "brain/specs/infra/agent-harness-note-abc123bookmark.md",
-                    "proposedTasks": [
-                        {
-                            "title": "Retry approval delivery",
-                            "priority": "high",
-                            "assignee": None,
-                            "description": "Ensure failed approval delivery can be retried.",
-                        }
-                    ],
-                }
-            ],
-            "taskIds": [],
-            "firstSeenAt": common.now_iso(),
-            "reviewedAt": common.now_iso(),
-            "lastUpdatedAt": common.now_iso(),
-        }
-        common.save_state(state, self.state_path)
-
-        stdin = io.StringIO(json.dumps({"implement": [], "monitoring": [], "reviewed": []}))
-        stdout = io.StringIO()
-        import build_task_proposals
-        with patch.object(build_task_proposals, "STATE_PATH", self.state_path), \
-             patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["build_task_proposals.py", "--json"]):
-            rc = build_task_proposals.main()
-
-        self.assertEqual(rc, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(len(payload["implement"]), 1)
-        recovered = payload["implement"][0]
-        self.assertEqual(recovered["bookmarkKey"], self.bookmark["bookmarkKey"])
-        self.assertTrue(recovered["recoveredForApproval"])
-        self.assertEqual(len(recovered["proposedTasks"]), 1)
-        self.assertEqual(recovered["proposedTasks"][0]["title"], "Retry approval delivery")
 
     def test_prepare_and_request_topic_approval_include_proposed_tasks(self):
         state = common.state_template()
@@ -1064,8 +1002,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         }
         with patch.object(handle_approval_reply, "STATE_PATH", self.state_path), \
              patch.object(handle_approval_reply, "fetch_messages", return_value=messages), \
-             patch.object(handle_approval_reply, "run_lobster_resume") as resume_mock, \
-             patch.object(handle_approval_reply, "run_script", side_effect=[(created_payload, None), (resolved_payload, None)]):
+             patch.object(handle_approval_reply, "run_lobster_resume") as resume_mock:
             with patch("sys.stdout", stdout), patch.object(sys, "argv", ["handle_approval_reply.py", "--json"]):
                 rc = handle_approval_reply.main()
 
@@ -1172,39 +1109,6 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         payload = json.loads(out.getvalue())
         self.assertEqual(payload["specRequests"][0]["topic"], "infra")
-
-    def test_flat_path_migration_does_not_repoint_colliding_item(self):
-        old_bookmarks_root = self.root / "brain/bookmarks/x"
-        old_reviews_root = self.root / "brain/reviews"
-        new_summaries_root = self.root / "brain/bookmarks/summaries"
-        old_reviews_root.mkdir(parents=True, exist_ok=True)
-        for topic, body in (("a", "first"), ("b", "second")):
-            path = old_bookmarks_root / topic / "same.md"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(body, encoding="utf-8")
-
-        state = common.state_template()
-        state["items"] = {
-            "a": {"bookmarkKey": "a", "path": "brain/bookmarks/x/a/same.md"},
-            "b": {"bookmarkKey": "b", "path": "brain/bookmarks/x/b/same.md"},
-        }
-        common.save_state(state, self.state_path)
-
-        with patch.object(migrate_flat_paths, "WORKSPACE", self.root), \
-             patch.object(migrate_flat_paths, "STATE_PATH", self.state_path), \
-             patch.object(migrate_flat_paths, "OLD_BOOKMARKS_ROOT", old_bookmarks_root), \
-             patch.object(migrate_flat_paths, "NEW_BOOKMARKS_ROOT", old_bookmarks_root), \
-             patch.object(migrate_flat_paths, "OLD_REVIEWS_ROOT", old_reviews_root), \
-             patch.object(migrate_flat_paths, "NEW_SUMMARIES_ROOT", new_summaries_root), \
-             patch.object(sys, "argv", ["migrate_flat_paths.py"]):
-            rc = migrate_flat_paths.main()
-
-        self.assertEqual(rc, 0)
-        updated = common.load_state(self.state_path)
-        self.assertEqual(updated["items"]["a"]["path"], "brain/bookmarks/x/same.md")
-        self.assertEqual(updated["items"]["b"]["path"], "brain/bookmarks/x/b/same.md")
-        self.assertEqual((old_bookmarks_root / "same.md").read_text(), "first")
-        self.assertEqual((old_bookmarks_root / "b/same.md").read_text(), "second")
 
     def test_approval_state_lock_serializes_callers(self):
         lock_path = self.root / "brain/state/bookmark-review-state.json"

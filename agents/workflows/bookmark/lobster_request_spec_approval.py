@@ -180,6 +180,11 @@ def main() -> int:
     # Validates that spec docs actually exist on disk.
     compact_ready: list[dict] = []
     compact_blocked: list[dict] = []
+    for package in blocked_packages:
+        reason = package.get("reason") or package.get("blockedReason") or "approval already pending globally"
+        items = [_compact_item(item) for item in package.get("items", [])]
+        base = {k: v for k, v in package.items() if k in _PACKAGE_KEEP}
+        compact_blocked.append({**base, "items": items, "reason": reason})
     for package in final_ready:
         items_with_specs = []
         items_missing_specs = []

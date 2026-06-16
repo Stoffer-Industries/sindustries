@@ -51,6 +51,12 @@ Extract:
 Write like a concise technical note for future reference. Dense and specific beats vague and general.
 Do not judge signal quality or relevance. That judgment happens in curation, separately."""
 
+_SUMMARIZED_OR_LATER = {
+    "summarized", "spec_requested", "spec_created", "approval_pending",
+    "revision_requested", "revision_staged", "reviewed", "declined",
+    "monitoring", "tasked",
+}
+
 SUMMARY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -165,16 +171,29 @@ def main() -> int:
         bookmark_key = record["bookmarkKey"]
         topic = record.get("topic") or "general"
 
-        # Skip if already summarised and summary doc exists
         existing = items.get(bookmark_key, {})
-        if existing.get("reviewStatus") == "summarized" and existing.get("summaryDoc"):
+        if record.get("skipReview") is True:
+            generated.append({
+                "bookmarkKey": bookmark_key,
+                "path": record["path"],
+                "topic": topic,
+                "reviewStatus": existing.get("reviewStatus") or "summarized",
+                "summaryDoc": existing.get("summaryDoc"),
+                "title": record["title"],
+                "summary": existing.get("summary"),
+                "skipped": True,
+            })
+            continue
+
+        # Skip if already summarised (or further along) and summary doc exists on disk
+        if existing.get("reviewStatus") in _SUMMARIZED_OR_LATER and existing.get("summaryDoc"):
             summary_path = WORKSPACE / existing["summaryDoc"]
             if summary_path.exists():
                 generated.append({
                     "bookmarkKey": bookmark_key,
                     "path": record["path"],
                     "topic": topic,
-                    "reviewStatus": "summarized",
+                    "reviewStatus": existing["reviewStatus"],
                     "summaryDoc": existing["summaryDoc"],
                     "title": record["title"],
                 })

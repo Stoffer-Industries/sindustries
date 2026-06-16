@@ -33,7 +33,7 @@ WORKFLOW_DIR = os.path.join(
 sys.path.insert(0, WORKFLOW_DIR)
 
 import common
-import filter_curation
+import lobster_list_curations as filter_curation
 import list_curate_candidates
 import validate_curate_output
 import validate_spec_output
