@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import check_transitions
 import common
-import summarize as summarize_mod
+import lobster_summarize as summarize_mod
 
 
 class BookmarkTransitionTests(unittest.TestCase):
@@ -169,7 +169,7 @@ class SummarizeTests(unittest.TestCase):
         curation goes to monitoring (heartbeat will refresh); terminal
         statuses go to reviewed.
         """
-        import filter_curation
+        import lobster_list_curations as filter_curation
         state = common.state_template()
 
         # Fresh curation, high score → implement
