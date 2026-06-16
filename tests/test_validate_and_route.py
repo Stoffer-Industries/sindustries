@@ -591,19 +591,13 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/spec.md",
-                "proposedTasks": [{
-                    "title": "task 1",
-                    "priority": "high",
-                    "summary": "s",
-                    "deliverable": "d",
-                    "acceptanceCriteria": ["ac"],
-                }],
             }],
         }])
         out = self._run()
         self.assertEqual(len(out["applied"]), 1)
         state = json.loads(self.state_path.read_text())
         self.assertEqual(state["items"]["k1"]["reviewStatus"], "spec_created")
+        self.assertEqual(state["items"]["k1"]["specProposals"], [{"title": "Spec", "specDoc": "brain/spec.md"}])
 
     def test_marks_invalid_when_spec_file_missing(self):
         _load_state(self.state_path, {
@@ -616,43 +610,11 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/specs/does/not/exist.md",
-                "proposedTasks": [{
-                    "title": "task",
-                    "priority": "high",
-                    "summary": "s",
-                    "deliverable": "d",
-                    "acceptanceCriteria": ["ac"],
-                }],
             }],
         }])
         out = self._run()
         self.assertEqual(len(out["invalid"]), 1)
         self.assertIn("missing on disk", out["invalid"][0]["errors"][0])
-
-    def test_marks_invalid_on_bad_priority(self):
-        _load_state(self.state_path, {
-            "k1": {"bookmarkKey": "k1", "reviewStatus": "spec_requested"},
-        })
-        self._make_spec("brain/spec.md")
-        self._write_artifact([{
-            "bookmarkKey": "k1",
-            "reviewDoc": "brain/reviews/k1.md",
-            "requestType": "new",
-            "specs": [{
-                "title": "Spec",
-                "specDoc": "brain/spec.md",
-                "proposedTasks": [{
-                    "title": "task",
-                    "priority": "URGENT",
-                    "summary": "s",
-                    "deliverable": "d",
-                    "acceptanceCriteria": ["ac"],
-                }],
-            }],
-        }])
-        out = self._run()
-        self.assertEqual(len(out["invalid"]), 1)
-        self.assertIn("priority", out["invalid"][0]["errors"][0])
 
     def test_rejects_unknown_bookmark_key_without_creating_state(self):
         _load_state(self.state_path, {
@@ -666,7 +628,6 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/spec.md",
-                "proposedTasks": [],
             }],
         }])
 
@@ -689,7 +650,6 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/spec.md",
-                "proposedTasks": [],
             }],
         }])
 
