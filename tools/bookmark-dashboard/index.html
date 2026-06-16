@@ -198,13 +198,13 @@
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
   <script>
-    const order = ["pending", "ingested", "summarized", "Curated: Monitoring", "Curated: High Signal", "spec_requested", "spec_created", "revision_staged", "approval_pending", "tasked", "declined"];
+    const order = ["pending", "ingested", "summarized", "Curated: Monitoring", "Curated: High Signal", "spec_requested", "spec_created", "revision_staged", "approval_pending", "tasked", "approved", "declined"];
     const colors = {
       pending: "#8aa0bd", ingested: "#8aa0bd", summarized: "#5a6b83",
       monitoring: "#b46a00",
       spec_requested: "#5e3f8a", spec_created: "#bd1e66",
       revision_staged: "#7254bd", revision_requested: "#9a6fd8",
-      approval_pending: "#d9257a", tasked: "#148f46", declined: "#a3312b",
+      approval_pending: "#d9257a", tasked: "#148f46", approved: "#0f9b59", declined: "#a3312b",
       "Curated: Monitoring": "#b46a00", "Curated: High Signal": "#2f75d6",
       // legacy states — muted so they're visible but clearly historical
       reviewed: "#c8d0db", summarised: "#c8d0db", queued_for_spec: "#c8d0db",
@@ -302,6 +302,7 @@
         specCreated: 0,
         approvalPending: 0,
         tasked: 0,
+        approved: 0,
         declined: 0,
       };
       for (const item of items) {
@@ -315,6 +316,7 @@
         else if (status === "spec_created") buckets.specCreated++;
         else if (status === "approval_pending" || status === "revision_staged") buckets.approvalPending++;
         else if (status === "tasked") buckets.tasked++;
+        else if (status === "approved") buckets.approved++;
         else if (status === "declined") buckets.declined++;
         else if (highScore) buckets.curatedImplement++;
         else if (hasCuration) buckets.monitoring++;  // low-score curation verdict
@@ -334,6 +336,7 @@
         { name: "Spec created",        count: buckets.specCreated,     value: buckets.specCreated,     color: "#bd1e66" },
         { name: "Awaiting approval",   count: buckets.approvalPending, value: buckets.approvalPending, color: "#d9257a" },
         { name: "Tasked",              count: buckets.tasked,          value: buckets.tasked,          color: "#148f46" },
+        { name: "Approved",            count: buckets.approved,        value: buckets.approved,        color: "#0f9b59" },
         { name: "Declined",            count: buckets.declined,        value: buckets.declined,        color: "#a3312b" },
       ];
       // Keep all nodes (including 0-value) so the chain stays connected.
@@ -345,7 +348,7 @@
       // visible even when items have moved on, and eliminates the artifact
       // where transient nodes (Spec requested) appear occupied due to
       // outgoing-only flow from downstream link values.
-      const approvalAndBeyond = buckets.approvalPending + buckets.tasked + buckets.declined;
+      const approvalAndBeyond = buckets.approvalPending + buckets.tasked + buckets.approved + buckets.declined;
       const specCreatedAndBeyond = buckets.specCreated + approvalAndBeyond;
       const specRequestedAndBeyond = buckets.specRequested + specCreatedAndBeyond;
       const implementBoundTotal = buckets.curatedImplement + specRequestedAndBeyond;
@@ -359,6 +362,7 @@
         { source: "Spec requested", target: "Spec created", value: specCreatedAndBeyond },
         { source: "Spec created", target: "Awaiting approval", value: approvalAndBeyond },
         { source: "Awaiting approval", target: "Tasked", value: buckets.tasked },
+        { source: "Awaiting approval", target: "Approved", value: buckets.approved },
         { source: "Awaiting approval", target: "Declined", value: buckets.declined },
       ];
       // Use node references (not indices) so links stay valid even if a
@@ -548,7 +552,7 @@
         const c = item.curation;
         if (!c) continue;
         const st = statusOf(item);
-        if (['spec_requested','spec_created','approval_pending','revision_staged','revision_requested','tasked','declined'].includes(st)) continue;
+        if (['spec_requested','spec_created','approval_pending','revision_staged','revision_requested','tasked','approved','declined'].includes(st)) continue;
         if (Number(c.score || 0) >= curThreshold) curHighSignal++; else curMonitoring++;
       }
       current['Curated: Monitoring'] = curMonitoring;

@@ -17,7 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
 
 import common
-import create_tasks_from_proposals
+import lobster_create_tasks_from_proposals as create_tasks_from_proposals
 import list_review_candidates
 import list_spec_requests
 import migrate_flat_paths
@@ -1876,7 +1876,12 @@ class BookmarkWorkflowTests(unittest.TestCase):
         item = updated_state["items"][self.bookmark["bookmarkKey"]]
         self.assertEqual(item["reviewStatus"], "approval_pending")
 
-    def test_resolve_spec_request_approve_without_created_tasks_returns_to_spec_created(self):
+    def test_resolve_spec_request_approve_without_created_tasks_marks_approved(self):
+        # Approving a spec that produced no proposals must land the item in
+        # the `approved` terminal state — the spec is the artifact, no work
+        # to kick off downstream. Distinct from `tasked` (approved + work in
+        # flight) so the dashboard can show at a glance which approvals need
+        # follow-up vs. which are simply done.
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
             "bookmarkKey": self.bookmark["bookmarkKey"],
@@ -1906,11 +1911,14 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["decision"], "approved")
+        self.assertEqual(payload["resolved"][0]["items"][0]["reviewStatus"], "approved")
 
         updated_state = common.load_state(self.state_path)
         item = updated_state["items"][self.bookmark["bookmarkKey"]]
         self.assertEqual(item["approvalStatus"], "approved")
-        self.assertEqual(item["reviewStatus"], "spec_created")
+        self.assertEqual(item["reviewStatus"], "approved")
+        self.assertEqual(item["taskIds"], [])
+        self.assertIsNotNone(item.get("approvalResolvedAt"))
 
 
 
