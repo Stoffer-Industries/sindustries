@@ -1,11 +1,13 @@
 ---
 name: spec-author
-description: "Write implementation specs for bookmark-reviewed items. Reads workspace context files directly to produce code-factory-aligned product specs under brain/bookmarks/specs/."
+description: "Write product specs for bookmark-reviewed items. Reads workspace context files directly to produce durable, implementation-agnostic specs under brain/bookmarks/specs/."
 ---
 
 # Spec Author
 
-Write an implementation spec from a reviewed item. This skill runs with full tool access — read the relevant context files, then write a grounded spec rather than reasoning blind from a payload.
+Write a product spec from a reviewed item. This skill runs with full tool access — read the relevant context files, then write a grounded spec rather than reasoning blind from a payload.
+
+**Key principle:** A spec describes what the system *can do* after this ships. It does not describe how to build it. Rowan will read the approved spec plus the reference docs and produce the implementation plan. The spec must stay useful even if the codebase changes before work begins.
 
 ## Inputs
 
@@ -65,8 +67,6 @@ Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs)
 
 ### Format
 
-The spec follows the code-factory product spec template so it can be used directly as a product spec when Tom approves it. Notes is intentionally lean — implementation detail belongs in Rowan's tech design, not here.
-
 ```markdown
 # Spec — <Title>
 
@@ -86,7 +86,7 @@ The spec follows the code-factory product spec template so it can be used direct
 
 ## Outcome
 
-One paragraph: what is demonstrably different after this ships? Name the capability, artifact, or behaviour change. Avoid "improved" or "enhanced".
+One paragraph: what is demonstrably different after this ships? Name the capability, artifact, or behaviour change. Avoid "improved" or "enhanced". Write this as a user/operator observation — what can someone *do* or *see* that they couldn't before?
 
 ## Why
 
@@ -98,9 +98,11 @@ Why this is worth doing now, grounded in the source material.
 - [ ] AC2: ...
 
 Rules:
-- Up to 10 ACs per spec, prefer fewer unless necessary
-- ACs are outcomes, not steps ("X is functional/visible/tested", not "write a script for X")
-- Sub-ACs for multi-codebase work:
+- Up to 8 ACs per spec, prefer fewer
+- Each AC is an **observable outcome**: a behaviour, capability, or property that can be verified without knowing how it was built
+- ACs must be implementation-agnostic: no script names, file paths, field names, CLI flags, or class names
+- ACs do not prescribe the approach — "the pipeline can retrieve relevant prior knowledge before writing a review" is correct; "build_index.py scans brain/bookmarks/ and writes bookmark-corpus-index.jsonl with fields path, topic, kind..." is not
+- Sub-ACs only for genuinely independent delivery tracks (different codebases, different timelines):
   - [ ] AC2.1 workspace: ...
   - [ ] AC2.2 sindustries: ...
 
@@ -110,9 +112,9 @@ What this spec deliberately does not cover. Name adjacent things that are out of
 
 ## Notes
 
-One short paragraph on the intended approach and a brief stack touchpoints line. This is orientation for Rowan, not a tech design — keep it to what can't be inferred from the ACs. If a tech design already exists, link it here instead of repeating its content.
+One short paragraph: the key insight from the source material and any hard constraints or non-obvious integration points Rowan should know before designing the implementation. Do not describe the implementation — that is Rowan's job.
 
-**Stack touchpoints:** `path/to/file.py` (what changes), `lobster/example.yaml` (pattern to follow).
+Optionally, name the area of the codebase this work lands in (e.g. "bookmark pipeline", "tasks API", "OpenClaw gateway extension") so Rowan knows where to start reading. Do not name specific files, scripts, or schemas.
 ```
 
 ## Step 4 — Return Metadata
@@ -125,16 +127,7 @@ If the caller expects pipeline-consumable output, print this JSON to stdout afte
     {
       "title": "Spec title",
       "specDoc": "brain/bookmarks/specs/<slug>-<key>.md",
-      "specType": "infra workflow",
-      "proposedTasks": [
-        {
-          "title": "Task title",
-          "priority": "high",
-          "summary": "Why this task",
-          "deliverable": "What lands in the PR",
-          "acceptanceCriteria": ["AC1 text", "AC2 text"]
-        }
-      ]
+      "specType": "infra workflow"
     }
   ]
 }
@@ -144,18 +137,21 @@ If invoked interactively, skip the JSON — just confirm the path written.
 
 ## Quality Bar
 
-**Grounded in what exists:** Specs reference actual files and systems from the sindustries repo. "Extend `scripts/bookmarks/common.py`" beats "extend the pipeline".
+**Outcome-focused ACs:** Each AC describes a state of the world after the feature ships. A reader who has never seen the codebase should be able to understand every AC. If an AC requires knowing a file path or script name to make sense, rewrite it.
+
+**Durable:** The spec should still be valid if Rowan starts work six months from now and the codebase has evolved. ACs that name specific scripts will rot; ACs that describe capabilities won't.
 
 **Honest scope:** If this spec only covers part of the source material, say why.
 
-**No placeholder language:** "validate", "explore", "refine" only appear with a concrete deliverable. "Validate the schema by running it against fixture data" is fine. "Validate approach" is not.
+**No placeholder language:** "validate", "explore", "refine" only appear with a concrete deliverable. "The system validates bookmark keys against the pipeline state" is fine. "Validate approach" is not.
 
-**ACs are outcomes:** Each AC describes a state of the world, not a task to perform.
+**No duplication:** Specs don't re-implement what's described in the sindustries system specs. Reference existing systems by name in Source and Notes; don't rebuild them in ACs.
 
 ## Anti-patterns
 
-- Writing the spec before reading all sindustries system specs — duplication is the most common quality failure
+- Writing implementation steps into ACs: "write a script at scripts/bookmarks/build_index.py that scans..." — this is a tech design, not a product spec
+- Naming specific scripts, field schemas, CLI flags, or class names anywhere except Notes (and even there, only if they are hard constraints, not proposals)
 - Using current frictions as targets to reshape the spec onto (frictions are context, not spec drivers)
-- Proposed tasks that are just ACs reworded as deliverables
-- Vague stack touchpoints like "the bookmark pipeline" — name the actual file
-- Splitting specs or tasks to match AC count rather than delivery boundaries
+- Writing the spec before reading all sindustries system specs — duplication is the most common quality failure
+- Splitting specs to match AC count rather than delivery boundaries
+- Notes longer than one paragraph — if it needs more than that, it is leaking into tech design
