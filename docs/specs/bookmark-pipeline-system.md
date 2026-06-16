@@ -112,10 +112,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `lobster_generate_specs.py` | Spec | review lobster | Reuses existing spec files or sets `spec_requested` |
 | `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write |
 | `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
-| `lobster_prepare_topic_approval.py` | Approval | review lobster | Builds approval package per topic |
-| `lobster_ensure_topic_slot_available.py` | Approval | review lobster | Dedup guard — blocks if an approval is already pending |
-| `lobster_finalize_review_cycle.py` | Approval | review lobster | Closes non-approval items for the current cycle |
-| `lobster_compact_approval_preview.py` | Approval | review lobster | Renders the approval gate message; pauses pipeline |
+| `lobster_request_spec_approval.py` | Approval | review lobster | Prepares packages, finalizes non-approval items, compacts payload, and pauses for approval gate |
 | `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in bookmark-curate skill) |
 | `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
 | `handle_approval_reply.py` | Approval | openclaw extension | Parses Tom's reply; routes to approve/decline/revise (lives in `.openclaw/extensions/approval-reply/`) |

@@ -14,8 +14,7 @@ WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().par
 _BOOKMARK_WF = WORKSPACE / 'codebases' / 'sindustries' / 'agents' / 'workflows' / 'bookmark'
 STATE_PATH = WORKSPACE / 'brain' / 'state' / 'bookmark-review-state.json'
 GENERATE_SPECS = _BOOKMARK_WF / 'lobster_generate_specs.py'
-PREPARE_TOPIC_APPROVAL = _BOOKMARK_WF / 'lobster_prepare_topic_approval.py'
-ENSURE_TOPIC_SLOT_AVAILABLE = _BOOKMARK_WF / 'lobster_ensure_topic_slot_available.py'
+REQUEST_SPEC_APPROVAL = _BOOKMARK_WF / 'lobster_request_spec_approval.py'
 REQUEST_TOPIC_APPROVAL = _BOOKMARK_WF / 'request_topic_approval.py'
 
 
@@ -147,25 +146,8 @@ def main() -> int:
             print(json.dumps({'ok': True, 'status': 'pending_spec', 'bookmarkKey': args.bookmark_key}))
             return 0
 
-    proposals = run_json([sys.executable, str(BUILD_TASK_PROPOSALS), '--json'], generated, env=env)
     approval_topic = item.get('approvalTopic') or item.get('topic') or 'general'
-    ready = run_json([sys.executable, str(PREPARE_TOPIC_APPROVAL), '--approval-topic', approval_topic, '--json'], proposals, env=env)
-
-    target_ready_packages = [
-        pkg for pkg in (ready.get('readyPackages') or [])
-        if any(entry.get('bookmarkKey') == args.bookmark_key for entry in (pkg.get('items') or []))
-    ]
-    target_blocked_packages = [
-        pkg for pkg in (ready.get('blockedPackages') or [])
-        if any(entry.get('bookmarkKey') == args.bookmark_key for entry in (pkg.get('items') or []))
-    ]
-    scoped_ready = {
-        **ready,
-        'readyPackages': target_ready_packages,
-        'blockedPackages': target_blocked_packages,
-    }
-
-    available = run_json([sys.executable, str(ENSURE_TOPIC_SLOT_AVAILABLE), '--json'], scoped_ready, env=env)
+    compact = run_json([sys.executable, str(REQUEST_SPEC_APPROVAL), '--approval-topic', approval_topic, '--json'], generated, env=env)
 
     resume_token = (
         item.get('approvalResumeToken')
@@ -173,11 +155,11 @@ def main() -> int:
         or item.get('resumeToken')
     )
     if resume_token:
-        available['resumeToken'] = resume_token
-        for pkg in available.get('readyPackages') or []:
+        compact['resumeToken'] = resume_token
+        for pkg in compact.get('readyPackages') or []:
             pkg['resumeToken'] = resume_token
 
-    approval = run_json([sys.executable, str(REQUEST_TOPIC_APPROVAL), '--json'], available, env=env)
+    approval = run_json([sys.executable, str(REQUEST_TOPIC_APPROVAL), '--json'], compact, env=env)
 
     failure_reason = approval_failure_reason(approval)
     if failure_reason:

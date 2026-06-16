@@ -423,7 +423,7 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "app-tasks": {
             "stackFocus": "task workflow itself: planning, triage, approval flow, backlog, state transitions, and progress reporting",
             "adjacentComponents": [
-                "scripts/bookmarks/lobster_prepare_topic_approval.py",
+                "scripts/bookmarks/lobster_request_spec_approval.py",
                 "TASK_PROCESS.md",
                 "Tasks API + transition check (scripts/task_transition_check.py)",
             ],
