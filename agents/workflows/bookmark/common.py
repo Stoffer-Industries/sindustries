@@ -229,7 +229,7 @@ def clear_approval_lock(state: dict, approval_id: str) -> str | None:
     """Remove the approvalLocks entry whose approvalId matches. Returns the
     topic that was locked, or None if no match was found.
 
-    Used by handle_approval_reply, resolve_topic_approval, and the
+    Used by handle_approval_reply, resolve_spec_request, and the
     revision-request flow to release the self-asserting global lock
     once the approval is resolved. Idempotent — calling on a state
     without the lock is a no-op.
