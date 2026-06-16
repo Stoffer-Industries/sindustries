@@ -67,9 +67,9 @@ steps:
     stdin: $request_spec_approval.stdout
     condition: $request_spec_approval.approved
 
-  - id: resolve_topic_approval
+  - id: resolve_spec_request
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmark/lobster_resolve_topic_approval.py
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_resolve_spec_request.py
       --decision approve
       --json
     stdin: $create_tasks_from_proposals.stdout

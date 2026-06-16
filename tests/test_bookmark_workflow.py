@@ -26,7 +26,7 @@ import summarize as summarize_mod
 import lobster_request_spec_approval as request_spec_approval
 import generate_specs
 import request_topic_approval
-import resolve_topic_approval
+import lobster_resolve_spec_request as resolve_spec_request
 import handle_approval_reply
 
 TASKS_OPS_DIR = Path(__file__).resolve().parents[1] / "agents" / "skills" / "tasks-api-ops"
@@ -1741,7 +1741,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         item = updated_state["items"][self.bookmark["bookmarkKey"]]
         self.assertEqual(item["reviewStatus"], "spec_created")
 
-    def test_resolve_topic_approval_decline_clears_pending_state(self):
+    def test_resolve_spec_request_decline_clears_pending_state(self):
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
             "bookmarkKey": self.bookmark["bookmarkKey"],
@@ -1765,9 +1765,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "created": [],
         }))
         stdout = io.StringIO()
-        with patch.object(resolve_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["resolve_topic_approval.py", "--decision", "decline", "--json"]):
-                rc = resolve_topic_approval.main()
+        with patch.object(resolve_spec_request, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_resolve_spec_request.py", "--decision", "decline", "--json"]):
+                rc = resolve_spec_request.main()
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
@@ -1805,7 +1805,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertIsNone(item["approvalId"])
         self.assertIsNone(item["approvalResumeToken"])
 
-    def test_resolve_topic_approval_approve_with_created_tasks_marks_tasked(self):
+    def test_resolve_spec_request_approve_with_created_tasks_marks_tasked(self):
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
             "bookmarkKey": self.bookmark["bookmarkKey"],
@@ -1831,9 +1831,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
             }],
         }))
         stdout = io.StringIO()
-        with patch.object(resolve_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["resolve_topic_approval.py", "--decision", "approve", "--json"]):
-                rc = resolve_topic_approval.main()
+        with patch.object(resolve_spec_request, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_resolve_spec_request.py", "--decision", "approve", "--json"]):
+                rc = resolve_spec_request.main()
 
         self.assertEqual(rc, 0)
         updated_state = common.load_state(self.state_path)
@@ -1841,7 +1841,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["reviewStatus"], "tasked")
         self.assertEqual(item["taskIds"], ["task-123"])
 
-    def test_resolve_topic_approval_skips_topic_mismatch(self):
+    def test_resolve_spec_request_skips_topic_mismatch(self):
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
             "bookmarkKey": self.bookmark["bookmarkKey"],
@@ -1864,9 +1864,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "created": [],
         }))
         stdout = io.StringIO()
-        with patch.object(resolve_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["resolve_topic_approval.py", "--decision", "approve", "--json"]):
-                rc = resolve_topic_approval.main()
+        with patch.object(resolve_spec_request, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_resolve_spec_request.py", "--decision", "approve", "--json"]):
+                rc = resolve_spec_request.main()
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
@@ -1876,7 +1876,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         item = updated_state["items"][self.bookmark["bookmarkKey"]]
         self.assertEqual(item["reviewStatus"], "approval_pending")
 
-    def test_resolve_topic_approval_approve_without_created_tasks_returns_to_spec_created(self):
+    def test_resolve_spec_request_approve_without_created_tasks_returns_to_spec_created(self):
         state = common.state_template()
         state["items"][self.bookmark["bookmarkKey"]] = {
             "bookmarkKey": self.bookmark["bookmarkKey"],
@@ -1899,9 +1899,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
             "created": [],
         }))
         stdout = io.StringIO()
-        with patch.object(resolve_topic_approval, "STATE_PATH", self.state_path):
-            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["resolve_topic_approval.py", "--decision", "approve", "--json"]):
-                rc = resolve_topic_approval.main()
+        with patch.object(resolve_spec_request, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_resolve_spec_request.py", "--decision", "approve", "--json"]):
+                rc = resolve_spec_request.main()
 
         self.assertEqual(rc, 0)
         payload = json.loads(stdout.getvalue())
