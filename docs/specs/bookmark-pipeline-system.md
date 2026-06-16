@@ -41,8 +41,8 @@ ingested  summarized  needs_research (human-gated)                      declined
 - Items below `relevanceThreshold` stay `summarized` and may be re-curated on the next pass
 
 ### 4. Spec Generation
-- **Lobster step:** `filter_curation.py` → `generate_specs.py`
-- `filter_curation.py` routes high-score curated items into the `implement` bucket
+- **Lobster step:** `lobster_list_curations.py` → `lobster_generate_specs.py`
+- `lobster_list_curations.py` routes high-score curated items into the `implement` bucket
 - `generate_specs.py` either:
   - Reuses existing spec files on disk (transitions to `spec_created`)
   - Sets `reviewStatus: spec_requested` if no spec exists (queues for Quinn heartbeat)
@@ -77,10 +77,10 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `tasked` | Tasks created in Tasks API | **terminal** |
 | `declined` | Tom declined the spec | **terminal** — will NOT re-enter pipeline |
 
-**Terminal statuses** (filter_curation skips these even with a high curation score):
+**Terminal statuses** (list_curations skips these even with a high curation score):
 `tasked`, `declined`, `approval_pending`, `revision_staged`, `revision_requested`, `needs_research`
 
-> **Note on `declined`:** Declining is permanent. `handle_approval_reply.py` clears the approval claim and preserves `reviewStatus: declined`; it does not clear curation or re-enter the item for curation. Use `revise: <changes>` if you want a revised spec instead. To manually re-enter a declined item, reset `reviewStatus` to `summarized` directly in `brain/state/bookmark-review-state.json`.
+> **Note on `declined`:** Declining is a permanent dead-end. `handle_approval_reply.py` clears the approval claim and sets `reviewStatus: declined`; the item will not re-enter the pipeline. Use `revise: <changes>` instead of `decline` if you want to iterate on the spec.
 
 ---
 
@@ -104,12 +104,11 @@ ingested  summarized  needs_research (human-gated)                      declined
 | Script | Stage | Executed by | Notes |
 |---|---|---|---|
 | `run_x_ingest.py` | Ingest | ingest cron | Entry point via x-bookmark-ingest skill |
-| `lobster_list_review_candidates.py` | Ingest | review lobster | Collects candidate bookmarks for the pipeline |
-| `lobster_ensure_non_empty.py` | Ingest | review lobster | Guards against empty candidate sets; short-circuits early |
+| `lobster_list_curate_candidates.py` | Ingest | review lobster | Collects candidate bookmarks for the pipeline |
 | `lobster_summarize.py` | Summarize | review lobster | Faithful extraction; no classification |
 | `list_curate_candidates.py` | Curate | heartbeat | Filter only — no LLM; outputs candidate batch for Quinn |
 | `validate_curate_output.py` | Curate | heartbeat | Applies Quinn's curation verdict to state |
-| `lobster_filter_curation.py` | Spec | review lobster | Routes high-score curated items into the pipeline |
+| `lobster_list_curations.py` | Spec | review lobster | Routes high-score curated items into the pipeline |
 | `lobster_generate_specs.py` | Spec | review lobster | Reuses existing spec files or sets `spec_requested` |
 | `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write |
 | `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
