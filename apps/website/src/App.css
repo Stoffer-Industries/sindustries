@@ -452,11 +452,10 @@ li {
   overflow: hidden;
 }
 
+/* Story cards + ship rows get this surface from the ui brand kit (.si-card). */
 .signal-card,
 .si-sticky-card-stack .slcs-card,
-.story-card,
-.studio-card,
-.ship-row {
+.studio-card {
   border: 1px solid rgb(17 18 19 / 10%);
   border-radius: var(--si-radius-lg);
   background: rgb(255 255 255 / 38%);
@@ -751,21 +750,8 @@ li {
   width: 100%;
   gap: 18px;
   padding: 18px 20px;
-  color: inherit;
-  cursor: pointer;
   font: inherit;
   text-align: left;
-  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
-}
-
-.ship-row:hover,
-.ship-row:focus-visible,
-.story-card:hover,
-.story-card:focus-visible {
-  border-color: rgb(255 201 53 / 56%);
-  background: rgb(255 255 255 / 58%);
-  transform: translateY(-2px);
-  outline: none;
 }
 
 .ship-row span {
@@ -815,11 +801,8 @@ li {
 .story-card {
   display: block;
   width: 100%;
-  color: inherit;
-  cursor: pointer;
   font: inherit;
   text-align: left;
-  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
 }
 
 .studio-grid {
@@ -854,47 +837,9 @@ li {
   margin-top: 0;
 }
 
-/* ─── Buttons ─── */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 48px;
-  padding: 0 20px;
-  border: 1px solid transparent;
-  border-radius: var(--si-radius-pill);
-  cursor: pointer;
-  font-family: var(--si-font-ui);
-  font-size: 0.95rem;
-  font-weight: 950;
-  text-decoration: none;
-  transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
-}
-
-.btn:hover {
-  transform: translateY(-1px);
-}
-
-.btn.primary {
-  background: var(--si-color-brand-500);
-  color: var(--si-color-ink-950);
-  box-shadow: 0 8px 22px rgb(255 201 53 / 24%);
-}
-
-.btn.secondary {
-  background: transparent;
-  border-color: rgb(243 241 236 / 36%);
-  color: var(--si-color-bone-100);
-}
-
-.btn.secondary.light {
-  border-color: rgb(17 18 19 / 16%);
-  color: var(--si-color-ink-950);
-}
-
-.btn.secondary:hover {
-  border-color: var(--si-color-brand-500);
-}
+/* ─── Buttons ───
+   CTAs use <Button> from @sindustries/ui with the brand kit
+   (data-si-pack="brand" on <html>). No local button chrome. */
 
 /* ─── Footer + About ─── */
 .site-footer {
@@ -957,15 +902,7 @@ li {
   padding-top: 24px;
 }
 
-.about-hero,
-.about-card.dark {
-  border: 1px solid rgb(243 241 236 / 12%);
-  border-radius: var(--si-radius-xl);
-  background: var(--si-color-ink-950);
-  color: var(--si-color-text-on-dark);
-  box-shadow: 0 24px 90px rgb(0 0 0 / 24%);
-}
-
+/* Ink panel chrome comes from the ui brand kit (Card variant="ink"). */
 .about-hero {
   padding: clamp(30px, 7vw, 76px);
 }
@@ -998,12 +935,9 @@ li {
   margin-top: var(--si-space-6);
 }
 
+/* Panel chrome comes from the ui brand kit (Card variant="panel"). */
 .about-card {
   padding: clamp(24px, 5vw, 52px);
-  border: 1px solid rgb(17 18 19 / 12%);
-  border-radius: var(--si-radius-xl);
-  background: color-mix(in srgb, var(--si-color-bone-50) 90%, white 10%);
-  box-shadow: var(--si-shadow-soft);
 }
 
 .about-card h2 {
@@ -1111,23 +1045,7 @@ li {
   margin-bottom: 18px;
 }
 
-.detail-sheet-meta span,
-.detail-sheet-topics span,
-.detail-sheet-links a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 11px;
-  border: 1px solid rgb(17 18 19 / 12%);
-  border-radius: var(--si-radius-pill);
-  background: rgb(255 255 255 / 52%);
-  color: var(--si-color-ink-950);
-  font-family: var(--si-font-ui);
-  font-size: 0.78rem;
-  font-weight: 900;
-  text-decoration: none;
-  text-transform: capitalize;
-}
+/* Chip chrome comes from the ui brand kit (Badge). */
 
 .detail-sheet-summary {
   max-width: 760px;
@@ -1155,7 +1073,7 @@ li {
   margin-top: 28px;
 }
 
-.detail-sheet-links a {
+.detail-sheet-links .si-badge {
   text-decoration: underline;
   text-decoration-color: rgb(255 201 53 / 70%);
   text-decoration-thickness: 3px;

@@ -109,7 +109,7 @@ Ink and graphite share the same cool hue family; ink is environment depth, graph
 
 | Family | Key steps | Role |
 |--------|-----------|------|
-| **Brand** (amber) | `500` `#ffc935`, `200` `#ffe891` | Secondary CTAs, dark-mode primary CTA, tertiary text in dark, priority badges |
+| **Brand** (amber) | `700` `#a76f00`, `500` `#ffc935`, `200` `#ffe891` | Secondary CTAs, dark-mode primary CTA, tertiary text in dark, priority badges; `700` for eyebrows/markers on bone |
 | **Sage** | `500` `#7a8b7c` | Light-mode primary CTA, tertiary text in light |
 | **Accent** (pink) | `500` `#ff3e8a`, `200` `#ff8ab4` | Urgent/blocked/draft Pulse badges |
 | **Info** (cyan) | `500` `#00d4ff`, `200` `#9ee9ff` | Focus rings, informational toasts/tags, medium-priority badge fills |
@@ -142,6 +142,8 @@ Related: `bgSectionHeader` (column chrome), `bgField` (inputs), `bgGlass`, `bgPa
 | `textSecondary` | graphite.700 | graphite.500 |
 | `textMuted` | graphite.600 | graphite.600 |
 | `textTertiary` | sage.500 | brand.500 |
+| `textOnDark` | bone.100 | bone.100 |
+| `textOnDarkSecondary` | bone.400 | bone.400 |
 | `borderStrong` | graphite.400 | graphite.500 |
 | `ctaPrimary` | sage.500 | brand.500 |
 | `ctaPrimaryText` | neutral.0 | ink.950 |
@@ -158,7 +160,7 @@ Use semantic tokens in components. Reach for primitives when you need a fixed sw
 
 **Dark mode (ink + graphite + paper)** — available in tasks via theme toggle. Canvas is deep ink; columns lift on graphite.800; cards sit on ink.800. Body copy reads in warm paper, not cold white.
 
-**Marketing site** — bone-forward (`bone.50` canvas, subtle amber radial wash). Dark ink panels and amber/yellow CTAs provide contrast on top of the bone base. Composes primitives directly for editorial layouts rather than the full semantic surface stack.
+**Marketing site** — light theme, bone-forward (`bone.50` canvas, subtle amber radial wash). Dark ink panels and amber/yellow CTAs provide contrast on top of the bone base; text on ink panels uses `textOnDark` / `textOnDarkSecondary`. Components come from `@sindustries/ui` with the **brand kit** (`data-si-pack="brand"`); editorial layout composes primitives directly rather than the full semantic surface stack.
 
 ---
 
@@ -332,11 +334,13 @@ Tools built by someone who uses them.
 
 **UI traits**
 
-- Pulse pack: sharp `ink.950` borders, hard offset shadows, near-zero radius on cards
+- One component set, multiple **kits** (style packs) in `@sindustries/ui`:
+  - **Pulse kit** (tasks app): sharp `ink.950` borders, hard offset shadows, near-zero radius, display-face buttons. Opt-in per component (`tone="display"`, `variant="pulse"`).
+  - **Brand kit** (marketing site): pill CTAs (amber primary + soft glow), hairline outline buttons that adapt to their surface, translucent editorial card surfaces, pill chips. Activated by context (`data-si-pack="brand"` on the page shell).
 - Semantic surface stack for layout nesting (`bgCanvas` / `bgSection` / `bgSurface`)
 - Bold status indicators (amber, cyan, pink, sage, success green)
 - Cyan focus rings on all interactive elements
-- Clear labels; metadata steps down `textSecondary` → `textMuted`
+- Clear labels; metadata steps down `textSecondary` → `textMuted`; on ink panels use `textOnDark` → `textOnDarkSecondary`
 
 **Motion**
 

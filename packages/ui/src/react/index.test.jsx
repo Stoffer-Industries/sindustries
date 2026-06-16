@@ -116,6 +116,28 @@ describe('@sindustries/ui/react', () => {
     expect(container.querySelector('[data-testid="subtle-divider"]')).toHaveClass('si-divider--subtle');
   });
 
+  it('renders brand-kit components inside a data-si-pack="brand" shell', () => {
+    render(
+      <div data-si-pack="brand">
+        <Button as="a" variant="primary" href="https://example.com">Follow on X</Button>
+        <Badge as="a" href="https://example.com/source">Canonical source</Badge>
+        <Card as="button" type="button" interactive variant="default" aria-label="Open story">
+          Story card
+        </Card>
+        <Card variant="ink" data-testid="ink-card">Dark panel</Card>
+      </div>
+    );
+
+    const cta = screen.getByRole('link', { name: 'Follow on X' });
+    expect(cta).toHaveClass('si-button', 'si-button--primary');
+    expect(cta).toHaveAttribute('href', 'https://example.com');
+    const chip = screen.getByRole('link', { name: 'Canonical source' });
+    expect(chip).toHaveClass('si-badge');
+    expect(chip).toHaveAttribute('href', 'https://example.com/source');
+    expect(screen.getByRole('button', { name: 'Open story' })).toHaveClass('si-card', 'si-card--interactive');
+    expect(screen.getByTestId('ink-card')).toHaveClass('si-card--ink');
+  });
+
   it('renders search and filter controls from design-system classes', () => {
     render(
       <>

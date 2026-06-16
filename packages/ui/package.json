@@ -6,6 +6,9 @@
   "exports": {
     "./react": "./src/react/index.jsx",
     "./react/styles.css": "./src/react/styles.css",
+    "./react/base.css": "./src/react/base.css",
+    "./react/kit-pulse.css": "./src/react/kit-pulse.css",
+    "./react/kit-brand.css": "./src/react/kit-brand.css",
     "./specimen": "./src/specimen/index.jsx",
     "./specimen/styles.css": "./src/specimen/styles.css"
   },

@@ -41,7 +41,8 @@ export const tokens = {
       },
       "brand": {
         "200": "#ffe891",
-        "500": "#ffc935"
+        "500": "#ffc935",
+        "700": "#a76f00"
       },
       "sage": {
         "500": "#7a8b7c"
@@ -112,6 +113,8 @@ export const tokens = {
         "textSecondary": "#3D444D",
         "textTertiary": "#7a8b7c",
         "textMuted": "#5C6670",
+        "textOnDark": "#f4f1ea",
+        "textOnDarkSecondary": "#d5d3cd",
         "borderStrong": "#9CA3AF",
         "borderSubtle": "rgba(0, 0, 0, 0.06)",
         "focus": "#00d4ff",
@@ -142,6 +145,8 @@ export const tokens = {
         "textSecondary": "#8f969e",
         "textTertiary": "#ffc935",
         "textMuted": "#5C6670",
+        "textOnDark": "#f4f1ea",
+        "textOnDarkSecondary": "#d5d3cd",
         "borderStrong": "#8f969e",
         "borderSubtle": "rgba(143, 150, 158, 0.18)",
         "focus": "#00d4ff",
@@ -219,6 +224,8 @@ export const colors = {
   textSecondary: dark.textSecondary,
   textTertiary: dark.textTertiary,
   textMuted: dark.textMuted,
+  textOnDark: dark.textOnDark,
+  textOnDarkSecondary: dark.textOnDarkSecondary,
   borderStrong: dark.borderStrong,
   borderSubtle: dark.borderSubtle,
   focus: dark.focus,
@@ -266,6 +273,8 @@ export const colorsLight = {
   textSecondary: light.textSecondary,
   textTertiary: light.textTertiary,
   textMuted: light.textMuted,
+  textOnDark: light.textOnDark,
+  textOnDarkSecondary: light.textOnDarkSecondary,
   borderStrong: light.borderStrong,
   borderSubtle: light.borderSubtle,
   focus: light.focus,

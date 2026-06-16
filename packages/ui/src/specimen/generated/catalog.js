@@ -33,6 +33,15 @@ export const COMPONENT_CATALOG = {
             "Button/Display/Outline",
             "Button/Display/Ghost"
           ]
+        },
+        "brand": {
+          "status": "implemented",
+          "variants": [
+            "primary",
+            "outline"
+          ],
+          "tones": [],
+          "penNames": []
         }
       }
     },
@@ -63,6 +72,14 @@ export const COMPONENT_CATALOG = {
             "Label/Priority/Low",
             "Label/Tag"
           ]
+        },
+        "brand": {
+          "status": "implemented",
+          "variants": [
+            "neutral"
+          ],
+          "tones": [],
+          "penNames": []
         }
       }
     },
@@ -101,6 +118,16 @@ export const COMPONENT_CATALOG = {
             "Modal/Task Card",
             "Card"
           ]
+        },
+        "brand": {
+          "status": "implemented",
+          "variants": [
+            "default",
+            "panel",
+            "ink"
+          ],
+          "tones": [],
+          "penNames": []
         }
       }
     },
@@ -671,6 +698,140 @@ export const COMPONENT_CATALOG = {
               "penRef": {
                 "id": "YLlSf",
                 "name": "Toast/Error"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "brand-buttons",
+      "title": "Brand buttons",
+      "pack": "brand",
+      "catalogComponent": "Button",
+      "note": "Pill CTAs — amber primary with soft glow, hairline outline that adapts to its surface via currentColor.",
+      "rows": [
+        {
+          "demos": [
+            {
+              "component": "Button",
+              "props": {
+                "variant": "primary",
+                "children": "Brand primary"
+              },
+              "penRef": {
+                "id": "gEIRT",
+                "name": "Button/Brand/Primary"
+              }
+            },
+            {
+              "component": "Button",
+              "props": {
+                "variant": "outline",
+                "children": "Brand outline"
+              },
+              "penRef": {
+                "id": "irYoM",
+                "name": "Button/Brand/Outline"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "brand-chips",
+      "title": "Brand chips",
+      "pack": "brand",
+      "catalogComponent": "Badge",
+      "note": "Meta, topic, and link chips on translucent white. Render links with as=\"a\".",
+      "rows": [
+        {
+          "demos": [
+            {
+              "component": "Badge",
+              "props": {
+                "children": "release"
+              },
+              "penRef": {
+                "id": "A7gWNi",
+                "name": "Label/Brand/Chip"
+              }
+            },
+            {
+              "component": "Badge",
+              "props": {
+                "children": "21 Apr 2026"
+              },
+              "penRef": {
+                "id": "OkDDd",
+                "name": "Label/Brand/Date"
+              }
+            },
+            {
+              "component": "Badge",
+              "props": {
+                "as": "a",
+                "href": "#brand-react",
+                "children": "canonical source"
+              },
+              "penRef": {
+                "id": "V5X9Q",
+                "name": "Label/Brand/Link"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "brand-cards",
+      "title": "Brand cards",
+      "pack": "brand",
+      "catalogComponent": "Card",
+      "note": "Translucent editorial surface (default + interactive), opaque bone panel, and ink panel.",
+      "rows": [
+        {
+          "demos": [
+            {
+              "component": "Card",
+              "props": {
+                "interactive": true,
+                "children": "Interactive card — story and ship surfaces"
+              },
+              "penRef": {
+                "id": "hFvAx",
+                "name": "Card/Brand/Interactive"
+              }
+            }
+          ]
+        },
+        {
+          "demos": [
+            {
+              "component": "Card",
+              "props": {
+                "variant": "panel",
+                "children": "Panel card — opaque bone section"
+              },
+              "penRef": {
+                "id": "GjmFn",
+                "name": "Card/Brand/Panel"
+              }
+            }
+          ]
+        },
+        {
+          "demos": [
+            {
+              "component": "Card",
+              "props": {
+                "variant": "ink",
+                "children": "Ink card — dark industrial panel"
+              },
+              "penRef": {
+                "id": "zYwsa",
+                "name": "Card/Brand/Ink"
               }
             }
           ]

@@ -77,5 +77,34 @@ export const SPECIMEN_PAGES = [
         "groupPack": "pulse"
       }
     ]
+  },
+  {
+    "id": "brand-react",
+    "penFrameId": "siReactSpecBrand",
+    "title": "Brand / React",
+    "penTitle": "Brand React specimen",
+    "eyebrow": "REACT · BRAND",
+    "intro": "Live components from @sindustries/ui/react with data-si-pack=\"brand\" — the editorial kit used by the brand site. Pill CTAs, translucent surfaces, soft glows.",
+    "pack": "brand",
+    "theme": "light",
+    "layout": {
+      "x": 2016,
+      "y": 32,
+      "width": 960
+    },
+    "sections": [
+      {
+        "id": "components",
+        "type": "componentGroups",
+        "title": "Brand components",
+        "groupPack": "brand"
+      },
+      {
+        "id": "catalog",
+        "type": "codeCatalog",
+        "title": "Code catalog",
+        "groupPack": "brand"
+      }
+    ]
   }
 ];

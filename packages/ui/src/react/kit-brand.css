@@ -1,0 +1,106 @@
+/*
+ * Brand kit — editorial marketing chrome: pill buttons, translucent card
+ * surfaces, soft glows, sentence case. Activated by context: set
+ * data-si-pack="brand" on a shell element (usually <html>) and the standard
+ * components restyle themselves. Used by the brand site (apps/website).
+ *
+ * Pairs with data-si-theme="light"; surfaces assume the bone canvas.
+ */
+
+[data-si-pack='brand'] .si-button {
+  border: 1px solid transparent;
+  border-radius: var(--si-radius-pill);
+  font-family: var(--si-font-ui);
+  font-size: 0.95rem;
+  font-weight: 950;
+  min-height: 48px;
+  padding: 0 20px;
+  text-transform: none;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
+}
+
+[data-si-pack='brand'] .si-button:hover {
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+[data-si-pack='brand'] .si-button--primary {
+  background: var(--si-color-brand-500);
+  border-color: transparent;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--si-color-brand-500) 24%, transparent);
+  color: var(--si-color-ink-950);
+}
+
+[data-si-pack='brand'] .si-button--primary:hover {
+  border-color: transparent;
+}
+
+/* Hairline chip that adapts to its surface: inherits the surrounding text
+   color, so it reads bone-on-ink inside dark panels and ink-on-bone on the
+   canvas without needing a modifier. */
+[data-si-pack='brand'] .si-button--outline {
+  background: transparent;
+  border-color: color-mix(in srgb, currentColor 26%, transparent);
+  color: inherit;
+}
+
+[data-si-pack='brand'] .si-button--outline:hover {
+  border-color: var(--si-color-brand-500);
+}
+
+/* Card — translucent editorial surface on the bone canvas */
+[data-si-pack='brand'] .si-card {
+  background: color-mix(in srgb, var(--si-color-neutral-0) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--si-color-ink-950) 10%, transparent);
+  border-radius: var(--si-radius-lg);
+  color: inherit;
+}
+
+[data-si-pack='brand'] .si-card--interactive:hover,
+[data-si-pack='brand'] .si-card--interactive:focus-visible {
+  background: color-mix(in srgb, var(--si-color-neutral-0) 58%, transparent);
+  border-color: color-mix(in srgb, var(--si-color-brand-500) 56%, transparent);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+[data-si-pack='brand'] .si-card--interactive {
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+[data-si-pack='brand'] .si-card--editing,
+[data-si-pack='brand'] .si-card:focus-within {
+  border-color: color-mix(in srgb, var(--si-color-ink-950) 10%, transparent);
+}
+
+/* Panel — opaque bone section card (about page) */
+[data-si-pack='brand'] .si-card--panel {
+  background: color-mix(in srgb, var(--si-color-bone-50) 90%, white 10%);
+  border: 1px solid color-mix(in srgb, var(--si-color-ink-950) 12%, transparent);
+  border-radius: var(--si-radius-xl);
+  box-shadow: var(--si-shadow-soft);
+}
+
+/* Ink — dark industrial panel sitting on the bone canvas */
+[data-si-pack='brand'] .si-card--ink {
+  background: var(--si-color-ink-950);
+  border: 1px solid color-mix(in srgb, var(--si-color-bone-100) 12%, transparent);
+  border-radius: var(--si-radius-xl);
+  box-shadow: 0 24px 90px rgb(0 0 0 / 24%);
+  color: var(--si-color-text-on-dark);
+}
+
+/* Badge — pill chip on translucent white, used for meta/topics/links */
+[data-si-pack='brand'] .si-badge {
+  background: color-mix(in srgb, var(--si-color-neutral-0) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--si-color-ink-950) 12%, transparent);
+  border-radius: var(--si-radius-pill);
+  color: var(--si-color-ink-950);
+  font-family: var(--si-font-ui);
+  font-size: 0.78rem;
+  font-weight: 900;
+  min-height: 32px;
+  padding: 0 11px;
+  text-decoration: none;
+  text-transform: capitalize;
+}

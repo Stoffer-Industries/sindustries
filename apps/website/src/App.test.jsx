@@ -21,6 +21,18 @@ describe('website app', () => {
     expect(screen.getByRole('link', { name: /email tom/i })).toBeInTheDocument();
   });
 
+  test('renders CTAs and cards from the @sindustries/ui brand kit', () => {
+    render(<App />);
+
+    const cta = screen
+      .getAllByRole('link', { name: /follow tom on x/i })
+      .find((element) => element.classList.contains('si-button'));
+    expect(cta).toHaveClass('si-button', 'si-button--primary');
+
+    const shipRow = screen.getByRole('button', { name: /open release detail for sindustries v1 site/i });
+    expect(shipRow).toHaveClass('si-card', 'si-card--interactive', 'ship-row');
+  });
+
   test('opens and closes release detail from a ship card', async () => {
     const user = userEvent.setup();
     render(<App />);

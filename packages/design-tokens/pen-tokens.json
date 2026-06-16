@@ -93,6 +93,10 @@
       "type": "color",
       "value": "#FFC935"
     },
+    "si-color-brand-700": {
+      "type": "color",
+      "value": "#A76F00"
+    },
     "si-color-sage-500": {
       "type": "color",
       "value": "#7A8B7C"
@@ -382,6 +386,40 @@
         },
         {
           "value": "#5C6670",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-text-on-dark": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F4F1EA",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#F4F1EA",
+          "theme": {
+            "Mode": "Dark"
+          }
+        }
+      ]
+    },
+    "si-color-text-on-dark-secondary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#D5D3CD",
+          "theme": {
+            "Mode": "Light"
+          }
+        },
+        {
+          "value": "#D5D3CD",
           "theme": {
             "Mode": "Dark"
           }

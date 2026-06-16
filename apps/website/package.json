@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@sindustries/design-tokens": "file:../../packages/design-tokens",
+    "@sindustries/ui": "file:../../packages/ui",
     "@vercel/analytics": "^2.0.1",
     "ajv": "^8.20.0",
     "react": "^18.3.1",

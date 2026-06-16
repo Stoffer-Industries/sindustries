@@ -43,9 +43,9 @@ export function Button({
   );
 }
 
-export function Badge({ variant = 'neutral', tone, className, ...props }) {
+export function Badge({ as: Component = 'span', variant = 'neutral', tone, className, ...props }) {
   return (
-    <span
+    <Component
       className={cx('si-badge', `si-badge--${variant}`, tone ? `si-badge--${tone}` : null, className)}
       {...props}
     />

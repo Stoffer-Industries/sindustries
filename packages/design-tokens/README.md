@@ -56,7 +56,7 @@ That overwrites `styles.css`, `src/tokens.ts`, `pen-tokens.json`, and keeps `des
 
 | Consumer | Import | Usage |
 |----------|--------|-------|
-| `apps/website` | `@sindustries/design-tokens/styles.css` | `var(--si-color-bg-canvas)` in CSS |
+| `apps/website` | `@sindustries/ui/react/styles.css` | `<Button>` / `<Card>` / `<Badge>` with the **brand** kit (`data-si-pack="brand"` + `data-si-theme="light"` on `<html>`) |
 | `apps/budget-mobile` | `@sindustries/design-tokens/tokens` | `import { colors, space, radius } from '…'` |
 | `apps/tasks` | `@sindustries/ui/specimen` | `/design-system` mirrors pen layout (tokens + Pulse React) |
 | `docs/designs/budgeting/main.pen` | `imports.ui` → `design-systems.pen` | Components (`ui:…` refs) + `$si-color-*` / `$si-radius-*` on art |
@@ -68,6 +68,19 @@ That overwrites `styles.css`, `src/tokens.ts`, `pen-tokens.json`, and keeps `des
 |----------|--------|----------|
 | `siSpecRoot` | `specimen-layout.json` + `tokens.json` | Color, type, space, radius swatches |
 | `siReactSpecPulse` | `component-catalog.json` | Pulse React demos + code catalog (paths to `@sindustries/ui/react`) |
+| `siReactSpecBrand` | `component-catalog.json` | Brand-kit React demos (pill CTAs, chips, editorial cards) + code catalog |
+
+### Style kits (packs)
+
+Components in `@sindustries/ui` share one markup/class contract; **kits** are alternative visual languages over it (CSS in `packages/ui/src/react/`):
+
+| Kit | File | Activation | Used by |
+|-----|------|------------|---------|
+| *(base)* | `base.css` | always on | specimen defaults |
+| `pulse` | `kit-pulse.css` | per component: `tone="display"` / `tone="pulse"` (Button, Badge), `variant="pulse"` (Card) | `apps/tasks` |
+| `brand` | `kit-brand.css` | by context: `data-si-pack="brand"` on a shell element (usually `<html>`) | `apps/website` |
+
+To add a kit: create `kit-<name>.css` (import it from `styles.css`), add a `packs.<name>` entry per component plus `specimenGroups` with `"pack": "<name>"` in `component-catalog.json`, and add a page with `"pack": "<name>"` (optional `"theme"`) to `specimen-layout.json`. Rebuild — the web specimen page and a `siReactSpec*` pen frame are generated automatically.
 
 Legacy shadcn components under frame `vtHps` are hand-authored archive — not part of the sync target.
 
