@@ -143,7 +143,8 @@ _Signals noted but insufficient detail to act on._
 Read `docs/state-of-the-nation.md`. Using the ops notes already collected, apply changes directly.
 
 - Add a new bullet to **What Already Exists** when something shipped (new system, pipeline stage, skill, or cron). One line, present tense, naming the key artifact.
-- Mark a bullet in **Current Frictions** as resolved when ops notes show it was addressed: replace with ~~strikethrough~~ + `(resolved YYYY-MM-DD)`.
+- Mark a bullet in **Current Frictions** as resolved when ops notes or memory show it was addressed: replace with ~~strikethrough~~ + `(resolved YYYY-MM-DD)`.
+- Add a new bullet to **Current Frictions** when memory files reveal a recurring problem, blockers, or pain points that kept coming up this week and aren't already listed. One line, present tense, concrete. Only add if it genuinely recurred — not a one-off debug session.
 
 **Rules:**
 - Surgical additions and removals only — do not rewrite sections
