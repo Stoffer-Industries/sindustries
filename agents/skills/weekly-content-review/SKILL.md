@@ -133,7 +133,29 @@ _Signals noted but insufficient detail to act on._
 
 ---
 
-## Step 6 — Notify
+## Step 6 — Update state-of-the-nation
+
+Read `docs/state-of-the-nation.md`. Using the ops notes already collected, apply changes directly where the update is factual and unambiguous. Put strategic or priority changes in the review file under a new `## State-of-the-nation (needs Tom)` section instead of applying them.
+
+**Apply directly (no Tom needed):**
+- Add a new bullet to **What Already Exists** when something real shipped (new system, new pipeline stage, new skill, new cron). One line, present tense, naming the key artifact.
+- Remove a bullet from **Current Frictions** when ops notes show the friction was resolved. Replace with ~~strikethrough~~ + `(resolved YYYY-MM-DD)` for one cycle, then drop it on the next run.
+- Bump the `Last updated:` date at the top of the file if one exists.
+
+**Put in review file (needs Tom):**
+- Changes to **What Matters Most Right Now** priorities or ranking
+- Changes to **Primary Goal** or framing
+- New topic sections or topic guidance rewrites
+- Removal of something from What Already Exists (it may be intentional)
+
+**Rules:**
+- Do not rewrite large sections — make surgical additions and removals only
+- If nothing changed this week that affects the doc, skip this step silently
+- Write the state-of-the-nation file directly (it is not a review artifact — it is a live ops doc)
+
+---
+
+## Step 7 — Notify
 
 After writing the file, post a short message to the session that triggered this skill:
 
