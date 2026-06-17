@@ -187,7 +187,7 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
         elif item.get("taskIds") or []:
             item["reviewStatus"] = "tasked"
         else:
-            item["reviewStatus"] = "spec_created"
+            item["reviewStatus"] = "approved"
         item["lastUpdatedAt"] = now_iso()
         state["items"][key] = item
         log_transition(
