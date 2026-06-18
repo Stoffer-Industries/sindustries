@@ -7,6 +7,11 @@ const http = require('http');
 const { spawnSync } = require('child_process');
 const { STATE_DIR, getPending, setPending, addProcessed } = require('./lib/state.cjs');
 const { extractDomain, slugify } = require('./lib/categorize.cjs');
+const {
+  extractArticleText,
+  extractTitle,
+  truncateUtf8
+} = require('./lib/extract_article.cjs');
 
 const BOOKMARKS_DIR = process.env.OPENCLAW_WORKSPACE
   ? path.join(process.env.OPENCLAW_WORKSPACE, 'brain', 'bookmarks', 'x')
@@ -98,7 +103,29 @@ function logTagsToCSV({ id, title, tags, originalTweet, url }) {
   fs.appendFileSync(csvPath, row);
 }
 
-function fetchTitleWithModule(mod, url, redirectDepth = 0) {
+const HTML_CONTENT_TYPES = new Set(['text/html', 'application/xhtml+xml']);
+
+function softWarn(url, reason) {
+  console.warn(`Linked article skipped for ${url}: ${reason}`);
+}
+
+function positiveIntFromEnv(name, fallback) {
+  const value = parseInt(process.env[name] || String(fallback), 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function isTweetStatusUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    return ['x.com', 'twitter.com', 'mobile.twitter.com'].includes(hostname)
+      && /\/status\/\d+/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function fetchPageWithModule(mod, url, redirectDepth = 0) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (value) => {
@@ -107,69 +134,139 @@ function fetchTitleWithModule(mod, url, redirectDepth = 0) {
       resolve(value);
     };
 
-    const req = mod.get(url, { timeout: 6000 }, (res) => {
-      // handle redirects
+    const timeoutMs = positiveIntFromEnv('BOOKMARK_INGEST_FETCH_TIMEOUT_MS', 12000);
+    const maxHtmlBytes = positiveIntFromEnv('BOOKMARK_INGEST_MAX_HTML_BYTES', 2 * 1024 * 1024);
+    const req = mod.get(url, {
+      timeout: timeoutMs,
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'User-Agent': 'StofferIndustriesBookmarkIngest/1.0'
+      }
+    }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectDepth < 5) {
         const nextUrl = new URL(res.headers.location, url).toString();
         const nextMod = nextUrl.startsWith('https:') ? https : http;
-        fetchTitleWithModule(nextMod, nextUrl, redirectDepth + 1).then(done);
+        fetchPageWithModule(nextMod, nextUrl, redirectDepth + 1).then(done);
         res.resume();
         return;
       }
 
-      let data = '';
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        done({ ok: false, error: `HTTP ${res.statusCode}` });
+        return;
+      }
+
+      const contentType = String(res.headers['content-type'] || '')
+        .split(';', 1)[0]
+        .trim()
+        .toLowerCase();
+      if (!HTML_CONTENT_TYPES.has(contentType)) {
+        res.resume();
+        done({
+          ok: false,
+          error: `unsupported Content-Type ${contentType || '(missing)'}`
+        });
+        return;
+      }
+
+      const chunks = [];
+      let receivedBytes = 0;
       res.on('data', chunk => {
         if (settled) return;
-        data += chunk;
-        if (data.length > 20000) {
-          const match = data.match(/<title>([^<]+)<\/title>/i);
-          done(match ? match[1].trim() : null);
+        receivedBytes += chunk.length;
+        if (receivedBytes > maxHtmlBytes) {
+          done({ ok: false, error: `HTML exceeded ${maxHtmlBytes} bytes` });
           res.destroy();
+          return;
         }
+        chunks.push(chunk);
       });
       res.on('end', () => {
-        const match = data.match(/<title>([^<]+)<\/title>/i);
-        done(match ? match[1].trim() : null);
+        const html = Buffer.concat(chunks).toString('utf8');
+        done({
+          ok: true,
+          finalUrl: url,
+          html,
+          title: extractTitle(html)
+        });
       });
-      res.on('close', () => {
-        const match = data.match(/<title>([^<]+)<\/title>/i);
-        done(match ? match[1].trim() : null);
-      });
-      res.on('error', () => done(null));
+      res.on('error', error => done({ ok: false, error: error.message }));
     });
 
-    req.on('error', () => done(null));
+    req.on('error', error => done({ ok: false, error: error.message }));
     req.on('timeout', () => {
       req.destroy();
-      done(null);
+      done({ ok: false, error: `request timed out after ${timeoutMs}ms` });
     });
   });
 }
 
-async function fetchURLTitle(url, isTweetLink = false) {
-  if (isTweetLink) return null;
+async function fetchLinkedArticle(url) {
   const mod = String(url || '').startsWith('http:') ? http : https;
-  return fetchTitleWithModule(mod, url);
+  const page = await fetchPageWithModule(mod, url);
+  if (!page.ok) {
+    softWarn(url, page.error);
+    return { title: null, article: null, error: page.error };
+  }
+
+  try {
+    const extracted = extractArticleText(page.html);
+    if (!extracted) {
+      const error = 'body extraction returned no text';
+      softWarn(url, error);
+      return { title: page.title, article: null, error };
+    }
+
+    const maxBodyBytes = positiveIntFromEnv('BOOKMARK_INGEST_MAX_BODY_BYTES', 200 * 1024);
+    return {
+      title: page.title,
+      article: {
+        body: truncateUtf8(extracted, maxBodyBytes),
+        domain: extractDomain(page.finalUrl || url),
+        fetchedAt: new Date().toISOString(),
+        url: page.finalUrl || url
+      },
+      error: null
+    };
+  } catch (error) {
+    softWarn(url, `body extraction failed: ${error.message}`);
+    return { title: page.title, article: null, error: error.message };
+  }
 }
 
 function getAcpxCommand() {
   return (process.env.BOOKMARK_LLM_ACPX_COMMAND || '/opt/homebrew/bin/acpx').trim();
 }
 
-async function generateMetadata(url, tweetText, isTweetLink = false) {
+function truncateForLlm(value, maxChars) {
+  const text = String(value || '');
+  if (text.length <= maxChars) return text;
+  const marker = '\n\n...[truncated]...\n\n';
+  const available = Math.max(0, maxChars - marker.length);
+  const startChars = Math.floor(available * 0.75);
+  const endChars = available - startChars;
+  return `${text.slice(0, startChars)}${marker}${text.slice(-endChars)}`.slice(0, maxChars);
+}
+
+async function generateMetadata(url, tweetText, isTweetLink = false, linkedArticle = null, fetchedTitle = null) {
   let title;
   if (isTweetLink) {
     title = (tweetText || '').split('\n')[0].substring(0, 80);
   } else {
-    title = await fetchURLTitle(url) || slugify((tweetText || '').substring(0, 80));
+    title = fetchedTitle || slugify((tweetText || '').substring(0, 80));
   }
 
   const domain = extractDomain(url);
-  const text = String(tweetText || '');
-  const MAX_LLM_CHARS = Number(process.env.BOOKMARK_LLM_MAX_CHARS || 12000);
-  const llmText = text.length > MAX_LLM_CHARS
-    ? `${text.slice(0, Math.floor(MAX_LLM_CHARS * 0.75))}\n\n...[truncated]...\n\n${text.slice(-Math.floor(MAX_LLM_CHARS * 0.25))}`
-    : text;
+  const MAX_LLM_CHARS = positiveIntFromEnv('BOOKMARK_LLM_MAX_CHARS', 12000);
+  const articleForLlm = linkedArticle
+    ? String(linkedArticle.body || '').slice(0, 10000)
+    : '';
+  const combinedText = [
+    `Tweet Text:\n${String(tweetText || '')}`,
+    articleForLlm ? `Linked Article:\n${articleForLlm}` : ''
+  ].filter(Boolean).join('\n\n');
+  const llmText = truncateForLlm(combinedText, MAX_LLM_CHARS);
 
   function callViaAcpx() {
     const acpxCommand = getAcpxCommand();
@@ -183,7 +280,7 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
       '',
       `URL: ${url}`,
       `Title: ${title || ''}`,
-      `Tweet Text:\n${llmText}`
+      llmText
     ].join('\n');
 
     const result = spawnSync(
@@ -242,15 +339,26 @@ async function generateMetadata(url, tweetText, isTweetLink = false) {
 }
 
 async function processBookmark(bookmark) {
+  ensureDir(BOOKMARKS_DIR);
+
   let url = bookmark.url || bookmark.expandedUrl;
-  let isTweetLink = false;
+  let isTweetLink = isTweetStatusUrl(url);
 
   if (!url) {
     url = `https://x.com/i/web/status/${bookmark.id}`;
     isTweetLink = true;
   }
 
-  const metadata = await generateMetadata(url, bookmark.text || '', isTweetLink);
+  const linkedPage = isTweetLink
+    ? { title: null, article: null }
+    : await fetchLinkedArticle(url);
+  const metadata = await generateMetadata(
+    url,
+    bookmark.text || '',
+    isTweetLink,
+    linkedPage.article,
+    linkedPage.title
+  );
 
   logTagsToCSV({
     id: bookmark.id,
@@ -263,6 +371,18 @@ async function processBookmark(bookmark) {
   const date = new Date().toISOString().split('T')[0];
   const safeTags = normalizeTags(metadata.tags);
 
+  const linkedArticleSection = linkedPage.article
+    ? `
+
+**Linked Article:**
+Source: ${linkedPage.article.url}
+Domain: ${linkedPage.article.domain}
+Fetched: ${linkedPage.article.fetchedAt}
+
+${linkedPage.article.body}
+`
+    : '';
+
   const frontmatter = `---
 title: "${metadata.title || bookmark.id}"
 source: x
@@ -274,6 +394,7 @@ tags: [${safeTags.map(t => `"${t}"`).join(', ')}]
 
 **Original Tweet:**
 ${bookmark.text || 'N/A'}
+${linkedArticleSection}
 `;
 
   const filename = path.join(BOOKMARKS_DIR, `${slugify(metadata.title || String(bookmark.id))}.md`);
@@ -312,7 +433,16 @@ async function main() {
   console.log(`Done. Processed: ${processed.length}, Remaining: ${remaining.length}`);
 }
 
-main().catch(e => {
-  console.error(e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(e => {
+    console.error(e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  fetchLinkedArticle,
+  generateMetadata,
+  processBookmark,
+  truncateForLlm
+};
