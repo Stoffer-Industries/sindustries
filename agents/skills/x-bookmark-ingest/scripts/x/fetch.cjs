@@ -89,9 +89,7 @@ function getAccessToken() {
   );
 }
 
-async function fetchWithXAPI(count) {
-  const accessToken = getAccessToken();
-
+async function fetchWithXAPI(count, accessToken = getAccessToken()) {
   // Get user ID first
   const meResp = await fetch('https://api.x.com/2/users/me', {
     headers: { 'Authorization': `Bearer ${accessToken}` }
@@ -103,7 +101,7 @@ async function fetchWithXAPI(count) {
   }
 
   // Fetch bookmarks
-  const resp = await fetch(`https://api.x.com/2/users/${userId}/bookmarks?max_results=${count}&tweet.fields=created_at,public_metrics,entities,text,note_tweet,article,attachments`, {
+  const resp = await fetch(`https://api.x.com/2/users/${userId}/bookmarks?max_results=${count}&tweet.fields=created_at,public_metrics,entities,text,note_tweet,article,attachments,referenced_tweets`, {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
 
@@ -123,6 +121,55 @@ async function fetchWithXAPI(count) {
   return data.data || [];
 }
 
+async function enrichQuotedTweetArticles(bookmarks, accessToken) {
+  for (const bookmark of bookmarks) {
+    if (bookmark.article?.plain_text) continue;
+
+    const quotedReference = bookmark.referenced_tweets?.find(
+      reference => reference.type === 'quoted'
+    );
+    if (!quotedReference?.id) continue;
+
+    try {
+      const resp = await fetch(
+        `https://api.x.com/2/tweets/${quotedReference.id}?tweet.fields=text,article,entities`,
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+      );
+      if (!resp.ok) {
+        console.warn(
+          `Quoted tweet article lookup skipped for bookmark ${bookmark.id}: X API request was not successful`
+        );
+        continue;
+      }
+
+      const payload = await resp.json();
+      bookmark.quotedTweet = payload?.data || null;
+      const quotedArticle = bookmark.quotedTweet?.article;
+      if (!quotedArticle?.plain_text) continue;
+
+      const original = String(bookmark.text || '').trim();
+      bookmark.text = original
+        ? `${original}\n\n[Quoted Article]\n${quotedArticle.plain_text}`
+        : quotedArticle.plain_text;
+      bookmark.linkedArticle = {
+        title: quotedArticle.title,
+        body: quotedArticle.plain_text,
+        previewText: quotedArticle.preview_text,
+        source: 'quoted-tweet',
+        sourceUrl: bookmark.quotedTweet.entities?.urls?.[0]?.unwound_url
+          || bookmark.quotedTweet.entities?.urls?.[0]?.expanded_url
+          || null
+      };
+    } catch (error) {
+      console.warn(
+        `Quoted tweet article lookup skipped for bookmark ${bookmark.id}: ${error.message}`
+      );
+    }
+  }
+
+  return bookmarks;
+}
+
 async function expandURL(url) {
   try {
     const resp = await fetch(url, { method: 'HEAD', redirect: 'follow' });
@@ -137,10 +184,12 @@ async function main() {
   console.log(`Fetching bookmarks (max ${maxItems})...`);
 
   let bookmarks = [];
+  let accessToken;
 
   // Use X API directly (OAuth) - skip bird CLI cookie auth
   try {
-    bookmarks = await fetchWithXAPI(maxItems);
+    accessToken = getAccessToken();
+    bookmarks = await fetchWithXAPI(maxItems, accessToken);
     console.log(`Fetched ${bookmarks.length} bookmarks via X API`);
   } catch (apiError) {
     console.error('Failed to fetch bookmarks:', apiError.message);
@@ -200,13 +249,25 @@ async function main() {
     }
   }
 
+  // Quoted Twitter articles are not expanded in the bookmarks response.
+  // Fetch them separately after the bookmark's own article/note text has
+  // been normalized so the quoted body is not overwritten.
+  await enrichQuotedTweetArticles(toAdd, accessToken);
+
   const updatedPending = [...pending, ...toAdd];
   setPending(updatedPending);
 
   console.log(`Added ${toAdd.length} to pending. Total pending: ${updatedPending.length}`);
 }
 
-main().catch(e => {
-  console.error(e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(e => {
+    console.error(e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  enrichQuotedTweetArticles,
+  fetchWithXAPI
+};

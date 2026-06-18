@@ -343,21 +343,29 @@ async function processBookmark(bookmark) {
 
   let url = bookmark.url || bookmark.expandedUrl;
   let isTweetLink = isTweetStatusUrl(url);
+  // The bookmarked tweet's own article is primary content. A quoted article
+  // is used only when the bookmark does not carry a direct article body.
+  const quotedArticle = !bookmark.article?.plain_text
+    ? bookmark.linkedArticle
+    : null;
 
   if (!url) {
     url = `https://x.com/i/web/status/${bookmark.id}`;
     isTweetLink = true;
   }
 
-  const linkedPage = isTweetLink
+  const linkedPage = quotedArticle
+    ? { title: quotedArticle.title || null, article: null }
+    : isTweetLink
     ? { title: null, article: null }
     : await fetchLinkedArticle(url);
+  const selectedArticle = quotedArticle || linkedPage.article;
   const metadata = await generateMetadata(
     url,
     bookmark.text || '',
     isTweetLink,
-    linkedPage.article,
-    linkedPage.title
+    selectedArticle,
+    quotedArticle?.title || linkedPage.title
   );
 
   logTagsToCSV({
@@ -371,7 +379,16 @@ async function processBookmark(bookmark) {
   const date = new Date().toISOString().split('T')[0];
   const safeTags = normalizeTags(metadata.tags);
 
-  const linkedArticleSection = linkedPage.article
+  const linkedArticleSection = quotedArticle
+    ? `
+
+**Linked Article:** (from quoted tweet)
+Title: ${quotedArticle.title || 'N/A'}
+Source: ${quotedArticle.sourceUrl || 'N/A'}
+Body:
+${quotedArticle.body}
+`
+    : linkedPage.article
     ? `
 
 **Linked Article:**

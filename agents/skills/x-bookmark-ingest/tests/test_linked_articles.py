@@ -10,6 +10,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PROCESS_SCRIPT = REPO_ROOT / "agents/skills/x-bookmark-ingest/scripts/x/process.cjs"
+FETCH_SCRIPT = REPO_ROOT / "agents/skills/x-bookmark-ingest/scripts/x/fetch.cjs"
 EXTRACT_SCRIPT = REPO_ROOT / "agents/skills/x-bookmark-ingest/scripts/x/lib/extract_article.cjs"
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -82,6 +83,20 @@ def fetch_article(url):
     )
     result = run_node(source)
     return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def enrich_quoted_articles(bookmarks, response, *, ok=True):
+    source = (
+        f"const f = require({json.dumps(str(FETCH_SCRIPT))});"
+        f"const bookmarks = {json.dumps(bookmarks)};"
+        "global.fetch = async () => ({"
+        f"ok: {json.dumps(ok)},"
+        f"json: async () => ({json.dumps(response)})"
+        "});"
+        "f.enrichQuotedTweetArticles(bookmarks, 'test-token')"
+        ".then(value => console.log(JSON.stringify(value)));"
+    )
+    return run_node(source)
 
 
 def test_clean_article_title_and_body_are_extracted(article_server):
@@ -256,3 +271,81 @@ def test_article_body_is_passed_to_llm_within_combined_cap(tmp_path):
     assert "Tweet Text:\ntweet context" in contextual_text
     assert "Linked Article:" in contextual_text
     assert len(contextual_text) <= 240
+
+
+def test_quoted_tweet_article_is_extracted():
+    bookmark = json.loads((FIXTURES / "quoted_article_tweet.json").read_text())
+    response = json.loads((FIXTURES / "quoted_article_response.json").read_text())
+
+    result = enrich_quoted_articles([bookmark], response)
+    enriched = json.loads(result.stdout.strip().splitlines()[-1])[0]
+
+    assert enriched["linkedArticle"]["body"] == response["data"]["article"]["plain_text"]
+    assert enriched["linkedArticle"]["source"] == "quoted-tweet"
+    assert enriched["linkedArticle"]["title"] == response["data"]["article"]["title"]
+
+
+def test_quoted_article_does_not_override_direct_article():
+    bookmark = json.loads((FIXTURES / "quoted_article_tweet.json").read_text())
+    bookmark["article"] = {
+        "title": "Primary article",
+        "plain_text": "The bookmarked tweet's own article body.",
+    }
+    response = json.loads((FIXTURES / "quoted_article_response.json").read_text())
+
+    result = enrich_quoted_articles([bookmark], response)
+    enriched = json.loads(result.stdout.strip().splitlines()[-1])[0]
+
+    assert "linkedArticle" not in enriched
+    assert enriched["article"]["title"] == "Primary article"
+
+
+def test_quoted_tweet_api_failure_falls_back_safely():
+    bookmark = json.loads((FIXTURES / "quoted_article_tweet.json").read_text())
+
+    result = enrich_quoted_articles([bookmark], {}, ok=False)
+    enriched = json.loads(result.stdout.strip().splitlines()[-1])[0]
+
+    assert "linkedArticle" not in enriched
+    assert enriched["text"] == bookmark["text"]
+    assert "Quoted tweet article lookup skipped" in result.stderr
+
+
+def test_process_writes_quoted_article_section(tmp_path):
+    acpx = tmp_path / "fake-acpx"
+    acpx.write_text("#!/bin/sh\necho '{\"tags\":[\"testing\",\"bookmarks\"]}'\n")
+    acpx.chmod(0o755)
+    workspace = tmp_path / "workspace"
+    response = json.loads((FIXTURES / "quoted_article_response.json").read_text())
+    article = response["data"]["article"]
+    bookmark = {
+        "id": "2063272524927103459",
+        "text": "Quoted article context",
+        "linkedArticle": {
+            "title": article["title"],
+            "body": article["plain_text"],
+            "source": "quoted-tweet",
+            "sourceUrl": "https://x.com/i/article/2063186252606865711",
+        },
+    }
+    source = (
+        f"const p = require({json.dumps(str(PROCESS_SCRIPT))});"
+        f"p.processBookmark({json.dumps(bookmark)})"
+        ".then(() => console.log('done'));"
+    )
+
+    run_node(
+        source,
+        env={
+            "OPENCLAW_WORKSPACE": str(workspace),
+            "OPENCLAW_STATE_DIR": str(workspace / "brain/state"),
+            "BOOKMARK_LLM_ACPX_COMMAND": str(acpx),
+        },
+    )
+
+    output_files = list((workspace / "brain/bookmarks/x").glob("*.md"))
+    assert len(output_files) == 1
+    output = output_files[0].read_text()
+    assert "**Linked Article:** (from quoted tweet)" in output
+    assert article["title"] in output
+    assert article["plain_text"] in output
