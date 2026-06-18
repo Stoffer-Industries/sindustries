@@ -24,6 +24,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 ### 1. Ingest
 - **Cron:** `bookmark-ingestion.md` (runs `run_x_ingest.py`)
 - Pulls new bookmarks from X, writes raw markdown to `brain/bookmarks/x/<slug>.md`
+- For non-tweet HTML links, fetches and stores a bounded, plain-text article body alongside the original tweet; unsupported or failed fetches fall back to tweet-only output
 - Sets `reviewStatus: ingested`
 
 ### 2. Summarize
