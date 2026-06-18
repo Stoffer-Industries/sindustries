@@ -13,3 +13,6 @@ apps/tasks/test-results/.last-run.json
 /agents/workflows/bookmark/state/
 
 **/__pycache__/**
+
+# OpenClaw runtime state (setup marker, regenerated on init)
+.openclaw/workspace-state.json
