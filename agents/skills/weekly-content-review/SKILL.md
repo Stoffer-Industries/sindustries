@@ -23,14 +23,19 @@ Use today's date as the review date (`REVIEW_DATE`). The note window is `REVIEW_
 
 ---
 
-## Step 2 — Collect safe daily notes
+## Step 2 — Collect safe daily notes and memory
 
-Read note files from:
+**Ops notes** — read from:
 ```
 /Users/quinnstoffer/.openclaw/workspace/brain/ops/notes/YYYY-MM-DD.md
 ```
+Collect files whose stem falls within the 7-day window. Copy the raw bullet lines as-is.
 
-Collect files whose stem (filename without extension) falls within the 7-day window. Read each file in full. Copy the raw bullet lines as-is; do not summarise or classify them yet.
+**Memory files** — also read from:
+```
+/Users/quinnstoffer/.openclaw/workspace/memory/YYYY-MM-DD*.md
+```
+Collect memory files whose stem starts with a date in the 7-day window. Read them for narrative context — what was being worked on, what broke, what shipped, what the arc of the week looked like. Do not copy memory lines verbatim into the review; synthesise them at a high level (e.g. "struggled with approval routing reliability before landing the fix", not the raw debug logs). Memory adds colour to the ops notes; ops notes remain the primary signal.
 
 **Safety rule:** Skip any file whose name or content contains markers like `sindustries weekly content review`, `needs approval from tom`, `review queue`. These are generated output, not input.
 
@@ -133,7 +138,21 @@ _Signals noted but insufficient detail to act on._
 
 ---
 
-## Step 6 — Notify
+## Step 6 — Update state-of-the-nation
+
+Read `docs/state-of-the-nation.md`. Using the ops notes already collected, apply changes directly.
+
+- Add a new bullet to **What Already Exists** when something shipped (new system, pipeline stage, skill, or cron). One line, present tense, naming the key artifact.
+- Mark a bullet in **Current Frictions** as resolved when ops notes or memory show it was addressed: replace with ~~strikethrough~~ + `(resolved YYYY-MM-DD)`.
+- Add a new bullet to **Current Frictions** when memory files reveal a recurring problem, blockers, or pain points that kept coming up this week and aren't already listed. One line, present tense, concrete. Only add if it genuinely recurred — not a one-off debug session.
+
+**Rules:**
+- Surgical additions and removals only — do not rewrite sections
+- If nothing changed this week that affects the doc, skip this step silently
+
+---
+
+## Step 7 — Notify
 
 After writing the file, post a short message to the session that triggered this skill:
 

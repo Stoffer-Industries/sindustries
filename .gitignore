@@ -10,5 +10,6 @@ services/tasks-api/.env.prodlike
 apps/tasks/test-results/.last-run.json
 .db-backups/
 .vercel
+/agents/workflows/bookmark/state/
 
 **/__pycache__/**

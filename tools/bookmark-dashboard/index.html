@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bookmark Pipeline Dashboard</title>
+  <style>
+    :root {
+      --ink: #101827;
+      --muted: #5a6b83;
+      --line: #d8e1ee;
+      --panel: #ffffff;
+      --soft: #f5f7fa;
+      --nav: #0d1526;
+      --blue: #2f75d6;
+      --green: #148f46;
+      --amber: #b46a00;
+      --pink: #bd1e66;
+      --red: #a3312b;
+      --violet: #7254bd;
+      --teal: #147f86;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--soft);
+      color: var(--ink);
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .page { max-width: 1180px; margin: 0 auto; padding: 24px 18px 36px; }
+    header { margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+    .subtle { color: var(--muted); }
+    .chrome {
+      height: 48px; margin: 24px 0 18px; border-radius: 8px; background: var(--nav);
+      color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 22px;
+      font-weight: 700; box-shadow: 0 1px 0 rgba(16,24,39,.08);
+    }
+    .lights { display: flex; gap: 8px; }
+    .lights span { width: 12px; height: 12px; border-radius: 50%; display: block; }
+    .light-green { background: #20c96b; } .light-yellow { background: #f4a51c; } .light-red { background: #eb4c43; }
+    .toolbar, .panel, .kpi { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; }
+    .toolbar {
+      display: flex; align-items: end; gap: 18px; padding: 12px 18px; margin-bottom: 18px; flex-wrap: wrap;
+    }
+    label { display: grid; gap: 5px; font-weight: 700; font-size: 12px; }
+    select, button {
+      height: 34px; border: 1px solid #cbd6e5; border-radius: 5px; background: #fff; color: var(--ink);
+      padding: 0 12px; min-width: 142px; font: inherit;
+    }
+    button {
+      margin-left: auto; min-width: 116px; border-color: var(--nav); background: var(--nav); color: #fff; cursor: pointer;
+      font-weight: 700;
+    }
+    button:focus, select:focus { outline: 2px solid #88b7ff; outline-offset: 2px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .kpi { min-height: 82px; padding: 14px; }
+    .kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .kpi .value { margin-top: 5px; font-size: 30px; line-height: 1; font-weight: 800; }
+    .kpi .note { margin-top: 6px; color: #6f819b; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: minmax(0, 2.1fr) minmax(250px, .9fr); gap: 18px; margin-bottom: 18px; }
+    .panel { padding: 16px 18px; min-width: 0; }
+    .panel + .panel { margin-top: 18px; }
+    h2 { margin: 0 0 4px; font-size: 16px; line-height: 1.2; }
+    .funnel { display: grid; gap: 10px; margin-top: 24px; }
+    .funnel-row { display: grid; grid-template-columns: 132px 1fr 58px; gap: 10px; align-items: center; }
+    .funnel-label { font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { height: 24px; background: #e7edf5; border-radius: 4px; overflow: hidden; }
+    .bar { height: 100%; border-radius: 4px; min-width: 2px; }
+    .bar-count { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .topic-row { display: grid; grid-template-columns: 88px 1fr 36px; gap: 10px; align-items: center; margin: 9px 0; }
+    .topic-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .topic-bar-track { height: 10px; background: #e7edf5; border-radius: 999px; overflow: hidden; }
+    .topic-bar { height: 100%; background: var(--nav); border-radius: 999px; }
+    .chart-wrap { width: 100%; min-height: 238px; margin-top: 12px; overflow: hidden; }
+    .sankey-wrap { width: 100%; height: 320px; margin-top: 12px; }
+    svg { display: block; width: 100%; height: auto; }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+    .recent { margin-top: 12px; display: grid; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .transition { padding: 8px 10px; border: 1px solid #e2e8f2; border-radius: 5px; background: #fbfcfe; overflow-wrap: anywhere; }
+    .pending-approvals { background: var(--amber); color: #fff; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; box-shadow: 0 1px 0 rgba(16,24,39,.08); }
+    .pending-approvals h3 { margin: 0 0 8px; font-size: 14px; }
+    .pending-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .pending-item { background: rgba(255,255,255,.18); border-radius: 6px; padding: 8px 12px; }
+    .pending-item .topic { font-weight: 800; }
+    .pending-item .meta { font-size: 12px; opacity: .9; margin-top: 2px; }
+    .curation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+    .curation-block { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; overflow: hidden; }
+    .curation-header { padding: 10px 14px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; }
+    .curation-header .count { font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+    .curation-header.implement-bound { background: rgba(20,143,70,.12); color: #0a5a2c; }
+    .curation-header.curated-waiting { background: rgba(180,106,0,.12); color: #7a4500; }
+    .curation-header.uncurated { background: rgba(90,107,131,.12); color: #3a4a63; }
+    .curation-items { padding: 6px 0; max-height: 240px; overflow-y: auto; font-size: 12px; }
+    .curation-item { padding: 6px 14px; display: grid; grid-template-columns: 1fr auto; gap: 6px; border-bottom: 1px solid #eef2f7; }
+    .curation-item:last-child { border-bottom: none; }
+    .curation-item .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .curation-item .meta { font-size: 11px; color: var(--muted); }
+    .curation-item .score-pill { align-self: start; padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .score-pill.high { background: rgba(20,143,70,.15); color: #0a5a2c; }
+    .score-pill.low { background: rgba(180,106,0,.15); color: #7a4500; }
+    .empty, .error { color: var(--muted); padding: 18px 0; }
+    .error { color: var(--red); font-weight: 700; }
+    .sankey-node text { font: 12px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--ink); }
+    .sankey-link { fill: none; stroke-opacity: 0.25; }
+    .sankey-link:hover { stroke-opacity: 0.45; }
+    #chart-tooltip {
+      position: fixed; pointer-events: none; display: none;
+      background: #fff; border: 1px solid var(--line); border-radius: 7px;
+      padding: 10px 13px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.10);
+      min-width: 160px; z-index: 100;
+    }
+    #chart-tooltip .tt-date { font-weight: 800; margin-bottom: 6px; color: var(--ink); }
+    #chart-tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; padding: 1px 0; }
+    #chart-tooltip .tt-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 5px; flex-shrink: 0; }
+    #chart-tooltip .tt-val { font-variant-numeric: tabular-nums; font-weight: 700; }
+    @media (max-width: 760px) {
+      .page { padding: 18px 12px 30px; }
+      .grid { grid-template-columns: 1fr; }
+      button { width: 100%; margin-left: 0; }
+      select { min-width: 100%; }
+      .toolbar label { width: 100%; }
+      .funnel-row { grid-template-columns: 104px 1fr 44px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <h1>Bookmark Pipeline Dashboard</h1>
+      <div class="subtle">Reads brain/state/bookmark-review-state.json + brain/state/bookmark-transitions.jsonl</div>
+    </header>
+
+    <div class="chrome">
+      <span>Bookmark Pipeline - localhost:8765</span>
+      <div class="lights" aria-hidden="true"><span class="light-green"></span><span class="light-yellow"></span><span class="light-red"></span></div>
+    </div>
+
+    <section class="toolbar" aria-label="Dashboard filters">
+      <label>Time
+        <select id="window">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="all">All</option>
+        </select>
+      </label>
+      <label>Topic
+        <select id="topic"><option value="all">All</option></select>
+      </label>
+      <button id="refresh" type="button">Refresh</button>
+    </section>
+
+    <section id="status"></section>
+    <section id="pending-approvals" hidden></section>
+    <section id="kpis" class="kpis" aria-label="State counts"></section>
+
+    <section class="panel" style="margin-bottom:18px">
+      <h2>Curations</h2>
+      <div class="subtle">Verdicts on each summary. Curations live in state as <code>item.curation = { createdAt, topic, score, reasoning }</code>; heartbeat keeps them fresh by re-curating any summary whose curation is older than <code>recurationDays</code>.</div>
+      <div id="curations" class="curation-grid"></div>
+    </section>
+
+    <section class="panel" style="margin-bottom:18px">
+      <h2>Curation Pipeline Flow</h2>
+      <div class="subtle">From summarization through curator verdict → spec generation → Tom's decision. Legacy `reviewed` items show as a side branch.</div>
+      <div id="sankey" class="sankey-wrap"></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Pipeline Funnel — how far does each bookmark get?</h2>
+        <div class="subtle">Counts in selected time window. Drop-off is the cost of being honest.</div>
+        <div id="funnel" class="funnel"></div>
+      </div>
+      <div class="panel">
+        <h2>By Topic</h2>
+        <div id="topics"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>State counts over time</h2>
+      <div class="subtle">X: date · Y: bookmark count · one line per state</div>
+      <div id="chart" class="chart-wrap"></div>
+      <div id="legend" class="legend"></div>
+    </section>
+
+    <section class="panel" style="margin-top:18px">
+      <h2>Recent transitions</h2>
+      <div id="recent" class="recent"></div>
+    </section>
+  </main>
+
+  <div id="chart-tooltip"></div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <script>
+    const order = ["pending", "ingested", "summarized", "Curated: Monitoring", "Curated: High Signal", "spec_requested", "spec_created", "revision_staged", "approval_pending", "tasked", "approved", "declined"];
+    const colors = {
+      pending: "#8aa0bd", ingested: "#8aa0bd", summarized: "#5a6b83",
+      monitoring: "#b46a00",
+      spec_requested: "#5e3f8a", spec_created: "#bd1e66",
+      revision_staged: "#7254bd", revision_requested: "#9a6fd8",
+      approval_pending: "#d9257a", tasked: "#148f46", approved: "#0f9b59", declined: "#a3312b",
+      "Curated: Monitoring": "#b46a00", "Curated: High Signal": "#2f75d6",
+      // legacy states — muted so they're visible but clearly historical
+      reviewed: "#c8d0db", summarised: "#c8d0db", queued_for_spec: "#c8d0db",
+    };
+    const state = { snapshot: { items: {} }, transitions: [] };
+    const $ = (id) => document.getElementById(id);
+    const fmtDate = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+    const parseDate = (v) => v ? new Date(v) : null;
+    const itemList = () => Object.entries(state.snapshot.items || {}).map(([key, item]) => ({ key, ...item }));
+    const itemByKey = () => new Map(itemList().map((item) => [item.key, item]));
+    const statusOf = (item) => item.reviewStatus || "pending";
+
+    function cutoff() {
+      const value = $("window").value;
+      if (value === "all") return null;
+      const date = new Date();
+      date.setDate(date.getDate() - Number(value));
+      date.setHours(0, 0, 0, 0);
+      return date;
+    }
+
+    function inScopeItem(item) {
+      const topic = $("topic").value;
+      if (topic !== "all" && (item.topic || "general") !== topic) return false;
+      const since = cutoff();
+      if (!since) return true;
+      const d = parseDate(item.lastUpdatedAt || item.reviewedAt || item.firstSeenAt);
+      return d && d >= since;
+    }
+
+    function inScopeTransition(event, byKey, useTime = true) {
+      const item = byKey.get(event.key);
+      const topic = $("topic").value;
+      if (topic !== "all" && (!item || (item.topic || "general") !== topic)) return false;
+      const since = cutoff();
+      if (useTime && since) {
+        const d = parseDate(event.at);
+        if (!d || d < since) return false;
+      }
+      return true;
+    }
+
+    async function load() {
+      $("status").innerHTML = "";
+      const [snapshotRes, transitionsRes] = await Promise.all([fetch("/api/state"), fetch("/api/transitions")]);
+      if (!snapshotRes.ok || !transitionsRes.ok) throw new Error("Could not read dashboard data");
+      state.snapshot = await snapshotRes.json();
+      state.transitions = await transitionsRes.json();
+      hydrateTopics();
+      render();
+    }
+
+    function hydrateTopics() {
+      const current = $("topic").value;
+      const topics = [...new Set(itemList().map((item) => item.topic || "general"))].sort();
+      $("topic").innerHTML = `<option value="all">All</option>` + topics.map((topic) => `<option value="${escapeHtml(topic)}">${escapeHtml(topic)}</option>`).join("");
+      if (topics.includes(current)) $("topic").value = current;
+    }
+
+    function countBy(items, getter) {
+      return items.reduce((acc, item) => {
+        const key = getter(item);
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+    }
+
+    function renderKpis() {
+      const counts = countBy(itemList(), statusOf);
+      const statuses = [...new Set([...order, ...Object.keys(counts)])].filter((s) => counts[s]);
+      $("kpis").innerHTML = statuses.map((status) => `
+        <div class="kpi">
+          <div class="label">${escapeHtml(status)}</div>
+          <div class="value" style="color:${colors[status] || "#101827"}">${counts[status]}</div>
+          <div class="note">${status === "pending" ? "watch this" : "current"}</div>
+        </div>`).join("") || `<div class="empty">No bookmark state found.</div>`;
+    }
+
+    function computeSankeyData() {
+      const items = itemList();
+      const total = items.length;
+      if (!total) return null;
+
+      // Bucket items by current pipeline position. The Sankey shows the
+      // curation pipeline end-to-end: items flow from "Awaiting curation"
+      // through curator verdict → spec generation → Tom's decision. The
+      // legacy `reviewed` status is shown as a side branch for visibility.
+      const threshold = 7;
+      const buckets = {
+        ingested: 0,
+        summarized: 0,
+        monitoring: 0,
+        curatedImplement: 0,
+        specRequested: 0,
+        specCreated: 0,
+        approvalPending: 0,
+        tasked: 0,
+        approved: 0,
+        declined: 0,
+      };
+      for (const item of items) {
+        const status = item.reviewStatus;
+        const c = item.curation;
+        const hasCuration = !!c;
+        const score = c ? Number(c.score || 0) : 0;
+        const highScore = hasCuration && score >= threshold;
+        const isSummarized = status === "summarized" || status === "summarised";
+        if (status === "spec_requested") buckets.specRequested++;
+        else if (status === "spec_created") buckets.specCreated++;
+        else if (status === "approval_pending" || status === "revision_staged") buckets.approvalPending++;
+        else if (status === "tasked") buckets.tasked++;
+        else if (status === "approved") buckets.approved++;
+        else if (status === "declined") buckets.declined++;
+        else if (highScore) buckets.curatedImplement++;
+        else if (hasCuration) buckets.monitoring++;  // low-score curation verdict
+        else if (isSummarized) buckets.summarized++;
+        else buckets.ingested++;
+      }
+
+      // count = items currently AT this bucket (matches funnel/chart)
+      // value = used by d3-sankey for visual sizing (set from linkDefs)
+      const summarizedCurrent = buckets.summarized + buckets.monitoring + buckets.curatedImplement;
+      const nodeDefs = [
+        { name: "Ingested",            count: buckets.ingested,        value: buckets.ingested,        color: "#8aa0bd" },
+        { name: "Summarized",          count: summarizedCurrent,       value: buckets.summarized,      color: "#5a6b83" },
+        { name: "Monitoring",          count: buckets.monitoring,      value: buckets.monitoring,      color: "#b46a00" },
+        { name: "Curated: High Signal",count: buckets.curatedImplement,value: buckets.curatedImplement,color: "#2f75d6" },
+        { name: "Spec requested",      count: buckets.specRequested,   value: buckets.specRequested,   color: "#5e3f8a" },
+        { name: "Spec created",        count: buckets.specCreated,     value: buckets.specCreated,     color: "#bd1e66" },
+        { name: "Awaiting approval",   count: buckets.approvalPending, value: buckets.approvalPending, color: "#d9257a" },
+        { name: "Tasked",              count: buckets.tasked,          value: buckets.tasked,          color: "#148f46" },
+        { name: "Approved",            count: buckets.approved,        value: buckets.approved,        color: "#0f9b59" },
+        { name: "Declined",            count: buckets.declined,        value: buckets.declined,        color: "#a3312b" },
+      ];
+      // Keep all nodes (including 0-value) so the chain stays connected.
+      // d3-sankey renders 0-value nodes at 0 height (invisible but valid).
+      const nodes = nodeDefs.map(d => Object.assign({}, d));
+
+      // All link values use cumulative pass-through counts: each link value =
+      // items currently AT or PAST the target stage. This keeps every link
+      // visible even when items have moved on, and eliminates the artifact
+      // where transient nodes (Spec requested) appear occupied due to
+      // outgoing-only flow from downstream link values.
+      const approvalAndBeyond = buckets.approvalPending + buckets.tasked + buckets.approved + buckets.declined;
+      const specCreatedAndBeyond = buckets.specCreated + approvalAndBeyond;
+      const specRequestedAndBeyond = buckets.specRequested + specCreatedAndBeyond;
+      const implementBoundTotal = buckets.curatedImplement + specRequestedAndBeyond;
+      const summarizedTotal = buckets.summarized + buckets.monitoring + implementBoundTotal;
+
+      const linkDefs = [
+        { source: "Ingested", target: "Summarized", value: summarizedTotal },
+        { source: "Summarized", target: "Monitoring", value: buckets.monitoring },
+        { source: "Summarized", target: "Curated: High Signal", value: implementBoundTotal },
+        { source: "Curated: High Signal", target: "Spec requested", value: specRequestedAndBeyond },
+        { source: "Spec requested", target: "Spec created", value: specCreatedAndBeyond },
+        { source: "Spec created", target: "Awaiting approval", value: approvalAndBeyond },
+        { source: "Awaiting approval", target: "Tasked", value: buckets.tasked },
+        { source: "Awaiting approval", target: "Approved", value: buckets.approved },
+        { source: "Awaiting approval", target: "Declined", value: buckets.declined },
+      ];
+      // Use node references (not indices) so links stay valid even if a
+      // 0-value node gets the same object as the one in `nodes`.
+      const links = linkDefs
+        .filter(l => l.value > 0)
+        .map(l => ({
+          source: nodes.find(n => n.name === l.source),
+          target: nodes.find(n => n.name === l.target),
+          value: l.value,
+        }));
+
+      return { nodes, links };
+    }
+
+    function renderSankey() {
+      const container = $("sankey");
+      container.innerHTML = "";
+      const data = computeSankeyData();
+      if (!data || !data.nodes.length) {
+        container.innerHTML = `<div class="empty">No data available.</div>`;
+        return;
+      }
+
+      const width = container.clientWidth || 800;
+      const height = 300;
+      const pad = { top: 20, right: 160, bottom: 20, left: 10 };
+
+      const sankey = d3.sankey()
+        .nodeWidth(18)
+        .nodePadding(22)
+        .extent([[pad.left, pad.top], [width - pad.right, height - pad.bottom]])
+        .nodeAlign(d3.sankeyLeft);
+
+      const nodesCopy = data.nodes.map(d => ({ ...d }));
+      const { nodes, links } = sankey({
+        nodes: nodesCopy,
+        links: data.links.map(d => ({
+          ...d,
+          source: data.nodes.indexOf(d.source),
+          target: data.nodes.indexOf(d.target),
+        })),
+      });
+
+      const svg = d3.select(container).append("svg")
+        .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("width", width)
+        .attr("height", height);
+
+      // Gradient defs for links
+      const defs = svg.append("defs");
+      links.forEach((link, i) => {
+        const grad = defs.append("linearGradient")
+          .attr("id", `grad-${i}`)
+          .attr("gradientUnits", "userSpaceOnUse")
+          .attr("x1", link.source.x1)
+          .attr("x2", link.target.x0);
+        grad.append("stop").attr("offset", "0%").attr("stop-color", link.source.color);
+        grad.append("stop").attr("offset", "100%").attr("stop-color", link.target.color);
+      });
+
+      // Links
+      svg.append("g")
+        .selectAll("path")
+        .data(links)
+        .join("path")
+        .attr("class", "sankey-link")
+        .attr("d", d3.sankeyLinkHorizontal())
+        .attr("stroke", (_, i) => `url(#grad-${i})`)
+        .attr("stroke-width", d => Math.max(1, d.width))
+        .append("title")
+        .text(d => `${d.source.name} → ${d.target.name}: ${d.value}`);
+
+      // Nodes
+      const nodeG = svg.append("g")
+        .selectAll("g")
+        .data(nodes)
+        .join("g")
+        .attr("class", "sankey-node");
+
+      nodeG.append("rect")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("width", d => d.x1 - d.x0)
+        .attr("height", d => Math.max(1, d.y1 - d.y0))
+        .attr("fill", d => d.color)
+        .attr("rx", 3);
+
+      // Labels: right of node — name, current count, in/out flow
+      nodeG.append("text")
+        .attr("x", d => d.x1 + 8)
+        .attr("y", d => (d.y0 + d.y1) / 2 - 10)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", "start")
+        .attr("font-weight", "700")
+        .attr("font-size", "12")
+        .text(d => d.name);
+
+      nodeG.append("text")
+        .attr("x", d => d.x1 + 8)
+        .attr("y", d => (d.y0 + d.y1) / 2 + 2)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", "start")
+        .attr("fill", "#6f819b")
+        .attr("font-size", "10")
+        .text(d => `${d.count} items`);
+
+      nodeG.append("text")
+        .attr("x", d => d.x1 + 8)
+        .attr("y", d => (d.y0 + d.y1) / 2 + 14)
+        .attr("dy", "0.35em")
+        .attr("text-anchor", "start")
+        .attr("fill", "#9aaabb")
+        .attr("font-size", "10")
+        .text(d => {
+          const inFlow = d.targetLinks.reduce((s, l) => s + l.value, 0);
+          const outFlow = d.sourceLinks.reduce((s, l) => s + l.value, 0);
+          if (!inFlow) return `out: ${outFlow}`;
+          if (!outFlow) return `in: ${inFlow}`;
+          return `in: ${inFlow}  out: ${outFlow}`;
+        });
+    }
+
+    function renderFunnel() {
+      const items = itemList().filter(inScopeItem);
+      const counts = countBy(items, statusOf);
+      const statuses = [...new Set([...order, ...Object.keys(counts)])].filter((s) => counts[s]);
+      const max = Math.max(1, ...Object.values(counts));
+      $("funnel").innerHTML = statuses.map((status) => `
+        <div class="funnel-row">
+          <div class="funnel-label">${escapeHtml(status)}</div>
+          <div class="bar-track"><div class="bar" style="width:${(counts[status] / max) * 100}%;background:${colors[status] || "#111827"}"></div></div>
+          <div class="bar-count">${counts[status]}</div>
+        </div>`).join("") || `<div class="empty">No items match the current filters.</div>`;
+    }
+
+    function renderTopics() {
+      const counts = countBy(itemList().filter((item) => {
+        const since = cutoff();
+        if (!since) return true;
+        const d = parseDate(item.lastUpdatedAt || item.reviewedAt || item.firstSeenAt);
+        return d && d >= since;
+      }), (item) => item.topic || "general");
+      const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      const max = Math.max(1, ...rows.map(([, count]) => count));
+      $("topics").innerHTML = rows.map(([topic, count]) => `
+        <div class="topic-row">
+          <div class="topic-name">${escapeHtml(topic)}</div>
+          <div class="topic-bar-track"><div class="topic-bar" style="width:${(count / max) * 100}%"></div></div>
+          <div class="bar-count">${count}</div>
+        </div>`).join("") || `<div class="empty">No topic data.</div>`;
+    }
+
+    function seriesData() {
+      const byKey = itemByKey();
+      const scopedItems = itemList().filter((item) => $("topic").value === "all" || (item.topic || "general") === $("topic").value);
+      const relevantKeys = new Set(scopedItems.map((item) => item.key));
+      // Deduplicate consecutive same-direction transitions per item: the lobster
+      // can re-apply the same status (e.g. summarized→monitoring) on every run
+      // without changing actual state. Each duplicate inflates the event count
+      // and breaks the backward reconstruction (pushes counts below zero).
+      const rawEvents = state.transitions
+        .filter((event) => relevantKeys.has(event.key))
+        .filter((event) => parseDate(event.at))
+        .sort((a, b) => parseDate(a.at) - parseDate(b.at));
+      const lastStateSeen = new Map(); // key → last "to" status
+      const events = rawEvents.filter((event) => {
+        if (!event.key || !event.to) return true;
+        if (lastStateSeen.get(event.key) === event.to) return false;
+        lastStateSeen.set(event.key, event.to);
+        return true;
+      });
+      const dates = [];
+      const start = cutoff() || parseDate(events[0]?.at) || new Date();
+      const today = new Date();
+      for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) dates.push(fmtDate(new Date(d)));
+      if (!dates.length) dates.push(fmtDate(today));
+
+      const statuses = [...new Set([...order, ...scopedItems.map(statusOf), ...events.flatMap((e) => [e.from, e.to]).filter(Boolean)])];
+      const current = countBy(scopedItems, statusOf);
+      // Inject current curation bucket counts — transitions log will grow these
+      // historically from next heartbeat onwards (validate_curate_output.py now
+      // logs from/to = "Curated: Monitoring" / "Curated: High Signal").
+      const curThreshold = 7;
+      let curMonitoring = 0, curHighSignal = 0;
+      for (const item of scopedItems) {
+        const c = item.curation;
+        if (!c) continue;
+        const st = statusOf(item);
+        if (['spec_requested','spec_created','approval_pending','revision_staged','revision_requested','tasked','approved','declined'].includes(st)) continue;
+        if (Number(c.score || 0) >= curThreshold) curHighSignal++; else curMonitoring++;
+      }
+      current['Curated: Monitoring'] = curMonitoring;
+      current['Curated: High Signal'] = curHighSignal;
+      const points = dates.map((date) => {
+        const counts = { ...current };
+        const dayEnd = new Date(`${date}T23:59:59.999Z`);
+        for (const event of [...events].reverse()) {
+          if (parseDate(event.at) <= dayEnd) break;
+          if (event.to) counts[event.to] = Math.max(0, (counts[event.to] || 0) - 1);
+          if (event.from) counts[event.from] = (counts[event.from] || 0) + 1;
+        }
+        return { date, counts };
+      });
+      return { statuses: statuses.filter((s) => points.some((p) => p.counts[s])), points };
+    }
+
+    function renderChart() {
+      const { statuses, points } = seriesData();
+      const container = $("chart");
+      container.innerHTML = "";
+      if (!points.length) { container.innerHTML = `<div class="empty">No data.</div>`; return; }
+
+      const W = container.clientWidth || 900;
+      const H = 240, pad = { l: 42, r: 18, t: 16, b: 34 };
+      const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+      const maxY = Math.max(1, ...points.flatMap((p) => statuses.map((s) => p.counts[s] || 0)));
+      const xScale = (i) => points.length === 1 ? pad.l : pad.l + i * innerW / (points.length - 1);
+      const yScale = (v) => pad.t + innerH - (v / maxY) * innerH;
+
+      const svg = d3.select(container).append("svg")
+        .attr("width", W).attr("height", H)
+        .attr("viewBox", `0 0 ${W} ${H}`);
+
+      // Axes
+      svg.append("line").attr("x1", pad.l).attr("y1", H - pad.b).attr("x2", W - pad.r).attr("y2", H - pad.b).attr("stroke", "#cbd6e5");
+      svg.append("line").attr("x1", pad.l).attr("y1", pad.t).attr("x2", pad.l).attr("y2", H - pad.b).attr("stroke", "#cbd6e5");
+      [0, Math.ceil(maxY / 2), maxY].forEach((tick) => {
+        svg.append("text").attr("x", pad.l - 6).attr("y", yScale(tick) + 4).attr("text-anchor", "end").attr("fill", "#6f819b").attr("font-size", 11).text(tick);
+      });
+      const step = Math.max(1, Math.floor(points.length / 4));
+      points.forEach((p, i) => {
+        if (i % step === 0 || i === points.length - 1)
+          svg.append("text").attr("x", xScale(i)).attr("y", H - 6).attr("text-anchor", i === 0 ? "start" : "middle").attr("fill", "#6f819b").attr("font-size", 11).text(p.date.slice(5));
+      });
+
+      // Lines
+      const line = d3.line().x((_, i) => xScale(i)).y((p) => yScale(p.v));
+      statuses.forEach((status) => {
+        svg.append("path")
+          .datum(points.map((p) => ({ v: p.counts[status] || 0 })))
+          .attr("fill", "none")
+          .attr("stroke", colors[status] || "#111827")
+          .attr("stroke-width", 2.5)
+          .attr("d", line);
+      });
+
+
+      // Crosshair + tooltip
+      const crosshair = svg.append("line").attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#cbd6e5").attr("stroke-dasharray", "4,3").attr("display", "none");
+      const tooltip = document.getElementById("chart-tooltip");
+      svg.append("rect")
+        .attr("x", pad.l).attr("y", pad.t).attr("width", innerW + pad.r).attr("height", innerH)
+        .attr("fill", "none").attr("pointer-events", "all")
+        .on("mousemove", (event) => {
+          const [mx] = d3.pointer(event);
+          const idx = Math.max(0, Math.min(points.length - 1, Math.round((mx - pad.l) / innerW * (points.length - 1))));
+          const p = points[idx];
+          const cx = xScale(idx);
+          crosshair.attr("x1", cx).attr("x2", cx).attr("display", null);
+          const rows = statuses.filter((s) => p.counts[s]).sort((a, b) => (p.counts[b] || 0) - (p.counts[a] || 0));
+          tooltip.style.display = "block";
+          // Flip tooltip left if near right edge of screen
+          const nearRight = event.clientX > window.innerWidth - 220;
+          tooltip.style.left = nearRight ? (event.clientX - 180) + "px" : (event.clientX + 14) + "px";
+          tooltip.style.top = (event.clientY - 10) + "px";
+          tooltip.innerHTML = `<div class="tt-date">${p.date}</div>` + rows.map((s) =>
+            `<div class="tt-row"><span><i class="tt-swatch" style="background:${colors[s] || '#111827'}"></i>${escapeHtml(s)}</span><span class="tt-val">${p.counts[s]}</span></div>`
+          ).join("");
+        })
+        .on("mouseleave", () => { crosshair.attr("display", "none"); tooltip.style.display = "none"; });
+
+      $("legend").innerHTML = statuses.map((s) => `<span><i class="swatch" style="background:${colors[s] || "#111827"}"></i>${escapeHtml(s)}</span>`).join("");
+    }
+
+    function renderRecent() {
+      const byKey = itemByKey();
+      const rows = state.transitions
+        .filter((event) => inScopeTransition(event, byKey, true))
+        .sort((a, b) => parseDate(b.at) - parseDate(a.at))
+        .slice(0, 20);
+      $("recent").innerHTML = rows.map((event) => {
+        const time = escapeHtml(event.at || "");
+        const key = escapeHtml(event.key || "");
+        let middle;
+        if (event.from && event.to) {
+          middle = `${escapeHtml(event.from)} → ${escapeHtml(event.to)}`;
+        } else if (event.to) {
+          middle = `→ ${escapeHtml(event.to)}`;
+        } else if (event.from) {
+          middle = `${escapeHtml(event.from)} →`;
+        } else {
+          // No status transition (e.g. curation refresh). The reason
+          // IS the description; show it standalone rather than paired
+          // with an empty from/to arrow.
+          middle = escapeHtml(event.reason || "(no change)");
+          return `<div class="transition">${time} | ${key} | ${middle}</div>`;
+        }
+        const reason = escapeHtml(event.reason || "");
+        return `<div class="transition">${time} | ${key} | ${middle} | ${reason}</div>`;
+      }).join("") || `<div class="empty">No transition log entries match the current filters.</div>`;
+    }
+
+    function curationGroups() {
+      // Bucket items by their curation verdict, not by status. Status is
+      // pipeline position; curation is the verdict. filter_curation reads
+      // the verdict to decide what flows to spec generation.
+      const focusThreshold = (() => {
+        // Best-effort read of the relevanceThreshold from focus config;
+        // not exposed via /api yet, so default to 7.
+        return 7;
+      })();
+      const implementBound = [];
+      const curatedWaiting = [];
+      const uncurated = [];
+      for (const item of itemList()) {
+        if (!inScopeItem(item)) continue;
+        const c = item.curation;
+        if (!c) { uncurated.push(item); continue; }
+        const score = Number(c.score || 0);
+        if (score >= focusThreshold) implementBound.push(item);
+        else curatedWaiting.push(item);
+      }
+      const sortByRecency = (a, b) => {
+        const ta = a.curation ? new Date(a.curation.createdAt || 0).getTime() : 0;
+        const tb = b.curation ? new Date(b.curation.createdAt || 0).getTime() : 0;
+        return tb - ta;
+      };
+      const sortByScore = (a, b) => (b.curation?.score || 0) - (a.curation?.score || 0);
+      implementBound.sort(sortByScore);
+      curatedWaiting.sort(sortByRecency);
+      uncurated.sort((a, b) => (b.lastUpdatedAt || "").localeCompare(a.lastUpdatedAt || ""));
+      return { implementBound, curatedWaiting, uncurated, threshold: focusThreshold };
+    }
+
+    function curationItemRow(item) {
+      const c = item.curation;
+      const title = escapeHtml(item.title || item.key);
+      const topic = c ? escapeHtml(c.topic || "general") : "";
+      const score = c ? Number(c.score || 0) : null;
+      const created = c && c.createdAt ? formatRelativeAge(c.createdAt) : "";
+      const status = item.reviewStatus ? `<span class="meta">${escapeHtml(item.reviewStatus)}</span>` : "";
+      let pill = "";
+      if (score !== null) {
+        const cls = score >= 7 ? "high" : "low";
+        pill = `<span class="score-pill ${cls}">${score.toFixed(1)}</span>`;
+      }
+      return `<div class="curation-item">
+        <div>
+          <div class="title" title="${escapeHtml(item.key)}">${title}</div>
+          <div class="meta">${topic}${topic && created ? " · " : ""}${created}${status ? " · " : ""}${status}</div>
+        </div>
+        ${pill}
+      </div>`;
+    }
+
+    function renderCurations() {
+      const { implementBound, curatedWaiting, uncurated, threshold } = curationGroups();
+      const blocks = [
+        { key: "implementBound", label: "Curated: High Signal", className: "implement-bound",
+          hint: `curator said yes (score ≥ ${threshold})`,
+          items: implementBound },
+        { key: "curatedWaiting", label: "Monitoring", className: "curated-waiting",
+          hint: "curator said not now (score < threshold)",
+          items: curatedWaiting },
+        { key: "uncurated", label: "Uncurated", className: "uncurated",
+          hint: "no verdict yet — heartbeat will curate on next pass",
+          items: uncurated },
+      ];
+      $("curations").innerHTML = blocks.map((b) => `
+        <div class="curation-block">
+          <div class="curation-header ${b.className}">
+            <span>${escapeHtml(b.label)}<br><span class="meta" style="font-weight:400;color:inherit;opacity:.85">${escapeHtml(b.hint)}</span></span>
+            <span class="count">${b.items.length}</span>
+          </div>
+          <div class="curation-items">${
+            b.items.slice(0, 30).map(curationItemRow).join("") ||
+            `<div class="empty" style="padding:12px 14px">No items in this group.</div>`
+          }</div>
+        </div>`).join("");
+    }
+
+    function renderPendingApprovals() {
+      const locks = state.snapshot.approvalLocks || {};
+      const entries = Object.entries(locks);
+      const el = $("pending-approvals");
+      if (!entries.length) { el.hidden = true; el.innerHTML = ""; return; }
+      el.hidden = false;
+      el.innerHTML = `
+        <h3>Pending approvals — waiting on you</h3>
+        <div class="pending-list">
+          ${entries.map(([topic, lock]) => `
+            <div class="pending-item">
+              <div class="topic">${escapeHtml(topic)}</div>
+              <div class="meta">${(lock.items || []).length} item${(lock.items || []).length === 1 ? "" : "s"} · ${formatRelativeAge(lock.requestedAt || "")} ago</div>
+            </div>`).join("")}
+        </div>`;
+    }
+
+    function formatRelativeAge(iso) {
+      if (!iso) return "";
+      const then = new Date(iso).getTime();
+      if (Number.isNaN(then)) return "";
+      const diffMs = Date.now() - then;
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes < 1) return "just now";
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h`;
+      const days = Math.floor(hours / 24);
+      if (days < 30) return `${days}d`;
+      return `${Math.floor(days / 30)}mo`;
+    }
+
+    function render() {
+      renderKpis();
+      renderCurations();
+      renderPendingApprovals();
+      renderSankey();
+      renderFunnel();
+      renderTopics();
+      renderChart();
+      renderRecent();
+    }
+
+    // Re-render pending approvals on a slow tick so the "X minutes ago"
+    // text stays fresh without hammering the server.
+    setInterval(() => {
+      if (!$("pending-approvals").hidden) renderPendingApprovals();
+      if ($("curations").children.length) {
+        // Refresh ages on visible curations
+        const items = document.querySelectorAll(".curation-item .meta");
+        // Cheap re-render: just trigger the existing render to recompute ages.
+        renderCurations();
+      }
+    }, 60000);
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    $("window").addEventListener("change", render);
+    $("topic").addEventListener("change", render);
+    $("refresh").addEventListener("click", () => load().catch(showError));
+    window.addEventListener("resize", renderSankey);
+    function showError(error) { $("status").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; }
+    load().catch(showError);
+  </script>
+</body>
+</html>

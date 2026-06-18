@@ -26,6 +26,7 @@ STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
 PR_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)", re.I)
 PR_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\bPR\b.*$", re.I | re.M)
 OWNER_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\b(Tom|Quinn)\b.*$", re.I | re.M)
+ANY_HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+", re.M)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[([ xX])\]\s+(.+\S)\s*$", re.M)
 
 
@@ -186,6 +187,19 @@ def extract_pr_urls_from_text(text: str) -> list[str]:
     return urls
 
 
+def heading_level(text: str) -> int:
+    match = re.match(r"^\s{0,3}(#{1,6})\s+", text or "")
+    return len(match.group(1)) if match else 6
+
+
+def next_heading_pos(text: str, after: int, max_level: int | None = None) -> int:
+    """Return the next heading at or above `max_level`, or len(text)."""
+    for match in ANY_HEADING_RE.finditer(text, after):
+        if max_level is None or len(match.group(1)) <= max_level:
+            return match.start()
+    return len(text)
+
+
 def pr_heading_blocks(description: str) -> list[str]:
     matches = list(PR_HEADING_RE.finditer(description or ""))
     blocks: list[str] = []
@@ -214,7 +228,9 @@ def owner_heading_blocks(description: str) -> list[str]:
     blocks: list[str] = []
     for idx, match in enumerate(matches):
         start = match.end()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description)
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else next_heading_pos(
+            description, start, heading_level(match.group(0))
+        )
         blocks.append(description[start:end])
     return blocks
 
@@ -224,7 +240,9 @@ def owner_heading_block_url_failures(description: str) -> list[str]:
     matches = list(OWNER_HEADING_RE.finditer(description or ""))
     for idx, match in enumerate(matches):
         start = match.end()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(description or "")
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else next_heading_pos(
+            description or "", start, heading_level(match.group(0))
+        )
         block = (description or "")[start:end]
         heading = match.group(0).strip()
         if not extract_pr_urls_from_text(heading + "\n" + block):

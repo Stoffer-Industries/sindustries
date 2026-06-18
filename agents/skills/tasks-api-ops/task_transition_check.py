@@ -20,6 +20,7 @@ import os
 import re
 import sys
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 # Import from workspace script; run from repo root or ensure script dir in path
@@ -170,6 +171,8 @@ def resolve_current_state(task: dict) -> str:
 DESC_WHAT = re.compile(r"\*\*What:\*\*\s*(.+)", re.IGNORECASE | re.DOTALL)
 DESC_WHY = re.compile(r"\*\*Why:\*\*\s*(.+)", re.IGNORECASE | re.DOTALL)
 DESC_AC = re.compile(r"\*\*AC:\*\*", re.IGNORECASE)
+# Spec-authored tasks use ## Acceptance Criteria instead of **AC:**
+DESC_AC_HEADING = re.compile(r"^##\s+Acceptance Criteria", re.IGNORECASE | re.MULTILINE)
 DESC_AC_ITEM = re.compile(r"^\s*-\s*\[[\sx]\].+", re.MULTILINE)
 DESC_SPEC = re.compile(r"\*\*Spec:\*\*\s*(.+?)(?=\n\*\*|\Z)", re.IGNORECASE | re.DOTALL)
 
@@ -177,13 +180,16 @@ DESC_SPEC = re.compile(r"\*\*Spec:\*\*\s*(.+?)(?=\n\*\*|\Z)", re.IGNORECASE | re
 def check_open_to_ready(task: dict) -> tuple[list[str], str]:
     failed = []
     desc = (task.get("description") or "").strip()
+    # Spec-authored tasks use **Spec:** header instead of **What:**/**Why:**
+    is_spec_task = bool(DESC_SPEC.search(desc)) and not DESC_WHAT.search(desc)
     if not desc:
         failed.append(MSG["READY"]["DESC"]["MISSING"])
-    if not DESC_WHAT.search(desc):
+    if not is_spec_task and not DESC_WHAT.search(desc):
         failed.append(MSG["READY"]["DESC"]["MISSING_WHAT"])
-    if not DESC_WHY.search(desc):
+    if not is_spec_task and not DESC_WHY.search(desc):
         failed.append(MSG["READY"]["DESC"]["MISSING_WHY"])
-    if not DESC_AC.search(desc):
+    has_ac = DESC_AC.search(desc) or DESC_AC_HEADING.search(desc)
+    if not has_ac:
         failed.append(MSG["READY"]["DESC"]["MISSING_AC"])
     else:
         ac_items = DESC_AC_ITEM.findall(desc)
@@ -291,7 +297,8 @@ def pr_tests_passing(owner: str, repo: str, head_sha: str, token: str) -> tuple[
     if state == "success":
         return True, ""
     if state == "pending":
-        return False, "GitHub reports this commit's status as pending; wait for all required checks on the PR to finish before moving the task forward"
+        if status.get("total_count") != 0:
+            return False, "GitHub reports this commit's status as pending; wait for all required checks on the PR to finish before moving the task forward"
     if state == "failure" or state == "error":
         return False, "One or more checks failed"
     # Fall through to check runs if status returned but wasn't conclusive
@@ -299,13 +306,18 @@ def pr_tests_passing(owner: str, repo: str, head_sha: str, token: str) -> tuple[
     if runs is None:
         # API unavailable - fail closed
         return False, "GitHub API unavailable; cannot verify check runs"
-    if runs and "check_runs" in runs:
-        for run in runs.get("check_runs", []):
-            conclusion = (run.get("conclusion") or "").lower()
-            if conclusion == "failure" or conclusion == "cancelled" or conclusion == "timed_out":
-                return False, f"Check failed: {run.get('name', 'unknown')}"
-            if conclusion == "" and (run.get("status") or "").lower() == "in_progress":
-                return False, "GitHub check runs are still in progress; wait for them to complete in the PR before moving the task forward"
+    check_runs = runs.get("check_runs") or []
+    if not check_runs:
+        return False, "No check runs reported for this commit yet; wait for CI to start"
+    successful_conclusions = {"success", "neutral", "skipped"}
+    for run in check_runs:
+        name = run.get("name", "unknown")
+        run_status = (run.get("status") or "").lower()
+        conclusion = (run.get("conclusion") or "").lower()
+        if run_status != "completed":
+            return False, f"Check not completed: {name} ({run_status or 'unknown status'})"
+        if conclusion not in successful_conclusions:
+            return False, f"Check failed: {name}"
     return True, ""
 
 
@@ -590,10 +602,10 @@ def _csv_escape_field(value: str) -> str:
 
 def append_transition_log(task_id: str, payload: dict[str, Any]) -> None:
     """Append a single CSV row: timestamp, taskId, current_state, json."""
-    # Static, stable path relative to repo root.
-    log_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "memory", "task-transition-check.csv")
-    )
+    workspace_root = Path(
+        os.environ.get("OPENCLAW_WORKSPACE", str(Path.home() / ".openclaw" / "workspace"))
+    ).expanduser()
+    log_path = str(workspace_root / "brain" / "state" / "task-transition-check.csv")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
     ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")

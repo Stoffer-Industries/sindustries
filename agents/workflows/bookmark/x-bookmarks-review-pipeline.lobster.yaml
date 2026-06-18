@@ -1,0 +1,76 @@
+name: x-bookmarks-review-pipeline
+
+# Ingest, summarise, and route bookmarks through the approval pipeline.
+#
+# Summarize replaces generate_reviews — faithful extraction, no classification.
+# Spec generation happens asynchronously in Quinn's heartbeat (spec_requested → spec files).
+# This pipeline runs through to the approval gate so the lobster resume token
+# is available when Tom approves a spec.
+
+args:
+  sourceRoot:
+    default: brain/bookmarks/x
+  reviewsRoot:
+    default: brain/bookmarks/summaries
+  specsRoot:
+    default: brain/bookmarks/specs
+  limit:
+    default: 25
+  source:
+    default: any
+  dryRun:
+    default: false
+  approvalTopic:
+    default: general
+
+steps:
+  - id: list_curate_candidates
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_list_curate_candidates.py
+      --source-root ${sourceRoot}
+      --source ${source}
+      --limit ${limit}
+      --json
+
+  - id: summarize
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_summarize.py
+      --reviews-root ${reviewsRoot}
+      --json
+    stdin: $list_curate_candidates.stdout
+
+  - id: list_curations
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_list_curations.py --json
+    stdin: $summarize.stdout
+
+  - id: generate_specs
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_generate_specs.py
+      --specs-root ${specsRoot}
+      --json
+    stdin: $list_curations.stdout
+
+  - id: request_spec_approval
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_request_spec_approval.py
+      --approval-topic ${approvalTopic}
+      --json
+    stdin: $generate_specs.stdout
+    approval: required
+
+  - id: create_tasks_from_proposals
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_create_tasks_from_proposals.py
+      --base-url ${TASKS_API_BASE_URL}
+      --json
+    stdin: $request_spec_approval.stdout
+    condition: $request_spec_approval.approved
+
+  - id: resolve_spec_request
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmark/lobster_resolve_spec_request.py
+      --decision approve
+      --json
+    stdin: $create_tasks_from_proposals.stdout
+    condition: $request_spec_approval.approved

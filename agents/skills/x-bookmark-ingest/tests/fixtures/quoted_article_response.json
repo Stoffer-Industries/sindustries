@@ -1,0 +1,20 @@
+{
+  "data": {
+    "id": "2063186252606865711",
+    "text": "https://t.co/WRWNtgam2L",
+    "entities": {
+      "urls": [
+        {
+          "expanded_url": "https://x.com/i/article/2063186252606865711",
+          "unwound_url": "https://x.com/i/article/2063186252606865711"
+        }
+      ]
+    },
+    "article": {
+      "title": "Test Article Title",
+      "preview_text": "Short preview used by the test.",
+      "plain_text": "Test article body. This fixture is small on purpose so the PR diff stays readable and the test does not bundle a real article. The shape mirrors what the X API returns: title, preview_text, plain_text, and an entities block with the article URL.",
+      "cover_media": "3_test-cover"
+    }
+  }
+}
