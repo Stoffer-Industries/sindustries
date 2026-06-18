@@ -1,0 +1,20 @@
+{
+  "data": {
+    "id": "2063186252606865711",
+    "text": "https://t.co/WRWNtgam2L",
+    "entities": {
+      "urls": [
+        {
+          "expanded_url": "https://x.com/i/article/2063186252606865711",
+          "unwound_url": "https://x.com/i/article/2063186252606865711"
+        }
+      ]
+    },
+    "article": {
+      "title": "How to Actually Set Up Claude Projects That Most Users Don't Know",
+      "preview_text": "Most people treat Claude Projects like a folder...",
+      "plain_text": "Most people treat Claude Projects like a folder. The useful setup starts by defining durable project instructions and source material.",
+      "cover_media": "3_quoted-cover"
+    }
+  }
+}

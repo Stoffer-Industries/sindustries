@@ -18,6 +18,8 @@ For bookmarks that link to an HTML page rather than another tweet, ingest also
 captures a best-effort plain-text copy of the linked article in the raw bookmark
 markdown. Fetch or extraction failures fall back to the existing tweet-only
 bookmark format.
+When a bookmarked tweet quotes a tweet that contains a Twitter article, the
+article body is also captured via the X API.
 
 Report success or failure from the command result. On a non-zero exit, or output
 containing `error`, `failed`, `exception`, `traceback`, or `no bookmarks`, follow

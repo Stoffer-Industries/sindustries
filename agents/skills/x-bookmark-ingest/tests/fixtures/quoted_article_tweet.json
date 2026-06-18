@@ -1,0 +1,20 @@
+{
+  "id": "2063272524927103459",
+  "text": "Anthropic engineer: a useful Claude Projects setup",
+  "note_tweet": {
+    "text": "Anthropic engineer: a useful Claude Projects setup with more context"
+  },
+  "referenced_tweets": [
+    {
+      "type": "quoted",
+      "id": "2063186252606865711"
+    }
+  ],
+  "entities": {
+    "urls": [
+      {
+        "expanded_url": "https://twitter.com/eng_khairallah1/status/2063186252606865711"
+      }
+    ]
+  }
+}
