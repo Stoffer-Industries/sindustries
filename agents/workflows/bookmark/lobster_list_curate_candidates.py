@@ -232,7 +232,7 @@ def main() -> int:
                         # Recovery path: if spec/proposal work exists but approval/task materialization
                         # hasn't happened yet, keep bookmark in pipeline for approval packaging.
                         has_unmaterialized_spec_work = (
-                            (existing.get("specProposals") or [])
+                            (existing.get("specProposals") or existing.get("specDocs"))
                             and existing.get("reviewStatus") not in {"approval_pending", "revision_staged", "declined", "approved"}
                             and existing.get("approvalStatus") != "declined"
                             and not (existing.get("taskIds") or [])
