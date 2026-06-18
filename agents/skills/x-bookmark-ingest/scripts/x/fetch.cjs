@@ -147,10 +147,11 @@ async function enrichQuotedTweetArticles(bookmarks, accessToken) {
       const quotedArticle = bookmark.quotedTweet?.article;
       if (!quotedArticle?.plain_text) continue;
 
-      const original = String(bookmark.text || '').trim();
-      bookmark.text = original
-        ? `${original}\n\n[Quoted Article]\n${quotedArticle.plain_text}`
-        : quotedArticle.plain_text;
+      // Keep bookmark.text as the tweet text only. The article body is
+      // surfaced via bookmark.linkedArticle and rendered in the bookmark
+      // markdown's Linked Article section, not concatenated into the
+      // Original Tweet text. Concatenating here would duplicate the
+      // article body in the final archive.
       bookmark.linkedArticle = {
         title: quotedArticle.title,
         body: quotedArticle.plain_text,

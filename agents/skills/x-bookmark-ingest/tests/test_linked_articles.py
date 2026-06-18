@@ -283,6 +283,13 @@ def test_quoted_tweet_article_is_extracted():
     assert enriched["linkedArticle"]["body"] == response["data"]["article"]["plain_text"]
     assert enriched["linkedArticle"]["source"] == "quoted-tweet"
     assert enriched["linkedArticle"]["title"] == response["data"]["article"]["title"]
+    # Critical: the article body must NOT also be concatenated into the
+    # tweet text. process.cjs writes bookmark.text into the Original Tweet
+    # section and linkedArticle.body into the Linked Article section, so
+    # duplicating the body here would land it twice in the final archive.
+    article_body = response["data"]["article"]["plain_text"]
+    assert article_body not in enriched["text"]
+    assert "[Quoted Article]" not in enriched["text"]
 
 
 def test_quoted_article_does_not_override_direct_article():
