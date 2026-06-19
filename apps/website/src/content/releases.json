@@ -56,8 +56,38 @@
     "summary": "Design-token pipeline and shared UI integration shipped. Colour and sync refinements followed on 2026-06-11.",
     "type": "system",
     "links": [],
-    "evidence": "Pencil design token library and token pipeline shipped 2026-06-09; tasks-app integrates @sindustries/ui; dark theme enabled. Colour refinements and sync consistency checks shipped 2026-06-11.",
+    "evidence": "Pencil design token library and token pipeline shipped 2026-06-09; tasks-app integrates @sindustries/ui; dark theme enabled. Colour refinements and sync consistency checks shipped 2026-06-11. As of 2026-06-19 the token pipeline feeds both production surfaces through shared `@sindustries/ui` primitives — the website and the tasks-app now render buttons, inputs, layouts, and tokens from the same source.",
     "visibility": "published"
+  },
+  {
+    "title": "Bookmark-to-task pipeline",
+    "slug": "bookmark-to-task-pipeline",
+    "releasedAt": "2026-06-17",
+    "summary": "Full X bookmark ingest-to-task pipeline shipped: bookmark review, spec authoring, markdown approval request, and task creation from approved specs.",
+    "type": "system",
+    "links": [],
+    "evidence": "Pipeline shipped 2026-06-17 with 110 tests across 53 files. The end-to-end loop — ingest, curate, spec, approve, create task — runs through a single heartbeat-driven workflow, with spec approvals routed via the OpenClaw gateway.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Linked article bookmark ingest",
+    "slug": "linked-article-bookmark-ingest",
+    "releasedAt": "2026-06-18",
+    "summary": "Bookmark ingest now captures linked article bodies and quoted X article text so the downstream summary, spec, and task all see the underlying source.",
+    "type": "system",
+    "links": [],
+    "evidence": "Linked article extraction and quoted X article parsing shipped 2026-06-18. The bookmark summary now contains the original article body or the quoted X article text, giving curation and spec authoring a richer source to work from.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Weekly repo audit automation",
+    "slug": "weekly-repo-audit-automation",
+    "releasedAt": "2026-06-19",
+    "summary": "Scheduled audit cron writes a weekly repo-audit doc and opens an idempotent Tom-approval PR labelled `code-audit` against main.",
+    "type": "system",
+    "links": [],
+    "evidence": "Cron, runner, and skill shipped 2026-06-19. The audit prompt is vendored as a skill, the cron writes `codebases/sindustries/docs/repo-audits/<YYYY-Www>.md` and opens a labelled PR per ISO week. Re-runs update the existing branch instead of opening duplicates.",
+    "visibility": "draft"
   },
   {
     "title": "Bookmark pipeline dashboard",
