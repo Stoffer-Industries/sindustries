@@ -88,5 +88,15 @@
     "links": [],
     "updatedAt": "2026-05-28",
     "visibility": "published"
+  },
+  {
+    "name": "@sindustries/ui",
+    "category": "app",
+    "summary": "Shared SIndustries UI component library used across the website and the tasks-app.",
+    "whyWeUseIt": "It keeps buttons, inputs, layouts, and design tokens in one source so both production surfaces stay visually consistent and ship from the same primitives.",
+    "status": "core",
+    "links": [],
+    "updatedAt": "2026-06-19",
+    "visibility": "draft"
   }
 ]
