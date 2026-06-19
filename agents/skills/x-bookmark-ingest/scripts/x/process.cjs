@@ -379,6 +379,10 @@ async function processBookmark(bookmark) {
   const date = new Date().toISOString().split('T')[0];
   const safeTags = normalizeTags(metadata.tags);
 
+  const quotedTweetSection = bookmark.quotedTweetText
+    ? `\n\n**Quoted Tweet:**\n${bookmark.quotedTweetText}`
+    : '';
+
   const linkedArticleSection = quotedArticle
     ? `
 
@@ -411,7 +415,7 @@ tags: [${safeTags.map(t => `"${t}"`).join(', ')}]
 
 **Original Tweet:**
 ${bookmark.text || 'N/A'}
-${linkedArticleSection}
+${quotedTweetSection}${linkedArticleSection}
 `;
 
   const filename = path.join(BOOKMARKS_DIR, `${slugify(metadata.title || String(bookmark.id))}.md`);

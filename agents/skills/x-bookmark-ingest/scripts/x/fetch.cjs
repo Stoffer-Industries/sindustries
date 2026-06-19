@@ -132,7 +132,7 @@ async function enrichQuotedTweetArticles(bookmarks, accessToken) {
 
     try {
       const resp = await fetch(
-        `https://api.x.com/2/tweets/${quotedReference.id}?tweet.fields=text,article,entities`,
+        `https://api.x.com/2/tweets/${quotedReference.id}?tweet.fields=text,note_tweet,article,entities`,
         { headers: { 'Authorization': `Bearer ${accessToken}` } }
       );
       if (!resp.ok) {
@@ -145,7 +145,16 @@ async function enrichQuotedTweetArticles(bookmarks, accessToken) {
       const payload = await resp.json();
       bookmark.quotedTweet = payload?.data || null;
       const quotedArticle = bookmark.quotedTweet?.article;
-      if (!quotedArticle?.plain_text) continue;
+      if (!quotedArticle?.plain_text) {
+        // Regular or note tweet (no X article) — capture the full text so the
+        // markdown includes a Quoted Tweet section. Prefer note_tweet.text for
+        // long-form tweets where text is truncated at 280 chars.
+        const fullText = bookmark.quotedTweet?.note_tweet?.text || bookmark.quotedTweet?.text;
+        if (fullText) {
+          bookmark.quotedTweetText = fullText;
+        }
+        continue;
+      }
 
       // Keep bookmark.text as the tweet text only. The article body is
       // surfaced via bookmark.linkedArticle and rendered in the bookmark
