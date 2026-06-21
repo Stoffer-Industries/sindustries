@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./native": "./src/native/index.tsx",
     "./react": "./src/react/index.jsx",
     "./react/styles.css": "./src/react/styles.css",
     "./react/base.css": "./src/react/base.css",
@@ -18,7 +19,20 @@
   ],
   "peerDependencies": {
     "react": "^18.3.1 || ^19.0.0",
-    "react-dom": "^18.3.1 || ^19.0.0"
+    "react-dom": "^18.3.1 || ^19.0.0",
+    "react-native": "^0.81.0",
+    "react-native-svg": "^15.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "react-native-svg": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@sindustries/design-tokens": "file:../design-tokens"
