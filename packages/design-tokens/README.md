@@ -22,6 +22,7 @@ packages/ui/component-catalog.json  ← React components per pack
 - `core.color.<group>.<variant>` → `--si-color-<group>-<variant>` + Pencil var.
 - `semantic.modes.{light,dark}.<camelKey>` → `--si-color-<kebab>` (themed) + Pencil themed var + `colors.<camelKey>` / `colorsLight.<camelKey>` in TS.
 - `core.space.*` / `core.radius.*` / `semantic.font.*` / `semantic.shadow.*` → corresponding `--si-space-*` / `--si-radius-*` / `--si-font-*` / `--si-shadow-*` vars.
+- `budget.color.*` / `budget.space.*` / `budget.radius.*` → `--si-budget-*` CSS vars, `$si-budget-*` Pencil vars, and the React Native `budget` export.
 
 You only need to touch `build-tokens.mjs` if you want a **renamed/grouped accessor** in the TS export (e.g. `colors.labels.green` aliasing `colors.labelGreen`).
 
@@ -57,7 +58,7 @@ That overwrites `styles.css`, `src/tokens.ts`, `pen-tokens.json`, and keeps `des
 | Consumer | Import | Usage |
 |----------|--------|-------|
 | `apps/website` | `@sindustries/ui/react/styles.css` | `<Button>` / `<Card>` / `<Badge>` with the **brand** kit (`data-si-pack="brand"` + `data-si-theme="light"` on `<html>`) |
-| `apps/budget-mobile` | `@sindustries/design-tokens/tokens` | `import { colors, space, radius } from '…'` |
+| `apps/budget-mobile` | `@sindustries/design-tokens/tokens` | `import { budget, colors, space, radius } from '…'` |
 | `apps/tasks` | `@sindustries/ui/specimen` | `/design-system` mirrors pen layout (tokens + Pulse React) |
 | `docs/designs/budgeting/main.pen` | `imports.ui` → `design-systems.pen` | Components (`ui:…` refs) + `$si-color-*` / `$si-radius-*` on art |
 | `packages/design-tokens/design-systems.pen` | *(none)* | Hand-edited components + generated specimens; build injects `variables` / `themes` |
@@ -108,7 +109,7 @@ Legacy shadcn components under frame `vtHps` are hand-authored archive — not p
 | Path | Description |
 |------|-------------|
 | `@sindustries/design-tokens/styles.css` | Global CSS variables + base element styles |
-| `@sindustries/design-tokens/tokens` | Generated `tokens` object and `colors` / `colorsLight` / `fonts` / `space` / `radius` / `platform` exports |
+| `@sindustries/design-tokens/tokens` | Generated `tokens` object and `budget` / `colors` / `colorsLight` / `fonts` / `space` / `radius` / `platform` exports |
 | `@sindustries/design-tokens/tokens.json` | Raw source JSON |
 | `@sindustries/design-tokens/pen-tokens.json` | Generated Pencil variables (JSON mirror) |
 | `@sindustries/design-tokens/design-systems.pen` | UI components + merged variables (library-ready) |
