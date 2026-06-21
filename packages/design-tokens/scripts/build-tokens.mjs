@@ -61,6 +61,29 @@ for (const [group, variants] of Object.entries(resolved.core.color)) {
   }
 }
 
+function flattenLeaves(value, path = []) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [{ path, value }];
+  }
+
+  return Object.entries(value).flatMap(([key, child]) => flattenLeaves(child, [...path, key]));
+}
+
+const budgetColorTokens = flattenLeaves(resolved.budget?.color ?? {}).map(({ path, value }) => ({
+  cssName: `si-budget-color-${path.map(kebab).join('-')}`,
+  value
+}));
+
+const budgetSpaceTokens = flattenLeaves(resolved.budget?.space ?? {}).map(({ path, value }) => ({
+  cssName: `si-budget-space-${path.join('-').replaceAll('_', '-')}`,
+  value
+}));
+
+const budgetRadiusTokens = flattenLeaves(resolved.budget?.radius ?? {}).map(({ path, value }) => ({
+  cssName: `si-budget-radius-${path.map(kebab).join('-')}`,
+  value
+}));
+
 /**
  * Mode-aware semantic colors — every key under `semantic.modes.light` (must
  * match `semantic.modes.dark`) produces an `--si-color-<kebab>` CSS variable
@@ -128,6 +151,10 @@ function buildPencilVariables() {
     v[cssName] = { type: 'color', value: colorToPencil(String(value)) };
   }
 
+  for (const { cssName, value } of budgetColorTokens) {
+    v[cssName] = { type: 'color', value: colorToPencil(String(value)) };
+  }
+
   for (const { cssName, lightValue, darkValue } of semanticModeColors) {
     v[cssName] = themedColorFromModes(lightValue, darkValue);
   }
@@ -141,6 +168,12 @@ function buildPencilVariables() {
   }
   for (const [key, val] of Object.entries(resolved.core.radius)) {
     v[`si-radius-${key}`] = { type: 'number', value: Number(val) };
+  }
+  for (const { cssName, value } of budgetSpaceTokens) {
+    v[cssName] = { type: 'number', value: Number(value) };
+  }
+  for (const { cssName, value } of budgetRadiusTokens) {
+    v[cssName] = { type: 'number', value: Number(value) };
   }
 
   v['si-shadow-soft'] = { type: 'string', value: String(resolved.semantic.shadow.soft) };
@@ -198,6 +231,7 @@ function pxVar(name, value) {
 }
 
 const corePrimitiveLines = corePrimitiveColors.map(({ cssName, value }) => cssVar(cssName, value));
+const budgetColorLines = budgetColorTokens.map(({ cssName, value }) => cssVar(cssName, value));
 const darkSemanticLines = semanticModeColors.map(({ cssName, darkValue }) => cssVar(cssName, darkValue));
 const lightSemanticLines = semanticModeColors.map(({ cssName, lightValue }) => cssVar(cssName, lightValue));
 const surfaceStackUtilityLines = surfaceStackKeys.map(
@@ -219,6 +253,7 @@ const css = `${generatedCssBanner}@import url('https://fonts.googleapis.com/css2
 
 ${[
   ...corePrimitiveLines,
+  ...budgetColorLines,
   '',
   ...darkSemanticLines,
   '',
@@ -229,6 +264,10 @@ ${[
   ...Object.entries(resolved.core.space).map(([key, value]) => pxVar(`si-space-${key}`, value)),
   '',
   ...Object.entries(resolved.core.radius).map(([key, value]) => pxVar(`si-radius-${key}`, value)),
+  '',
+  ...budgetSpaceTokens.map(({ cssName, value }) => pxVar(cssName, value)),
+  '',
+  ...budgetRadiusTokens.map(({ cssName, value }) => pxVar(cssName, value)),
   '',
   cssVar('si-shadow-soft', resolved.semantic.shadow.soft),
   cssVar('si-shadow-hard', resolved.semantic.shadow.hard)
@@ -355,6 +394,7 @@ export const colorsDark = colors;
 export const fonts = tokens.semantic.font;
 export const space = tokens.core.space;
 export const radius = tokens.core.radius;
+export const budget = tokens.budget;
 export const platform = tokens.platform;
 
 /** Surface stack color keys (see tokens.semantic.surfaceStack). */

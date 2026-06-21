@@ -10211,6 +10211,206 @@
       "type": "color",
       "value": "#8F969E2E"
     },
+    "si-budget-color-surface-app": {
+      "type": "color",
+      "value": "#1F1F23"
+    },
+    "si-budget-color-surface-card": {
+      "type": "color",
+      "value": "#28282E"
+    },
+    "si-budget-color-surface-row": {
+      "type": "color",
+      "value": "#25252A"
+    },
+    "si-budget-color-surface-elevated": {
+      "type": "color",
+      "value": "#2A2A2F"
+    },
+    "si-budget-color-surface-inset": {
+      "type": "color",
+      "value": "#202027"
+    },
+    "si-budget-color-surface-info": {
+      "type": "color",
+      "value": "#202A38"
+    },
+    "si-budget-color-surface-strong": {
+      "type": "color",
+      "value": "#34343A"
+    },
+    "si-budget-color-surface-modal": {
+      "type": "color",
+      "value": "#2C2C2E"
+    },
+    "si-budget-color-surface-control": {
+      "type": "color",
+      "value": "#F4F4F5"
+    },
+    "si-budget-color-surface-control-pressed": {
+      "type": "color",
+      "value": "#D7D7DC"
+    },
+    "si-budget-color-overlay-transparent": {
+      "type": "color",
+      "value": "#00000000"
+    },
+    "si-budget-color-overlay-scrim": {
+      "type": "color",
+      "value": "#00000066"
+    },
+    "si-budget-color-overlay-sheet": {
+      "type": "color",
+      "value": "#00000080"
+    },
+    "si-budget-color-border-subtle": {
+      "type": "color",
+      "value": "#FFFFFF10"
+    },
+    "si-budget-color-border-default": {
+      "type": "color",
+      "value": "#FFFFFF12"
+    },
+    "si-budget-color-border-raised": {
+      "type": "color",
+      "value": "#FFFFFF14"
+    },
+    "si-budget-color-border-selected": {
+      "type": "color",
+      "value": "#FFFFFF22"
+    },
+    "si-budget-color-border-chart": {
+      "type": "color",
+      "value": "#92929A55"
+    },
+    "si-budget-color-border-ios": {
+      "type": "color",
+      "value": "#54545899"
+    },
+    "si-budget-color-text-primary": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "si-budget-color-text-secondary": {
+      "type": "color",
+      "value": "#B7B7BD"
+    },
+    "si-budget-color-text-muted": {
+      "type": "color",
+      "value": "#92929A"
+    },
+    "si-budget-color-text-subtle": {
+      "type": "color",
+      "value": "#A8A8AE"
+    },
+    "si-budget-color-text-disabled": {
+      "type": "color",
+      "value": "#77777E"
+    },
+    "si-budget-color-text-inverse": {
+      "type": "color",
+      "value": "#16161A"
+    },
+    "si-budget-color-text-ios-secondary": {
+      "type": "color",
+      "value": "#EBEBF599"
+    },
+    "si-budget-color-status-income": {
+      "type": "color",
+      "value": "#45C073"
+    },
+    "si-budget-color-status-success": {
+      "type": "color",
+      "value": "#10B981"
+    },
+    "si-budget-color-status-success-subtle": {
+      "type": "color",
+      "value": "#193326"
+    },
+    "si-budget-color-status-danger": {
+      "type": "color",
+      "value": "#F87171"
+    },
+    "si-budget-color-status-danger-subtle": {
+      "type": "color",
+      "value": "#3A1618"
+    },
+    "si-budget-color-status-ios-info": {
+      "type": "color",
+      "value": "#0A84FF"
+    },
+    "si-budget-color-status-ios-danger": {
+      "type": "color",
+      "value": "#FF453A"
+    },
+    "si-budget-color-chart-income-line": {
+      "type": "color",
+      "value": "#45C073"
+    },
+    "si-budget-color-chart-income-fill": {
+      "type": "color",
+      "value": "#45C07340"
+    },
+    "si-budget-color-chart-income-fill-transparent": {
+      "type": "color",
+      "value": "#45C07300"
+    },
+    "si-budget-color-chart-blue": {
+      "type": "color",
+      "value": "#60A5FA"
+    },
+    "si-budget-color-chart-blue-subtle": {
+      "type": "color",
+      "value": "#60A5FA33"
+    },
+    "si-budget-color-chart-green-subtle": {
+      "type": "color",
+      "value": "#10B98155"
+    },
+    "si-budget-color-chart-danger-subtle": {
+      "type": "color",
+      "value": "#F8717155"
+    },
+    "si-budget-color-category-groceries": {
+      "type": "color",
+      "value": "#10B981"
+    },
+    "si-budget-color-category-subscriptions": {
+      "type": "color",
+      "value": "#60A5FA"
+    },
+    "si-budget-color-category-transport": {
+      "type": "color",
+      "value": "#F59E0B"
+    },
+    "si-budget-color-category-dining": {
+      "type": "color",
+      "value": "#A78BFA"
+    },
+    "si-budget-color-category-other": {
+      "type": "color",
+      "value": "#92929A"
+    },
+    "si-budget-color-account-blue": {
+      "type": "color",
+      "value": "#4A9FD8"
+    },
+    "si-budget-color-account-purple": {
+      "type": "color",
+      "value": "#6D5DFB"
+    },
+    "si-budget-color-account-orange": {
+      "type": "color",
+      "value": "#F59E0B"
+    },
+    "si-budget-color-account-green": {
+      "type": "color",
+      "value": "#10B981"
+    },
+    "si-budget-color-account-ink": {
+      "type": "color",
+      "value": "#111827"
+    },
     "si-color-cta-primary": {
       "type": "color",
       "value": [
@@ -10745,6 +10945,138 @@
     "si-radius-pill": {
       "type": "number",
       "value": 999
+    },
+    "si-budget-space-0": {
+      "type": "number",
+      "value": 0
+    },
+    "si-budget-space-1": {
+      "type": "number",
+      "value": 4
+    },
+    "si-budget-space-2": {
+      "type": "number",
+      "value": 8
+    },
+    "si-budget-space-3": {
+      "type": "number",
+      "value": 12
+    },
+    "si-budget-space-4": {
+      "type": "number",
+      "value": 16
+    },
+    "si-budget-space-5": {
+      "type": "number",
+      "value": 20
+    },
+    "si-budget-space-6": {
+      "type": "number",
+      "value": 24
+    },
+    "si-budget-space-0-75": {
+      "type": "number",
+      "value": 3
+    },
+    "si-budget-space-1-25": {
+      "type": "number",
+      "value": 5
+    },
+    "si-budget-space-1-5": {
+      "type": "number",
+      "value": 6
+    },
+    "si-budget-space-2-5": {
+      "type": "number",
+      "value": 10
+    },
+    "si-budget-space-3-25": {
+      "type": "number",
+      "value": 13
+    },
+    "si-budget-space-3-5": {
+      "type": "number",
+      "value": 14
+    },
+    "si-budget-space-4-5": {
+      "type": "number",
+      "value": 18
+    },
+    "si-budget-space-5-25": {
+      "type": "number",
+      "value": 21
+    },
+    "si-budget-space-5-5": {
+      "type": "number",
+      "value": 22
+    },
+    "si-budget-radius-bar-xs": {
+      "type": "number",
+      "value": 3
+    },
+    "si-budget-radius-bar-sm": {
+      "type": "number",
+      "value": 4
+    },
+    "si-budget-radius-progress": {
+      "type": "number",
+      "value": 7
+    },
+    "si-budget-radius-xs": {
+      "type": "number",
+      "value": 8
+    },
+    "si-budget-radius-handle": {
+      "type": "number",
+      "value": 12
+    },
+    "si-budget-radius-segment": {
+      "type": "number",
+      "value": 13
+    },
+    "si-budget-radius-card-sm": {
+      "type": "number",
+      "value": 14
+    },
+    "si-budget-radius-chip": {
+      "type": "number",
+      "value": 15
+    },
+    "si-budget-radius-avatar": {
+      "type": "number",
+      "value": 16
+    },
+    "si-budget-radius-panel": {
+      "type": "number",
+      "value": 18
+    },
+    "si-budget-radius-row": {
+      "type": "number",
+      "value": 20
+    },
+    "si-budget-radius-button": {
+      "type": "number",
+      "value": 22
+    },
+    "si-budget-radius-dialog": {
+      "type": "number",
+      "value": 23
+    },
+    "si-budget-radius-sheet": {
+      "type": "number",
+      "value": 24
+    },
+    "si-budget-radius-bar": {
+      "type": "number",
+      "value": 26
+    },
+    "si-budget-radius-screen": {
+      "type": "number",
+      "value": 34
+    },
+    "si-budget-radius-nav": {
+      "type": "number",
+      "value": 36
     },
     "si-shadow-soft": {
       "type": "string",

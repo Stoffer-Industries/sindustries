@@ -180,6 +180,113 @@ export const tokens = {
       "bgSurface"
     ]
   },
+  "budget": {
+    "color": {
+      "surface": {
+        "app": "#1f1f23",
+        "card": "#28282e",
+        "row": "#25252a",
+        "elevated": "#2a2a2f",
+        "inset": "#202027",
+        "info": "#202a38",
+        "strong": "#34343a",
+        "modal": "#2c2c2e",
+        "control": "#f4f4f5",
+        "controlPressed": "#d7d7dc"
+      },
+      "overlay": {
+        "transparent": "#00000000",
+        "scrim": "#00000066",
+        "sheet": "#00000080"
+      },
+      "border": {
+        "subtle": "#ffffff10",
+        "default": "#ffffff12",
+        "raised": "#ffffff14",
+        "selected": "#ffffff22",
+        "chart": "#92929a55",
+        "ios": "#54545899"
+      },
+      "text": {
+        "primary": "#ffffff",
+        "secondary": "#b7b7bd",
+        "muted": "#92929a",
+        "subtle": "#a8a8ae",
+        "disabled": "#77777e",
+        "inverse": "#16161a",
+        "iosSecondary": "#ebebf599"
+      },
+      "status": {
+        "income": "#45c073",
+        "success": "#10b981",
+        "successSubtle": "#193326",
+        "danger": "#f87171",
+        "dangerSubtle": "#3a1618",
+        "iosInfo": "#0a84ff",
+        "iosDanger": "#ff453a"
+      },
+      "chart": {
+        "incomeLine": "#45c073",
+        "incomeFill": "#45c07340",
+        "incomeFillTransparent": "#45c07300",
+        "blue": "#60a5fa",
+        "blueSubtle": "#60a5fa33",
+        "greenSubtle": "#10b98155",
+        "dangerSubtle": "#f8717155"
+      },
+      "category": {
+        "groceries": "#10b981",
+        "subscriptions": "#60a5fa",
+        "transport": "#f59e0b",
+        "dining": "#a78bfa",
+        "other": "#92929a"
+      },
+      "account": {
+        "blue": "#4a9fd8",
+        "purple": "#6d5dfb",
+        "orange": "#f59e0b",
+        "green": "#10b981",
+        "ink": "#111827"
+      }
+    },
+    "space": {
+      "0": 0,
+      "1": 4,
+      "2": 8,
+      "3": 12,
+      "4": 16,
+      "5": 20,
+      "6": 24,
+      "0_75": 3,
+      "1_25": 5,
+      "1_5": 6,
+      "2_5": 10,
+      "3_25": 13,
+      "3_5": 14,
+      "4_5": 18,
+      "5_25": 21,
+      "5_5": 22
+    },
+    "radius": {
+      "barXs": 3,
+      "barSm": 4,
+      "progress": 7,
+      "xs": 8,
+      "handle": 12,
+      "segment": 13,
+      "cardSm": 14,
+      "chip": 15,
+      "avatar": 16,
+      "panel": 18,
+      "row": 20,
+      "button": 22,
+      "dialog": 23,
+      "sheet": 24,
+      "bar": 26,
+      "screen": 34,
+      "nav": 36
+    }
+  },
   "platform": {
     "mobile": {
       "tabBar": {
@@ -327,6 +434,7 @@ export const colorsDark = colors;
 export const fonts = tokens.semantic.font;
 export const space = tokens.core.space;
 export const radius = tokens.core.radius;
+export const budget = tokens.budget;
 export const platform = tokens.platform;
 
 /** Surface stack color keys (see tokens.semantic.surfaceStack). */
