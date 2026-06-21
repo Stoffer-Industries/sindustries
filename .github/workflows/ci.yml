@@ -80,6 +80,9 @@ jobs:
       - name: Ensure Rollup Linux native binary is present
         run: npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace services/tasks-api
 
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace services/tasks-api
+
       - name: Run unit tests
         run: npm test --workspace services/tasks-api
 
@@ -150,6 +153,9 @@ jobs:
         run: |
           npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace apps/tasks
           npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace services/tasks-api
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace services/tasks-api
 
       - name: Apply DB migrations + seed
         env:
