@@ -1,7 +1,7 @@
 {
   "version": "2.10",
   "imports": {
-    "ui": "../../../packages/design-tokens/design-systems.pen"
+    "ui": "../../../packages/design-tokens/design-systems.lib.pen"
   },
   "children": [
     {
@@ -82,70 +82,12 @@
               ],
               "children": [
                 {
-                  "type": "frame",
-                  "id": "Bqu7z",
-                  "name": "Header",
+                  "type": "ref",
+                  "id": "budgetImportedHeaderAccounts",
+                  "ref": "budgetMobileHeader",
+                  "name": "Budget/BudgetHeader",
                   "width": "fill_container",
-                  "justifyContent": "space_between",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "JBich",
-                      "name": "titleWrapA",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "uN88O",
-                          "name": "titleA",
-                          "fill": "#FFFFFF",
-                          "content": "Accounts",
-                          "fontFamily": "Inter",
-                          "fontSize": 30,
-                          "fontWeight": "700"
-                        },
-                        {
-                          "type": "text",
-                          "id": "IbGv2",
-                          "name": "subtitleA",
-                          "fill": "#92929A",
-                          "content": "Cards and balances",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "500"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "JJUbg",
-                      "name": "Add Card Button",
-                      "fill": "#F4F4F5",
-                      "cornerRadius": 22,
-                      "gap": 8,
-                      "padding": [
-                        12,
-                        16,
-                        12,
-                        14
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "QOsdk",
-                          "name": "addTextA",
-                          "fill": "#16161A",
-                          "content": "+ Add card",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "700"
-                        }
-                      ]
-                    }
-                  ]
+                  "height": "fit_content"
                 },
                 {
                   "type": "frame",
@@ -156,86 +98,12 @@
                   "gap": 12,
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "rPeNF",
-                      "name": "Everyday Visa",
+                      "type": "ref",
+                      "id": "budgetImportedAccountCardRow",
+                      "ref": "budgetAccountCardRow",
+                      "name": "Budget/AccountCardRow",
                       "width": "fill_container",
-                      "fill": "#28282E",
-                      "cornerRadius": 22,
-                      "stroke": {
-                        "align": "inside",
-                        "thickness": 1,
-                        "fill": "#FFFFFF10"
-                      },
-                      "gap": 12,
-                      "padding": 14,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "C7q4P",
-                          "name": "icon1A",
-                          "width": 50,
-                          "height": 50,
-                          "fill": "#4A9FD8",
-                          "cornerRadius": 16,
-                          "layout": "vertical",
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "jD2Np",
-                              "name": "iconText1A",
-                              "fill": "#FFFFFF",
-                              "content": "V",
-                              "fontFamily": "Inter",
-                              "fontSize": 20,
-                              "fontWeight": "800"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "JKxOe",
-                          "name": "copy1A",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 4,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "mnTkj",
-                              "name": "name1A",
-                              "fill": "#FFFFFF",
-                              "content": "Everyday Visa",
-                              "fontFamily": "Inter",
-                              "fontSize": 17,
-                              "fontWeight": "700"
-                            },
-                            {
-                              "type": "text",
-                              "id": "q3D7j",
-                              "name": "meta1A",
-                              "fill": "#92929A",
-                              "content": "Main spending card",
-                              "fontFamily": "Inter",
-                              "fontSize": 13,
-                              "fontWeight": "500"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "text",
-                          "id": "1o07q",
-                          "name": "bal1A",
-                          "fill": "#FFFFFF",
-                          "content": "$2,684.41",
-                          "fontFamily": "Inter",
-                          "fontSize": 17,
-                          "fontWeight": "700"
-                        }
-                      ]
+                      "height": "fit_content"
                     },
                     {
                       "type": "frame",
@@ -642,99 +510,12 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
-                  "id": "m5MIN",
-                  "name": "Pill Tab Bar",
+                  "type": "ref",
+                  "id": "budgetImportedPillTabsAccounts",
+                  "ref": "budgetPillTabBar",
+                  "name": "Budget/PillTabBar",
                   "width": "fill_container",
-                  "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "#FFFFFF12"
-                  },
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "ge96u",
-                      "name": "navCardsA",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "mzEs5",
-                          "name": "navCardsTxtA",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "NsHVd",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "piGeG",
-                          "name": "insightsTxtA",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "eIR0x",
-                      "name": "navSettingsA",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "qzMFY",
-                          "name": "navSettingsTxtA",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
-                    }
-                  ]
+                  "height": "fit_content"
                 }
               ]
             }
