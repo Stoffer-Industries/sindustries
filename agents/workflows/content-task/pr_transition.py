@@ -106,15 +106,27 @@ def pr_heading_urls(task: dict) -> list[str]:
     return extract_pr_urls_from_text(task.get("description") or "")
 
 
+QUINN_LOGINS = {"quinnstoffer"}
+TOM_LOGINS = {"stoff81"}
+
+
+def _heading_index_for_assignees(assignees: list[str]) -> int | None:
+    """Return heading index based on PR assignees. Quinn=0, Tom=1, unknown=None."""
+    logins = {a.lower() for a in assignees if a}
+    if logins & QUINN_LOGINS:
+        return 0
+    if logins & TOM_LOGINS:
+        return 1
+    return None
+
+
 def url_to_heading_index(url: str, pr_urls: list[str], description: str = "") -> int | None:
     """Map a PR URL to its owner heading index.
 
-    Prefers scanning the owner sections in the description to find which block contains
-    the URL (reliable regardless of how many PRs exist). Falls back to the reversed-position
-    formula when description is unavailable (requires exactly 2 URLs to be correct).
-
-    Ivy's [ivy-prs] comment order is: tom: #N (first), quinn: #M (second).
-    Heading order is: Quinn (index 0), Tom (index 1).
+    Priority order:
+    1. Scan owner sections in the description (URL already injected).
+    2. Look up PR assignees: quinnstoffer → 0 (Quinn), Stoff81 → 1 (Tom).
+    3. Fall back to reversed-position formula (fragile, last resort).
     """
     if not url or url not in pr_urls:
         return None
@@ -122,48 +134,76 @@ def url_to_heading_index(url: str, pr_urls: list[str], description: str = "") ->
         for idx, (block_text, _) in enumerate(owner_sections(description)):
             if url in block_text:
                 return idx
+    try:
+        idx = _heading_index_for_assignees(gh_pr_assignees(url))
+        if idx is not None:
+            return idx
+    except Exception:
+        pass
     pos = pr_urls.index(url)
-    return 1 - pos  # fallback: pr_urls[0] (Tom's) → 1, pr_urls[1] (Quinn's) → 0
+    return 1 - pos  # last resort: pr_urls[0] → Tom(1), pr_urls[1] → Quinn(0)
 
 
 def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
-    """Inject PR URLs as markdown links into owner heading blocks in order.
+    """Inject PR URLs as markdown links into the correct owner heading blocks.
 
-    pr_urls order: [Tom's PR URL, Quinn's PR URL] (from Ivy's [ivy-prs] comment).
-    Heading order: ## Quinn can execute (idx 0), ## Needs Tom approval (idx 1).
-    So the first URL (Tom's) goes to heading idx 1, second URL (Quinn's) goes to heading idx 0.
-    We walk h_idx in reverse to find the first empty heading from the end.
+    Uses PR assignees to determine the target heading:
+    - quinnstoffer → ## Quinn can execute (idx 0)
+    - Stoff81 → ## Needs Tom approval (idx 1)
+    Falls back to positional ordering only when no assignee is set.
     """
     if not pr_urls or not description:
         return description
     result = description
-    # Do NOT reverse pr_urls — order is already [Tom's, Quinn's].
-    # Walking h_idx in reverse (1→0) assigns first URL to Tom heading, second to Quinn heading.
     owner_matches = list(OWNER_HEADING_RE.finditer(result))
     for url in pr_urls:
         if url in result:
             continue
         pr_num_match = re.search(r"pull/(\d+)", url or "")
         pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
-        # Walk h_idx in reverse: h_idx=1 (Tom heading) first, then h_idx=0 (Quinn heading).
-        heading_idx = None
-        for h_idx in range(len(owner_matches) - 1, -1, -1):
-            match = owner_matches[h_idx]
-            start = match.end()
-            end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else next_heading_pos(
-                result, start, heading_level(match.group(0))
-            )
-            block = result[start:end]
-            if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
-                heading_idx = h_idx
-                break
-        if heading_idx is not None:
-            match = owner_matches[heading_idx]
-            start = match.end()
-            result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
-            owner_matches = list(OWNER_HEADING_RE.finditer(result))
-        else:
+
+        # Determine target heading by assignee first, fall back to first empty heading.
+        target_idx: int | None = None
+        try:
+            target_idx = _heading_index_for_assignees(gh_pr_assignees(url))
+        except Exception:
+            pass
+
+        if target_idx is not None:
+            # Inject into the assignee-matched heading if it doesn't already have a PR URL.
+            if target_idx < len(owner_matches):
+                match = owner_matches[target_idx]
+                start = match.end()
+                end = owner_matches[target_idx + 1].start() if target_idx + 1 < len(owner_matches) else next_heading_pos(
+                    result, start, heading_level(match.group(0))
+                )
+                block = result[start:end]
+                if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
+                    result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
+                    owner_matches = list(OWNER_HEADING_RE.finditer(result))
+                    continue
+            # Heading already has a URL or index out of range — append at end.
             result = result.rstrip() + f"\n\n[{pr_label}]({url})\n"
+        else:
+            # No assignee — fall back to first empty heading walking in reverse.
+            heading_idx = None
+            for h_idx in range(len(owner_matches) - 1, -1, -1):
+                match = owner_matches[h_idx]
+                start = match.end()
+                end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else next_heading_pos(
+                    result, start, heading_level(match.group(0))
+                )
+                block = result[start:end]
+                if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
+                    heading_idx = h_idx
+                    break
+            if heading_idx is not None:
+                match = owner_matches[heading_idx]
+                start = match.end()
+                result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
+                owner_matches = list(OWNER_HEADING_RE.finditer(result))
+            else:
+                result = result.rstrip() + f"\n\n[{pr_label}]({url})\n"
     return result
 
 

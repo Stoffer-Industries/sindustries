@@ -80,7 +80,15 @@ These are non-negotiable:
 4. **No first-person Tom copy without explicit approval** — except in stories, where first-person voice is fine and quotes are welcome. Stories are routed for Tom's approval via PRs before publishing.
 5. **No startup theater.** No "disrupting", "revolutionising", "game-changing".
 6. **No private context.** Don't mention inMusic, family, salary, or anything that isn't already public.
-7. **No implementation detail.** The audience is the public — they don't know or care about internal tooling. Never mention: local file paths (`brain/`, `~/.openclaw/`, `/workspace/`), internal service names or ports, or infrastructure detail. Agent names (Ivy, Rowan, Quinn) are fine to use — they add personality. Describe what a system *does for the business*. Reference other published Systems or Stacks by their public names instead.
+7. **No implementation detail.** The audience is the public — they don't know or care about internal tooling. Never mention:
+   - Local file paths (`brain/`, `~/.openclaw/`, `/workspace/`)
+   - Internal service names or ports
+   - Infrastructure detail
+   - PR numbers (e.g. "PR #57" — say "we opened a pull request" if needed)
+   - Code module or function names (e.g. "filter_curation step", "the Lobster's generate_specs")
+   - Internal system names used as proper nouns (e.g. "Tasks API", "the Lobster") — describe what they do instead ("our task management system", "our automation pipeline")
+
+   Agent names (Ivy, Rowan, Quinn) are fine to use — they add personality. Describe what a system *does for the business*. Reference other published Systems or Stacks by their public names instead.
 
 ---
 
@@ -137,6 +145,12 @@ Branch names: `content/YYYY-MM-DD-tom` and `content/YYYY-MM-DD-quinn`.
 **Quinn-approval PR** — contains items with `approval_risk_level: low` only.
 
 If a single content item has both low and high risk elements, split it: put the high-risk lines in the Tom PR and the safe version (with those lines removed or redacted) in the Quinn PR.
+
+**After creating each PR, immediately set the correct assignee:**
+- Tom-approval PR → assign to `Stoff81`: `gh pr edit <number> --repo Stoffer-Industries/sindustries --add-assignee Stoff81`
+- Quinn-approval PR → assign to `quinnstoffer`: `gh pr edit <number> --repo Stoffer-Industries/sindustries --add-assignee quinnstoffer`
+
+The workflow uses PR assignees to route each PR to the correct review section in the task. Missing assignees will cause the pipeline to stall.
 
 ---
 
