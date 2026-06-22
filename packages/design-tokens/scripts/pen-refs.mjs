@@ -43,6 +43,22 @@ function stripPlacement(node) {
   return copy;
 }
 
+function namespaceEmbeddedIds(value, namespace, isRoot = false) {
+  if (Array.isArray(value)) {
+    return value.map((item) => namespaceEmbeddedIds(item, namespace));
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  const copy = {};
+  for (const [key, childValue] of Object.entries(value)) {
+    copy[key] = namespaceEmbeddedIds(childValue, namespace);
+  }
+  if (!isRoot && typeof copy.id === 'string') {
+    copy.id = `${namespace}_${copy.id}`;
+  }
+  return copy;
+}
+
 /** Preserve explicit widths/heights from pen masters when embedding in specimens. */
 function resolveEmbedDimension(value) {
   if (typeof value === 'number') return value;
@@ -66,7 +82,7 @@ export function clonePenEmbedNode(source, embedId) {
     if (source.rotation !== undefined && embed.rotation === undefined) {
       embed.rotation = source.rotation;
     }
-    return embed;
+    return namespaceEmbeddedIds(embed, embedId, true);
   }
 
   if (source.type === 'frame' && source.id) {

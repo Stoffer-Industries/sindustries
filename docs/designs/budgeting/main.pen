@@ -1,5 +1,8 @@
 {
   "version": "2.13",
+  "imports": {
+    "ui": "../../../packages/design-tokens/design-systems.lib.pen"
+  },
   "children": [
     {
       "type": "frame",
@@ -8088,9 +8091,5 @@
         }
       ]
     }
-  ],
-  "imports": {
-    "ui": "../../../packages/design-tokens/design-systems.lib.pen",
-    "N": "../../../node_modules/@sindustries/design-tokens/design-systems.lib.pen"
-  }
+  ]
 }
