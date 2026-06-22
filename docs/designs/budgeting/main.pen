@@ -84,7 +84,7 @@
                 {
                   "type": "ref",
                   "id": "budgetImportedHeaderAccounts",
-                  "ref": "budgetMobileHeader",
+                  "ref": "ui:budgetMobileHeader",
                   "name": "Budget/BudgetHeader",
                   "width": "fill_container",
                   "height": "fit_content"
@@ -100,7 +100,7 @@
                     {
                       "type": "ref",
                       "id": "budgetImportedAccountCardRow",
-                      "ref": "budgetAccountCardRow",
+                      "ref": "ui:budgetAccountCardRow",
                       "name": "Budget/AccountCardRow",
                       "width": "fill_container",
                       "height": "fit_content"
@@ -502,7 +502,7 @@
                 {
                   "type": "ref",
                   "id": "budgetImportedPillTabsAccounts",
-                  "ref": "budgetPillTabBar",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Budget/PillTabBar",
                   "width": "fill_container",
                   "height": "fit_content"

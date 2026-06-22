@@ -5990,8 +5990,8 @@
         {
           "type": "frame",
           "id": "budgetInlineAlertEditor",
-          "x": 4607,
-          "y": 4456,
+          "x": 4634,
+          "y": 4319,
           "name": "Mobile/InlineEditor",
           "reusable": true,
           "width": 354,
@@ -6111,8 +6111,12 @@
               "type": "ref",
               "ref": "budgetToggleRow",
               "name": "Mobile/ToggleRow",
-              "width": "fit_content",
-              "height": "fit_content"
+              "width": 317,
+              "height": "fit_content",
+              "flipX": false,
+              "flipY": false,
+              "x": 16,
+              "y": 176
             },
             {
               "type": "frame",
@@ -6292,7 +6296,7 @@
           "type": "frame",
           "id": "budgetBottomSheet",
           "x": 4185,
-          "y": 4346,
+          "y": 4319,
           "name": "Mobile/BottomSheet",
           "reusable": true,
           "width": 390,
@@ -6312,6 +6316,7 @@
             20,
             20
           ],
+          "alignItems": "center",
           "children": [
             {
               "type": "frame",
@@ -6325,7 +6330,6 @@
               "type": "frame",
               "id": "bmFrm109",
               "width": "fill_container",
-              "layout": "horizontal",
               "gap": 10,
               "children": [
                 {
@@ -6374,14 +6378,13 @@
                 }
               ]
             }
-          ],
-          "alignItems": "center"
+          ]
         },
         {
           "type": "frame",
           "id": "budgetNativeConfirmDialogAdapter",
           "x": 3854,
-          "y": 4333,
+          "y": 4319,
           "name": "Mobile/NativeConfirmDialogAdapter",
           "reusable": true,
           "width": 270,
@@ -6462,12 +6465,12 @@
     {
       "type": "frame",
       "id": "siSpecRoot",
+      "x": -1610,
+      "y": 22,
       "name": "Design tokens specimen",
       "theme": {
         "Mode": "Dark"
       },
-      "x": -1610,
-      "y": 22,
       "width": 960,
       "height": 1347,
       "fill": "$si-color-bg-canvas",
@@ -6497,8 +6500,7 @@
               "fontFamily": "Inter",
               "fontSize": 12,
               "fontWeight": "800",
-              "letterSpacing": 1.4,
-              "textGrowth": "auto"
+              "letterSpacing": 1.4
             },
             {
               "type": "text",
@@ -6507,8 +6509,7 @@
               "content": "Pencil token specimen",
               "fontFamily": "Inter",
               "fontSize": 32,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "text",
@@ -6516,11 +6517,11 @@
               "fill": "$si-color-text-secondary",
               "textGrowth": "fixed-width",
               "width": 860,
+              "content": "Generated from tokens.json. Compare with /design-system and product apps.",
               "lineHeight": 1.3,
               "fontFamily": "Work Sans",
               "fontSize": 15,
-              "fontWeight": "normal",
-              "content": "Generated from tokens.json. Compare with /design-system and product apps."
+              "fontWeight": "normal"
             }
           ]
         },
@@ -6544,15 +6545,13 @@
               "content": "Color",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "frame",
               "id": "siSwRow0",
               "width": "fill_container",
               "height": 94,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "center",
               "children": [
@@ -6572,11 +6571,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws0q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-canvas"
+                      "id": "siSws0q",
+                      "fill": "$si-color-bg-canvas",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6585,8 +6584,7 @@
                       "content": "Canvas",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6606,11 +6604,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws1q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-section"
+                      "id": "siSws1q",
+                      "fill": "$si-color-bg-section",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6619,8 +6617,7 @@
                       "content": "Section",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6640,11 +6637,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws2q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-section-header"
+                      "id": "siSws2q",
+                      "fill": "$si-color-bg-section-header",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6653,8 +6650,7 @@
                       "content": "Section header",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6674,11 +6670,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws3q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-surface"
+                      "id": "siSws3q",
+                      "fill": "$si-color-bg-surface",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6687,8 +6683,7 @@
                       "content": "Surface",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6708,11 +6703,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws4q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-bg-field"
+                      "id": "siSws4q",
+                      "fill": "$si-color-bg-field",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6721,8 +6716,7 @@
                       "content": "Field",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 }
@@ -6733,7 +6727,6 @@
               "id": "siSwRow1",
               "width": "fill_container",
               "height": 94,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "center",
               "children": [
@@ -6753,11 +6746,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws5q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-text-primary"
+                      "id": "siSws5q",
+                      "fill": "$si-color-text-primary",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6766,8 +6759,7 @@
                       "content": "Primary text",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6787,11 +6779,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws6q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-text-muted"
+                      "id": "siSws6q",
+                      "fill": "$si-color-text-muted",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6800,8 +6792,7 @@
                       "content": "Muted text",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 }
@@ -6812,7 +6803,6 @@
               "id": "siSwRow2",
               "width": "fill_container",
               "height": 94,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "center",
               "children": [
@@ -6832,11 +6822,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws7q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-brand-500"
+                      "id": "siSws7q",
+                      "fill": "$si-color-brand-500",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6845,8 +6835,7 @@
                       "content": "Brand",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6866,11 +6855,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws8q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-accent-500"
+                      "id": "siSws8q",
+                      "fill": "$si-color-accent-500",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6879,8 +6868,7 @@
                       "content": "Accent Pink",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6900,11 +6888,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws9q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-sage-500"
+                      "id": "siSws9q",
+                      "fill": "$si-color-sage-500",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6913,8 +6901,7 @@
                       "content": "Sage",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 }
@@ -6925,7 +6912,6 @@
               "id": "siSwRow3",
               "width": "fill_container",
               "height": 94,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "center",
               "children": [
@@ -6945,11 +6931,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws10q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-success-500"
+                      "id": "siSws10q",
+                      "fill": "$si-color-success-500",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6958,8 +6944,7 @@
                       "content": "Success",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -6979,11 +6964,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siSws11q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-danger-500"
+                      "id": "siSws11q",
+                      "fill": "$si-color-danger-500",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -6992,8 +6977,7 @@
                       "content": "Danger",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 }
@@ -7021,15 +7005,13 @@
               "content": "Color labels",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "frame",
               "id": "siLblRow",
               "width": "fill_container",
               "height": 94,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "center",
               "children": [
@@ -7049,11 +7031,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siLbl0q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-label-green"
+                      "id": "siLbl0q",
+                      "fill": "$si-color-label-green",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -7062,8 +7044,7 @@
                       "content": "Green",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -7083,11 +7064,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siLbl1q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-label-blue"
+                      "id": "siLbl1q",
+                      "fill": "$si-color-label-blue",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -7096,8 +7077,7 @@
                       "content": "Blue",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -7117,11 +7097,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siLbl2q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-label-orange"
+                      "id": "siLbl2q",
+                      "fill": "$si-color-label-orange",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -7130,8 +7110,7 @@
                       "content": "Orange",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -7151,11 +7130,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siLbl3q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-label-purple"
+                      "id": "siLbl3q",
+                      "fill": "$si-color-label-purple",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -7164,8 +7143,7 @@
                       "content": "Purple",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 },
@@ -7185,11 +7163,11 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "id": "siLbl4q",
-                      "width": "fill_container",
-                      "height": 28,
                       "cornerRadius": "$si-radius-sm",
-                      "fill": "$si-color-label-gray"
+                      "id": "siLbl4q",
+                      "fill": "$si-color-label-gray",
+                      "width": "fill_container",
+                      "height": 28
                     },
                     {
                       "type": "text",
@@ -7198,8 +7176,7 @@
                       "content": "Gray",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "800",
-                      "textGrowth": "auto"
+                      "fontWeight": "800"
                     }
                   ]
                 }
@@ -7227,8 +7204,7 @@
               "content": "Typography",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "text",
@@ -7237,8 +7213,7 @@
               "content": "Display face",
               "fontFamily": "Dela Gothic One",
               "fontSize": 30,
-              "fontWeight": "normal",
-              "textGrowth": "auto"
+              "fontWeight": "normal"
             },
             {
               "type": "text",
@@ -7248,8 +7223,7 @@
               "fontFamily": "Inter",
               "fontSize": 13,
               "fontWeight": "800",
-              "letterSpacing": 1.2,
-              "textGrowth": "auto"
+              "letterSpacing": 1.2
             },
             {
               "type": "text",
@@ -7259,20 +7233,19 @@
               "fontFamily": "Dela Gothic One",
               "fontSize": 15,
               "fontWeight": "normal",
-              "letterSpacing": 1.2,
-              "textGrowth": "auto"
+              "letterSpacing": 1.2
             },
             {
               "type": "text",
               "id": "siSpecBody",
               "fill": "$si-color-text-secondary",
-              "content": "Body copy with text.secondary for longer readable text.",
-              "fontFamily": "Work Sans",
-              "fontSize": 15,
-              "fontWeight": "normal",
               "textGrowth": "fixed-width",
               "width": 860,
-              "lineHeight": 1.35
+              "content": "Body copy with text.secondary for longer readable text.",
+              "lineHeight": 1.35,
+              "fontFamily": "Work Sans",
+              "fontSize": 15,
+              "fontWeight": "normal"
             }
           ]
         },
@@ -7296,25 +7269,23 @@
               "content": "Space",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "frame",
               "id": "siSpecSpaceRow",
               "width": "fill_container",
               "height": 68,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "end",
               "children": [
                 {
                   "type": "frame",
                   "id": "siSpk1",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 20,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7332,18 +7303,17 @@
                       "content": "1",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk2",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 20,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7361,18 +7331,17 @@
                       "content": "2",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk3",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 20,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7390,18 +7359,17 @@
                       "content": "3",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk4",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 20,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7419,18 +7387,17 @@
                       "content": "4",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk5",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 20,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7448,18 +7415,17 @@
                       "content": "5",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk6",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 24,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7477,18 +7443,17 @@
                       "content": "6",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk7",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 28,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7506,18 +7471,17 @@
                       "content": "7",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk8",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 32,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7535,18 +7499,17 @@
                       "content": "8",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
                 {
                   "type": "frame",
                   "id": "siSpk10",
-                  "layout": "vertical",
-                  "gap": 4,
                   "width": 40,
                   "height": 58,
+                  "layout": "vertical",
+                  "gap": 4,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7564,8 +7527,7 @@
                       "content": "10",
                       "fontFamily": "Inter",
                       "fontSize": 10,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 }
@@ -7593,15 +7555,13 @@
               "content": "Radius",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "frame",
               "id": "siSpecRadRow",
               "width": "fill_container",
               "height": 88,
-              "layout": "horizontal",
               "gap": 12,
               "alignItems": "center",
               "children": [
@@ -7626,8 +7586,7 @@
                       "content": "sm",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "700",
-                      "textGrowth": "auto"
+                      "fontWeight": "700"
                     }
                   ]
                 },
@@ -7652,8 +7611,7 @@
                       "content": "md",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "700",
-                      "textGrowth": "auto"
+                      "fontWeight": "700"
                     }
                   ]
                 },
@@ -7678,8 +7636,7 @@
                       "content": "lg",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "700",
-                      "textGrowth": "auto"
+                      "fontWeight": "700"
                     }
                   ]
                 },
@@ -7704,8 +7661,7 @@
                       "content": "xl",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "700",
-                      "textGrowth": "auto"
+                      "fontWeight": "700"
                     }
                   ]
                 },
@@ -7730,8 +7686,7 @@
                       "content": "pill",
                       "fontFamily": "Inter",
                       "fontSize": 11,
-                      "fontWeight": "700",
-                      "textGrowth": "auto"
+                      "fontWeight": "700"
                     }
                   ]
                 }
@@ -7744,12 +7699,12 @@
     {
       "type": "frame",
       "id": "siReactSpecPulse",
+      "x": -548,
+      "y": 22,
       "name": "Pulse React specimen",
       "theme": {
         "Mode": "Dark"
       },
-      "x": -548,
-      "y": 22,
       "width": 960,
       "height": 4083,
       "fill": "$si-color-bg-canvas",
@@ -7779,8 +7734,7 @@
               "fontFamily": "Inter",
               "fontSize": 12,
               "fontWeight": "800",
-              "letterSpacing": 1.4,
-              "textGrowth": "auto"
+              "letterSpacing": 1.4
             },
             {
               "type": "text",
@@ -7789,8 +7743,7 @@
               "content": "Pulse React specimen",
               "fontFamily": "Inter",
               "fontSize": 32,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "text",
@@ -7798,11 +7751,11 @@
               "fill": "$si-color-text-secondary",
               "textGrowth": "fixed-width",
               "width": 860,
+              "content": "Live components from @sindustries/ui/react with data-si-pack=\"pulse\". Code paths sit beside each section where linked.",
               "lineHeight": 1.3,
               "fontFamily": "Work Sans",
               "fontSize": 15,
-              "fontWeight": "normal",
-              "content": "Live components from @sindustries/ui/react with data-si-pack=\"pulse\". Code paths sit beside each section where linked."
+              "fontWeight": "normal"
             }
           ]
         },
@@ -7817,10 +7770,9 @@
               "type": "frame",
               "id": "siReactSpecPulseSurfPageHdr",
               "width": "fill_container",
-              "layout": "horizontal",
-              "alignItems": "center",
               "gap": 12,
               "justifyContent": "space_between",
+              "alignItems": "center",
               "children": [
                 {
                   "type": "text",
@@ -7829,34 +7781,31 @@
                   "content": "Surfaces",
                   "fontFamily": "Dela Gothic One",
                   "fontSize": 28,
-                  "fontWeight": "normal",
-                  "textGrowth": "auto"
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
                   "id": "siReactSpecPulseSurfPageMeta",
                   "fill": "$si-color-brand-500",
                   "content": "PAGE · Canvas · --si-color-bg-canvas",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 9,
                   "fontWeight": "800",
-                  "letterSpacing": 0.8,
-                  "textAlign": "right",
-                  "textGrowth": "auto"
+                  "letterSpacing": 0.8
                 }
               ]
             },
             {
               "type": "frame",
               "id": "siReactSpecPulseSurfSection",
+              "clip": true,
               "width": "fill_container",
               "fill": "$si-color-bg-section",
-              "cornerRadius": 0,
               "stroke": "$si-color-ink-950",
               "strokeWidth": 2,
               "strokeAlignment": "inner",
               "layout": "vertical",
-              "clip": true,
               "children": [
                 {
                   "type": "frame",
@@ -7869,10 +7818,9 @@
                       "type": "frame",
                       "id": "siReactSpecPulseSurfSecHdrRow",
                       "width": "fill_container",
-                      "layout": "horizontal",
-                      "alignItems": "center",
                       "gap": 12,
                       "justifyContent": "space_between",
+                      "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
@@ -7882,20 +7830,18 @@
                           "fontFamily": "Dela Gothic One",
                           "fontSize": 13,
                           "fontWeight": "700",
-                          "letterSpacing": 0.6,
-                          "textGrowth": "auto"
+                          "letterSpacing": 0.6
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseSurfSecMeta",
                           "fill": "$si-color-brand-500",
                           "content": "SECTION · Kanban column · --si-color-bg-section",
+                          "textAlign": "right",
                           "fontFamily": "Inter",
                           "fontSize": 9,
                           "fontWeight": "800",
-                          "letterSpacing": 0.8,
-                          "textAlign": "right",
-                          "textGrowth": "auto"
+                          "letterSpacing": 0.8
                         }
                       ]
                     }
@@ -7915,7 +7861,6 @@
                       "id": "siReactSpecPulseSurfGroup",
                       "width": "fill_container",
                       "fill": "$si-color-bg-surface",
-                      "cornerRadius": 0,
                       "stroke": "$si-color-ink-950",
                       "strokeWidth": 2,
                       "strokeAlignment": "inner",
@@ -7927,34 +7872,32 @@
                           "type": "frame",
                           "id": "siReactSpecPulseSurfGroupHdr",
                           "width": "fill_container",
-                          "layout": "horizontal",
-                          "alignItems": "center",
                           "gap": 12,
                           "justifyContent": "space_between",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
                               "id": "siReactSpecPulseSurfGroupTitle",
                               "fill": "$si-color-text-primary",
-                              "content": "Section Header",
-                              "fontFamily": "Dela Gothic One",
-                              "fontSize": 14,
-                              "fontWeight": "700",
                               "textGrowth": "fixed-width",
                               "width": 320,
-                              "lineHeight": 1.35
+                              "content": "Section Header",
+                              "lineHeight": 1.35,
+                              "fontFamily": "Dela Gothic One",
+                              "fontSize": 14,
+                              "fontWeight": "700"
                             },
                             {
                               "type": "text",
                               "id": "siReactSpecPulseSurfGroupMeta",
                               "fill": "$si-color-brand-500",
                               "content": "GROUP · Task card · --si-color-bg-surface",
+                              "textAlign": "right",
                               "fontFamily": "Inter",
                               "fontSize": 9,
                               "fontWeight": "800",
-                              "letterSpacing": 0.8,
-                              "textAlign": "right",
-                              "textGrowth": "auto"
+                              "letterSpacing": 0.8
                             }
                           ]
                         },
@@ -7962,10 +7905,9 @@
                           "type": "frame",
                           "id": "siReactSpecPulseSurfFieldsHdr",
                           "width": "fill_container",
-                          "layout": "horizontal",
-                          "alignItems": "center",
                           "gap": 12,
                           "justifyContent": "space_between",
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "frame",
@@ -7983,12 +7925,11 @@
                               "id": "siReactSpecPulseSurfFieldsMeta",
                               "fill": "$si-color-brand-500",
                               "content": "FIELDS · Task fields · --si-color-bg-field",
+                              "textAlign": "right",
                               "fontFamily": "Inter",
                               "fontSize": 9,
                               "fontWeight": "800",
-                              "letterSpacing": 0.8,
-                              "textAlign": "right",
-                              "textGrowth": "auto"
+                              "letterSpacing": 0.8
                             }
                           ]
                         }
@@ -8020,8 +7961,7 @@
               "content": "Components",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "frame",
@@ -8043,8 +7983,7 @@
                   "content": "Buttons",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -8064,13 +8003,12 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp0r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp0r0p0",
+                              "type": "ref",
                               "ref": "xBc88",
                               "name": "Button/Default",
                               "width": "fit_content",
@@ -8085,6 +8023,7 @@
                               "cornerRadius": "$si-radius-pill",
                               "width": "fit_content",
                               "height": "fit_content",
+                              "rotation": -0.31369502359715695,
                               "descendants": {
                                 "zF167": {
                                   "fill": "$si-color-text-primary"
@@ -8092,8 +8031,7 @@
                                 "FT3cO": {
                                   "fill": "$si-color-text-primary"
                                 }
-                              },
-                              "rotation": -0.31369502359715695
+                              }
                             },
                             {
                               "id": "siReactSpecPulseGrp0r0p2",
@@ -8163,29 +8101,28 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp0r1",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp0r1p0",
+                              "type": "ref",
                               "ref": "BdDpP",
                               "name": "Button/Display/Primary",
                               "width": "fit_content",
                               "height": "fit_content"
                             },
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp0r1p1",
+                              "type": "ref",
                               "ref": "BdDpO",
                               "name": "Button/Display/Outline",
                               "width": "fit_content",
                               "height": "fit_content"
                             },
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp0r1p2",
+                              "type": "ref",
                               "ref": "BdDpG",
                               "name": "Button/Display/Ghost",
                               "width": "fit_content",
@@ -8197,12 +8134,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp0n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "Display variants — square corners, hard shadow, display face.",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -8224,14 +8161,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp0cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -8242,8 +8177,7 @@
                               "content": "Button",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -8252,8 +8186,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -8261,45 +8194,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp0cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-button  ·  @sindustries/ui/react  ·  pen:xBc88",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp0cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: primary, secondary, outline, ghost, destructive, nav, filter, tone:display",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp0cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp0cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Button/Default, Button/Large/Default, Button/Display/Primary, Button/Display/Outline, Button/Display/Ghost",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -8327,8 +8260,7 @@
                   "content": "Badges, tooltip, and avatar",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -8348,7 +8280,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp1r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -8369,6 +8300,7 @@
                               "padding": 8,
                               "gap": 0,
                               "clip": false,
+                              "rotation": -360,
                               "descendants": {
                                 "1qRIv": {
                                   "content": "URGENT",
@@ -8378,8 +8310,7 @@
                                   "fontWeight": "800",
                                   "fontSize": 11
                                 }
-                              },
-                              "rotation": -360
+                              }
                             },
                             {
                               "id": "siReactSpecPulseGrp1r0p1",
@@ -8490,16 +8421,16 @@
                               }
                             },
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp1r0p5",
+                              "type": "ref",
                               "ref": "cqxgS",
                               "name": "Tooltip",
                               "width": "fit_content",
                               "height": "fit_content"
                             },
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp1r0p6",
+                              "type": "ref",
                               "ref": "vP6oo",
                               "name": "Avatar/Text",
                               "width": 24,
@@ -8511,12 +8442,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp1n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "See /design-system for live demos.",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -8538,14 +8469,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp1cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -8556,8 +8485,7 @@
                               "content": "Badge",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -8566,8 +8494,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -8575,45 +8502,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-badge  ·  @sindustries/ui/react  ·  pen:Tn1Ii",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: urgent, high, medium, low, tag, draft, blocked, neutral, status, tone:pulse",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Label/Priority, Label/Priority/High, Label/Priority/Medium, Label/Priority/Low, Label/Tag",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -8626,7 +8553,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp1cat1h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -8637,8 +8563,7 @@
                               "content": "Tooltip",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -8647,8 +8572,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -8656,45 +8580,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat1p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-tooltip  ·  @sindustries/ui/react  ·  pen:cqxgS",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat1v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat1f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat1pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Tooltip",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -8707,7 +8631,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp1cat2h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -8718,8 +8641,7 @@
                               "content": "Avatar",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -8728,8 +8650,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -8737,45 +8658,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat2p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-avatar  ·  @sindustries/ui/react  ·  pen:vP6oo",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat2v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat2f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp1cat2pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Avatar/Text, Avatar/Pulse",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -8803,8 +8724,7 @@
                   "content": "Pulse task card",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -8824,7 +8744,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp2r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -8855,6 +8774,7 @@
                                 14,
                                 16
                               ],
+                              "rotation": 0.6583287114526105,
                               "descendants": {
                                 "SaWqo": {
                                   "height": "fit_content",
@@ -8956,8 +8876,7 @@
                                     }
                                   ]
                                 }
-                              },
-                              "rotation": 0.6583287114526105
+                              }
                             }
                           ]
                         },
@@ -8965,12 +8884,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp2n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "kind: pulseTaskCard · live demo on /design-system",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -8992,14 +8911,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp2cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9010,8 +8927,7 @@
                               "content": "Card",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9020,8 +8936,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9029,45 +8944,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-card  ·  @sindustries/ui/react  ·  pen:Q7WW3w",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: default, pulse, state:ready, state:blocked, state:editing, state:archived",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Modal/Task Card, Card",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -9080,7 +8995,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp2cat1h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9091,8 +9005,7 @@
                               "content": "CardContainer",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9101,8 +9014,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9110,45 +9022,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat1p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-card-container  ·  @sindustries/ui/react  ·  pen:mK9pR",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat1v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: column, filter",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat1f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp2cat1pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Card Conatiner",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -9176,8 +9088,7 @@
                   "content": "Form controls",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -9197,7 +9108,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -9224,7 +9134,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3r1",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -9251,7 +9160,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3r2",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -9278,7 +9186,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3r3",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -9302,12 +9209,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp3n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "kind: formControls · live demo on /design-system",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -9329,14 +9236,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9347,8 +9252,7 @@
                               "content": "Field",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9357,8 +9261,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9366,45 +9269,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-field  ·  @sindustries/ui/react",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Input Group/Default, Select Group/Default, Textarea Group/Default",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -9417,7 +9320,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3cat1h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9428,8 +9330,7 @@
                               "content": "Input",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9438,8 +9339,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9447,45 +9347,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat1p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-input  ·  @sindustries/ui/react  ·  pen:uEeaR",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat1v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat1f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat1pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Input Group/Default",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -9498,7 +9398,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3cat2h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9509,8 +9408,7 @@
                               "content": "Select",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9519,8 +9417,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9528,45 +9425,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat2p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-select  ·  @sindustries/ui/react  ·  pen:gqrFC",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat2v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat2f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat2pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Select Group/Default",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -9579,7 +9476,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3cat3h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9590,8 +9486,7 @@
                               "content": "Textarea",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9600,8 +9495,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9609,45 +9503,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat3p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-textarea  ·  @sindustries/ui/react  ·  pen:5QESV",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat3v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat3f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat3pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Textarea Group/Default",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -9660,7 +9554,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp3cat4h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9671,8 +9564,7 @@
                               "content": "SearchInput",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9681,8 +9573,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9690,45 +9581,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat4p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-search  ·  @sindustries/ui/react  ·  pen:xUnz2",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat4v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat4f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp3cat4pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: List Search Box/Filled",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -9756,8 +9647,7 @@
                   "content": "Dividers",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -9777,13 +9667,12 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp4r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp4r0p0",
+                              "type": "ref",
                               "ref": "DvDsh",
                               "name": "Divider/Dashed",
                               "width": 400,
@@ -9795,13 +9684,12 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp4r1",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp4r1p0",
+                              "type": "ref",
                               "ref": "DvSub",
                               "name": "Divider/Subtle",
                               "width": 400,
@@ -9813,12 +9701,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp4n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "kind: dividers · live demo on /design-system",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -9840,14 +9728,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp4cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -9858,8 +9744,7 @@
                               "content": "Divider",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -9868,8 +9753,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -9877,45 +9761,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp4cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-divider  ·  @sindustries/ui/react  ·  pen:DvDsh",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp4cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: subtle, dashed",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp4cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp4cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Divider/Dashed, Divider/Subtle",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -9943,8 +9827,7 @@
                   "content": "Dropdown",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -9964,13 +9847,12 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp5r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp5r0p0",
+                              "type": "ref",
                               "ref": "vsaL0",
                               "name": "Dropdown",
                               "width": 220,
@@ -9982,12 +9864,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp5n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "kind: dropdown · live demo on /design-system",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -10009,14 +9891,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp5cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10027,8 +9907,7 @@
                               "content": "Dropdown",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10037,8 +9916,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -10046,45 +9924,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-dropdown  ·  @sindustries/ui/react  ·  pen:vsaL0",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Dropdown",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -10097,7 +9975,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp5cat1h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10108,8 +9985,7 @@
                               "content": "DropdownOption",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10118,8 +9994,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -10127,45 +10002,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat1p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-dropdown__option  ·  @sindustries/ui/react",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat1v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat1f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat1pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -10178,7 +10053,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp5cat2h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10189,8 +10063,7 @@
                               "content": "DropdownDivider",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10199,8 +10072,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -10208,45 +10080,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat2p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-dropdown__divider  ·  @sindustries/ui/react",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat2v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat2f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp5cat2pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Dropdown Divider",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -10274,8 +10146,7 @@
                   "content": "Toast",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -10295,13 +10166,12 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp6r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecPulseGrp6r0p0",
+                              "type": "ref",
                               "ref": "90yrf",
                               "name": "Toast/Info",
                               "width": 640,
@@ -10313,7 +10183,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp6r1",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -10352,7 +10221,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp6r2",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
@@ -10391,12 +10259,12 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp6n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "kind: toast · live demo on /design-system",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -10418,14 +10286,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecPulseGrp6cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10436,8 +10302,7 @@
                               "content": "Toast",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10446,8 +10311,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -10455,45 +10319,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-toast  ·  @sindustries/ui/react  ·  pen:90yrf",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: Toast/Info, Toast/Success, Toast/Warning, Toast/Error",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -10506,7 +10370,6 @@
                           "type": "frame",
                           "id": "siReactSpecPulseGrp6cat1h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10517,8 +10380,7 @@
                               "content": "ToastViewport",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10527,8 +10389,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -10536,45 +10397,45 @@
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat1p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-toast-viewport  ·  @sindustries/ui/react",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat1v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat1f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecPulseGrp6cat1pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -10589,12 +10450,12 @@
     {
       "type": "frame",
       "id": "siReactSpecBrand",
+      "x": 482,
+      "y": 32,
       "name": "Brand React specimen",
       "theme": {
         "Mode": "Light"
       },
-      "x": 482,
-      "y": 32,
       "width": 960,
       "height": 1273,
       "fill": "$si-color-bg-canvas",
@@ -10624,8 +10485,7 @@
               "fontFamily": "Inter",
               "fontSize": 12,
               "fontWeight": "800",
-              "letterSpacing": 1.4,
-              "textGrowth": "auto"
+              "letterSpacing": 1.4
             },
             {
               "type": "text",
@@ -10634,8 +10494,7 @@
               "content": "Brand React specimen",
               "fontFamily": "Inter",
               "fontSize": 32,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "text",
@@ -10643,11 +10502,11 @@
               "fill": "$si-color-text-secondary",
               "textGrowth": "fixed-width",
               "width": 860,
+              "content": "Live components from @sindustries/ui/react with data-si-pack=\"brand\" — the editorial kit used by the brand site. Pill CTAs, translucent surfaces, soft glows.",
               "lineHeight": 1.3,
               "fontFamily": "Work Sans",
               "fontSize": 15,
-              "fontWeight": "normal",
-              "content": "Live components from @sindustries/ui/react with data-si-pack=\"brand\" — the editorial kit used by the brand site. Pill CTAs, translucent surfaces, soft glows."
+              "fontWeight": "normal"
             }
           ]
         },
@@ -10671,8 +10530,7 @@
               "content": "Brand components",
               "fontFamily": "Inter",
               "fontSize": 20,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             },
             {
               "type": "frame",
@@ -10694,8 +10552,7 @@
                   "content": "Brand buttons",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -10715,21 +10572,20 @@
                           "type": "frame",
                           "id": "siReactSpecBrandGrp0r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecBrandGrp0r0p0",
+                              "type": "ref",
                               "ref": "gEIRT",
                               "name": "Button/Brand/Primary",
                               "width": "fit_content",
                               "height": "fit_content"
                             },
                             {
-                              "type": "ref",
                               "id": "siReactSpecBrandGrp0r0p1",
+                              "type": "ref",
                               "ref": "irYoM",
                               "name": "Button/Brand/Outline",
                               "width": "fit_content",
@@ -10741,12 +10597,12 @@
                           "type": "text",
                           "id": "siReactSpecBrandGrp0n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "Pill CTAs — amber primary with soft glow, hairline outline that adapts to its surface via currentColor.",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -10768,14 +10624,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecBrandGrp0cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10786,8 +10640,7 @@
                               "content": "Button",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10796,8 +10649,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -10805,45 +10657,45 @@
                           "type": "text",
                           "id": "siReactSpecBrandGrp0cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-button  ·  @sindustries/ui/react  ·  pen:xBc88",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp0cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: primary, outline",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp0cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp0cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -10871,8 +10723,7 @@
                   "content": "Brand chips",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -10892,13 +10743,12 @@
                           "type": "frame",
                           "id": "siReactSpecBrandGrp1r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecBrandGrp1r0p0",
+                              "type": "ref",
                               "ref": "A7gWNi",
                               "name": "Label/Brand/Chip",
                               "width": "fit_content",
@@ -10909,26 +10759,26 @@
                               "type": "ref",
                               "ref": "A7gWNi",
                               "name": "Label/Brand/Date",
+                              "width": "fit_content",
+                              "height": "fit_content",
                               "descendants": {
                                 "lhUrW": {
                                   "content": "21 Apr 2026"
                                 }
-                              },
-                              "width": "fit_content",
-                              "height": "fit_content"
+                              }
                             },
                             {
                               "id": "siReactSpecBrandGrp1r0p2",
                               "type": "ref",
                               "ref": "A7gWNi",
                               "name": "Label/Brand/Link",
+                              "width": "fit_content",
+                              "height": "fit_content",
                               "descendants": {
                                 "lhUrW": {
                                   "content": "canonical source"
                                 }
-                              },
-                              "width": "fit_content",
-                              "height": "fit_content"
+                              }
                             }
                           ]
                         },
@@ -10936,12 +10786,12 @@
                           "type": "text",
                           "id": "siReactSpecBrandGrp1n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "Meta, topic, and link chips on translucent white. Render links with as=\"a\".",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -10963,14 +10813,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecBrandGrp1cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -10981,8 +10829,7 @@
                               "content": "Badge",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -10991,8 +10838,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -11000,45 +10846,45 @@
                           "type": "text",
                           "id": "siReactSpecBrandGrp1cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-badge  ·  @sindustries/ui/react  ·  pen:Tn1Ii",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp1cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: neutral",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp1cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp1cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -11066,8 +10912,7 @@
                   "content": "Brand cards",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "frame",
@@ -11087,13 +10932,12 @@
                           "type": "frame",
                           "id": "siReactSpecBrandGrp2r0",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecBrandGrp2r0p0",
+                              "type": "ref",
                               "ref": "hFvAx",
                               "name": "Card/Brand/Interactive",
                               "width": 360,
@@ -11105,13 +10949,12 @@
                           "type": "frame",
                           "id": "siReactSpecBrandGrp2r1",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecBrandGrp2r1p0",
+                              "type": "ref",
                               "ref": "GjmFn",
                               "name": "Card/Brand/Panel",
                               "width": 360,
@@ -11123,13 +10966,12 @@
                           "type": "frame",
                           "id": "siReactSpecBrandGrp2r2",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 12,
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ref",
                               "id": "siReactSpecBrandGrp2r2p0",
+                              "type": "ref",
                               "ref": "zYwsa",
                               "name": "Card/Brand/Ink",
                               "width": 360,
@@ -11141,12 +10983,12 @@
                           "type": "text",
                           "id": "siReactSpecBrandGrp2n",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 840,
                           "content": "Translucent editorial surface (default + interactive), opaque bone panel, and ink panel.",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 840
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -11168,14 +11010,12 @@
                           "fontFamily": "Inter",
                           "fontSize": 10,
                           "fontWeight": "800",
-                          "letterSpacing": 1.2,
-                          "textGrowth": "auto"
+                          "letterSpacing": 1.2
                         },
                         {
                           "type": "frame",
                           "id": "siReactSpecBrandGrp2cat0h",
                           "width": "fill_container",
-                          "layout": "horizontal",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -11186,8 +11026,7 @@
                               "content": "Card",
                               "fontFamily": "Inter",
                               "fontSize": 13,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             },
                             {
                               "type": "text",
@@ -11196,8 +11035,7 @@
                               "content": "IMPLEMENTED",
                               "fontFamily": "Inter",
                               "fontSize": 10,
-                              "fontWeight": "800",
-                              "textGrowth": "auto"
+                              "fontWeight": "800"
                             }
                           ]
                         },
@@ -11205,45 +11043,45 @@
                           "type": "text",
                           "id": "siReactSpecBrandGrp2cat0p",
                           "fill": "$si-color-text-muted",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": ".si-card  ·  @sindustries/ui/react  ·  pen:Q7WW3w",
                           "fontFamily": "Inter",
                           "fontSize": 11,
-                          "fontWeight": "600",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "600"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp2cat0v",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "variants: default, panel, ink",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp2cat0f",
                           "fill": "$si-color-text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "packages/ui/src/react/index.jsx",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
                           "id": "siReactSpecBrandGrp2cat0pen",
                           "fill": "$si-color-text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": 880,
                           "content": "pen: —",
                           "fontFamily": "Inter",
                           "fontSize": 10,
-                          "fontWeight": "normal",
-                          "textGrowth": "fixed-width",
-                          "width": 880
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -11275,6 +11113,8 @@
           "fill": "$si-budget-color-surface-card",
           "cornerRadius": "$si-budget-radius-panel",
           "stroke": "$si-budget-color-border-default",
+          "strokeWidth": 1,
+          "strokeAlignment": "inner",
           "layout": "vertical",
           "gap": 10,
           "padding": 22,
@@ -11302,17 +11142,15 @@
               "type": "text",
               "id": "bmTxt182",
               "fill": "$si-budget-color-text-secondary",
-              "content": "Reusable Pencil library components only. Product screens and budget-specific sample data live in product UX files.",
-              "fontFamily": "Inter",
-              "fontSize": 15,
-              "fontWeight": "500",
               "textGrowth": "fixed-width",
               "width": 860,
-              "lineHeight": 1.3
+              "content": "Reusable Pencil library components only. Product screens and budget-specific sample data live in product UX files.",
+              "lineHeight": 1.3,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "500"
             }
-          ],
-          "strokeWidth": 1,
-          "strokeAlignment": "inner"
+          ]
         },
         {
           "type": "frame",
@@ -11321,6 +11159,8 @@
           "fill": "$si-budget-color-surface-elevated",
           "cornerRadius": "$si-radius-lg",
           "stroke": "$si-budget-color-border-subtle",
+          "strokeWidth": 1,
+          "strokeAlignment": "inner",
           "layout": "vertical",
           "gap": 14,
           "padding": 18,
@@ -11341,6 +11181,8 @@
               "fill": "$si-budget-color-surface-card",
               "cornerRadius": "$si-budget-radius-panel",
               "stroke": "$si-budget-color-border-default",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
               "layout": "vertical",
               "gap": 10,
               "padding": 14,
@@ -11365,45 +11207,44 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenButtonsRow0",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenButtonsBack",
+                          "type": "ref",
                           "ref": "budgetIconButtonBack",
                           "name": "Mobile/IconButton Back",
                           "width": "fit_content",
                           "height": "fit_content"
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenButtonsMore",
+                          "type": "ref",
                           "ref": "budgetIconButtonMore",
                           "name": "Mobile/IconButton More",
                           "width": "fit_content",
                           "height": "fit_content"
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenButtonsDelete",
+                          "type": "ref",
                           "ref": "budgetIconButtonDelete",
                           "name": "Mobile/IconButton Delete",
                           "width": "fit_content",
                           "height": "fit_content"
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenButtonsAdd",
+                          "type": "ref",
                           "ref": "budgetIconButtonAdd",
                           "name": "Mobile/IconButton Add",
                           "width": "fit_content",
                           "height": "fit_content"
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenButtonsChart",
+                          "type": "ref",
                           "ref": "budgetIconButtonChart",
                           "name": "Mobile/IconButton Chart",
                           "width": "fit_content",
@@ -11417,16 +11258,14 @@
                   "type": "text",
                   "id": "budgetMobileSpecimenButtonsNote",
                   "fill": "$si-budget-color-text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 840,
                   "content": "Icon-only mobile actions.",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "fixed-width",
-                  "width": 840
+                  "fontWeight": "500"
                 }
-              ],
-              "strokeWidth": 1,
-              "strokeAlignment": "inner"
+              ]
             },
             {
               "type": "frame",
@@ -11435,6 +11274,8 @@
               "fill": "$si-budget-color-surface-card",
               "cornerRadius": "$si-budget-radius-panel",
               "stroke": "$si-budget-color-border-default",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
               "layout": "vertical",
               "gap": 10,
               "padding": 14,
@@ -11459,25 +11300,28 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenNavigationRow0",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenHeaderRef",
+                          "type": "ref",
                           "ref": "budgetMobileHeader",
                           "name": "Mobile/Header",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 0,
+                          "y": 9.5
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenTabsRef",
+                          "type": "ref",
                           "ref": "budgetPillTabBar",
                           "name": "Mobile/PillTabBar",
-                          "width": "fit_content(0)",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": 62
                         }
                       ]
                     }
@@ -11487,16 +11331,14 @@
                   "type": "text",
                   "id": "budgetMobileSpecimenNavigationNote",
                   "fill": "$si-budget-color-text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 840,
                   "content": "Top bars and segmented navigation with placeholder labels.",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "fixed-width",
-                  "width": 840
+                  "fontWeight": "500"
                 }
-              ],
-              "strokeWidth": 1,
-              "strokeAlignment": "inner"
+              ]
             },
             {
               "type": "frame",
@@ -11505,6 +11347,8 @@
               "fill": "$si-budget-color-surface-card",
               "cornerRadius": "$si-budget-radius-panel",
               "stroke": "$si-budget-color-border-default",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
               "layout": "vertical",
               "gap": 10,
               "padding": 14,
@@ -11529,24 +11373,23 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenIndicatorsRow0",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenPeriodRef",
+                          "type": "ref",
                           "ref": "budgetPeriodSelector",
                           "name": "Mobile/SegmentedSelector",
-                          "width": "fit_content(0)",
+                          "width": 250,
                           "height": "fit_content"
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenBarsRef",
+                          "type": "ref",
                           "ref": "budgetStackedCategoryBars",
                           "name": "Mobile/StackedBars",
-                          "width": "fit_content(0)",
+                          "width": 354,
                           "height": "fit_content"
                         }
                       ]
@@ -11557,16 +11400,14 @@
                   "type": "text",
                   "id": "budgetMobileSpecimenIndicatorsNote",
                   "fill": "$si-budget-color-text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 840,
                   "content": "Small state and chart indicators without product data.",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "fixed-width",
-                  "width": 840
+                  "fontWeight": "500"
                 }
-              ],
-              "strokeWidth": 1,
-              "strokeAlignment": "inner"
+              ]
             },
             {
               "type": "frame",
@@ -11575,6 +11416,8 @@
               "fill": "$si-budget-color-surface-card",
               "cornerRadius": "$si-budget-radius-panel",
               "stroke": "$si-budget-color-border-default",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
               "layout": "vertical",
               "gap": 10,
               "padding": 14,
@@ -11599,25 +11442,32 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenCardsRow0",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenCardRowRef",
+                          "type": "ref",
                           "ref": "budgetAccountCardRow",
                           "name": "Mobile/PrimaryRow",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 0,
+                          "y": 0
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenDataRowRef",
+                          "type": "ref",
                           "ref": "budgetTransactionRow",
                           "name": "Mobile/DataRow",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 366,
+                          "y": 0
                         }
                       ]
                     },
@@ -11625,25 +11475,28 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenCardsRow1",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenMetricRef",
+                          "type": "ref",
                           "ref": "budgetMetricPanel",
                           "name": "Mobile/MetricPanel",
-                          "width": "fit_content(0)",
+                          "width": 354,
                           "height": "fit_content"
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenChartRef",
+                          "type": "ref",
                           "ref": "budgetBalanceAreaChart",
                           "name": "Mobile/ChartPanel",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 366,
+                          "y": 0
                         }
                       ]
                     }
@@ -11653,16 +11506,14 @@
                   "type": "text",
                   "id": "budgetMobileSpecimenCardsNote",
                   "fill": "$si-budget-color-text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 840,
                   "content": "Four reusable card-style variants max: primary row, data row, panel, and chart panel.",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "fixed-width",
-                  "width": 840
+                  "fontWeight": "500"
                 }
-              ],
-              "strokeWidth": 1,
-              "strokeAlignment": "inner"
+              ]
             },
             {
               "type": "frame",
@@ -11671,6 +11522,8 @@
               "fill": "$si-budget-color-surface-card",
               "cornerRadius": "$si-budget-radius-panel",
               "stroke": "$si-budget-color-border-default",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
               "layout": "vertical",
               "gap": 10,
               "padding": 14,
@@ -11695,25 +11548,32 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenRowsRow0",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenSummaryRef",
+                          "type": "ref",
                           "ref": "budgetCategorySummaryRow",
                           "name": "Mobile/SummaryRow",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 0,
+                          "y": 0
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenOptionRef",
+                          "type": "ref",
                           "ref": "budgetCategoryOptionRow",
                           "name": "Mobile/OptionRow",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 366,
+                          "y": 7
                         }
                       ]
                     },
@@ -11721,25 +11581,42 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenRowsRow1",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenToggleRef",
+                          "type": "ref",
                           "ref": "budgetToggleRow",
                           "name": "Mobile/ToggleRow",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 0,
+                          "y": 124
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenEditorRef",
+                          "type": "ref",
                           "ref": "budgetInlineAlertEditor",
                           "name": "Mobile/InlineEditor",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 354,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 366,
+                          "y": 0,
+                          "descendants": {
+                            "bmRef085": {
+                              "flipX": false,
+                              "flipY": false,
+                              "width": 232,
+                              "height": "fit_content",
+                              "x": 16,
+                              "y": 176
+                            }
+                          }
                         }
                       ]
                     }
@@ -11749,16 +11626,14 @@
                   "type": "text",
                   "id": "budgetMobileSpecimenRowsControlsNote",
                   "fill": "$si-budget-color-text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 840,
                   "content": "Reusable rows and compact controls with placeholder content.",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "fixed-width",
-                  "width": 840
+                  "fontWeight": "500"
                 }
-              ],
-              "strokeWidth": 1,
-              "strokeAlignment": "inner"
+              ]
             },
             {
               "type": "frame",
@@ -11767,6 +11642,8 @@
               "fill": "$si-budget-color-surface-card",
               "cornerRadius": "$si-budget-radius-panel",
               "stroke": "$si-budget-color-border-default",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
               "layout": "vertical",
               "gap": 10,
               "padding": 14,
@@ -11791,24 +11668,27 @@
                       "type": "frame",
                       "id": "budgetMobileSpecimenDialogsRow0",
                       "width": "fill_container",
-                      "layout": "horizontal",
                       "gap": 12,
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenSheetRef",
+                          "type": "ref",
                           "ref": "budgetBottomSheet",
                           "name": "Mobile/BottomSheet",
-                          "width": "fit_content",
-                          "height": "fit_content"
+                          "width": 390,
+                          "height": "fit_content",
+                          "flipX": false,
+                          "flipY": false,
+                          "x": 0,
+                          "y": 12
                         },
                         {
-                          "type": "ref",
                           "id": "budgetMobileSpecimenNativeDialogRef",
+                          "type": "ref",
                           "ref": "budgetNativeConfirmDialogAdapter",
                           "name": "Mobile/NativeConfirmDialogAdapter",
-                          "width": "fit_content(0)",
+                          "width": 270,
                           "height": "fit_content"
                         }
                       ]
@@ -11819,23 +11699,18 @@
                   "type": "text",
                   "id": "budgetMobileSpecimenDialogsNote",
                   "fill": "$si-budget-color-text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 840,
                   "content": "Dialog specimens stay generic; bottom sheet contains only drag affordance and Cancel/Save actions.",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "fixed-width",
-                  "width": 840
+                  "fontWeight": "500"
                 }
-              ],
-              "strokeWidth": 1,
-              "strokeAlignment": "inner"
+              ]
             }
-          ],
-          "strokeWidth": 1,
-          "strokeAlignment": "inner"
+          ]
         }
-      ],
-      "height": 1680
+      ]
     }
   ],
   "themes": {
