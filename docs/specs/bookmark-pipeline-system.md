@@ -1,7 +1,7 @@
 # System Spec — Bookmark Pipeline
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-06-14
+**Last updated:** 2026-06-23
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmark/`
 
 ---
@@ -50,6 +50,7 @@ ingested  summarized  needs_research (human-gated)                      declined
   - Sets `reviewStatus: spec_requested` if no spec exists (queues for Quinn heartbeat)
 - **Heartbeat step** (Quinn) picks up `spec_requested` items via `list_spec_requests.py`, writes spec markdown to `brain/bookmarks/specs/<slug>-<key>.md`, then calls `validate_spec_output.py`
 - `validate_spec_output.py` transitions item to `spec_created` and logs the transition
+- `list_spec_requests.py` guards against state drift: items with `approvalStatus=approved` AND non-empty `taskIds` are skipped even if `reviewStatus` is still `spec_requested`. This is a read-only guard — it does not write state. **Side effect:** once a bookmark has been approved and tasked, it will not receive a secondary spec dispatch even if re-curated with a high score. This is intentional.
 
 ### 5. Approval
 - **Lobster cron:** `bookmark-review-lobster.md` (runs `run_bookmark_review_cron.py`)
@@ -112,7 +113,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `validate_curate_output.py` | Curate | heartbeat | Applies Quinn's curation verdict to state |
 | `lobster_list_curations.py` | Spec | review lobster | Routes high-score curated items into the pipeline |
 | `lobster_generate_specs.py` | Spec | review lobster | Reuses existing spec files or sets `spec_requested` |
-| `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write |
+| `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write; skips items where `approvalStatus=approved` AND `taskIds` non-empty (drift guard, read-only) |
 | `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
 | `lobster_request_spec_approval.py` | Approval | review lobster | Prepares packages, finalizes non-approval items, compacts payload, and pauses for approval gate |
 | `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in bookmark-curate skill) |
@@ -159,5 +160,6 @@ If a spec's topic isn't in the config, falls back to `general`. If `general` is 
 |---|---|---|
 | Approval never sent | `specDocs` empty or item in terminal status | Check `approvalLocks` in state; verify spec file exists on disk |
 | Spec never written | Item has no `spec_requested` status or `list_spec_requests.py` skipped it | Check item's `reviewStatus` and `curation` field in state |
+| Spec not dispatched for re-curated item | Item was previously approved+tasked; `list_spec_requests.py` drift guard skips it permanently | By design — tasked bookmarks don't re-enter spec dispatch. If a genuinely new spec angle is needed, create a new bookmark or task manually. |
 | Curation not refreshing | `recurationDays` not elapsed or item in terminal status | Check `focus-config.json`, lower `recurationDays` or manually clear `item.curation` |
 | Lobster exits 137 | OOM during lobster run | Check available memory; lobster may need to be run with a lower batch `limit` arg |
