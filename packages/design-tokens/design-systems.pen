@@ -8935,7 +8935,7 @@
                                   "children": [
                                     {
                                       "type": "text",
-                                      "id": "ldPAv",
+                                      "id": "siReactSpecPulseGrp2r0p0_ldPAv",
                                       "name": "Title",
                                       "fill": "$si-color-text-primary",
                                       "textGrowth": "fixed-width",
@@ -8960,13 +8960,13 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "tTagsFZ",
+                                      "id": "siReactSpecPulseGrp2r0p0_tTagsFZ",
                                       "name": "Tags",
                                       "gap": 6,
                                       "alignItems": "center",
                                       "children": [
                                         {
-                                          "id": "D5pbDe",
+                                          "id": "siReactSpecPulseGrp2r0p0_D5pbDe",
                                           "type": "ref",
                                           "ref": "Tn1Ii",
                                           "name": "Label/Priority",
@@ -8974,7 +8974,7 @@
                                           "height": "fit_content"
                                         },
                                         {
-                                          "id": "tTag1",
+                                          "id": "siReactSpecPulseGrp2r0p0_tTag1",
                                           "type": "ref",
                                           "ref": "LbTag",
                                           "width": "fit_content",
@@ -8986,7 +8986,7 @@
                                           }
                                         },
                                         {
-                                          "id": "tTag2",
+                                          "id": "siReactSpecPulseGrp2r0p0_tTag2",
                                           "type": "ref",
                                           "ref": "LbTag",
                                           "width": "fit_content",
@@ -9001,13 +9001,13 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "tMetaFZ",
+                                      "id": "siReactSpecPulseGrp2r0p0_tMetaFZ",
                                       "name": "Meta",
                                       "gap": 10,
                                       "alignItems": "center",
                                       "children": [
                                         {
-                                          "id": "pWNr0",
+                                          "id": "siReactSpecPulseGrp2r0p0_pWNr0",
                                           "type": "ref",
                                           "ref": "AvPul",
                                           "name": "Avatar/Pulse",
@@ -9016,7 +9016,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "ihLoF",
+                                          "id": "siReactSpecPulseGrp2r0p0_ihLoF",
                                           "name": "Date",
                                           "fill": "$si-color-text-muted",
                                           "content": "2026-03-07",
