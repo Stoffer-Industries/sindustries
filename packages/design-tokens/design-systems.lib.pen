@@ -4,14 +4,14 @@
     {
       "type": "frame",
       "id": "vtHps",
-      "x": 1524,
-      "y": 22,
+      "x": 2689,
+      "y": 32,
       "name": "design system components",
       "theme": {
         "Mode": "Light"
       },
       "clip": true,
-      "width": 3874,
+      "width": 5086,
       "height": 6581,
       "fill": "$si-color-bg-canvas",
       "cornerRadius": 28,
@@ -4843,8 +4843,8 @@
           "type": "ref",
           "reusable": true,
           "ref": "xUnz2",
-          "x": 72,
-          "y": 2520,
+          "x": 1070,
+          "y": 2452,
           "name": "List Search Box/Specimen",
           "width": 260,
           "height": "fit_content",
@@ -4860,8 +4860,8 @@
         {
           "type": "frame",
           "id": "DvDsh",
-          "x": 72,
-          "y": 2650,
+          "x": 312,
+          "y": 1493,
           "name": "Divider/Dashed",
           "reusable": true,
           "width": 400,
@@ -5130,111 +5130,20 @@
         },
         {
           "type": "frame",
-          "id": "budgetMobileScreen",
-          "name": "Budget/BudgetScreen",
-          "reusable": true,
-          "x": 2200,
-          "y": 3500,
-          "width": 390,
-          "height": 844,
-          "fill": "$si-budget-color-surface-app",
-          "cornerRadius": "$si-budget-radius-screen",
-          "layout": "vertical",
-          "gap": 18,
-          "padding": [
-            20,
-            18
-          ],
-          "children": [
-            {
-              "type": "frame",
-              "id": "bmFrm003",
-              "width": "fill_container",
-              "height": 36,
-              "layout": "horizontal",
-              "justifyContent": "space-between",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "text",
-                  "id": "bmTxt001",
-                  "fill": "$si-budget-color-text-primary",
-                  "content": "9:41",
-                  "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "700",
-                  "textGrowth": "auto"
-                },
-                {
-                  "type": "text",
-                  "id": "bmTxt002",
-                  "fill": "$si-budget-color-text-muted",
-                  "content": "LTE 100%",
-                  "fontFamily": "Inter",
-                  "fontSize": 11,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
-                }
-              ]
-            },
-            {
-              "type": "ref",
-              "id": "bmRef004",
-              "ref": "budgetMobileHeader",
-              "name": "Budget/BudgetHeader",
-              "width": "fill_container",
-              "height": "fit_content"
-            },
-            {
-              "type": "ref",
-              "id": "bmRef005",
-              "ref": "budgetAccountCardRow",
-              "name": "Budget/AccountCardRow",
-              "width": "fill_container",
-              "height": "fit_content"
-            },
-            {
-              "type": "ref",
-              "id": "bmRef006",
-              "ref": "budgetMetricPanel",
-              "name": "Budget/MetricPanel",
-              "width": "fill_container",
-              "height": "fit_content"
-            },
-            {
-              "type": "frame",
-              "id": "bmFrm007",
-              "width": "fill_container",
-              "height": "fill_container",
-              "children": []
-            },
-            {
-              "type": "ref",
-              "id": "bmRef008",
-              "ref": "budgetPillTabBar",
-              "name": "Budget/PillTabBar",
-              "width": "fill_container",
-              "height": "fit_content"
-            }
-          ]
-        },
-        {
-          "type": "frame",
           "id": "budgetMobileHeader",
-          "name": "Budget/BudgetHeader",
+          "x": 3842,
+          "y": 314,
+          "name": "Mobile/Header",
           "reusable": true,
-          "x": 2640,
-          "y": 3500,
           "width": 354,
-          "layout": "horizontal",
           "gap": 8,
           "alignItems": "center",
           "children": [
             {
-              "type": "ref",
               "id": "bmRef009",
+              "type": "ref",
               "ref": "budgetIconButtonBack",
-              "name": "Budget/IconButton Back",
+              "name": "Mobile/IconButton Back",
               "width": "fit_content",
               "height": "fit_content"
             },
@@ -5250,31 +5159,29 @@
                   "type": "text",
                   "id": "bmTxt010",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Budget",
+                  "content": "Title",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 21,
-                  "fontWeight": "800",
-                  "textGrowth": "auto",
-                  "textAlign": "center"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt011",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Everyday accounts",
+                  "content": "Subtitle",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto",
-                  "textAlign": "center"
+                  "fontWeight": "600"
                 }
               ]
             },
             {
-              "type": "ref",
               "id": "bmRef013",
+              "type": "ref",
               "ref": "budgetIconButtonMore",
-              "name": "Budget/IconButton More",
+              "name": "Mobile/IconButton More",
               "width": "fit_content",
               "height": "fit_content"
             }
@@ -5283,19 +5190,14 @@
         {
           "type": "frame",
           "id": "budgetIconButtonBack",
-          "name": "Budget/IconButton Back",
+          "x": 4019,
+          "y": 187,
+          "name": "Mobile/IconButton Back",
           "reusable": true,
-          "x": 3080,
-          "y": 3500,
           "width": 44,
           "height": 44,
           "fill": "$si-budget-color-surface-elevated",
           "cornerRadius": "$si-budget-radius-button",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "justifyContent": "center",
           "alignItems": "center",
@@ -5305,30 +5207,24 @@
               "id": "bmTxt014",
               "fill": "$si-budget-color-text-primary",
               "content": "‹",
+              "textAlign": "center",
               "fontFamily": "Inter",
               "fontSize": 22,
-              "fontWeight": "800",
-              "textGrowth": "auto",
-              "textAlign": "center"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetIconButtonMore",
-          "name": "Budget/IconButton More",
+          "x": 4110,
+          "y": 190,
+          "name": "Mobile/IconButton More",
           "reusable": true,
-          "x": 3520,
-          "y": 3500,
           "width": 44,
           "height": 44,
           "fill": "$si-budget-color-surface-elevated",
           "cornerRadius": "$si-budget-radius-button",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "justifyContent": "center",
           "alignItems": "center",
@@ -5338,30 +5234,24 @@
               "id": "bmTxt015",
               "fill": "$si-budget-color-text-primary",
               "content": "...",
+              "textAlign": "center",
               "fontFamily": "Inter",
               "fontSize": 22,
-              "fontWeight": "800",
-              "textGrowth": "auto",
-              "textAlign": "center"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetIconButtonDelete",
-          "name": "Budget/IconButton Delete",
+          "x": 3842,
+          "y": 184,
+          "name": "Mobile/IconButton Delete",
           "reusable": true,
-          "x": 2200,
-          "y": 4020,
           "width": 44,
           "height": 44,
           "fill": "$si-budget-color-surface-elevated",
           "cornerRadius": "$si-budget-radius-button",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "justifyContent": "center",
           "alignItems": "center",
@@ -5371,30 +5261,24 @@
               "id": "bmTxt016",
               "fill": "$si-budget-color-text-primary",
               "content": "×",
+              "textAlign": "center",
               "fontFamily": "Inter",
               "fontSize": 22,
-              "fontWeight": "800",
-              "textGrowth": "auto",
-              "textAlign": "center"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetIconButtonAdd",
-          "name": "Budget/IconButton Add",
+          "x": 3928,
+          "y": 184,
+          "name": "Mobile/IconButton Add",
           "reusable": true,
-          "x": 2640,
-          "y": 4020,
           "width": 44,
           "height": 44,
           "fill": "$si-budget-color-surface-elevated",
           "cornerRadius": "$si-budget-radius-button",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "justifyContent": "center",
           "alignItems": "center",
@@ -5404,30 +5288,24 @@
               "id": "bmTxt017",
               "fill": "$si-budget-color-text-primary",
               "content": "+",
+              "textAlign": "center",
               "fontFamily": "Inter",
               "fontSize": 22,
-              "fontWeight": "800",
-              "textGrowth": "auto",
-              "textAlign": "center"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetIconButtonChart",
-          "name": "Budget/IconButton Chart",
+          "x": 4196,
+          "y": 194,
+          "name": "Mobile/IconButton Chart",
           "reusable": true,
-          "x": 3080,
-          "y": 4020,
           "width": 44,
           "height": 44,
           "fill": "$si-budget-color-surface-elevated",
           "cornerRadius": "$si-budget-radius-button",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "justifyContent": "center",
           "alignItems": "center",
@@ -5437,31 +5315,24 @@
               "id": "bmTxt018",
               "fill": "$si-budget-color-text-primary",
               "content": "⌁",
+              "textAlign": "center",
               "fontFamily": "Inter",
               "fontSize": 22,
-              "fontWeight": "800",
-              "textGrowth": "auto",
-              "textAlign": "center"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetPillTabBar",
-          "name": "Budget/PillTabBar",
+          "x": 3909,
+          "y": 968,
+          "name": "Mobile/PillTabBar",
           "reusable": true,
-          "x": 3520,
-          "y": 4020,
           "width": 354,
           "height": 62,
           "fill": "$si-budget-color-surface-card",
           "cornerRadius": "$si-budget-radius-nav",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
-          "layout": "horizontal",
           "gap": 4,
           "padding": 4,
           "children": [
@@ -5480,11 +5351,10 @@
                   "type": "text",
                   "id": "bmTxt019",
                   "fill": "$si-budget-color-text-inverse",
-                  "content": "HOME",
+                  "content": "TAB ONE",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5502,11 +5372,10 @@
                   "type": "text",
                   "id": "bmTxt021",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "INSIGHTS",
+                  "content": "TAB TWO",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5524,11 +5393,10 @@
                   "type": "text",
                   "id": "bmTxt023",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "SETTINGS",
+                  "content": "TAB THREE",
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             }
@@ -5537,19 +5405,13 @@
         {
           "type": "frame",
           "id": "budgetAccountCardRow",
-          "name": "Budget/AccountCardRow",
+          "x": 3812,
+          "y": 3741,
+          "name": "Mobile/PrimaryRow",
           "reusable": true,
-          "x": 2200,
-          "y": 4540,
           "width": 354,
           "fill": "$si-budget-color-surface-row",
           "cornerRadius": "$si-budget-radius-row",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
-          "layout": "horizontal",
           "gap": 12,
           "padding": 12,
           "alignItems": "center",
@@ -5569,11 +5431,10 @@
                   "type": "text",
                   "id": "bmTxt025",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "V",
+                  "content": "A",
                   "fontFamily": "Inter",
                   "fontSize": 18,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5588,21 +5449,19 @@
                   "type": "text",
                   "id": "bmTxt027",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Visa Everyday",
+                  "content": "Primary row label",
                   "fontFamily": "Inter",
                   "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt028",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Updated 2 min ago",
+                  "content": "Supporting text",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 }
               ]
             },
@@ -5610,30 +5469,23 @@
               "type": "text",
               "id": "bmTxt030",
               "fill": "$si-budget-color-text-primary",
-              "content": "$4,280.40",
+              "content": "Value",
               "fontFamily": "Inter",
               "fontSize": 15,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetTransactionRow",
-          "name": "Budget/TransactionRow",
+          "x": 3812,
+          "y": 3857,
+          "name": "Mobile/DataRow",
           "reusable": true,
-          "x": 2640,
-          "y": 4540,
           "width": 354,
           "fill": "$si-budget-color-surface-row",
           "cornerRadius": "$si-budget-radius-row",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
-          "layout": "horizontal",
           "gap": 12,
           "padding": 12,
           "alignItems": "center",
@@ -5653,11 +5505,10 @@
                   "type": "text",
                   "id": "bmTxt031",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "S",
+                  "content": "B",
                   "fontFamily": "Inter",
                   "fontSize": 18,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5672,51 +5523,43 @@
                   "type": "text",
                   "id": "bmTxt033",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Supermarket",
+                  "content": "Secondary row label",
                   "fontFamily": "Inter",
                   "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt034",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Groceries · Today",
+                  "content": "Supporting text",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 }
               ]
             },
             {
               "type": "text",
               "id": "bmTxt036",
-              "fill": "$si-budget-color-status-danger",
-              "content": "-$82.40",
+              "fill": "$si-budget-color-text-primary",
+              "content": "Value",
               "fontFamily": "Inter",
               "fontSize": 15,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetMetricPanel",
-          "name": "Budget/MetricPanel",
+          "x": 3812,
+          "y": 3468,
+          "name": "Mobile/MetricPanel",
           "reusable": true,
-          "x": 3080,
-          "y": 4540,
           "width": 354,
           "fill": "$si-budget-color-surface-card",
           "cornerRadius": "$si-budget-radius-panel",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "gap": 12,
           "padding": 16,
@@ -5732,22 +5575,20 @@
                   "type": "text",
                   "id": "bmTxt037",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Balance history",
+                  "content": "Panel title",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt038",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Reusable dark panel for charts and summaries",
+                  "content": "Optional supporting text",
+                  "lineHeight": 1.35,
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "auto",
-                  "lineHeight": 1.35
+                  "fontWeight": "500"
                 }
               ]
             },
@@ -5768,8 +5609,7 @@
                   "width": "fill_container",
                   "height": 64,
                   "fill": "$si-budget-color-chart-income-fill",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-panel"
                 },
                 {
                   "type": "frame",
@@ -5777,17 +5617,15 @@
                   "width": "fill_container",
                   "height": 3,
                   "fill": "$si-budget-color-chart-income-line",
-                  "cornerRadius": "$si-budget-radius-bar-xs",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar-xs"
                 },
                 {
                   "type": "frame",
                   "id": "bmFrm042",
-                  "width": "70%",
+                  "width": "fit_content(0)",
                   "height": 2,
                   "fill": "$si-budget-color-status-danger",
-                  "cornerRadius": "$si-budget-radius-bar-xs",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar-xs"
                 }
               ]
             }
@@ -5796,14 +5634,13 @@
         {
           "type": "frame",
           "id": "budgetPeriodSelector",
-          "name": "Budget/PeriodSelector",
+          "x": 3989,
+          "y": 2612,
+          "name": "Mobile/SegmentedSelector",
           "reusable": true,
-          "x": 3520,
-          "y": 4540,
           "width": 250,
           "fill": "$si-budget-color-surface-inset",
           "cornerRadius": "$si-budget-radius-chip",
-          "layout": "horizontal",
           "gap": 4,
           "padding": 4,
           "children": [
@@ -5821,11 +5658,10 @@
                   "type": "text",
                   "id": "bmTxt044",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "1W",
+                  "content": "A",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5844,11 +5680,10 @@
                   "type": "text",
                   "id": "bmTxt046",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "1M",
+                  "content": "B",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5866,11 +5701,10 @@
                   "type": "text",
                   "id": "bmTxt048",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "3M",
+                  "content": "C",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5888,11 +5722,10 @@
                   "type": "text",
                   "id": "bmTxt050",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "1Y",
+                  "content": "D",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
@@ -5910,11 +5743,10 @@
                   "type": "text",
                   "id": "bmTxt052",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "ALL",
+                  "content": "E",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             }
@@ -5923,28 +5755,23 @@
         {
           "type": "frame",
           "id": "budgetBalanceAreaChart",
-          "name": "Budget/BalanceAreaChart",
+          "x": 4634,
+          "y": 3468,
+          "name": "Mobile/ChartPanel",
           "reusable": true,
-          "x": 2200,
-          "y": 5060,
           "width": 354,
           "fill": "$si-budget-color-surface-card",
           "cornerRadius": "$si-budget-radius-panel",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "gap": 10,
           "padding": 16,
           "children": [
             {
-              "type": "ref",
               "id": "bmRef054",
+              "type": "ref",
               "ref": "budgetPeriodSelector",
-              "name": "Budget/PeriodSelector",
-              "width": "fit_content",
+              "name": "Mobile/SegmentedSelector",
+              "width": "fit_content(0)",
               "height": "fit_content"
             },
             {
@@ -5964,8 +5791,7 @@
                   "width": "fill_container",
                   "height": 64,
                   "fill": "$si-budget-color-chart-income-fill",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-panel"
                 },
                 {
                   "type": "frame",
@@ -5973,17 +5799,15 @@
                   "width": "fill_container",
                   "height": 3,
                   "fill": "$si-budget-color-chart-income-line",
-                  "cornerRadius": "$si-budget-radius-bar-xs",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar-xs"
                 },
                 {
                   "type": "frame",
                   "id": "bmFrm057",
-                  "width": "70%",
+                  "width": "fit_content(0)",
                   "height": 2,
                   "fill": "$si-budget-color-status-danger",
-                  "cornerRadius": "$si-budget-radius-bar-xs",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar-xs"
                 }
               ]
             }
@@ -5992,18 +5816,13 @@
         {
           "type": "frame",
           "id": "budgetStackedCategoryBars",
-          "name": "Budget/StackedCategoryBars",
+          "x": 4221,
+          "y": 3468,
+          "name": "Mobile/StackedBars",
           "reusable": true,
-          "x": 2640,
-          "y": 5060,
           "width": 354,
           "fill": "$si-budget-color-surface-card",
           "cornerRadius": "$si-budget-radius-panel",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "gap": 12,
           "padding": 16,
@@ -6019,22 +5838,20 @@
                   "type": "text",
                   "id": "bmTxt059",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Weekly spending",
+                  "content": "Segment group",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt060",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Stacked category segments",
+                  "content": "Stacked indicator segments",
+                  "lineHeight": 1.35,
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "auto",
-                  "lineHeight": 1.35
+                  "fontWeight": "500"
                 }
               ]
             },
@@ -6045,10 +5862,8 @@
               "height": 150,
               "fill": "$si-budget-color-surface-inset",
               "cornerRadius": "$si-budget-radius-panel",
-              "layout": "horizontal",
               "gap": 10,
               "padding": 14,
-              "alignItems": "flex-end",
               "children": [
                 {
                   "type": "frame",
@@ -6056,8 +5871,7 @@
                   "width": "fill_container",
                   "height": 62,
                   "fill": "$si-budget-color-category-groceries",
-                  "cornerRadius": "$si-budget-radius-bar",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar"
                 },
                 {
                   "type": "frame",
@@ -6065,8 +5879,7 @@
                   "width": "fill_container",
                   "height": 92,
                   "fill": "$si-budget-color-category-subscriptions",
-                  "cornerRadius": "$si-budget-radius-bar",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar"
                 },
                 {
                   "type": "frame",
@@ -6074,8 +5887,7 @@
                   "width": "fill_container",
                   "height": 48,
                   "fill": "$si-budget-color-category-transport",
-                  "cornerRadius": "$si-budget-radius-bar",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar"
                 },
                 {
                   "type": "frame",
@@ -6083,8 +5895,7 @@
                   "width": "fill_container",
                   "height": 118,
                   "fill": "$si-budget-color-category-dining",
-                  "cornerRadius": "$si-budget-radius-bar",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar"
                 },
                 {
                   "type": "frame",
@@ -6092,8 +5903,7 @@
                   "width": "fill_container",
                   "height": 78,
                   "fill": "$si-budget-color-category-other",
-                  "cornerRadius": "$si-budget-radius-bar",
-                  "children": []
+                  "cornerRadius": "$si-budget-radius-bar"
                 }
               ]
             }
@@ -6102,19 +5912,13 @@
         {
           "type": "frame",
           "id": "budgetCategorySummaryRow",
-          "name": "Budget/CategorySummaryRow",
+          "x": 4221,
+          "y": 3739,
+          "name": "Mobile/SummaryRow",
           "reusable": true,
-          "x": 3080,
-          "y": 5060,
           "width": 354,
           "fill": "$si-budget-color-surface-row",
           "cornerRadius": "$si-budget-radius-row",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
-          "layout": "horizontal",
           "gap": 12,
           "padding": 12,
           "alignItems": "center",
@@ -6125,8 +5929,7 @@
               "width": 12,
               "height": 12,
               "fill": "$si-budget-color-category-groceries",
-              "cornerRadius": 6,
-              "children": []
+              "cornerRadius": 6
             },
             {
               "type": "frame",
@@ -6139,21 +5942,19 @@
                   "type": "text",
                   "id": "bmTxt069",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Groceries",
+                  "content": "Row label",
                   "fontFamily": "Inter",
                   "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt070",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "12 transactions · 38%",
+                  "content": "Supporting text",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 },
                 {
                   "type": "frame",
@@ -6166,11 +5967,10 @@
                     {
                       "type": "frame",
                       "id": "bmFrm071",
-                      "width": "60%",
+                      "width": "fit_content(0)",
                       "height": 7,
                       "fill": "$si-budget-color-category-groceries",
-                      "cornerRadius": "$si-budget-radius-progress",
-                      "children": []
+                      "cornerRadius": "$si-budget-radius-progress"
                     }
                   ]
                 }
@@ -6180,29 +5980,23 @@
               "type": "text",
               "id": "bmTxt074",
               "fill": "$si-budget-color-text-primary",
-              "content": "$428",
+              "content": "Value",
               "fontFamily": "Inter",
               "fontSize": 15,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetInlineAlertEditor",
-          "name": "Budget/InlineAlertEditor",
+          "x": 4607,
+          "y": 4456,
+          "name": "Mobile/InlineEditor",
           "reusable": true,
-          "x": 3520,
-          "y": 5060,
           "width": 354,
           "fill": "$si-budget-color-surface-card",
           "cornerRadius": "$si-budget-radius-panel",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-default"
-          },
           "layout": "vertical",
           "gap": 12,
           "padding": 16,
@@ -6218,22 +6012,20 @@
                   "type": "text",
                   "id": "bmTxt075",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Balance alert",
+                  "content": "Inline editor",
                   "fontFamily": "Inter",
                   "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt076",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Create threshold notifications inline",
+                  "content": "Optional supporting text",
+                  "lineHeight": 1.35,
                   "fontFamily": "Inter",
                   "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "auto",
-                  "lineHeight": 1.35
+                  "fontWeight": "500"
                 }
               ]
             },
@@ -6241,7 +6033,6 @@
               "type": "frame",
               "id": "bmFrm082",
               "width": "fill_container",
-              "layout": "horizontal",
               "gap": 8,
               "children": [
                 {
@@ -6259,11 +6050,10 @@
                       "type": "text",
                       "id": "bmTxt078",
                       "fill": "$si-budget-color-text-primary",
-                      "content": "More than",
+                      "content": "Option A",
                       "fontFamily": "Inter",
                       "fontSize": 12,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
@@ -6282,11 +6072,10 @@
                       "type": "text",
                       "id": "bmTxt080",
                       "fill": "$si-budget-color-text-muted",
-                      "content": "Less than",
+                      "content": "Option B",
                       "fontFamily": "Inter",
                       "fontSize": 12,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 }
@@ -6299,11 +6088,6 @@
               "height": 50,
               "fill": "$si-budget-color-surface-inset",
               "cornerRadius": "$si-budget-radius-card-sm",
-              "stroke": {
-                "align": "inside",
-                "thickness": 1,
-                "fill": "$si-budget-color-border-default"
-              },
               "layout": "vertical",
               "padding": [
                 0,
@@ -6315,19 +6099,18 @@
                   "type": "text",
                   "id": "bmTxt083",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "$1,000",
+                  "content": "Value",
                   "fontFamily": "Inter",
                   "fontSize": 20,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 }
               ]
             },
             {
-              "type": "ref",
               "id": "bmRef085",
+              "type": "ref",
               "ref": "budgetToggleRow",
-              "name": "Budget/ToggleRow",
+              "name": "Mobile/ToggleRow",
               "width": "fit_content",
               "height": "fit_content"
             },
@@ -6335,7 +6118,6 @@
               "type": "frame",
               "id": "bmFrm090",
               "width": "fill_container",
-              "layout": "horizontal",
               "gap": 8,
               "children": [
                 {
@@ -6356,8 +6138,7 @@
                       "content": "Cancel",
                       "fontFamily": "Inter",
                       "fontSize": 13,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 },
@@ -6379,8 +6160,7 @@
                       "content": "Save",
                       "fontFamily": "Inter",
                       "fontSize": 13,
-                      "fontWeight": "600",
-                      "textGrowth": "auto"
+                      "fontWeight": "600"
                     }
                   ]
                 }
@@ -6391,13 +6171,12 @@
         {
           "type": "frame",
           "id": "budgetToggleRow",
-          "name": "Budget/ToggleRow",
+          "x": 4280,
+          "y": 2889,
+          "name": "Mobile/ToggleRow",
           "reusable": true,
-          "x": 2200,
-          "y": 5580,
           "width": 354,
           "height": 50,
-          "layout": "horizontal",
           "gap": 12,
           "alignItems": "center",
           "children": [
@@ -6412,21 +6191,19 @@
                   "type": "text",
                   "id": "bmTxt091",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Push notifications",
+                  "content": "Setting label",
                   "fontFamily": "Inter",
                   "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt092",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Selected state",
+                  "content": "Supporting text",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 }
               ]
             },
@@ -6437,9 +6214,7 @@
               "height": 30,
               "fill": "$si-budget-color-status-success",
               "cornerRadius": "$si-budget-radius-chip",
-              "layout": "horizontal",
               "padding": 3,
-              "justifyContent": "flex-end",
               "children": [
                 {
                   "type": "frame",
@@ -6447,8 +6222,7 @@
                   "width": 24,
                   "height": 24,
                   "fill": "$si-budget-color-text-primary",
-                  "cornerRadius": 12,
-                  "children": []
+                  "cornerRadius": 12
                 }
               ]
             }
@@ -6457,19 +6231,13 @@
         {
           "type": "frame",
           "id": "budgetCategoryOptionRow",
-          "name": "Budget/CategoryOptionRow",
+          "x": 4221,
+          "y": 3857,
+          "name": "Mobile/OptionRow",
           "reusable": true,
-          "x": 2640,
-          "y": 5580,
           "width": 354,
           "fill": "$si-budget-color-surface-strong",
           "cornerRadius": "$si-budget-radius-row",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-selected"
-          },
-          "layout": "horizontal",
           "gap": 12,
           "padding": 12,
           "alignItems": "center",
@@ -6480,8 +6248,7 @@
               "width": 12,
               "height": 12,
               "fill": "$si-budget-color-category-dining",
-              "cornerRadius": 6,
-              "children": []
+              "cornerRadius": 6
             },
             {
               "type": "frame",
@@ -6494,21 +6261,19 @@
                   "type": "text",
                   "id": "bmTxt097",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Dining",
+                  "content": "Option label",
                   "fontFamily": "Inter",
                   "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt098",
                   "fill": "$si-budget-color-text-muted",
-                  "content": "Selected category",
+                  "content": "Supporting text",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 }
               ]
             },
@@ -6519,20 +6284,19 @@
               "content": "✓",
               "fontFamily": "Inter",
               "fontSize": 18,
-              "fontWeight": "800",
-              "textGrowth": "auto"
+              "fontWeight": "800"
             }
           ]
         },
         {
           "type": "frame",
           "id": "budgetBottomSheet",
-          "name": "Budget/BottomSheet",
+          "x": 4185,
+          "y": 4346,
+          "name": "Mobile/BottomSheet",
           "reusable": true,
-          "x": 3080,
-          "y": 5580,
           "width": 390,
-          "height": 392,
+          "height": 168,
           "fill": "$si-budget-color-surface-modal",
           "cornerRadius": [
             "$si-budget-radius-sheet",
@@ -6541,8 +6305,13 @@
             0
           ],
           "layout": "vertical",
-          "gap": 14,
-          "padding": 20,
+          "gap": 18,
+          "padding": [
+            12,
+            20,
+            20,
+            20
+          ],
           "children": [
             {
               "type": "frame",
@@ -6550,101 +6319,74 @@
               "width": 42,
               "height": 5,
               "fill": "$si-budget-color-border-ios",
-              "cornerRadius": "$si-budget-radius-handle",
-              "children": []
-            },
-            {
-              "type": "frame",
-              "id": "bmFrm104",
-              "width": "fill_container",
-              "layout": "vertical",
-              "gap": 4,
-              "children": [
-                {
-                  "type": "text",
-                  "id": "bmTxt102",
-                  "fill": "$si-budget-color-text-primary",
-                  "content": "Transaction detail",
-                  "fontFamily": "Inter",
-                  "fontSize": 14,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
-                },
-                {
-                  "type": "text",
-                  "id": "bmTxt103",
-                  "fill": "$si-budget-color-text-muted",
-                  "content": "Rounded top sheet with detail rows",
-                  "fontFamily": "Inter",
-                  "fontSize": 11,
-                  "fontWeight": "500",
-                  "textGrowth": "auto",
-                  "lineHeight": 1.35
-                }
-              ]
-            },
-            {
-              "type": "ref",
-              "id": "bmRef105",
-              "ref": "budgetTransactionRow",
-              "name": "Budget/TransactionRow",
-              "width": "fill_container",
-              "height": "fit_content"
-            },
-            {
-              "type": "frame",
-              "id": "bmFrm106",
-              "width": "fill_container",
-              "height": 1,
-              "fill": "$si-budget-color-border-subtle",
-              "children": []
+              "cornerRadius": "$si-budget-radius-handle"
             },
             {
               "type": "frame",
               "id": "bmFrm109",
               "width": "fill_container",
               "layout": "horizontal",
-              "justifyContent": "space-between",
+              "gap": 10,
               "children": [
                 {
-                  "type": "text",
-                  "id": "bmTxt107",
-                  "fill": "$si-budget-color-text-muted",
-                  "content": "Card",
-                  "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "type": "frame",
+                  "id": "bmFrm107",
+                  "width": "fill_container",
+                  "height": 44,
+                  "fill": "$si-budget-color-surface-strong",
+                  "cornerRadius": "$si-budget-radius-button",
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "bmTxt107",
+                      "fill": "$si-budget-color-text-primary",
+                      "content": "Cancel",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "700"
+                    }
+                  ]
                 },
                 {
-                  "type": "text",
-                  "id": "bmTxt108",
-                  "fill": "$si-budget-color-text-primary",
-                  "content": "Visa Everyday",
-                  "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "type": "frame",
+                  "id": "bmFrm108",
+                  "width": "fill_container",
+                  "height": 44,
+                  "fill": "$si-budget-color-surface-control",
+                  "cornerRadius": "$si-budget-radius-button",
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "bmTxt108",
+                      "fill": "$si-budget-color-text-inverse",
+                      "content": "Save",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "800"
+                    }
+                  ]
                 }
               ]
             }
-          ]
+          ],
+          "alignItems": "center"
         },
         {
           "type": "frame",
           "id": "budgetNativeConfirmDialogAdapter",
-          "name": "Budget/NativeConfirmDialogAdapter",
+          "x": 3854,
+          "y": 4333,
+          "name": "Mobile/NativeConfirmDialogAdapter",
           "reusable": true,
-          "x": 3520,
-          "y": 5580,
           "width": 270,
           "fill": "$si-budget-color-surface-modal",
           "cornerRadius": "$si-budget-radius-dialog",
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "$si-budget-color-border-ios"
-          },
           "layout": "vertical",
           "children": [
             {
@@ -6660,23 +6402,20 @@
                   "type": "text",
                   "id": "bmTxt110",
                   "fill": "$si-budget-color-text-primary",
-                  "content": "Delete alert?",
+                  "content": "Confirm action?",
                   "fontFamily": "Inter",
                   "fontSize": 17,
-                  "fontWeight": "800",
-                  "textGrowth": "auto"
+                  "fontWeight": "800"
                 },
                 {
                   "type": "text",
                   "id": "bmTxt111",
                   "fill": "$si-budget-color-text-ios-secondary",
-                  "content": "This uses the iOS native destructive confirmation pattern.",
+                  "content": "Optional supporting message.",
+                  "textAlign": "center",
                   "fontFamily": "Inter",
                   "fontSize": 12,
-                  "fontWeight": "600",
-                  "textGrowth": "auto",
-                  "width": 220,
-                  "textAlign": "center"
+                  "fontWeight": "600"
                 }
               ]
             },
@@ -6685,8 +6424,7 @@
               "id": "bmFrm113",
               "width": "fill_container",
               "height": 1,
-              "fill": "$si-budget-color-border-ios",
-              "children": []
+              "fill": "$si-budget-color-border-ios"
             },
             {
               "type": "frame",
@@ -6700,16 +6438,24 @@
                 {
                   "type": "text",
                   "id": "bmTxt114",
-                  "fill": "$si-budget-color-status-ios-danger",
-                  "content": "Delete",
+                  "fill": "$si-budget-color-status-ios-info",
+                  "content": "Save",
                   "fontFamily": "Inter",
                   "fontSize": 17,
-                  "fontWeight": "600",
-                  "textGrowth": "auto"
+                  "fontWeight": "600"
                 }
               ]
             }
           ]
+        },
+        {
+          "type": "rectangle",
+          "id": "x1W2P",
+          "x": 3672,
+          "y": 150,
+          "fill": "#CCCCCC",
+          "width": 49,
+          "height": 6101
         }
       ]
     },
@@ -11602,12 +11348,12 @@
     {
       "type": "frame",
       "id": "budgetMobileSpecimenPage",
-      "name": "Budget Mobile specimen",
-      "x": 1512,
-      "y": 6750,
+      "x": 1532,
+      "y": 22,
+      "name": "Mobile kit specimen",
       "width": 960,
       "fill": "$si-budget-color-surface-app",
-      "cornerRadius": "$si-radius-lg",
+      "cornerRadius": "$si-radius-xl",
       "layout": "vertical",
       "gap": 18,
       "padding": 24,
@@ -11624,939 +11370,578 @@
             "fill": "$si-budget-color-border-default"
           },
           "layout": "vertical",
-          "gap": 6,
-          "padding": 18,
+          "gap": 10,
+          "padding": 22,
           "children": [
             {
               "type": "text",
               "id": "bmTxt180",
-              "fill": "$si-budget-color-text-primary",
-              "content": "Budget Mobile specimen",
+              "fill": "$si-budget-color-status-success",
+              "content": "MOBILE KIT",
               "fontFamily": "Inter",
-              "fontSize": 26,
-              "fontWeight": "900",
-              "textGrowth": "auto"
+              "fontSize": 12,
+              "fontWeight": "800",
+              "letterSpacing": 1.4
             },
             {
               "type": "text",
               "id": "bmTxt181",
-              "fill": "$si-budget-color-text-muted",
-              "content": "React Native budgeting kit components as importable Pencil library refs.",
+              "fill": "$si-budget-color-text-primary",
+              "content": "Mobile kit specimen",
               "fontFamily": "Inter",
-              "fontSize": 13,
-              "fontWeight": "600",
-              "textGrowth": "auto"
+              "fontSize": 32,
+              "fontWeight": "800"
+            },
+            {
+              "type": "text",
+              "id": "bmTxt182",
+              "fill": "$si-budget-color-text-secondary",
+              "content": "Reusable Pencil library components only. Product screens and budget-specific sample data live in product UX files.",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "500",
+              "textGrowth": "fixed-width",
+              "width": 860,
+              "lineHeight": 1.3
             }
           ]
         },
         {
           "type": "frame",
-          "id": "budgetMobileSpecimenGrid",
+          "id": "budgetMobileSpecimenComponents",
           "width": "fill_container",
-          "layout": "horizontal",
-          "gap": 18,
+          "fill": "$si-budget-color-surface-elevated",
+          "cornerRadius": "$si-radius-lg",
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "$si-budget-color-border-subtle"
+          },
+          "layout": "vertical",
+          "gap": 14,
+          "padding": 18,
           "children": [
             {
+              "type": "text",
+              "id": "budgetMobileSpecimenComponentsTitle",
+              "fill": "$si-budget-color-text-primary",
+              "content": "Components",
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "800"
+            },
+            {
               "type": "frame",
-              "id": "budgetMobileSpecimenColA",
+              "id": "budgetMobileSpecimenButtons",
               "width": "fill_container",
+              "fill": "$si-budget-color-surface-card",
+              "cornerRadius": "$si-budget-radius-panel",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$si-budget-color-border-default"
+              },
               "layout": "vertical",
-              "gap": 18,
+              "gap": 10,
+              "padding": 14,
               "children": [
                 {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenButtonsTitle",
+                  "fill": "$si-budget-color-text-primary",
+                  "content": "Buttons",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "800"
+                },
+                {
                   "type": "frame",
-                  "id": "budgetSpecCard0",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
+                  "id": "budgetMobileSpecimenButtonsBody",
+                  "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
+                  "gap": 10,
                   "children": [
                     {
                       "type": "frame",
-                      "id": "bmFrm118",
+                      "id": "budgetMobileSpecimenButtonsRow0",
                       "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
                       "children": [
                         {
-                          "type": "text",
-                          "id": "bmTxt116",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "BudgetScreen",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenButtonsBack",
+                          "ref": "budgetIconButtonBack",
+                          "name": "Mobile/IconButton Back",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         },
                         {
-                          "type": "text",
-                          "id": "bmTxt117",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenButtonsMore",
+                          "ref": "budgetIconButtonMore",
+                          "name": "Mobile/IconButton More",
+                          "width": "fit_content",
+                          "height": "fit_content"
+                        },
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenButtonsDelete",
+                          "ref": "budgetIconButtonDelete",
+                          "name": "Mobile/IconButton Delete",
+                          "width": "fit_content",
+                          "height": "fit_content"
+                        },
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenButtonsAdd",
+                          "ref": "budgetIconButtonAdd",
+                          "name": "Mobile/IconButton Add",
+                          "width": "fit_content",
+                          "height": "fit_content"
+                        },
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenButtonsChart",
+                          "ref": "budgetIconButtonChart",
+                          "name": "Mobile/IconButton Chart",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         }
                       ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef119",
-                      "ref": "budgetMobileScreen",
-                      "name": "Budget/BudgetScreen",
-                      "width": 195,
-                      "height": 422
                     }
                   ]
                 },
                 {
-                  "type": "frame",
-                  "id": "budgetSpecCard2",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm126",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt124",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "IconButton",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt125",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef127",
-                      "ref": "budgetIconButtonAdd",
-                      "name": "Budget/IconButton",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard4",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm134",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt132",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "AccountCardRow",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt133",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef135",
-                      "ref": "budgetAccountCardRow",
-                      "name": "Budget/AccountCardRow",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard6",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm142",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt140",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "MetricPanel",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt141",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef143",
-                      "ref": "budgetMetricPanel",
-                      "name": "Budget/MetricPanel",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard8",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm150",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt148",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "BalanceAreaChart",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt149",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef151",
-                      "ref": "budgetBalanceAreaChart",
-                      "name": "Budget/BalanceAreaChart",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard10",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm158",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt156",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "CategorySummaryRow",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt157",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef159",
-                      "ref": "budgetCategorySummaryRow",
-                      "name": "Budget/CategorySummaryRow",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard12",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm166",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt164",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "ToggleRow",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt165",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef167",
-                      "ref": "budgetToggleRow",
-                      "name": "Budget/ToggleRow",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard14",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm174",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt172",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "BottomSheet",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt173",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef175",
-                      "ref": "budgetBottomSheet",
-                      "name": "Budget/BottomSheet",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
+                  "type": "text",
+                  "id": "budgetMobileSpecimenButtonsNote",
+                  "fill": "$si-budget-color-text-muted",
+                  "content": "Icon-only mobile actions.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "500",
+                  "textGrowth": "fixed-width",
+                  "width": 840
                 }
               ]
             },
             {
               "type": "frame",
-              "id": "budgetMobileSpecimenColB",
+              "id": "budgetMobileSpecimenNavigation",
               "width": "fill_container",
+              "fill": "$si-budget-color-surface-card",
+              "cornerRadius": "$si-budget-radius-panel",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$si-budget-color-border-default"
+              },
               "layout": "vertical",
-              "gap": 18,
+              "gap": 10,
+              "padding": 14,
               "children": [
                 {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenNavigationTitle",
+                  "fill": "$si-budget-color-text-primary",
+                  "content": "Navigation",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "800"
+                },
+                {
                   "type": "frame",
-                  "id": "budgetSpecCard1",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
+                  "id": "budgetMobileSpecimenNavigationBody",
+                  "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
+                  "gap": 10,
                   "children": [
                     {
                       "type": "frame",
-                      "id": "bmFrm122",
+                      "id": "budgetMobileSpecimenNavigationRow0",
                       "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
                       "children": [
                         {
-                          "type": "text",
-                          "id": "bmTxt120",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "BudgetHeader",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenHeaderRef",
+                          "ref": "budgetMobileHeader",
+                          "name": "Mobile/Header",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         },
                         {
-                          "type": "text",
-                          "id": "bmTxt121",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenTabsRef",
+                          "ref": "budgetPillTabBar",
+                          "name": "Mobile/PillTabBar",
+                          "width": "fit_content(0)",
+                          "height": "fit_content"
                         }
                       ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef123",
-                      "ref": "budgetMobileHeader",
-                      "name": "Budget/BudgetHeader",
-                      "width": "fit_content",
-                      "height": "fit_content"
                     }
                   ]
                 },
                 {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenNavigationNote",
+                  "fill": "$si-budget-color-text-muted",
+                  "content": "Top bars and segmented navigation with placeholder labels.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "500",
+                  "textGrowth": "fixed-width",
+                  "width": 840
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "budgetMobileSpecimenIndicators",
+              "width": "fill_container",
+              "fill": "$si-budget-color-surface-card",
+              "cornerRadius": "$si-budget-radius-panel",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$si-budget-color-border-default"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenIndicatorsTitle",
+                  "fill": "$si-budget-color-text-primary",
+                  "content": "Indicators",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "800"
+                },
+                {
                   "type": "frame",
-                  "id": "budgetSpecCard3",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
+                  "id": "budgetMobileSpecimenIndicatorsBody",
+                  "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
+                  "gap": 10,
                   "children": [
                     {
                       "type": "frame",
-                      "id": "bmFrm130",
+                      "id": "budgetMobileSpecimenIndicatorsRow0",
                       "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
                       "children": [
                         {
-                          "type": "text",
-                          "id": "bmTxt128",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "PillTabBar",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenPeriodRef",
+                          "ref": "budgetPeriodSelector",
+                          "name": "Mobile/SegmentedSelector",
+                          "width": "fit_content(0)",
+                          "height": "fit_content"
                         },
                         {
-                          "type": "text",
-                          "id": "bmTxt129",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenBarsRef",
+                          "ref": "budgetStackedCategoryBars",
+                          "name": "Mobile/StackedBars",
+                          "width": "fit_content(0)",
+                          "height": "fit_content"
                         }
                       ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef131",
-                      "ref": "budgetPillTabBar",
-                      "name": "Budget/PillTabBar",
-                      "width": "fit_content",
-                      "height": "fit_content"
                     }
                   ]
                 },
                 {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenIndicatorsNote",
+                  "fill": "$si-budget-color-text-muted",
+                  "content": "Small state and chart indicators without product data.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "500",
+                  "textGrowth": "fixed-width",
+                  "width": 840
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "budgetMobileSpecimenCards",
+              "width": "fill_container",
+              "fill": "$si-budget-color-surface-card",
+              "cornerRadius": "$si-budget-radius-panel",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$si-budget-color-border-default"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenCardsTitle",
+                  "fill": "$si-budget-color-text-primary",
+                  "content": "Cards",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "800"
+                },
+                {
                   "type": "frame",
-                  "id": "budgetSpecCard5",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
+                  "id": "budgetMobileSpecimenCardsBody",
+                  "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
+                  "gap": 10,
                   "children": [
                     {
                       "type": "frame",
-                      "id": "bmFrm138",
+                      "id": "budgetMobileSpecimenCardsRow0",
                       "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
                       "children": [
                         {
-                          "type": "text",
-                          "id": "bmTxt136",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "TransactionRow",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenCardRowRef",
+                          "ref": "budgetAccountCardRow",
+                          "name": "Mobile/PrimaryRow",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         },
                         {
-                          "type": "text",
-                          "id": "bmTxt137",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenDataRowRef",
+                          "ref": "budgetTransactionRow",
+                          "name": "Mobile/DataRow",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         }
                       ]
                     },
                     {
-                      "type": "ref",
-                      "id": "bmRef139",
-                      "ref": "budgetTransactionRow",
-                      "name": "Budget/TransactionRow",
-                      "width": "fit_content",
-                      "height": "fit_content"
+                      "type": "frame",
+                      "id": "budgetMobileSpecimenCardsRow1",
+                      "width": "fill_container",
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenMetricRef",
+                          "ref": "budgetMetricPanel",
+                          "name": "Mobile/MetricPanel",
+                          "width": "fit_content(0)",
+                          "height": "fit_content"
+                        },
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenChartRef",
+                          "ref": "budgetBalanceAreaChart",
+                          "name": "Mobile/ChartPanel",
+                          "width": "fit_content",
+                          "height": "fit_content"
+                        }
+                      ]
                     }
                   ]
                 },
                 {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenCardsNote",
+                  "fill": "$si-budget-color-text-muted",
+                  "content": "Four reusable card-style variants max: primary row, data row, panel, and chart panel.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "500",
+                  "textGrowth": "fixed-width",
+                  "width": 840
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "budgetMobileSpecimenRowsControls",
+              "width": "fill_container",
+              "fill": "$si-budget-color-surface-card",
+              "cornerRadius": "$si-budget-radius-panel",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$si-budget-color-border-default"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenRowsControlsTitle",
+                  "fill": "$si-budget-color-text-primary",
+                  "content": "Rows and controls",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "800"
+                },
+                {
                   "type": "frame",
-                  "id": "budgetSpecCard7",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
+                  "id": "budgetMobileSpecimenRowsControlsBody",
+                  "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
+                  "gap": 10,
                   "children": [
                     {
                       "type": "frame",
-                      "id": "bmFrm146",
+                      "id": "budgetMobileSpecimenRowsRow0",
                       "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
                       "children": [
                         {
-                          "type": "text",
-                          "id": "bmTxt144",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "PeriodSelector",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenSummaryRef",
+                          "ref": "budgetCategorySummaryRow",
+                          "name": "Mobile/SummaryRow",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         },
                         {
-                          "type": "text",
-                          "id": "bmTxt145",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenOptionRef",
+                          "ref": "budgetCategoryOptionRow",
+                          "name": "Mobile/OptionRow",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         }
                       ]
                     },
                     {
-                      "type": "ref",
-                      "id": "bmRef147",
-                      "ref": "budgetPeriodSelector",
-                      "name": "Budget/PeriodSelector",
-                      "width": "fit_content",
-                      "height": "fit_content"
+                      "type": "frame",
+                      "id": "budgetMobileSpecimenRowsRow1",
+                      "width": "fill_container",
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenToggleRef",
+                          "ref": "budgetToggleRow",
+                          "name": "Mobile/ToggleRow",
+                          "width": "fit_content",
+                          "height": "fit_content"
+                        },
+                        {
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenEditorRef",
+                          "ref": "budgetInlineAlertEditor",
+                          "name": "Mobile/InlineEditor",
+                          "width": "fit_content",
+                          "height": "fit_content"
+                        }
+                      ]
                     }
                   ]
                 },
                 {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenRowsControlsNote",
+                  "fill": "$si-budget-color-text-muted",
+                  "content": "Reusable rows and compact controls with placeholder content.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "500",
+                  "textGrowth": "fixed-width",
+                  "width": 840
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "budgetMobileSpecimenDialogs",
+              "width": "fill_container",
+              "fill": "$si-budget-color-surface-card",
+              "cornerRadius": "$si-budget-radius-panel",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$si-budget-color-border-default"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "budgetMobileSpecimenDialogsTitle",
+                  "fill": "$si-budget-color-text-primary",
+                  "content": "Dialogs",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "800"
+                },
+                {
                   "type": "frame",
-                  "id": "budgetSpecCard9",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
+                  "id": "budgetMobileSpecimenDialogsBody",
+                  "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
+                  "gap": 10,
                   "children": [
                     {
                       "type": "frame",
-                      "id": "bmFrm154",
+                      "id": "budgetMobileSpecimenDialogsRow0",
                       "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
+                      "layout": "horizontal",
+                      "gap": 12,
+                      "alignItems": "center",
                       "children": [
                         {
-                          "type": "text",
-                          "id": "bmTxt152",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "StackedCategoryBars",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenSheetRef",
+                          "ref": "budgetBottomSheet",
+                          "name": "Mobile/BottomSheet",
+                          "width": "fit_content",
+                          "height": "fit_content"
                         },
                         {
-                          "type": "text",
-                          "id": "bmTxt153",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
+                          "type": "ref",
+                          "id": "budgetMobileSpecimenNativeDialogRef",
+                          "ref": "budgetNativeConfirmDialogAdapter",
+                          "name": "Mobile/NativeConfirmDialogAdapter",
+                          "width": "fit_content(0)",
+                          "height": "fit_content"
                         }
                       ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef155",
-                      "ref": "budgetStackedCategoryBars",
-                      "name": "Budget/StackedCategoryBars",
-                      "width": "fit_content",
-                      "height": "fit_content"
                     }
                   ]
                 },
                 {
-                  "type": "frame",
-                  "id": "budgetSpecCard11",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm162",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt160",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "InlineAlertEditor",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt161",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef163",
-                      "ref": "budgetInlineAlertEditor",
-                      "name": "Budget/InlineAlertEditor",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard13",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm170",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt168",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "CategoryOptionRow",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt169",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef171",
-                      "ref": "budgetCategoryOptionRow",
-                      "name": "Budget/CategoryOptionRow",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "budgetSpecCard15",
-                  "width": 420,
-                  "fill": "$si-budget-color-surface-card",
-                  "cornerRadius": "$si-budget-radius-panel",
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 1,
-                    "fill": "$si-budget-color-border-default"
-                  },
-                  "layout": "vertical",
-                  "gap": 12,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "bmFrm178",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 4,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "bmTxt176",
-                          "fill": "$si-budget-color-text-primary",
-                          "content": "NativeConfirmDialogAdapter",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "800",
-                          "textGrowth": "auto"
-                        },
-                        {
-                          "type": "text",
-                          "id": "bmTxt177",
-                          "fill": "$si-budget-color-text-muted",
-                          "content": "Reusable Pencil library component specimen",
-                          "fontFamily": "Inter",
-                          "fontSize": 11,
-                          "fontWeight": "500",
-                          "textGrowth": "auto",
-                          "lineHeight": 1.35
-                        }
-                      ]
-                    },
-                    {
-                      "type": "ref",
-                      "id": "bmRef179",
-                      "ref": "budgetNativeConfirmDialogAdapter",
-                      "name": "Budget/NativeConfirmDialogAdapter",
-                      "width": "fit_content",
-                      "height": "fit_content"
-                    }
-                  ]
+                  "type": "text",
+                  "id": "budgetMobileSpecimenDialogsNote",
+                  "fill": "$si-budget-color-text-muted",
+                  "content": "Dialog specimens stay generic; bottom sheet contains only drag affordance and Cancel/Save actions.",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "500",
+                  "textGrowth": "fixed-width",
+                  "width": 840
                 }
               ]
             }
           ]
         }
-      ]
+      ],
+      "height": 1680
     }
   ],
   "themes": {
