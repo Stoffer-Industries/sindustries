@@ -51,11 +51,7 @@ export default function App() {
               <Stack.Screen
                 name="Transactions"
                 component={TransactionsScreen}
-                options={{
-                  title: 'Transactions',
-                  headerBackTitle: 'Back',
-                  headerBackButtonDisplayMode: 'generic'
-                }}
+                options={{ headerShown: false }}
               />
               <Stack.Screen
                 name="Alerts"

@@ -1,7 +1,25 @@
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, FlatList, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  BottomSheet,
+  BudgetHeader,
+  BudgetScreen,
+  CategoryOptionRow,
+  CategorySummaryRow,
+  IconButton,
+  MetricPanel,
+  PillTabBar,
+  StackedCategoryBars,
+  TransactionRow
+} from '@sindustries/ui/native';
+import { tokens } from '@sindustries/design-tokens/tokens';
+
 import { apiFetch } from '../api/http';
+import type { RootStackParamList } from '../navigation/types';
 import { useSession } from '../state/SessionContext';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Transactions'>;
 
 type Txn = {
   id: string;
@@ -11,6 +29,10 @@ type Txn = {
   category: string;
   pending?: boolean;
 };
+
+const budget = tokens.budget;
+const b = budget.color;
+const bs = budget.space;
 
 const categories = [
   'groceries',
@@ -27,16 +49,29 @@ const categories = [
   'other'
 ];
 
-export function TransactionsScreen() {
+const demoTransactions: Txn[] = [
+  { id: 'demo-1', merchant: 'Countdown', description: null, amountCents: -8420, category: 'groceries' },
+  { id: 'demo-2', merchant: 'Netflix', description: null, amountCents: -2499, category: 'subscriptions' },
+  { id: 'demo-3', merchant: 'Auckland Transport', description: null, amountCents: -1180, category: 'transport' },
+  { id: 'demo-4', merchant: 'Payroll', description: null, amountCents: 328000, category: 'transfers' },
+  { id: 'demo-5', merchant: 'Best Ugly Bagels', description: null, amountCents: -2750, category: 'dining' }
+];
+
+export function TransactionsScreen({ navigation }: Props) {
   const { session } = useSession();
-  const [data, setData] = useState<Txn[]>(useMemo(() => [], []));
+  const [data, setData] = useState<Txn[]>(demoTransactions);
   const [loading, setLoading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [editingTxn, setEditingTxn] = useState<Txn | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function run() {
-      if (!session) return;
+      if (!session) {
+        setData(demoTransactions);
+        return;
+      }
       setLoading(true);
       try {
         const res = await apiFetch<{ transactions?: Txn[] }>(
@@ -58,74 +93,219 @@ export function TransactionsScreen() {
     };
   }, [session]);
 
-  function recategorize(txnId: string) {
-    Alert.alert(
-      'Change category',
-      'Pick a new category',
-      categories.map((c) => ({
-        text: c,
-        onPress: async () => {
-          if (!session) return;
-          const prev = data.find((t) => t.id === txnId);
-          setData((p) => p.map((t) => (t.id === txnId ? { ...t, category: c } : t)));
-          try {
-            await apiFetch(`/transactions/${encodeURIComponent(txnId)}/category`, {
-              method: 'PATCH',
-              body: JSON.stringify({ category: c }),
-              session
-            });
-          } catch (e: any) {
-            // rollback on error
-            if (prev) {
-              setData((p) =>
-                p.map((t) => (t.id === txnId ? { ...t, category: prev.category } : t))
-              );
-            }
-            Alert.alert('Update failed', e?.message ?? 'Unknown error');
-          }
-        }
-      }))
-    );
+  const categoryRows = useMemo(() => buildCategoryRows(data), [data]);
+  const visibleTransactions = selectedCategory
+    ? data.filter((txn) => txn.category === selectedCategory)
+    : data;
+  const totalSpend = data
+    .filter((txn) => txn.amountCents < 0)
+    .reduce((sum, txn) => sum + Math.abs(txn.amountCents), 0);
+
+  async function updateCategory(txn: Txn, category: string) {
+    setEditingTxn(null);
+    const previous = txn.category;
+    setData((current) => current.map((item) => (item.id === txn.id ? { ...item, category } : item)));
+    if (!session) return;
+
+    try {
+      await apiFetch(`/transactions/${encodeURIComponent(txn.id)}/category`, {
+        method: 'PATCH',
+        body: JSON.stringify({ category }),
+        session
+      });
+    } catch (e: any) {
+      setData((current) => current.map((item) => (item.id === txn.id ? { ...item, category: previous } : item)));
+      Alert.alert('Update failed', e?.message ?? 'Unknown error');
+    }
   }
 
   return (
-    <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, gap: 12 }}>
-      <Text style={{ color: '#6b7280' }}>
-        {session ? (loading ? 'Loading…' : 'Backed by budget-api') : 'Please dev-login first.'}
-      </Text>
-      <FlatList
-        data={data}
-        keyExtractor={(t) => t.id}
-        style={{ flex: 1 }}
-        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        renderItem={({ item }) => {
-          const title = item.merchant?.trim() || item.description?.trim() || 'Unknown transaction';
-
-          return (
-            <View
-              style={{
-                borderWidth: 1,
-                borderColor: '#e5e7eb',
-                borderRadius: 12,
-                padding: 12,
-                gap: 8
-              }}
-            >
-              <Text style={{ fontWeight: '700' }}>
-                {title}
-                {item.pending ? ' (pending)' : ''}
-              </Text>
-              <Text>${(item.amountCents / 100).toFixed(2)}</Text>
-              <Text style={{ color: '#6b7280' }}>Category: {item.category}</Text>
-              <Button
-                title="Change category"
-                onPress={() => recategorize(item.id)}
-              />
-            </View>
-          );
-        }}
+    <BudgetScreen
+      footer={
+        <PillTabBar
+          activeKey="spend"
+          items={[
+            { key: 'accounts', label: 'Accounts' },
+            { key: 'spend', label: 'Spend' },
+            { key: 'alerts', label: 'Alerts' }
+          ]}
+          onChange={(key) => {
+            if (key === 'accounts') navigation.navigate('Dashboard');
+            if (key === 'alerts') navigation.navigate('Alerts');
+          }}
+        />
+      }
+    >
+      <BudgetHeader
+        title="Spending"
+        subtitle={session ? (loading ? 'Refreshing transactions' : 'Backed by budget-api') : 'Demo spending breakdown'}
+        left={<IconButton action="back" label="Back to accounts" onPress={() => navigation.navigate('Dashboard')} />}
       />
-    </View>
+
+      <MetricPanel title={formatCents(totalSpend)} subtitle="Spent this period">
+        <StackedCategoryBars
+          bars={[
+            {
+              label: 'W1',
+              segments: categoryRows.slice(0, 4).map((row) => ({
+                key: row.category,
+                value: row.amountCents,
+                color: row.color
+              }))
+            },
+            {
+              label: 'W2',
+              segments: categoryRows.slice(1, 5).map((row) => ({
+                key: row.category,
+                value: Math.round(row.amountCents * 0.72),
+                color: row.color
+              }))
+            },
+            {
+              label: 'W3',
+              segments: categoryRows.slice(0, 5).map((row) => ({
+                key: row.category,
+                value: Math.round(row.amountCents * 0.9),
+                color: row.color
+              }))
+            },
+            {
+              label: 'W4',
+              segments: categoryRows.slice(0, 5).map((row) => ({
+                key: row.category,
+                value: row.amountCents,
+                color: row.color
+              }))
+            }
+          ]}
+        />
+      </MetricPanel>
+
+      <MetricPanel title="Categories" subtitle={selectedCategory ? `Filtered to ${selectedCategory}` : 'Tap a category to review'}>
+        {categoryRows.slice(0, 6).map((row) => (
+          <CategorySummaryRow
+            key={row.category}
+            color={row.color}
+            label={titleCase(row.category)}
+            metadata={`${row.count} transactions`}
+            amount={formatCents(row.amountCents)}
+            progress={totalSpend === 0 ? 0 : row.amountCents / totalSpend}
+            onPress={() => setSelectedCategory(selectedCategory === row.category ? null : row.category)}
+          />
+        ))}
+      </MetricPanel>
+
+      <MetricPanel title={selectedCategory ? `${titleCase(selectedCategory)} transactions` : 'Recent transactions'}>
+        <View style={styles.transactionList}>
+          {visibleTransactions.length === 0 ? (
+            <Text style={styles.emptyText}>{session ? 'No transactions yet.' : 'Please dev-login from Accounts to load live data.'}</Text>
+          ) : (
+            visibleTransactions.slice(0, 8).map((txn) => {
+              const title = txn.merchant?.trim() || txn.description?.trim() || 'Unknown transaction';
+              return (
+                <TransactionRow
+                  key={txn.id}
+                  initial={title.charAt(0).toUpperCase()}
+                  title={title}
+                  metadata={`${titleCase(txn.category)}${txn.pending ? ' - Pending' : ''}`}
+                  amount={formatCents(txn.amountCents)}
+                  income={txn.amountCents > 0}
+                  color={colorForCategory(txn.category)}
+                  onPress={() => setEditingTxn(txn)}
+                />
+              );
+            })
+          )}
+        </View>
+      </MetricPanel>
+
+      {selectedCategory ? (
+        <Pressable accessibilityRole="button" onPress={() => setSelectedCategory(null)} style={styles.clearButton}>
+          <Text style={styles.clearText}>Clear category filter</Text>
+        </Pressable>
+      ) : null}
+
+      <BottomSheet
+        visible={editingTxn !== null}
+        title={editingTxn ? (editingTxn.merchant || editingTxn.description || 'Transaction') : undefined}
+        subtitle={editingTxn ? formatCents(editingTxn.amountCents) : undefined}
+        onDismiss={() => setEditingTxn(null)}
+      >
+        {editingTxn
+          ? categories.map((category) => (
+              <CategoryOptionRow
+                key={category}
+                color={colorForCategory(category)}
+                label={titleCase(category)}
+                selected={editingTxn.category === category}
+                onPress={() => updateCategory(editingTxn, category)}
+              />
+            ))
+          : null}
+      </BottomSheet>
+    </BudgetScreen>
   );
 }
 
+function buildCategoryRows(transactions: Txn[]) {
+  const spend = transactions.filter((txn) => txn.amountCents < 0);
+  const grouped = new Map<string, { amountCents: number; count: number }>();
+  for (const txn of spend) {
+    const current = grouped.get(txn.category) ?? { amountCents: 0, count: 0 };
+    current.amountCents += Math.abs(txn.amountCents);
+    current.count += 1;
+    grouped.set(txn.category, current);
+  }
+
+  return [...grouped.entries()]
+    .map(([category, value]) => ({
+      category,
+      color: colorForCategory(category),
+      ...value
+    }))
+    .sort((a, b) => b.amountCents - a.amountCents);
+}
+
+function colorForCategory(category: string) {
+  const categoryColors = b.category as Record<string, string>;
+  return categoryColors[category] ?? b.category.other;
+}
+
+function titleCase(value: string) {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function formatCents(cents: number) {
+  const amount = Math.abs(cents) / 100;
+  const formatted = new Intl.NumberFormat('en-NZ', {
+    style: 'currency',
+    currency: 'NZD'
+  }).format(amount);
+  if (cents < 0) return `-${formatted}`;
+  return formatted;
+}
+
+const styles = StyleSheet.create({
+  transactionList: {
+    gap: bs[3]
+  },
+  emptyText: {
+    color: b.text.muted,
+    fontSize: 14
+  },
+  clearButton: {
+    minHeight: tokens.platform.mobile.hitTarget.min,
+    borderRadius: budget.radius.button,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: b.surface.strong
+  },
+  clearText: {
+    color: b.text.primary,
+    fontWeight: '800'
+  }
+});
