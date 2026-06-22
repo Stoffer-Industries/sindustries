@@ -1,11 +1,21 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Linking, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  AccountCardRow,
+  BalanceAreaChart,
+  BudgetHeader,
+  BudgetScreen,
+  IconButton,
+  MetricPanel,
+  PeriodSelector,
+  PillTabBar
+} from '@sindustries/ui/native';
+import { tokens } from '@sindustries/design-tokens/tokens';
 
-import { CategoryTimeseriesChart } from '../components/CategoryTimeseriesChart';
 import { apiFetch } from '../api/http';
 import type { RootStackParamList } from '../navigation/types';
-import { useSession } from '../state/SessionContext';
+import { useSession, type Session } from '../state/SessionContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
@@ -23,68 +33,50 @@ type BalancePoint = {
   currentBalanceCents: number;
 };
 
+const budget = tokens.budget;
+const b = budget.color;
+const bs = budget.space;
+const accountColors = [b.account.blue, b.account.purple, b.account.orange, b.account.green];
+
+const demoAccounts: BalanceAccount[] = [
+  {
+    id: 'demo-savings',
+    displayName: 'Savings',
+    currentBalanceCents: 1284400,
+    availableBalanceCents: 1284400,
+    balanceCurrency: 'NZD',
+    balanceUpdatedAt: new Date().toISOString()
+  },
+  {
+    id: 'demo-travel',
+    displayName: 'Travel Mastercard',
+    currentBalanceCents: -84275,
+    availableBalanceCents: -84275,
+    balanceCurrency: 'NZD',
+    balanceUpdatedAt: new Date().toISOString()
+  },
+  {
+    id: 'demo-emergency',
+    displayName: 'Emergency Fund',
+    currentBalanceCents: 650000,
+    availableBalanceCents: 650000,
+    balanceCurrency: 'NZD',
+    balanceUpdatedAt: new Date().toISOString()
+  }
+];
+
+const demoBalancePoints = [10250, 10680, 10420, 11190, 11740, 11610, 12440].map((value) => ({
+  value
+}));
+
 export function DashboardScreen({ navigation }: Props) {
   const { session, setSession } = useSession();
   const [email, setEmail] = useState('dev@example.com');
-  const [series, setSeries] = useState<Record<string, { day: string; amountCents: number }[]>>(
-    {}
-  );
   const [balanceAccounts, setBalanceAccounts] = useState<BalanceAccount[]>([]);
-  const [balancePoints, setBalancePoints] = useState<{ day: string; amountCents: number }[]>([]);
+  const [balancePoints, setBalancePoints] = useState<{ value: number }[]>(demoBalancePoints);
   const [syncVersion, setSyncVersion] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState<string>('other');
   const [akahuStatus, setAkahuStatus] = useState<string>('');
-
-  const demoPoints = useMemo(
-    () => [
-      { day: '2026-03-25', amountCents: 1200 },
-      { day: '2026-03-26', amountCents: 5600 },
-      { day: '2026-03-27', amountCents: 2900 },
-      { day: '2026-03-28', amountCents: 8600 },
-      { day: '2026-03-29', amountCents: 6400 },
-      { day: '2026-03-30', amountCents: 9100 },
-      { day: '2026-03-31', amountCents: 7800 }
-    ],
-    []
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      if (!session) return;
-      const now = new Date();
-      const to = now.toISOString().slice(0, 10);
-      const fromDate = new Date(now.valueOf() - 6 * 24 * 60 * 60 * 1000);
-      const from = fromDate.toISOString().slice(0, 10);
-
-      try {
-        const res = await apiFetch<{
-          from: string;
-          to: string;
-          series: Record<string, { day: string; amountCents: number }[]>;
-        }>(
-          `/categories/timeseries?userId=${encodeURIComponent(
-            session.user.id
-          )}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-          { session }
-        );
-        if (cancelled) return;
-        setSeries(res.series ?? {});
-
-        const keys = Object.keys(res.series ?? {});
-        if (keys.length > 0 && !keys.includes(selectedCategory)) {
-          setSelectedCategory(keys[0]);
-        }
-      } catch {
-        // keep UI usable even before DB exists
-      }
-    }
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [session]);
+  const [period, setPeriod] = useState('1M');
 
   useEffect(() => {
     let cancelled = false;
@@ -129,12 +121,14 @@ export function DashboardScreen({ navigation }: Props) {
         setBalanceAccounts(res.accounts ?? []);
         setBalancePoints(
           (res.totalSeries ?? []).map((point) => ({
-            day: point.capturedAt.slice(0, 10),
-            amountCents: point.currentBalanceCents
+            value: point.currentBalanceCents / 100
           }))
         );
       } catch {
-        // Balance history only exists after Akahu sync has captured account balances.
+        if (!cancelled) {
+          setBalanceAccounts([]);
+          setBalancePoints(demoBalancePoints);
+        }
       }
     }
 
@@ -151,19 +145,18 @@ export function DashboardScreen({ navigation }: Props) {
 
     async function maybeHandleUrl(url: string) {
       try {
-        // Akahu redirects to the configured redirect_uri with ?code=... on success.
         const u = new URL(url);
         const code = u.searchParams.get('code');
         if (!code) return;
 
-        setAkahuStatus('Exchanging Akahu code…');
+        setAkahuStatus('Exchanging Akahu code...');
         await apiFetch('/akahu/exchange', {
           method: 'POST',
           body: JSON.stringify({ userId: activeSession.user.id, code }),
           session: activeSession
         });
 
-        setAkahuStatus('Syncing transactions…');
+        setAkahuStatus('Syncing transactions...');
         const now = Date.now();
         const startMs = now - 30 * 24 * 60 * 60 * 1000;
         await apiFetch('/akahu/sync', {
@@ -173,7 +166,7 @@ export function DashboardScreen({ navigation }: Props) {
         });
 
         if (alive) {
-          setAkahuStatus('Akahu linked + synced');
+          setAkahuStatus('Akahu linked and synced');
           setSyncVersion((value) => value + 1);
         }
       } catch (e: any) {
@@ -198,38 +191,75 @@ export function DashboardScreen({ navigation }: Props) {
     };
   }, [session]);
 
-  const categoryKeys = Object.keys(series);
-  const chartPoints = session
-    ? series[selectedCategory] ?? []
-    : demoPoints;
-  const latestTotalBalanceCents = balanceAccounts.reduce((sum, account) => {
+  const accounts = session && balanceAccounts.length > 0 ? balanceAccounts : demoAccounts;
+  const totalBalanceCents = accounts.reduce((sum, account) => {
     const value = account.currentBalanceCents ?? account.availableBalanceCents;
     return value === null ? sum : sum + value;
   }, 0);
 
+  const subtitle = session ? `Signed in as ${session.user.email}` : 'Demo balances until Akahu is linked';
+
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 20, fontWeight: '700' }}>Dashboard</Text>
-        <Text style={{ color: '#6b7280' }}>
-          {session ? `Signed in as ${session.user.email}` : 'Not signed in'}
-        </Text>
+    <BudgetScreen
+      footer={
+        <PillTabBar
+          activeKey="accounts"
+          items={[
+            { key: 'accounts', label: 'Accounts' },
+            { key: 'spend', label: 'Spend' },
+            { key: 'alerts', label: 'Alerts' }
+          ]}
+          onChange={(key) => {
+            if (key === 'spend') navigation.navigate('Transactions');
+            if (key === 'alerts') navigation.navigate('Alerts');
+          }}
+        />
+      }
+    >
+      <BudgetHeader
+        title="Accounts"
+        subtitle={subtitle}
+        right={<IconButton action="more" label="Account actions" />}
+      />
+
+      <MetricPanel
+        title={formatCents(totalBalanceCents)}
+        subtitle={session ? 'Latest total balance' : 'Demo total balance'}
+      >
+        <PeriodSelector value={period} onChange={setPeriod} />
+        <BalanceAreaChart points={balancePoints.length > 0 ? balancePoints : demoBalancePoints} />
+      </MetricPanel>
+
+      <View style={styles.list}>
+        {accounts.map((account, index) => {
+          const balance = account.currentBalanceCents ?? account.availableBalanceCents;
+          return (
+            <AccountCardRow
+              key={account.id}
+              initial={initialFor(account.displayName)}
+              name={account.displayName}
+              subtitle={account.balanceUpdatedAt ? `Updated ${formatDate(account.balanceUpdatedAt)}` : 'No balance update yet'}
+              balance={balance === null ? 'No balance' : formatCents(balance)}
+              color={accountColors[index % accountColors.length]}
+            />
+          );
+        })}
+      </View>
+
+      <MetricPanel title={session ? 'Akahu' : 'Dev sign in'} subtitle={akahuStatus || undefined}>
         {!session ? (
-          <View style={{ gap: 8 }}>
+          <View style={styles.loginForm}>
             <TextInput
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
-              style={{
-                borderWidth: 1,
-                borderColor: '#e5e7eb',
-                borderRadius: 12,
-                padding: 12
-              }}
+              keyboardType="email-address"
               placeholder="email"
+              placeholderTextColor={b.text.disabled}
+              style={styles.input}
             />
-            <Button
-              title="Dev login"
+            <ActionButton
+              label="Dev login"
               onPress={async () => {
                 try {
                   const res = await apiFetch<{
@@ -247,79 +277,18 @@ export function DashboardScreen({ navigation }: Props) {
             />
           </View>
         ) : (
-          <Button title="Sign out" onPress={() => setSession(null)} />
-        )}
-        <Text style={{ color: '#6b7280' }}>
-          Category trend {session ? '(from budget-api)' : '(demo placeholder)'}
-        </Text>
-        {session && categoryKeys.length > 0 ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {categoryKeys.slice(0, 8).map((k) => (
-              <Button
-                key={k}
-                title={k === selectedCategory ? `• ${k}` : k}
-                onPress={() => setSelectedCategory(k)}
-              />
-            ))}
-          </View>
-        ) : null}
-        <CategoryTimeseriesChart points={chartPoints} />
-      </View>
-
-      {session ? (
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontSize: 18, fontWeight: '700' }}>Balance trend</Text>
-          <Text style={{ color: '#6b7280' }}>
-            {balanceAccounts.length > 0
-              ? `Latest total ${formatCents(latestTotalBalanceCents)}`
-              : 'Sync Akahu to capture account balances'}
-          </Text>
-          <CategoryTimeseriesChart points={balancePoints} />
-          {balanceAccounts.slice(0, 4).map((account) => {
-            const balance = account.currentBalanceCents ?? account.availableBalanceCents;
-            return (
-              <Text key={account.id} style={{ color: '#374151' }}>
-                {account.displayName}: {balance === null ? 'No balance yet' : formatCents(balance)}
-              </Text>
-            );
-          })}
-        </View>
-      ) : null}
-
-      <View style={{ gap: 12 }}>
-        {session ? (
-          <View style={{ gap: 8 }}>
-            <Button
-              title="Link Akahu"
+          <View style={styles.actions}>
+            <ActionButton label="Link Akahu" onPress={() => linkAkahu(session.user.id, session, setAkahuStatus)} />
+            <ActionButton
+              label="Sync now"
               onPress={async () => {
                 try {
-                  setAkahuStatus('Opening Akahu…');
-                  const res = await apiFetch<{ authorizeUrl: string }>(
-                    `/akahu/authorize-url?userId=${encodeURIComponent(session.user.id)}`,
-                    { session }
-                  );
-                  await Linking.openURL(res.authorizeUrl);
-                } catch (e: any) {
-                  setAkahuStatus('');
-                  Alert.alert('Could not open Akahu', e?.message ?? 'Unknown error');
-                }
-              }}
-            />
-            <Button
-              title="Sync Akahu now"
-              onPress={async () => {
-                try {
-                  setAkahuStatus('Refreshing Akahu + syncing transactions…');
+                  setAkahuStatus('Refreshing Akahu and syncing transactions...');
                   const now = Date.now();
                   const startMs = now - 90 * 24 * 60 * 60 * 1000;
                   await apiFetch('/akahu/sync', {
                     method: 'POST',
-                    body: JSON.stringify({
-                      userId: session.user.id,
-                      startMs,
-                      endMs: now,
-                      force: true
-                    }),
+                    body: JSON.stringify({ userId: session.user.id, startMs, endMs: now, force: true }),
                     session
                   });
                   setAkahuStatus('Sync complete');
@@ -330,24 +299,58 @@ export function DashboardScreen({ navigation }: Props) {
                 }
               }}
             />
-            {akahuStatus ? <Text style={{ color: '#6b7280' }}>{akahuStatus}</Text> : null}
+            <ActionButton label="Sign out" variant="secondary" onPress={() => setSession(null)} />
           </View>
-        ) : null}
-        <Button
-          title="View transactions"
-          onPress={() => navigation.navigate('Transactions')}
-        />
-        <Button
-          title="View alerts"
-          onPress={() => navigation.navigate('Alerts')}
-        />
-        <Button
-          title="View token specimen"
-          onPress={() => navigation.navigate('TokenSpecimen')}
-        />
-      </View>
-    </ScrollView>
+        )}
+      </MetricPanel>
+    </BudgetScreen>
   );
+}
+
+function ActionButton({
+  label,
+  variant = 'primary',
+  onPress
+}: {
+  label: string;
+  variant?: 'primary' | 'secondary';
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionButton,
+        variant === 'secondary' && styles.secondaryButton,
+        pressed && styles.pressed
+      ]}
+    >
+      <Text style={[styles.actionText, variant === 'secondary' && styles.secondaryText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+async function linkAkahu(userId: string, session: Session, setAkahuStatus: (status: string) => void) {
+  try {
+    setAkahuStatus('Opening Akahu...');
+    const res = await apiFetch<{ authorizeUrl: string }>(
+      `/akahu/authorize-url?userId=${encodeURIComponent(userId)}`,
+      { session }
+    );
+    await Linking.openURL(res.authorizeUrl);
+  } catch (e: any) {
+    setAkahuStatus('');
+    Alert.alert('Could not open Akahu', e?.message ?? 'Unknown error');
+  }
+}
+
+function initialFor(name: string) {
+  return name.trim().charAt(0).toUpperCase() || '$';
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short' }).format(new Date(value));
 }
 
 function formatCents(cents: number) {
@@ -357,3 +360,45 @@ function formatCents(cents: number) {
   }).format(cents / 100);
 }
 
+const styles = StyleSheet.create({
+  list: {
+    gap: bs[3]
+  },
+  loginForm: {
+    gap: bs[3]
+  },
+  actions: {
+    gap: bs[3]
+  },
+  input: {
+    minHeight: 50,
+    borderRadius: budget.radius.cardSm,
+    paddingHorizontal: bs[4],
+    color: b.text.primary,
+    backgroundColor: b.surface.inset,
+    borderWidth: 1,
+    borderColor: b.border.default,
+    fontSize: 16,
+    fontWeight: '600'
+  },
+  actionButton: {
+    minHeight: tokens.platform.mobile.hitTarget.min,
+    borderRadius: budget.radius.button,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: b.surface.control
+  },
+  secondaryButton: {
+    backgroundColor: b.surface.strong
+  },
+  actionText: {
+    color: b.text.inverse,
+    fontWeight: '800'
+  },
+  secondaryText: {
+    color: b.text.primary
+  },
+  pressed: {
+    opacity: 0.82
+  }
+});
