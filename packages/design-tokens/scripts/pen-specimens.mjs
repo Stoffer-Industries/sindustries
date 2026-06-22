@@ -20,9 +20,9 @@ export async function loadComponentCatalog() {
 export const GENERATED_SPECIMEN_FRAME_IDS = ['siSpecRoot', 'siReactSpecPulse', 'zq4EP'];
 
 const strokeSubtle = {
-  align: 'inside',
-  thickness: 1,
-  fill: '$si-color-border-subtle'
+  stroke: '$si-color-border-subtle',
+  strokeWidth: 1,
+  strokeAlignment: 'inner'
 };
 
 function sectionPanel(id, title, children) {
@@ -32,7 +32,7 @@ function sectionPanel(id, title, children) {
     width: 'fill_container',
     fill: penColorVar('bgSection'),
     cornerRadius: '$si-radius-lg',
-    stroke: strokeSubtle,
+    ...strokeSubtle,
     layout: 'vertical',
     gap: 14,
     padding: 18,
@@ -60,7 +60,7 @@ function buildSwatchCards(swatches, idPrefix = 'siSws') {
     height: 86,
     fill: penColorVar('bgSurface'),
     cornerRadius: '$si-radius-md',
-    stroke: strokeSubtle,
+    ...strokeSubtle,
     layout: 'vertical',
     gap: 6,
     padding: 8,
@@ -88,9 +88,9 @@ function buildSwatchCards(swatches, idPrefix = 'siSws') {
 }
 
 const strokeInk = {
-  align: 'inside',
-  thickness: 2,
-  fill: '$si-color-ink-950'
+  stroke: '$si-color-ink-950',
+  strokeWidth: 2,
+  strokeAlignment: 'inner'
 };
 
 const modeKeyKebab = (modeKey) => modeKey.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
@@ -140,7 +140,7 @@ function buildSurfaceStackDemo(resolved, layout, idPrefix) {
     height: 40,
     fill: penColorVar('bgField'),
     cornerRadius: '$si-radius-sm',
-    stroke: strokeSubtle
+    ...strokeSubtle
   };
 
   const groupFrame = {
@@ -149,7 +149,7 @@ function buildSurfaceStackDemo(resolved, layout, idPrefix) {
     width: 'fill_container',
     fill: penColorVar('bgSurface'),
     cornerRadius: 0,
-    stroke: strokeInk,
+    ...strokeInk,
     layout: 'vertical',
     gap: 10,
     padding: 14,
@@ -194,7 +194,7 @@ function buildSurfaceStackDemo(resolved, layout, idPrefix) {
     width: 'fill_container',
     fill: penColorVar('bgSection'),
     cornerRadius: 0,
-    stroke: strokeInk,
+    ...strokeInk,
     layout: 'vertical',
     clip: true,
     children: [
@@ -351,7 +351,7 @@ function buildTokenSections(resolved, layout) {
       height: 76,
       fill: penColorVar('bgSurface'),
       cornerRadius: Number(r),
-      stroke: strokeSubtle,
+      ...strokeSubtle,
       layout: 'vertical',
       justifyContent: 'center',
       alignItems: 'center',
@@ -689,7 +689,7 @@ function buildComponentGroupCard(group, index, page, penLibraryIndex, catalog) {
     width: 'fill_container',
     fill: penColorVar('bgSurface'),
     cornerRadius: '$si-radius-md',
-    stroke: strokeSubtle,
+    ...strokeSubtle,
     layout: 'vertical',
     gap: 8,
     padding: 14,
@@ -723,7 +723,7 @@ function buildPageFrame(page, sectionNodes, catalog, penLibraryIndex, resolved, 
     width: 'fill_container',
     fill: penColorVar('bgSection'),
     cornerRadius: '$si-radius-lg',
-    stroke: strokeSubtle,
+    ...strokeSubtle,
     layout: 'vertical',
     gap: 10,
     padding: 22,
