@@ -46,6 +46,34 @@ test('clonePenEmbedNode strips placement and preserves ref overrides', () => {
   assert.deepEqual(embed.descendants, { FT3cO: { fill: '$si-color-text-primary' } });
 });
 
+test('clonePenEmbedNode namespaces embedded descendant child ids', () => {
+  const embed = clonePenEmbedNode(
+    {
+      type: 'ref',
+      id: 'cardDemo',
+      ref: 'cardMaster',
+      descendants: {
+        titleSlot: {
+          children: [
+            { type: 'text', id: 'titleText', content: 'Demo' },
+            {
+              type: 'frame',
+              id: 'metaRow',
+              children: [{ type: 'text', id: 'dateText', content: '2026-06-22' }]
+            }
+          ]
+        }
+      }
+    },
+    'specCard1'
+  );
+
+  assert.equal(embed.id, 'specCard1');
+  assert.equal(embed.descendants.titleSlot.children[0].id, 'specCard1_titleText');
+  assert.equal(embed.descendants.titleSlot.children[1].id, 'specCard1_metaRow');
+  assert.equal(embed.descendants.titleSlot.children[1].children[0].id, 'specCard1_dateText');
+});
+
 test('clonePenEmbedNode converts masters into refs', () => {
   const index = buildPenLibraryIndex(library);
   const master = resolvePenRef({ name: 'Button/Default' }, index);
