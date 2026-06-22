@@ -1,6 +1,6 @@
 /**
  * Align docs/designs/budgeting/main.pen with @sindustries/design-tokens:
- * - sets imports → design-systems.pen (variables + components; standalone library)
+ * - sets imports → design-systems.lib.pen (variables + components; standalone library)
  * - removes duplicate root `variables` if present
  * - removes legacy on-canvas specimen frame (id q4Jkj) if still present
  *
@@ -9,11 +9,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 
-import { repoRootFromThisScript, serializePenDocument } from './pen-token-kit.mjs';
+import { designSystemsLibPenAbs, repoRootFromThisScript, serializePenDocument } from './pen-token-kit.mjs';
 
 const repoRoot = repoRootFromThisScript(import.meta.url);
 const mainPenPath = resolve(repoRoot, 'docs/designs/budgeting/main.pen');
-const designSystemsKit = resolve(repoRoot, 'packages/design-tokens/design-systems.pen');
+const designSystemsKit = designSystemsLibPenAbs(repoRoot);
 
 function relTo(fromAbs, toAbs) {
   let r = relative(dirname(fromAbs), toAbs);
