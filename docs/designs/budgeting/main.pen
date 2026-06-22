@@ -505,7 +505,18 @@
                   "ref": "ui:budgetPillTabBar",
                   "name": "Budget/PillTabBar",
                   "width": "fill_container",
-                  "height": "fit_content"
+                  "height": 62,
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
+                    },
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
+                    },
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
+                    }
+                  }
                 }
               ]
             }
@@ -1165,97 +1176,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "gWf84",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "5Oam9",
-                      "name": "navCardsD",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "ORzXy",
-                          "name": "navCardsTxtD",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "uvpLL",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "5oSv8",
-                          "name": "insightsTxtD",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "idvZa",
-                      "name": "navSettingsD",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "F2ESF",
-                          "name": "navSettingsTxtD",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             }
@@ -2055,97 +1992,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "fRM6S",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "HkD12",
-                      "name": "navCardsIA",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "u24BS",
-                          "name": "navCardsTxtIA",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "2i3qp",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "hzWrC",
-                          "name": "insightsTxtIA",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "bZedb",
-                      "name": "navSettingsIA",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "hr81B",
-                          "name": "navSettingsTxtIA",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             }
@@ -2921,97 +2784,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "B1xq6",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "oKRth",
-                      "name": "navCardsIA",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "IBAB7",
-                          "name": "navCardsTxtIA",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "kVvF8",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "AG8AW",
-                          "name": "insightsTxtDel",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "ipI1s",
-                      "name": "navSettingsIA",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "6xkQj",
-                          "name": "navSettingsTxtIA",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             },
@@ -3972,97 +3761,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "5agsQ",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "9bfEC",
-                      "name": "navCardsSB",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "ooByJ",
-                          "name": "navCardsTxtSB",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "CagzF",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "k2VMH",
-                          "name": "insightsTxtSB",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "J3cpm",
-                      "name": "navSettingsSB",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "EGEbF",
-                          "name": "navSettingsTxtSB",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             }
@@ -4955,97 +4670,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "kuUMj",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "pkBj4",
-                      "name": "navCardsSB",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "lZmDA",
-                          "name": "navCardsTxtSB",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "rnPzW",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "7boWa",
-                          "name": "insightsTxtReview",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "SrfJR",
-                      "name": "navSettingsSB",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "XfudW",
-                          "name": "navSettingsTxtSB",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             }
@@ -5589,97 +5230,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "oR2zp",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "EobZH",
-                      "name": "navCardsRC",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "EcODy",
-                          "name": "navCardsTxtRC",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "01ung",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "yd0pu",
-                          "name": "insightsTxtPicker",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "0TSJM",
-                      "name": "navSettingsRC",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "sv3Sn",
-                          "name": "navSettingsTxtRC",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             }
@@ -6339,97 +5906,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "P6jaV",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "dx09k",
-                      "name": "navCardsD",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "Nuhet",
-                          "name": "navCardsTxtD",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "IC4SI",
-                      "name": "navInsights",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#00000000",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "RugVs",
-                          "name": "insightsTxtSheet",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "daHdq",
-                      "name": "navSettingsD",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "5Hmhh",
-                          "name": "navSettingsTxtD",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             },
@@ -7146,96 +6639,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "ltND5",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "Q1sqx",
-                      "name": "homeCT",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "vRceI",
-                          "name": "homeTxtCT",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "OuTMu",
-                      "name": "insightsCT",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "CK5kC",
-                          "name": "insightsTxtCT",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "3OVRA",
-                      "name": "settingsCT",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "ke2Pf",
-                          "name": "settingsTxtCT",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             }
@@ -7686,96 +7106,23 @@
               "alignItems": "center",
               "children": [
                 {
-                  "type": "frame",
+                  "type": "ref",
                   "id": "WBIq0",
+                  "ref": "ui:budgetPillTabBar",
                   "name": "Pill Tab Bar",
                   "width": "fill_container",
                   "height": 62,
-                  "fill": "#2A2A2F",
-                  "cornerRadius": 36,
-                  "stroke": "#FFFFFF12",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "gap": 4,
-                  "padding": 4,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "Fjens",
-                      "name": "homeCT",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "fill": "#FFFFFF22",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "s0Yxw",
-                          "name": "homeTxtCT",
-                          "fill": "#FFFFFF",
-                          "content": "HOME",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "800",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                  "descendants": {
+                    "ui:bmTxt019": {
+                      "content": "HOME"
                     },
-                    {
-                      "type": "frame",
-                      "id": "XYrbH",
-                      "name": "insightsCT",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "mld8P",
-                          "name": "insightsTxtCT",
-                          "fill": "#A8A8AE",
-                          "content": "INSIGHTS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt021": {
+                      "content": "INSIGHTS"
                     },
-                    {
-                      "type": "frame",
-                      "id": "5etOt",
-                      "name": "settingsCT",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "cornerRadius": 26,
-                      "layout": "vertical",
-                      "gap": 4,
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "k3ZGR",
-                          "name": "settingsTxtCT",
-                          "fill": "#A8A8AE",
-                          "content": "SETTINGS",
-                          "fontFamily": "Inter",
-                          "fontSize": 10,
-                          "fontWeight": "600",
-                          "letterSpacing": 0.5
-                        }
-                      ]
+                    "ui:bmTxt023": {
+                      "content": "SETTINGS"
                     }
-                  ]
+                  }
                 }
               ]
             },
