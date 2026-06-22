@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-tokens.mjs",
+    "build": "node scripts/build-tokens.mjs && node ../../scripts/design/sync-design-systems-lib.mjs",
     "test": "node --test scripts/*.test.mjs"
   },
   "exports": {
