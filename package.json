@@ -4,6 +4,7 @@
   "scripts": {
     "sync:budgeting-pen": "node scripts/design/sync-budgeting-pen.mjs",
     "sync:design-systems-pen": "node scripts/design/sync-design-systems-pen.mjs",
+    "sync:design-systems-lib": "node scripts/design/sync-design-systems-lib.mjs",
     "check:design-sync": "node scripts/design/check-design-sync.mjs"
   },
   "workspaces": [
