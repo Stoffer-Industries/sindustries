@@ -16,10 +16,6 @@ from common import (
     dump_json,
     get_approval_topic,
     load_state,
-    log_transition,
-    now_iso,
-    save_state,
-    transition_log_path,
 )
 
 TASKS_CLIENT_DIRS = [
@@ -102,14 +98,12 @@ def main() -> int:
     state = load_state(Path(STATE_PATH))
     items = state.get("items", {})
     requests = []
-    reconciled = []
-    changed = False
     base_url = None
     if get_base_url is not None:
         try:
             base_url = get_base_url()
         except BaseException as exc:  # noqa: BLE001
-            print(f"[list_spec_requests] Tasks API unavailable; approval/task reconciliation disabled: {exc}", file=sys.stderr)
+            print(f"[list_spec_requests] Tasks API unavailable; skip-tasked guard disabled: {exc}", file=sys.stderr)
     for key, item in items.items():
         status = item.get("reviewStatus")
         # Human-gated states such as needs_research are intentionally excluded.
@@ -119,19 +113,9 @@ def main() -> int:
         if request is None:
             continue
         if _already_tasked(item, base_url):
-            reason = "approved bookmark already has active taskIds; reconciled spec request to tasked"
-            item["reviewStatus"] = "tasked"
-            item["lastUpdatedAt"] = now_iso()
-            items[key] = item
-            log_transition(key, status, "tasked", reason, transitions_path=transition_log_path(Path(STATE_PATH)))
-            reconciled.append({"bookmarkKey": key, "previousStatus": status, "reason": reason})
-            print(f"[list_spec_requests] reconciled {key}: {status} -> tasked ({reason})", file=sys.stderr)
-            changed = True
             continue
         requests.append(request)
-    if changed:
-        save_state(state, Path(STATE_PATH))
-    dump_json({"ok": True, "specRequests": requests, "count": len(requests), "reconciled": reconciled})
+    dump_json({"ok": True, "specRequests": requests, "count": len(requests)})
     return 0
 
 
