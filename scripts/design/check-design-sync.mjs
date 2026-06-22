@@ -35,6 +35,16 @@ function runBuild() {
   }
 }
 
+function runDesignSystemsLibSync() {
+  const result = spawnSync(process.execPath, [resolve(repoRoot, 'scripts/design/sync-design-systems-lib.mjs')], {
+    cwd: repoRoot,
+    stdio: 'inherit'
+  });
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+}
+
 function runGitDiff(paths) {
   const result = spawnSync('git', ['diff', '--quiet', '--', ...paths], { cwd: repoRoot });
   return result.status === 0;
@@ -58,19 +68,21 @@ async function main() {
   }
 
   runBuild();
+  runDesignSystemsLibSync();
 
   const generatedPaths = [
     'packages/design-tokens/styles.css',
     'packages/design-tokens/src/tokens.ts',
     'packages/design-tokens/pen-tokens.json',
     'packages/design-tokens/design-systems.pen',
+    'packages/design-tokens/design-systems.lib.pen',
     'packages/ui/src/specimen/generated/manifest.js',
     'packages/ui/src/specimen/generated/pages.js',
     'packages/ui/src/specimen/generated/catalog.js'
   ];
 
   if (!runGitDiff(generatedPaths)) {
-    console.error('Generated design-system artifacts are out of date. Run: npm run build --workspace @sindustries/design-tokens');
+    console.error('Generated design-system artifacts are out of date. Run: npm run sync:design-systems-pen && npm run sync:design-systems-lib');
     process.exit(1);
   }
 
