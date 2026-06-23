@@ -32,6 +32,7 @@ model User {
   txns      Transaction[]
   feedback  CategorizationFeedback[]
   alerts    NotificationEvent[]
+  balanceAlertConfigs BalanceAlertConfig[]
 }
 
 model AkahuConnection {
@@ -75,6 +76,7 @@ model LinkedCard {
   txns           Transaction[]
   balanceSnapshots AccountBalanceSnapshot[]
   budgets        CardMonthlyBudget[]
+  balanceAlertConfig BalanceAlertConfig?
 
   @@unique([provider, providerCardId])
   @@index([userId, createdAt])
@@ -149,6 +151,23 @@ model CategorizationFeedback {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, merchantKey])
+}
+
+model BalanceAlertConfig {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  cardId         String   @unique @db.Uuid
+  condition      String
+  thresholdCents Int
+  pushEnabled    Boolean  @default(true)
+  emailEnabled   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card           LinkedCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model NotificationEvent {
