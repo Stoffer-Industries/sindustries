@@ -11,6 +11,5 @@ Run from this skill directory:
 python3 check_stale_content.py
 ```
 
-For each `STALE:` line in the output, append a daily content note using the
-`content-notes` skill. The note should identify the slug, stale status/date, why
-it may need a website update, and the source content file.
+The weekly content review cron consumes the output directly. Do not append
+heartbeat content notes for stale items.

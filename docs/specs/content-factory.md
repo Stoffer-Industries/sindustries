@@ -382,7 +382,7 @@ Before any content moves to review:
 
 ## Stale Content
 
-Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 days as potentially stale. These appear in the weekly review as candidate updates, not automatic changes.
+The weekly content review cron flags experiments and systems with `updatedAt` older than 30 days as potentially stale. These appear in the weekly review as candidate updates, not automatic changes.
 
 ---
 

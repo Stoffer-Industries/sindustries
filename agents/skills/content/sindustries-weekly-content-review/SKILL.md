@@ -62,6 +62,16 @@ Read each of these files in full:
 
 Build a mental model of: what is currently published, what statuses exist, when each item was last updated.
 
+Then run the stale-content checker:
+
+```bash
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/content/sindustries-stale-content/check_stale_content.py
+```
+
+Treat each stale item as an additional weekly-review signal. Do not append stale
+items to `brain/ops/notes/`; the weekly review is the place where stale content
+is triaged.
+
 ---
 
 ## Step 4 — Compare and generate change items
@@ -71,6 +81,15 @@ For each daily note bullet, ask:
 - Which content item does it relate to? (experiment, system, stack, release, story)
 - What specifically needs to change: **add**, **edit**, or **remove**?
 - Is the change factual/technical (Quinn can execute) or strategic/narrative/first-person (needs Tom)?
+
+For each stale-content checker item, add one of:
+- `EDIT experiment/<slug> — review stale status/update date (<N> days old)`
+- `EDIT system/<slug> — review stale status/update date (<N> days old)`
+
+Classify these as **Quinn can execute** when the only likely change is a factual
+`updatedAt`, status, or `currentLearning` refresh with evidence. Classify as
+**Needs Tom approval** when the stale item needs narrative repositioning,
+summary rewrites, or strategic context.
 
 Produce a flat list of proposed change items. Each item should be:
 - One line, starting with the action: `ADD`, `EDIT`, or `REMOVE`
@@ -134,6 +153,10 @@ _Signals noted but insufficient detail to act on._
 <!-- Raw notes appended for context. Do not re-ingest these in subsequent runs. -->
 
 [paste raw note bullets here, grouped by date]
+
+## Reference — Stale content check
+
+[paste stale-content checker output here, or `STALE_CHECK_OK: ...` if nothing is stale]
 ```
 
 **Rules:**
