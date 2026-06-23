@@ -13,7 +13,7 @@ Status field meanings:
 If the command fails (non-zero exit or `ok: false`) or status is `partial_failure`, report the failure exactly.
 
 # notify-soft-fails
-Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/notify-soft-fails/SKILL.md and follow it.
+Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
 If the output of this cron has soft failures or unacceptable errors, escalate that to Lox's main session.
 
 If the script succeeds, say exactly: NO_REPLY

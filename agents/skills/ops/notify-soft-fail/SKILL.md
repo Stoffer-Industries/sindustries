@@ -1,9 +1,9 @@
 ---
-name: notify-soft-fails
+name: notify-soft-fail
 description: "Notify Lox of cron failures via sessions_send. Lox then escalates to Tom directly via Telegram CLI. Use in cron prompts to route failures to Lox for investigation."
 ---
 
-# notify-soft-fails
+# notify-soft-fail
 
 Use this pattern in cron agent prompts to notify Lox of failures — both hard (non-zero exit) and soft (failure keywords in output).
 
@@ -25,7 +25,7 @@ In the cron prompt, reference this skill generically:
 
 ```
 # notify-soft-fails
-Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/notify-soft-fails/SKILL.md and follow it.
+Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
 If the output of this cron has soft failures or unacceptable errors, escalate that to Lox's main session.
 ```
 

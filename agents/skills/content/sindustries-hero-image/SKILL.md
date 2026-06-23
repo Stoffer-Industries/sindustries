@@ -1,9 +1,9 @@
 ---
-name: sindustries-hero-images
+name: sindustries-hero-image
 description: Generate ultra-premium cinematic hero images for Sindustries brand. Use when creating hero images, product photography, or marketing visuals for sindustries.co.nz. Uses hardcoded openai/gpt-image-2 model for maximum quality.
 ---
 
-# Sindustries Hero Images
+# Sindustries Hero Image
 
 Generate cinematic, ultra-premium hero images using the Sindustries brand prompt template.
 
@@ -23,7 +23,7 @@ Generate cinematic, ultra-premium hero images using the Sindustries brand prompt
 
 1. Run the generator script with `--condensed` flag (avoids timeout on complex prompts):
    ```bash
-   python3 skills/sindustries-hero-images/scripts/generate_hero.py \
+   python3 skills/content/sindustries-hero-image/scripts/generate_hero.py \
      --env "brutalist concrete building courtyard" \
      --object "matador seg28 travel pack" \
      --supporting "loom tea towel" "timemore scale" \

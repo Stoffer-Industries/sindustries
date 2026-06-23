@@ -19,8 +19,8 @@ from common import (
 )
 
 TASKS_CLIENT_DIRS = [
-    WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "tasks-api-ops",
-    Path(__file__).resolve().parents[2] / "skills" / "tasks-api-ops",
+    WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "ops" / "tasks-api",
+    Path(__file__).resolve().parents[3] / "skills" / "ops" / "tasks-api",
 ]
 for tasks_client_dir in TASKS_CLIENT_DIRS:
     if tasks_client_dir.exists() and str(tasks_client_dir) not in sys.path:

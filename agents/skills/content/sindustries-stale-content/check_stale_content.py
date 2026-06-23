@@ -14,8 +14,8 @@ import json
 import sys
 from pathlib import Path
 
-WORKSPACE = Path(__file__).resolve().parents[5]
-CONTENT_ROOT = WORKSPACE / "codebases" / "sindustries" / "apps" / "website" / "src" / "content"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+CONTENT_ROOT = REPO_ROOT / "apps" / "website" / "src" / "content"
 THRESHOLD_DAYS = 30
 ACTIVE_STATUSES = {"active", "building", "operating"}
 

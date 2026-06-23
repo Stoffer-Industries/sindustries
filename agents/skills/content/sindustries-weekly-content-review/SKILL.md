@@ -1,4 +1,9 @@
-# weekly-content-review
+---
+name: sindustries-weekly-content-review
+description: "Create the SIndustries weekly content review from ops notes, memory, and current website content."
+---
+
+# SIndustries Weekly Content Review
 
 Quinn's native workflow for the SIndustries weekly content review. Compares recent daily ops notes against live website content, then proposes specific content changes for Tom's triage.
 

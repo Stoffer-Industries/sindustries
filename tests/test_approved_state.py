@@ -22,8 +22,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "agents" / "workflows" / "bookmark"))
-sys.path.insert(0, str(REPO / "agents" / "skills" / "tasks-api-ops"))
+sys.path.insert(0, str(REPO / "agents" / "workflows" / "bookmarks" / "scripts"))
+sys.path.insert(0, str(REPO / "agents" / "skills" / "ops" / "tasks-api"))
 
 import common  # noqa: E402
 import lobster_resolve_spec_request as resolve_spec_request  # noqa: E402

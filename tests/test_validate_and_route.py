@@ -28,7 +28,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 WORKFLOW_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "agents", "workflows", "bookmark"
+    os.path.dirname(__file__), "..", "agents", "workflows", "bookmarks", "scripts"
 )
 sys.path.insert(0, WORKFLOW_DIR)
 

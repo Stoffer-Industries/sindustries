@@ -365,7 +365,7 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "owner": "Tom Stoffer",
         "framingReminder": "The bookmark's own framing is the spec's center of gravity. The state-of-the-nation document, frictions, and topic profile are relevance signals — they tell you whether the bookmark belongs in this topic's domain, not what the bookmark is about. Do not re-shape the bookmark onto our frictions. The spec generation prompt has the full faithfulness rule.",
         "currentState": [
-            "Bookmark ingest lives in agents/skills/x-bookmark-ingest/scripts/",
+            "Bookmark ingest lives in agents/skills/bookmarks/x-ingest/scripts/",
             "Review workflow scripts live under agents/workflows/bookmarks/scripts/",
             "Review state is stored in brain/state/bookmark-review-state.json",
             "Pipeline orchestration target is agents/workflows/bookmarks/bookmarks.lobster.yaml",
@@ -394,7 +394,7 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
             "stackFocus": "the OpenClaw runtime stack: agent orchestration, workflow plumbing, state files, observability, deployment, host hardening, and the scripts/lobsters that wire them together",
             "adjacentComponents": [
                 "agents/workflows/bookmarks/scripts/*.py",
-                "agents/skills/x-bookmark-ingest/scripts/x/*.cjs",
+                "agents/skills/bookmarks/x-ingest/scripts/x/*.cjs",
                 "agents/workflows/bookmarks/bookmarks.lobster.yaml",
                 "brain/state/bookmark-review-state.json",
                 "infra/runbooks/ and infra/RUNBOOKS.md",

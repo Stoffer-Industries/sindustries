@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 WORKSPACE = Path("/Users/quinnstoffer/.openclaw/workspace")
-TASKS_CLIENT_DIR = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "tasks-api-ops"
+TASKS_CLIENT_DIR = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "ops" / "tasks-api"
 if str(TASKS_CLIENT_DIR) not in sys.path:
     sys.path.insert(0, str(TASKS_CLIENT_DIR))
 

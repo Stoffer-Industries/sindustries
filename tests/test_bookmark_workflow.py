@@ -27,7 +27,7 @@ import request_topic_approval
 import lobster_resolve_spec_request as resolve_spec_request
 import handle_approval_reply
 
-TASKS_OPS_DIR = Path(__file__).resolve().parents[1] / "agents" / "skills" / "tasks-api-ops"
+TASKS_OPS_DIR = Path(__file__).resolve().parents[1] / "agents" / "skills" / "ops" / "tasks-api"
 task_transition_spec = importlib.util.spec_from_file_location(
     "task_transition_check",
     TASKS_OPS_DIR / "task_transition_check.py",
@@ -1262,7 +1262,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         reader.close()
 
     def test_request_single_spec_approval_reset_clears_old_spec_state_and_files(self):
-        module_path = Path(__file__).resolve().parents[1] / "agents" / "workflows" / "bookmark" / "debug" / "request_single_spec_approval.py"
+        module_path = Path(__file__).resolve().parents[1] / "agents" / "workflows" / "bookmarks" / "scripts" / "debug" / "request_single_spec_approval.py"
         spec = importlib.util.spec_from_file_location("request_single_spec_approval_debug", module_path)
         reset_debug = importlib.util.module_from_spec(spec)
         assert spec and spec.loader

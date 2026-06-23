@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+WORKFLOW_SCRIPTS = REPO_ROOT / "agents" / "workflows" / "bookmarks" / "scripts"
+if str(WORKFLOW_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_SCRIPTS))
 
 from common import STATE_PATH, load_state
 
