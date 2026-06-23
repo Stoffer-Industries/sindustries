@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
 
 import common
 import lobster_create_tasks_from_proposals as create_tasks_from_proposals
@@ -1901,7 +1901,7 @@ class ReviewNeverRewrittenTests(unittest.TestCase):
         bookmark_file.write_text("# Test")
 
         # Import and run list_review_candidates
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
         import importlib
         import list_review_candidates
         importlib.reload(list_review_candidates)
@@ -1939,7 +1939,7 @@ class ReviewNeverRewrittenTests(unittest.TestCase):
         bookmark_file.write_text("# Test 2")
 
         # Run list_review_candidates
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
         import importlib
         import list_review_candidates
         importlib.reload(list_review_candidates)
@@ -1978,7 +1978,7 @@ class ReviewNeverRewrittenTests(unittest.TestCase):
         bookmark_file.write_text("# Test 3")
 
         # Run list_review_candidates
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
         import importlib
         import list_review_candidates
         importlib.reload(list_review_candidates)
@@ -2019,7 +2019,7 @@ class ReviewNeverRewrittenTests(unittest.TestCase):
         common.save_state(state, self.state_path)
 
         # Run cleanup (import and call)
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
         import list_review_candidates
         list_review_candidates.cleanup_stale_references(self.root)
 

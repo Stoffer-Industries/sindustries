@@ -12,7 +12,7 @@ The work is split into three discrete steps. Heartbeat orchestrates; nothing her
 ## Step 1 — List candidates (filter only, no LLM)
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/list_curate_candidates.py --json
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmarks/scripts/list_curate_candidates.py --json
 ```
 
 Output includes:
@@ -62,7 +62,7 @@ Write the decisions to `brain/state/curate-output.json` (overwrite — curate is
 ## Step 3 — Apply state (lobster-side state machine)
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmark/validate_curate_output.py --json
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmarks/scripts/validate_curate_output.py --json
 ```
 
 Reads the artifact, validates format, writes `item.curation` for each decision, logs a `curation refreshed` transition, and renames the artifact to `.processed`. Idempotent — safe to re-run.
