@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 
-CONTENT_TASK_DIR = Path(__file__).resolve().parents[1] / "agents/workflows/content-task"
+CONTENT_TASK_DIR = Path(__file__).resolve().parents[1] / "agents/workflows/content-tasks/scripts"
 
 
 def load_content_task_modules():
