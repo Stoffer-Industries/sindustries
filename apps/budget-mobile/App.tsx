@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppEdgeSwipeBack } from './src/components/AppEdgeSwipeBack';
 import { AlertsScreen } from './src/screens/AlertsScreen';
+import { CategoryTransactionsScreen } from './src/screens/CategoryTransactionsScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { TokenSpecimenScreen } from './src/screens/TokenSpecimenScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
@@ -30,6 +31,7 @@ export default function App() {
                 screens: {
                   Dashboard: '',
                   Transactions: 'transactions',
+                  CategoryTransactions: 'transactions/:category',
                   Alerts: 'alerts',
                   TokenSpecimen: 'tokens'
                 }
@@ -51,6 +53,11 @@ export default function App() {
               <Stack.Screen
                 name="Transactions"
                 component={TransactionsScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="CategoryTransactions"
+                component={CategoryTransactionsScreen}
                 options={{ headerShown: false }}
               />
               <Stack.Screen

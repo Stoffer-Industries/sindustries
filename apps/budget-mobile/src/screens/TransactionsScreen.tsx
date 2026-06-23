@@ -61,7 +61,7 @@ export function TransactionsScreen({ navigation }: Props) {
   const { session } = useSession();
   const [data, setData] = useState<Txn[]>(demoTransactions);
   const [loading, setLoading] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [detailTxn, setDetailTxn] = useState<Txn | null>(null);
   const [editingTxn, setEditingTxn] = useState<Txn | null>(null);
 
   useEffect(() => {
@@ -94,9 +94,6 @@ export function TransactionsScreen({ navigation }: Props) {
   }, [session]);
 
   const categoryRows = useMemo(() => buildCategoryRows(data), [data]);
-  const visibleTransactions = selectedCategory
-    ? data.filter((txn) => txn.category === selectedCategory)
-    : data;
   const totalSpend = data
     .filter((txn) => txn.amountCents < 0)
     .reduce((sum, txn) => sum + Math.abs(txn.amountCents), 0);
@@ -181,37 +178,37 @@ export function TransactionsScreen({ navigation }: Props) {
         />
       </MetricPanel>
 
-      <MetricPanel title="Categories" subtitle={selectedCategory ? `Filtered to ${selectedCategory}` : 'Tap a category to review'}>
-        {categoryRows.slice(0, 6).map((row) => (
+      <MetricPanel title="Categories" subtitle="Tap a category to review transactions">
+        {categoryRows.map((row) => (
           <CategorySummaryRow
             key={row.category}
             color={row.color}
             label={titleCase(row.category)}
-            metadata={`${row.count} transactions`}
+            metadata={`${row.count} transaction${row.count !== 1 ? 's' : ''}`}
             amount={formatCents(row.amountCents)}
             progress={totalSpend === 0 ? 0 : row.amountCents / totalSpend}
-            onPress={() => setSelectedCategory(selectedCategory === row.category ? null : row.category)}
+            onPress={() => navigation.navigate('CategoryTransactions', { category: row.category })}
           />
         ))}
       </MetricPanel>
 
-      <MetricPanel title={selectedCategory ? `${titleCase(selectedCategory)} transactions` : 'Recent transactions'}>
+      <MetricPanel title="Recent transactions">
         <View style={styles.transactionList}>
-          {visibleTransactions.length === 0 ? (
+          {data.length === 0 ? (
             <Text style={styles.emptyText}>{session ? 'No transactions yet.' : 'Please dev-login from Accounts to load live data.'}</Text>
           ) : (
-            visibleTransactions.slice(0, 8).map((txn) => {
+            data.slice(0, 8).map((txn) => {
               const title = txn.merchant?.trim() || txn.description?.trim() || 'Unknown transaction';
               return (
                 <TransactionRow
                   key={txn.id}
                   initial={title.charAt(0).toUpperCase()}
                   title={title}
-                  metadata={`${titleCase(txn.category)}${txn.pending ? ' - Pending' : ''}`}
+                  metadata={`${titleCase(txn.category)}${txn.pending ? ' · Pending' : ''}`}
                   amount={formatCents(txn.amountCents)}
                   income={txn.amountCents > 0}
                   color={colorForCategory(txn.category)}
-                  onPress={() => setEditingTxn(txn)}
+                  onPress={() => setDetailTxn(txn)}
                 />
               );
             })
@@ -219,16 +216,33 @@ export function TransactionsScreen({ navigation }: Props) {
         </View>
       </MetricPanel>
 
-      {selectedCategory ? (
-        <Pressable accessibilityRole="button" onPress={() => setSelectedCategory(null)} style={styles.clearButton}>
-          <Text style={styles.clearText}>Clear category filter</Text>
-        </Pressable>
-      ) : null}
+      {/* Transaction detail sheet */}
+      <BottomSheet
+        visible={detailTxn !== null && editingTxn === null}
+        title={detailTxn ? (detailTxn.merchant || detailTxn.description || 'Transaction') : undefined}
+        subtitle={detailTxn ? formatCents(detailTxn.amountCents) : undefined}
+        detailRows={detailTxn ? buildDetailRows(detailTxn) : []}
+        onDismiss={() => setDetailTxn(null)}
+      >
+        {detailTxn ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.changeCategoryButton}
+            onPress={() => {
+              setEditingTxn(detailTxn);
+              setDetailTxn(null);
+            }}
+          >
+            <Text style={styles.changeCategoryText}>Change category</Text>
+          </Pressable>
+        ) : null}
+      </BottomSheet>
 
+      {/* Recategorization sheet */}
       <BottomSheet
         visible={editingTxn !== null}
         title={editingTxn ? (editingTxn.merchant || editingTxn.description || 'Transaction') : undefined}
-        subtitle={editingTxn ? formatCents(editingTxn.amountCents) : undefined}
+        subtitle="Choose a category"
         onDismiss={() => setEditingTxn(null)}
       >
         {editingTxn
@@ -245,6 +259,13 @@ export function TransactionsScreen({ navigation }: Props) {
       </BottomSheet>
     </BudgetScreen>
   );
+}
+
+function buildDetailRows(txn: Txn): { label: string; value: string }[] {
+  return [
+    { label: 'Category', value: titleCase(txn.category) },
+    { label: 'Status', value: txn.pending ? 'Pending' : 'Cleared' }
+  ];
 }
 
 function buildCategoryRows(transactions: Txn[]) {
@@ -297,15 +318,16 @@ const styles = StyleSheet.create({
     color: b.text.muted,
     fontSize: 14
   },
-  clearButton: {
+  changeCategoryButton: {
     minHeight: tokens.platform.mobile.hitTarget.min,
     borderRadius: budget.radius.button,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: b.surface.strong
+    backgroundColor: b.surface.control
   },
-  clearText: {
-    color: b.text.primary,
-    fontWeight: '800'
+  changeCategoryText: {
+    color: b.text.inverse,
+    fontWeight: '800',
+    fontSize: 15
   }
 });
