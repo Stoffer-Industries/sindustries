@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Heartbeat stale-content check.
+Weekly content review stale-content check.
 
 Flags experiments and systems in the sindustries content files where
 updatedAt is more than 30 days ago and status is active/building/operating.
 
-Called from heartbeat. Prints stale items to stdout; exits 0 either way.
+Called from the weekly content review cron. Prints stale items to stdout; exits
+0 either way.
 """
 from __future__ import annotations
 

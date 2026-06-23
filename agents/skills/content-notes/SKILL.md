@@ -5,7 +5,7 @@ description: "Append SIndustries-relevant daily ops notes for the weekly content
 
 # Content Notes
 
-Track SIndustries-relevant signals during heartbeat by appending structured daily notes. The weekly cron reads them and creates content tasks.
+Track SIndustries-relevant signals during heartbeat by appending structured daily notes. The weekly cron reads them into Tom's review file.
 
 ---
 
@@ -77,20 +77,4 @@ notes_path.write_text(content.replace(
     f"<!-- heartbeat appends here -->\n{note_text}"
 ))
 print(f"Appended note to {notes_path}")
-```
-
----
-
-## Stale content check (heartbeat, once per day)
-
-Run:
-
-```
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/content/sindustries-stale-content/check_stale_content.py
-```
-
-For each `STALE:` line in the output, append a daily note with the format:
-
-```
-- [YYYY-MM-DD] **<slug>** — listed as <status> but updatedAt is <date> (>30 days) | why: website content may need a status update | ref: codebases/sindustries/apps/website/src/content/<file>
 ```
