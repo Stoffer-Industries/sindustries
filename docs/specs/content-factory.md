@@ -57,7 +57,7 @@ Quinn normally does not write final website copy. She is the orchestrator, not t
 
 A resumable workflow runner that drives content tasks through their lifecycle. Quinn's heartbeat runs the `content-tasks/run.py` wrapper, which discovers all active content tasks and runs the Lobster step chain for each task.
 
-**Script:** `agents/workflows/content-tasks/content-tasks.lobster.yaml`  
+**Script:** `agents/workflows/content-tasks/content-task.lobster.yaml`  
 **Entry point:** `agents/workflows/content-tasks/run.py`
 
 ---
@@ -394,7 +394,7 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 | Content notes skill | `agents/skills/content-notes/SKILL.md` |
 | Content authoring skill | `agents/skills/content-authoring/SKILL.md` |
 | Weekly content review skill | `agents/skills/weekly-content-review/SKILL.md` |
-| Lobster YAML | `agents/workflows/content-tasks/content-tasks.lobster.yaml` |
+| Lobster YAML | `agents/workflows/content-tasks/content-task.lobster.yaml` |
 | Lobster entry point | `agents/workflows/content-tasks/run.py` |
 | Transition scripts | `agents/workflows/content-tasks/scripts/` |
 | Hero image skill | `agents/skills/sindustries-hero-images/SKILL.md` |
