@@ -55,10 +55,10 @@ Quinn normally does not write final website copy. She is the orchestrator, not t
 
 ### The Lobster (content-task workflow)
 
-A resumable workflow runner that drives content tasks through their lifecycle. Quinn's heartbeat runs the `content-task.py` wrapper, which discovers all active content tasks and runs the Lobster step chain for each task.
+A resumable workflow runner that drives content tasks through their lifecycle. Quinn's heartbeat runs the `content-tasks/run.py` wrapper, which discovers all active content tasks and runs the Lobster step chain for each task.
 
-**Script:** `agents/workflows/scripts/content-task.lobster.yaml`  
-**Entry point:** `agents/workflows/content-task.py`
+**Script:** `agents/workflows/content-tasks/content-tasks.lobster.yaml`  
+**Entry point:** `agents/workflows/content-tasks/run.py`
 
 ---
 
@@ -246,7 +246,7 @@ Task description format:
 open → ready → doing → acceptance → done
 ```
 
-The `content-task.py` wrapper discovers active `content` tasks in `open`, `ready`, `doing`, and `acceptance`, then runs the Lobster step chain for each one. A task can pass through multiple consecutive gates in one wrapper run when later criteria are already satisfied.
+The `content-tasks/run.py` wrapper discovers active `content` tasks in `open`, `ready`, `doing`, and `acceptance`, then runs the Lobster step chain for each one. A task can pass through multiple consecutive gates in one wrapper run when later criteria are already satisfied.
 
 | Transition | Criteria |
 |---|---|
@@ -261,7 +261,7 @@ If earlier criteria regress, the Lobster moves the task backwards and posts a co
 
 ```bash
 TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 \
-  /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-task.py --json
+  /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-tasks/run.py --json
 ```
 
 ---
@@ -394,9 +394,9 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 | Content notes skill | `agents/skills/content-notes/SKILL.md` |
 | Content authoring skill | `agents/skills/content-authoring/SKILL.md` |
 | Weekly content review skill | `agents/skills/weekly-content-review/SKILL.md` |
-| Lobster YAML | `agents/workflows/scripts/content-task.lobster.yaml` |
-| Lobster entry point | `agents/workflows/content-task.py` |
-| Transition scripts | `agents/workflows/content-task/` |
+| Lobster YAML | `agents/workflows/content-tasks/content-tasks.lobster.yaml` |
+| Lobster entry point | `agents/workflows/content-tasks/run.py` |
+| Transition scripts | `agents/workflows/content-tasks/scripts/` |
 | Hero image skill | `agents/skills/sindustries-hero-images/SKILL.md` |
 | Ivy agent docs | `workspace: agents/ivy/` |
 | Daily ops notes | `workspace: brain/ops/notes/YYYY-MM-DD.md` |
