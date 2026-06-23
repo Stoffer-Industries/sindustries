@@ -650,7 +650,7 @@ def main() -> int:
 
         # Queue for Quinn's heartbeat spec dispatch.
         # Quinn picks up spec_requested items, writes specs with full tool access,
-        # then calls agents/workflows/bookmark/validate_spec_output.py to record the result.
+        # then calls agents/workflows/bookmarks/scripts/validate_spec_output.py to record the result.
         # build_task_proposals.approval_recoverable_items re-enters them once spec_created.
         if state_item.get("reviewStatus") != "spec_requested":
             previous_status = state_item.get("reviewStatus")

@@ -199,13 +199,23 @@ def main() -> int:
     state = load_state(Path(STATE_PATH))
     items = state.get("items", {})
 
-    candidates = []
+    # Two-pass collection: spec recovery items first (guaranteed slots), then new items.
+    # This prevents alphabetical file ordering from starving spec_created items that
+    # need approval packaging but happen to sort after the limit boundary.
+    priority_candidates: list[dict] = []  # spec work exists, approval not yet sent
+    normal_candidates: list[dict] = []    # new/unsummarized items
+
+    seen_keys: set[str] = set()
     for path in find_bookmark_files(root):
         record = bookmark_record(path)
         if args.source != "any" and record["source"] != args.source:
             continue
-        existing = items.get(record["bookmarkKey"], {})
-        
+        bk = record["bookmarkKey"]
+        if bk in seen_keys:
+            continue
+        seen_keys.add(bk)
+        existing = items.get(bk, {})
+
         # Check if we have a valid review on disk - if so, skip (never rewrite)
         if existing.get("reviewDoc"):
             review_path = WORKSPACE / existing["reviewDoc"]
@@ -228,6 +238,8 @@ def main() -> int:
                     if not valid_specs:
                         # Has implement classification but no specs - allow spec generation but skip review regeneration
                         record["skipReview"] = True
+                        record["existingState"] = existing
+                        normal_candidates.append(record)
                     else:
                         # Recovery path: if spec/proposal work exists but approval/task materialization
                         # hasn't happened yet, keep bookmark in pipeline for approval packaging.
@@ -239,18 +251,22 @@ def main() -> int:
                         )
                         if has_unmaterialized_spec_work:
                             record["skipReview"] = True
-                        else:
-                            continue  # fully processed: has specs and no remaining approval/task work
+                            record["existingState"] = existing
+                            priority_candidates.append(record)
+                        # else: fully processed, skip
                 else:
                     # Not implement - skip entirely, review already exists
-                    continue
-        
-        # If no review on disk, allow processing
-        
-        record["existingState"] = existing
-        candidates.append(record)
-        if len(candidates) >= args.limit:
-            break
+                    pass
+        else:
+            # If no review on disk, allow processing
+            record["existingState"] = existing
+            normal_candidates.append(record)
+
+    # Build final candidates list: priority items first, then fill with normal items
+    candidates = priority_candidates[:args.limit]
+    remaining = args.limit - len(candidates)
+    if remaining > 0:
+        candidates.extend(normal_candidates[:remaining])
 
     payload = {
         "ok": True,

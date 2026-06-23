@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
 
 import io
 import json

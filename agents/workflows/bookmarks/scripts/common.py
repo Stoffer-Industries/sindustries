@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
-WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
+WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
 # brain is a symlink to iCloud - don't resolve it to avoid cross-device paths
 BOOKMARKS_ROOT = WORKSPACE / "brain" / "bookmarks"
 REVIEWS_ROOT = WORKSPACE / "brain" / "bookmarks" / "summaries"
@@ -366,9 +366,9 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "framingReminder": "The bookmark's own framing is the spec's center of gravity. The state-of-the-nation document, frictions, and topic profile are relevance signals — they tell you whether the bookmark belongs in this topic's domain, not what the bookmark is about. Do not re-shape the bookmark onto our frictions. The spec generation prompt has the full faithfulness rule.",
         "currentState": [
             "Bookmark ingest lives in agents/skills/x-bookmark-ingest/scripts/",
-            "Review workflow scripts live under agents/workflows/bookmark/",
+            "Review workflow scripts live under agents/workflows/bookmarks/scripts/",
             "Review state is stored in brain/state/bookmark-review-state.json",
-            "Pipeline orchestration target is agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml",
+            "Pipeline orchestration target is agents/workflows/bookmarks/bookmarks.lobster.yaml",
         ],
         "goals": [
             "Automate repetitive work around planning, tasks, memory, and operations",
@@ -393,9 +393,9 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
         "infra": {
             "stackFocus": "the OpenClaw runtime stack: agent orchestration, workflow plumbing, state files, observability, deployment, host hardening, and the scripts/lobsters that wire them together",
             "adjacentComponents": [
-                "agents/workflows/bookmark/*.py",
+                "agents/workflows/bookmarks/scripts/*.py",
                 "agents/skills/x-bookmark-ingest/scripts/x/*.cjs",
-                "agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml",
+                "agents/workflows/bookmarks/bookmarks.lobster.yaml",
                 "brain/state/bookmark-review-state.json",
                 "infra/runbooks/ and infra/RUNBOOKS.md",
                 "codebases/sindustries/infra/ (Grafana, OTel, Prometheus)",
