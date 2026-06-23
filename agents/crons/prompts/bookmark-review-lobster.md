@@ -1,5 +1,5 @@
 Run this exact command with the exec tool and base your reply only on its JSON output:
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmark-curate/scripts/run_bookmark_curate.py
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/bookmarks/run.py
 
 Do not summarize from memory. Base your reply only on the JSON output.
 

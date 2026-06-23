@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmark"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agents/workflows/bookmarks/scripts"))
 
 import common
 import lobster_summarize as summarize_mod

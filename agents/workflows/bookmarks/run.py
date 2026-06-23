@@ -9,9 +9,9 @@ import threading
 from pathlib import Path
 
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
-WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
-PIPELINE = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmark" / "x-bookmarks-review-pipeline.lobster.yaml"
-REQUEST_APPROVAL = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmark" / "request_topic_approval.py"
+WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[5]
+PIPELINE = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "bookmarks.lobster.yaml"
+REQUEST_APPROVAL = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "scripts" / "request_topic_approval.py"
 STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
 DEFAULT_ARGS = {
     "sourceRoot": "brain/bookmarks/x",

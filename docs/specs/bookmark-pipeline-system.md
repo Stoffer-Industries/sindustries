@@ -2,7 +2,7 @@
 
 **Type:** System reference (keep updated as the pipeline evolves)
 **Last updated:** 2026-06-23
-**Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmark/`
+**Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmarks/`
 
 ---
 
@@ -98,7 +98,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `brain/bookmarks/x/<slug>.md` | Raw bookmark files |
 | `brain/bookmarks/summaries/<slug>-<key>.md` | LLM-produced summaries |
 | `brain/bookmarks/specs/<slug>-<key>.md` | Spec files written by Quinn |
-| `agents/workflows/bookmark/x-bookmarks-review-pipeline.lobster.yaml` | Lobster pipeline definition |
+| `agents/workflows/bookmarks/bookmarks.lobster.yaml` | Lobster pipeline definition |
 
 ---
 
