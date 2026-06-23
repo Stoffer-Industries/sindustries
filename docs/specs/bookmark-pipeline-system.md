@@ -106,7 +106,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 
 | Script | Stage | Executed by | Notes |
 |---|---|---|---|
-| `run_x_ingest.py` | Ingest | ingest cron | Entry point via x-bookmark-ingest skill |
+| `run_x_ingest.py` | Ingest | ingest cron | Entry point via `agents/skills/bookmarks/x-ingest/` |
 | `lobster_list_curate_candidates.py` | Ingest | review lobster | Collects candidate bookmarks for the pipeline |
 | `lobster_summarize.py` | Summarize | review lobster | Faithful extraction; no classification |
 | `list_curate_candidates.py` | Curate | heartbeat | Filter only — no LLM; outputs candidate batch for Quinn |
@@ -116,13 +116,13 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write; skips items where `approvalStatus=approved` AND `taskIds` non-empty (drift guard, read-only) |
 | `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
 | `lobster_request_spec_approval.py` | Approval | review lobster | Prepares packages, finalizes non-approval items, compacts payload, and pauses for approval gate |
-| `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in bookmark-curate skill) |
+| `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in `agents/skills/bookmarks/curate/`) |
 | `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
 | `handle_approval_reply.py` | Approval | openclaw extension | Parses Tom's reply; routes to approve/decline/revise (lives in `.openclaw/extensions/approval-reply/`) |
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
 | `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
 | `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown |
-| `run_bookmark_state_analyzer.py` | Inspect | skill | Compact state summary without loading full JSON (in bookmark-state-analyzer skill) |
+| `run_bookmark_state_analyzer.py` | Inspect | skill | Compact state summary without loading full JSON (in `agents/skills/bookmarks/state/`) |
 
 ---
 

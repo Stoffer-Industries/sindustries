@@ -31,6 +31,6 @@ Append new findings to brain/sindustries-drop/scan-00X.md (next available number
 Be concise, specific, evidence-based. No fluff. Do not repeat findings already confirmed in previous scans unless new data contradicts them.
 
 # notify-soft-fails
-Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/notify-soft-fails/SKILL.md and follow it.
+Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
 - If you were unable to write the scan file, OR if searches returned errors, exceptions, or no usable results across all categories: send failure notification as described in the skill with text: 'Sindustries Drop Product Scan cron failure: <brief summary of what went wrong>'
 - If the scan completed and results were written, do nothing further.

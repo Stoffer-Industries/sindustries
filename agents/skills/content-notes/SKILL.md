@@ -1,4 +1,9 @@
-# content-notes
+---
+name: content-notes
+description: "Append SIndustries-relevant daily ops notes for the weekly content review."
+---
+
+# Content Notes
 
 Track SIndustries-relevant signals during heartbeat by appending structured daily notes. The weekly cron reads them and creates content tasks.
 
@@ -81,7 +86,7 @@ print(f"Appended note to {notes_path}")
 Run:
 
 ```
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/content-notes/check_stale_content.py
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/content/sindustries-stale-content/check_stale_content.py
 ```
 
 For each `STALE:` line in the output, append a daily note with the format:

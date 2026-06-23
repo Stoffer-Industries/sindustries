@@ -12,7 +12,7 @@ Use the bundled analyzer script to summarize bookmark workflow state without loa
 Run:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmark-state-analyzer/scripts/run_bookmark_state_analyzer.py
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py
 ```
 
 This prints a compact human-readable summary with:
@@ -28,7 +28,7 @@ This prints a compact human-readable summary with:
 When you need structured output, run:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmark-state-analyzer/scripts/run_bookmark_state_analyzer.py --json
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py --json
 ```
 
 Use this instead of reading the large JSON file directly when the user asks for status, counts, pending work, or a quick health check.
@@ -38,13 +38,13 @@ Use this instead of reading the large JSON file directly when the user asks for 
 Filter by topic:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmark-state-analyzer/scripts/run_bookmark_state_analyzer.py --topic brain
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py --topic brain
 ```
 
 Filter by review status:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmark-state-analyzer/scripts/run_bookmark_state_analyzer.py --status spec_created
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py --status spec_created
 ```
 
 Combine filters when narrowing the report.
@@ -53,5 +53,5 @@ Combine filters when narrowing the report.
 
 - Prefer the analyzer for summaries, counts, and triage.
 - Read the raw JSON only when you need fields the analyzer does not expose.
-- If the user asks for a new bucket or metric repeatedly, extend `codebases/sindustries/agents/skills/bookmark-state-analyzer/scripts/run_bookmark_state_analyzer.py` rather than repeatedly loading the full state file.
+- If the user asks for a new bucket or metric repeatedly, extend `codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py` rather than repeatedly loading the full state file.
 - Treat `spec_created` and `approval_pending` as likely follow-up states unless the workflow semantics change.

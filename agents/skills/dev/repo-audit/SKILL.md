@@ -46,7 +46,7 @@ Default target repo:
 1. Print the vendored audit prompt:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/repo-audit/repo_audit.py --print-prompt /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/repo-audit/repo_audit.py --print-prompt /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
 ```
 
 2. Use that prompt to audit the target repo with read-only inspection. Produce a single markdown document matching the required sections.
@@ -57,7 +57,7 @@ python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/ski
 
 ```bash
 source ~/.openclaw/.env
-GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/repo-audit/repo_audit.py /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries --audit-file /tmp/sindustries-repo-audit.md
+GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/repo-audit/repo_audit.py /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries --audit-file /tmp/sindustries-repo-audit.md
 ```
 
 The runner writes `docs/repo-audits/<YYYY-Www>.md`, updates or creates the branch `code-garden/sindustries/<YYYY-Www>`, pushes it, and opens or updates one PR titled `cod—audit: sindustries weekly review <YYYY-Www>` against `main`.

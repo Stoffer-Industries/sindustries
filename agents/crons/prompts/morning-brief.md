@@ -31,7 +31,7 @@ except Exception as e:
 4) Pull active tasks from the Tasks API:
    python3 -c "
 import sys, json, urllib.request, os
-sys.path.insert(0, '/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/tasks-api-ops')
+sys.path.insert(0, '/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api')
 try:
     from tasks_api_client import list_tasks
     active = []
@@ -104,7 +104,7 @@ If nothing in either state file needs Tom: write "nothing blocking — all clear
 Keep concise, practical, no fluff. The NEEDS YOUR ATTENTION section is the most important — if it's empty, say so clearly so Tom knows the agents are running clean.
 
 # notify-soft-fails
-Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/notify-soft-fails/SKILL.md and follow it.
+Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
 After generating the brief:
 - If any tool call returned an auth error, a non-zero exit code, or output containing 'error', 'failed', 'exception', 'traceback', or 'unauthorized': send failure notification as described in the skill with text: 'Morning Brief soft failure: <brief summary of what failed>'
 - If everything succeeded, do nothing further.

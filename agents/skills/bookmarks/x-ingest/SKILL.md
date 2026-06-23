@@ -23,6 +23,6 @@ article body is also captured via the X API.
 
 Report success or failure from the command result. On a non-zero exit, or output
 containing `error`, `failed`, `exception`, `traceback`, or `no bookmarks`, follow
-`../notify-soft-fails/SKILL.md` and send:
+`../../ops/notify-soft-fail/SKILL.md` and send:
 
 `Bookmark Ingestion cron failure: <brief summary of what went wrong from the output>`

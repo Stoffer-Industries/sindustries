@@ -1,5 +1,5 @@
 ---
-name: tasks-api-ops
+name: tasks-api
 description: Manage Stoffer Industries tasks through the Tasks API from workspace automations. Use when creating, updating, listing, prioritizing, or archiving tasks, and when migrating task workflows away from local tasks.md/tasks.json state files toward API-first state.
 ---
 
@@ -26,13 +26,13 @@ export TASKS_API_BASE_URL=http://localhost:4001/api/v1
 
 Scripts live at:
 ```
-/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/tasks-api-ops/
+/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/
 ```
 
 Use:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/tasks-api-ops/tasks_api_client.py <command>
+python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py <command>
 ```
 
 Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `tasks_api_client` for scripts that need to query tasks without using the CLI (both files must be in the same directory).
@@ -122,7 +122,7 @@ Rules:
 Script that evaluates whether a task can transition to the next state; used during heartbeat to report readiness and failed criteria.
 
 ```bash
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/tasks-api-ops/task_transition_check.py <task-id>
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/task_transition_check.py <task-id>
 ```
 
 For Doing→Acceptance and Acceptance→Done checks (PR, tests, merge, branch cleanup), set `GITHUB_TOKEN`:

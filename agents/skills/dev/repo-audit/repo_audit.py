@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 
-DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[4]
 SOURCE_BOOKMARK = (
     "/Users/quinnstoffer/.openclaw/workspace/brain/bookmarks/x/"
     "got-your-hands-on-claude-fable-5.md"

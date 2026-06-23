@@ -1,4 +1,9 @@
-# content-authoring skill
+---
+name: sindustries-copy
+description: "Produce publication-ready SIndustries website copy from approved notes, tasks, and source material."
+---
+
+# SIndustries Copy
 
 ## Purpose
 
@@ -97,9 +102,9 @@ These are non-negotiable:
 Experiments and systems **require an image**. If you are adding or updating one of these content types, you must provide the image file in the same PR.
 
 **How to create images:**
-Use the `sindustries-hero-images` skill:
+Use the `sindustries-hero-image` skill:
 ```
-~/.openclaw/workspace/codebases/sindustries/agents/skills/sindustries-hero-images/SKILL.md
+~/.openclaw/workspace/codebases/sindustries/agents/skills/content/sindustries-hero-image/SKILL.md
 ```
 
 **Where to save:**

@@ -19,7 +19,7 @@ from pathlib import Path
 # Resolve the bookmark workflow dir so `common` can be imported from here.
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 _ws = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[2] / "workspace"
-_bookmark_wf = _ws / "codebases" / "sindustries" / "agents" / "workflows" / "bookmark"
+_bookmark_wf = _ws / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "scripts"
 if str(_bookmark_wf) not in sys.path:
     sys.path.insert(0, str(_bookmark_wf))
 
@@ -139,7 +139,7 @@ def pending_by_approval_id(state: dict, thread_id: str = "") -> dict[str, dict]:
 def run_lobster_resume(token: str, approve: bool) -> tuple[dict | None, str | None]:
     args = ["lobster", "resume", "--token", token, "--approve", "yes" if approve else "no"]
     env = os.environ.copy()
-    tasks_api_path = str(WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "tasks-api-ops")
+    tasks_api_path = str(WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "ops" / "tasks-api")
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{tasks_api_path}:{existing}" if existing else tasks_api_path
     env.setdefault("TASKS_API_BASE_URL", "http://localhost:4000/api/v1")
@@ -202,7 +202,7 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
 
 
 def rebuild_revised_approval(bookmark_key: str) -> dict | None:
-    script = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmark" / "rebuild_revised_approval.py"
+    script = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "scripts" / "rebuild_revised_approval.py"
     proc = subprocess.run(
         [sys.executable, str(script), "--bookmark-key", bookmark_key, "--json"],
         text=True,

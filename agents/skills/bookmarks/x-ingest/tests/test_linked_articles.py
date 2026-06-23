@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-PROCESS_SCRIPT = REPO_ROOT / "agents/skills/x-bookmark-ingest/scripts/x/process.cjs"
-FETCH_SCRIPT = REPO_ROOT / "agents/skills/x-bookmark-ingest/scripts/x/fetch.cjs"
-EXTRACT_SCRIPT = REPO_ROOT / "agents/skills/x-bookmark-ingest/scripts/x/lib/extract_article.cjs"
+REPO_ROOT = Path(__file__).resolve().parents[5]
+PROCESS_SCRIPT = REPO_ROOT / "agents/skills/bookmarks/x-ingest/scripts/x/process.cjs"
+FETCH_SCRIPT = REPO_ROOT / "agents/skills/bookmarks/x-ingest/scripts/x/fetch.cjs"
+EXTRACT_SCRIPT = REPO_ROOT / "agents/skills/bookmarks/x-ingest/scripts/x/lib/extract_article.cjs"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

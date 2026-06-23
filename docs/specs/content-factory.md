@@ -33,7 +33,7 @@ Nothing publishes without review. Nothing requires Tom to write copy.
 - Reviews and merges Quinn-approval PRs
 - Runs the content-task workflow from heartbeat; the wrapper discovers active content tasks and drives each through the Lobster step chain
 
-Quinn normally does not write final website copy. She is the orchestrator, not the author. The `content-authoring` skill still allows Quinn to handle one-off content tasks directly when explicitly needed.
+Quinn normally does not write final website copy. She is the orchestrator, not the author. The `sindustries-copy` skill still allows Quinn to handle one-off content tasks directly when explicitly needed.
 
 ### Ivy — Content Agent
 
@@ -352,10 +352,10 @@ For stories specifically: first-person voice is fine and encouraged. Quotes are 
 
 ## Images
 
-Experiments and systems require an image. Use the `sindustries-hero-images` skill to generate:
+Experiments and systems require an image. Use the `sindustries-hero-image` skill to generate:
 
 ```
-agents/skills/sindustries-hero-images/SKILL.md
+agents/skills/content/sindustries-hero-image/SKILL.md
 ```
 
 Save to:
@@ -392,12 +392,12 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 |---|---|
 | Content files | `apps/website/src/content/` |
 | Content notes skill | `agents/skills/content-notes/SKILL.md` |
-| Content authoring skill | `agents/skills/content-authoring/SKILL.md` |
-| Weekly content review skill | `agents/skills/weekly-content-review/SKILL.md` |
+| Content authoring skill | `agents/skills/content/sindustries-copy/SKILL.md` |
+| Weekly content review skill | `agents/skills/content/sindustries-weekly-content-review/SKILL.md` |
 | Lobster YAML | `agents/workflows/content-tasks/content-task.lobster.yaml` |
 | Lobster entry point | `agents/workflows/content-tasks/run.py` |
 | Transition scripts | `agents/workflows/content-tasks/scripts/` |
-| Hero image skill | `agents/skills/sindustries-hero-images/SKILL.md` |
+| Hero image skill | `agents/skills/content/sindustries-hero-image/SKILL.md` |
 | Ivy agent docs | `workspace: agents/ivy/` |
 | Daily ops notes | `workspace: brain/ops/notes/YYYY-MM-DD.md` |
 | Weekly review files | `workspace: brain/content/sindustries-weekly-content/YYYY-MM-DD.md` |
@@ -409,5 +409,5 @@ Quinn's heartbeat flags experiments and systems with `updatedAt` older than 30 d
 - Story files are loaded and rendered, but story JSON is not schema-validated in `apps/website/src/content/index.js` yet.
 - `canonicalUrl` is optional for stories and populated only when there is an external canonical source.
 - Content authoring skill field mapping table shows minimum fields only; Ivy should refer to the JSON schema examples in this doc for the full field list.
-- The content-authoring skill is stricter than this spec in one place: it routes release entries as `medium` risk/Tom approval, while the website content contribution guide and this spec allow Quinn to approve low-risk release entries for already-completed public work.
+- The `sindustries-copy` skill is stricter than this spec in one place: it routes release entries as `medium` risk/Tom approval, while the website content contribution guide and this spec allow Quinn to approve low-risk release entries for already-completed public work.
 - Some supporting docs still have stale wording or paths: Ivy workspace docs point at older source/spec paths (`brain/reviews/...` or `brain/specs/...`), and the content-notes skill summary says the weekly cron creates tasks even though the current weekly-review skill only writes the review file. This `content-factory` spec should become the canonical reference going forward.
