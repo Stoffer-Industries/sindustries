@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   AccountCardRow,
@@ -7,7 +7,9 @@ import {
   BudgetHeader,
   BudgetScreen,
   IconButton,
+  InlineAlertEditor,
   MetricPanel,
+  NativeConfirmDialogAdapter,
   PeriodSelector,
   PillTabBar
 } from '@sindustries/ui/native';
@@ -31,6 +33,22 @@ type BalanceAccount = {
 type BalancePoint = {
   capturedAt: string;
   currentBalanceCents: number;
+};
+
+type AlertConfig = {
+  id: string;
+  cardId: string;
+  condition: 'more-than' | 'less-than';
+  thresholdCents: number;
+  pushEnabled: boolean;
+  emailEnabled: boolean;
+};
+
+type AlertEditorState = {
+  condition: 'more-than' | 'less-than';
+  amount: string;
+  pushEnabled: boolean;
+  emailEnabled: boolean;
 };
 
 const budget = tokens.budget;
@@ -77,6 +95,16 @@ export function DashboardScreen({ navigation }: Props) {
   const [syncVersion, setSyncVersion] = useState(0);
   const [akahuStatus, setAkahuStatus] = useState<string>('');
   const [period, setPeriod] = useState('1M');
+
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [alertConfigs, setAlertConfigs] = useState<Record<string, AlertConfig | null>>({});
+  const [editorState, setEditorState] = useState<AlertEditorState>({
+    condition: 'less-than',
+    amount: '',
+    pushEnabled: true,
+    emailEnabled: false
+  });
+  const [savingAlert, setSavingAlert] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +219,94 @@ export function DashboardScreen({ navigation }: Props) {
     };
   }, [session]);
 
+  const loadAlertConfig = useCallback(
+    async (cardId: string) => {
+      if (!session || cardId.startsWith('demo-')) return;
+      try {
+        const res = await apiFetch<{ config: AlertConfig | null }>(
+          `/cards/${encodeURIComponent(cardId)}/alert-config`,
+          { session }
+        );
+        setAlertConfigs((prev) => ({ ...prev, [cardId]: res.config }));
+        if (res.config) {
+          setEditorState({
+            condition: res.config.condition,
+            amount: (res.config.thresholdCents / 100).toFixed(2),
+            pushEnabled: res.config.pushEnabled,
+            emailEnabled: res.config.emailEnabled
+          });
+        } else {
+          setEditorState({ condition: 'less-than', amount: '', pushEnabled: true, emailEnabled: false });
+        }
+      } catch {
+        setEditorState({ condition: 'less-than', amount: '', pushEnabled: true, emailEnabled: false });
+      }
+    },
+    [session]
+  );
+
+  function handleCardPress(cardId: string) {
+    if (selectedCardId === cardId) {
+      setSelectedCardId(null);
+      return;
+    }
+    setSelectedCardId(cardId);
+    loadAlertConfig(cardId);
+  }
+
+  async function handleSaveAlert() {
+    if (!session || !selectedCardId) return;
+    const thresholdCents = Math.round(parseFloat(editorState.amount.replace(/[^0-9.]/g, '')) * 100);
+    if (!thresholdCents || thresholdCents <= 0) {
+      Alert.alert('Invalid amount', 'Enter a threshold amount greater than $0.');
+      return;
+    }
+    setSavingAlert(true);
+    try {
+      const res = await apiFetch<{ config: AlertConfig }>(
+        `/cards/${encodeURIComponent(selectedCardId)}/alert-config`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            condition: editorState.condition,
+            thresholdCents,
+            pushEnabled: editorState.pushEnabled,
+            emailEnabled: editorState.emailEnabled
+          }),
+          session
+        }
+      );
+      setAlertConfigs((prev) => ({ ...prev, [selectedCardId]: res.config }));
+      setSelectedCardId(null);
+    } catch (e: any) {
+      Alert.alert('Could not save alert', e?.message ?? 'Unknown error');
+    } finally {
+      setSavingAlert(false);
+    }
+  }
+
+  function handleDeleteAlert() {
+    if (!session || !selectedCardId) return;
+    const dialog = NativeConfirmDialogAdapter({
+      title: 'Remove balance alert',
+      message: 'This will permanently remove the balance alert for this account.',
+      confirmLabel: 'Remove',
+      onConfirm: async () => {
+        try {
+          await apiFetch(`/cards/${encodeURIComponent(selectedCardId)}/alert-config`, {
+            method: 'DELETE',
+            session
+          });
+          setAlertConfigs((prev) => ({ ...prev, [selectedCardId]: null }));
+          setSelectedCardId(null);
+        } catch (e: any) {
+          Alert.alert('Could not remove alert', e?.message ?? 'Unknown error');
+        }
+      }
+    });
+    dialog.confirm();
+  }
+
   const accounts = session && balanceAccounts.length > 0 ? balanceAccounts : demoAccounts;
   const totalBalanceCents = accounts.reduce((sum, account) => {
     const value = account.currentBalanceCents ?? account.availableBalanceCents;
@@ -198,6 +314,9 @@ export function DashboardScreen({ navigation }: Props) {
   }, 0);
 
   const subtitle = session ? `Signed in as ${session.user.email}` : 'Demo balances until Akahu is linked';
+  const selectedAccount = selectedCardId ? accounts.find((a) => a.id === selectedCardId) : null;
+  const selectedConfig = selectedCardId ? alertConfigs[selectedCardId] : null;
+  const isDemo = selectedCardId?.startsWith('demo-') ?? false;
 
   return (
     <BudgetScreen
@@ -233,15 +352,54 @@ export function DashboardScreen({ navigation }: Props) {
       <View style={styles.list}>
         {accounts.map((account, index) => {
           const balance = account.currentBalanceCents ?? account.availableBalanceCents;
+          const hasAlert = !!alertConfigs[account.id];
+          const isSelected = selectedCardId === account.id;
           return (
-            <AccountCardRow
-              key={account.id}
-              initial={initialFor(account.displayName)}
-              name={account.displayName}
-              subtitle={account.balanceUpdatedAt ? `Updated ${formatDate(account.balanceUpdatedAt)}` : 'No balance update yet'}
-              balance={balance === null ? 'No balance' : formatCents(balance)}
-              color={accountColors[index % accountColors.length]}
-            />
+            <View key={account.id}>
+              <AccountCardRow
+                initial={initialFor(account.displayName)}
+                name={account.displayName}
+                subtitle={
+                  hasAlert
+                    ? `Alert set · ${account.balanceUpdatedAt ? `Updated ${formatDate(account.balanceUpdatedAt)}` : 'No balance update yet'}`
+                    : account.balanceUpdatedAt
+                    ? `Updated ${formatDate(account.balanceUpdatedAt)}`
+                    : 'No balance update yet'
+                }
+                balance={balance === null ? 'No balance' : formatCents(balance)}
+                color={accountColors[index % accountColors.length]}
+                onPress={() => handleCardPress(account.id)}
+              />
+              {isSelected && selectedAccount ? (
+                <View style={styles.inlineEditor}>
+                  {isDemo ? (
+                    <Text style={styles.demoNote}>
+                      Sign in with a real account to save balance alerts.
+                    </Text>
+                  ) : (
+                    <>
+                      <InlineAlertEditor
+                        condition={editorState.condition}
+                        amount={editorState.amount}
+                        pushEnabled={editorState.pushEnabled}
+                        emailEnabled={editorState.emailEnabled}
+                        onConditionChange={(c) => setEditorState((s) => ({ ...s, condition: c }))}
+                        onAmountChange={(a) => setEditorState((s) => ({ ...s, amount: a }))}
+                        onPushChange={(v) => setEditorState((s) => ({ ...s, pushEnabled: v }))}
+                        onEmailChange={(v) => setEditorState((s) => ({ ...s, emailEnabled: v }))}
+                        onSave={savingAlert ? undefined : handleSaveAlert}
+                        onCancel={() => setSelectedCardId(null)}
+                      />
+                      {selectedConfig ? (
+                        <Pressable onPress={handleDeleteAlert} style={styles.deleteLink}>
+                          <Text style={styles.deleteLinkText}>Remove balance alert</Text>
+                        </Pressable>
+                      ) : null}
+                    </>
+                  )}
+                </View>
+              ) : null}
+            </View>
           );
         })}
       </View>
@@ -369,6 +527,24 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: bs[3]
+  },
+  inlineEditor: {
+    marginTop: bs[2],
+    gap: bs[2]
+  },
+  demoNote: {
+    color: b.text.muted,
+    fontSize: 13,
+    paddingHorizontal: bs[2]
+  },
+  deleteLink: {
+    alignItems: 'center',
+    paddingVertical: bs[2]
+  },
+  deleteLinkText: {
+    color: b.status.iosDanger,
+    fontSize: 14,
+    fontWeight: '600'
   },
   input: {
     minHeight: 50,
