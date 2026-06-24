@@ -69,14 +69,16 @@ Schema:
 
 ### 3. Select 1 finding
 
-First check if there is already an open code-garden PR — if so, stop here and do not open another.
+Check whether there is already an open PR with the `code-garden` label. That label is the **only** gate — any other open PRs (including infrastructure or skills PRs without the label) do not count and must be ignored.
 
 ```bash
 GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr list --repo Stoffer-Industries/sindustries --label code-garden --state open --json number,title
 ```
 
-If the list is empty, pick one Low or Medium finding that:
+If that command returns a non-empty list, stop here. Otherwise proceed.
+
+Pick one Low or Medium finding that:
 - Is not already in the `done` list for this audit week
 - Is T1 or T2 (see above)
 - Can be fully addressed in a single focused PR
