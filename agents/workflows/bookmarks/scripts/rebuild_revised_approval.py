@@ -11,7 +11,7 @@ from pathlib import Path
 
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
-_BOOKMARK_WF = WORKSPACE / 'codebases' / 'sindustries' / 'agents' / 'workflows' / 'bookmark'
+_BOOKMARK_WF = WORKSPACE / 'codebases' / 'sindustries' / 'agents' / 'workflows' / 'bookmarks' / 'scripts'
 STATE_PATH = WORKSPACE / 'brain' / 'state' / 'bookmark-review-state.json'
 GENERATE_SPECS = _BOOKMARK_WF / 'lobster_generate_specs.py'
 REQUEST_SPEC_APPROVAL = _BOOKMARK_WF / 'lobster_request_spec_approval.py'
