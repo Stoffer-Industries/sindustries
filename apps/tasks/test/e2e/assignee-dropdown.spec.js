@@ -38,10 +38,10 @@ test('AC2: assignee dropdown shows reserved options', async ({ page }) => {
   const assigneeSelect = page.locator('select[aria-label="Detail assignee"]');
   await expect(assigneeSelect).toBeVisible();
   
-  // Check all options are present (4 reserved + 1 Unassigned = 5)
+  // Check all options are present (5 reserved + 1 Unassigned = 6)
   const options = assigneeSelect.locator('option');
-  await expect(options).toHaveCount(5);
-  
+  await expect(options).toHaveCount(6);
+
   // Verify options contain expected values by getting all text
   const allOptionsText = await options.allTextContents();
   expect(allOptionsText).toContain('Unassigned');
@@ -49,6 +49,7 @@ test('AC2: assignee dropdown shows reserved options', async ({ page }) => {
   expect(allOptionsText).toContain('Quinn');
   expect(allOptionsText).toContain('Rowan');
   expect(allOptionsText).toContain('Lox');
+  expect(allOptionsText).toContain('Ivy');
 });
 
 test('AC3: can select assignee from dropdown', async ({ page }) => {
