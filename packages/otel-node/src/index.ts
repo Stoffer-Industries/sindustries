@@ -1,7 +1,7 @@
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { resourceFromAttributes } from '@opentelemetry/resources';
+import { Resource } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import {
@@ -37,7 +37,7 @@ export function startOtel(options?: StartOtelOptions): void {
   const environment =
     process.env.OTEL_ENVIRONMENT ?? process.env.NODE_ENV ?? 'development';
 
-  const resource = resourceFromAttributes({
+  const resource = new Resource({
     [ATTR_SERVICE_NAME]: serviceName,
     [ATTR_SERVICE_NAMESPACE]: namespace,
     'deployment.environment': environment,
