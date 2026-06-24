@@ -96,12 +96,18 @@ e.g. `chore/code-garden-2026-W26-stale-triage-comment`
 
 Make the minimal change to address the finding. Do not bundle unrelated changes.
 
-**Scope guard — never commit files in these paths:**
+**Scope guard — your commits must never touch these paths** (they exist on the base branch but must not appear in your new commits):
 - `agents/skills/`
 - `agents/crons/`
 - Any file outside the application source code
 
-If a finding touches those paths, skip it.
+Before staging, verify only code improvement files are included:
+```bash
+git diff --name-only origin/main HEAD
+```
+If that list includes anything under `agents/skills/` or `agents/crons/`, do not open the PR — those leaked from the base branch. Fix by resetting those files: `git checkout origin/main -- <path>`.
+
+If a finding only touches those paths, skip it entirely.
 
 Run the relevant tests locally before committing:
 ```bash
@@ -124,13 +130,13 @@ Co-Authored-By: Rowan <rowanstoffer@gmail.com>
 
 ### 5. Open PR
 
-PR base is `feat/code-garden`, not main.
+PR targets `main`. The branch is off `feat/code-garden` for context, but the PR base is main.
 
 ```bash
 GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr create \
   --repo Stoffer-Industries/sindustries \
-  --base feat/code-garden \
+  --base main \
   --title "chore(code-garden): <what was fixed>" \
   --label "code-garden" \
   --assignee quinnstoffer \
