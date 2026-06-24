@@ -7,16 +7,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-WORKSPACE = Path(__file__).resolve().parents[3]
-BOOKMARKS_DIR = WORKSPACE / "scripts" / "bookmarks"
+WORKSPACE = Path(__file__).resolve().parents[7]
+BOOKMARKS_DIR = Path(__file__).resolve().parent.parent
 if str(BOOKMARKS_DIR) not in sys.path:
     sys.path.insert(0, str(BOOKMARKS_DIR))
 
 from common import SPECS_ROOT, STATE_PATH, load_state
-PREPARE_TOPIC_APPROVAL = WORKSPACE / "scripts" / "bookmarks" / "prepare_topic_approval.py"
-REQUEST_TOPIC_APPROVAL = WORKSPACE / "scripts" / "bookmarks" / "request_topic_approval.py"
-GENERATE_SPECS = WORKSPACE / "scripts" / "bookmarks" / "generate_specs.py"
-BUILD_TASK_PROPOSALS = WORKSPACE / "scripts" / "bookmarks" / "build_task_proposals.py"
+PREPARE_TOPIC_APPROVAL = BOOKMARKS_DIR / "prepare_topic_approval.py"
+REQUEST_TOPIC_APPROVAL = BOOKMARKS_DIR / "request_topic_approval.py"
+GENERATE_SPECS = BOOKMARKS_DIR / "generate_specs.py"
+BUILD_TASK_PROPOSALS = BOOKMARKS_DIR / "build_task_proposals.py"
 
 
 def run_json(args: list[str], stdin_payload: dict | None = None) -> dict:

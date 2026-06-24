@@ -18,8 +18,8 @@ from pathlib import Path
 
 # Resolve the bookmark workflow dir so `common` can be imported from here.
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
-_ws = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[2] / "workspace"
-_bookmark_wf = _ws / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "scripts"
+_ws = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
+_bookmark_wf = Path(__file__).resolve().parent
 if str(_bookmark_wf) not in sys.path:
     sys.path.insert(0, str(_bookmark_wf))
 
