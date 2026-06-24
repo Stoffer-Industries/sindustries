@@ -83,13 +83,23 @@ If the list is empty, pick one Low or Medium finding that:
 
 Skip any finding that requires understanding product/business intent. If unsure, skip.
 
-### 4. Implement on a new branch
+### 4. Implement on the shared code-garden branch
 
-Branch naming: `chore/code-garden-<audit-week>-<short-slug>`
+**Branch:** always use `feat/code-garden` (create from main if it doesn't exist locally).
 
-e.g. `chore/code-garden-2026-W26-stale-triage-comment`
+```bash
+git fetch origin
+git checkout feat/code-garden 2>/dev/null || git checkout -b feat/code-garden origin/main
+```
 
 Make the minimal change to address the finding. Do not bundle unrelated changes.
+
+**Scope guard — never commit files in these paths:**
+- `agents/skills/`
+- `agents/crons/`
+- Any file outside the application source code
+
+If a finding touches those paths, skip it.
 
 Run the relevant tests locally before committing:
 ```bash
@@ -112,10 +122,20 @@ Co-Authored-By: Rowan <rowanstoffer@gmail.com>
 
 ### 5. Open PR
 
+Check if a PR for `feat/code-garden` already exists:
+```bash
+GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
+gh pr list --repo Stoffer-Industries/sindustries --head feat/code-garden --state open --json number,title
+```
+
+If one exists, push to the branch and it will update the existing PR — no need to create a new one.
+
+If no PR exists yet:
 ```bash
 GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr create \
   --repo Stoffer-Industries/sindustries \
+  --head feat/code-garden \
   --title "chore(code-garden): <what was fixed>" \
   --label "code-garden" \
   --assignee quinnstoffer \
