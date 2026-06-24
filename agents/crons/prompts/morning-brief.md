@@ -22,7 +22,7 @@ import json
 try:
     with open('/Users/quinnstoffer/.openclaw/workspace/brain/state/bookmark-review-state.json') as f:
         state = json.load(f)
-    pending = [(k, v['title']) for k, v in state.get('items', {}).items() if v.get('approvalStatus') == 'pending']
+    pending = [{'id': '#' + v['approvalId'], 'title': v.get('title','')[:60], 'topic': v.get('approvalTopic','')} for v in state.get('items', {}).values() if v.get('approvalStatus') == 'pending' and v.get('approvalId')]
     print(json.dumps(pending))
 except Exception as e:
     print('[]')
@@ -85,8 +85,8 @@ Output format:
 [What happened since yesterday — agent activity, things resolved, things that came up]
 
 ⚠️ PENDING APPROVALS
-[Only if pending bookmark approvals exist. For each: topic | title ~50 chars | ID: approvalId]
-[Reply: approve [id] or decline [id]]
+[Only if pending bookmark approvals exist. For each: topic | title ~50 chars | #ap<id>]
+[Reply: approve #apXXXXXXXX or decline #apXXXXXXXX]
 [Skip this section entirely if none]
 
 🏗️ TEAM STATUS

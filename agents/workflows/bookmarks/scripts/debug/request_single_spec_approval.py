@@ -13,10 +13,9 @@ if str(BOOKMARKS_DIR) not in sys.path:
     sys.path.insert(0, str(BOOKMARKS_DIR))
 
 from common import SPECS_ROOT, STATE_PATH, load_state
-PREPARE_TOPIC_APPROVAL = BOOKMARKS_DIR / "prepare_topic_approval.py"
+PREPARE_TOPIC_APPROVAL = BOOKMARKS_DIR / "lobster_request_spec_approval.py"
 REQUEST_TOPIC_APPROVAL = BOOKMARKS_DIR / "request_topic_approval.py"
-GENERATE_SPECS = BOOKMARKS_DIR / "generate_specs.py"
-BUILD_TASK_PROPOSALS = BOOKMARKS_DIR / "build_task_proposals.py"
+GENERATE_SPECS = BOOKMARKS_DIR / "lobster_generate_specs.py"
 
 
 def run_json(args: list[str], stdin_payload: dict | None = None) -> dict:
@@ -43,7 +42,7 @@ def _spec_path(spec_doc: str) -> Path | None:
     spec_doc = (spec_doc or "").strip()
     if not spec_doc:
         return None
-    if spec_doc.startswith("brain/specs/"):
+    if spec_doc.startswith("brain/bookmarks/specs/") or spec_doc.startswith("brain/specs/"):
         return WORKSPACE / spec_doc
     return Path(SPECS_ROOT) / spec_doc
 
@@ -95,8 +94,7 @@ def reset_to_approval_ready(bookmark_key: str) -> dict:
         "monitoring": [],
         "reviewed": [],
     }
-    generated = run_json([sys.executable, str(GENERATE_SPECS), "--json"], payload)
-    proposed = run_json([sys.executable, str(BUILD_TASK_PROPOSALS), "--json"], generated)
+    run_json([sys.executable, str(GENERATE_SPECS), "--json"], payload)
     refreshed = load_state(state_path).get("items", {}).get(bookmark_key, {})
     return {
         "ok": True,
@@ -104,7 +102,6 @@ def reset_to_approval_ready(bookmark_key: str) -> dict:
         "reviewStatus": refreshed.get("reviewStatus"),
         "specDocs": refreshed.get("specDocs") or [],
         "specProposals": refreshed.get("specProposals") or [],
-        "taskProposalPayload": proposed,
     }
 
 

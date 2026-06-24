@@ -11,7 +11,7 @@ from pathlib import Path
 
 from common import WORKSPACE, dump_json, now_iso
 
-SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_ROOT = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "ops" / "tasks-api"
 if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 

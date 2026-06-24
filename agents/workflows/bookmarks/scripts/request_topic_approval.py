@@ -272,6 +272,43 @@ def extract_delivery_ids(payload: dict | None) -> tuple[str | None, str | None]:
     return message_id, thread_id
 
 
+def _deliver_via_telegram_api(message: str, delivery: dict) -> dict | None:
+    """Fallback: send directly via Telegram Bot API when the gateway CLI times out."""
+    import urllib.request
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token or delivery.get("channel") != "telegram":
+        return None
+    target = delivery.get("target", "")
+    thread_id = delivery.get("threadId")
+    payload: dict[str, Any] = {
+        "chat_id": target,
+        "text": message,
+        "parse_mode": "Markdown",
+    }
+    if thread_id:
+        payload["message_thread_id"] = int(thread_id)
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                msg_id = str(result.get("result", {}).get("message_id", ""))
+                return {
+                    "ok": True,
+                    "messageId": msg_id,
+                    "threadId": thread_id,
+                    "deliveryMethod": "telegram-api-direct",
+                }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "deliveryMethod": "telegram-api-direct"}
+    return None
+
+
 def deliver_approval_message(message: str, delivery: dict) -> dict:
     args = [
         "openclaw",
@@ -290,20 +327,34 @@ def deliver_approval_message(message: str, delivery: dict) -> dict:
     if delivery.get("threadId"):
         args.extend(["--thread-id", delivery["threadId"]])
 
-    completed = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-    )
-    raw = (completed.stdout or "").strip()
-    stderr = (completed.stderr or "").strip()
+    cli_failed = False
     try:
-        payload = json.loads(raw or "{}")
-    except json.JSONDecodeError:
-        payload = {"raw": raw, "stderr": stderr}
-    if completed.returncode != 0 and isinstance(payload, dict) and not payload.get("error"):
-        payload["error"] = stderr or raw or f"openclaw message send failed with code {completed.returncode}"
-        payload["returncode"] = completed.returncode
+        completed = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+        raw = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        try:
+            payload = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            payload = {"raw": raw, "stderr": stderr}
+        if completed.returncode != 0 and isinstance(payload, dict) and not payload.get("error"):
+            payload["error"] = stderr or raw or f"openclaw message send failed with code {completed.returncode}"
+            payload["returncode"] = completed.returncode
+        cli_failed = completed.returncode != 0 or bool(payload.get("error"))
+    except subprocess.TimeoutExpired:
+        payload = {"error": "openclaw message send CLI timed out after 12s", "returncode": -1}
+        cli_failed = True
+
+    # If CLI delivery failed, fall back to direct Telegram API.
+    if cli_failed:
+        fallback = _deliver_via_telegram_api(message, delivery)
+        if fallback and fallback.get("ok"):
+            payload = fallback
+
     message_id, resolved_thread_id = extract_delivery_ids(payload)
     return {
         "channel": delivery["channel"],
