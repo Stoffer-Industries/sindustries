@@ -109,7 +109,7 @@ Co-Authored-By: Rowan <rowanstoffer@gmail.com>
 
 ### 4. Open PR
 
-PR targets `main`. Rowan is the author and assignee; Quinn is the reviewer. See `agents/skills/dev/pr-roles/SKILL.md`.
+PR targets `main`. Open as the author and set yourself as assignee with a review request. See `agents/skills/dev/pr-process/SKILL.md` — follow the "If you are opening a PR" section.
 
 ```bash
 GITHUB_TOKEN="$(grep ROWAN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
