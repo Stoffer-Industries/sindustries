@@ -24,13 +24,15 @@ gh pr create \
   ...
 ```
 
-The assignee owns the PR to completion. The reviewer is the only one who merges.
+The assignee owns the PR to completion — including merging once all reviewers have approved.
 
 ---
 
 ## If you are the reviewer
 
-### 1. Find open PRs assigned to you for review
+Your job is to approve or request changes. The assignee merges.
+
+### 1. Find open PRs where you are requested as reviewer
 
 ```bash
 GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
@@ -52,7 +54,7 @@ GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr checks <number> --repo Stoffer-Industries/sindustries
 ```
 
-Do not approve or merge if CI is failing.
+Do not approve if CI is failing.
 
 ### 3. Apply a review tier (for code-garden PRs)
 
@@ -60,29 +62,26 @@ Code-garden PRs are categorised by risk. For other PR types, use your own judgem
 
 | Tier | Type | Reviewer action |
 |------|------|-----------------|
-| T1 | Trivial non-functional (dead code, comments, imports, typos) | Approve + merge |
-| T2 | Structural, low risk (constants, dedup, type annotations) | Review carefully; approve + merge if correct |
+| T1 | Trivial non-functional (dead code, comments, imports, typos) | Approve |
+| T2 | Structural, low risk (constants, dedup, type annotations) | Review carefully; approve if correct |
 | T3 | Touches logic, API surface, or security posture | Request changes — assignee must split |
 
 If the PR mixes tiers (some hunks are T1, one hunk is T3), request changes and ask the assignee to split.
 
 **Comment format:**
 ```
-[T1] LGTM — merging.
+[T1] LGTM.
 [T2] LGTM. <specific note if anything worth flagging>.
 [T2] Request changes: <specific actionable feedback>.
 [T3] This crosses into logic territory: <reason>. Please split the T3 change out — keep this PR T1/T2 only.
 ```
 
-### 4. Act on the tier
+### 4. Submit your review
 
-**Approve and merge (T1 or T2):**
+**Approve (T1 or T2):**
 ```bash
 GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
-gh pr review <number> --repo Stoffer-Industries/sindustries --approve --body "[T1] LGTM — merging."
-
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
-gh pr merge <number> --repo Stoffer-Industries/sindustries --squash --delete-branch
+gh pr review <number> --repo Stoffer-Industries/sindustries --approve --body "[T1] LGTM."
 ```
 
 **Request changes (T2 with issues or T3):**
@@ -94,16 +93,35 @@ gh pr review <number> --repo Stoffer-Industries/sindustries --request-changes \
 
 ### Reviewer guardrails
 
-- Never merge with failing CI
-- Never merge a PR that changes logic, security posture, or API surface
+- Do not merge — the assignee merges after approval
+- Do not approve with failing CI
+- Do not approve a PR that changes logic, security posture, or API surface
 - Leave one clear review comment per PR — not multiple fragmented messages
 - If a code-garden PR has been open >7 days with no CI issues and is T1: flag it in the heartbeat summary
 
 ---
 
-## If you are the assignee addressing review comments
+## If you are the assignee
 
-When the reviewer requests changes:
+### Checking for approval and merging
+
+After opening a PR, poll for review state in your heartbeat. Once all reviewers have approved and CI is green, merge:
+
+```bash
+GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
+gh pr view <number> --repo Stoffer-Industries/sindustries --json reviews,statusCheckRollup
+```
+
+Merge when `reviews` contains an `APPROVED` state from every requested reviewer and CI is passing:
+
+```bash
+GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
+gh pr merge <number> --repo Stoffer-Industries/sindustries --squash --delete-branch
+```
+
+### Addressing review comments
+
+When a reviewer requests changes:
 
 1. List your open PRs with pending reviews:
    ```bash
@@ -112,7 +130,7 @@ When the reviewer requests changes:
      --state open --json number,title,url,reviews
    ```
 
-2. For each PR with `CHANGES_REQUESTED`, read the review comments:
+2. For each PR with `CHANGES_REQUESTED`, read the inline comments:
    ```bash
    GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
    gh api repos/Stoffer-Industries/sindustries/pulls/<number>/comments \
@@ -120,7 +138,7 @@ When the reviewer requests changes:
    ```
 
 3. For each change request:
-   - If valid T1/T2 fix: make the change, push to branch, reply "Fixed in `<commit-sha>`."
+   - If valid fix: make the change, push to branch, reply "Fixed in `<commit-sha>`."
    - If requesting T3 change: reply "Acknowledged — this is out of scope for this PR. Leaving in T1/T2 scope."
 
 4. Do not resolve threads — the reviewer resolves on re-review.
