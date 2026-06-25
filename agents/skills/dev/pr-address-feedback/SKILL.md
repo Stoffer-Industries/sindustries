@@ -25,7 +25,6 @@ Critically evaluate review feedback received on your own PRs. Not all feedback i
 ### 1. Gather the feedback
 
 ```bash
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh api repos/Stoffer-Industries/<repo>/pulls/<number>/comments \
   --jq '.[] | {id, path, line, body, user: .user.login}'
 ```
@@ -68,7 +67,7 @@ For each, ask:
 If the PR description no longer matches the current state of the branch, update it so the PR always describes what it *currently* does:
 
 ```bash
-GITHUB_TOKEN="..." gh api repos/Stoffer-Industries/<repo>/pulls/<number> \
+gh api repos/Stoffer-Industries/<repo>/pulls/<number> \
   -X PATCH --field body="<updated body>"
 ```
 

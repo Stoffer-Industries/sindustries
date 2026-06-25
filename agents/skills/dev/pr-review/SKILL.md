@@ -17,10 +17,8 @@ Conduct a review and submit approve or request-changes via `gh pr review`. Do no
 ### 1. Get the diff and context
 
 ```bash
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr view <number> --repo Stoffer-Industries/<repo> --json title,body,reviews,statusCheckRollup
 
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr diff <number> --repo Stoffer-Industries/<repo>
 ```
 
@@ -84,13 +82,13 @@ The PR can only be approved once all ACs are checked. Merging is a separate step
 Approve:
 
 ```bash
-GITHUB_TOKEN="..." gh pr review <number> --repo Stoffer-Industries/<repo> --approve --body "LGTM"
+gh pr review <number> --repo Stoffer-Industries/<repo> --approve --body "LGTM"
 ```
 
 Request changes (always with specific, actionable feedback):
 
 ```bash
-GITHUB_TOKEN="..." gh pr review <number> --repo Stoffer-Industries/<repo> --request-changes --body "<specific issues>"
+gh pr review <number> --repo Stoffer-Industries/<repo> --request-changes --body "<specific issues>"
 ```
 
 ## Guardrails

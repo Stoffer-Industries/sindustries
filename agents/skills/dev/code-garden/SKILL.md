@@ -34,7 +34,6 @@ Read the full audit file.
 Check whether there is already an open PR with the `code-garden` label. That label is the **only** gate — any other open PRs (including infrastructure or skills PRs without the label) do not count and must be ignored.
 
 ```bash
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr list --repo Stoffer-Industries/sindustries --label code-garden --state open --json number,title
 ```
 

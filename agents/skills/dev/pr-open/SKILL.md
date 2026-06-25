@@ -17,10 +17,9 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 
 Always set `--assignee` to yourself and `--reviewer` to the designated reviewer. Check the skill or heartbeat that invoked you for who the reviewer is; if not stated, default to `tomstoffer`.
 
-Use your own GitHub token from `~/.openclaw/.env` for all `gh` commands. If you are unsure which env var holds your token, grep for your username in that file.
+`GITHUB_TOKEN` is provided by your agent config — do not define it in skills.
 
 ```bash
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr create \
   --repo Stoffer-Industries/sindustries \
   --base main \
