@@ -21,6 +21,8 @@ Read and follow: `agents/skills/dev/pr-review/SKILL.md`
 
 **After completing your review:** submit approve or request-changes via `gh pr review`. Do not merge — the assignee merges.
 
+For code-garden PRs, the single question is: **does this change observable behavior or any spec/API contract?** If yes, request changes. If no, approve. The audit already assessed risk — trust it.
+
 Do not approve with failing CI. Leave one clear review comment per PR.
 
 ---

@@ -5,31 +5,17 @@ description: "Pick findings from the latest repo audit and fix them. Opens a PR 
 
 # Code Garden
 
-## Change tiers
+## Guardrail
 
-**T1 — Trivial:**
-- Remove dead/unreachable code
-- Remove unused imports
-- Fix stale/wrong comments or inline docs
-- README additions or corrections
-- Rename variable/function for clarity (no callers outside the file)
-- Fix typos in strings that are not user-facing
+Follow audit findings as-is. The only constraint: **changes must be functionally equivalent** — the system must behave identically before and after. No spec changes, no API surface changes, no behavior changes.
 
-**T2 — Structural, low risk:**
-- Extract a repeated literal into a named constant
-- Consolidate duplicated logic into a shared helper (no API-surface change)
-- Simplify a condition without changing its truth table
-- Add or fix a TypeScript type annotation that doesn't change runtime behavior
-- Add lint/format CI step (no rule changes, just enforcement)
-- Sync constants that are documented as needing to match (e.g. assignee lists)
+Skip a finding if:
+- Addressing it would change observable behavior
+- It requires product/business judgement
+- It touches security (needs Tom)
+- You are unsure — skip and move on
 
-**Never pick (skip immediately):**
-- Security fixes (separate, needs Tom)
-- Performance changes that could affect observable behavior
-- Logic refactors that change how data is computed
-- New features or new tests
-- Schema or migration changes
-- Any finding tagged Critical or High in the audit
+The audit already identifies risk and severity. Trust it.
 
 ---
 
@@ -117,8 +103,7 @@ Use this PR body format:
 ## Summary
 - **Audit:** docs/repo-audits/<week>.md
 - **Finding:** [<Severity>] <finding title>
-- **Tier:** T1 | T2
-- <one-sentence description of what was changed and why it's non-functional>
+- <one-sentence description of what was changed and why it's functionally equivalent>
 
 ## Test plan
 - [ ] Relevant tests pass
