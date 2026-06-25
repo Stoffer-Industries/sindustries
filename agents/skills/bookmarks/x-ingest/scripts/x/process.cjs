@@ -239,6 +239,20 @@ function getAcpxCommand() {
   return (process.env.BOOKMARK_LLM_ACPX_COMMAND || '/opt/homebrew/bin/acpx').trim();
 }
 
+// acpx supports multiple ACP agent backends. We default to `openclaw` so the
+// tagger routes through the OpenClaw gateway provider pool (`minimax-portal/*`),
+// which is the billing pool that's currently healthy in this workspace. The
+// previous default (`codex`) routed through `@zed-industries/codex-acp` to
+// OpenAI's `/v1/responses` endpoint, which requires an `api.responses.write`
+// scope our key doesn't have — see
+// `infra/runbooks/bookmark-acpx-openai-401-no-scopes.md`. The OpenClaw
+// gateway is a separate billing pool from `MINIMAX_API_KEY` (direct), so
+// flipping the subcommand does not affect the direct-pool path documented in
+// `infra/runbooks/minimax-direct-key-out-of-balance.md`.
+function getAcpxSubcommand() {
+  return (process.env.BOOKMARK_LLM_ACPX_SUBCOMMAND || 'openclaw').trim();
+}
+
 function truncateForLlm(value, maxChars) {
   const text = String(value || '');
   if (text.length <= maxChars) return text;
@@ -270,7 +284,10 @@ async function generateMetadata(url, tweetText, isTweetLink = false, linkedArtic
 
   function callViaAcpx() {
     const acpxCommand = getAcpxCommand();
-    const model = (process.env.BOOKMARK_LLM_MODEL || 'minimax').trim();
+    const acpxSubcommand = getAcpxSubcommand();
+    // Default to an OpenClaw gateway model — see getAcpxSubcommand() comment
+    // for why this is no longer `codex`. Operators can still override via env.
+    const model = (process.env.BOOKMARK_LLM_MODEL || 'minimax-portal/MiniMax-M3').trim();
     const timeoutMs = parseInt(process.env.BOOKMARK_LLM_TIMEOUT_SECONDS || '120', 10) * 1000;
     const prompt = [
       'You are tagging X bookmarks for a second brain.',
@@ -285,7 +302,15 @@ async function generateMetadata(url, tweetText, isTweetLink = false, linkedArtic
 
     const result = spawnSync(
       acpxCommand,
-      ['--approve-all', '--format', 'quiet', '--model', model, 'codex', 'exec', '-f', '-'],
+      [
+        '--approve-all',
+        '--format', 'quiet',
+        '--allowed-tools', '',
+        '--model', model,
+        acpxSubcommand,
+        'exec',
+        '-f', '-'
+      ],
       {
         input: prompt,
         encoding: 'utf8',
