@@ -96,7 +96,7 @@ Run current tests directly on GitHub runners:
   - cache dependencies where practical.
 
 ### 6.3 Repo docs to update (required)
-- `docs/architecture.md` **must be updated** as part of this task to reflect:
+- `README.md` **must be updated** as part of this task to reflect:
   - hybrid local dev model,
   - single Postgres + schema boundaries,
   - Tilt orchestration role,
@@ -112,7 +112,7 @@ Run current tests directly on GitHub runners:
 1. A new developer can run dev stack with one command path and see app+api+db healthy.
 2. Dev loop supports code change iteration without manual multi-terminal orchestration.
 3. CI runs current tests on GitHub runners and reports clearly on PRs.
-4. `docs/architecture.md` is updated and accurate to implemented model.
+4. `README.md` is updated and accurate to implemented model.
 5. Postgres shared-instance policy + schema ownership constraints are documented.
 6. No production deployment complexity is introduced in this phase.
 

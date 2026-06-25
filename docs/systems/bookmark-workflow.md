@@ -1,7 +1,7 @@
-# System Spec — Bookmark Pipeline
+# Bookmark Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-06-23
+**Last updated:** 2026-06-26
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmarks/`
 
 ---
@@ -9,6 +9,8 @@
 ## Purpose
 
 Turn X/Twitter bookmarks into approved implementation specs and Tasks API tasks, with minimal manual triage. Tom reviews one approval message per ready spec; everything else is automated.
+
+For the wider agent map, see `docs/systems/agent-orchestration.md`.
 
 ---
 

@@ -1,8 +1,8 @@
-# Workflows — Master Reference
+# Agent Orchestration
 
-> The high-level map of how work flows through our setup. If something looks weird, start here, then drill into the linked doc.
+> The high-level map of how work flows through our setup. If something looks weird, start here, then drill into the linked system doc.
 
-**Last reviewed:** 2026-06-23
+**Last reviewed:** 2026-06-26
 **Owner:** Quinn (chief of staff)
 **Audience:** Tom — when you need to remember what runs where
 
@@ -75,7 +75,7 @@ flowchart TB
 
 ---
 
-## 1. Bookmark Pipeline
+## 1. Bookmark Workflow
 
 Inbound links (X bookmarks, web research) become actionable tasks.
 
@@ -86,37 +86,20 @@ flowchart LR
   bm -->|lobster summarize| summarized
   summarized -->|heartbeat curate| curated
   curated -->|score above threshold| spec_req[spec_requested]
-  curated -->|score below threshold| declined
+  curated -->|score below threshold| summarized
   spec_req -->|heartbeat writes spec| spec_created[spec_created]
-  spec_created -->|lobster creates task| tasked
+  spec_created --> approval[approval_pending]
+  approval -->|Tom approves| tasked
   tasked -->|Rowan implements| pr_opened[PR opened]
   pr_opened -->|merged| done
 ```
 
-**State machine**
+Bookmark workflow details live in `docs/systems/bookmark-workflow.md`. This document only needs the orchestration-level shape: bookmarks enter through ingest, Quinn curates and writes specs during heartbeat, Lobster owns approval delivery and task creation, and Rowan implements approved tasks.
 
-| State | Owner | Trigger to next |
-|---|---|---|
-| ingest | x-bookmark-ingest | lobster summarize step |
-| summarized | lobster | heartbeat curate step |
-| curated | heartbeat | score above threshold → spec_requested |
-| spec_requested | heartbeat | spec markdown written + validated |
-| spec_created | validate | lobster generate_tasks → task created |
-| tasked | Rowan / agent | PR opened |
-| done | — | PR merged |
-| declined | — | score below threshold, no follow-up |
-
-**Key files**
-- State: `brain/state/bookmark-review-state.json`
-- Spec output: `brain/state/spec-output.json`
-- Specs land in: `brain/bookmarks/specs/`
-- Curation skill: `agents/skills/bookmarks/curate/`
-- Spec skill: `agents/skills/product/spec-author/`
-- Lobster scripts: `agents/workflows/bookmarks/scripts/`
-
-**Guardrails (from MEMORY.md)**
-- State transitions only via the state machine — no leaking logic into list functions (learned the hard way during the spec_requested drift bug)
-- Once `tasked`, secondary curations do not generate new specs — by design
+**High-level guardrails**
+- State transitions must go through the bookmark workflow state machine.
+- Once a bookmark is tasked, secondary curations do not generate new specs by design.
+- Tom sees approval messages for ready specs, not raw curation noise.
 
 ---
 
@@ -332,7 +315,8 @@ flowchart LR
 | `brain/ops/notes/` | Daily content signals (feeds weekly review) | Quinn / Lox |
 | `brain/content/sindustries-weekly-content/` | Weekly review files for Tom triage | Quinn |
 | workspace `docs/infra/` | Runbooks and setup docs | Quinn / Lox |
-| `docs/specs/` (in sindustries repo) | System specs — ground truth | Quinn |
+| `docs/systems/` (in sindustries repo) | Current system references and operational workflow docs | Quinn |
+| `docs/specs/` (in sindustries repo) | Build-against specs and older planning artifacts | Quinn |
 
 **Rule of thumb (from AGENTS.md):**
 - raw / inbound idea → `brain/bookmarks/`
@@ -341,7 +325,7 @@ flowchart LR
 - publishable content → `brain/posts/`
 - daily content signal → `brain/ops/notes/`
 - weekly review for triage → `brain/content/sindustries-weekly-content/`
-- workflow reference → `workflows/`
+- system / workflow reference → `docs/systems/`
 - current system / runbook → workspace `docs/infra/`
 
 ---
@@ -381,6 +365,7 @@ Quick troubleshooting pointer — find the symptom and check the file.
 ## See Also
 
 - `TASK_PROCESS.md` — single source of truth for task workflow
+- `docs/systems/bookmark-workflow.md` — bookmark workflow state machine and script map
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
 - `agents/rowan/SOUL.md` — Rowan's operating contract
