@@ -15,7 +15,9 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 
 ## The gh pr create Command
 
-Always set `--assignee` to yourself and `--reviewer` to the designated reviewer. Check the skill or heartbeat that invoked you for who the reviewer is; if not stated, default to `quinnstoffer`.
+Always set `--assignee` to yourself and `--reviewer` to the designated reviewer. Check the skill or heartbeat that invoked you for who the reviewer is; if not stated, default to `tomstoffer`.
+
+Use your own GitHub token from `~/.openclaw/.env` for all `gh` commands. If you are unsure which env var holds your token, grep for your username in that file.
 
 ```bash
 GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
@@ -39,6 +41,11 @@ EOF
 )"
 ```
 
+Include a `Co-Authored-By` trailer in your commit messages identifying yourself:
+```
+Co-Authored-By: <Your Name> <your-email>
+```
+
 ## PR Summary Guidelines
 
 **Title:** `<type>(<scope>): <short description>` — same format as commit messages. Under 72 characters.
@@ -47,8 +54,3 @@ EOF
 
 **Test plan:** concrete, checkable steps. Not "tests pass" — what specifically should a reviewer verify? For non-functional changes, it's fine to write "No logic changes — diff is purely structural."
 
-## Assignee Owns the PR to Completion
-
-The assignee is responsible for:
-- Addressing review feedback (see `agents/skills/dev/pr-address-feedback/SKILL.md`)
-- Merging once all reviewers have approved and CI is green (see `agents/skills/dev/pr-process/SKILL.md`)

@@ -5,6 +5,8 @@ description: "Pick findings from the latest repo audit and fix them. Opens a PR 
 
 # Code Garden
 
+> **Branch requirement:** The sindustries repo must be checked out on `feat/code-garden` for these skills to be available. Verify with `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries branch --show-current` before starting.
+
 ## Change tiers
 
 **T1 — Trivial:**
@@ -48,7 +50,7 @@ Read the full audit file.
 Check whether there is already an open PR with the `code-garden` label. That label is the **only** gate — any other open PRs (including infrastructure or skills PRs without the label) do not count and must be ignored.
 
 ```bash
-GITHUB_TOKEN="$(grep ROWAN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
+GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr list --repo Stoffer-Industries/sindustries --label code-garden --state open --json number,title
 ```
 
@@ -95,14 +97,14 @@ npm test --workspace <affected-workspace>
 python3 -m pytest <affected-dir>
 ```
 
-Commit message format:
+Commit message format and co-authored-by convention: follow `agents/skills/dev/pr-open/SKILL.md`.
+
+Example commit message:
 ```
 chore(code-garden): <what was fixed> [<audit-week>]
 
 Non-functional change from repo audit <audit-week>.
 Finding: <short description>
-
-Co-Authored-By: Rowan <rowanstoffer@gmail.com>
 ```
 
 ### 4. Mark the finding as done in the audit file
