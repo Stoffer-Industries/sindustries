@@ -141,7 +141,8 @@ All new content starts with `visibility: "draft"` unless Tom explicitly sets it 
 
 ## Approval routing
 
-After producing the outputs, route content to the correct PR:
+After producing the outputs, route content to the correct PR. Follow the pr-open skill for opening PRs:
+`agents/skills/dev/pr-open/SKILL.md`
 
 Both PRs target the **sindustries repo** (`Stoffer-Industries/sindustries`), branching from `main`.
 Branch names: `content/YYYY-MM-DD-tom` and `content/YYYY-MM-DD-quinn`.
@@ -151,11 +152,11 @@ Branch names: `content/YYYY-MM-DD-tom` and `content/YYYY-MM-DD-quinn`.
 
 If a single content item has both low and high risk elements, split it: put the high-risk lines in the Tom PR and the safe version (with those lines removed or redacted) in the Quinn PR.
 
-**After creating each PR, immediately set the correct assignee:**
-- Tom-approval PR → assign to `Stoff81`: `gh pr edit <number> --repo Stoffer-Industries/sindustries --add-assignee Stoff81`
-- Quinn-approval PR → assign to `quinnstoffer`: `gh pr edit <number> --repo Stoffer-Industries/sindustries --add-assignee quinnstoffer`
+**Open each PR with yourself as assignee and the correct reviewer:**
+- Tom-approval PR → `--reviewer Stoff81`
+- Quinn-approval PR → `--reviewer quinnstoffer`
 
-The workflow uses PR assignees to route each PR to the correct review section in the task. Missing assignees will cause the pipeline to stall.
+The opener (you) is the assignee and merges after approval. Missing reviewers will cause the pipeline to stall.
 
 ---
 
