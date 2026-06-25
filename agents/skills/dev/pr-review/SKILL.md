@@ -35,9 +35,9 @@ Before line-by-line review:
 
 ### 3. Review the changes
 
-For each modified file, read enough surrounding code to understand intent — not just the changed lines. Trace call sites if signatures, contracts, or shared data structures changed.
+**Read the changed files in context** (surrounding code, not just the diff lines). **Trace changed contracts and callers** — if a signature or shared type changed, every consumer is affected. **Check tests actually prove the change**, not just that they run. **Prioritise correctness, security, and data loss over style** — a PR with great naming but a race condition is not LGTM.
 
-Prioritise:
+For each modified file, walk through these in order:
 
 1. **Correctness and logic errors** — things that would cause incorrect behavior.
 2. **Security** — input validation, injection, auth, secret handling.
@@ -47,6 +47,18 @@ Prioritise:
 6. **Style and readability** — only flag if genuinely confusing.
 
 Be specific — reference file:line. Provide fixes, not just complaints. Do not flag TODOs or pre-existing issues unless the PR makes them worse.
+
+**When to escalate to pr-deep-review:** if the PR touches any of the following, run `pr-deep-review` for the full checklist before approving:
+
+- Concurrency, async paths, locks, or shared mutable state
+- Database queries, schema changes, or data migrations
+- Authentication, authorization, secrets, or token handling
+- Public APIs or shared types/contracts (exported types, REST/GraphQL signatures, serialisation formats)
+- File system, network, or external service integration
+- Error handling / retry / backoff logic
+- Anything touching `tasks-api`, `bookmark-*` workflows, `tilt`, `otel`, or infra runbooks
+
+For doc updates, content tasks, code-garden cleanup, and small bug fixes, this skill alone is sufficient — do not invoke `pr-deep-review` for those.
 
 ### 4. Task-linked PRs
 
@@ -67,25 +79,7 @@ If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, o
 
 The PR can only be approved once all ACs are checked. Merging is a separate step that happens after approval.
 
-### 5. Deep-review escalation
-
-**Read the changed files in context** (surrounding code, not just the diff lines). **Trace changed contracts and callers** — if a signature or shared type changed, every consumer is affected. **Verify any linked task ACs are actually delivered** by the diff, not just claimed. **Check tests actually prove the change**, not just that they run.
-
-**Prioritise correctness, security, and data loss over style.** A PR with great naming but a race condition is not LGTM.
-
-If the PR touches any of the following, run `pr-deep-review` for the full checklist before approving:
-
-- Concurrency, async paths, locks, or shared mutable state
-- Database queries, schema changes, or data migrations
-- Authentication, authorization, secrets, or token handling
-- Public APIs or shared types/contracts (exported types, REST/GraphQL signatures, serialisation formats)
-- File system, network, or external service integration
-- Error handling / retry / backoff logic
-- Anything touching `tasks-api`, `bookmark-*` workflows, `tilt`, `otel`, or infra runbooks
-
-For doc updates, content tasks, code-garden cleanup, and small bug fixes, `pr-review` alone is sufficient — do not invoke `pr-deep-review` for those.
-
-### 6. Submit verdict
+### 5. Submit verdict
 
 Approve:
 
