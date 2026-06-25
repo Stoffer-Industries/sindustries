@@ -94,10 +94,22 @@ When implementing fixes:
 4. **Verify the fix compiles and tests pass** before committing.
 5. Push to the same branch and reply to the comment: "Fixed in `<commit-sha>`."
 
-### Step 5: Communicate via Code, Not Comments
+### Step 5: Update the PR Description
+
+Before pushing, review the PR body and update it to reflect the current state of the branch:
+
+```bash
+GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
+gh api repos/Stoffer-Industries/sindustries/pulls/<number> \
+  -X PATCH --field body="<updated body>"
+```
+
+Update the summary bullets to reflect what was added or changed in response to feedback. If the test plan has changed, update that too. The PR description should always describe what the PR *currently* does, not what it originally did.
+
+### Step 6: Push and Communicate via Code, Not Comments
 
 **Do NOT reply to PR comments with lengthy explanations.** Let the code speak for itself:
-- For fixes: make the change with a clear commit message. The reviewer will see the updated diff. Reply "Fixed in `<commit-sha>`."
+- For fixes: push to the branch and reply to the comment "Fixed in `<commit-sha>`."
 - For won't-fix / invalid: reply once with a brief, respectful explanation. Do not argue.
 - Do not resolve threads — the reviewer resolves on re-review.
 
