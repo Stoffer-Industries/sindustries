@@ -64,7 +64,25 @@ If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, o
 
 Do not declare the PR done until your reviewer ACs are checked off.
 
-### 5. Submit verdict
+### 5. Deep-review escalation
+
+**Read the changed files in context** (surrounding code, not just the diff lines). **Trace changed contracts and callers** — if a signature or shared type changed, every consumer is affected. **Verify any linked task ACs are actually delivered** by the diff, not just claimed. **Check tests actually prove the change**, not just that they run.
+
+**Prioritise correctness, security, and data loss over style.** A PR with great naming but a race condition is not LGTM.
+
+If the PR touches any of the following, run `pr-deep-review` for the full checklist before approving:
+
+- Concurrency, async paths, locks, or shared mutable state
+- Database queries, schema changes, or data migrations
+- Authentication, authorization, secrets, or token handling
+- Public APIs or shared types/contracts (exported types, REST/GraphQL signatures, serialisation formats)
+- File system, network, or external service integration
+- Error handling / retry / backoff logic
+- Anything touching `tasks-api`, `bookmark-*` workflows, `tilt`, `otel`, or infra runbooks
+
+For doc updates, content tasks, code-garden cleanup, and small bug fixes, `pr-review` alone is sufficient — do not invoke `pr-deep-review` for those.
+
+### 6. Submit verdict
 
 Approve:
 
