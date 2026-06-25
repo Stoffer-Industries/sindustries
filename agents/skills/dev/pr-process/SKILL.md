@@ -21,21 +21,15 @@ Read and follow: `agents/skills/dev/pr-review/SKILL.md`
 
 **After completing your review:** submit approve or request-changes via `gh pr review`. Do not merge — the assignee merges.
 
-**For code-garden PRs**, apply the tier classification:
-
-| Tier | Type | Action |
-|------|------|--------|
-| T1 | Trivial non-functional (dead code, comments, imports, typos) | Approve |
-| T2 | Structural, low risk (constants, dedup, type annotations) | Approve if correct |
-| T3 | Touches logic, API surface, or security posture | Request changes — assignee must split |
-
-Comment format: `[T1] LGTM.` / `[T2] LGTM. <note>.` / `[T3] This crosses into logic territory: <reason>. Please split.`
-
-Do not approve with failing CI. Do not approve T3 changes. Leave one clear review comment per PR.
+Do not approve with failing CI. Leave one clear review comment per PR.
 
 ---
 
 ## If you are the assignee
+
+### Addressing review comments
+
+Read and follow: `agents/skills/dev/pr-address-feedback/SKILL.md`
 
 ### Merging after approval
 
@@ -52,7 +46,3 @@ Merge when every requested reviewer shows `APPROVED` and CI passes:
 GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr merge <number> --repo Stoffer-Industries/sindustries --squash --delete-branch
 ```
-
-### Addressing review comments
-
-Read and follow: `agents/skills/dev/pr-address-feedback/SKILL.md`
