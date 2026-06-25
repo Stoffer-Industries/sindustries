@@ -54,15 +54,17 @@ If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, o
 
 1. Read the task body in the Tasks API (`tasks_api_client.py get <task-id>`).
 2. For each AC, find the corresponding change in the diff. If an AC is not delivered, request changes.
-3. After merging, mark your reviewer ACs done. The script is role-scoped — replace `${ROLE}` with your role slug (`quinn`, `ivy`, etc.):
+3. After merging, mark your reviewer ACs done. **The post-merge AC check-off step is role-specific** — not every role has a script today:
+   - **Quinn (content reviewer):** runs `check_off_quinn_acs.py` to mark her ACs done:
+     ```bash
+     TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+       python3 codebases/sindustries/agents/workflows/content-tasks/scripts/check_off_quinn_acs.py \
+       --task-id <task-id>
+     ```
+   - **Tom (content reviewer):** no post-merge AC check-off step. Tom's review IS his contribution — AC verification happens at approval time, not via a separate script.
+   - **Other roles:** check the content-tasks workflow docs for whether a check-off script exists for your role before assuming one does. Do not invent one — ask the team.
 
-   ```bash
-   TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-     python3 codebases/sindustries/agents/workflows/content-tasks/scripts/check_off_${ROLE}_acs.py \
-     --task-id <task-id>
-   ```
-
-Do not declare the PR done until your reviewer ACs are checked off.
+Do not declare the PR done until your reviewer ACs are verified (via script if your role has one, via task-body inspection otherwise).
 
 ### 5. Deep-review escalation
 
