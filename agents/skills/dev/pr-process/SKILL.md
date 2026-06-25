@@ -48,3 +48,17 @@ Merge when every requested reviewer shows `APPROVED` and CI passes:
 GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr merge <number> --repo Stoffer-Industries/sindustries --squash --delete-branch
 ```
+
+---
+
+## Example role mappings
+
+This skill is role-based, not agent-based. Any agent can play any role on a given PR. The split is: one role opens the PR, one or more review it, the opener merges after all approvals + green CI.
+
+Concrete patterns in our workflows:
+
+- **Content tasks:** opener opens (`--assignee <self>`, `--reviewer quinn,tomstoffer`). Quinn and Tom review. Opener merges after both approvals.
+- **Code-garden tasks:** opener opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Opener merges after approval.
+- **Cross-repo PRs (workspace repo, infra scripts):** same pattern — opener opens, reviewer reviews, opener merges.
+
+The reviewer never merges. The assignee/opener owns getting the PR accepted and merged.
