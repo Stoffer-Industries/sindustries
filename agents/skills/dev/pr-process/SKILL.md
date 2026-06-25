@@ -38,14 +38,12 @@ Read and follow: `agents/skills/dev/pr-address-feedback/SKILL.md`
 Poll for review state in your heartbeat. Once all reviewers have approved and CI is green:
 
 ```bash
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr view <number> --repo Stoffer-Industries/sindustries --json reviews,statusCheckRollup
 ```
 
 Merge when every requested reviewer shows `APPROVED` and CI passes:
 
 ```bash
-GITHUB_TOKEN="$(grep <YOUR_TOKEN_VAR> ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr merge <number> --repo Stoffer-Industries/sindustries --squash --delete-branch
 ```
 
