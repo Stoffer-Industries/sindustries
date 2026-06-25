@@ -5,8 +5,6 @@ description: "Pick findings from the latest repo audit and fix them. Opens a PR 
 
 # Code Garden
 
-> **Branch requirement:** The sindustries repo must be checked out on `feat/code-garden` for these skills to be available. Verify with `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries branch --show-current` before starting.
-
 ## Change tiers
 
 **T1 — Trivial:**
@@ -62,13 +60,11 @@ Pick one finding that:
 
 Skip any finding that requires understanding product/business intent. If unsure, skip.
 
-### 3. Implement on a chore branch off feat/code-garden
-
-Branch off `feat/code-garden`, not main:
+### 3. Implement on a chore branch off main
 
 ```bash
 git fetch origin
-git checkout -b chore/code-garden-<audit-week>-<short-slug> origin/feat/code-garden
+git checkout -b chore/code-garden-<audit-week>-<short-slug> origin/main
 ```
 
 e.g. `chore/code-garden-2026-W26-stale-triage-comment`
