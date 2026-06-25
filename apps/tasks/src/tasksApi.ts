@@ -6,7 +6,7 @@ export interface TaskFilters {
   tag?: string;
   assignee?: string;
   includeArchived?: boolean;
-  // Note: 'ready' boolean filter is deprecated — use status='ready' or status='triage' instead
+  // Note: 'ready' boolean filter is deprecated; use status='ready' instead
 }
 
 export interface Comment {
@@ -20,7 +20,7 @@ export interface Task {
   id: string | number;
   title: string;
   description?: string | null;
-  status: string;  // open | triage | ready | doing | acceptance | done
+  status: string;  // open | ready | doing | acceptance | done
   priority: string;
   assignee?: string | null;
   dueAt?: string | null;
@@ -42,7 +42,7 @@ export interface CreateTaskPayload {
   tags?: string[];
   blocked?: boolean;
   taskType?: 'content' | 'code' | 'research' | null;
-  // Note: 'ready' field removed — use status='triage' or status='ready' instead
+  // Note: 'ready' field removed; use status='ready' instead
 }
 
 export interface UpdateTaskPayload {
@@ -103,7 +103,7 @@ export async function fetchTasks(filters: TaskFilters): Promise<Task[]> {
   if (filters.tag) query.set('tag', filters.tag);
   if (filters.assignee) query.set('assignee', filters.assignee);
   if (filters.includeArchived) query.set('includeArchived', 'true');
-  // Note: 'ready' boolean filter is deprecated — use status='ready' or status='triage' instead
+  // Note: 'ready' boolean filter is deprecated; use status='ready' instead
   return api<Task[]>('/tasks?' + query.toString());
 }
 
