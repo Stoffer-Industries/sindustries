@@ -29,13 +29,15 @@ Quinn runs this skill during heartbeat to close out Rowan's non-functional clean
 
 ### 1. Find open code-garden PRs
 
+See `agents/skills/dev/pr-roles/SKILL.md` for role conventions. PRs are assigned to Rowan; Quinn is the reviewer.
+
 ```bash
 GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr list \
   --repo Stoffer-Industries/sindustries \
   --label code-garden \
   --state open \
-  --assignee quinnstoffer \
+  --assignee rowanstoffer \
   --json number,title,url,headRefName,author,createdAt
 ```
 

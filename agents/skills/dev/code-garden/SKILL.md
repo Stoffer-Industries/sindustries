@@ -1,15 +1,15 @@
 ---
 name: code-garden
-description: "Pick non-functional findings from the latest repo audit and fix them. Opens a PR assigned to Quinn. T1/T2 changes only — no logic, no security, no behaviour changes."
+description: "Pick findings from the latest repo audit and fix them. Opens a PR assigned to Rowan with a review request to Quinn."
 ---
 
 # Code Garden
 
-Rowan runs this skill during heartbeat to keep the codebase tidy without shipping logic changes.
+Rowan runs this skill during heartbeat to keep the codebase tidy.
 
-## What counts as a code-garden change (T1/T2 only)
+## Change tiers (used by Quinn on review)
 
-**T1 — Trivial, auto-mergeable by Quinn:**
+**T1 — Trivial (Quinn auto-merges):**
 - Remove dead/unreachable code
 - Remove unused imports
 - Fix stale/wrong comments or inline docs
@@ -45,47 +45,24 @@ ls /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/docs/repo-audit
 
 Read the full audit file.
 
-### 2. Load the done-list
-
-Read (or create if missing) the state file tracking which audit findings have already been addressed:
-
-```
-/Users/quinnstoffer/.openclaw/workspace/brain/state/code-garden-state.json
-```
-
-Schema:
-```json
-{
-  "done": [
-    {
-      "auditWeek": "2026-W26",
-      "finding": "<short slug of the finding>",
-      "pr": 123,
-      "completedAt": "ISO"
-    }
-  ]
-}
-```
-
-### 3. Select 1 finding
+### 2. Select 1 finding
 
 Check whether there is already an open PR with the `code-garden` label. That label is the **only** gate — any other open PRs (including infrastructure or skills PRs without the label) do not count and must be ignored.
 
 ```bash
-GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
+GITHUB_TOKEN="$(grep ROWAN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr list --repo Stoffer-Industries/sindustries --label code-garden --state open --json number,title
 ```
 
 If that command returns a non-empty list, stop here. Otherwise proceed.
 
-Pick one Low or Medium finding that:
-- Is not already in the `done` list for this audit week
-- Is T1 or T2 (see above)
+Pick one finding that:
+- Is **not already marked done** in the audit md file (look for `<!-- DONE: PR #... -->` on the finding line)
 - Can be fully addressed in a single focused PR
 
 Skip any finding that requires understanding product/business intent. If unsure, skip.
 
-### 4. Implement on a chore branch off feat/code-garden
+### 3. Implement on a chore branch off feat/code-garden
 
 Branch off `feat/code-garden`, not main:
 
@@ -130,18 +107,19 @@ Finding: <short description>
 Co-Authored-By: Rowan <rowanstoffer@gmail.com>
 ```
 
-### 5. Open PR
+### 4. Open PR
 
-PR targets `main`. The branch is off `feat/code-garden` for context, but the PR base is main.
+PR targets `main`. Rowan is the author and assignee; Quinn is the reviewer. See `agents/skills/dev/pr-roles/SKILL.md`.
 
 ```bash
-GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
+GITHUB_TOKEN="$(grep ROWAN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
 gh pr create \
   --repo Stoffer-Industries/sindustries \
   --base main \
   --title "chore(code-garden): <what was fixed>" \
   --label "code-garden" \
-  --assignee quinnstoffer \
+  --assignee rowanstoffer \
+  --reviewer quinnstoffer \
   --body "$(cat <<'EOF'
 ## Code garden
 
@@ -160,32 +138,13 @@ EOF
 )"
 ```
 
-### 6. Update the state file
+### 5. Mark the finding as done in the audit file
 
-Add an entry to `brain/state/code-garden-state.json` for each finding addressed.
+Edit the audit md to mark the finding done:
 
----
+```bash
+# Append <!-- DONE: PR #<number> --> to the finding's header line in the audit file
+sed -i '' 's/<finding headline>/& <!-- DONE: PR #<number> -->/' docs/repo-audits/<week>.md
+```
 
-## PR comment addressing
-
-When this skill is called to address review comments (not to pick new findings):
-
-1. List your open PRs:
-   ```bash
-   GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
-   gh pr list --repo Stoffer-Industries/sindustries --author rowanstoffer --state open \
-     --label code-garden --json number,title,url
-   ```
-
-2. For each PR, check for unresolved review comments:
-   ```bash
-   GITHUB_TOKEN="$(grep QUINN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
-   gh pr view <number> --repo Stoffer-Industries/sindustries --json reviews,comments
-   ```
-
-3. For each `CHANGES_REQUESTED` review with specific comments:
-   - Read the comment carefully
-   - If it's requesting a T3 change: reply "Acknowledged — this finding has been escalated to Tom as it touches logic/behavior. Leaving this PR in its current T1/T2 scope."
-   - If it's requesting a valid T1/T2 fix: make the change, push to the same branch, reply "Fixed in <commit-sha>."
-
-4. Do not resolve threads yourself — Quinn resolves them on re-review.
+Commit the change to the chore branch so it travels with the PR.
