@@ -1,8 +1,10 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
-// Configure marked for safe, sensible defaults
-marked.setOptions({
+// Configure marked for safe, sensible defaults.
+// marked.use accepts the same option keys as the deprecated setOptions,
+// so this is a behavior-equivalent migration from marked v17's deprecation.
+marked.use({
   gfm: true,
   breaks: true,
 });
