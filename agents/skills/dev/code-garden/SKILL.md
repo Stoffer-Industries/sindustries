@@ -1,15 +1,13 @@
 ---
 name: code-garden
-description: "Pick findings from the latest repo audit and fix them. Opens a PR assigned to Rowan with a review request to Quinn."
+description: "Pick findings from the latest repo audit and fix them. Opens a PR for review."
 ---
 
 # Code Garden
 
-Rowan runs this skill during heartbeat to keep the codebase tidy.
+## Change tiers
 
-## Change tiers (used by Quinn on review)
-
-**T1 — Trivial (Quinn auto-merges):**
+**T1 — Trivial:**
 - Remove dead/unreachable code
 - Remove unused imports
 - Fix stale/wrong comments or inline docs
@@ -17,7 +15,7 @@ Rowan runs this skill during heartbeat to keep the codebase tidy.
 - Rename variable/function for clarity (no callers outside the file)
 - Fix typos in strings that are not user-facing
 
-**T2 — Structural, low risk (Quinn reviews before merging):**
+**T2 — Structural, low risk:**
 - Extract a repeated literal into a named constant
 - Consolidate duplicated logic into a shared helper (no API-surface change)
 - Simplify a condition without changing its truth table
@@ -107,44 +105,28 @@ Finding: <short description>
 Co-Authored-By: Rowan <rowanstoffer@gmail.com>
 ```
 
-### 4. Open PR
+### 4. Mark the finding as done in the audit file
 
-PR targets `main`. Open as the author and set yourself as assignee with a review request. See `agents/skills/dev/pr-process/SKILL.md` — follow the "If you are opening a PR" section.
+Before opening the PR, edit the audit file to mark the finding done. Append `<!-- DONE: PR #TBD -->` to the finding's header line in `docs/repo-audits/<week>.md`. Commit this to the chore branch so it travels with the PR. Once the PR number is known, update the placeholder to the actual number.
 
-```bash
-GITHUB_TOKEN="$(grep ROWAN_GITHUB_TOKEN ~/.openclaw/.env | cut -d= -f2-)" \
-gh pr create \
-  --repo Stoffer-Industries/sindustries \
-  --base main \
-  --title "chore(code-garden): <what was fixed>" \
-  --label "code-garden" \
-  --assignee rowanstoffer \
-  --reviewer quinnstoffer \
-  --body "$(cat <<'EOF'
-## Code garden
+### 5. Open PR
 
-**Audit:** docs/repo-audits/<week>.md
-**Finding:** [<Severity>] <finding title>
-**Tier:** T1 | T2
+Read and follow: `agents/skills/dev/pr-open/SKILL.md`
 
-<one-sentence description of what was changed and why it's non-functional>
+Use this PR body format:
+
+```
+## Summary
+- **Audit:** docs/repo-audits/<week>.md
+- **Finding:** [<Severity>] <finding title>
+- **Tier:** T1 | T2
+- <one-sentence description of what was changed and why it's non-functional>
 
 ## Test plan
-- [ ] `npm test --workspace <workspace>` passes
+- [ ] Relevant tests pass
 - [ ] No logic changes — diff is purely structural/cosmetic
 
 🌱 Code garden — non-functional cleanup only
-EOF
-)"
 ```
 
-### 5. Mark the finding as done in the audit file
-
-Edit the audit md to mark the finding done:
-
-```bash
-# Append <!-- DONE: PR #<number> --> to the finding's header line in the audit file
-sed -i '' 's/<finding headline>/& <!-- DONE: PR #<number> -->/' docs/repo-audits/<week>.md
-```
-
-Commit the change to the chore branch so it travels with the PR.
+Add `--label "code-garden"` to the `gh pr create` command.
