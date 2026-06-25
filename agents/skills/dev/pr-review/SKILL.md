@@ -50,21 +50,28 @@ Be specific — reference file:line. Provide fixes, not just complaints. Do not 
 
 ### 4. Task-linked PRs
 
-If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, or match the PR title to a task title), verify the diff actually delivers the task's ACs:
+If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, or match the PR title to a task title):
 
-1. Read the task body in the Tasks API (`tasks_api_client.py get <task-id>`).
-2. For each AC, find the corresponding change in the diff. If an AC is not delivered, request changes.
-3. After merging, mark your reviewer ACs done. **The post-merge AC check-off step is role-specific** — not every role has a script today:
-   - **Quinn (content reviewer):** runs `check_off_quinn_acs.py` to mark her ACs done:
-     ```bash
-     TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-       python3 codebases/sindustries/agents/workflows/content-tasks/scripts/check_off_quinn_acs.py \
-       --task-id <task-id>
-     ```
-   - **Tom (content reviewer):** no post-merge AC check-off step. Tom's review IS his contribution — AC verification happens at approval time, not via a separate script.
-   - **Other roles:** check the content-tasks workflow docs for whether a check-off script exists for your role before assuming one does. Do not invent one — ask the team.
+**1. Verify every AC during review, before approving.**
 
-Do not declare the PR done until your reviewer ACs are verified (via script if your role has one, via task-body inspection otherwise).
+a. Read the task body in the Tasks API (`tasks_api_client.py get <task-id>`).
+b. For each AC in the task, find the corresponding change in the diff. If any AC is not delivered by the diff, request changes — **do not approve until every AC has a matching change**.
+c. Only when every AC is accounted for, approve.
+
+This is the actual "checking" of ACs. It happens during review, not after merging.
+
+**2. After the assignee merges — record-keeping (Quinn only).**
+
+The post-merge script is bookkeeping, not verification. It marks AC checkboxes in the task body as done (`- [ ]` → `- [x]`). The ACs were already verified in step 1.
+
+- **Quinn (content reviewer):** runs `check_off_quinn_acs.py` after merge:
+  ```bash
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+    python3 codebases/sindustries/agents/workflows/content-tasks/scripts/check_off_quinn_acs.py \
+    --task-id <task-id>
+  ```
+- **Tom (content reviewer):** no post-merge script. Tom's review IS his contribution — there is no separate record-keeping step.
+- **Other roles:** check the content-tasks workflow docs before assuming a script exists for your role. Do not invent one.
 
 ### 5. Deep-review escalation
 
