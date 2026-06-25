@@ -11,7 +11,9 @@ Sindustries is organized as a monorepo with explicit boundaries between product 
 - `services/` — backend APIs, workers, and long-running service processes
 - `packages/` — shared libraries, types, utilities, and cross-cutting configs
 - `infra/` — infrastructure, environments, and deployment/runtime definitions
-- `docs/` — architecture, specifications, and decision records
+- `docs/` — current system references, build specs, design notes, and repo audits
+  - `docs/systems/` — current system and workflow references
+  - `docs/specs/` — build-against specs and older planning artifacts
 
 ## Direction
 
@@ -21,6 +23,12 @@ Planned product evolution:
 1. Build and prove the focused `tasks` surface.
 2. Evolve `mission-control` into the aggregate shell that hosts cross-app workflows (including `tasks`, collaboration, and future surfaces).
 3. Keep domain boundaries strict so apps can ship independently while sharing stable packages/services.
+
+## System references
+
+- `docs/systems/agent-orchestration.md` — high-level map of agent workflows, heartbeat, content, tasks, and incident handling.
+- `docs/systems/bookmark-workflow.md` — detailed bookmark pipeline state machine, scripts, curation, approval, and task creation.
+- `TASK_PROCESS.md` — task lifecycle source of truth.
 
 ## Local setup (dev + prodlike)
 
@@ -143,6 +151,14 @@ Use explicit API base URLs:
 - Dev: `http://localhost:4000/api/v1`
 - Prod-like: `http://localhost:4001/api/v1`
 
+### Runtime and data ownership guardrails
+
+- Mode config source of truth: `scripts/dev/mode-env.sh`.
+- Each mode uses an isolated Postgres database: `sindustries_dev` or `sindustries_prodlike`.
+- Each service owns its schema and migrations. Current API ownership schema: `tasks_api`; reserved app-side schema boundary: `tasks_app`.
+- Cross-service reads and writes must go through service APIs/contracts, not direct table access.
+- `scripts/dev/*` are the operational source of truth; wrappers such as Make targets should call scripts rather than duplicate runtime logic.
+
 ### Run tests
 
 ```bash
@@ -160,7 +176,7 @@ make test-e2e
 ## Working method
 
 For non-trivial work, use spec-first delivery:
-- write/update a spec in `docs/specs/`
+- write/update a spec in `docs/specs/`, or a current system reference in `docs/systems/` when documenting live workflow behavior
 - implement in small mergeable slices
 - validate before merge
 - document risks and mitigations
