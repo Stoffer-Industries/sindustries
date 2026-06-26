@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { createApp } from '../src/app.ts';
+import { createApp } from '../src/app';
 
 describe('tasks api db integration', () => {
   it('reads seeded rows and persists create/update/archive through postgres', async () => {

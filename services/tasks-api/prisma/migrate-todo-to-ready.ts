@@ -1,7 +1,7 @@
 // Migration script to update existing tasks from todo -> open
 // Run this once to migrate existing data
 
-import { prisma } from '../src/lib/prisma.ts';
+import { prisma } from '../src/lib/prisma';
 
 async function migrate() {
   console.log('Starting migration: todo -> open');

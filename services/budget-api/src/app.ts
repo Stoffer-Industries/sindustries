@@ -1,12 +1,12 @@
 import express from 'express';
 
-import { alertsRouter } from './routes/alerts.ts';
-import { akahuRouter } from './routes/akahu.ts';
-import { cardsRouter } from './routes/cards.ts';
-import { categorizeRouter } from './routes/categorize.ts';
-import { categoriesRouter } from './routes/categories.ts';
-import { sessionRouter } from './routes/session.ts';
-import { transactionsRouter } from './routes/transactions.ts';
+import { alertsRouter } from './routes/alerts';
+import { akahuRouter } from './routes/akahu';
+import { cardsRouter } from './routes/cards';
+import { categorizeRouter } from './routes/categorize';
+import { categoriesRouter } from './routes/categories';
+import { sessionRouter } from './routes/session';
+import { transactionsRouter } from './routes/transactions';
 
 function getAllowedOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.split(',')

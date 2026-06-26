@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
-import { prisma } from '../lib/prisma.ts';
-import { jsonError } from '../lib/http.ts';
+import { prisma } from '../lib/prisma';
+import { jsonError } from '../lib/http';
 
 export const sessionRouter = Router();
 

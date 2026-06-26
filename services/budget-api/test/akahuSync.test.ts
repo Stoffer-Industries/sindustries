@@ -43,7 +43,7 @@ vi.mock('../src/services/categorizer.ts', () => ({
   categoryTaxonomy: []
 }));
 
-import { createApp } from '../src/app.ts';
+import { createApp } from '../src/app';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

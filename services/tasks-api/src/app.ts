@@ -1,7 +1,7 @@
 import express from 'express';
-import { healthRouter } from './routes/health.ts';
-import { tasksRouter } from './routes/tasks.ts';
-import { tagsRouter } from './routes/tags.ts';
+import { healthRouter } from './routes/health';
+import { tasksRouter } from './routes/tasks';
+import { tagsRouter } from './routes/tags';
 
 function getAllowedOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.split(',')

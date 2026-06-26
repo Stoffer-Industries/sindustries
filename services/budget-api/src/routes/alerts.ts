@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { prisma } from '../lib/prisma.ts';
-import { jsonError } from '../lib/http.ts';
-import { evaluateAlertsForUser } from '../services/alerts.ts';
+import { prisma } from '../lib/prisma';
+import { jsonError } from '../lib/http';
+import { evaluateAlertsForUser } from '../services/alerts';
 
 export const alertsRouter = Router();
 

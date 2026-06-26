@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { jsonError } from '../lib/http.ts';
-import { categorizeTransaction, categoryTaxonomy } from '../services/categorizer.ts';
+import { jsonError } from '../lib/http';
+import { categorizeTransaction, categoryTaxonomy } from '../services/categorizer';
 
 export const categorizeRouter = Router();
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   akahuGetPendingTransactions,
   akahuRefreshAllAccounts
-} from '../src/services/akahuClient.ts';
+} from '../src/services/akahuClient';
 
 function jsonResponse(status: number, body: unknown) {
   return {

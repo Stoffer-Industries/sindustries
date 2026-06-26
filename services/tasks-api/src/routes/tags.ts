@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { prisma } from '../lib/prisma.ts';
-import { badRequest } from '../lib/http.ts';
+import { prisma } from '../lib/prisma';
+import { badRequest } from '../lib/http';
 
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : value;

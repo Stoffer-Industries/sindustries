@@ -10,8 +10,8 @@ vi.mock('../src/lib/prisma.ts', () => {
   };
 });
 
-import { categorizeTransaction } from '../src/services/categorizer.ts';
-import { prisma } from '../src/lib/prisma.ts';
+import { categorizeTransaction } from '../src/services/categorizer';
+import { prisma } from '../src/lib/prisma';
 
 describe('categorizeTransaction', () => {
   it('uses feedback rule when available', async () => {

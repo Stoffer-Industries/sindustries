@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { jsonError } from '../lib/http.ts';
+import { jsonError } from '../lib/http';
 import { normalizeMerchantKey } from '@sindustries/budget-domain';
 import {
   getTransactionById,
   listTransactionsForUser,
   recordCategorizationFeedback,
   updateTransactionCategory
-} from '../repos/transactionsRepo.ts';
+} from '../repos/transactionsRepo';
 
 export const transactionsRouter = Router();
 

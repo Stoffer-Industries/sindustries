@@ -17,8 +17,8 @@ vi.mock('../src/lib/prisma.ts', () => {
   };
 });
 
-import { prisma } from '../src/lib/prisma.ts';
-import { evaluateAlertsForUser } from '../src/services/alerts.ts';
+import { prisma } from '../src/lib/prisma';
+import { evaluateAlertsForUser } from '../src/services/alerts';
 
 describe('evaluateAlertsForUser', () => {
   it('creates deduped events per stage crossed', async () => {
