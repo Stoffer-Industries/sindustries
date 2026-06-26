@@ -40,7 +40,7 @@ gh pr list --repo Stoffer-Industries/sindustries --label code-garden --state ope
 If that command returns a non-empty list, stop here. Otherwise proceed.
 
 Pick one finding that:
-- Is **not already marked done** in the audit md file (look for `<!-- DONE: PR #... -->` on the finding line)
+- Is **not already marked done** in the audit md file (look for `✅ [PR #...]` on the finding line)
 - Can be fully addressed in a single focused PR
 
 Skip any finding that requires understanding product/business intent. If unsure, skip.
@@ -90,7 +90,7 @@ Finding: <short description>
 
 ### 4. Mark the finding as done in the audit file
 
-Before opening the PR, edit the audit file to mark the finding done. Append `<!-- DONE: PR #TBD -->` to the finding's header line in `docs/repo-audits/<week>.md`. Commit this to the chore branch so it travels with the PR. Once the PR number is known, update the placeholder to the actual number.
+Before opening the PR, edit the audit file to mark the finding done. Append ` ✅ [PR #TBD](https://github.com/Stoffer-Industries/sindustries/pull/TBD)` to the finding's header line in `docs/repo-audits/<week>.md`. Commit this to the chore branch so it travels with the PR. Once the PR number is known, replace both `TBD` placeholders with the actual PR number.
 
 ### 5. Open PR
 
