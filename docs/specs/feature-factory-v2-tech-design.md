@@ -3,6 +3,7 @@
 ## Links
 
 - Product spec: `brain/bookmarks/specs/feature-factory-v2-2026-06-04.md`
+- Tech design: `docs/specs/feature-factory-v2-tech-design.md`
 - Task: `2527ff9d-4369-444f-995d-4d4bb0ac7b70` (`Feature Factory v2`)
 - Tasks API record: `http://localhost:4001/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70`
 
@@ -32,6 +33,8 @@ The implementation should add a new workflow lane under `agents/workflows/featur
 - The workflow must use an idempotent reconciler pattern. Do not use `wait_for` or any blocking Lobster primitive.
 - Approval must use GitHub review state for acceptance. No custom Telegram approval channel.
 - `ready` -> `doing` is blocked until the task has `tech_design_url` and `tech_design_approved: true`.
+- Tech design approval lives on the task, not in the product spec. Do not look for Tom's sign-off in the spec file. The task remains blocked in `ready` while waiting for tech design approval; Quinn sets `tech_design_approved: true` on the task once Tom confirms.
+- Rowan capacity is one unblocked feature task per state, matching the Ivy content-task workflow capacity pattern.
 - The current Tasks API schema does not expose first-class `tech_design_url`, `tech_design_approved`, system spec, or arbitrary metadata fields. Existing workflow state is stored through task comments using `[lobster-state]`.
 - `.openclaw` changes are outside the primary repo boundary and must be flagged for Quinn rather than edited silently here.
 
@@ -82,6 +85,21 @@ Proposed interim comment tags:
 - `[system-spec] docs/systems/<file>.md`
 - `[no-system-spec-change] <reason>`
 
+## Tasks API Workstream
+
+Feature Factory v2 needs first-class `taskType: feature` support before the workflow can rely on durable task discovery and validation.
+
+Implementation requirements:
+
+- Extend Tasks API task validation and persistence so `taskType: feature` is an accepted first-class type.
+- Add or update Tasks API route tests, schema tests, and any UI/API contract tests that enumerate task types.
+- Update workflow discovery so the feature-task wrapper selects active tasks with `taskType: feature` instead of treating feature work as `code` or relying only on tags.
+- Keep `feature-factory` tag fallback only as an interim compatibility path while existing tasks are migrated.
+
+Acceptance criterion:
+
+- A feature task with `taskType: feature` can be created, read, listed, validated by tests, and discovered by the feature-task workflow without tag-only routing.
+
 ## Rust CLI
 
 Create `agents/workflows/feature-task/` as a Cargo crate. The binary can be named `feature-task`.
@@ -103,7 +121,7 @@ Commands:
 
 - `spec-check`
   - Implements `open` -> `ready`.
-  - Verifies a linked product spec exists and is approved by Tom.
+  - Verifies a linked product spec exists and includes enough implementation-ready scope. It must not require or parse Tom's approval from the product spec.
   - Verifies the task has feature-task acceptance criteria and workstreams.
   - Posts a specific failed-criteria comment if blocked.
   - Moves `open` -> `ready` when criteria pass.
@@ -112,8 +130,9 @@ Commands:
   - Implements `ready` -> `doing`.
   - Requires `tech_design_url`.
   - Requires `tech_design_approved: true`.
+  - Treats missing task-level tech design approval as a blocked `ready` state, not as a product spec defect.
   - Requires Rowan assignment.
-  - Requires no active unblocked Rowan feature task beyond the configured capacity, if capacity is enforced.
+  - Requires no active unblocked Rowan feature task beyond the configured capacity of one task per state.
   - Moves `ready` -> `doing` when criteria pass.
 
 - `verify-delivery`
@@ -168,50 +187,50 @@ args:
 steps:
   - id: load_task
     command: >-
-      ${sindustriesRepo}/agents/workflows/feature-task/target/debug/feature-task
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       load-task --base-url ${tasksApiBaseUrl} --task-id ${taskId}
 
   - id: spec_check
     command: >-
-      ${sindustriesRepo}/agents/workflows/feature-task/target/debug/feature-task
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       spec-check --base-url ${tasksApiBaseUrl} --dry-run ${dryRun}
     stdin: $load_task.stdout
 
   - id: ready_checks
     command: >-
-      ${sindustriesRepo}/agents/workflows/feature-task/target/debug/feature-task
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun}
     stdin: $spec_check.stdout
     condition: $spec_check.json.criteria_met
 
   - id: verify_delivery
     command: >-
-      ${sindustriesRepo}/agents/workflows/feature-task/target/debug/feature-task
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun}
     stdin: $ready_checks.stdout
     condition: $ready_checks.json.criteria_met
 
   - id: feedback_aggregate
     command: >-
-      ${sindustriesRepo}/agents/workflows/feature-task/target/debug/feature-task
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun}
     stdin: $verify_delivery.stdout
     condition: $verify_delivery.json.criteria_met
 
   - id: post_merge
     command: >-
-      ${sindustriesRepo}/agents/workflows/feature-task/target/debug/feature-task
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun}
     stdin: $feedback_aggregate.stdout
     condition: $feedback_aggregate.json.criteria_met
 ```
 
-Use the final binary path from `cargo build`. If CI or cron expects a release binary, document and use `target/release/feature-task` instead.
+Each Lobster step should invoke the CLI through `cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml -- ...`. Do not encode `target/debug` or `target/release` binary paths in Lobster YAML, and do not assume a cached compiled binary exists before the workflow runs.
 
 Add `agents/workflows/feature-task/run.py` or a Rust subcommand wrapper that:
 
 - Lists active feature tasks in `open`, `ready`, `doing`, and `acceptance`.
-- Selects tasks tagged `feature-factory` or `taskType == "code"` once task typing supports feature/code cleanly.
+- Selects tasks with `taskType == "feature"` once the Tasks API workstream lands, with `feature-factory` tag fallback only for interim migration.
 - Runs `lobster run --mode tool agents/workflows/feature-task/feature-task.lobster.yaml --args-json ...`.
 - Returns a JSON summary with per-task results and errors.
 
@@ -220,7 +239,7 @@ Add `agents/workflows/feature-task/run.py` or a Rust subcommand wrapper that:
 Add skills under `agents/skills/dev/` unless the repository conventions suggest a more precise location during implementation:
 
 - `tech-design`
-  - Creates `docs/designs/<task-slug>.md`.
+  - Creates `docs/specs/<task-slug>-tech-design.md`.
   - Requires product spec link, task ID, branch, worktree, repos, `.openclaw` boundary, implementation plan, test plan, and open questions.
   - Posts or instructs posting the design URL to the task.
 
@@ -246,6 +265,7 @@ Fixture groups:
   - duplicated spec blocks.
   - missing acceptance criteria.
   - multiple workstreams.
+  - `taskType: feature` accepted and discoverable through the Tasks API.
 
 - Workstream parsing:
   - Rowan-only workstream.
@@ -278,24 +298,20 @@ Test commands:
 ## Implementation Plan
 
 1. Create the Rust crate and shared model layer.
-2. Add fixture-driven parsers for task descriptions, task comments, workstreams, and PR URLs.
-3. Implement the Tasks API client and idempotent comment/state helpers.
-4. Implement `load-task` and `spec-check`.
-5. Implement `ready-checks`, including the tech design approval gate.
-6. Implement GitHub inspection helpers using `gh` JSON output or GitHub REST responses.
-7. Implement `verify-delivery`, `feedback-aggregate`, and `post-merge`.
-8. Add `feature-task.lobster.yaml` and the active-task wrapper.
-9. Add the feature-task cron prompt.
-10. Add tech-design and system-spec skills.
-11. Add CI coverage for the Rust crate.
-12. Run a dry-run pass against task `2527ff9d-4369-444f-995d-4d4bb0ac7b70`.
+2. Add Tasks API support for first-class `taskType: feature`, including validation, tests, and workflow discovery updates.
+3. Add fixture-driven parsers for task descriptions, task comments, workstreams, and PR URLs.
+4. Implement the Tasks API client and idempotent comment/state helpers.
+5. Implement `load-task` and `spec-check`.
+6. Implement `ready-checks`, including the task-level tech design approval gate.
+7. Implement GitHub inspection helpers using `gh` JSON output or GitHub REST responses.
+8. Implement `verify-delivery`, `feedback-aggregate`, and `post-merge`.
+9. Add `feature-task.lobster.yaml` and the active-task wrapper.
+10. Add the feature-task cron prompt.
+11. Add tech-design and system-spec skills.
+12. Add CI coverage for the Rust crate.
+13. Run a dry-run pass against task `2527ff9d-4369-444f-995d-4d4bb0ac7b70`.
 
 ## Open Questions
 
-- Should Tasks API get first-class fields for `tech_design_url`, `tech_design_approved`, `system_spec_url`, and `no_system_spec_change_reason`, or should v2 initially encode these in tagged comments?
-- What exact marker in the product spec counts as "approved by Tom"?
-- Should feature tasks use `taskType: code`, a new `taskType: feature`, or tag-based discovery?
-- What is Rowan's max concurrent unblocked feature-task capacity?
-- Should the feature-task workflow compile the Rust binary before each cron run, or should CI/cron rely on a checked-in build step before `lobster run`?
+- Should Tasks API get first-class fields for `tech_design_url`, `tech_design_approved`, `system_spec_url`, and `no_system_spec_change_reason`, or should v2 initially encode non-taskType fields in tagged comments?
 - Which `.openclaw` repository/path should own Rowan `HEARTBEAT.md`, `WORKFLOW.md`, and cron registration changes for AC7.1, AC9.2, and AC9.3?
-
