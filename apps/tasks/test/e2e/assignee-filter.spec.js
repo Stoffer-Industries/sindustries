@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const ASSIGNEE_OPTIONS = ['Quinn', 'Rowan', 'Lox', 'Tom'];
+const ASSIGNEE_OPTIONS = ['Quinn', 'Rowan', 'Lox', 'Tom', 'Ivy'];
 
 function mockTasks(tasks) {
   return async (route) => {
