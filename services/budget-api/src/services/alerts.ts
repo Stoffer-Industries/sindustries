@@ -1,5 +1,5 @@
 import { evaluateMonthlyCardBudget, type BudgetStage } from '@sindustries/budget-domain';
-import { prisma } from '../lib/prisma.ts';
+import { prisma } from '../lib/prisma';
 
 export async function evaluateAlertsForUser(params: { userId: string; month: string }) {
   const cards = await prisma.linkedCard.findMany({ where: { userId: params.userId } });

@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { prisma } from '../lib/prisma.ts';
-import { jsonError } from '../lib/http.ts';
-import { getCardById, getMonthlyBudget, upsertMonthlyBudget } from '../repos/cardsRepo.ts';
+import { prisma } from '../lib/prisma';
+import { jsonError } from '../lib/http';
+import { getCardById, getMonthlyBudget, upsertMonthlyBudget } from '../repos/cardsRepo';
 
 export const cardsRouter = Router();
 

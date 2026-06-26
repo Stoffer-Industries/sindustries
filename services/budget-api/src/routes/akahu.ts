@@ -1,21 +1,21 @@
 import { createHash } from 'node:crypto';
 import { Router } from 'express';
-import { prisma } from '../lib/prisma.ts';
-import { jsonError } from '../lib/http.ts';
-import { evaluateAlertsForUser } from '../services/alerts.ts';
+import { prisma } from '../lib/prisma';
+import { jsonError } from '../lib/http';
+import { evaluateAlertsForUser } from '../services/alerts';
 import {
   akahuGetAccounts,
   akahuGetPendingTransactions,
   akahuRefreshAllAccounts,
   akahuGetTransactions,
   exchangeAuthorizationCode
-} from '../services/akahuClient.ts';
+} from '../services/akahuClient';
 import {
   getAkahuConnectionForUser,
   markAkahuSyncComplete,
   upsertAkahuConnection
-} from '../repos/akahuRepo.ts';
-import { categorizeTransaction } from '../services/categorizer.ts';
+} from '../repos/akahuRepo';
+import { categorizeTransaction } from '../services/categorizer';
 
 export const akahuRouter = Router();
 

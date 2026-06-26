@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { prisma } from '../lib/prisma.ts';
-import { badRequest, notFound } from '../lib/http.ts';
+import { prisma } from '../lib/prisma';
+import { badRequest, notFound } from '../lib/http';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 10000;

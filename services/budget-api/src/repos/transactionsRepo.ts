@@ -1,4 +1,4 @@
-import { prisma } from '../lib/prisma.ts';
+import { prisma } from '../lib/prisma';
 
 export async function listTransactionsForUser(userId: string) {
   return prisma.transaction.findMany({

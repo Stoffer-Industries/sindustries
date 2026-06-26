@@ -1,5 +1,5 @@
 import { Categories, normalizeMerchantKey } from '@sindustries/budget-domain';
-import { prisma } from '../lib/prisma.ts';
+import { prisma } from '../lib/prisma';
 
 export type CategorizationResult = {
   category: string;
