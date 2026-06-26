@@ -96,6 +96,8 @@ Before opening the PR, edit the audit file to mark the finding done. Append `<!-
 
 Read and follow: `agents/skills/dev/pr-open/SKILL.md`
 
+Code-garden PRs use `--assignee rowanstoffer --reviewer quinnstoffer`.
+
 Use this PR body format:
 
 ```
