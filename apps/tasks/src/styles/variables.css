@@ -1,12 +1,5 @@
 :root,
-[data-si-theme='dark'] {
-  --si-canvas-gradient: linear-gradient(
-    180deg,
-    var(--si-color-bg-section) 0%,
-    var(--si-color-bg-canvas) 100%
-  );
-}
-
+[data-si-theme='dark'],
 [data-si-theme='light'] {
   --si-canvas-gradient: linear-gradient(
     180deg,
