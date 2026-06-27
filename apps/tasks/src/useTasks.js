@@ -78,7 +78,11 @@ export function useTasks(filters, options = {}) {
     setError('');
     try {
       const task = await fetchTaskRequest(id);
-      setTasks((current) => current.map((entry) => (entry.id === id ? task : entry)));
+      setTasks((current) => {
+        const existingIndex = current.findIndex((entry) => String(entry.id) === String(id));
+        if (existingIndex === -1) return [...current, task];
+        return current.map((entry, index) => (index === existingIndex ? task : entry));
+      });
       return task;
     } catch (e) {
       setError(e.message);
