@@ -54,6 +54,26 @@ Run:
 `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-tasks/run.py --json`
 Report only failures, blocked closed-unmerged PRs, or meaningful transitions.
 
+---
+
+OPENCLAW HANDOFFS (FEATURE FACTORY)
+
+Quinn is the only agent that can write to `~/.openclaw/`. When a feature task has an unresolved `[openclaw-needed]` comment from Rowan, Quinn applies the change.
+
+Each heartbeat:
+1. List active feature tasks (status: doing or acceptance):
+   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --status doing --status acceptance`
+2. For each task, scan comments for `[openclaw-needed]` entries that do not yet have a matching `[openclaw-done]`.
+3. For each unresolved `[openclaw-needed]`:
+   - Read the comment: it must include exact file paths, proposed diff summary, validation command, and rollback note.
+   - If the change affects product behaviour, ask Tom before applying.
+   - Apply the change to `~/.openclaw/`.
+   - Validate using the command in the comment.
+   - Post a task comment: `[openclaw-done] <changed paths> | validated: <command output summary> | <any follow-up notes>`
+4. If `[openclaw-needed]` comments exist but are unclear or unsafe, mark the task blocked and post a comment explaining what is missing.
+
+Do not apply `.openclaw` changes speculatively. Only act on explicit `[openclaw-needed]` comments from Rowan.
+
 PR REVIEW
 
 Process any PRs that need your attention.
