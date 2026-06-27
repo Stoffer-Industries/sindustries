@@ -45,6 +45,8 @@ struct StageArgs {
     dry_run: bool,
     #[arg(long, default_value = ".")]
     repo: PathBuf,
+    #[arg(long)]
+    workspace_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -175,7 +177,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_open".to_string();
         return Ok(env);
     }
-    let failures = spec_failures(&env.task, &args.repo);
+    let failures = spec_failures(&env.task, &args.repo, workspace_root(&args));
     transition_or_block(&args, env, "ready", "spec_check", failures)
 }
 
@@ -287,7 +289,7 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
             &env.task.id,
             &format!("[rowan-feedback]\n{}", failures.join("\n")),
         )?;
-        env.task = api_patch(&args.base_url, &env.task.id, json!({"status": "doing"}))?;
+        env.task = api_get_task(&args.base_url, &env.task.id)?;
     }
     env.criteria_met = false;
     env.action_taken = "feedback_routed".to_string();
@@ -330,7 +332,8 @@ fn transition_or_block(
             format!("moved_to_{next_status}")
         };
         if !args.dry_run && env.task.status != next_status {
-            env.task = api_patch(&args.base_url, &env.task.id, json!({"status": next_status}))?;
+            api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": next_status}))?;
+            env.task = api_get_task(&args.base_url, &env.task.id)?;
             write_state(
                 &args.base_url,
                 &env.task.id,
@@ -385,6 +388,10 @@ fn api_get<T: for<'de> Deserialize<'de>>(base_url: &str, path: &str) -> Result<T
     let value: Value = ureq::get(&url).call()?.into_json()?;
     serde_json::from_value(value.get("data").cloned().unwrap_or(value))
         .context("decode API response")
+}
+
+fn api_get_task(base_url: &str, task_id: &str) -> Result<Task> {
+    api_get(base_url, &format!("/tasks/{task_id}"))
 }
 
 fn api_patch<T: for<'de> Deserialize<'de>>(
@@ -488,11 +495,11 @@ fn is_past(task: &Task, stage: &str) -> bool {
     status_rank(&task.status) > status_rank(stage)
 }
 
-fn spec_failures(task: &Task, repo: &Path) -> Vec<String> {
+fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
     let mut failures = Vec::new();
     match product_spec(task) {
         Some(spec) => {
-            let path = repo.join(&spec.path);
+            let path = resolve_product_spec_path(&spec.path, repo, workspace_root);
             if !path.exists() {
                 failures.push(format!("Product spec does not exist: `{}`.", spec.path));
             } else if let Ok(text) = fs::read_to_string(&path) {
@@ -535,8 +542,26 @@ fn parse_product_spec_ref(text: &str) -> Option<ProductSpecRef> {
     re.captures(text)
         .and_then(|cap| cap.get(1))
         .map(|m| ProductSpecRef {
-            path: m.as_str().trim_start_matches('/').to_string(),
+            path: m.as_str().to_string(),
         })
+}
+
+fn resolve_product_spec_path(path: &str, repo: &Path, workspace_root: &Path) -> PathBuf {
+    let spec = Path::new(path);
+    if spec.is_absolute() {
+        return spec.to_path_buf();
+    }
+    if path.starts_with("brain/") {
+        return workspace_root.join(spec);
+    }
+    repo.join(spec)
+}
+
+fn workspace_root(args: &StageArgs) -> &Path {
+    args.workspace_root
+        .as_deref()
+        .or_else(|| args.repo.parent())
+        .unwrap_or_else(|| Path::new("."))
 }
 
 fn acceptance_criteria_text(text: &str) -> Vec<String> {
@@ -765,6 +790,58 @@ mod tests {
     #[test]
     fn detects_missing_product_spec() {
         assert!(parse_product_spec_ref("no spec here").is_none());
+    }
+
+    #[test]
+    fn resolves_product_specs_relative_to_workspace_root() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        assert_eq!(
+            resolve_product_spec_path(
+                "brain/bookmarks/specs/example.md",
+                repo.path(),
+                workspace.path()
+            ),
+            workspace.path().join("brain/bookmarks/specs/example.md")
+        );
+
+        assert_eq!(
+            resolve_product_spec_path("docs/spec.md", repo.path(), workspace.path()),
+            repo.path().join("docs/spec.md")
+        );
+
+        let absolute = workspace.path().join("brain/bookmarks/specs/example.md");
+        assert_eq!(
+            resolve_product_spec_path(absolute.to_str().unwrap(), repo.path(), workspace.path()),
+            absolute
+        );
+    }
+
+    #[test]
+    fn validates_existing_product_spec_under_workspace_root() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let spec_path = workspace.path().join("brain/bookmarks/specs/example.md");
+        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        fs::write(
+            &spec_path,
+            "## Acceptance Criteria\n- [ ] Implementation-ready criteria",
+        )
+        .unwrap();
+
+        let task = Task {
+            description: Some(
+                "Product spec: brain/bookmarks/specs/example.md\n\n## Rowan Workstream\n- [ ] Build it"
+                    .to_string(),
+            ),
+            ..Task::default()
+        };
+
+        assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(!repo
+            .path()
+            .join("brain/bookmarks/specs/example.md")
+            .exists());
     }
 
     #[test]

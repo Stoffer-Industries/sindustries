@@ -14,7 +14,10 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
-REPO = SCRIPT_DIR.parents[2]
+REPO = SCRIPT_DIR.parent.parent.parent
+WORKSPACE_ROOT = REPO.parent / "workspace"
+if not WORKSPACE_ROOT.exists():
+    WORKSPACE_ROOT = REPO.parent
 DEFAULT_BASE_URL = "http://localhost:4001/api/v1"
 
 
@@ -64,6 +67,7 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool) -> dict[str, Any]:
             "taskId": task_id,
             "tasksApiBaseUrl": base_url,
             "sindustriesRepo": str(REPO),
+            "workspaceRoot": str(WORKSPACE_ROOT),
             "dryRun": dry_run,
         }
     )
