@@ -2,8 +2,10 @@ use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -74,6 +76,8 @@ struct Task {
     blocked: bool,
     #[serde(default)]
     task_type: Option<String>,
+    #[serde(default)]
+    spec_checksum: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
@@ -171,6 +175,9 @@ fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
 
 fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    if let Some(blocked) = block_on_spec_drift(env.clone(), "spec_check") {
+        return Ok(blocked);
+    }
     if is_past(&env.task, "open") {
         env.already_past = true;
         env.criteria_met = true;
@@ -183,6 +190,9 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
 
 fn ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    if let Some(blocked) = block_on_spec_drift(env.clone(), "ready_checks") {
+        return Ok(blocked);
+    }
     if is_past(&env.task, "ready") {
         env.already_past = true;
         env.criteria_met = true;
@@ -223,6 +233,9 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 
 fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    if let Some(blocked) = block_on_spec_drift(env.clone(), "verify_delivery") {
+        return Ok(blocked);
+    }
     if is_past(&env.task, "doing") {
         env.already_past = true;
         env.criteria_met = true;
@@ -262,6 +275,9 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
 
 fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    if let Some(blocked) = block_on_spec_drift(env.clone(), "feedback_aggregate") {
+        return Ok(blocked);
+    }
     let mut failures = Vec::new();
     for url in rowan_pr_urls(&env.task) {
         match inspect_pr(&url) {
@@ -299,6 +315,9 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
 
 fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    if let Some(blocked) = block_on_spec_drift(env.clone(), "post_merge") {
+        return Ok(blocked);
+    }
     if is_past(&env.task, "acceptance") {
         env.already_past = true;
         env.criteria_met = true;
@@ -332,7 +351,11 @@ fn transition_or_block(
             format!("moved_to_{next_status}")
         };
         if !args.dry_run && env.task.status != next_status {
-            api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": next_status}))?;
+            let mut patch = json!({"status": next_status});
+            if next_status == "ready" {
+                patch["specChecksum"] = Value::String(spec_checksum(&env.task));
+            }
+            api_patch::<Task>(&args.base_url, &env.task.id, patch)?;
             env.task = api_get_task(&args.base_url, &env.task.id)?;
             write_state(
                 &args.base_url,
@@ -357,6 +380,17 @@ fn transition_or_block(
         }
     }
     Ok(env)
+}
+
+fn block_on_spec_drift(mut env: Envelope, action: &str) -> Option<Envelope> {
+    let failures = spec_checksum_failures(&env.task);
+    if failures.is_empty() {
+        return None;
+    }
+    env.criteria_met = false;
+    env.action_taken = format!("{action}_blocked_spec_drift");
+    env.failures = failures.clone();
+    Some(env)
 }
 
 fn output(
@@ -563,6 +597,51 @@ fn acceptance_criteria_text(text: &str) -> Vec<String> {
     re.captures_iter(text)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().trim().to_string()))
         .collect()
+}
+
+fn spec_checksum(task: &Task) -> String {
+    let acs = acceptance_criteria_text(&task.description.clone().unwrap_or_default());
+    acceptance_criteria_checksum(&acs)
+}
+
+fn acceptance_criteria_checksum(acceptance_criteria: &[String]) -> String {
+    let value = json!({ "acceptanceCriteria": acceptance_criteria });
+    let canonical = canonical_json_bytes(&value);
+    let digest = Sha256::digest(canonical);
+    format!("{digest:x}")
+}
+
+fn canonical_json_bytes(value: &Value) -> Vec<u8> {
+    serde_json::to_vec(&canonical_json_value(value)).expect("serialize canonical JSON")
+}
+
+fn canonical_json_value(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let sorted: BTreeMap<_, _> = object
+                .iter()
+                .map(|(key, value)| (key.clone(), canonical_json_value(value)))
+                .collect();
+            Value::Object(Map::from_iter(sorted))
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical_json_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn spec_checksum_failures(task: &Task) -> Vec<String> {
+    let Some(stored) = task.spec_checksum.as_deref() else {
+        return vec![];
+    };
+    let current = spec_checksum(task);
+    if current == stored {
+        vec![]
+    } else {
+        vec![format!(
+            "ACs modified after spec approval -- write a new spec to change scope. Task {} stored specChecksum `{stored}` but current AC checksum is `{current}`.",
+            task.id
+        )]
+    }
 }
 
 fn workstreams(task: &Task) -> Vec<Workstream> {
@@ -891,6 +970,77 @@ mod tests {
             .path()
             .join("brain/bookmarks/specs/example.md")
             .exists());
+    }
+
+    #[test]
+    fn computes_deterministic_compact_spec_checksum() {
+        let acs = vec![
+            "AC2: Build the second thing".to_string(),
+            "AC1: Build the first thing".to_string(),
+        ];
+        let checksum = acceptance_criteria_checksum(&acs);
+
+        assert_eq!(checksum, acceptance_criteria_checksum(&acs));
+        assert_eq!(
+            canonical_json_bytes(&json!({
+                "z": "last",
+                "acceptanceCriteria": acs,
+                "a": { "second": 2, "first": 1 }
+            })),
+            br#"{"a":{"first":1,"second":2},"acceptanceCriteria":["AC2: Build the second thing","AC1: Build the first thing"],"z":"last"}"#
+        );
+    }
+
+    #[test]
+    fn spec_checksum_guard_allows_unchanged_acceptance_criteria() {
+        let mut task = Task {
+            id: "task-no-drift".to_string(),
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        task.spec_checksum = Some(spec_checksum(&task));
+
+        assert!(spec_checksum_failures(&task).is_empty());
+    }
+
+    #[test]
+    fn spec_checksum_guard_blocks_drift_after_approval() {
+        let approved_task = Task {
+            id: "task-drift".to_string(),
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let changed_task = Task {
+            id: "task-drift".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Also build this"
+                    .to_string(),
+            ),
+            spec_checksum: Some(spec_checksum(&approved_task)),
+            ..Task::default()
+        };
+
+        let failures = spec_checksum_failures(&changed_task);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("ACs modified after spec approval"));
+        assert!(failures[0].contains("write a new spec to change scope"));
+        assert!(failures[0].contains("task-drift"));
+    }
+
+    #[test]
+    fn spec_approval_transition_stores_current_checksum() {
+        let task = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let mut patch = json!({"status": "ready"});
+        patch["specChecksum"] = Value::String(spec_checksum(&task));
+
+        assert_eq!(patch["status"], "ready");
+        assert_eq!(
+            patch["specChecksum"].as_str().unwrap(),
+            spec_checksum(&task)
+        );
     }
 
     #[test]

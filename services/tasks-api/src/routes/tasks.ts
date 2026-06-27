@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma';
-import { badRequest, notFound } from '../lib/http';
+import { badRequest, notFound, sendError } from '../lib/http';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 10000;
@@ -110,6 +111,7 @@ function mapTask(task) {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     taskType: task.taskType ?? null,
+    specChecksum: task.specChecksum ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
     comments: task.comments?.map(mapComment) ?? [],
     dependsOn,
@@ -161,6 +163,42 @@ function normalizeDependsOnIds(value) {
   }
 
   return normalized;
+}
+
+function acceptanceCriteriaText(description) {
+  if (!description) return [];
+  const criteria = [];
+  const re = /^\s*-\s*\[[ xX]\]\s+(.+)$/gm;
+  let match;
+  while ((match = re.exec(description)) !== null) {
+    criteria.push(match[1].trim());
+  }
+  return criteria;
+}
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
+  }
+  return value;
+}
+
+function specChecksumForDescription(description) {
+  const canonical = canonicalize({ acceptanceCriteria: acceptanceCriteriaText(description) });
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+function specDriftMessage(taskId, stored, current) {
+  return `ACs modified after spec approval -- write a new spec to change scope. Task ${taskId} stored specChecksum \`${stored}\` but current AC checksum is \`${current}\`.`;
+}
+
+function rejectSpecDrift(res, task, description) {
+  if (!task.specChecksum) return false;
+  const current = specChecksumForDescription(description ?? task.description);
+  if (current === task.specChecksum) return false;
+  sendError(res, 409, 'SPEC_CHECKSUM_MISMATCH', specDriftMessage(task.id, task.specChecksum, current));
+  return true;
 }
 
 async function connectTags(tagNames) {
@@ -431,11 +469,15 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     const tags = normalizeTags(req.body?.tags);
     const blocked = req.body?.blocked ?? false;
     const taskType = req.body?.taskType || null;
+    const specChecksum = normalizeString(req.body?.specChecksum) || null;
 
     // Validation
     if (!rawTitle) return badRequest(res, 'TITLE_REQUIRED', 'title is required');
     if (taskType && !validTaskTypes.has(taskType)) {
       return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
+    }
+    if (specChecksum && !/^[a-f0-9]{64}$/.test(specChecksum)) {
+      return badRequest(res, 'INVALID_SPEC_CHECKSUM', 'specChecksum must be a lowercase sha256 hex digest');
     }
     if (!validStatuses.has(status)) return badRequest(res, 'INVALID_STATUS_VALUE', 'Invalid status value');
     if (!validPriorities.has(priority)) return badRequest(res, 'INVALID_PRIORITY_VALUE', 'Invalid priority value');
@@ -461,6 +503,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
         completedAt: status === 'done' ? now : null,
         blocked,
         taskType,
+        specChecksum,
         tags: {
           create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
         }
@@ -553,6 +596,26 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       if (!validDependencies) return;
     }
 
+    if (req.body?.specChecksum !== undefined) {
+      const specChecksum = normalizeString(req.body.specChecksum);
+      if (specChecksum && !/^[a-f0-9]{64}$/.test(specChecksum)) {
+        return badRequest(res, 'INVALID_SPEC_CHECKSUM', 'specChecksum must be a lowercase sha256 hex digest');
+      }
+      if (existing.specChecksum && specChecksum !== existing.specChecksum) {
+        return sendError(
+          res,
+          409,
+          'SPEC_CHECKSUM_LOCKED',
+          'specChecksum is locked after spec approval -- write a new spec to change scope'
+        );
+      }
+      updates.specChecksum = specChecksum || null;
+    }
+
+    if (rejectSpecDrift(res, existing, description === undefined ? existing.description : description || null)) {
+      return;
+    }
+
     const hasTagUpdate = req.body?.tags !== undefined;
     let tagRecords = null;
     if (req.body?.tags !== undefined) {
@@ -607,6 +670,7 @@ tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
     const { id } = req.params;
     const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
+    if (rejectSpecDrift(res, existing, existing.description)) return;
 
     const author = normalizeString(req.body?.author);
     const text = normalizeString(req.body?.text);
