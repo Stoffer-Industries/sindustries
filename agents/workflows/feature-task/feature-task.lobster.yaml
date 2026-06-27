@@ -8,7 +8,7 @@ args:
   sindustriesRepo:
     default: /Users/quinnstoffer/workspaces/rowan/sindustries
   workspaceRoot:
-    default: /Users/quinnstoffer/workspaces/rowan/workspace
+    default: /Users/quinnstoffer/.openclaw/workspace
   dryRun:
     default: false
 
