@@ -229,22 +229,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     }
     if let Ok(tasks) = list_active_feature_tasks(&args.base_url) {
         let current_id = &env.task.id;
-        for state in ["ready", "doing", "acceptance"] {
-            let active = tasks
-                .iter()
-                .filter(|task| {
-                    task.id != *current_id
-                        && task.status == state
-                        && !task.blocked
-                        && task.assignee.as_deref() == Some("Rowan")
-                })
-                .count();
-            if active >= 1 {
-                failures.push(format!(
-                    "Rowan capacity is full for `{state}` feature tasks."
-                ));
-            }
-        }
+        failures.extend(rowan_doing_capacity_failures(&tasks, current_id));
     }
     transition_or_block(&args, env, "doing", "ready_checks", failures)
 }
@@ -578,6 +563,23 @@ fn list_active_feature_tasks(base_url: &str) -> Result<Vec<Task>> {
         }
     }
     Ok(out)
+}
+
+fn rowan_doing_capacity_failures(tasks: &[Task], current_id: &str) -> Vec<String> {
+    let active_doing = tasks
+        .iter()
+        .filter(|task| {
+            task.id != current_id
+                && task.status == "doing"
+                && !task.blocked
+                && task.assignee.as_deref() == Some("Rowan")
+        })
+        .count();
+    if active_doing >= 1 {
+        vec!["Rowan already has an active task in `doing`.".to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 fn comment_text(comment: &TaskComment) -> &str {
@@ -1162,6 +1164,41 @@ mod tests {
         assert_eq!(
             patch["specChecksum"].as_str().unwrap(),
             spec_checksum(&task)
+        );
+    }
+
+    #[test]
+    fn rowan_capacity_allows_other_ready_and_acceptance_tasks() {
+        let tasks = vec![
+            Task {
+                id: "other-ready".to_string(),
+                status: "ready".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+            Task {
+                id: "other-acceptance".to_string(),
+                status: "acceptance".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+        ];
+
+        assert!(rowan_doing_capacity_failures(&tasks, "current-task").is_empty());
+    }
+
+    #[test]
+    fn rowan_capacity_blocks_existing_doing_task() {
+        let tasks = vec![Task {
+            id: "other-doing".to_string(),
+            status: "doing".to_string(),
+            assignee: Some("Rowan".to_string()),
+            ..Task::default()
+        }];
+
+        assert_eq!(
+            rowan_doing_capacity_failures(&tasks, "current-task"),
+            vec!["Rowan already has an active task in `doing`.".to_string()]
         );
     }
 
