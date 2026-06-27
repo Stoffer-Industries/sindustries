@@ -92,11 +92,11 @@
   {
     "name": "@sindustries/ui",
     "category": "app",
-    "summary": "Shared SIndustries UI component library used across the website and the tasks-app.",
-    "whyWeUseIt": "It keeps buttons, inputs, layouts, and design tokens in one source so both production surfaces stay visually consistent and ship from the same primitives.",
+    "summary": "Shared SIndustries UI component library used across the website and tasks app, with tokens and reusable primitives shipped from one source.",
+    "whyWeUseIt": "It keeps buttons, inputs, layouts, and design tokens in one source so both production surfaces stay visually consistent, and the tasks app tokens specimen page makes the shared contract easy to inspect.",
     "status": "core",
     "links": [],
-    "updatedAt": "2026-06-19",
-    "visibility": "draft"
+    "updatedAt": "2026-06-20",
+    "visibility": "published"
   }
 ]
