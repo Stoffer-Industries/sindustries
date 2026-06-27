@@ -56,6 +56,15 @@ Report only failures, blocked closed-unmerged PRs, or meaningful transitions.
 
 ---
 
+FEATURE TASK LOBSTER CHECK
+
+Quinn dispatches feature task workflow passes from heartbeat; Lobster owns all status transitions.
+Run:
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py --json`
+Report only failures, blocked tasks, or meaningful transitions.
+
+---
+
 OPENCLAW HANDOFFS (FEATURE FACTORY)
 
 Quinn is the only agent that can write to `~/.openclaw/`. When a feature task has an unresolved `[openclaw-needed]` comment from Rowan, Quinn applies the change.
