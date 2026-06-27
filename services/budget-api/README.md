@@ -51,3 +51,14 @@ npm run dev
 - `GET /api/v1/categories/timeseries?userId=...&from=...&to=...`
 - `GET /api/v1/alerts?userId=...`
 
+## Security posture
+
+> **MVP scope: dev/Tailnet only — auth is not yet enforced.**
+>
+> Every route except `/api/v1/me` accepts a `userId` from the request body or
+> query and operates on that user without verifying a session token. Treat the
+> service as reachable only over a trusted Tailnet and never expose it on the
+> public internet until the `requireSession` middleware in
+> `services/budget-api/src/app.ts` lands (tracked in the repo audit under
+> "Theme 1 — Lock down `budget-api` before any non-Tailnet deployment").
+
