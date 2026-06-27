@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = {
@@ -46,12 +47,19 @@ function task(overrides = {}) {
     assignee: null,
     archivedAt: null,
     blocked: false,
+    specChecksum: null,
     createdAt: new Date('2026-03-01T00:00:00.000Z'),
     updatedAt: new Date('2026-03-01T00:00:00.000Z'),
     tags: [],
     dependencies: [],
     ...overrides
   };
+}
+
+function checksumForAcceptanceCriteria(criteria) {
+  return createHash('sha256')
+    .update(JSON.stringify({ acceptanceCriteria: criteria }))
+    .digest('hex');
 }
 
 describe('tasks api endpoints', () => {
@@ -297,6 +305,63 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.create).toHaveBeenCalledTimes(1);
     expect(prismaMock.task.create.mock.calls[0][0].data.title).toBe('🔧 Created task');
     expect(prismaMock.task.create.mock.calls[0][0].data.taskType).toBe('feature');
+  });
+
+  it('PATCH /api/v1/tasks/:id stores specChecksum', async () => {
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task())
+      .mockResolvedValueOnce(task({ status: 'ready', specChecksum: checksum }));
+    prismaMock.task.update.mockResolvedValue(task({ status: 'ready', specChecksum: checksum }));
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .send({ status: 'ready', specChecksum: checksum });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.specChecksum).toBe(checksum);
+    expect(prismaMock.task.update.mock.calls[0][0].data.specChecksum).toBe(checksum);
+  });
+
+  it('PATCH /api/v1/tasks/:id blocks AC drift after spec approval', async () => {
+    const approvedDescription = '## Acceptance Criteria\n- [ ] AC1: Build it';
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    prismaMock.task.findFirst.mockResolvedValueOnce(
+      task({ id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70', description: approvedDescription, specChecksum: checksum })
+    );
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
+      .send({ description: `${approvedDescription}\n- [ ] AC2: Drift` });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('SPEC_CHECKSUM_MISMATCH');
+    expect(response.body.error.message).toContain('ACs modified after spec approval');
+    expect(response.body.error.message).toContain('write a new spec to change scope');
+    expect(response.body.error.message).toContain('2527ff9d-4369-444f-995d-4d4bb0ac7b70');
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/v1/tasks/:id/comments blocks when current ACs drifted after spec approval', async () => {
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    prismaMock.task.findFirst.mockResolvedValueOnce(
+      task({
+        id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+        description: '## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift',
+        specChecksum: checksum
+      })
+    );
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70/comments')
+      .send({ author: 'Rowan', text: 'trying to comment' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('SPEC_CHECKSUM_MISMATCH');
+    expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
   });
 
   it('GET /api/v1/tasks formats task titles with taskType emoji without duplication', async () => {

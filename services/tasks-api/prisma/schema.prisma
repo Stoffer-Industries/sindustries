@@ -38,7 +38,8 @@ model Task {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  taskType        String?      // content | code | research
+  taskType        String?      // content | code | research | feature
+  specChecksum    String?
 
   tags            TaskTag[]
   comments        TaskComment[]
