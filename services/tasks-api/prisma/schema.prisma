@@ -41,10 +41,24 @@ model Task {
 
   tags            TaskTag[]
   comments        TaskComment[]
+  dependencies    TaskDependency[] @relation("TaskDependsOn")
+  dependedOnBy    TaskDependency[] @relation("TaskDependedOnBy")
 
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
   @@index([dueAt])
+}
+
+model TaskDependency {
+  taskId      String   @db.Uuid
+  dependsOnId String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  task      Task @relation("TaskDependsOn", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("TaskDependedOnBy", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, dependsOnId])
+  @@index([dependsOnId])
 }
 
 model TaskComment {
