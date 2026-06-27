@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, Divider, Field, Input, Select, Textarea } from '@sindustries/ui/react';
+import { Badge, Button, Card, Divider, Field, Input, Select, Textarea } from '@sindustries/ui/react';
 import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS } from '../utils/constants.js';
 import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
@@ -16,9 +16,25 @@ import { TaskCardSummary } from './TaskCardSummary.jsx';
  * @param {Function} props.onArchive - Callback to archive task
  * @param {Function} props.onClose - Callback to close editor
  * @param {Function} props.onAddComment - Callback to add comment
+ * @param {Function} props.onFetchDependency - Callback to validate and fetch dependency task
+ * @param {Function} props.onUpdateDependencies - Callback to replace dependsOnIds
+ * @param {Function} props.onOpenTask - Callback to navigate to a dependency task
  * @param {boolean} props.isSubmittingComment - Whether comment is being submitted
  */
-export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArchive, onClose, onAddComment, isSubmittingComment }) {
+export function TaskEditor({
+  draft,
+  task,
+  isDirty,
+  onDraftChange,
+  onSave,
+  onArchive,
+  onClose,
+  onAddComment,
+  onFetchDependency,
+  onUpdateDependencies,
+  onOpenTask,
+  isSubmittingComment
+}) {
   const descriptionRef = useRef(null);
   const titleRef = useRef(null);
   const statusRef = useRef(null);
@@ -30,6 +46,11 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
   const [commentDraft, setCommentDraft] = useState({ author: '', text: '' });
   const [isCommentComposerOpen, setIsCommentComposerOpen] = useState(false);
   const [isDescriptionEditing, setIsDescriptionEditing] = useState(false);
+  const [dependencyDraft, setDependencyDraft] = useState('');
+  const [dependencyCandidate, setDependencyCandidate] = useState(null);
+  const [dependencyError, setDependencyError] = useState('');
+  const [isCheckingDependency, setIsCheckingDependency] = useState(false);
+  const [isSavingDependency, setIsSavingDependency] = useState(false);
 
   useEffect(() => {
     const textarea = descriptionRef.current;
@@ -135,11 +156,87 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
     setIsCommentComposerOpen(false);
   }
 
+  function dependencyIds() {
+    if (Array.isArray(task.dependsOnIds)) return task.dependsOnIds.map((id) => String(id));
+    if (Array.isArray(task.dependsOn)) return task.dependsOn.map((dependency) => String(dependency.id));
+    return [];
+  }
+
+  async function handleValidateDependency() {
+    const candidateId = dependencyDraft.trim();
+    setDependencyCandidate(null);
+    setDependencyError('');
+
+    if (!candidateId) {
+      setDependencyError('Enter a task ID.');
+      return;
+    }
+
+    if (String(task.id) === candidateId) {
+      setDependencyError('A task cannot depend on itself.');
+      return;
+    }
+
+    if (dependencyIds().includes(candidateId)) {
+      setDependencyError('That dependency is already linked.');
+      return;
+    }
+
+    if (!onFetchDependency) {
+      setDependencyError('Task lookup is unavailable.');
+      return;
+    }
+
+    setIsCheckingDependency(true);
+    try {
+      const dependency = await onFetchDependency(candidateId);
+      if (!dependency || dependency.archivedAt) {
+        setDependencyError('Task not found.');
+        return;
+      }
+      setDependencyCandidate(dependency);
+    } catch (error) {
+      setDependencyError(error?.message || 'Task not found.');
+    } finally {
+      setIsCheckingDependency(false);
+    }
+  }
+
+  async function handleConfirmDependency() {
+    if (!dependencyCandidate || !onUpdateDependencies) return;
+    setIsSavingDependency(true);
+    setDependencyError('');
+    try {
+      const didUpdate = await onUpdateDependencies([...dependencyIds(), String(dependencyCandidate.id)]);
+      if (!didUpdate) return;
+      setDependencyDraft('');
+      setDependencyCandidate(null);
+    } catch (error) {
+      setDependencyError(error?.message || 'Failed to add dependency.');
+    } finally {
+      setIsSavingDependency(false);
+    }
+  }
+
+  async function handleRemoveDependency(dependencyId) {
+    if (!onUpdateDependencies) return;
+    setIsSavingDependency(true);
+    setDependencyError('');
+    try {
+      await onUpdateDependencies(dependencyIds().filter((id) => id !== String(dependencyId)));
+    } catch (error) {
+      setDependencyError(error?.message || 'Failed to remove dependency.');
+    } finally {
+      setIsSavingDependency(false);
+    }
+  }
+
   const comments = [...normalizeComments(task.comments)].sort((a, b) => {
     const timeDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     if (timeDiff !== 0) return timeDiff;
     return String(b.id ?? '').localeCompare(String(a.id ?? ''));
   });
+  const dependencies = Array.isArray(task.dependsOn) ? task.dependsOn : [];
 
   return (
     <div className="task-card-editor" onClick={(e) => e.stopPropagation()}>
@@ -149,7 +246,7 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
         onClick={onClose}
         aria-label="Close task editor and show card view"
       >
-        <TaskCardSummary task={task} hasDraft={isDirty} />
+        <TaskCardSummary task={task} hasDraft={isDirty} showCopyId={false} />
       </button>
 
       <Divider variant="dashed" />
@@ -270,6 +367,108 @@ export function TaskEditor({ draft, task, isDirty, onDraftChange, onSave, onArch
             <span>Blocked</span>
           </label>
         </div>
+
+        <section className="dependencies-section" aria-label="Task dependencies">
+          <div className="dependencies-header">
+            <h4 className="si-font-display">Dependencies</h4>
+            <span className="small dependencies-count">
+              {dependencies.length === 0 ? 'No dependencies' : `${dependencies.length} linked`}
+            </span>
+          </div>
+
+          {dependencies.length > 0 ? (
+            <ol className="dependencies-list">
+              {dependencies.map((dependency) => (
+                <li key={dependency.id} className="dependency-row">
+                  <button
+                    type="button"
+                    className="dependency-link"
+                    onClick={() => onOpenTask?.(dependency.id)}
+                  >
+                    <span>{dependency.title}</span>
+                    <Badge variant="tag" tone="pulse">{STATUS_LABELS[dependency.status] ?? dependency.status}</Badge>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    tone="display"
+                    aria-label={`Remove dependency ${dependency.title}`}
+                    disabled={isSavingDependency}
+                    onClick={() => void handleRemoveDependency(dependency.id)}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+
+          <div className="dependency-add">
+            <Field label="Add dependency by task ID">
+              <div className="dependency-add-row">
+                <Input
+                  aria-label="Dependency task ID"
+                  value={dependencyDraft}
+                  placeholder="Enter task ID"
+                  onChange={(event) => {
+                    setDependencyDraft(event.target.value);
+                    setDependencyCandidate(null);
+                    setDependencyError('');
+                  }}
+                  onMouseDown={stopPropagation}
+                  onTouchStart={stopPropagation}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleValidateDependency();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  tone="display"
+                  disabled={isCheckingDependency || isSavingDependency || !dependencyDraft.trim()}
+                  onClick={() => void handleValidateDependency()}
+                >
+                  {isCheckingDependency ? 'Checking' : 'Check'}
+                </Button>
+              </div>
+            </Field>
+
+            {dependencyCandidate ? (
+              <div className="dependency-confirm" role="status">
+                <div>
+                  <span className="small">Link to</span>
+                  <strong>{dependencyCandidate.title}</strong>
+                  <Badge variant="tag" tone="pulse">{STATUS_LABELS[dependencyCandidate.status] ?? dependencyCandidate.status}</Badge>
+                </div>
+                <div className="dependency-confirm-actions">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    tone="display"
+                    disabled={isSavingDependency}
+                    onClick={() => void handleConfirmDependency()}
+                  >
+                    Confirm
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    tone="display"
+                    disabled={isSavingDependency}
+                    onClick={() => setDependencyCandidate(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {dependencyError ? <p className="dependency-error" role="alert">{dependencyError}</p> : null}
+          </div>
+        </section>
       </div>
 
       <div className="editor-actions">
