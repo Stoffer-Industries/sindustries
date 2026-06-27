@@ -38,6 +38,25 @@ The implementation should add a new workflow lane under `agents/workflows/featur
 - The current Tasks API schema does not expose first-class `tech_design_url`, `tech_design_approved`, system spec, or arbitrary metadata fields. Existing workflow state is stored through task comments using `[lobster-state]`.
 - `.openclaw` changes are outside the primary repo boundary and must be flagged for Quinn rather than edited silently here.
 
+## Spec Checksum Enforcement (AC Drift Guard)
+
+**Decision (2026-06-27):** Any changes to acceptance criteria after a spec is approved require a new task and new spec. ACs on an approved task are locked.
+
+**Rule:** Option 1 — hard lock. No partial AC amendments. New scope = new task.
+
+**Enforcement mechanism:** The Tasks API stores a `specChecksum` (SHA-256 of the serialized `acceptanceCriteria` array) on the task. Once set, any PATCH that changes the ACs or any POST comment on a task with drifted ACs returns `409 SPEC_CHECKSUM_MISMATCH`.
+
+**Tasks API implementation (already shipped):**
+- `PATCH /api/v1/tasks/:id` accepts `specChecksum` as a write-once field. Writing a different checksum than the stored one is rejected.
+- AC drift on PATCH or POST comment returns `{ error: { code: "SPEC_CHECKSUM_MISMATCH" } }`.
+- Validation tests are in `services/tasks-api/test/read-endpoints.test.ts`.
+
+**Rust CLI responsibility:**
+- `spec-check` must compute the AC checksum from the task description and write it back to the task via `PATCH specChecksum` when moving `open` -> `ready`.
+- `ready-checks` and downstream commands must detect a `SPEC_CHECKSUM_MISMATCH` response from the Tasks API and surface it as a blocked criterion rather than crashing.
+
+**Out of scope for v2:** One-click "create new spec from this task" UI shortcut. Deferred to a later iteration.
+
 ## Data Model
 
 The feature-task workflow should normalize the task into an internal model rather than operating on raw description text everywhere.
@@ -124,6 +143,7 @@ Commands:
   - Verifies a linked product spec exists and includes enough implementation-ready scope. It must not require or parse Tom's approval from the product spec.
   - Verifies the task has feature-task acceptance criteria and workstreams.
   - Posts a specific failed-criteria comment if blocked.
+  - On passing: computes SHA-256 checksum of the ACs and writes it to the task via `PATCH specChecksum`. This locks the ACs; any downstream AC edit will be rejected by the Tasks API with `SPEC_CHECKSUM_MISMATCH`.
   - Moves `open` -> `ready` when criteria pass.
 
 - `ready-checks`
