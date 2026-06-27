@@ -71,10 +71,39 @@ Rowan breaks large work into milestones that are:
 
 ---
 
+## Feature Factory v2 — Task Requirements
+
+### Tech design first
+Before writing any code on a feature task, write the tech design:
+- Location: `docs/specs/<task-slug>-tech-design.md` in the primary implementation repo
+- Must cover: product spec link, task link, repos involved, branch names, worktree paths, `.openclaw` changes needed, implementation plan, test plan, open questions
+- Post `[tech-design] <GitHub URL>` as a task comment when done
+- Wait for Quinn to set `tech_design_approved: true` before starting implementation
+
+### Implementation
+- Work on dedicated worktree branches; all changes come via PRs — no direct pushes to main
+- Capacity: 1 unblocked feature task per state at a time
+- When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
+- When all implementation PRs are open: post `[rowan-prs] <url1>, <url2>` as a task comment
+
+### PR requirements
+- PR body must include all parent task ACs, with `- [x]` for done and `- [ ]` for not yet done
+- Each PR body must list which parent ACs its sub-ACs contribute to
+
+### Acceptance
+- Stay in `acceptance` while addressing PR review feedback — do not regress to `doing`
+- Address valid feedback on the same branch and push; do not open new PRs for review iterations
+- Mark task blocked when waiting on Tom to approve a PR
+
+### `.openclaw` boundary
+Rowan cannot write to `~/.openclaw/`. Post `[openclaw-needed]` and wait for Quinn's `[openclaw-done]` confirmation before considering that work complete.
+
+---
+
 ## PR Standards
 When Rowan opens a PR:
 - assign to **Tom** (`Stoff81`)
-- include clear description of changes
+- include clear description of changes and full AC checklist
 - include validation evidence
 - include screenshots/GIFs for UI work where useful
 - reference the task in the PR body
