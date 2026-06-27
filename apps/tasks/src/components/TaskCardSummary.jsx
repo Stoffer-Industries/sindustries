@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Avatar, Badge } from '@sindustries/ui/react';
 import { assigneeInitial } from '../utils/helpers.js';
 
@@ -20,11 +21,30 @@ function taskCardTags(task) {
 /**
  * Read-only task card body used in list/board views and the editor preview strip.
  */
-export function TaskCardSummary({ task, hasDraft, onTitleClick }) {
+export function TaskCardSummary({ task, hasDraft, onTitleClick, showCopyId = true }) {
   const date = taskCardDate(task);
   const tags = taskCardTags(task);
   const assignee = assigneeInitial(task.assignee);
   const TitleTag = onTitleClick ? 'button' : 'div';
+  const [didCopy, setDidCopy] = useState(false);
+  const copyTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) window.clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
+
+  async function copyTaskId(event) {
+    event.stopPropagation();
+    const id = String(task.id ?? '');
+    if (!id || !navigator.clipboard?.writeText) return;
+
+    await navigator.clipboard.writeText(id);
+    setDidCopy(true);
+    if (copyTimeoutRef.current) window.clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = window.setTimeout(() => setDidCopy(false), 1500);
+  }
 
   return (
     <>
@@ -48,6 +68,17 @@ export function TaskCardSummary({ task, hasDraft, onTitleClick }) {
           {hasDraft ? <Badge variant="draft" tone="pulse">Unsaved</Badge> : null}
         </div>
         <div className="task-card-footer-meta">
+          {showCopyId && task.id ? (
+            <button
+              type="button"
+              className="task-id-copy-btn"
+              aria-label={`Copy task ID ${task.id}`}
+              title={didCopy ? 'Copied' : 'Copy task ID'}
+              onClick={(event) => void copyTaskId(event)}
+            >
+              {didCopy ? 'Copied' : 'ID'}
+            </button>
+          ) : null}
           {assignee ? (
             <Avatar aria-label={`Assignee ${task.assignee}`}>
               {assignee}

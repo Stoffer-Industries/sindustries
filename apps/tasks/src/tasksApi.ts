@@ -66,6 +66,7 @@ export interface UpdateTaskPayload {
   tags?: string[];
   blocked?: boolean;
   taskType?: 'content' | 'code' | 'research' | null;
+  dependsOnIds?: Array<string | number>;
   // Note: 'ready' field removed — use status field instead
 }
 
