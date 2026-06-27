@@ -11,6 +11,12 @@ const validAssignees = new Set(['Tom', 'Quinn', 'Rowan', 'Lox', 'Ivy']);
 const validSorts = new Set(['priority', 'createdAt', 'updatedAt', 'dueAt', 'statusChangedAt']);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const validTaskTypes = new Set(['content', 'code', 'research', 'feature']);
+const taskTypeTitlePrefixes = {
+  content: '✍️',
+  code: '💻',
+  research: '🔎',
+  feature: '🔧'
+};
 
 const dependencyInclude = {
   dependencies: {
@@ -91,7 +97,7 @@ function mapTask(task) {
 
   return {
     id: task.id,
-    title: task.title,
+    title: formatTaskTitle(task.title, task.taskType),
     description: task.description,
     status: task.status,
     statusChangedAt: task.statusChangedAt,
@@ -110,6 +116,17 @@ function mapTask(task) {
     dependsOnIds: dependsOn.map((dependency) => dependency.id),
     dependencyBlocked: dependsOn.some((dependency) => dependency.status !== 'done')
   };
+}
+
+function formatTaskTitle(title, taskType) {
+  const prefix = taskTypeTitlePrefixes[taskType];
+  if (!prefix || typeof title !== 'string') return title;
+
+  const knownPrefixPattern = Object.values(taskTypeTitlePrefixes)
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const titleWithoutKnownPrefix = title.replace(new RegExp(`^(?:${knownPrefixPattern})\\s+`), '');
+  return `${prefix} ${titleWithoutKnownPrefix}`;
 }
 
 function mapTaskComment(comment) {
@@ -405,7 +422,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
 
 tasksRouter.post('/tasks', async (req, res, next) => {
   try {
-    const title = normalizeString(req.body?.title);
+    const rawTitle = normalizeString(req.body?.title);
     const description = normalizeString(req.body?.description) || null;
     const status = req.body?.status ?? 'open';
     const priority = req.body?.priority ?? 'medium';
@@ -416,7 +433,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     const taskType = req.body?.taskType || null;
 
     // Validation
-    if (!title) return badRequest(res, 'TITLE_REQUIRED', 'title is required');
+    if (!rawTitle) return badRequest(res, 'TITLE_REQUIRED', 'title is required');
     if (taskType && !validTaskTypes.has(taskType)) {
       return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
     }
@@ -430,6 +447,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
 
     const tagRecords = await connectTags(tags);
     const now = new Date();
+    const title = formatTaskTitle(rawTitle, taskType);
 
     const created = await prisma.task.create({
       data: {

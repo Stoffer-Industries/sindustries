@@ -279,7 +279,7 @@ describe('tasks api endpoints', () => {
   it('POST /api/v1/tasks creates a feature task', async () => {
     prismaMock.tag.upsert.mockResolvedValue({ id: 'tag-1', name: 'backend' });
     prismaMock.task.create.mockResolvedValue(
-      task({ title: 'Created task', taskType: 'feature', tags: [{ tag: { name: 'backend' } }] })
+      task({ title: '🔧 Created task', taskType: 'feature', tags: [{ tag: { name: 'backend' } }] })
     );
 
     const app = createApp();
@@ -291,11 +291,29 @@ describe('tasks api endpoints', () => {
     });
 
     expect(response.status).toBe(201);
-    expect(response.body.data.title).toBe('Created task');
+    expect(response.body.data.title).toBe('🔧 Created task');
     expect(response.body.data.taskType).toBe('feature');
     expect(response.body.data.tags).toEqual(['backend']);
     expect(prismaMock.task.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.task.create.mock.calls[0][0].data.title).toBe('🔧 Created task');
     expect(prismaMock.task.create.mock.calls[0][0].data.taskType).toBe('feature');
+  });
+
+  it('GET /api/v1/tasks formats task titles with taskType emoji without duplication', async () => {
+    prismaMock.task.findMany.mockResolvedValue([
+      task({ id: 'feature', title: 'Build factory', taskType: 'feature' }),
+      task({ id: 'content', title: '✍️ Publish update', taskType: 'content' }),
+      task({ id: 'code', title: 'Fix worker', taskType: 'code' }),
+      task({ id: 'research', title: 'Explore options', taskType: 'research' })
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/v1/tasks');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((item) => item.title)).toEqual(
+      expect.arrayContaining(['🔧 Build factory', '✍️ Publish update', '💻 Fix worker', '🔎 Explore options'])
+    );
   });
 
   it('POST /api/v1/tasks rejects invalid taskType values', async () => {

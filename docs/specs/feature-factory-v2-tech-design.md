@@ -148,7 +148,8 @@ Commands:
 - `feedback-aggregate`
   - Implements acceptance feedback routing.
   - Reads GitHub review decision and inline review comments.
-  - If any PR has `CHANGES_REQUESTED`, open review comments, or required review missing, writes a concise task comment for Rowan and moves back to `doing`.
+  - If any PR has `CHANGES_REQUESTED`, open review comments, or required review missing, writes a concise task comment for Rowan and leaves the task in `acceptance` while Rowan addresses PR feedback.
+  - Does not mark the task blocked for Rowan-addressable PR feedback; `blocked` is reserved for cases where the workflow is waiting on Tom.
   - Does not route through Telegram approval.
 
 - `post-merge`
