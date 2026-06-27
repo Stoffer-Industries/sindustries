@@ -98,6 +98,45 @@
     "links": [],
     "evidence": "Bookmark pipeline dashboard shipped 2026-06-10.",
     "visibility": "published"
+  },
+  {
+    "title": "SIndustries UI shared library rollout",
+    "slug": "sindustries-ui-shared-library-rollout",
+    "releasedAt": "2026-06-20",
+    "summary": "The website and tasks app now consume shared SIndustries UI tokens and components from one source, so design work compounds across both product surfaces.",
+    "type": "system",
+    "links": [],
+    "evidence": "Shared @sindustries/ui primitives now serve the website and tasks app; the tasks app also ships a tokens specimen page, and Pencil token sync consolidates into the shared UI artifact.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Morning brief ops escalation",
+    "slug": "morning-brief-ops-escalation",
+    "releasedAt": "2026-06-22",
+    "summary": "The daily morning brief now surfaces blocked agent-layer incidents and Quinn ops findings from persistent operating state.",
+    "type": "system",
+    "links": [],
+    "evidence": "Morning brief workflow now reads persistent incident and ops state and escalates items that need Tom attention into the daily brief.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Budgeting mobile live-data MVP",
+    "slug": "budgeting-mobile-live-data-mvp",
+    "releasedAt": "2026-06-23",
+    "summary": "The NZ budgeting mobile build moved from concept to a live-data MVP with accounts, balances, alerts, transactions, spending breakdowns, and recategorisation.",
+    "type": "product",
+    "links": [],
+    "evidence": "Budget mobile phases shipped accounts and cards screens, inline balance alert setup, delete confirmation, spending breakdowns, category transactions, recategorisation, transaction detail sheets, and Akahu-backed live bank sync.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Bookmark tagger gateway route",
+    "slug": "bookmark-tagger-gateway-route",
+    "releasedAt": "2026-06-26",
+    "summary": "Bookmark enrichment now routes through the OpenClaw gateway and emits descriptive content tags instead of fallback review labels.",
+    "type": "system",
+    "links": [],
+    "evidence": "The X bookmark tagger now returns descriptive tags such as agent architecture and token optimisation after moving through the OpenClaw gateway provider route.",
+    "visibility": "draft"
   }
 ]
-

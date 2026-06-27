@@ -80,14 +80,18 @@
   {
     "title": "NZ Personal Banking App",
     "slug": "nz-personal-banking-app",
-    "tag": "Product concept",
-    "status": "idea",
-    "summary": "A visibility layer for household spending, budget drift, and real-time financial control.",
+    "tag": "Live-data MVP",
+    "status": "active",
+    "summary": "A live-data mobile budgeting MVP for NZ households, wired to bank sync, balances, alerts, transaction views, spending breakdowns, and recategorisation.",
     "why": "Most personal finance apps are built for a US context and don't fit NZ banking realities: open banking access, bank-specific quirks, and the specific spending patterns of NZ households.\n\nThe pain is real and personal. Tracking family net worth in Google Sheets for 2 hours a month is a solved problem waiting for better tooling. The interesting question isn't 'can an app do this' — they can — it's whether there's a viable wedge in the NZ market specifically.\n\nIf open banking APIs improve in NZ (the regulatory environment is moving in that direction), the data access problem becomes solvable. The UI/UX problem remains: most apps optimise for transaction history, not for the decision-support layer households actually need.",
     "successCriteria": "The concept is sufficiently narrowed to identify: the specific user problem with evidence it's real and recurring, a credible data-access path given NZ banking constraints, and a prototype scope small enough to test with real users.\n\nThis is a go/no-go gate, not a build commitment. The outcome could be 'the constraint is access to bank data and the regulatory timeline makes this unviable right now' — that's a valid result.",
-    "currentLearning": [],
+    "currentLearning": [
+      "The first end-to-end mobile build is now wired to live Akahu-backed bank data instead of mock screens.",
+      "Accounts, cards, balances, balance alerts, spending breakdowns, category transaction views, recategorisation, and transaction detail sheets are functional in the MVP.",
+      "The experiment has moved from market concept to product learning: the next useful evidence is whether the live-data flows make household decisions clearer in repeated use."
+    ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-05-28",
+    "updatedAt": "2026-06-23",
     "links": [],
     "image": "/brand/studio/nz-personal-banking-hero.png",
     "visibility": "published"
