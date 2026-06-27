@@ -79,6 +79,33 @@
   margin-left: auto;
 }
 
+.task-id-copy-btn {
+  align-items: center;
+  background: var(--si-color-bg-field);
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-xs);
+  color: var(--si-color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--si-font-ui);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  letter-spacing: 0;
+  min-width: 28px;
+  padding: 0 7px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.task-id-copy-btn:hover,
+.task-id-copy-btn:focus-visible {
+  border-color: var(--si-color-cta-primary);
+  color: var(--si-color-text-primary);
+  outline: none;
+}
+
 .task-card-date {
   color: var(--si-color-text-muted);
   font-family: var(--si-font-ui);
