@@ -10,6 +10,7 @@ const validPriorities = new Set(['low', 'medium', 'high', 'urgent']);
 const validAssignees = new Set(['Tom', 'Quinn', 'Rowan', 'Lox', 'Ivy']);
 const validSorts = new Set(['priority', 'createdAt', 'updatedAt', 'dueAt', 'statusChangedAt']);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const validTaskTypes = new Set(['content', 'code', 'research', 'feature']);
 
 const dependencyInclude = {
   dependencies: {
@@ -416,8 +417,8 @@ tasksRouter.post('/tasks', async (req, res, next) => {
 
     // Validation
     if (!title) return badRequest(res, 'TITLE_REQUIRED', 'title is required');
-    if (taskType && !['content', 'code', 'research'].includes(taskType)) {
-      return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, or research');
+    if (taskType && !validTaskTypes.has(taskType)) {
+      return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
     }
     if (!validStatuses.has(status)) return badRequest(res, 'INVALID_STATUS_VALUE', 'Invalid status value');
     if (!validPriorities.has(priority)) return badRequest(res, 'INVALID_PRIORITY_VALUE', 'Invalid priority value');
@@ -523,9 +524,8 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     }
 
     if (req.body?.taskType !== undefined) {
-      const validTypes = ['content', 'code', 'research'];
-      if (req.body.taskType && !validTypes.includes(req.body.taskType)) {
-        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, or research');
+      if (req.body.taskType && !validTaskTypes.has(req.body.taskType)) {
+        return badRequest(res, 'INVALID_TASK_TYPE', 'taskType must be content, code, research, or feature');
       }
       updates.taskType = req.body.taskType || null;
     }

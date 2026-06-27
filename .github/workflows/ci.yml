@@ -95,6 +95,19 @@ jobs:
       - name: Run DB integration tests
         run: npm run test:integration --workspace services/tasks-api
 
+  feature-task-workflow-tests:
+    name: feature-task workflow tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run feature-task tests
+        run: cargo test --manifest-path agents/workflows/feature-task/Cargo.toml
+
   budget-api-tests:
     name: budget-api tests (unit + db integration)
     runs-on: ubuntu-latest
