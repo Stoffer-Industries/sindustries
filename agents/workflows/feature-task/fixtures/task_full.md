@@ -1,4 +1,4 @@
-Product spec: `brain/bookmarks/specs/feature-factory-v2-2026-06-04.md`
+**Spec:** brain/bookmarks/specs/feature-factory-v2-2026-06-04.md
 
 ## Acceptance Criteria
 

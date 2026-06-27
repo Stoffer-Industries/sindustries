@@ -501,19 +501,14 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
         Some(spec) => {
             let path = resolve_product_spec_path(&spec.path, repo, workspace_root);
             if !path.exists() {
-                failures.push(format!("Product spec does not exist: `{}`.", spec.path));
+                failures.push(format!("Product spec not found at {}", spec.path));
             } else if let Ok(text) = fs::read_to_string(&path) {
-                if acceptance_criteria_text(&text).is_empty()
-                    && !text.to_lowercase().contains("acceptance")
-                {
-                    failures.push(
-                        "Product spec does not include implementation-ready acceptance criteria."
-                            .to_string(),
-                    );
+                if !product_spec_approved_by_tom(&text) {
+                    failures.push("Product spec not approved by Tom".to_string());
                 }
             }
         }
-        None => failures.push("Task must link a product spec.".to_string()),
+        None => failures.push("Task description must include a **Spec:** line".to_string()),
     }
     if acceptance_criteria_text(&task.description.clone().unwrap_or_default()).is_empty() {
         failures.push("Task description must include acceptance criteria checkboxes.".to_string());
@@ -525,25 +520,22 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
 }
 
 fn product_spec(task: &Task) -> Option<ProductSpecRef> {
-    let text = format!(
-        "{}\n{}",
-        task.description.clone().unwrap_or_default(),
-        task.comments
-            .iter()
-            .map(comment_text)
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    parse_product_spec_ref(&text)
+    parse_product_spec_ref(&task.description.clone().unwrap_or_default())
 }
 
 fn parse_product_spec_ref(text: &str) -> Option<ProductSpecRef> {
-    let re = Regex::new(r"(?i)(?:product spec|spec):\s*`?([A-Za-z0-9_./-]*brain/bookmarks/specs/[A-Za-z0-9_.-]+\.md)`?").unwrap();
+    let re = Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s*`?([^`\s]+\.md)`?\s*$").unwrap();
     re.captures(text)
         .and_then(|cap| cap.get(1))
         .map(|m| ProductSpecRef {
             path: m.as_str().to_string(),
         })
+}
+
+fn product_spec_approved_by_tom(text: &str) -> bool {
+    Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$")
+        .unwrap()
+        .is_match(text)
 }
 
 fn resolve_product_spec_path(path: &str, repo: &Path, workspace_root: &Path) -> PathBuf {
@@ -552,6 +544,9 @@ fn resolve_product_spec_path(path: &str, repo: &Path, workspace_root: &Path) -> 
         return spec.to_path_buf();
     }
     if path.starts_with("brain/") {
+        if workspace_root.file_name().and_then(|name| name.to_str()) == Some("brain") {
+            return workspace_root.join(path.trim_start_matches("brain/"));
+        }
         return workspace_root.join(spec);
     }
     repo.join(spec)
@@ -560,8 +555,7 @@ fn resolve_product_spec_path(path: &str, repo: &Path, workspace_root: &Path) -> 
 fn workspace_root(args: &StageArgs) -> &Path {
     args.workspace_root
         .as_deref()
-        .or_else(|| args.repo.parent())
-        .unwrap_or_else(|| Path::new("."))
+        .unwrap_or_else(|| Path::new("/Users/quinnstoffer/.openclaw/workspace"))
 }
 
 fn acceptance_criteria_text(text: &str) -> Vec<String> {
@@ -576,6 +570,11 @@ fn workstreams(task: &Task) -> Vec<Workstream> {
 }
 
 fn parse_workstreams(text: &str) -> Vec<Workstream> {
+    let owner_section = parse_owner_workstreams(text);
+    if !owner_section.is_empty() {
+        return owner_section;
+    }
+
     let heading =
         Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(?:workstream\s*[:/-]?\s*)?(.+?)\s*$").unwrap();
     let mut matches: Vec<_> = heading.find_iter(text).collect();
@@ -603,6 +602,43 @@ fn parse_workstreams(text: &str) -> Vec<Workstream> {
             Workstream {
                 owner,
                 body: text[start..end].trim().to_string(),
+            }
+        })
+        .collect()
+}
+
+fn parse_owner_workstreams(text: &str) -> Vec<Workstream> {
+    let section_re = Regex::new(r"(?im)^\s*\*\*Workstreams\*\*\s*$").unwrap();
+    let Some(section_match) = section_re.find(text) else {
+        return Vec::new();
+    };
+    let start = section_match.end();
+    let after = &text[start..];
+    let end_re = Regex::new(r"(?m)^\s*(?:#{1,6}\s+|\*\*[^*\n]+\*\*\s*$)").unwrap();
+    let end = end_re
+        .find(after)
+        .map(|m| start + m.start())
+        .unwrap_or(text.len());
+    let section = &text[start..end];
+    let owner_re = Regex::new(r"(?m)^-\s+Owner:\s*(.+?)\s*$").unwrap();
+    let owners: Vec<_> = owner_re.find_iter(section).collect();
+    owners
+        .iter()
+        .enumerate()
+        .map(|(idx, owner_match)| {
+            let body_start = owner_match.start();
+            let body_end = owners
+                .get(idx + 1)
+                .map(|next| next.start())
+                .unwrap_or(section.len());
+            let owner = owner_re
+                .captures(owner_match.as_str())
+                .and_then(|cap| cap.get(1))
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_else(|| "Rowan".to_string());
+            Workstream {
+                owner,
+                body: section[body_start..body_end].trim().to_string(),
             }
         })
         .collect()
@@ -793,6 +829,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_only_bold_spec_line_from_description() {
+        assert!(parse_product_spec_ref("Product spec: brain/bookmarks/specs/example.md").is_none());
+        let spec = parse_product_spec_ref("**Spec:** brain/bookmarks/specs/example.md").unwrap();
+        assert_eq!(spec.path, "brain/bookmarks/specs/example.md");
+    }
+
+    #[test]
+    fn detects_tom_product_spec_approval_marker() {
+        assert!(product_spec_approved_by_tom("- [x] **Approved by Tom**"));
+        assert!(!product_spec_approved_by_tom("- [ ] **Approved by Tom**"));
+    }
+
+    #[test]
     fn resolves_product_specs_relative_to_workspace_root() {
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
@@ -825,13 +874,13 @@ mod tests {
         fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
         fs::write(
             &spec_path,
-            "## Acceptance Criteria\n- [ ] Implementation-ready criteria",
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] Implementation-ready criteria",
         )
         .unwrap();
 
         let task = Task {
             description: Some(
-                "Product spec: brain/bookmarks/specs/example.md\n\n## Rowan Workstream\n- [ ] Build it"
+                "**Spec:** brain/bookmarks/specs/example.md\n\n## Acceptance Criteria\n- [ ] Build it\n\n## Rowan Workstream\n- [ ] Build it"
                     .to_string(),
             ),
             ..Task::default()
@@ -850,6 +899,60 @@ mod tests {
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].owner, "Rowan");
         assert_eq!(streams[1].owner, "Quinn");
+    }
+
+    #[test]
+    fn parses_bold_workstreams_section_with_owner_blocks() {
+        let text = r#"**Workstreams**
+- Owner: Rowan
+  Repo: Stoffer-Industries/sindustries
+  Branch: task-456c92a8-depends-on
+  Worktree: ~/workspaces/rowan/sindustries
+  PR: (pending)
+  Scope: Build it
+  ACs: AC1
+  Status: open
+
+- Owner: Quinn
+  Scope: .openclaw handoff
+  Status: open
+
+**Type:** feature
+"#;
+        let streams = parse_workstreams(text);
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].owner, "Rowan");
+        assert!(streams[0].body.contains("task-456c92a8-depends-on"));
+        assert_eq!(streams[1].owner, "Quinn");
+    }
+
+    #[test]
+    fn spec_failures_do_not_hide_valid_bold_workstreams() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let task = Task {
+            description: Some(
+                r#"## Acceptance Criteria
+- [ ] AC1: Build it
+
+**Workstreams**
+- Owner: Rowan
+  Repo: Stoffer-Industries/sindustries
+  Branch: task-456c92a8-depends-on
+  Status: open
+"#
+                .to_string(),
+            ),
+            ..Task::default()
+        };
+        let failures = spec_failures(&task, repo.path(), workspace.path());
+        assert!(failures.contains(&"Task description must include a **Spec:** line".to_string()));
+        assert!(
+            !failures
+                .iter()
+                .any(|failure| failure.contains("workstreams")),
+            "unexpected workstream failure: {failures:?}"
+        );
     }
 
     #[test]

@@ -15,9 +15,9 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
 REPO = SCRIPT_DIR.parent.parent.parent
-WORKSPACE_ROOT = REPO.parent / "workspace"
+WORKSPACE_ROOT = Path("/Users/quinnstoffer/.openclaw/workspace")
 if not WORKSPACE_ROOT.exists():
-    WORKSPACE_ROOT = REPO.parent
+    WORKSPACE_ROOT = REPO.parents[1] if len(REPO.parents) > 1 else REPO.parent
 DEFAULT_BASE_URL = "http://localhost:4001/api/v1"
 
 
