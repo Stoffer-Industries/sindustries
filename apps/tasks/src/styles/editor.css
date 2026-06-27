@@ -108,6 +108,115 @@
   width: 100%;
 }
 
+.dependencies-section {
+  background: var(--si-color-bg-field);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  width: 100%;
+}
+
+.dependencies-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.dependencies-header h4 {
+  color: var(--si-color-text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.dependencies-count {
+  color: var(--si-color-text-muted);
+}
+
+.dependencies-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dependency-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.dependency-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--si-color-text-primary);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.dependency-link span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependency-add {
+  display: grid;
+  gap: 8px;
+}
+
+.dependency-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dependency-add-row .si-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dependency-confirm {
+  align-items: center;
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-xs);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px;
+}
+
+.dependency-confirm > div:first-child {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dependency-confirm-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.dependency-error {
+  color: var(--si-color-status-danger);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
 .comments-header {
   align-items: center;
   display: flex;
