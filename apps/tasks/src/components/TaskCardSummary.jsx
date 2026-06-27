@@ -1,8 +1,9 @@
 import { Avatar, Badge } from '@sindustries/ui/react';
 import { assigneeInitial } from '../utils/helpers.js';
+import { PRIORITIES } from '../utils/constants.js';
 
 function priorityVariant(priority) {
-  return ['urgent', 'high', 'medium', 'low'].includes(priority) ? priority : 'neutral';
+  return PRIORITIES.includes(priority) ? priority : 'neutral';
 }
 
 function taskCardDate(task) {
