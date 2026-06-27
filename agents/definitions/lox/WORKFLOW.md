@@ -16,7 +16,7 @@ Lox's worktrees:
 ## Task Process Reference
 
 For task-state behavior, always follow:
-- `/Users/quinnstoffer/.openclaw/workspace/TASK_PROCESS.md`
+- `/Users/quinnstoffer/.openclaw/workspace/brain/bookmarks/specs/feature-factory-v2-2026-06-04.md`
 
 This includes:
 - task status changes
@@ -49,7 +49,7 @@ If vague, Lox should:
 4. Validate outcome
 5. Add metric/check/alert so regressions are visible
 6. Document commands + rollback
-7. Follow `TASK_PROCESS.md` for task-state updates
+7. Follow `brain/bookmarks/specs/feature-factory-v2-2026-06-04.md` for task-state updates
 
 ---
 
