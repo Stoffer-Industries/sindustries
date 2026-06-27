@@ -5,6 +5,7 @@ Usage examples:
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --limit 50
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py create --title "Test" --priority high
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --status doing
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --depends-on <dependency-id>
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py archive --id <task-id>
 """
 
@@ -132,6 +133,8 @@ def cmd_create(args):
 def cmd_patch(args):
     base = get_base_url()
     payload = {}
+    if args.depends_on is not None and args.clear_dependencies:
+        raise SystemExit("--depends-on and --clear-dependencies are mutually exclusive")
 
     # Support --field as a shortcut for picking field + value in one go
     # This enables telegram button flows like: /tasks patch --id <id> --field status
@@ -158,6 +161,10 @@ def cmd_patch(args):
                 payload[key] = value == "true"
     if args.tags is not None:
         payload["tags"] = args.tags
+    if args.depends_on is not None:
+        payload["dependsOnIds"] = args.depends_on
+    if args.clear_dependencies:
+        payload["dependsOnIds"] = []
 
     # Handle description: append to existing instead of replacing
     if args.description is not None:
@@ -222,6 +229,8 @@ def build_parser():
     u.add_argument("--priority")
     u.add_argument("--assignee")
     u.add_argument("--tags", nargs="*")
+    u.add_argument("--depends-on", nargs="+", dest="depends_on", help="Replace task dependencies with these task IDs")
+    u.add_argument("--clear-dependencies", action="store_true", help="Clear all task dependencies")
     u.add_argument("--blocked", choices=["true", "false"])
     u.add_argument("--ready", choices=["true", "false"])
     u.set_defaults(func=cmd_patch)

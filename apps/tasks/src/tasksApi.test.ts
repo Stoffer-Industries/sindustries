@@ -137,13 +137,13 @@ describe('tasksApi', () => {
       const task = { id: 1, title: 'Updated' };
       mockFetch.mockResolvedValueOnce(mockResponse(task));
 
-      const result = await updateTask(1, { title: 'Updated', status: 'done' });
+      const result = await updateTask(1, { title: 'Updated', status: 'done', dependsOnIds: ['dep-1'] });
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:4000/api/v1/tasks/1',
         expect.objectContaining({
           method: 'PATCH',
-          body: JSON.stringify({ title: 'Updated', status: 'done' })
+          body: JSON.stringify({ title: 'Updated', status: 'done', dependsOnIds: ['dep-1'] })
         })
       );
       expect(result).toEqual(task);
