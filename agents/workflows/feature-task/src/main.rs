@@ -6,7 +6,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs,
+    fmt, fs,
     io::{self, Read},
     path::{Path, PathBuf},
     process::Command,
@@ -152,6 +152,24 @@ enum ReviewState {
     Merged,
     ClosedUnmerged,
 }
+
+#[derive(Debug)]
+struct ApiStatusError {
+    status: u16,
+    code: Option<String>,
+    message: String,
+}
+
+impl fmt::Display for ApiStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.code {
+            Some(code) => write!(f, "API returned {} {code}: {}", self.status, self.message),
+            None => write!(f, "API returned {}: {}", self.status, self.message),
+        }
+    }
+}
+
+impl std::error::Error for ApiStatusError {}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -300,11 +318,19 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     if !args.dry_run {
-        add_comment(
+        if let Err(err) = add_comment(
             &args.base_url,
             &env.task.id,
             &format!("[rowan-feedback]\n{}", failures.join("\n")),
-        )?;
+        ) {
+            if let Some(message) = spec_checksum_mismatch_message(&err) {
+                env.criteria_met = false;
+                env.action_taken = "feedback_aggregate_blocked_spec_drift".to_string();
+                env.failures = vec![message];
+                return Ok(env);
+            }
+            return Err(err);
+        }
         env.task = api_get_task(&args.base_url, &env.task.id)?;
     }
     env.criteria_met = false;
@@ -355,28 +381,58 @@ fn transition_or_block(
             if next_status == "ready" {
                 patch["specChecksum"] = Value::String(spec_checksum(&env.task));
             }
-            api_patch::<Task>(&args.base_url, &env.task.id, patch)?;
+            if let Err(err) = api_patch::<Task>(&args.base_url, &env.task.id, patch) {
+                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                    env.criteria_met = false;
+                    env.action_taken = format!("{action}_blocked_spec_drift");
+                    env.failures = vec![message];
+                    return Ok(env);
+                }
+                return Err(err);
+            }
             env.task = api_get_task(&args.base_url, &env.task.id)?;
-            write_state(
+            if let Err(err) = write_state(
                 &args.base_url,
                 &env.task.id,
                 &env.lobster_state,
                 Some(&format!(
                     "Feature task workflow moved task to `{next_status}`."
                 )),
-            )?;
+            ) {
+                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                    env.criteria_met = false;
+                    env.action_taken = format!("{action}_blocked_spec_drift");
+                    env.failures = vec![message];
+                    return Ok(env);
+                }
+                return Err(err);
+            }
         }
     } else {
         env.action_taken = format!("{action}_blocked");
         let fingerprint = failures.join("\n");
         if !args.dry_run && env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
             env.lobster_state.failure_fingerprint = Some(fingerprint);
-            add_comment(
+            if let Err(err) = add_comment(
                 &args.base_url,
                 &env.task.id,
                 &format!("[feature-task-blocked]\n{}", failures.join("\n")),
-            )?;
-            write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+            ) {
+                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                    env.action_taken = format!("{action}_blocked_spec_drift");
+                    env.failures = vec![message];
+                    return Ok(env);
+                }
+                return Err(err);
+            }
+            if let Err(err) = write_state(&args.base_url, &env.task.id, &env.lobster_state, None) {
+                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                    env.action_taken = format!("{action}_blocked_spec_drift");
+                    env.failures = vec![message];
+                    return Ok(env);
+                }
+                return Err(err);
+            }
         }
     }
     Ok(env)
@@ -434,7 +490,7 @@ fn api_patch<T: for<'de> Deserialize<'de>>(
     payload: Value,
 ) -> Result<T> {
     let url = format!("{}/tasks/{task_id}", base_url.trim_end_matches('/'));
-    let value: Value = ureq::patch(&url).send_json(payload)?.into_json()?;
+    let value: Value = handle_api_result(ureq::patch(&url).send_json(payload))?;
     serde_json::from_value(value.get("data").cloned().unwrap_or(value))
         .context("decode API patch response")
 }
@@ -444,8 +500,45 @@ fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
         "{}/tasks/{task_id}/comments",
         base_url.trim_end_matches('/')
     );
-    ureq::post(&url).send_json(json!({"author": AUTHOR, "text": text}))?;
+    handle_api_result(ureq::post(&url).send_json(json!({"author": AUTHOR, "text": text})))?;
     Ok(())
+}
+
+fn handle_api_result(response: std::result::Result<ureq::Response, ureq::Error>) -> Result<Value> {
+    match response {
+        Ok(response) => Ok(response.into_json()?),
+        Err(ureq::Error::Status(status, response)) => {
+            Err(api_status_error(status, response)).context("API request failed")
+        }
+        Err(err) => Err(err).context("API request failed"),
+    }
+}
+
+fn api_status_error(status: u16, response: ureq::Response) -> ApiStatusError {
+    let fallback = response.status_text().to_string();
+    let value = response.into_json::<Value>().ok();
+    let code = value
+        .as_ref()
+        .and_then(|value| value.pointer("/error/code"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let message = value
+        .as_ref()
+        .and_then(|value| value.pointer("/error/message"))
+        .and_then(Value::as_str)
+        .unwrap_or(&fallback)
+        .to_string();
+    ApiStatusError {
+        status,
+        code,
+        message,
+    }
+}
+
+fn spec_checksum_mismatch_message(err: &anyhow::Error) -> Option<String> {
+    let api_err = err.downcast_ref::<ApiStatusError>()?;
+    (api_err.status == 409 && api_err.code.as_deref() == Some("SPEC_CHECKSUM_MISMATCH"))
+        .then(|| api_err.message.clone())
 }
 
 fn write_state(
@@ -1025,6 +1118,35 @@ mod tests {
         assert!(failures[0].contains("ACs modified after spec approval"));
         assert!(failures[0].contains("write a new spec to change scope"));
         assert!(failures[0].contains("task-drift"));
+    }
+
+    #[test]
+    fn extracts_api_spec_checksum_mismatch_as_blocked_message() {
+        let err = Err::<(), _>(ApiStatusError {
+            status: 409,
+            code: Some("SPEC_CHECKSUM_MISMATCH".to_string()),
+            message: "ACs modified after spec approval".to_string(),
+        })
+        .context("API request failed")
+        .unwrap_err();
+
+        assert_eq!(
+            spec_checksum_mismatch_message(&err).as_deref(),
+            Some("ACs modified after spec approval")
+        );
+    }
+
+    #[test]
+    fn ignores_other_api_conflicts_for_spec_checksum_handling() {
+        let err = Err::<(), _>(ApiStatusError {
+            status: 409,
+            code: Some("SPEC_CHECKSUM_LOCKED".to_string()),
+            message: "specChecksum is locked".to_string(),
+        })
+        .context("API request failed")
+        .unwrap_err();
+
+        assert!(spec_checksum_mismatch_message(&err).is_none());
     }
 
     #[test]
