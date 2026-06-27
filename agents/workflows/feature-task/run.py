@@ -19,6 +19,21 @@ WORKSPACE_ROOT = Path("/Users/quinnstoffer/.openclaw/workspace")
 if not WORKSPACE_ROOT.exists():
     WORKSPACE_ROOT = REPO.parents[1] if len(REPO.parents) > 1 else REPO.parent
 DEFAULT_BASE_URL = "http://localhost:4001/api/v1"
+PATH_PREFIXES = [
+    str(Path.home() / ".cargo" / "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+]
+
+
+def workflow_env() -> dict[str, str]:
+    env = os.environ.copy()
+    existing_path = env.get("PATH", "")
+    path_parts = [path for path in PATH_PREFIXES if Path(path).exists()]
+    if existing_path:
+        path_parts.append(existing_path)
+    env["PATH"] = os.pathsep.join(path_parts)
+    return env
 
 
 def api_get(base_url: str, path: str) -> dict[str, Any]:
@@ -72,7 +87,7 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool) -> dict[str, Any]:
         }
     )
     cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
-    proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ.copy())
+    proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=workflow_env())
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     threads = [
