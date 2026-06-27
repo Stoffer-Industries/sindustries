@@ -4,11 +4,19 @@ import { SPECIMEN_PAGES } from './generated/pages.js';
 import { SpecimenSection } from './SpecimenSections.jsx';
 import './styles.css';
 
-const KIT_TABS = [
-  { id: 'tokens', label: 'Tokens' },
-  { id: 'pulse-react', label: 'Pulse' },
-  { id: 'brand-react', label: 'Brand' }
-];
+// Kit tabs are derived from SPECIMEN_PAGES so adding a page only requires
+// editing the generated manifest. The tabLabel mapping preserves the
+// short labels the existing tests assert against.
+const KIT_TAB_LABELS = {
+  tokens: 'Tokens',
+  'pulse-react': 'Pulse',
+  'brand-react': 'Brand'
+};
+
+const KIT_TABS = SPECIMEN_PAGES.map((page) => ({
+  id: page.id,
+  label: KIT_TAB_LABELS[page.id] ?? page.id
+}));
 
 function shellPackForPage(page) {
   return page?.pack ?? 'pulse';
@@ -16,7 +24,7 @@ function shellPackForPage(page) {
 
 export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
   const [activePageId, setActivePageId] = useState(SPECIMEN_PAGES[0]?.id ?? 'tokens');
-  const [theme, setTheme] = useState('dark');
+  const [theme, setTheme] = useState(SPECIMEN_PAGES[0]?.theme ?? 'dark');
   const activePage = SPECIMEN_PAGES.find((page) => page.id === activePageId) ?? SPECIMEN_PAGES[0];
   const nextTheme = theme === 'dark' ? 'light' : 'dark';
 
