@@ -1,0 +1,51 @@
+name: feature-task
+
+args:
+  taskId:
+    required: true
+  tasksApiBaseUrl:
+    default: ${TASKS_API_BASE_URL}
+  sindustriesRepo:
+    default: /Users/quinnstoffer/workspaces/rowan/sindustries
+  dryRun:
+    default: false
+
+steps:
+  - id: load_task
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      load-task --base-url ${tasksApiBaseUrl} --task-id ${taskId}
+
+  - id: spec_check
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      spec-check --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo}
+    stdin: $load_task.stdout
+
+  - id: ready_checks
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo}
+    stdin: $spec_check.stdout
+    condition: $spec_check.json.criteria_met
+
+  - id: verify_delivery
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo}
+    stdin: $ready_checks.stdout
+    condition: $ready_checks.json.criteria_met
+
+  - id: feedback_aggregate
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo}
+    stdin: $verify_delivery.stdout
+    condition: $verify_delivery.json.criteria_met
+
+  - id: post_merge
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo}
+    stdin: $feedback_aggregate.stdout
+    condition: $feedback_aggregate.json.criteria_met

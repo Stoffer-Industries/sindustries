@@ -276,21 +276,40 @@ describe('tasks api endpoints', () => {
     });
   });
 
-  it('POST /api/v1/tasks creates a task', async () => {
+  it('POST /api/v1/tasks creates a feature task', async () => {
     prismaMock.tag.upsert.mockResolvedValue({ id: 'tag-1', name: 'backend' });
-    prismaMock.task.create.mockResolvedValue(task({ title: 'Created task', tags: [{ tag: { name: 'backend' } }] }));
+    prismaMock.task.create.mockResolvedValue(
+      task({ title: 'Created task', taskType: 'feature', tags: [{ tag: { name: 'backend' } }] })
+    );
 
     const app = createApp();
     const response = await request(app).post('/api/v1/tasks').send({
       title: 'Created task',
       priority: 'high',
+      taskType: 'feature',
       tags: ['backend']
     });
 
     expect(response.status).toBe(201);
     expect(response.body.data.title).toBe('Created task');
+    expect(response.body.data.taskType).toBe('feature');
     expect(response.body.data.tags).toEqual(['backend']);
     expect(prismaMock.task.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.task.create.mock.calls[0][0].data.taskType).toBe('feature');
+  });
+
+  it('POST /api/v1/tasks rejects invalid taskType values', async () => {
+    const app = createApp();
+    const response = await request(app).post('/api/v1/tasks').send({
+      title: 'Created task',
+      taskType: 'invalid'
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: { code: 'INVALID_TASK_TYPE', message: 'taskType must be content, code, research, or feature' }
+    });
+    expect(prismaMock.task.create).not.toHaveBeenCalled();
   });
 
   it('PATCH /api/v1/tasks/:id updates task fields', async () => {
@@ -437,6 +456,33 @@ describe('tasks api endpoints', () => {
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('CIRCULAR_DEPENDENCY_NOT_ALLOWED');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /api/v1/tasks/:id accepts feature and rejects invalid taskType values', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task())
+      .mockResolvedValueOnce(task({ taskType: 'feature' }))
+      .mockResolvedValueOnce(task());
+    prismaMock.task.update.mockResolvedValue(task({ taskType: 'feature' }));
+
+    const app = createApp();
+    const feature = await request(app)
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .send({ taskType: 'feature' });
+
+    expect(feature.status).toBe(200);
+    expect(feature.body.data.taskType).toBe('feature');
+    expect(prismaMock.task.update.mock.calls[0][0].data.taskType).toBe('feature');
+
+    const invalid = await request(app)
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .send({ taskType: 'invalid' });
+
+    expect(invalid.status).toBe(400);
+    expect(invalid.body).toEqual({
+      error: { code: 'INVALID_TASK_TYPE', message: 'taskType must be content, code, research, or feature' }
+    });
+    expect(prismaMock.task.update).toHaveBeenCalledTimes(1);
   });
 
   it('DELETE /api/v1/tasks/:id archives task', async () => {
