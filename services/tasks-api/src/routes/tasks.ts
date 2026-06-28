@@ -9,22 +9,6 @@ const validStatuses = new Set(['open', 'ready', 'doing', 'acceptance', 'done']);
 const validPriorities = new Set(['low', 'medium', 'high', 'urgent']);
 const validAssignees = new Set(['Tom', 'Quinn', 'Rowan', 'Lox', 'Ivy']);
 const validSorts = new Set(['priority', 'createdAt', 'updatedAt', 'dueAt', 'statusChangedAt']);
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const dependencyInclude = {
-  dependencies: {
-    include: {
-      dependsOn: {
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          completedAt: true
-        }
-      }
-    }
-  }
-};
 
 const priorityOrder = {
   urgent: 0,
@@ -78,16 +62,6 @@ function mapComment(comment) {
 }
 
 function mapTask(task) {
-  const dependsOn = task.dependencies
-    ?.map((dependency) => dependency.dependsOn)
-    .filter(Boolean)
-    .map((dependency) => ({
-      id: dependency.id,
-      title: dependency.title,
-      status: dependency.status,
-      completedAt: dependency.completedAt
-    })) ?? [];
-
   return {
     id: task.id,
     title: task.title,
@@ -104,10 +78,7 @@ function mapTask(task) {
     updatedAt: task.updatedAt,
     taskType: task.taskType ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
-    comments: task.comments?.map(mapComment) ?? [],
-    dependsOn,
-    dependsOnIds: dependsOn.map((dependency) => dependency.id),
-    dependencyBlocked: dependsOn.some((dependency) => dependency.status !== 'done')
+    comments: task.comments?.map(mapComment) ?? []
   };
 }
 
@@ -129,22 +100,6 @@ function normalizeTags(tags) {
   return [...new Set(normalized)];
 }
 
-function normalizeDependsOnIds(value) {
-  if (!Array.isArray(value)) return null;
-  const normalized = [];
-  const seen = new Set();
-
-  for (const id of value) {
-    if (typeof id !== 'string' || !uuidPattern.test(id)) return null;
-    if (!seen.has(id)) {
-      seen.add(id);
-      normalized.push(id);
-    }
-  }
-
-  return normalized;
-}
-
 async function connectTags(tagNames) {
   if (!tagNames?.length) return [];
 
@@ -157,46 +112,6 @@ async function connectTags(tagNames) {
       })
     )
   );
-}
-
-async function validateDependsOnIds(res, taskId, dependsOnIds) {
-  if (dependsOnIds.includes(taskId)) {
-    badRequest(res, 'SELF_DEPENDENCY_NOT_ALLOWED', 'Task cannot depend on itself');
-    return false;
-  }
-
-  if (dependsOnIds.length === 0) return true;
-
-  const dependencyTasks = await prisma.task.findMany({
-    where: { id: { in: dependsOnIds } },
-    select: { id: true, archivedAt: true }
-  });
-  const foundIds = new Set(dependencyTasks.map((task) => task.id));
-  const missingId = dependsOnIds.find((id) => !foundIds.has(id));
-  if (missingId) {
-    badRequest(res, 'DEPENDENCY_TASK_NOT_FOUND', `Dependency task not found: ${missingId}`);
-    return false;
-  }
-
-  const archivedTask = dependencyTasks.find((task) => task.archivedAt);
-  if (archivedTask) {
-    badRequest(res, 'ARCHIVED_DEPENDENCY_NOT_ALLOWED', `Dependency task is archived: ${archivedTask.id}`);
-    return false;
-  }
-
-  const directCycle = await prisma.taskDependency.findFirst({
-    where: {
-      taskId: { in: dependsOnIds },
-      dependsOnId: taskId
-    },
-    select: { taskId: true }
-  });
-  if (directCycle) {
-    badRequest(res, 'CIRCULAR_DEPENDENCY_NOT_ALLOWED', 'Direct circular dependencies are not allowed');
-    return false;
-  }
-
-  return true;
 }
 
 export const tasksRouter = Router();
@@ -324,8 +239,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
           include: {
             tag: true
           }
-        },
-        ...dependencyInclude
+        }
       },
       take: limit + 1
     });
@@ -387,8 +301,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
         },
         comments: {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-        },
-        ...dependencyInclude
+        }
       }
     });
 
@@ -451,8 +364,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
           include: {
             tag: true
           }
-        },
-        ...dependencyInclude
+        }
       }
     });
 
@@ -469,8 +381,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
     const updates = {};
-    const hasDependencyUpdate = req.body?.dependsOnIds !== undefined;
-    const dependsOnIds = hasDependencyUpdate ? normalizeDependsOnIds(req.body.dependsOnIds) : undefined;
     const title = normalizeString(req.body?.title);
     const description = req.body?.description === undefined ? undefined : normalizeString(req.body.description);
     const assignee = req.body?.assignee === undefined ? undefined : normalizeString(req.body.assignee);
@@ -478,10 +388,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     if (req.body?.title !== undefined) {
       if (!title) return badRequest(res, 'TITLE_EMPTY', 'title cannot be empty');
       updates.title = title;
-    }
-
-    if (hasDependencyUpdate && !dependsOnIds) {
-      return badRequest(res, 'INVALID_DEPENDS_ON_IDS', 'dependsOnIds must be an array of UUID strings');
     }
 
     if (description !== undefined) updates.description = description || null;
@@ -530,55 +436,37 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       updates.taskType = req.body.taskType || null;
     }
 
-    if (hasDependencyUpdate) {
-      const validDependencies = await validateDependsOnIds(res, id, dependsOnIds);
-      if (!validDependencies) return;
-    }
+    const updated = await prisma.task.update({
+      where: { id },
+      data: updates,
+      include: {
+        tags: {
+          include: {
+            tag: true
+          }
+        }
+      }
+    });
 
-    const hasTagUpdate = req.body?.tags !== undefined;
-    let tagRecords = null;
     if (req.body?.tags !== undefined) {
       const tags = normalizeTags(req.body.tags);
       if (!tags) return badRequest(res, 'INVALID_TAGS', 'tags must be an array of strings');
-      tagRecords = await connectTags(tags);
+      const tagRecords = await connectTags(tags);
+      await prisma.taskTag.deleteMany({ where: { taskId: id } });
+      if (tagRecords.length > 0) {
+        await prisma.taskTag.createMany({
+          data: tagRecords.map((tag) => ({ taskId: id, tagId: tag.id })),
+          skipDuplicates: true
+        });
+      }
     }
 
-    const task = await prisma.$transaction(async (tx) => {
-      await tx.task.update({
-        where: { id },
-        data: updates
-      });
-
-      if (hasTagUpdate) {
-        await tx.taskTag.deleteMany({ where: { taskId: id } });
-        if (tagRecords.length > 0) {
-          await tx.taskTag.createMany({
-            data: tagRecords.map((tag) => ({ taskId: id, tagId: tag.id })),
-            skipDuplicates: true
-          });
-        }
-      }
-
-      if (hasDependencyUpdate) {
-        await tx.taskDependency.deleteMany({ where: { taskId: id } });
-        if (dependsOnIds.length > 0) {
-          await tx.taskDependency.createMany({
-            data: dependsOnIds.map((dependsOnId) => ({ taskId: id, dependsOnId })),
-            skipDuplicates: true
-          });
-        }
-      }
-
-      return tx.task.findFirst({
-        where: { id },
-        include: {
-          tags: { include: { tag: true } },
-          ...dependencyInclude
-        }
-      });
+    const task = await prisma.task.findFirst({
+      where: { id },
+      include: { tags: { include: { tag: true } } }
     });
 
-    return res.status(200).json({ data: mapTask(task) });
+    return res.status(200).json({ data: mapTask(task ?? updated) });
   } catch (error) {
     return next(error);
   }

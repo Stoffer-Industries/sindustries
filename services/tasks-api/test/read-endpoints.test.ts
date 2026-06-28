@@ -8,11 +8,6 @@ const prismaMock = {
     create: vi.fn(),
     update: vi.fn()
   },
-  taskDependency: {
-    findFirst: vi.fn(),
-    deleteMany: vi.fn(),
-    createMany: vi.fn()
-  },
   taskComment: {
     create: vi.fn()
   },
@@ -23,8 +18,7 @@ const prismaMock = {
   tag: {
     findMany: vi.fn(),
     upsert: vi.fn()
-  },
-  $transaction: vi.fn()
+  }
 };
 
 vi.mock('../src/lib/prisma.ts', () => ({
@@ -49,7 +43,6 @@ function task(overrides = {}) {
     createdAt: new Date('2026-03-01T00:00:00.000Z'),
     updatedAt: new Date('2026-03-01T00:00:00.000Z'),
     tags: [],
-    dependencies: [],
     ...overrides
   };
 }
@@ -57,7 +50,6 @@ function task(overrides = {}) {
 describe('tasks api endpoints', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
   });
 
   it('GET /api/v1/tasks returns paginated task list', async () => {
@@ -73,51 +65,12 @@ describe('tasks api endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data).toHaveLength(2);
-    expect(response.body.data[0]).toMatchObject({
-      dependsOn: [],
-      dependsOnIds: [],
-      dependencyBlocked: false
-    });
     expect(response.body.page).toEqual({
       limit: 2,
       nextCursor: null,
       hasNextPage: false
     });
     expect(prismaMock.task.findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it('GET /api/v1/tasks maps dependency references and blocked state', async () => {
-    prismaMock.task.findMany.mockResolvedValue([
-      task({
-        id: '11111111-1111-1111-1111-111111111111',
-        dependencies: [
-          {
-            dependsOn: {
-              id: '22222222-2222-2222-2222-222222222222',
-              title: 'Dependency',
-              status: 'doing',
-              completedAt: null
-            }
-          }
-        ]
-      })
-    ]);
-
-    const app = createApp();
-    const response = await request(app).get('/api/v1/tasks');
-
-    expect(response.status).toBe(200);
-    expect(response.body.data[0].dependsOn).toEqual([
-      {
-        id: '22222222-2222-2222-2222-222222222222',
-        title: 'Dependency',
-        status: 'doing',
-        completedAt: null
-      }
-    ]);
-    expect(response.body.data[0].dependsOnIds).toEqual(['22222222-2222-2222-2222-222222222222']);
-    expect(response.body.data[0].dependencyBlocked).toBe(true);
-    expect(prismaMock.task.findMany.mock.calls[0][0].include.dependencies).toBeDefined();
   });
 
   it('GET /api/v1/tasks includes archived tasks when requested', async () => {
@@ -154,16 +107,6 @@ describe('tasks api endpoints', () => {
         id: '22222222-2222-2222-2222-222222222222',
         title: 'Task detail',
         tags: [{ tag: { name: 'backend' } }],
-        dependencies: [
-          {
-            dependsOn: {
-              id: '33333333-3333-3333-3333-333333333333',
-              title: 'Done dependency',
-              status: 'done',
-              completedAt: new Date('2026-03-10T00:00:00.000Z')
-            }
-          }
-        ],
         comments: [
           {
             id: 'comment-1',
@@ -189,8 +132,6 @@ describe('tasks api endpoints', () => {
     expect(response.status).toBe(200);
     expect(response.body.data.id).toBe('22222222-2222-2222-2222-222222222222');
     expect(response.body.data.tags).toEqual(['backend']);
-    expect(response.body.data.dependsOnIds).toEqual(['33333333-3333-3333-3333-333333333333']);
-    expect(response.body.data.dependencyBlocked).toBe(false);
     expect(response.body.data.comments).toEqual([
       {
         id: 'comment-1',
@@ -308,135 +249,6 @@ describe('tasks api endpoints', () => {
     expect(response.body.data.title).toBe('Updated title');
     expect(response.body.data.status).toBe('doing');
     expect(prismaMock.task.update).toHaveBeenCalledTimes(1);
-  });
-
-  it('PATCH /api/v1/tasks/:id replaces dependencies', async () => {
-    const dependencyId = '22222222-2222-2222-2222-222222222222';
-    prismaMock.task.findFirst
-      .mockResolvedValueOnce(task())
-      .mockResolvedValueOnce(task({
-        dependencies: [
-          {
-            dependsOn: {
-              id: dependencyId,
-              title: 'Dependency',
-              status: 'ready',
-              completedAt: null
-            }
-          }
-        ]
-      }));
-    prismaMock.task.findMany.mockResolvedValue([{ id: dependencyId, archivedAt: null }]);
-    prismaMock.taskDependency.findFirst.mockResolvedValue(null);
-    prismaMock.task.update.mockResolvedValue(task());
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: [dependencyId, dependencyId] });
-
-    expect(response.status).toBe(200);
-    expect(response.body.data.dependsOnIds).toEqual([dependencyId]);
-    expect(response.body.data.dependencyBlocked).toBe(true);
-    expect(prismaMock.taskDependency.deleteMany).toHaveBeenCalledWith({
-      where: { taskId: '11111111-1111-1111-1111-111111111111' }
-    });
-    expect(prismaMock.taskDependency.createMany).toHaveBeenCalledWith({
-      data: [{ taskId: '11111111-1111-1111-1111-111111111111', dependsOnId: dependencyId }],
-      skipDuplicates: true
-    });
-  });
-
-  it('PATCH /api/v1/tasks/:id clears dependencies', async () => {
-    prismaMock.task.findFirst
-      .mockResolvedValueOnce(task())
-      .mockResolvedValueOnce(task());
-    prismaMock.task.update.mockResolvedValue(task());
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: [] });
-
-    expect(response.status).toBe(200);
-    expect(prismaMock.taskDependency.deleteMany).toHaveBeenCalledWith({
-      where: { taskId: '11111111-1111-1111-1111-111111111111' }
-    });
-    expect(prismaMock.taskDependency.createMany).not.toHaveBeenCalled();
-  });
-
-  it('PATCH /api/v1/tasks/:id rejects invalid dependency payloads', async () => {
-    prismaMock.task.findFirst.mockResolvedValue(task());
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: ['not-a-uuid'] });
-
-    expect(response.status).toBe(400);
-    expect(response.body).toEqual({
-      error: { code: 'INVALID_DEPENDS_ON_IDS', message: 'dependsOnIds must be an array of UUID strings' }
-    });
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('PATCH /api/v1/tasks/:id rejects self dependencies', async () => {
-    prismaMock.task.findFirst.mockResolvedValue(task());
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: ['11111111-1111-1111-1111-111111111111'] });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('SELF_DEPENDENCY_NOT_ALLOWED');
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('PATCH /api/v1/tasks/:id rejects unknown dependencies', async () => {
-    const dependencyId = '22222222-2222-2222-2222-222222222222';
-    prismaMock.task.findFirst.mockResolvedValue(task());
-    prismaMock.task.findMany.mockResolvedValue([]);
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: [dependencyId] });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('DEPENDENCY_TASK_NOT_FOUND');
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('PATCH /api/v1/tasks/:id rejects archived dependencies', async () => {
-    const dependencyId = '22222222-2222-2222-2222-222222222222';
-    prismaMock.task.findFirst.mockResolvedValue(task());
-    prismaMock.task.findMany.mockResolvedValue([{ id: dependencyId, archivedAt: new Date('2026-03-01T00:00:00.000Z') }]);
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: [dependencyId] });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('ARCHIVED_DEPENDENCY_NOT_ALLOWED');
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('PATCH /api/v1/tasks/:id rejects direct circular dependencies', async () => {
-    const dependencyId = '22222222-2222-2222-2222-222222222222';
-    prismaMock.task.findFirst.mockResolvedValue(task());
-    prismaMock.task.findMany.mockResolvedValue([{ id: dependencyId, archivedAt: null }]);
-    prismaMock.taskDependency.findFirst.mockResolvedValue({ taskId: dependencyId });
-
-    const app = createApp();
-    const response = await request(app)
-      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
-      .send({ dependsOnIds: [dependencyId] });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('CIRCULAR_DEPENDENCY_NOT_ALLOWED');
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
   it('DELETE /api/v1/tasks/:id archives task', async () => {

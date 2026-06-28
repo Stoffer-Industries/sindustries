@@ -16,13 +16,6 @@ export interface Comment {
   createdAt?: string;
 }
 
-export interface DependencyReference {
-  id: string | number;
-  title: string;
-  status: string;
-  completedAt?: string | null;
-}
-
 export interface Task {
   id: string | number;
   title: string;
@@ -38,9 +31,6 @@ export interface Task {
   createdAt?: string | null;
   statusChangedAt?: string | null;
   comments?: Comment[];
-  dependsOn?: DependencyReference[];
-  dependsOnIds?: Array<string | number>;
-  dependencyBlocked?: boolean;
 }
 
 export interface CreateTaskPayload {
@@ -51,7 +41,6 @@ export interface CreateTaskPayload {
   assignee?: string | null;
   tags?: string[];
   blocked?: boolean;
-  dependsOnIds?: Array<string | number>;
   taskType?: 'content' | 'code' | 'research' | null;
   // Note: 'ready' field removed; use status='ready' instead
 }
