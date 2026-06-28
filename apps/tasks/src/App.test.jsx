@@ -201,7 +201,7 @@ describe('tasks ui', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kanban' }));
 
     const readyColumn = await screen.findByTestId('column-ready');
-    const cards = within(readyColumn).getAllByRole('article');
+    const cards = within(readyColumn).getAllByRole('button');
     expect(cards[0]).toHaveTextContent('Older');
     expect(cards[1]).toHaveTextContent('Newer');
   });

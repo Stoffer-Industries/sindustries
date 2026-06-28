@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { TaskEditor } from '../components/TaskEditor.jsx';
 
 const defaultProps = {
@@ -24,9 +24,6 @@ const defaultProps = {
   onArchive: vi.fn(),
   onClose: vi.fn(),
   onAddComment: vi.fn(),
-  onFetchDependency: vi.fn(),
-  onUpdateDependencies: vi.fn(),
-  onOpenTask: vi.fn(),
   isSubmittingComment: false
 };
 
@@ -245,94 +242,5 @@ describe('TaskEditor', () => {
     render(<TaskEditor {...propsWithAssignee} />);
 
     expect(screen.getByLabelText('Detail assignee')).toHaveValue('Rowan');
-  });
-
-  it('renders dependency links with title and status', () => {
-    render(
-      <TaskEditor
-        {...defaultProps}
-        task={{
-          ...defaultProps.task,
-          dependsOn: [{ id: 'dep-1', title: 'Upstream API work', status: 'done' }],
-          dependsOnIds: ['dep-1']
-        }}
-      />
-    );
-
-    const dependencies = screen.getByRole('region', { name: 'Task dependencies' });
-    expect(within(dependencies).getByRole('button', { name: /Upstream API work\s*Done/ })).toBeInTheDocument();
-    expect(within(dependencies).getByText('Done')).toBeInTheDocument();
-  });
-
-  it('validates a dependency ID and confirms before adding it', async () => {
-    const onFetchDependency = vi.fn().mockResolvedValue({
-      id: 'dep-2',
-      title: 'Dependency task',
-      status: 'ready'
-    });
-    const onUpdateDependencies = vi.fn().mockResolvedValue(true);
-
-    render(
-      <TaskEditor
-        {...defaultProps}
-        task={{ ...defaultProps.task, id: 'task-1', dependsOn: [], dependsOnIds: [] }}
-        onFetchDependency={onFetchDependency}
-        onUpdateDependencies={onUpdateDependencies}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText('Dependency task ID'), { target: { value: 'dep-2' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }));
-
-    expect(await screen.findByText('Dependency task')).toBeInTheDocument();
-    expect(within(screen.getByRole('status')).getByText('Ready')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
-
-    await waitFor(() => {
-      expect(onUpdateDependencies).toHaveBeenCalledWith(['dep-2']);
-    });
-  });
-
-  it('shows an inline error when dependency lookup fails', async () => {
-    const onFetchDependency = vi.fn().mockRejectedValue(new Error('Task not found'));
-
-    render(
-      <TaskEditor
-        {...defaultProps}
-        task={{ ...defaultProps.task, id: 'task-1', dependsOn: [], dependsOnIds: [] }}
-        onFetchDependency={onFetchDependency}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText('Dependency task ID'), { target: { value: 'missing-task' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Task not found');
-  });
-
-  it('removes one dependency without clearing the rest', async () => {
-    const onUpdateDependencies = vi.fn().mockResolvedValue(true);
-
-    render(
-      <TaskEditor
-        {...defaultProps}
-        task={{
-          ...defaultProps.task,
-          dependsOn: [
-            { id: 'dep-1', title: 'First dependency', status: 'ready' },
-            { id: 'dep-2', title: 'Second dependency', status: 'doing' }
-          ],
-          dependsOnIds: ['dep-1', 'dep-2']
-        }}
-        onUpdateDependencies={onUpdateDependencies}
-      />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Remove dependency First dependency' }));
-
-    await waitFor(() => {
-      expect(onUpdateDependencies).toHaveBeenCalledWith(['dep-2']);
-    });
   });
 });

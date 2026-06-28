@@ -17,7 +17,6 @@ import {
 } from '@sindustries/ui/react';
 import { useTasks } from './useTasks.js';
 import { useTaskDrafts } from './useTaskDrafts.js';
-import { fetchTask } from './tasksApi';
 import { useDebounce } from './hooks/useDebounce.js';
 import { useToast } from './hooks/useToast.js';
 import { TaskCardSummary } from './components/TaskCardSummary.jsx';
@@ -806,9 +805,6 @@ export function App() {
                             scrollToTaskIfNeeded(task.id);
                           }}
                           onAddComment={(payload) => createTaskComment(task.id, payload)}
-                          onFetchDependency={fetchTask}
-                          onUpdateDependencies={(dependsOnIds) => patchTask(task.id, { dependsOnIds })}
-                          onOpenTask={openTask}
                           isSubmittingComment={submittingCommentForTaskId === task.id}
                         />
                       )}
@@ -894,9 +890,6 @@ export function App() {
                                     scrollToTaskIfNeeded(task.id);
                                   }}
                                   onAddComment={(payload) => createTaskComment(task.id, payload)}
-                                  onFetchDependency={fetchTask}
-                                  onUpdateDependencies={(dependsOnIds) => patchTask(task.id, { dependsOnIds })}
-                                  onOpenTask={openTask}
                                   isSubmittingComment={submittingCommentForTaskId === task.id}
                                 />
                               )}
