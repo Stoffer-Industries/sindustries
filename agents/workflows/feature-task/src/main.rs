@@ -254,8 +254,11 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     env.lobster_state.pr_urls = pr_urls.clone();
     for url in &pr_urls {
         match inspect_pr(url) {
-            Ok(review) if matches!(review, ReviewState::Approved | ReviewState::Merged) => {}
-            Ok(review) => failures.push(format!("PR {url} is not delivery-ready: {review:?}.")),
+            Ok(review) => {
+                if let Some(failure) = verify_delivery_review_failure(url, review) {
+                    failures.push(failure);
+                }
+            }
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
         if let Ok(body) = pr_body(url) {
@@ -285,16 +288,11 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     let mut failures = Vec::new();
     for url in rowan_pr_urls(&env.task) {
         match inspect_pr(&url) {
-            Ok(ReviewState::ChangesRequested) => {
-                failures.push(format!("Changes requested on {url}."))
+            Ok(review) => {
+                if let Some(failure) = feedback_review_failure(&url, review) {
+                    failures.push(failure);
+                }
             }
-            Ok(ReviewState::CommentsPresent) => {
-                failures.push(format!("Open review comments remain on {url}."))
-            }
-            Ok(ReviewState::Required) => {
-                failures.push(format!("Required review is missing on {url}."))
-            }
-            Ok(_) => {}
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
     }
@@ -323,6 +321,22 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     env.action_taken = "feedback_routed".to_string();
     env.failures = failures;
     Ok(env)
+}
+
+fn verify_delivery_review_failure(url: &str, review: ReviewState) -> Option<String> {
+    match review {
+        ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
+        ReviewState::ClosedUnmerged => Some(format!("PR {url} is closed without merge.")),
+        _ => None,
+    }
+}
+
+fn feedback_review_failure(url: &str, review: ReviewState) -> Option<String> {
+    match review {
+        ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
+        ReviewState::CommentsPresent => Some(format!("Open review comments remain on {url}.")),
+        _ => None,
+    }
 }
 
 fn post_merge(args: StageArgs) -> Result<Envelope> {
@@ -1448,6 +1462,31 @@ mod tests {
         assert_eq!(
             active,
             vec!["https://github.com/Stoffer-Industries/sindustries/pull/128".to_string()]
+        );
+    }
+
+    #[test]
+    fn verify_delivery_review_gate_allows_pending_review() {
+        let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
+        assert!(verify_delivery_review_failure(url, ReviewState::Required).is_none());
+        assert!(verify_delivery_review_failure(url, ReviewState::CommentsPresent).is_none());
+        assert_eq!(
+            verify_delivery_review_failure(url, ReviewState::ChangesRequested),
+            Some(format!("Changes requested on {url}."))
+        );
+        assert_eq!(
+            verify_delivery_review_failure(url, ReviewState::ClosedUnmerged),
+            Some(format!("PR {url} is closed without merge."))
+        );
+    }
+
+    #[test]
+    fn feedback_aggregate_waits_on_required_review_without_failure() {
+        let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
+        assert!(feedback_review_failure(url, ReviewState::Required).is_none());
+        assert_eq!(
+            feedback_review_failure(url, ReviewState::ChangesRequested),
+            Some(format!("Changes requested on {url}."))
         );
     }
 
