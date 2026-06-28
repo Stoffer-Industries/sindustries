@@ -32,7 +32,7 @@ function isReadyTask(task) {
 function cardState(task, isSelected) {
   if (task.archivedAt) return 'archived';
   if (isSelected) return 'editing';
-  if (task.blocked || task.dependencyBlocked) return 'blocked';
+  if (task.blocked) return 'blocked';
   if (isReadyTask(task)) return 'ready';
   return undefined;
 }

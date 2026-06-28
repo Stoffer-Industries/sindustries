@@ -235,28 +235,6 @@ describe('tasks ui', () => {
     expect(within(card).getByText('2026-03-07')).toBeInTheDocument();
   });
 
-  it('marks dependency-blocked tasks with the blocked card state', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          data: [mockTask({
-            id: 'dependency-blocked',
-            title: 'Dependency blocked',
-            dependencyBlocked: true,
-            blocked: false
-          })]
-        })
-      })
-    );
-
-    render(<App />);
-
-    const card = await screen.findByTestId('card-dependency-blocked');
-    expect(card).toHaveClass('si-card--blocked');
-  });
-
   it('refreshes tasks when the window regains focus', async () => {
     localStorage.setItem('tasks-app-view', 'board');
     const fetchMock = vi
