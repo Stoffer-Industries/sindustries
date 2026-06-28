@@ -45,7 +45,7 @@ def workflow_env() -> dict[str, str]:
         path_parts.append(existing_path)
     env["PATH"] = os.pathsep.join(path_parts)
     if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
-        token = _load_dotenv_token("ROWAN_GITHUB_TOKEN")
+        token = _load_dotenv_token("QUINN_GITHUB_TOKEN")
         if token:
             env["GH_TOKEN"] = token
     return env

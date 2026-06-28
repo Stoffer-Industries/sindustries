@@ -41,7 +41,7 @@ def run_workflow(task_id: str, capacity_limit: int) -> dict:
         dotenv = Path(__file__).parents[4] / ".openclaw" / ".env"
         try:
             for line in dotenv.read_text().splitlines():
-                if line.startswith("IVY_GITHUB_TOKEN="):
+                if line.startswith("QUINN_GITHUB_TOKEN="):
                     env["GH_TOKEN"] = line.split("=", 1)[1].strip()
                     break
         except Exception:
