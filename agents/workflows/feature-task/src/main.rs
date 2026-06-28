@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose, Engine as _};
 use clap::{ArgAction, Parser, Subcommand};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -246,7 +247,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = Vec::new();
-    let pr_urls = rowan_pr_urls(&env.task);
+    let pr_urls = rowan_active_pr_urls(&env.task);
     if pr_urls.is_empty() {
         failures.push("Missing `[rowan-prs]` task comment with at least one PR URL.".to_string());
     }
@@ -854,6 +855,20 @@ fn rowan_pr_urls(task: &Task) -> Vec<String> {
     urls
 }
 
+fn rowan_active_pr_urls(task: &Task) -> Vec<String> {
+    rowan_active_pr_urls_with(task, inspect_pr)
+}
+
+fn rowan_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
+where
+    F: Fn(&str) -> Result<ReviewState>,
+{
+    rowan_pr_urls(task)
+        .into_iter()
+        .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
+        .collect()
+}
+
 fn openclaw_needed(task: &Task) -> bool {
     !tagged_values(task, "[openclaw-needed]").is_empty()
 }
@@ -862,7 +877,33 @@ fn openclaw_done(task: &Task) -> bool {
     !tagged_values(task, "[openclaw-done]").is_empty()
 }
 
+trait SystemSpecFetcher {
+    fn read(&self, owner: &str, repo: &str, path: &str, branch: &str) -> Result<String>;
+}
+
+struct GhSystemSpecFetcher;
+
+impl SystemSpecFetcher for GhSystemSpecFetcher {
+    fn read(&self, owner: &str, repo: &str, path: &str, branch: &str) -> Result<String> {
+        fetch_github_contents(owner, repo, path, branch)
+    }
+}
+
 fn system_spec_failures(task: &Task, repo: &Path) -> Vec<String> {
+    system_spec_failures_with(task, repo, inspect_pr, pr_head_branch, &GhSystemSpecFetcher)
+}
+
+fn system_spec_failures_with<I, B>(
+    task: &Task,
+    _repo: &Path,
+    inspect: I,
+    branch_for_pr: B,
+    fetcher: &dyn SystemSpecFetcher,
+) -> Vec<String>
+where
+    I: Fn(&str) -> Result<ReviewState> + Copy,
+    B: Fn(&str) -> Result<String> + Copy,
+{
     let system_specs = tagged_values(task, "[system-spec]");
     if system_specs.is_empty() {
         let reasons = tagged_values(task, "[no-system-spec-change]");
@@ -871,14 +912,45 @@ fn system_spec_failures(task: &Task, repo: &Path) -> Vec<String> {
         }
         return vec!["Missing `[system-spec] docs/systems/<file>.md` or substantive `[no-system-spec-change]` reason.".to_string()];
     }
+    let active_prs = rowan_active_pr_urls_with(task, inspect);
+    let Some(active_pr_url) = active_prs.first() else {
+        return vec![
+            "Missing active `[rowan-prs]` PR URL to read system specs from a PR branch."
+                .to_string(),
+        ];
+    };
+    let (owner, repo_name) = match parse_pr_repo(active_pr_url) {
+        Ok(parts) => parts,
+        Err(err) => {
+            return vec![format!(
+                "Could not parse active PR URL `{active_pr_url}`: {err}."
+            )]
+        }
+    };
+    let branch = match branch_for_pr(active_pr_url) {
+        Ok(branch) => branch,
+        Err(err) => {
+            return vec![format!(
+                "Could not determine head branch for active PR `{active_pr_url}`: {err}."
+            )]
+        }
+    };
     system_specs
         .into_iter()
         .filter_map(|path| {
-            let full = repo.join(&path);
-            if !full.exists() {
-                return Some(format!("System spec does not exist: `{path}`."));
-            }
-            let text = fs::read_to_string(full).unwrap_or_default();
+            let text = match fetcher.read(&owner, &repo_name, &path, &branch) {
+                Ok(text) => text,
+                Err(err) if is_github_404(&err) => {
+                    return Some(format!(
+                        "System spec `{path}` is missing on PR branch `{branch}`."
+                    ))
+                }
+                Err(err) => {
+                    return Some(format!(
+                        "Could not read system spec `{path}` from PR branch `{branch}`: {err}."
+                    ))
+                }
+            };
             let current = rowan_pr_urls(task)
                 .into_iter()
                 .any(|url| text.contains(&url))
@@ -886,6 +958,78 @@ fn system_spec_failures(task: &Task, repo: &Path) -> Vec<String> {
             (!current).then(|| format!("System spec `{path}` does not reference this task or PR."))
         })
         .collect()
+}
+
+fn parse_pr_repo(url: &str) -> Result<(String, String)> {
+    let re = Regex::new(r"^https://github\.com/([^/]+)/([^/]+)/pull/\d+$").unwrap();
+    let caps = re
+        .captures(url)
+        .ok_or_else(|| anyhow!("expected GitHub PR URL"))?;
+    Ok((caps[1].to_string(), caps[2].to_string()))
+}
+
+fn pr_head_branch(url: &str) -> Result<String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            url,
+            "--json",
+            "headRefName",
+            "--jq",
+            ".headRefName",
+        ])
+        .output()
+        .context("run gh pr view for head branch")?;
+    if !output.status.success() {
+        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_string()));
+    }
+    let branch = String::from_utf8(output.stdout)?.trim().to_string();
+    if branch.is_empty() {
+        return Err(anyhow!("empty PR head branch"));
+    }
+    Ok(branch)
+}
+
+fn fetch_github_contents(owner: &str, repo: &str, path: &str, branch: &str) -> Result<String> {
+    let endpoint = format!("repos/{owner}/{repo}/contents/{path}?ref={branch}");
+    let output = Command::new("gh")
+        .args(["api", &endpoint])
+        .output()
+        .context("run gh api for contents")?;
+    if !output.status.success() {
+        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_string()));
+    }
+    decode_github_contents_response(&String::from_utf8(output.stdout)?)
+}
+
+fn decode_github_contents_response(raw: &str) -> Result<String> {
+    let value: Value = serde_json::from_str(raw)?;
+    let encoding = value
+        .get("encoding")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if encoding != "base64" {
+        return Err(anyhow!("unsupported GitHub contents encoding `{encoding}`"));
+    }
+    let content = value
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("GitHub contents response missing `content`"))?;
+    let compact: String = content.chars().filter(|c| !c.is_whitespace()).collect();
+    let decoded = general_purpose::STANDARD
+        .decode(compact)
+        .context("decode GitHub contents base64")?;
+    String::from_utf8(decoded).context("GitHub contents file is not UTF-8")
+}
+
+fn is_github_404(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("HTTP 404") || message.contains("Not Found")
 }
 
 fn inspect_pr(url: &str) -> Result<ReviewState> {
@@ -1274,6 +1418,40 @@ mod tests {
     }
 
     #[test]
+    fn active_rowan_pr_urls_skip_merged_prs() {
+        let task = Task {
+            comments: vec![
+                TaskComment {
+                    text: Some(
+                        "[rowan-prs]\nhttps://github.com/Stoffer-Industries/sindustries/pull/120"
+                            .to_string(),
+                    ),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(
+                        "[rowan-prs]\nhttps://github.com/Stoffer-Industries/sindustries/pull/128"
+                            .to_string(),
+                    ),
+                    body: None,
+                },
+            ],
+            ..Task::default()
+        };
+        let active = rowan_active_pr_urls_with(&task, |url| {
+            if url.ends_with("/120") {
+                Ok(ReviewState::Merged)
+            } else {
+                Ok(ReviewState::Approved)
+            }
+        });
+        assert_eq!(
+            active,
+            vec!["https://github.com/Stoffer-Industries/sindustries/pull/128".to_string()]
+        );
+    }
+
+    #[test]
     fn parses_github_review_states() {
         assert_eq!(
             parse_github_review_state(&fixture("github_approved.json")).unwrap(),
@@ -1309,20 +1487,100 @@ mod tests {
     #[test]
     fn validates_existing_current_system_spec() {
         let repo = tempdir().unwrap();
-        fs::create_dir_all(repo.path().join("docs/systems")).unwrap();
-        fs::write(
-            repo.path().join("docs/systems/feature-task.md"),
-            "References task-1",
-        )
-        .unwrap();
         let task = Task {
             id: "task-1".to_string(),
-            comments: vec![TaskComment {
-                text: Some("[system-spec] docs/systems/feature-task.md".to_string()),
-                body: None,
-            }],
+            comments: vec![
+                TaskComment {
+                    text: Some("[system-spec] docs/systems/feature-task.md".to_string()),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(
+                        "[rowan-prs] https://github.com/Stoffer-Industries/sindustries/pull/128"
+                            .to_string(),
+                    ),
+                    body: None,
+                },
+            ],
             ..Task::default()
         };
-        assert!(system_spec_failures(&task, repo.path()).is_empty());
+        let fetcher = StubFetcher {
+            body: "References task-1".to_string(),
+            error: None,
+        };
+        assert!(system_spec_failures_with(
+            &task,
+            repo.path(),
+            |_| Ok(ReviewState::Approved),
+            |_| Ok("task-456c92a8-depends-on".to_string()),
+            &fetcher,
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn reports_system_spec_missing_on_pr_branch() {
+        let repo = tempdir().unwrap();
+        let task = Task {
+            id: "task-1".to_string(),
+            comments: vec![
+                TaskComment {
+                    text: Some("[system-spec] docs/systems/feature-task.md".to_string()),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(
+                        "[rowan-prs] https://github.com/Stoffer-Industries/sindustries/pull/128"
+                            .to_string(),
+                    ),
+                    body: None,
+                },
+            ],
+            ..Task::default()
+        };
+        let fetcher = StubFetcher {
+            body: String::new(),
+            error: Some("gh: Not Found (HTTP 404)".to_string()),
+        };
+        assert_eq!(
+            system_spec_failures_with(
+                &task,
+                repo.path(),
+                |_| Ok(ReviewState::Approved),
+                |_| Ok("task-456c92a8-depends-on".to_string()),
+                &fetcher,
+            ),
+            vec![
+                "System spec `docs/systems/feature-task.md` is missing on PR branch `task-456c92a8-depends-on`."
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn decodes_github_contents_response() {
+        let raw = json!({
+            "encoding": "base64",
+            "content": "UmVmZXJlbmNlcyB0YXNrLTE=\n"
+        })
+        .to_string();
+        assert_eq!(
+            decode_github_contents_response(&raw).unwrap(),
+            "References task-1"
+        );
+    }
+
+    struct StubFetcher {
+        body: String,
+        error: Option<String>,
+    }
+
+    impl SystemSpecFetcher for StubFetcher {
+        fn read(&self, _owner: &str, _repo: &str, _path: &str, _branch: &str) -> Result<String> {
+            match &self.error {
+                Some(error) => Err(anyhow!(error.clone())),
+                None => Ok(self.body.clone()),
+            }
+        }
     }
 }
