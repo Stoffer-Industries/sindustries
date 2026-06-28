@@ -1,7 +1,7 @@
 # Feature Task Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-29
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/feature-task/`
 
 ---
@@ -137,13 +137,27 @@ The first-class Tasks API target is `taskType`, `tech_design_url`, `tech_design_
 
 ## Spec Checksum Safeguards (factory-v2 last grandfathered edit)
 
-After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). Every task event (status change, AC edit, dependency add, comment) recalculates the checksum and verifies it against the stored value. A mismatch blocks the event with a clear error pointing the user to write a new spec; there is no one-click create-new-spec UI yet.
+After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). A drift between the stored checksum and the current AC text blocks the write with `409 SPEC_CHECKSUM_MISMATCH`, pointing the user to write a new spec; there is no one-click create-new-spec UI yet.
+
+### Which writes hit the drift handshake
+
+Only the two write surfaces that mutate `description` enforce the checksum:
+
+| Surface | Trigger | Drift guard |
+|---|---|---|
+| `PATCH /tasks/:id` (with `description` in body) | `tasks.ts` calls `rejectSpecDrift(res, existing, newDescription)` | `409 SPEC_CHECKSUM_MISMATCH` if the canonical AC checksum no longer matches `existing.specChecksum` |
+| `POST /tasks/:id/comments` | `tasks.ts` calls `rejectSpecDrift(res, existing, existing.description)` | Same `409` response if ACs have drifted since the comment was authored |
+
+Other task events (status changes, dependency adds, tag edits, AC-free PATCH writes, comment edits) do **not** re-check the checksum — they succeed even if ACs have drifted. If a caller needs to assert the AC is still in scope on those paths, the caller is responsible for passing `description` into a `PATCH` first.
+
+The error message returned on drift names the task id, the stored `specChecksum`, and the current recomputed checksum so the caller can decide whether to write a new spec or roll the stored checksum forward via a follow-up `PATCH /tasks/:id` with the matching `description`.
 
 `factory-v2` is the last task grandfathered with editable ACs after spec approval. From the next task onward, ACs are frozen at approval and any change requires a new task.
 
 Lives in:
 - `services/tasks-api/prisma/schema.prisma` — `specChecksum` field on tasks
-- `services/tasks-api/src/routes/tasks.ts` — write-side validation; returns `409 SPEC_CHECKSUM_MISMATCH` with the stored vs. current checksum
+- `services/tasks-api/src/routes/tasks/_spec.ts` — `rejectSpecDrift` helper + canonical AC checksum
+- `services/tasks-api/src/routes/tasks.ts` — write-side validation at the two PATCH/POST call sites above
 - `agents/workflows/feature-task/src/main.rs` — Rust-side checksum guard at the lobster gate
 
 ---
@@ -183,7 +197,8 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 | `ready -> doing` blocked | Missing `[tech-design-approved]` or `specChecksum` drift | Quinn confirms Tom sign-off and posts `[tech-design-approved] true`; for drift, write a new spec |
 | `[openclaw-needed]` never resolved | Quinn missed the heartbeat step | Quinn scans active feature tasks on the next heartbeat tick |
 | `acceptance -> done` blocked | `[system-spec]` missing or no `[no-system-spec-change]` reason | Author `docs/systems/<system>.md` and post `[system-spec] <path>` |
-| Spec checksum mismatch | ACs edited after spec approval | Treat as spec drift — write a new spec, do not hand-edit ACs |
+| Spec checksum mismatch | ACs edited after spec approval | Hits only `PATCH /tasks/:id` (with `description`) and `POST /tasks/:id/comments`; both return `409 SPEC_CHECKSUM_MISMATCH`. Treat as spec drift — write a new spec, do not hand-edit ACs. |
+| `PATCH` succeeds despite stale ACs | Other event types (status change, dependency add, tag edit) don't re-check the checksum | Pass the updated `description` through `PATCH /tasks/:id` first so the drift check fires there. |
 | CI green but PR not merged | Reviewer has not approved | Wait for `APPROVED` review state; Lobster will not mark `done` until GitHub merge is recorded |
 
 ---
