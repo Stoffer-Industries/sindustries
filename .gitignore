@@ -8,10 +8,12 @@ dist/
 services/tasks-api/.env.dev
 services/tasks-api/.env.prodlike
 services/tasks-api/src/generated/
+services/tasks-api/generated/
 services/budget-api/.env.dev
 services/budget-api/.env.dev.local
 services/budget-api/.env.prodlike.local
 services/budget-api/src/generated/
+services/budget-api/generated/
 apps/tasks/test-results/.last-run.json
 .db-backups/
 .vercel
