@@ -50,6 +50,35 @@ if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev
   exit 1
 fi
 
+ensure_dev_workspace_deps() {
+  local missing=0
+
+  for path in \
+    "$ROOT_DIR/node_modules/.bin/tsx" \
+    "$ROOT_DIR/node_modules/.bin/vite" \
+    "$ROOT_DIR/node_modules/@vitejs/plugin-react/package.json"; do
+    if [[ ! -e "$path" ]]; then
+      missing=1
+      break
+    fi
+  done
+
+  if [[ "$missing" == "0" ]]; then
+    return 0
+  fi
+
+  echo "Installing missing JS workspace dependencies..."
+  (
+    cd "$ROOT_DIR"
+    npm install \
+      --workspace @sindustries/tasks-api \
+      --workspace @sindustries/budget-api \
+      --workspace @sindustries/tasks-app
+  )
+}
+
+ensure_dev_workspace_deps
+
 if ! colima status >/dev/null 2>&1; then
   echo "Starting Colima..."
   colima start
