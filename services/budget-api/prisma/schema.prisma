@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -187,4 +188,3 @@ model NotificationEvent {
   @@index([userId, createdAt])
   @@index([userId, cardId, month])
 }
-
