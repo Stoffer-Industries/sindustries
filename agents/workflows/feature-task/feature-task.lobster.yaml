@@ -29,25 +29,25 @@ steps:
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $spec_check.stdout
-    condition: $spec_check.json.criteria_met
+    condition: $spec_check.json.criteriaMet
 
   - id: verify_delivery
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $ready_checks.stdout
-    condition: $ready_checks.json.criteria_met
+    condition: $ready_checks.json.criteriaMet
 
   - id: feedback_aggregate
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $verify_delivery.stdout
-    condition: $verify_delivery.json.criteria_met
+    condition: $verify_delivery.json.criteriaMet
 
   - id: post_merge
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $feedback_aggregate.stdout
-    condition: $feedback_aggregate.json.criteria_met
+    condition: $feedback_aggregate.json.criteriaMet
