@@ -193,7 +193,120 @@ async function main() {
     }
   });
 
-  console.log('Seed complete: 26 tasks, 8 tags, Seed Task 15 comments, Comment Test Task, Markdown Showcase Task.');
+  const unfinishedDependency = await prisma.task.create({
+    data: {
+      id: '11111111-aaaa-4000-8000-000000000001',
+      title: 'Dependency Demo Blocker - unfinished',
+      description: 'AC2 demo dependency. Leave this task unfinished so the dependent demo task returns dependencyBlocked: true.',
+      status: 'doing',
+      priority: 'high',
+      statusChangedAt: new Date(),
+      assignee: 'Rowan',
+      comments: {
+        create: [
+          {
+            author: 'Rowan',
+            body: 'This is the unfinished dependency for the AC2 demo task.'
+          }
+        ]
+      }
+    }
+  });
+
+  await prisma.task.create({
+    data: {
+      id: '11111111-aaaa-4000-8000-000000000002',
+      title: 'Dependency Demo - AC2 blocked by unfinished dependency',
+      description: [
+        'AC2 demo task.',
+        '',
+        'Expected API/UI behavior:',
+        '- blocked: false',
+        '- dependencyBlocked: true',
+        '- dependsOn includes "Dependency Demo Blocker - unfinished"',
+        '- the card should still render with the blocked visual state because dependencyBlocked is true'
+      ].join('\n'),
+      status: 'ready',
+      priority: 'urgent',
+      blocked: false,
+      statusChangedAt: new Date(),
+      assignee: 'Tom',
+      dependencies: {
+        create: [
+          {
+            dependsOnId: unfinishedDependency.id
+          }
+        ]
+      },
+      comments: {
+        create: [
+          {
+            author: 'Rowan',
+            body: 'Use this task to verify AC2 without creating dependency data by hand.'
+          }
+        ]
+      }
+    }
+  });
+
+  const completedDependency = await prisma.task.create({
+    data: {
+      id: '11111111-aaaa-4000-8000-000000000003',
+      title: 'Dependency Demo Blocker - completed',
+      description: 'AC3 demo dependency. This task is already done so dependent tasks should not be dependency-blocked by it.',
+      status: 'done',
+      priority: 'medium',
+      statusChangedAt: daysAgo(1),
+      completedAt: daysAgo(1),
+      assignee: 'Rowan',
+      comments: {
+        create: [
+          {
+            author: 'Rowan',
+            body: 'This is the completed dependency for the AC3 demo task.'
+          }
+        ]
+      }
+    }
+  });
+
+  await prisma.task.create({
+    data: {
+      id: '11111111-aaaa-4000-8000-000000000004',
+      title: 'Dependency Demo - AC3 unblocked by completed dependency',
+      description: [
+        'AC3 demo task.',
+        '',
+        'Expected API/UI behavior:',
+        '- blocked: false',
+        '- dependencyBlocked: false',
+        '- dependsOn includes "Dependency Demo Blocker - completed"',
+        '- the card should not render with the blocked visual state from dependency state'
+      ].join('\n'),
+      status: 'ready',
+      priority: 'high',
+      blocked: false,
+      statusChangedAt: new Date(),
+      assignee: 'Tom',
+      dependencies: {
+        create: [
+          {
+            dependsOnId: completedDependency.id
+          }
+        ]
+      },
+      comments: {
+        create: [
+          {
+            author: 'Rowan',
+            body: 'Use this task to verify AC3 without manually completing a dependency first.'
+          }
+        ]
+      }
+    }
+  });
+
+  console.log('Seed complete: 30 tasks, 8 tags, Seed Task 15 comments, Comment Test Task, Markdown Showcase Task, dependency AC2/AC3 demo tasks.');
 }
 
 main()
