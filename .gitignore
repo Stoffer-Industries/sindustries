@@ -2,6 +2,9 @@
 node_modules/
 **/node_modules/
 **/dist/
+# Rust build artifacts (e.g. agents/workflows/feature-task/target/ at 589 MB)
+target/
+**/target/
 .env
 dist/
 **/.env
