@@ -39,6 +39,7 @@ npm run dev
 
 - `DATABASE_URL` must include `?schema=budget_api` (see `.env.example`).
 - If you see Prisma `P2021` errors like `The table budget_api.User does not exist`, it means migrations have not been applied yet.
+- The Prisma client writes to `services/budget-api/generated/prisma` (see `prisma/schema.prisma`). Worktrees branched before `c8dbac8` may still have a stale `services/budget-api/src/generated/` directory — it is gitignored but unused, and can be removed with `rm -rf services/budget-api/src/generated` to silence editor warnings.
 
 ## MVP endpoints
 
