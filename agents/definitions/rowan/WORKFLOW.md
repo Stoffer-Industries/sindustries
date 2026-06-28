@@ -92,10 +92,12 @@ Before writing any code on a feature task, write the tech design:
 
 ### System spec (required before acceptance)
 
-Before the task can move from `doing` to `acceptance`, a system spec must exist documenting what shipped.
+Before the task can move from `doing` to `acceptance`, a system spec must be updated or created.
+
+**Default: update an existing spec.** Check `docs/systems/` first. If this task's changes belong to an existing system, update that file rather than creating a new one. Prefer fewer, broader specs over one-per-feature proliferation — only create a new spec file when the work introduces a genuinely new system or subsystem that has no natural home in an existing doc.
 
 - Use the system-spec skill: `agents/skills/dev/system-spec/SKILL.md`
-- Write the spec to `docs/systems/<name>.md` in the sindustries repo
+- Target: an existing `docs/systems/<name>.md` (update) or a new one only if truly warranted
 - Post a task comment: `[system-spec] docs/systems/<name>.md`
 
 If the change is genuinely non-functional (config tweak, docs-only, test-only), post instead:
