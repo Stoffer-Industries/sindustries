@@ -36,12 +36,22 @@ def run_workflow(task_id: str, capacity_limit: int) -> dict:
     args_json = json.dumps({"taskId": task_id, "ivyCapacityLimit": capacity_limit})
     cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
     log_debug("starting content-task pass for " + task_id)
+    env = os.environ.copy()
+    if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
+        dotenv = Path(__file__).parents[4] / ".openclaw" / ".env"
+        try:
+            for line in dotenv.read_text().splitlines():
+                if line.startswith("IVY_GITHUB_TOKEN="):
+                    env["GH_TOKEN"] = line.split("=", 1)[1].strip()
+                    break
+        except Exception:
+            pass
     proc = subprocess.Popen(
         cmd,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=os.environ.copy(),
+        env=env,
     )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []

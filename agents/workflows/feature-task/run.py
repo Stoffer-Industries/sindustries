@@ -26,6 +26,17 @@ PATH_PREFIXES = [
 ]
 
 
+def _load_dotenv_token(key: str) -> str:
+    dotenv = Path.home() / ".openclaw" / ".env"
+    try:
+        for line in dotenv.read_text().splitlines():
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+
+
 def workflow_env() -> dict[str, str]:
     env = os.environ.copy()
     existing_path = env.get("PATH", "")
@@ -33,6 +44,10 @@ def workflow_env() -> dict[str, str]:
     if existing_path:
         path_parts.append(existing_path)
     env["PATH"] = os.pathsep.join(path_parts)
+    if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
+        token = _load_dotenv_token("ROWAN_GITHUB_TOKEN")
+        if token:
+            env["GH_TOKEN"] = token
     return env
 
 
