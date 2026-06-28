@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "prisma generate",
     "dev": "tsx watch src/server.ts",
+    "prestart": "prisma generate",
     "start": "tsx src/server.ts",
+    "pretest": "prisma generate",
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
@@ -33,4 +36,3 @@
     "vitest": "^2.1.2"
   }
 }
-
