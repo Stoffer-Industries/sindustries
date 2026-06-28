@@ -90,6 +90,19 @@ Before writing any code on a feature task, write the tech design:
 - PR body must include all parent task ACs, with `- [x]` for done and `- [ ]` for not yet done
 - Each PR body must list which parent ACs its sub-ACs contribute to
 
+### System spec (required before acceptance)
+
+Before the task can move from `doing` to `acceptance`, a system spec must exist documenting what shipped.
+
+- Use the system-spec skill: `agents/skills/dev/system-spec/SKILL.md`
+- Write the spec to `docs/systems/<name>.md` in the sindustries repo
+- Post a task comment: `[system-spec] docs/systems/<name>.md`
+
+If the change is genuinely non-functional (config tweak, docs-only, test-only), post instead:
+`[no-system-spec-change] <one-sentence reason why no system spec is needed>`
+
+The Lobster verify-delivery step checks for one of these two comments and will block acceptance until it finds one.
+
 ### Acceptance
 - Stay in `acceptance` while addressing PR review feedback — do not regress to `doing`
 - Address valid feedback on the same branch and push; do not open new PRs for review iterations
