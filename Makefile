@@ -1,4 +1,4 @@
-.PHONY: bootstrap up down reset-db migrate-db test test-api test-app test-e2e
+.PHONY: bootstrap up down reset-db migrate-db test test-api test-app test-website test-e2e test-all
 
 MODE ?= dev
 
@@ -21,12 +21,17 @@ migrate-db:
 
 test: test-api test-app test-e2e
 
+test-all: test-api test-website test-app test-e2e
+
 test-api:
 	cd services/tasks-api && npm test
 	cd services/budget-api && npm test
 
 test-app:
 	cd apps/tasks && npm test
+
+test-website:
+	cd apps/website && npm test
 
 test-e2e:
 	cd apps/tasks && npm run test:e2e
