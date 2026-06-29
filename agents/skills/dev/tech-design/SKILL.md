@@ -7,6 +7,8 @@ description: "Create approved implementation tech designs for feature tasks."
 
 Use this skill when a feature task needs a design before Rowan starts implementation.
 
+Read [`docs/CONVENTIONS.md`](../../../../docs/CONVENTIONS.md) for the full doc taxonomy and required frontmatter before writing.
+
 Write the design to `docs/specs/<task-slug>-tech-design.md`.
 
 Include:

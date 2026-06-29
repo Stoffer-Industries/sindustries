@@ -13,6 +13,10 @@ A task is only Done when all are true:
 3. **Specification documentation included**
    - Problem, scope, assumptions, non-goals.
    - Design decisions and tradeoffs.
+   - Read [`docs/CONVENTIONS.md`](../../../docs/CONVENTIONS.md) before writing or updating any spec or system doc.
+   - Tech design frontmatter updated on ship: `status: shipped`, `shipped_pr`, `shipped_date`.
+   - `docs/systems/` doc updated or created for any system behaviour change.
+   - `apps/<app>/SPEC.md` updated if user-visible behaviour changed.
 
 4. **Operational safety covered**
    - Rollback/mitigation notes captured.

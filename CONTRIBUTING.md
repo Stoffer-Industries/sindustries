@@ -5,9 +5,11 @@
 This repo uses a **spec-first** workflow for any non-trivial change, plus a strict **dev vs prodlike** split for local work.
 
 For non-trivial code tasks:
-- create or update a real spec doc before implementation starts in `docs/specs`
+- create or update a tech design in `docs/specs/` before implementation starts
 - record the spec doc path in the task
 - task notes are not a substitute for a spec doc
+
+See [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) for the full doc taxonomy: tech designs, system docs, app specs, and their lifecycle.
 
 ## Environment rules
 
@@ -56,7 +58,7 @@ For non-trivial work:
 1. Pass a clarification gate
    - Ask questions if needed, or explicitly note why no clarification is needed.
    - Record assumptions.
-2. Write or update a short spec in `docs/specs/` before implementation.
+2. Write or update a tech design in `docs/specs/` before implementation (see [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)).
 3. Implement in small, mergeable slices.
 4. Validate with the right tests/checks and note any manual verification.
 5. Capture rollback, mitigation, or follow-up notes if risk remains.
@@ -90,7 +92,8 @@ CI currently covers:
 6. The PR summary must include the ACs relevant to that PR.
 7. Tom should not review code until all required checks are passing.
 8. Every AC covered by that PR needs at least one E2E test, unless explicitly marked not possible with a reason.
-9. The PR should be assigned to **`Stoff81`** for review once ready.
+9. If the PR changes user-visible behaviour in an app, `apps/<app>/SPEC.md` must be updated to reflect it.
+10. The PR should be assigned to **`Stoff81`** for review once ready.
 
 ## Commit message standard
 
