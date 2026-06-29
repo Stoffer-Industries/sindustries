@@ -15,13 +15,13 @@ Use when turning a request into a tracked feature task. Covers the factory vs di
 - Is a new capability, not a removal or rename
 - Will take Rowan more than a few hours of focused work
 
-**Assign directly** (no factory, no spec) when the work is:
+**Assign directly** (no task needed) when the work is:
 - Removing or renaming an old artifact
 - A typo / cosmetic fix
 - A config or path correction
 - Something Tom has already verbally approved and scoped
 
-Direct tasks still go through the Tasks API but do not need `taskType: feature` or a spec line. Use a `taskType: chore` and skip the spec and workstream block.
+For direct work: hand it to Rowan with a clear instruction and let him open a PR. No Tasks API call needed.
 
 ---
 
@@ -117,7 +117,7 @@ base = 'http://localhost:4001/api/v1'
 
 # Create new task
 payload = json.dumps({
-    'title': '🔧 <Title>',
+    'title': '<Title>',
     'description': '<formatted description from Step 3>',
     'taskType': 'feature',
     'assignee': 'Rowan',

@@ -4,7 +4,7 @@
 Heartbeat discovers and advances content tasks assigned to Ivy.
 
 Workflow semantics for the content task workflow Lobster are defined in:
-- /Users/quinnstoffer/.openclaw/workspace/brain/tasks/specs/app-tasks/content-task-workflow-lobster.md
+- agents/workflows/content-tasks/content-task.lobster.yaml
 
 Ivy must NEVER change task status. The Lobster does that.
 
