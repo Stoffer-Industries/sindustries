@@ -91,7 +91,7 @@ const DEFAULT_API_BASE_BY_PORT: Record<string, string> = {
 const API_BASE =
   import.meta.env.VITE_TASKS_API_BASE_URL
   ?? DEFAULT_API_BASE_BY_PORT[window.location.port]
-  ?? 'http://localhost:4000/api/v1';
+  ?? 'http://localhost:4001/api/v1';
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
