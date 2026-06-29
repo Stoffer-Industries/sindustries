@@ -28,7 +28,6 @@ Planned product evolution:
 
 - `docs/systems/agent-orchestration.md` — high-level map of agent workflows, heartbeat, content, tasks, and incident handling.
 - `docs/systems/bookmark-workflow.md` — detailed bookmark pipeline state machine, scripts, curation, approval, and task creation.
-- `TASK_PROCESS.md` — task lifecycle source of truth.
 
 ## Local setup (dev + prodlike)
 
