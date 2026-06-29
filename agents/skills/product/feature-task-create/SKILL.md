@@ -43,7 +43,7 @@ Do **not** amend an existing approved spec unless the task is explicitly an amen
 # Spec — <Title>
 
 **Status:** Draft
-- [ ] Approved by Tom
+- [ ] **Approved by Tom**
 
 ## Outcome
 
