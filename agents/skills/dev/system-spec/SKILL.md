@@ -7,6 +7,8 @@ description: "Create or update durable system specifications for shipped feature
 
 Use this skill when a feature changes durable system behavior, data contracts, workflow orchestration, cron behavior, or operational ownership.
 
+Read [`docs/CONVENTIONS.md`](../../../../docs/CONVENTIONS.md) for the full doc taxonomy before writing or updating.
+
 **Default: update an existing spec.** Check `docs/systems/` first. If this task's changes belong to an existing system, update that file. Only create a new `docs/systems/<name>.md` when the work introduces a genuinely new system or subsystem with no natural home in an existing doc. Prefer fewer, broader specs over per-feature proliferation.
 
 Create or update `docs/systems/<system>.md`.
