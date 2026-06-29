@@ -194,12 +194,11 @@ stateDiagram-v2
 
 **Who can do what**
 - **Agents (Rowan, Ivy):** open PRs, write code/copy, comment progress. **Cannot** change task state.
-- **Quinn:** advances state via the Tasks API during heartbeat, after `task_transition_check.py` validates the move.
+- **Quinn:** advances state via the Tasks API during heartbeat, after workflow-specific validation passes.
 - **Tom:** reviews PRs, merges, approves in-acceptance items.
 
 **Key files**
 - Source of truth: `TASK_PROCESS.md`
-- Transition validator: `scripts/task_transition_check.py`
 - API client: `agents/skills/ops/tasks-api/tasks_api_client.py`
 - Prodlike API: `http://localhost:4001/api/v1`
 
@@ -233,7 +232,7 @@ flowchart TB
 | 2 | Spec dispatch | Writes spec markdown for `spec_requested` items, max 2 per heartbeat | `bookmark-review-state.json` |
 | 3 | Content task lobster | Reports only failures / blocked / meaningful transitions | none (read-only) |
 | 4 | PR review | Lists open PRs assigned to Quinn, reviews for blockers | none (read-only) |
-| 5 | Task inspection | Runs `task_transition_check` on heartbeat task set, advances valid tasks | Tasks API |
+| 5 | Task inspection | Inspects heartbeat task set, advances valid tasks | Tasks API |
 
 **Heartbeat never:**
 - Modifies code
@@ -351,7 +350,7 @@ Quick troubleshooting pointer — find the symptom and check the file.
 |---|---|
 | Bookmark stuck in a state | `brain/state/bookmark-review-state.json` |
 | Spec never written | `brain/state/spec-output.json` last entry + validate step output |
-| Task not advancing | `task_transition_check.py <task-id>` for failed criteria |
+| Task not advancing | `HEARTBEAT.md` + task comments for failed criteria |
 | Heartbeat silently broken | `HEARTBEAT.md` + `cron list` |
 | PR not appearing | `gh pr list --repo Stoffer-Industries/sindustries` |
 | Curation scores stale | `brain/state/bookmark-review-state.json` → check `curation.createdAt` |

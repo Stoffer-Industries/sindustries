@@ -21,7 +21,7 @@
   - `apps/tasks/src/utils/helpers.js`
   - `apps/tasks/src/**/*.test.*` for visible blocked behavior
   - `agents/skills/ops/tasks-api/tasks_api_client.py`
-  - `agents/skills/ops/tasks-api/tests/test_task_transition_check.py` or a new focused client test if the current suite is not the right fit
+  - `agents/skills/ops/tasks-api/tests/test_tasks_api_client.py` or a new focused client test if the current suite is not the right fit
 
 ## Product Summary
 

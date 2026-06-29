@@ -425,11 +425,11 @@ def bookmark_workspace_context(topic: str) -> dict[str, Any]:
             "adjacentComponents": [
                 "scripts/bookmarks/lobster_request_spec_approval.py",
                 "TASK_PROCESS.md",
-                "Tasks API + transition check (scripts/task_transition_check.py)",
+                "Tasks API",
             ],
             "evaluationQuestions": [
                 "Is the bookmark about how a task is shaped, triaged, approved, transitioned, or reported — rather than about a specific task domain?",
-                "Could it land in the Tasks API + transition check + bookmark-pipeline spec workflow without inventing a new system?",
+                "Could it land in the Tasks API + bookmark-pipeline spec workflow without inventing a new system?",
                 "Does it sharpen an existing workflow step, rather than adding a new feature surface?",
             ],
         },
