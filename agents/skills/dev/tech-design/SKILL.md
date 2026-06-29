@@ -24,6 +24,8 @@ After writing the design, post the durable task comment:
 
 `[tech-design] <repo URL or local path>`
 
-Do not mark approval yourself. Quinn records Tom's approval with:
+Quinn approves tech designs as part of heartbeat. After reading the design at the linked path, post the durable task comment:
 
 `[tech-design-approved] true`
+
+Quinn should review the design for: completeness (all required sections present), alignment with the product spec, no unbounded scope, `.openclaw` boundary notes where relevant. If anything looks wrong or risky, flag to Tom instead of approving.

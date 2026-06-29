@@ -24,6 +24,21 @@ Heartbeat only reports bookmark pipeline health:
 
 ---
 
+TECH DESIGN APPROVAL
+
+Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated this.
+
+Each heartbeat:
+1. Run the feature task workflow check (see FEATURE TASK LOBSTER CHECK below).
+2. For any task blocked on `[tech-design-approved]` that already has a `[tech-design]` comment:
+   - Read the design at the linked path.
+   - Check: all required sections present, aligned with spec, no unbounded scope, `.openclaw` boundary notes where relevant.
+   - If it looks good: post task comment `[tech-design-approved] true`
+   - If something looks wrong or risky: flag to Tom via Telegram instead of approving.
+3. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
+
+---
+
 CONTENT TASK LOBSTER CHECK
 
 Quinn dispatches content task workflow passes from heartbeat; Lobster owns all status transitions.
