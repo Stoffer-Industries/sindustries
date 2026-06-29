@@ -308,7 +308,7 @@ flowchart LR
 |---|---|---|
 | `brain/bookmarks/` | Inbound material (X, links, research) | x-bookmark-ingest |
 | `brain/reviews/` | Our opinions / analysis on bookmarks | Quinn |
-| `brain/specs/` | Implementation plans derived from reviews | spec-author skill |
+| `brain/tasks/specs/` | Implementation-target docs for feature tasks | Quinn / Rowan |
 | `brain/posts/` | Public content (blog, social) | Ivy |
 | `brain/ops/notes/` | Daily content signals (feeds weekly review) | Quinn / Lox |
 | `brain/content/sindustries-weekly-content/` | Weekly review files for Tom triage | Quinn |
@@ -319,7 +319,7 @@ flowchart LR
 **Rule of thumb (from AGENTS.md):**
 - raw / inbound idea → `brain/bookmarks/`
 - interpretation / opinion → `brain/reviews/`
-- build-against plan → `brain/specs/`
+- build-against plan → `brain/tasks/specs/`
 - publishable content → `brain/posts/`
 - daily content signal → `brain/ops/notes/`
 - weekly review for triage → `brain/content/sindustries-weekly-content/`
