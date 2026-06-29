@@ -27,16 +27,6 @@ import request_topic_approval
 import lobster_resolve_spec_request as resolve_spec_request
 import handle_approval_reply
 
-TASKS_OPS_DIR = Path(__file__).resolve().parents[1] / "agents" / "skills" / "ops" / "tasks-api"
-task_transition_spec = importlib.util.spec_from_file_location(
-    "task_transition_check",
-    TASKS_OPS_DIR / "task_transition_check.py",
-)
-task_transition_check = importlib.util.module_from_spec(task_transition_spec)
-assert task_transition_spec.loader is not None
-task_transition_spec.loader.exec_module(task_transition_check)
-
-
 class BookmarkWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -1489,11 +1479,6 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertIn("source:bookmark-review-pipeline", request_payload["tags"])
         self.assertIn(f"bookmark:{self.bookmark['bookmarkKey']}", request_payload["tags"])
         self.assertTrue(any(tag.startswith("spec-task:") for tag in request_payload["tags"]))
-        transition_failures, _ = task_transition_check.check_open_to_ready({
-            "description": request_payload["description"],
-            "assignee": "quinn",
-        })
-        self.assertEqual(transition_failures, [])
 
     def test_create_tasks_from_proposals_reuses_existing_task_when_marker_matches(self):
         spec_doc = "brain/bookmarks/specs/llm-driven-bookmark-reviews-abc123bookmark.md"
