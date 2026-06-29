@@ -416,7 +416,7 @@ fn transition_or_block(
             if let Err(err) = add_comment(
                 &args.base_url,
                 &env.task.id,
-                &format!("[feature-task-blocked]\n{}", failures.join("\n")),
+                &format!("[feature-task-progress-checklist]\n{}", failures.join("\n")),
             ) {
                 if let Some(message) = spec_checksum_mismatch_message(&err) {
                     env.action_taken = format!("{action}_blocked_spec_drift");
