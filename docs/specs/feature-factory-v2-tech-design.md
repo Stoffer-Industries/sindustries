@@ -1,3 +1,11 @@
+---
+status: shipped
+task_id: 2527ff9d-4369-444f-995d-4d4bb0ac7b70
+product_spec: brain/bookmarks/specs/feature-factory-v2-2026-06-04.md
+shipped_pr: 117
+shipped_date: 2026-06-28
+---
+
 # Feature Factory v2 Tech Design
 
 ## Links
