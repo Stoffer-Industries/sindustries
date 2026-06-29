@@ -1,3 +1,11 @@
+---
+status: shipped
+task_id: n/a
+product_spec: n/a
+shipped_pr: 35
+shipped_date: 2026-05-29
+---
+
 # Website Detail Sheets
 
 ## Problem

@@ -1,3 +1,11 @@
+---
+status: shipped
+task_id: 1ac0de01-47fc-47c3-96b7-dfb2eaf756c7
+product_spec: n/a
+shipped_pr: null
+shipped_date: 2026-03
+---
+
 # Task comments spec
 
 Date: 2026-03-12

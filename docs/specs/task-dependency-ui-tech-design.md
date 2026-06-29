@@ -1,3 +1,11 @@
+---
+status: shipped
+task_id: 8593d197-f3df-4486-aa50-dcaafd599264
+product_spec: brain/bookmarks/specs/task-dependency-ui-2026-06-27.md
+shipped_pr: 129
+shipped_date: 2026-06-27
+---
+
 # Task Dependency UI Tech Design
 
 ## Links

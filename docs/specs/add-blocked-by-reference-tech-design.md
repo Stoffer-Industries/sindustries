@@ -1,3 +1,11 @@
+---
+status: shipped
+task_id: 456c92a8-835f-453e-a1ef-5ed5a31844f2
+product_spec: brain/bookmarks/specs/blocked-by-reference-2026-06-27.md
+shipped_pr: 128
+shipped_date: 2026-06-28
+---
+
 # Add Blocked by Reference Tech Design
 
 ## Links
