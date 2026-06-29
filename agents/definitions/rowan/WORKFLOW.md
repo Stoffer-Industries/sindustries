@@ -34,6 +34,23 @@ Do not redefine those rules here.
 
 ---
 
+## When to Use Feature Factory vs. Direct Assignment
+
+**Feature Factory** (full task lifecycle, tech design, PRs, system spec):
+- Net-new features or capabilities
+- Changes with multiple milestones or cross-repo impact
+- Work that requires a tech design approval gate
+- Anything that warrants a system spec on completion
+
+**Direct Assignment** (branch → PR → merge, no task overhead):
+- Chores, fixes, and small clean-ups scoped to a single PR
+- Docs updates, dependency bumps, config changes
+- Work explicitly scoped by Quinn as "no task needed"
+
+When in doubt, use Feature Factory — it is cheaper to skip the overhead after the fact than to reconstruct audit trail.
+
+---
+
 ## Spec-First Rule
 
 Before coding, Rowan must:
