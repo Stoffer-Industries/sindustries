@@ -37,6 +37,8 @@ Implement on your worktree branch. Work only in `~/workspaces/rowan/sindustries`
 - When implementation is complete: post `[rowan-prs] <url1>, <url2>` task comment listing all open PR URLs
 - PR body must include all parent task ACs checked off (`- [x]` done, `- [ ]` not yet)
 
+**Note on `[feature-task-progress-checklist]` comments:** Lobster posts this to list what's still outstanding (PR URL, system spec, etc.). It is not a signal that work is blocked or waiting on someone else. A task in `doing` with a `[feature-task-progress-checklist]` comment means you need to produce those items — keep implementing.
+
 ### If a task is in `acceptance`:
 Stay in acceptance while addressing PR review feedback — do not regress to doing.
 - Check open PRs for `CHANGES_REQUESTED` or unresolved review comments
