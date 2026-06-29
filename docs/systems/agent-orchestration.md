@@ -178,7 +178,7 @@ So: **1 heartbeat tick = 1 invocation of `content-tasks/run.py` = N lobster runs
 
 ## 3. Task Lifecycle
 
-Cross-cutting workflow for everything in the Tasks API. Single source of truth: `TASK_PROCESS.md`.
+Cross-cutting workflow for everything in the Tasks API.
 
 ```mermaid
 stateDiagram-v2
@@ -198,7 +198,6 @@ stateDiagram-v2
 - **Tom:** reviews PRs, merges, approves in-acceptance items.
 
 **Key files**
-- Source of truth: `TASK_PROCESS.md`
 - API client: `agents/skills/ops/tasks-api/tasks_api_client.py`
 - Prodlike API: `http://localhost:4001/api/v1`
 
@@ -363,7 +362,6 @@ Quick troubleshooting pointer — find the symptom and check the file.
 
 ## See Also
 
-- `TASK_PROCESS.md` — single source of truth for task workflow
 - `docs/systems/bookmark-workflow.md` — bookmark workflow state machine and script map
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
