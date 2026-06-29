@@ -15,6 +15,7 @@ function sanitizeTaskDraft(draft) {
     assignee: sanitizeDraftValue(draft?.assignee),
     dueAt: sanitizeDraftValue(draft?.dueAt),
     tagsText: sanitizeDraftValue(draft?.tagsText),
+    taskType: sanitizeDraftValue(draft?.taskType),
     blocked: Boolean(draft?.blocked)
   };
 }
@@ -45,6 +46,7 @@ function shallowDraftEqual(left, right) {
     && left.assignee === right.assignee
     && left.dueAt === right.dueAt
     && left.tagsText === right.tagsText
+    && left.taskType === right.taskType
     && left.blocked === right.blocked;
 }
 

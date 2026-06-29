@@ -11,6 +11,7 @@ const defaultProps = {
     assignee: '',
     dueAt: '',
     tagsText: '',
+    taskType: '',
     blocked: false
   },
   task: {
@@ -245,6 +246,25 @@ describe('TaskEditor', () => {
     render(<TaskEditor {...propsWithAssignee} />);
 
     expect(screen.getByLabelText('Detail assignee')).toHaveValue('Rowan');
+  });
+
+  it('renders task type selector and saves taskType', () => {
+    const onSave = vi.fn();
+    const props = {
+      ...defaultProps,
+      draft: { ...defaultProps.draft, taskType: 'feature' },
+      onSave
+    };
+    render(<TaskEditor {...props} />);
+
+    expect(screen.getByLabelText('Detail task type')).toHaveValue('feature');
+    expect(screen.getByRole('option', { name: 'Feature' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Save changes'));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ taskType: 'feature' })
+    );
   });
 
   it('renders dependency links with title and status', () => {

@@ -144,6 +144,35 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.findMany.mock.calls[0][0].where).not.toHaveProperty('archivedAt');
   });
 
+  it('GET /api/v1/tasks filters by taskType', async () => {
+    prismaMock.task.findMany.mockResolvedValue([
+      task({ id: 'feature-task', title: 'Build task type UI', taskType: 'feature' })
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .get('/api/v1/tasks')
+      .query({ taskType: 'feature' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data[0].taskType).toBe('feature');
+    expect(prismaMock.task.findMany.mock.calls[0][0].where).toMatchObject({
+      taskType: 'feature'
+    });
+  });
+
+  it('GET /api/v1/tasks rejects invalid taskType filters', async () => {
+    const app = createApp();
+
+    const response = await request(app).get('/api/v1/tasks').query({ taskType: 'invalid' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: { code: 'INVALID_TASK_TYPE_FILTER', message: 'Invalid taskType filter' }
+    });
+    expect(prismaMock.task.findMany).not.toHaveBeenCalled();
+  });
+
   it('GET /api/v1/tasks validates bad status filter', async () => {
     const app = createApp();
 

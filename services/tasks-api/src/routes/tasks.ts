@@ -31,6 +31,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       status,
       priority,
       assignee,
+      taskType,
       tag,
       q,
       dueBefore,
@@ -53,6 +54,10 @@ tasksRouter.get('/tasks', async (req, res, next) => {
 
     if (priority && !validPriorities.has(priority)) {
       return badRequest(res, 'INVALID_PRIORITY_FILTER', 'Invalid priority filter');
+    }
+
+    if (taskType && !validTaskTypes.has(String(taskType))) {
+      return badRequest(res, 'INVALID_TASK_TYPE_FILTER', 'Invalid taskType filter');
     }
 
     if (sort && !validSorts.has(sort)) {
@@ -88,6 +93,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       ...(includeArchived === 'true' ? {} : { archivedAt: null }),
       ...statusFilter,
       ...(priority ? { priority } : {}),
+      ...(taskType ? { taskType: String(taskType) } : {}),
       ...(assignee
         ? assignee === 'unassigned'
           ? { OR: [{ assignee: null }, { assignee: '' }] }

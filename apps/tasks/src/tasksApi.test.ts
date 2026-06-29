@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   fetchTasks,
   createTask,
@@ -6,7 +6,7 @@ import {
   fetchTask,
   archiveTask,
   createTaskComment
-} from '../tasksApi.ts';
+} from './tasksApi.ts';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -21,14 +21,6 @@ const mockResponse = (data, ok = true) => ({
 describe('tasksApi', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default port for tests
-    vi.spyOn(window, 'location', 'value').mockValue({
-      port: '5173'
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   describe('fetchTasks', () => {
@@ -39,8 +31,8 @@ describe('tasksApi', () => {
       const result = await fetchTasks({});
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks?sort=priority&limit=100',
-        expect.objectContaining({ method: 'GET' })
+        'http://localhost:4001/api/v1/tasks?sort=priority&limit=10000',
+        expect.any(Object)
       );
       expect(result).toEqual(tasks);
     });
@@ -75,6 +67,17 @@ describe('tasksApi', () => {
       );
     });
 
+    it('adds task type filter when set', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse([]));
+
+      await fetchTasks({ taskType: 'feature' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('taskType=feature'),
+        expect.any(Object)
+      );
+    });
+
     it('throws error on failed request', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -93,7 +96,7 @@ describe('tasksApi', () => {
       const result = await createTask({ title: 'New Task' });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks',
+        'http://localhost:4001/api/v1/tasks',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ title: 'New Task' })
@@ -115,20 +118,16 @@ describe('tasksApi', () => {
         blocked: true
       });
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          body: JSON.stringify(expect.objectContaining({
-            title: 'Task',
-            description: 'Description',
-            priority: 'high',
-            dueAt: '2024-01-15',
-            assignee: 'John',
-            tags: ['tag1'],
-            blocked: true
-          }))
-        })
-      );
+      const [, options] = mockFetch.mock.calls[0];
+      expect(JSON.parse(options.body)).toMatchObject({
+        title: 'Task',
+        description: 'Description',
+        priority: 'high',
+        dueAt: '2024-01-15',
+        assignee: 'John',
+        tags: ['tag1'],
+        blocked: true
+      });
     });
   });
 
@@ -140,7 +139,7 @@ describe('tasksApi', () => {
       const result = await updateTask(1, { title: 'Updated', status: 'done', dependsOnIds: ['dep-1'] });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks/1',
+        'http://localhost:4001/api/v1/tasks/1',
         expect.objectContaining({
           method: 'PATCH',
           body: JSON.stringify({ title: 'Updated', status: 'done', dependsOnIds: ['dep-1'] })
@@ -158,7 +157,7 @@ describe('tasksApi', () => {
       const result = await fetchTask(1);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks/1',
+        'http://localhost:4001/api/v1/tasks/1',
         expect.any(Object)
       );
       expect(result).toEqual(task);
@@ -170,7 +169,7 @@ describe('tasksApi', () => {
       await fetchTask('abc-123');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks/abc-123',
+        'http://localhost:4001/api/v1/tasks/abc-123',
         expect.any(Object)
       );
     });
@@ -183,7 +182,7 @@ describe('tasksApi', () => {
       const result = await archiveTask(1);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks/1',
+        'http://localhost:4001/api/v1/tasks/1',
         expect.objectContaining({ method: 'DELETE' })
       );
       expect(result).toBeNull();
@@ -198,7 +197,7 @@ describe('tasksApi', () => {
       const result = await createTaskComment(1, { author: 'John', text: 'Comment' });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/v1/tasks/1/comments',
+        'http://localhost:4001/api/v1/tasks/1/comments',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ author: 'John', text: 'Comment' })

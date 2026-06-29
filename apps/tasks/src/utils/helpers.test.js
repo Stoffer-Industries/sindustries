@@ -102,6 +102,7 @@ describe('helpers', () => {
       expect(result.assignee).toBe('');
       expect(result.dueAt).toBe('');
       expect(result.tagsText).toBe('');
+      expect(result.taskType).toBe('');
       expect(result.blocked).toBe(false);
     });
 
@@ -114,6 +115,7 @@ describe('helpers', () => {
         assignee: 'John',
         dueAt: '2024-01-15T00:00:00.000Z',
         tags: ['tag1', 'tag2'],
+        taskType: 'feature',
         blocked: true
       };
       const result = normalizeTaskForEditor(task);
@@ -124,6 +126,7 @@ describe('helpers', () => {
       expect(result.assignee).toBe('John');
       expect(result.dueAt).toBe('2024-01-15');
       expect(result.tagsText).toBe('tag1, tag2');
+      expect(result.taskType).toBe('feature');
       expect(result.blocked).toBe(true);
     });
 

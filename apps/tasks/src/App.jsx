@@ -22,7 +22,7 @@ import { useDebounce } from './hooks/useDebounce.js';
 import { useToast } from './hooks/useToast.js';
 import { TaskCardSummary } from './components/TaskCardSummary.jsx';
 import { TaskEditor } from './components/TaskEditor.jsx';
-import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS } from './utils/constants.js';
+import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS, TASK_TYPES, TASK_TYPE_LABELS } from './utils/constants.js';
 import { createConfettiPieces, normalizeTaskForEditor, taskCardTilt } from './utils/helpers.js';
 import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from './utils/storage.js';
 
@@ -43,12 +43,13 @@ export function App() {
   const [theme, setTheme] = useState(getStoredTheme);
   const [selectedId, setSelectedId] = useState(null);
   const initialStatusSelection = ['open', 'ready', 'doing', 'acceptance'];
-  const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', includeArchived: false });
+  const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', taskType: '', includeArchived: false });
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set(initialStatusSelection));
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
   const statusMenuRef = useRef(null);
   const priorityMenuRef = useRef(null);
   const assigneeMenuRef = useRef(null);
+  const taskTypeMenuRef = useRef(null);
   const tagMenuRef = useRef(null);
 
   // Calculate number of visible columns for CSS grid
@@ -64,6 +65,7 @@ export function App() {
       status: statusMenuRef,
       priority: priorityMenuRef,
       assignee: assigneeMenuRef,
+      taskType: taskTypeMenuRef,
       tag: tagMenuRef
     };
 
@@ -617,6 +619,51 @@ export function App() {
               ) : null}
             </div>
 
+            <div className="status-filter" ref={taskTypeMenuRef}>
+              <Button
+                type="button"
+                variant="filter"
+                active={Boolean(filters.taskType)}
+                className="filter-trigger"
+                aria-label="Task type filter"
+                aria-haspopup="menu"
+                aria-expanded={openFilterMenu === 'taskType'}
+                onClick={() => setOpenFilterMenu((current) => (current === 'taskType' ? null : 'taskType'))}
+              >
+                {`TYPE: ${(filters.taskType ? TASK_TYPE_LABELS[filters.taskType] : 'All types').toUpperCase()}`}
+              </Button>
+              {openFilterMenu === 'taskType' ? (
+                <Dropdown className="filter-menu" role="menu" aria-label="Task type filter menu">
+                  <DropdownOption
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={!filters.taskType}
+                    onClick={() => {
+                      setFilters((current) => ({ ...current, taskType: '' }));
+                      setOpenFilterMenu(null);
+                    }}
+                  >
+                    ALL TYPES
+                  </DropdownOption>
+                  <DropdownDivider />
+                  {TASK_TYPES.map((taskType) => (
+                    <DropdownOption
+                      key={taskType}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={filters.taskType === taskType}
+                      onClick={() => {
+                        setFilters((current) => ({ ...current, taskType }));
+                        setOpenFilterMenu(null);
+                      }}
+                    >
+                      {TASK_TYPE_LABELS[taskType].toUpperCase()}
+                    </DropdownOption>
+                  ))}
+                </Dropdown>
+              ) : null}
+            </div>
+
             {allTags.length > 0 ? (
               <div className="status-filter" ref={tagMenuRef}>
                 <Button
@@ -723,9 +770,9 @@ export function App() {
               <Field label="Content type">
                 <Select value={newTask.taskType} onChange={(e) => setNewTask((current) => ({ ...current, taskType: e.target.value }))}>
                   <option value="">None</option>
-                  <option value="content">Content</option>
-                  <option value="code">Code</option>
-                  <option value="research">Research</option>
+                  {TASK_TYPES.map((taskType) => (
+                    <option key={taskType} value={taskType}>{TASK_TYPE_LABELS[taskType]}</option>
+                  ))}
                 </Select>
               </Field>
             </div>

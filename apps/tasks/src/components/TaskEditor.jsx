@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Card, Divider, Field, Input, Select, Textarea } from '@sindustries/ui/react';
-import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS } from '../utils/constants.js';
+import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS, TASK_TYPES, TASK_TYPE_LABELS } from '../utils/constants.js';
 import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
 import { TaskCardSummary } from './TaskCardSummary.jsx';
@@ -40,6 +40,7 @@ export function TaskEditor({
   const statusRef = useRef(null);
   const priorityRef = useRef(null);
   const assigneeRef = useRef(null);
+  const taskTypeRef = useRef(null);
   const dueAtRef = useRef(null);
   const tagsRef = useRef(null);
   const blockedRef = useRef(null);
@@ -93,6 +94,7 @@ export function TaskEditor({
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean),
+      taskType: draft.taskType || null,
       blocked: draft.blocked
     };
   }
@@ -103,6 +105,7 @@ export function TaskEditor({
     statusRef,
     priorityRef,
     assigneeRef,
+    taskTypeRef,
     dueAtRef,
     tagsRef,
     blockedRef
@@ -341,6 +344,15 @@ export function TaskEditor({
               <option value="">Unassigned</option>
               {ASSIGNEE_OPTIONS.map((assignee) => (
                 <option key={assignee} value={assignee}>{assignee}</option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Type">
+            <Select ref={taskTypeRef} aria-label="Detail task type" value={draft.taskType} onChange={(e) => update('taskType', e.target.value)} onMouseDown={stopPropagation} onTouchStart={stopPropagation} onKeyDown={(e) => handleKeyDown(e, taskTypeRef, false)}>
+              <option value="">None</option>
+              {TASK_TYPES.map((taskType) => (
+                <option key={taskType} value={taskType}>{TASK_TYPE_LABELS[taskType]}</option>
               ))}
             </Select>
           </Field>
