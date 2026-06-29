@@ -1,4 +1,4 @@
-.PHONY: bootstrap up down reset-db migrate-db test test-api test-app test-website test-e2e test-all clean-generated
+.PHONY: bootstrap up down reset-db migrate-db test test-api test-app test-website test-e2e test-all clean-generated check-migrations
 
 MODE ?= dev
 
@@ -43,3 +43,12 @@ test-e2e:
 # the canonical services/*/generated/prisma directory.
 clean-generated:
 	rm -rf services/budget-api/src/generated services/tasks-api/src/generated
+
+# Fails if any two Prisma migration directories under **/prisma/migrations/
+# share the same 14-char timestamp prefix. Prisma applies migrations in
+# lexical order, so a shared prefix leaves the apply order at the mercy of
+# the suffix and the filesystem sort — silent schema drift between dev and
+# CI. Wire this into CI (see .github/workflows/ci.yml tasks-api-tests job)
+# and run locally before pushing a new migration.
+check-migrations:
+	./scripts/check-migration-prefixes.sh
