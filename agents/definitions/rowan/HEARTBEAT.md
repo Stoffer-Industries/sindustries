@@ -36,6 +36,7 @@ Implement on your worktree branch. Work only in `~/workspaces/rowan/sindustries`
 - When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
 - When implementation is complete: post `[rowan-prs] <url1>, <url2>` task comment listing all open PR URLs
 - PR body must include all parent task ACs checked off (`- [x]` done, `- [ ]` not yet)
+- Before the task can move to `acceptance`, post a system spec comment: read `agents/skills/dev/system-spec/SKILL.md` and post either `[system-spec] docs/systems/<file>.md` or `[no-system-spec-change] <reason>` — Lobster blocks advancement until one is present
 
 **Note on `[feature-task-progress-checklist]` comments:** Lobster posts this to list what's still outstanding (PR URL, system spec, etc.). It is not a signal that work is blocked or waiting on someone else. A task in `doing` with a `[feature-task-progress-checklist]` comment means you need to produce those items — keep implementing.
 
