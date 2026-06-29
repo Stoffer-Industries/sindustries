@@ -123,7 +123,7 @@ When creating, moving, or restoring documentation, use these directories consist
 
 - `brain/bookmarks/` — inbound material to review later. This is the staging area for information we care about (from X, podcasts, links, or our own research) that may lead to action later.
 - `brain/reviews/` — our opinions, analysis, and synthesis about bookmarks as they relate to our world.
-- `brain/specs/` — implementation-target documents, usually derived from reviews and may include delivery planning or scheduling.
+- `brain/tasks/specs/` — implementation-target documents for feature tasks, usually derived from reviews and may include delivery planning or scheduling.
 - `brain/posts/` — content we create for the outside world.
 - `docs/infra/` — documentation about the current OpenClaw setup, runtime, incidents, baselines, and operational setup.
 
@@ -131,7 +131,7 @@ When creating, moving, or restoring documentation, use these directories consist
 If unsure where something belongs:
 - raw/inbound idea → `brain/bookmarks/`
 - interpretation/opinion → `brain/reviews/`
-- build-against plan/spec → `brain/specs/`
+- build-against plan/spec → `brain/tasks/specs/`
 - publishable outward content → `brain/posts/`
 - current system/runbook/setup docs → `docs/infra/`
 
