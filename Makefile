@@ -1,4 +1,4 @@
-.PHONY: bootstrap up down reset-db migrate-db test test-api test-app test-website test-e2e test-all
+.PHONY: bootstrap up down reset-db migrate-db test test-api test-app test-website test-e2e test-all clean-generated
 
 MODE ?= dev
 
@@ -35,3 +35,11 @@ test-website:
 
 test-e2e:
 	cd apps/tasks && npm run test:e2e
+
+# Removes the stale pre-c8dbac8 src/generated/ directories on older worktrees.
+# The Prisma schema now writes to services/*/generated/prisma; the older
+# src/generated/ path is gitignored and only present on checkouts created
+# before c8dbac8. Safe to run; re-running `prisma generate` will repopulate
+# the canonical services/*/generated/prisma directory.
+clean-generated:
+	rm -rf services/budget-api/src/generated services/tasks-api/src/generated
