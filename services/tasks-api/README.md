@@ -66,6 +66,12 @@ sort and the filesystem, which can silently swap between dev and CI.
 extend the same minute as a recent migration, increment the last 2 digits
 (e.g. `20260627000000` → `20260627000100`).
 
+A repo-wide check enforces this: run `make check-migrations` (or
+`./scripts/check-migration-prefixes.sh`) before pushing, and the
+`tasks-api-tests` job runs the same check in CI before applying migrations.
+The check fails with a non-zero exit if any two `prisma/migrations/*`
+directories share a 14-char timestamp prefix.
+
 ### Renaming an already-applied migration
 
 If a migration has already been applied to a live database, renaming its

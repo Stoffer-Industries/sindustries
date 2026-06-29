@@ -83,6 +83,9 @@ jobs:
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace services/tasks-api
 
+      - name: Check Prisma migration prefixes
+        run: ./scripts/check-migration-prefixes.sh
+
       - name: Run unit tests
         run: npm test --workspace services/tasks-api
 
