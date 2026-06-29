@@ -181,6 +181,28 @@ describe('tasks ui', () => {
     expect(screen.getByLabelText('Search')).toBeInTheDocument();
     expect(screen.getByLabelText('Status filter')).toBeInTheDocument();
     expect(screen.getByLabelText('Priority filter')).toBeInTheDocument();
+    expect(screen.getByLabelText('Task type filter')).toBeInTheDocument();
+  });
+
+  it('filters tasks by task type', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ data: [mockTask({ taskType: 'feature' })] }) });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+
+    await screen.findByRole('list', { name: 'Backlog list' });
+    fireEvent.click(screen.getByLabelText('Task type filter'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'FEATURE' }));
+
+    await waitFor(() => {
+      const typeFilterCall = fetchMock.mock.calls.find(([url]) => String(url).includes('taskType=feature'));
+      expect(typeFilterCall?.[0]).toContain('taskType=feature');
+    });
+    expect(screen.getByLabelText('Task type filter')).toHaveTextContent('TYPE: FEATURE');
   });
 
   it('renders board columns sorted by priority, readiness, then createdAt', async () => {
@@ -377,6 +399,53 @@ describe('tasks ui', () => {
     expect(screen.getByLabelText('Detail title')).toHaveValue('Draft title');
   });
 
+  it('preserves and saves unsaved task type edits', async () => {
+    const fetchMock = vi.fn(async (url, options = {}) => {
+      const method = options.method ?? 'GET';
+      const urlText = String(url);
+
+      if (method === 'GET' && urlText.includes('/tasks?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [mockTask({ id: 'type-draft-task', title: 'Type draft task', taskType: 'code' })]
+          })
+        };
+      }
+
+      if (method === 'PATCH' && urlText.includes('/tasks/type-draft-task')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: mockTask({ id: 'type-draft-task', title: 'Type draft task', taskType: 'feature' })
+          })
+        };
+      }
+
+      throw new Error(`Unexpected fetch call: ${method} ${urlText}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+
+    await screen.findByRole('list', { name: 'Backlog list' });
+    fireEvent.click(screen.getByRole('button', { name: 'Type draft task' }));
+    fireEvent.change(screen.getByLabelText('Detail task type'), { target: { value: 'feature' } });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Type draft task' }));
+    expect(screen.getByLabelText('Detail task type')).toHaveValue('feature');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(([url, options]) => String(url).includes('/tasks/type-draft-task') && options?.method === 'PATCH');
+      expect(JSON.parse(patchCall?.[1]?.body ?? '{}')).toMatchObject({ taskType: 'feature' });
+    });
+  });
+
   it('restores unsaved task edits after remounting the page', async () => {
     vi.stubGlobal(
       'fetch',
@@ -446,9 +515,18 @@ describe('tasks ui', () => {
     await screen.findByRole('list', { name: 'Backlog list' });
     fireEvent.click(screen.getByRole('button', { name: '+ New Task' }));
     fireEvent.change(screen.getByLabelText('New task title'), { target: { value: 'Created' } });
+    expect(screen.getByRole('option', { name: 'Feature' })).toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue('None'), { target: { value: 'feature' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/tasks'), expect.objectContaining({ method: 'POST' })));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/tasks'),
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"taskType":"feature"')
+      })
+    );
 
     fireEvent.click(await screen.findByRole('button', { name: 'Created' }));
     fireEvent.click(screen.getByRole('button', { name: 'Archive task' }));

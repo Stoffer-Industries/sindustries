@@ -5,9 +5,12 @@ export interface TaskFilters {
   priority?: string;
   tag?: string;
   assignee?: string;
+  taskType?: TaskType | '';
   includeArchived?: boolean;
   // Note: 'ready' boolean filter is deprecated; use status='ready' instead
 }
+
+export type TaskType = 'content' | 'code' | 'research' | 'feature';
 
 export interface Comment {
   id?: string | number;
@@ -33,7 +36,7 @@ export interface Task {
   dueAt?: string | null;
   tags?: Array<{ name: string } | string>;
   blocked?: boolean;
-  taskType?: 'content' | 'code' | 'research' | null;
+  taskType?: TaskType | null;
   archivedAt?: string | null;
   createdAt?: string | null;
   statusChangedAt?: string | null;
@@ -52,7 +55,7 @@ export interface CreateTaskPayload {
   tags?: string[];
   blocked?: boolean;
   dependsOnIds?: Array<string | number>;
-  taskType?: 'content' | 'code' | 'research' | null;
+  taskType?: TaskType | null;
   // Note: 'ready' field removed; use status='ready' instead
 }
 
@@ -65,7 +68,7 @@ export interface UpdateTaskPayload {
   dueAt?: string | null;
   tags?: string[];
   blocked?: boolean;
-  taskType?: 'content' | 'code' | 'research' | null;
+  taskType?: TaskType | null;
   dependsOnIds?: Array<string | number>;
   // Note: 'ready' field removed — use status field instead
 }
@@ -114,6 +117,7 @@ export async function fetchTasks(filters: TaskFilters): Promise<Task[]> {
   if (filters.priority) query.set('priority', filters.priority);
   if (filters.tag) query.set('tag', filters.tag);
   if (filters.assignee) query.set('assignee', filters.assignee);
+  if (filters.taskType) query.set('taskType', filters.taskType);
   if (filters.includeArchived) query.set('includeArchived', 'true');
   // Note: 'ready' boolean filter is deprecated; use status='ready' instead
   return api<Task[]>('/tasks?' + query.toString());
