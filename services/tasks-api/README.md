@@ -53,3 +53,32 @@ npm test
 Current M1 tests:
 - API health integration test (`/health`)
 - Prisma schema validation test (`prisma validate`)
+
+## Migrations
+
+Prisma applies migration directories in lexical order of the directory name.
+The first 14 characters of each directory name are the `YYYYMMDDHHMMSS` timestamp
+and must be unique across the `prisma/migrations/` tree. Sharing a prefix
+between two directories leaves the apply order at the mercy of the suffix
+sort and the filesystem, which can silently swap between dev and CI.
+
+**Convention:** new migrations get a unique 14-digit prefix. If you need to
+extend the same minute as a recent migration, increment the last 2 digits
+(e.g. `20260627000000` → `20260627000100`).
+
+### Renaming an already-applied migration
+
+If a migration has already been applied to a live database, renaming its
+directory on disk does **not** update the `_prisma_migrations` table. After
+shipping the rename, every environment that already applied the old name
+needs a one-time SQL update so the recorded name matches the new directory:
+
+```sql
+UPDATE _prisma_migrations
+SET migration_name = '<new-name>'
+WHERE migration_name = '<old-name>';
+```
+
+Run this on dev, prodlike, and any cached CI DBs before the next deploy.
+A fresh `prisma migrate deploy` against a clean DB will pick up the new
+name directly.
