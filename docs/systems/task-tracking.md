@@ -54,7 +54,9 @@ open → ready → doing → acceptance → done
 
 State transitions are enforced by convention, not database constraints. Quinn validates before advancing.
 
-**`blocked` flag** — independent of status. Set when a task has unresolved `dependsOn` entries. Agent cannot proceed while `blocked: true`.
+**`blocked` flag** — manually set by humans or workflow automation. Independent of `dependencyBlocked`.
+
+**`dependencyBlocked`** — computed (not stored). True when any `dependsOn` task has `status !== "done"`. A task is visibly blocked when either `blocked` or `dependencyBlocked` is true.
 
 **`completedAt`** — set when status transitions to `done`, cleared on transition away from `done`.
 
@@ -101,7 +103,21 @@ Agent communication channel and workflow state machine. Comments follow structur
 
 ### TaskDependency
 
-Join table: `taskId → dependsOnId`. Cascade deletes. When all blocking tasks are done, `blocked` on the dependent task can be cleared.
+Join table: `taskId → dependsOnId`. Cascade deletes on either side. Index on `dependsOnId` for reverse lookups.
+
+Task responses include:
+- `dependsOn` — array of `{ id, title, status, completedAt }` for each dependency
+- `dependsOnIds` — flat array of dependency UUIDs
+- `dependencyBlocked` — computed boolean, true when any dependency `status !== "done"`
+
+`PATCH /tasks/:id` accepts `dependsOnIds`:
+- Array of UUIDs replaces the full dependency set
+- Empty array clears all dependencies
+- Omitted field leaves dependencies unchanged
+
+Validation rejects: non-UUID values, self-references, missing task IDs, archived dependencies, direct circular dependencies (A→B, B→A). Deep cycle detection is out of scope.
+
+**CLI:** `tasks_api_client.py` exposes `--depends-on <id>` (repeatable) and `--clear-dependencies` (mutually exclusive) for automation.
 
 ---
 
@@ -149,6 +165,12 @@ Agent tooling always targets **prodlike** (`4001`). The dev stack (`4000`) is fo
 **Restart API after migration:** `make up MODE=prodlike` applies pending migrations on container start.
 
 **Common failure: spec drift rejection:** PATCH returns 409 when `specChecksum` doesn't match. Rowan reads current specChecksum from `GET /tasks/:id`, compares to local spec, resolves drift, then retries PATCH.
+
+**Dependency appears blocked but `blocked` is false:** check `dependencyBlocked` — this is expected when an unfinished dependency exists. The two signals are independent.
+
+**PATCH rejects a dependency update:** inspect error code for self-reference, archived dependency, missing task ID, invalid UUID, or direct circular dependency.
+
+**Stale task comments mention an old PR:** read the latest task comments; Lobster state may retain old `prUrls`. Current task comments and workstream fields are the source of truth.
 
 ---
 
