@@ -360,9 +360,50 @@ Quick troubleshooting pointer — find the symptom and check the file.
 
 ---
 
+## 6. OpenClaw Runtime
+
+OpenClaw is the gateway process that runs all agents. It handles channel routing, session lifecycle, cron scheduling, tool execution, and model calls.
+
+```
+Tom's machine
+  openclaw gateway (node process)
+    ├── Channel adapters (Telegram, Signal)
+    ├── Session manager (per-agent conversation contexts)
+    ├── Cron scheduler (fires agent sessions on schedule)
+    ├── Tool executor (exec, web_fetch, sessions_send, etc.)
+    └── Model router (Anthropic / OpenAI)
+
+~/.openclaw/
+  openclaw.json      gateway config
+  workspace/         Quinn's home (sindustries repo lives here)
+  .env               secrets (API keys, tokens)
+```
+
+**Session keys:**
+
+| Agent | Session key | Primary channel |
+|---|---|---|
+| Quinn | `agent:quinn` | Telegram DMs / Sindustries group |
+| Rowan | `agent:rowan` | Sindustries infra topic |
+| Ivy | `agent:ivy` | Internal only |
+| Lox | `agent:lox` | Sindustries infra topic |
+
+**Channel routing:** Messages arrive via Telegram and are routed to the correct agent based on chat ID and topic ID. Authorized senders are configured in `openclaw.json` under `channels.telegram.allowFrom`. Only Tom's number is allowlisted.
+
+**Brain:** `~/.openclaw/workspace/brain/` is a symlink into iCloud Drive. It holds private data (product specs, state files, ops notes) that must not live in git. Git worktrees for sindustries branches must not materialise a real `brain/` directory — the path must always remain a symlink.
+
+**`.openclaw/` write boundary:** Only Quinn can write to `~/.openclaw/`. When Rowan or another agent needs a gateway config change, they post `[openclaw-needed]` on the task; Quinn applies it during heartbeat and posts `[openclaw-done]`.
+
+**Config:** `openclaw.json` — edit via `openclaw config set <field> <value>` or direct JSON edit. Restart after changes: `openclaw gateway restart`. Key fields: `agents.defaults.workspace`, `agents.defaults.heartbeat.every`, `channels.telegram.allowFrom`, `crons`.
+
+**Cron jobs:** Defined in `agents/crons/prompts/` as `.md` files. Registered in `openclaw.json`. Run `cron list` to verify. `openclaw gateway status` / `openclaw gateway restart` for health.
+
+---
+
 ## See Also
 
 - `docs/systems/bookmark-workflow.md` — bookmark workflow state machine and script map
+- `docs/systems/task-tracking.md` — Tasks API data model, comment tag protocol, dependency system
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
 - `agents/rowan/SOUL.md` — Rowan's operating contract
