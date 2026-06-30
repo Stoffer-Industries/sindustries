@@ -197,6 +197,10 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
     if let Some(blocked) = block_on_spec_drift(env.clone(), "spec_check") {
         return Ok(blocked);
     }
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(&args, env, "spec_check", manual_failures);
+    }
     if is_past(&env.task, "open") {
         let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
         if !failures.is_empty() {
@@ -236,6 +240,10 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     if let Some(blocked) = block_on_spec_drift(env.clone(), "ready_checks") {
         return Ok(blocked);
     }
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(&args, env, "ready_checks", manual_failures);
+    }
     if is_past(&env.task, "ready") {
         env.already_past = true;
         env.criteria_met = true;
@@ -263,6 +271,10 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     if let Some(blocked) = block_on_spec_drift(env.clone(), "verify_delivery") {
         return Ok(blocked);
+    }
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(&args, env, "verify_delivery", manual_failures);
     }
     if is_past(&env.task, "doing") {
         env.already_past = true;
@@ -311,6 +323,10 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     if let Some(blocked) = block_on_spec_drift(env.clone(), "feedback_aggregate") {
         return Ok(blocked);
+    }
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(&args, env, "feedback_aggregate", manual_failures);
     }
     let mut failures = Vec::new();
     for url in rowan_pr_urls(&env.task) {
@@ -384,6 +400,10 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     if let Some(blocked) = block_on_spec_drift(env.clone(), "post_merge") {
         return Ok(blocked);
+    }
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(&args, env, "post_merge", manual_failures);
     }
     let qa_failures = qa_ac_verified_failures(&env.task);
     if is_past(&env.task, "acceptance") {
@@ -516,6 +536,57 @@ fn block_on_spec_drift(mut env: Envelope, action: &str) -> Option<Envelope> {
     env.action_taken = format!("{action}_blocked_spec_drift");
     env.failures = failures.clone();
     Some(env)
+}
+
+fn manual_block_failures(task: &Task) -> Vec<String> {
+    if task.blocked {
+        vec![
+            "Task is manually blocked (`blocked: true`); clear the block to allow progression. \
+             (`dependencyBlocked` is a separate computed flag and is not affected.)"
+                .to_string(),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+fn block_with_manual_block(
+    args: &StageArgs,
+    mut env: Envelope,
+    action: &str,
+    failures: Vec<String>,
+) -> Result<Envelope> {
+    env.criteria_met = false;
+    env.action_taken = format!("{action}_blocked");
+    env.failures = failures.clone();
+    if args.dry_run {
+        return Ok(env);
+    }
+    let fingerprint = failures.join("\n");
+    if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+        env.lobster_state.failure_fingerprint = Some(fingerprint);
+        if let Err(err) = add_comment(
+            &args.base_url,
+            &env.task.id,
+            &format!("[feature-task-blocked]\n{}", failures.join("\n")),
+        ) {
+            if let Some(message) = spec_checksum_mismatch_message(&err) {
+                env.action_taken = format!("{action}_blocked_spec_drift");
+                env.failures = vec![message];
+                return Ok(env);
+            }
+            return Err(err);
+        }
+        if let Err(err) = write_state(&args.base_url, &env.task.id, &env.lobster_state, None) {
+            if let Some(message) = spec_checksum_mismatch_message(&err) {
+                env.action_taken = format!("{action}_blocked_spec_drift");
+                env.failures = vec![message];
+                return Ok(env);
+            }
+            return Err(err);
+        }
+    }
+    Ok(env)
 }
 
 fn output(
@@ -2081,5 +2152,126 @@ mod tests {
                 None => Ok(self.body.clone()),
             }
         }
+    }
+
+    // ---- manual block guard (task 593ee264) ----
+
+    fn blocked_task() -> Task {
+        Task {
+            id: "task-blocked".to_string(),
+            status: "doing".to_string(),
+            blocked: true,
+            ..Task::default()
+        }
+    }
+
+    fn unblocked_task() -> Task {
+        Task {
+            id: "task-unblocked".to_string(),
+            status: "doing".to_string(),
+            blocked: false,
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn manual_block_failures_returns_empty_when_unblocked() {
+        let task = unblocked_task();
+        assert!(manual_block_failures(&task).is_empty());
+    }
+
+    #[test]
+    fn manual_block_failures_returns_message_when_blocked() {
+        let task = blocked_task();
+        let failures = manual_block_failures(&task);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("blocked: true"));
+        assert!(failures[0].contains("dependencyBlocked"));
+    }
+
+    #[test]
+    fn manual_block_guard_does_not_touch_dependency_blocked() {
+        // dependencyBlocked is a separate computed property; the guard only watches the manual flag.
+        let task = Task {
+            id: "task-dep-blocked-only".to_string(),
+            blocked: false,
+            ..Task::default()
+        };
+        assert!(manual_block_failures(&task).is_empty());
+
+        let task = Task {
+            id: "task-manual-only".to_string(),
+            blocked: true,
+            ..Task::default()
+        };
+        let failures = manual_block_failures(&task);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("blocked: true"));
+        // The message must explicitly mention dependencyBlocked is separate so an operator
+        // reading the failure understands which flag applies.
+        assert!(failures[0].contains("dependencyBlocked"));
+    }
+
+    #[test]
+    fn manual_block_guard_message_distinguishes_manual_flag() {
+        let task = blocked_task();
+        let failures = manual_block_failures(&task);
+        assert!(failures[0].contains("`blocked: true`"));
+        assert!(failures[0].contains("`dependencyBlocked`"));
+        assert!(failures[0].contains("separate"));
+    }
+
+    #[test]
+    fn manual_block_guard_skips_transition_when_blocked() {
+        // Envelope-level guard: a blocked task in `doing` does not get any api_patch call.
+        // We use dry_run so no network calls are made; the envelope records the block
+        // and the action_taken ends in `_blocked`.
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task: blocked_task(),
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let failures = manual_block_failures(&env.task);
+        let result = block_with_manual_block(&args, env, "ready_checks", failures)
+            .expect("block_with_manual_block should not error in dry-run");
+        assert!(!result.criteria_met);
+        assert_eq!(result.action_taken, "ready_checks_blocked");
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].contains("blocked: true"));
+    }
+
+    #[test]
+    fn manual_block_guard_allows_unblocked_task_to_continue() {
+        // In dry-run mode, the helper short-circuits without writing anything for an
+        // unblocked task. The caller is expected to gate the helper with manual_block_failures
+        // before invoking it, so an empty failure list should not be passed in practice.
+        // This test asserts the helper still produces a sensible envelope if called directly.
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task: unblocked_task(),
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_with_manual_block(&args, env, "ready_checks", Vec::new()).unwrap();
+        assert!(!result.criteria_met);
+        assert_eq!(result.action_taken, "ready_checks_blocked");
+        assert!(result.failures.is_empty());
     }
 }
