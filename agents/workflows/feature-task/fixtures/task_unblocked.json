@@ -1,0 +1,12 @@
+{
+  "id": "task-unblocked-fixture",
+  "title": "Unblocked task fixture",
+  "description": "**Spec:** brain/bookmarks/specs/example.md\n\n## Acceptance Criteria\n- [ ] AC1: Continue normally",
+  "status": "doing",
+  "assignee": "Rowan",
+  "blocked": false,
+  "dependencyBlocked": false,
+  "taskType": "feature",
+  "tags": ["feature-factory"],
+  "comments": []
+}

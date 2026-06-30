@@ -1,0 +1,12 @@
+{
+  "id": "task-blocked-fixture",
+  "title": "Blocked task fixture",
+  "description": "**Spec:** brain/bookmarks/specs/example.md\n\n## Acceptance Criteria\n- [ ] AC1: Stay blocked",
+  "status": "doing",
+  "assignee": "Rowan",
+  "blocked": true,
+  "dependencyBlocked": false,
+  "taskType": "feature",
+  "tags": ["feature-factory"],
+  "comments": []
+}
