@@ -10,8 +10,6 @@ import {
   Input,
   SearchInput,
   Select,
-  Toast,
-  ToastViewport,
   Tooltip,
   cx
 } from '@sindustries/ui/react';
@@ -20,8 +18,10 @@ import { useTaskDrafts } from './useTaskDrafts.js';
 import { fetchTask } from './tasksApi';
 import { useDebounce } from './hooks/useDebounce.js';
 import { useToast } from './hooks/useToast.js';
+import { ConfettiLayer } from './components/ConfettiLayer.jsx';
 import { TaskCardSummary } from './components/TaskCardSummary.jsx';
 import { TaskEditor } from './components/TaskEditor.jsx';
+import { ToastStack } from './components/ToastStack.jsx';
 import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS, TASK_TYPES, TASK_TYPE_LABELS } from './utils/constants.js';
 import { createConfettiPieces, normalizeTaskForEditor, taskCardTilt } from './utils/helpers.js';
 import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from './utils/storage.js';
@@ -966,41 +966,14 @@ export function App() {
         <Button variant="ghost" tone="display" active={view === 'board'} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Board</Button>
       </nav>
 
-      {/* Toast notifications */}
-      <ToastViewport aria-live="polite" aria-atomic="true">
-        {toasts.map((toast) => (
-          <Toast key={toast.id} type={toast.type} className={`toast toast-${toast.type}`}>
-            {toast.message}
-          </Toast>
-        ))}
-      </ToastViewport>
+      <ToastStack toasts={toasts} />
 
       {/* Accessibility: announce task count to screen readers */}
       <div className="sr-only" role="status" aria-live="polite">
         {isLoading ? 'Loading tasks...' : `${tasks.length} tasks`}
       </div>
 
-      <div className="confetti-layer" aria-hidden="true">
-        {confettiBursts.map((burst) => (
-          <div key={burst.id} className="confetti-burst">
-            {burst.pieces.map((piece) => (
-              <span
-                key={`${burst.id}-${piece.id}`}
-                className="confetti-piece"
-                style={{
-                  '--confetti-color': piece.color,
-                  '--confetti-start-x': `${piece.startX}vw`,
-                  '--confetti-drift': `${piece.drift}px`,
-                  '--confetti-rotation': `${piece.rotation}deg`,
-                  '--confetti-size': `${piece.size}px`,
-                  '--confetti-duration': `${piece.duration}ms`,
-                  '--confetti-delay': `${piece.delay}ms`
-                }}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      <ConfettiLayer bursts={confettiBursts} />
     </main>
   );
 }
