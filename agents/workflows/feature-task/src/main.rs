@@ -198,6 +198,30 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         return Ok(blocked);
     }
     if is_past(&env.task, "open") {
+        let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
+        if !failures.is_empty() {
+            if !args.dry_run {
+                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "open"}))?;
+                env.task = api_get_task(&args.base_url, &env.task.id)?;
+                let fingerprint = failures.join("\n");
+                if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+                    env.lobster_state.failure_fingerprint = Some(fingerprint);
+                    add_comment(
+                        &args.base_url,
+                        &env.task.id,
+                        &format!(
+                            "[feature-task-progress-checklist]\nTask advanced past spec check without passing the gate. Reverted to `open`.\n{}",
+                            failures.join("\n")
+                        ),
+                    )?;
+                    write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+                }
+            }
+            env.criteria_met = false;
+            env.action_taken = "spec_check_reverted_to_open".to_string();
+            env.failures = failures;
+            return Ok(env);
+        }
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_open".to_string();
@@ -342,18 +366,60 @@ fn feedback_review_failure(url: &str, review: ReviewState) -> Option<String> {
     }
 }
 
+fn qa_ac_verified(task: &Task) -> bool {
+    tagged_values(task, "[qa-ac-verified]")
+        .into_iter()
+        .any(|v| v.eq_ignore_ascii_case("true"))
+}
+
+fn qa_ac_verified_failures(task: &Task) -> Vec<String> {
+    if qa_ac_verified(task) {
+        vec![]
+    } else {
+        vec!["Missing task comment `[qa-ac-verified] true` -- Tom must verify all task ACs are met before closing.".to_string()]
+    }
+}
+
 fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     if let Some(blocked) = block_on_spec_drift(env.clone(), "post_merge") {
         return Ok(blocked);
     }
+    let qa_failures = qa_ac_verified_failures(&env.task);
     if is_past(&env.task, "acceptance") {
+        if !qa_failures.is_empty() {
+            if !args.dry_run {
+                api_patch::<Task>(
+                    &args.base_url,
+                    &env.task.id,
+                    json!({"status": "acceptance"}),
+                )?;
+                env.task = api_get_task(&args.base_url, &env.task.id)?;
+                let fingerprint = qa_failures.join("\n");
+                if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+                    env.lobster_state.failure_fingerprint = Some(fingerprint);
+                    add_comment(
+                        &args.base_url,
+                        &env.task.id,
+                        &format!(
+                            "[feature-task-progress-checklist]\nTask advanced to `done` without Tom verifying task ACs. Reverted to `acceptance`.\n{}",
+                            qa_failures.join("\n")
+                        ),
+                    )?;
+                    write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+                }
+            }
+            env.criteria_met = false;
+            env.action_taken = "post_merge_reverted_to_acceptance".to_string();
+            env.failures = qa_failures;
+            return Ok(env);
+        }
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_acceptance".to_string();
         return Ok(env);
     }
-    let mut failures = Vec::new();
+    let mut failures = qa_failures;
     for url in rowan_pr_urls(&env.task) {
         match inspect_pr(&url) {
             Ok(ReviewState::Merged) => {}
@@ -663,6 +729,18 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
     if workstreams(task).is_empty() {
         failures.push("Task description must include workstreams.".to_string());
     }
+    failures
+}
+
+fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
+    if task.spec_checksum.is_some() {
+        return vec![];
+    }
+    let mut failures = vec![
+        "Task is past `open` but has no stored `specChecksum`; the spec gate was bypassed."
+            .to_string(),
+    ];
+    failures.extend(spec_failures(task, repo, workspace_root));
     failures
 }
 
@@ -1769,6 +1847,82 @@ mod tests {
             active,
             vec!["https://github.com/Stoffer-Industries/sindustries/pull/128".to_string()]
         );
+    }
+
+    #[test]
+    fn post_merge_requires_qa_ac_verified() {
+        let task_without = Task::default();
+        assert!(!qa_ac_verified(&task_without));
+        assert_eq!(
+            qa_ac_verified_failures(&task_without),
+            vec!["Missing task comment `[qa-ac-verified] true` -- Tom must verify all task ACs are met before closing.".to_string()]
+        );
+
+        let task_with = Task {
+            comments: vec![TaskComment {
+                text: Some("[qa-ac-verified] true".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        assert!(qa_ac_verified(&task_with));
+        assert!(qa_ac_verified_failures(&task_with).is_empty());
+
+        let task_false = Task {
+            comments: vec![TaskComment {
+                text: Some("[qa-ac-verified] false".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        assert!(!qa_ac_verified(&task_false));
+    }
+
+    #[test]
+    fn spec_check_detects_manually_advanced_task_without_checksum() {
+        let task = Task {
+            id: "task-manually-advanced".to_string(),
+            status: "acceptance".to_string(),
+            spec_checksum: None,
+            description: Some("No spec line here".to_string()),
+            ..Task::default()
+        };
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let failures = missing_spec_checksum_failures(&task, repo.path(), workspace.path());
+        assert!(
+            !failures.is_empty(),
+            "expected failures for manually-advanced task without checksum"
+        );
+        assert!(failures
+            .iter()
+            .any(|f| f.contains("no stored `specChecksum`")));
+        assert!(failures.iter().any(|f| f.contains("**Spec:**")));
+    }
+
+    #[test]
+    fn spec_check_allows_past_open_task_with_valid_checksum() {
+        let task = Task {
+            id: "task-legit-ready".to_string(),
+            status: "acceptance".to_string(),
+            spec_checksum: Some("abc123".to_string()),
+            description: Some("## Acceptance Criteria\n- [ ] AC1".to_string()),
+            ..Task::default()
+        };
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        assert!(missing_spec_checksum_failures(&task, repo.path(), workspace.path()).is_empty());
+
+        // A task with a stored checksum is already past "open" legitimately — spec_checksum_failures
+        // (not spec_failures) is the gate from here on, so we just confirm no spec drift.
+        let failures = spec_checksum_failures(&task);
+        // checksum "abc123" won't match the real computed checksum, so drift is detected —
+        // that's correct behaviour: the stored checksum must match current ACs.
+        assert!(
+            !failures.is_empty(),
+            "expected drift for mismatched checksum"
+        );
+        assert!(failures[0].contains("ACs modified after spec approval"));
     }
 
     #[test]
