@@ -110,37 +110,49 @@ Key constraints or non-obvious integration points. One paragraph max.
 
 ## Step 4 — Call the Tasks API
 
-```python
-import urllib.request, json
+Use `tasks_api_client.py create` with the `--spec` flag so the standard Spec line is composed automatically. Workstreams live in a small YAML file passed via `--workstreams` to avoid shell-escaping headaches:
 
-base = 'http://localhost:4001/api/v1'
+```bash
+cat > /tmp/task-ws.yaml <<'YAML'
+- Owner: Rowan
+  Repo: Stoffer-Industries/sindustries
+  Branch: task-<first 8 chars of task ID>-<short-slug>
+  Worktree: ~/workspaces/rowan/sindustries
+  PR: (pending)
+  Scope: <what Rowan builds>
+  ACs: AC1, AC2, ...
+  Status: open
 
-# Create new task
-payload = json.dumps({
-    'title': '<Title>',
-    'description': '<formatted description from Step 3>',
-    'taskType': 'feature',
-    'assignee': 'Rowan',
-    'priority': 'high',  # or 'urgent' if blocking
-    'tags': ['rowan', '<topic-tag>']
-}).encode()
+- Owner: Quinn          # only if Quinn has ACs
+  Scope: <what Quinn does>
+  ACs: AC3, ...
+  Status: open
+YAML
 
-req = urllib.request.Request(f'{base}/tasks', data=payload,
-    headers={'Content-Type': 'application/json'}, method='POST')
-with urllib.request.urlopen(req) as resp:
-    task = json.load(resp)['data']
-    print('Created:', task['id'], task['title'])
+TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
+    --title '<Title>' \
+    --spec 'brain/tasks/specs/<slug>-YYYY-MM-DD.md' \
+    --workstreams /tmp/task-ws.yaml \
+    --description '<body text from Step 3, minus Spec/Workstreams>' \
+    --priority high \
+    --tags rowan <topic-tag> \
+    --type feature \
+    --assignee Rowan
 ```
 
-To update an existing task (replace description, not append):
+The CLI prepends `**Spec:** <path>` and appends the `**Workstreams**` block automatically when they're not already in the description. If the description still has no `**Spec:**` line, the CLI prints a stderr warning (the lobster will block `ready_checks` for feature tasks until you add one).
 
-```python
-req = urllib.request.Request(f'{base}/tasks/{task_id}',
-    data=json.dumps({'description': desc, 'taskType': 'feature', 'assignee': 'Rowan'}).encode(),
-    headers={'Content-Type': 'application/json'}, method='PATCH')
+To update an existing task's description (replaces, not appends):
+
+```bash
+TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
+    --id <task-id> \
+    --description '<new full description>'
 ```
 
-Note: `tasks_api_client.py patch --description` **appends** to the existing description. Use direct API calls to replace.
+Direct `urllib` POSTs remain valid as a fallback if the CLI is unavailable, but prefer the CLI for these reasons: it enforces the `**Spec:**` regex the lobster parses, it warns on missing fields, and the patch path correctly replaces the description rather than appending.
 
 ---
 

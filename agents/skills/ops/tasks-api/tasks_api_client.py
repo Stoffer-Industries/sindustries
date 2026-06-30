@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import sys
 import urllib.parse
 import urllib.request
@@ -121,8 +122,38 @@ def cmd_create(args):
         "priority": args.priority,
         "status": args.status,
     }
-    if args.description is not None:
-        payload["description"] = args.description
+    description = args.description or ""
+    spec_path = getattr(args, "spec", None)
+    workstreams_path = getattr(args, "workstreams", None)
+
+    # If --spec is provided and the description doesn't already have one,
+    # prepend the standard '**Spec:** <path>' line so the lobster's
+    # ready_checks stage can parse it.
+    if spec_path and "**Spec:**" not in description:
+        description = f"**Spec:** {spec_path}\n\n{description}"
+
+    # If --workstreams is provided, append the YAML contents as a Workstreams
+    # section. Skipped if the description already has one so the caller's
+    # explicit content wins.
+    if workstreams_path:
+        ws_text = pathlib.Path(workstreams_path).read_text().rstrip()
+        if "**Workstreams**" not in description:
+            if description and not description.endswith("\n\n"):
+                description = description.rstrip() + "\n\n"
+            description = f"{description}**Workstreams**\n\n{ws_text}\n"
+
+    # Non-fatal warning when the final description has no Spec line. The
+    # lobster hard-blocks ready_checks for feature tasks without one, but
+    # we don't want to break bug/chore task creation here.
+    if "**Spec:**" not in description:
+        sys.stderr.write(
+            "warning: task description has no '**Spec:**' line; lobster will "
+            "block ready_checks for feature tasks until you add one (use "
+            "--spec to set it automatically).\n"
+        )
+
+    if description:
+        payload["description"] = description
     if args.tags:
         payload["tags"] = args.tags
     if getattr(args, "type", None) is not None:
@@ -209,6 +240,8 @@ def build_parser():
     c = sub.add_parser("create")
     c.add_argument("--title", required=True)
     c.add_argument("--description")
+    c.add_argument("--spec", help="Prepend a '**Spec:** <path>' line to the description if missing")
+    c.add_argument("--workstreams", help="Path to a YAML file appended as the **Workstreams** section if missing")
     c.add_argument("--status", default="open")
     c.add_argument("--priority", default="medium")
     c.add_argument("--tags", nargs="*")
