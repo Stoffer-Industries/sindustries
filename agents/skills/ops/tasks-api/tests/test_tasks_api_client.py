@@ -63,6 +63,80 @@ class TasksApiClientPatchTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 args.func(args)
 
+    # ---- patch --description replaces (task 2cee0bcd) ----
+
+    def test_patch_description_replaces_existing(self):
+        parser = tasks_api_client.build_parser()
+        args = parser.parse_args(
+            ["patch", "--id", "task-1", "--description", "new text"]
+        )
+
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ) as api_request, patch.object(
+            tasks_api_client, "get_task"
+        ) as get_task, patch("builtins.print"):
+            args.func(args)
+
+        api_request.assert_called_once_with(
+            "PATCH",
+            "http://tasks.test/api/v1",
+            "/tasks/task-1",
+            {"description": "new text"},
+        )
+        get_task.assert_not_called()
+
+    def test_patch_description_called_twice_stores_only_second(self):
+        parser = tasks_api_client.build_parser()
+        captured_payloads = []
+
+        def fake_api_request(method, base, path, payload):
+            captured_payloads.append(payload)
+            return {"data": {"id": "task-1", "description": payload.get("description")}}
+
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", side_effect=fake_api_request
+        ), patch("builtins.print"):
+            args1 = parser.parse_args(
+                ["patch", "--id", "task-1", "--description", "first"]
+            )
+            args1.func(args1)
+            args2 = parser.parse_args(
+                ["patch", "--id", "task-1", "--description", "second"]
+            )
+            args2.func(args2)
+
+        self.assertEqual(captured_payloads[0], {"description": "first"})
+        self.assertEqual(captured_payloads[1], {"description": "second"})
+        self.assertNotIn("first", captured_payloads[1]["description"])
+
+    def test_patch_other_fields_unaffected_by_description(self):
+        parser = tasks_api_client.build_parser()
+        args = parser.parse_args(
+            [
+                "patch",
+                "--id",
+                "task-1",
+                "--status",
+                "doing",
+                "--priority",
+                "high",
+            ]
+        )
+
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ) as api_request, patch("builtins.print"):
+            args.func(args)
+
+        api_request.assert_called_once_with(
+            "PATCH",
+            "http://tasks.test/api/v1",
+            "/tasks/task-1",
+            {"status": "doing", "priority": "high"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
+
