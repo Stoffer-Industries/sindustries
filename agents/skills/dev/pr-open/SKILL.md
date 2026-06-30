@@ -53,3 +53,20 @@ Co-Authored-By: <Your Name> <your-email>
 
 **Test plan:** concrete, checkable steps. Not "tests pass" — what specifically should a reviewer verify? For non-functional changes, it's fine to write "No logic changes — diff is purely structural."
 
+**Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. Every checked `- [x]` AC line must end with one of:
+
+- `(testID: <id>)` — Playwright test ID reference
+- `(file: <path>:<line>)` — file and line reference
+- `(not tested: <reason>)` — explicit reason when no test exists
+
+Example:
+
+```markdown
+## Acceptance Criteria
+- [x] AC1: Task detail shows dependency links. (testID: 4)
+- [x] AC2: Card click-to-copy affordance. (file: apps/tasks/src/components/TaskCardSummary.jsx:42)
+- [x] AC3: Reduced opacity for archived tasks. (not tested: design tokens supply color; visual review only)
+```
+
+PRs without the required annotations are blocked from acceptance with a clear comment listing the ACs that need evidence.
+

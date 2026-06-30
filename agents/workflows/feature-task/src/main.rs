@@ -267,6 +267,9 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                     "PR {url} does not show checked acceptance criteria in its body."
                 ));
             }
+            for ac_failure in verify_pr_acs_failures(&body) {
+                failures.push(format!("PR {url} — {ac_failure}"));
+            }
         }
     }
     if workstreams(&env.task).is_empty() {
@@ -1133,6 +1136,123 @@ fn body_has_checked_acceptance(body: &str) -> bool {
         .is_match(body)
 }
 
+/// Evidence annotation recognised on a feature-task PR AC line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Evidence {
+    /// Playwright test ID reference, e.g. `(testID: 1234)`
+    TestId(String),
+    /// File path and line reference, e.g. `(file: apps/tasks/src/App.jsx:42)`
+    FileRef { path: String, line: u64 },
+    /// Explicit reason for not adding a test, e.g. `(not tested: design tokens)`
+    NotTested { reason: String },
+}
+
+/// One parsed AC line from a PR body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AcEvidence {
+    ac_label: String,
+    description: String,
+    evidence: Option<Evidence>,
+}
+
+/// Extract the Acceptance Criteria section from a PR body.
+///
+/// Recognises `## Acceptance Criteria` and `## ACs` / `## AC` headings. When
+/// no header is found, the whole body is returned so PRs without a section
+/// still get validated.
+fn extract_ac_section(body: &str) -> &str {
+    let header_re =
+        Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(?:Acceptance Criteria|ACs?)\s*:?\s*$").unwrap();
+    let Some(header) = header_re.find(body) else {
+        return body;
+    };
+    let start = header.end();
+    let tail = &body[start..];
+    // Same-or-higher heading ends the section.
+    let next_re = Regex::new(r"(?im)^\s{0,3}#{2,6}\s+\S").unwrap();
+    match next_re.find(tail) {
+        Some(next) => &tail[..next.start()],
+        None => tail,
+    }
+}
+
+/// Recognise an evidence annotation that anchors the end of a string.
+fn parse_evidence(text: &str) -> Option<Evidence> {
+    // (not tested: <reason>) comes first so the reason may contain colons.
+    let not_tested = Regex::new(r"\(not tested:\s*([^)]+)\)\s*$").unwrap();
+    if let Some(cap) = not_tested.captures(text) {
+        return Some(Evidence::NotTested {
+            reason: cap[1].trim().to_string(),
+        });
+    }
+    // (file: <path>:<line>)
+    let file_ref = Regex::new(r"\(file:\s*([^)]+?):(\d+)\)\s*$").unwrap();
+    if let Some(cap) = file_ref.captures(text) {
+        return Some(Evidence::FileRef {
+            path: cap[1].trim().to_string(),
+            line: cap[2].parse().unwrap_or(0),
+        });
+    }
+    // (testID: <value>)
+    let test_id = Regex::new(r"\(testID:\s*([^)]+)\)\s*$").unwrap();
+    if let Some(cap) = test_id.captures(text) {
+        return Some(Evidence::TestId(cap[1].trim().to_string()));
+    }
+    None
+}
+
+/// Strip a trailing evidence annotation from a description string.
+/// Returns the description with the trailing `(...)` evidence removed.
+fn strip_trailing_evidence(text: &str) -> String {
+    let re =
+        Regex::new(r"\s+\((testID|file|not tested):\s*[^)]+\)\s*$").unwrap();
+    match re.find(text) {
+        Some(m) => text[..m.start()].trim_end().to_string(),
+        None => text.to_string(),
+    }
+}
+
+/// Parse a single AC line. Returns `None` if the line isn't a checked AC.
+fn parse_ac_line(line: &str) -> Option<AcEvidence> {
+    let ac_re = Regex::new(r"^\s*-\s*\[[xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
+    let cap = ac_re.captures(line.trim())?;
+    let ac_label = cap[1].to_string();
+    let rest = cap[2].to_string();
+    if let Some(ev) = parse_evidence(&rest) {
+        let description = strip_trailing_evidence(&rest);
+        Some(AcEvidence {
+            ac_label,
+            description,
+            evidence: Some(ev),
+        })
+    } else {
+        Some(AcEvidence {
+            ac_label,
+            description: rest,
+            evidence: None,
+        })
+    }
+}
+
+/// Build failure messages for ACs that lack evidence. Empty list = all ACs
+/// in the section carry `(testID: ...)`, `(file: path:line)`, or
+/// `(not tested: reason)` annotations.
+fn verify_pr_acs_failures(body: &str) -> Vec<String> {
+    let section = extract_ac_section(body);
+    let mut failures = Vec::new();
+    for line in section.lines() {
+        if let Some(ac) = parse_ac_line(line) {
+            if ac.evidence.is_none() {
+                failures.push(format!(
+                    "AC {} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<line>)`, or `(not tested: <reason>)`.",
+                    ac.ac_label
+                ));
+            }
+        }
+    }
+    failures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1165,6 +1285,130 @@ mod tests {
         assert!(parse_product_spec_ref("Product spec: brain/bookmarks/specs/example.md").is_none());
         let spec = parse_product_spec_ref("**Spec:** brain/bookmarks/specs/example.md").unwrap();
         assert_eq!(spec.path, "brain/bookmarks/specs/example.md");
+    }
+
+    // ---- AC evidence parsing (task 6e70deb8) ----
+
+    #[test]
+    fn parse_evidence_recognises_test_id() {
+        assert_eq!(
+            parse_evidence("foo (testID: 1234)"),
+            Some(Evidence::TestId("1234".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_evidence_recognises_file_ref() {
+        assert_eq!(
+            parse_evidence("bar (file: apps/tasks/src/X.jsx:42)"),
+            Some(Evidence::FileRef {
+                path: "apps/tasks/src/X.jsx".to_string(),
+                line: 42,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_evidence_recognises_not_tested_reason() {
+        assert_eq!(
+            parse_evidence("baz (not tested: requires manual click flow)"),
+            Some(Evidence::NotTested {
+                reason: "requires manual click flow".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_evidence_rejects_bare_not_tested() {
+        assert_eq!(parse_evidence("qux (not tested)"), None);
+        assert_eq!(parse_evidence("quux"), None);
+    }
+
+    #[test]
+    fn parse_ac_line_extracts_label_description_evidence() {
+        let ac = parse_ac_line("- [x] AC1: Build it (testID: 7)").unwrap();
+        assert_eq!(ac.ac_label, "AC1");
+        assert_eq!(ac.description, "Build it");
+        assert_eq!(ac.evidence, Some(Evidence::TestId("7".to_string())));
+    }
+
+    #[test]
+    fn parse_ac_line_ignores_unchecked_lines() {
+        assert!(parse_ac_line("- [ ] AC2: Unchecked (testID: 1)").is_none());
+    }
+
+    #[test]
+    fn parse_ac_line_ignores_non_ac_bullets() {
+        assert!(parse_ac_line("- [x] `npm test`").is_none());
+        assert!(parse_ac_line("- [x] Some other bullet").is_none());
+    }
+
+    #[test]
+    fn parse_ac_line_handles_description_with_parens() {
+        let ac = parse_ac_line("- [x] AC1: Allow (paren) text (testID: 1)").unwrap();
+        assert_eq!(ac.ac_label, "AC1");
+        assert_eq!(ac.description, "Allow (paren) text");
+        assert_eq!(ac.evidence, Some(Evidence::TestId("1".to_string())));
+    }
+
+    #[test]
+    fn extract_ac_section_returns_section_when_header_present() {
+        let body = "## Summary\nFoo.\n\n## Acceptance Criteria\n- [x] AC1: First\n- [x] AC2: Second (testID: 1)\n\n## Test plan\n- [x] run tests\n";
+        let section = extract_ac_section(body);
+        assert!(section.contains("AC1: First"));
+        assert!(section.contains("AC2: Second"));
+        assert!(!section.contains("Test plan"));
+        assert!(!section.contains("run tests"));
+    }
+
+    #[test]
+    fn extract_ac_section_falls_back_to_whole_body() {
+        let body = "- [x] AC1: First (testID: 1)";
+        let section = extract_ac_section(body);
+        assert!(section.contains("AC1: First"));
+    }
+
+    #[test]
+    fn extract_ac_section_handles_acs_header() {
+        let body = "## ACs\n- [x] AC1: First (testID: 1)\n";
+        let section = extract_ac_section(body);
+        assert!(section.contains("AC1: First"));
+    }
+
+    #[test]
+    fn verify_pr_acs_passes_when_all_have_evidence() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Foo (testID: 1)\n- [x] AC2: Bar (file: src/x.js:2)\n- [x] AC3: Baz (not tested: design tokens)\n";
+        assert!(verify_pr_acs_failures(body).is_empty());
+    }
+
+    #[test]
+    fn verify_pr_acs_blocks_one_missing_evidence() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Foo (testID: 1)\n- [x] AC2: Bar\n- [x] AC3: Baz (testID: 3)\n";
+        let failures = verify_pr_acs_failures(body);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("AC2"));
+        assert!(failures[0].contains("missing evidence"));
+    }
+
+    #[test]
+    fn verify_pr_acs_blocks_all_missing_evidence() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Foo\n- [x] AC2: Bar\n";
+        let failures = verify_pr_acs_failures(body);
+        assert_eq!(failures.len(), 2);
+        assert!(failures[0].contains("AC1"));
+        assert!(failures[1].contains("AC2"));
+    }
+
+    #[test]
+    fn verify_pr_acs_ignores_unchecked_lines() {
+        let body = "## Acceptance Criteria\n- [ ] AC1: Pending\n- [x] AC2: Done (testID: 1)\n";
+        assert!(verify_pr_acs_failures(body).is_empty());
+    }
+
+    #[test]
+    fn verify_pr_acs_skips_other_sections() {
+        let body = "## Test plan\n- [x] AC1: Not really an AC\n\n## Acceptance Criteria\n- [x] AC1: Real AC (testID: 1)\n";
+        assert!(verify_pr_acs_failures(body).is_empty());
     }
 
     #[test]
