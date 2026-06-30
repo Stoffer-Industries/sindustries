@@ -137,6 +137,125 @@ class TasksApiClientPatchTest(unittest.TestCase):
         )
 
 
+
+
+    # ---- create --spec / --workstreams helpers (task 8ec03996) ----
+
+    def _build_create_args(self, **overrides):
+        """Construct a Namespace mimicking `tasks_api_client.py create` argv."""
+        from argparse import Namespace
+        defaults = {
+            "title": "T",
+            "description": "Body.",
+            "spec": None,
+            "workstreams": None,
+            "status": "open",
+            "priority": "medium",
+            "tags": [],
+            "type": None,
+        }
+        defaults.update(overrides)
+        ns = Namespace(**defaults)
+        ns.func = tasks_api_client.cmd_create
+        return ns
+
+    def test_create_with_spec_prepends_spec_line(self):
+        args = self._build_create_args(spec="brain/bookmarks/specs/foo.md")
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ) as api_request, patch("builtins.print"):
+            args.func(args)
+        payload = api_request.call_args.args[3]
+        self.assertTrue(
+            payload["description"].startswith("**Spec:** brain/bookmarks/specs/foo.md\n\n"),
+            f"description did not start with Spec line: {payload['description']!r}",
+        )
+        self.assertIn("Body.", payload["description"])
+
+    def test_create_with_spec_does_not_double_prepend(self):
+        args = self._build_create_args(
+            spec="brain/bookmarks/specs/foo.md",
+            description="**Spec:** brain/bookmarks/specs/foo.md\n\nBody.",
+        )
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ) as api_request, patch("builtins.print"):
+            args.func(args)
+        payload = api_request.call_args.args[3]
+        # Description must contain the Spec line exactly once.
+        self.assertEqual(payload["description"].count("**Spec:**"), 1)
+        self.assertIn("Body.", payload["description"])
+
+    def test_create_without_spec_warns_to_stderr(self):
+        args = self._build_create_args()  # no spec, no Spec line in description
+        import io
+        captured_stderr = io.StringIO()
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ), patch.object(
+            tasks_api_client.sys, "stderr", captured_stderr
+        ), patch("builtins.print"):
+            args.func(args)
+        self.assertIn("**Spec:**", captured_stderr.getvalue())
+        self.assertIn("lobster will block", captured_stderr.getvalue())
+
+    def test_create_without_spec_no_warning_when_present(self):
+        args = self._build_create_args(
+            description="**Spec:** brain/bookmarks/specs/foo.md\n\nBody."
+        )
+        import io
+        captured_stderr = io.StringIO()
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ), patch.object(
+            tasks_api_client.sys, "stderr", captured_stderr
+        ), patch("builtins.print"):
+            args.func(args)
+        self.assertNotIn("**Spec:**", captured_stderr.getvalue())
+
+    def test_create_with_workstreams_appends_section(self, tmp_workstreams=None):
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".yaml") as f:
+            f.write("- Owner: Rowan\n  Scope: Build it\n")
+            ws_path = f.name
+        try:
+            args = self._build_create_args(workstreams=ws_path)
+            with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+                tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+            ) as api_request, patch("builtins.print"):
+                args.func(args)
+            payload = api_request.call_args.args[3]
+            self.assertIn("**Workstreams**", payload["description"])
+            self.assertIn("- Owner: Rowan", payload["description"])
+            self.assertIn("Scope: Build it", payload["description"])
+        finally:
+            os.unlink(ws_path)
+
+    def test_create_with_workstreams_idempotent(self):
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".yaml") as f:
+            f.write("- Owner: Rowan\n")
+            ws_path = f.name
+        try:
+            args = self._build_create_args(
+                description="Body.\n\n**Workstreams**\n\n- Owner: Quinn",
+                workstreams=ws_path,
+            )
+            with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+                tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+            ) as api_request, patch("builtins.print"):
+                args.func(args)
+            payload = api_request.call_args.args[3]
+            # Workstreams section must appear exactly once.
+            self.assertEqual(payload["description"].count("**Workstreams**"), 1)
+            self.assertEqual(payload["description"].count("- Owner:"), 1)
+        finally:
+            os.unlink(ws_path)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
