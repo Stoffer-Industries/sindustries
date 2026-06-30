@@ -855,7 +855,12 @@ fn tech_design_url(task: &Task) -> Option<String> {
 fn tech_design_approved(task: &Task) -> bool {
     tagged_values(task, "[tech-design-approved]")
         .into_iter()
-        .any(|v| v.eq_ignore_ascii_case("true"))
+        .any(|v| {
+            // Match a leading "true" token (case-insensitive). Rationale text
+            // after the token is allowed and ignored.
+            let token = v.trim_start().split_whitespace().next().unwrap_or("");
+            token.eq_ignore_ascii_case("true")
+        })
 }
 
 fn rowan_pr_urls(task: &Task) -> Vec<String> {
@@ -1285,6 +1290,63 @@ mod tests {
         assert!(parse_product_spec_ref("Product spec: brain/bookmarks/specs/example.md").is_none());
         let spec = parse_product_spec_ref("**Spec:** brain/bookmarks/specs/example.md").unwrap();
         assert_eq!(spec.path, "brain/bookmarks/specs/example.md");
+    }
+
+    // ---- tech_design_approved parser relaxation (task 44f5ed65) ----
+
+    fn task_with_approval_comment(comment: &str) -> Task {
+        Task {
+            id: "task-44f5ed65".to_string(),
+            comments: vec![TaskComment {
+                text: Some(comment.to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn tech_design_approved_accepts_bare_true() {
+        let task = task_with_approval_comment("[tech-design-approved] true");
+        assert!(tech_design_approved(&task));
+    }
+
+    #[test]
+    fn tech_design_approved_accepts_rationale_after_true() {
+        let task = task_with_approval_comment(
+            "[tech-design-approved] true \u{2014} Approved by Quinn on behalf of Tom 2026-06-30",
+        );
+        assert!(tech_design_approved(&task));
+    }
+
+    #[test]
+    fn tech_design_approved_accepts_uppercase_true() {
+        let task = task_with_approval_comment("[tech-design-approved] TRUE");
+        assert!(tech_design_approved(&task));
+    }
+
+    #[test]
+    fn tech_design_approved_accepts_leading_whitespace() {
+        let task = task_with_approval_comment("[tech-design-approved]    true with rationale");
+        assert!(tech_design_approved(&task));
+    }
+
+    #[test]
+    fn tech_design_approved_rejects_false() {
+        let task = task_with_approval_comment("[tech-design-approved] false \u{2014} pending review");
+        assert!(!tech_design_approved(&task));
+    }
+
+    #[test]
+    fn tech_design_approved_rejects_missing_value() {
+        let task = task_with_approval_comment("[tech-design-approved]");
+        assert!(!tech_design_approved(&task));
+    }
+
+    #[test]
+    fn tech_design_approved_rejects_unrelated_token() {
+        let task = task_with_approval_comment("[tech-design-approved] maybe");
+        assert!(!tech_design_approved(&task));
     }
 
     // ---- AC evidence parsing (task 6e70deb8) ----
