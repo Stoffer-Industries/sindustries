@@ -166,17 +166,12 @@ def cmd_patch(args):
     if args.clear_dependencies:
         payload["dependsOnIds"] = []
 
-    # Handle description: append to existing instead of replacing
+    # Handle description: replace, not concatenate. The Tasks API supports
+    # partial-PATCH and stores whatever description string it receives;
+    # previously this branch concatenated the new value onto the existing one,
+    # which caused repeated patches to multiply the description content.
     if args.description is not None:
-        try:
-            current = get_task(args.id, base_url=base)
-            existing = (current.get("description") or "") if current else ""
-            if existing:
-                payload["description"] = f"{existing}\n\n{args.description}"
-            else:
-                payload["description"] = args.description
-        except Exception:
-            payload["description"] = args.description
+        payload["description"] = args.description
 
     print(json.dumps(api_request("PATCH", base, f"/tasks/{args.id}", payload), indent=2))
 
