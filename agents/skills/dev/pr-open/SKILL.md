@@ -57,7 +57,10 @@ Co-Authored-By: <Your Name> <your-email>
 
 - `(testID: <id>)` — Playwright test ID reference
 - `(file: <path>:<line>)` — file and line reference
-- `(not tested: <reason>)` — explicit reason when no test exists
+- `(not tested: <reason>)` — implemented in code but not testable
+- `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
+
+**Every task AC must appear in the PR body** — checked with evidence. Fix PRs must re-list all task ACs, not just the ones being addressed.
 
 Example:
 
@@ -66,7 +69,10 @@ Example:
 - [x] AC1: Task detail shows dependency links. (testID: 4)
 - [x] AC2: Card click-to-copy affordance. (file: apps/tasks/src/components/TaskCardSummary.jsx:42)
 - [x] AC3: Reduced opacity for archived tasks. (not tested: design tokens supply color; visual review only)
+- [x] AC4: Feature factory v2 spec updated. (not code: updated brain/bookmarks/specs/feature-factory-v2-2026-06-04.md)
 ```
 
 PRs without the required annotations are blocked from acceptance with a clear comment listing the ACs that need evidence.
+
+**QA bounce:** after merge, the lobster compares the latest merged PR body against the task description ACs. If any AC is missing, unchecked, or has altered text, the task bounces back to `doing` and a `[feature-task-progress-checklist]` comment is posted explaining what the next PR must address.
 

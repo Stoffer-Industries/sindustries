@@ -1,7 +1,7 @@
 # Feature Task Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-01
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/feature-task/`
 
 ---
@@ -59,8 +59,17 @@ The Rust CLI under `agents/workflows/feature-task/` owns parsing, gate enforceme
   - CI on the merged commits is green
   - System spec exists at `docs/systems/<file>.md` (gated via `[system-spec]` task comment) OR a substantive `[no-system-spec-change] <reason>` is recorded
   - No `[openclaw-needed]` pending without matching `[openclaw-done]` from Quinn
-  - Spec checksum still matches AC JSON (no drift since `ready`)
+  - Latest merged PR body covers all task description ACs — each checked with evidence (see QA bounce below)
+  - `[qa-ac-verified] true` task comment from Tom
 - Rust commands: `feature-task feedback-aggregate`, then `feature-task post-merge`
+
+**QA bounce (acceptance → doing):** the lobster compares every AC in the task description against the latest merged PR body at the `post-merge` stage. If any AC is missing from the PR, unchecked, or has altered text, the task is bounced back to `doing` and a `[feature-task-progress-checklist]` comment is posted. The next fix PR must re-list *all* task ACs. Tom may edit ACs in the task description during QA — spec drift does not block at `post-merge` (it is covered by the resync feature; see task b2ab54db).
+
+**PR AC evidence formats** (every checked `[x]` AC line must end with one of):
+- `(testID: <id>)` — Playwright test ID reference
+- `(file: <path>:<line>)` — file and line reference
+- `(not tested: <reason>)` — implemented in code but not testable
+- `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
 
 ### 4. `done` — terminal
 
@@ -128,6 +137,8 @@ Until first-class Tasks API fields exist, the workflow reads these tags from tas
 | `[openclaw-done] <summary>` | Quinn | `.openclaw` change applied |
 | `[system-spec] docs/systems/<file>.md` | implementer | System spec reference |
 | `[no-system-spec-change] <reason>` | implementer | Bypass for code-only changes |
+| `[qa-ac-verified] true` | Tom | Explicit QA sign-off; required before `acceptance -> done` |
+| `[feature-task-progress-checklist] ...` | Lobster | Posted when QA bounce detected; lists ACs missing/unchecked/altered in latest PR |
 | `[lobster-state] { ... }` | Lobster | Reconciler state — `version`, `last_orchestrated_at`, gate outcomes |
 | `[scope-add] <summary>` | Quinn / Tom | Document a scope change after spec approval (used in factory-v2 grandfathering) |
 
@@ -200,6 +211,8 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 | Spec checksum mismatch | ACs edited after spec approval | Hits only `PATCH /tasks/:id` (with `description`) and `POST /tasks/:id/comments`; both return `409 SPEC_CHECKSUM_MISMATCH`. Treat as spec drift — write a new spec, do not hand-edit ACs. |
 | `PATCH` succeeds despite stale ACs | Other event types (status change, dependency add, tag edit) don't re-check the checksum | Pass the updated `description` through `PATCH /tasks/:id` first so the drift check fires there. |
 | CI green but PR not merged | Reviewer has not approved | Wait for `APPROVED` review state; Lobster will not mark `done` until GitHub merge is recorded |
+| Task bounced to `doing` from `acceptance` | QA AC check failed — AC missing, unchecked, or text differs in latest PR | Open a fix PR that includes ALL task ACs checked with evidence; `[feature-task-progress-checklist]` comment details what failed |
+| `acceptance -> done` blocked with "Missing `[qa-ac-verified] true`" | Tom has not signed off | Tom posts `[qa-ac-verified] true` after verifying ACs on staging |
 
 ---
 
