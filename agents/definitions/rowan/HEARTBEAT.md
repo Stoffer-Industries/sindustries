@@ -19,7 +19,7 @@ If no open PRs or no unresolved comments: skip the assignee part.
 ## Step 2 — Feature task work
 
 Check for active feature tasks assigned to you:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status ready --status doing --status acceptance`
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status ready --status doing --status acceptance summary`
 
 Follow WORKFLOW.md for full per-state instructions (tech design, implementation, system spec, acceptance):
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/definitions/rowan/WORKFLOW.md`
