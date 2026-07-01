@@ -16,70 +16,41 @@ Use API-first task operations for all automation flows.
 
 ## Base URL
 
-Ensure `TASKS_API_BASE_URL` is set in your environment before running scripts:
-
 ```bash
 export TASKS_API_BASE_URL=http://localhost:4001/api/v1
 ```
 
-## Primary helper script
+## Script
 
-Scripts live at:
 ```
-/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/
+/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py
 ```
 
-Use:
+Run with `-h` or `<command> -h` for full usage:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py <command>
+python3 tasks_api_client.py -h
+python3 tasks_api_client.py list -h
+python3 tasks_api_client.py create -h
 ```
 
-Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `tasks_api_client` for scripts that need to query tasks without using the CLI (both files must be in the same directory).
+Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `tasks_api_client` for scripts that need to query tasks without the CLI.
 
-### Commands
+## Common patterns
 
-- Get one task:
+Agent task view (grouped by status with blockers):
 ```bash
-python3 tasks_api_client.py get --id <task-id>
+python3 tasks_api_client.py list --assignee Rowan --status ready --status doing --status acceptance --summary
 ```
 
-- List tasks:
+Heartbeat view (all active + 10 open):
 ```bash
-python3 tasks_api_client.py list --limit 50
-```
-Optional filters: `--status`, `--assignee`, `--blocked true|false`, `--ready true|false`, `--priority`, `--q`.
-
-Heartbeat view (all Acceptance, Doing, Ready, and 10 from Todo in one payload):
-
-```bash
-python3 tasks_api_client.py list --limit 50 --heartbeat
+python3 tasks_api_client.py list --heartbeat
 ```
 
-- Create task:
-```bash
-python3 tasks_api_client.py create --title "Task title" --priority high
-```
+## Content task creation
 
-- Update/move task:
-```bash
-python3 tasks_api_client.py patch --id <task-id> --status doing
-```
-
-- Set blocked/ready flags:
-```bash
-python3 tasks_api_client.py patch --id <task-id> --blocked true
-python3 tasks_api_client.py patch --id <task-id> --ready true
-```
-
-- Archive task:
-```bash
-python3 tasks_api_client.py archive --id <task-id>
-```
-
-## Content task creation (weekly review approval)
-
-When Tom approves a weekly content review, create the task with `--type content` and use the following description format. Each change item must use a markdown checkbox (`- [ ]`).
+When Tom approves a weekly content review, create the task with `--type content`:
 
 ```bash
 python3 tasks_api_client.py create \
@@ -110,7 +81,7 @@ EOF
 ```
 
 Rules:
-- `--type content` is required — the task will be rejected or miscategorised without it
-- Each change item from the review file becomes one `- [ ]` checkbox line
-- Omit sections that have no items rather than leaving them empty
-- `--tags "weekly-review,content-ops"` should always be included for weekly review tasks
+- `--type content` is required
+- Each change item becomes one `- [ ]` checkbox line
+- Omit empty sections
+- Always include `--tags "weekly-review,content-ops"`
