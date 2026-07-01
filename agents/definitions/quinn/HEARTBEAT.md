@@ -30,12 +30,15 @@ Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated
 
 Each heartbeat:
 1. Run the feature task workflow check (see FEATURE TASK LOBSTER CHECK below).
-2. For any task blocked on `[tech-design-approved]` that already has a `[tech-design]` comment:
+2. Find feature tasks with a `[tech-design]` comment but no proper `[tech-design-approved] true` comment:
+   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
+   The script mirrors the lobster's parser (`tagged_values` + `tech_design_approved` in `agents/workflows/feature-task/src/main.rs`): a comment counts as approval only if its trimmed text STARTS WITH the tag and the first whitespace-separated token after the tag is `true` (case-insensitive). Substring matches in the lobster's progress-checklist complaints (e.g. `Missing task comment [tech-design-approved] true`) are intentionally NOT counted.
+3. For each pending task:
    - Read the design at the linked path.
    - Check: all required sections present, aligned with spec, no unbounded scope, `.openclaw` boundary notes where relevant.
    - If it looks good: post task comment `[tech-design-approved] true`
    - If something looks wrong or risky: flag to Tom via Telegram instead of approving.
-3. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
+4. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
 
 ---
 
