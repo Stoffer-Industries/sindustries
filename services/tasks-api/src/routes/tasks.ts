@@ -444,7 +444,10 @@ tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
     const { id } = req.params;
     const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
-    if (rejectSpecDrift(res, existing, existing.description)) return;
+    // Comments are meta-discussion, not scope changes. The drift check
+    // belongs on PATCH (where ACs can actually be modified), not on comment
+    // creation. Checking here blocks all discussion on drifted tasks, which
+    // is the opposite of what we want — the new ACs need to be discussed.
 
     const author = normalizeString(req.body?.author);
     const text = normalizeString(req.body?.text);
