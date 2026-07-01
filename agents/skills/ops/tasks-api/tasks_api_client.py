@@ -87,6 +87,33 @@ def list_tasks(
     return []
 
 
+def _blocking_comment(task: dict) -> str | None:
+    """Return the text of the latest [feature-task-progress-checklist] comment, if any."""
+    for comment in reversed(task.get("comments") or []):
+        text = comment.get("text") or comment.get("body") or ""
+        if "[feature-task-progress-checklist]" in text:
+            # Return just the failure lines, not the tag itself
+            lines = [l for l in text.splitlines() if l.strip() and "[feature-task-progress-checklist]" not in l]
+            return " | ".join(lines[:3]) if lines else None
+    return None
+
+
+def _fetch_tasks_multi_status(statuses: list[str], base: str, limit: int, extra_q: dict) -> list:
+    """Fetch tasks across multiple statuses, one API call per status."""
+    seen: set[str] = set()
+    result = []
+    for status in statuses:
+        q = {"limit": str(limit), "status": status, **extra_q}
+        path = "/tasks?" + urllib.parse.urlencode(q)
+        resp = api_request("GET", base, path)
+        for task in (resp.get("data") if isinstance(resp, dict) else []) or []:
+            tid = task.get("id", "")
+            if tid and tid not in seen:
+                seen.add(tid)
+                result.append(task)
+    return result
+
+
 def cmd_list(args):
     base = get_base_url()
     # Heartbeat view: all Acceptance, Doing, Ready, plus 10 from Open
@@ -98,21 +125,49 @@ def cmd_list(args):
         print(json.dumps({"data": tasks}, indent=2))
         return
 
-    q = {"limit": str(args.limit)}
-    if args.status:
-        q["status"] = args.status
+    extra_q: dict = {}
     if args.priority:
-        q["priority"] = args.priority
+        extra_q["priority"] = args.priority
     if args.q:
-        q["q"] = args.q
+        extra_q["q"] = args.q
     if getattr(args, "assignee", None):
-        q["assignee"] = args.assignee
+        extra_q["assignee"] = args.assignee
     if getattr(args, "blocked", None):
-        q["blocked"] = args.blocked
+        extra_q["blocked"] = args.blocked
     if getattr(args, "ready", None):
-        q["ready"] = args.ready
-    path = "/tasks?" + urllib.parse.urlencode(q)
-    print(json.dumps(api_request("GET", base, path), indent=2))
+        extra_q["ready"] = args.ready
+
+    statuses: list[str] = args.status or []
+
+    if len(statuses) > 1:
+        # Multi-status: group output by status, include blocking comment per task
+        groups: dict[str, list] = {}
+        for status in statuses:
+            q = {"limit": str(args.limit), "status": status, **extra_q}
+            path = "/tasks?" + urllib.parse.urlencode(q)
+            resp = api_request("GET", base, path)
+            groups[status] = (resp.get("data") if isinstance(resp, dict) else []) or []
+
+        if getattr(args, "summary", False):
+            for status, tasks in groups.items():
+                if not tasks:
+                    continue
+                print(f"\n=== {status.upper()} ({len(tasks)}) ===")
+                for t in tasks:
+                    blocker = _blocking_comment(t)
+                    blocker_str = f"\n    ⛔ {blocker}" if blocker else ""
+                    print(f"  [{t.get('id','')[:8]}] {t.get('title','')}{blocker_str}")
+        else:
+            all_tasks = [t for tasks in groups.values() for t in tasks]
+            print(json.dumps({"data": all_tasks}, indent=2))
+    elif statuses:
+        q = {"limit": str(args.limit), "status": statuses[0], **extra_q}
+        path = "/tasks?" + urllib.parse.urlencode(q)
+        print(json.dumps(api_request("GET", base, path), indent=2))
+    else:
+        q = {"limit": str(args.limit), **extra_q}
+        path = "/tasks?" + urllib.parse.urlencode(q)
+        print(json.dumps(api_request("GET", base, path), indent=2))
 
 
 def cmd_create(args):
@@ -228,13 +283,14 @@ def build_parser():
 
     l = sub.add_parser("list")
     l.add_argument("--limit", type=int, default=20)
-    l.add_argument("--status")
+    l.add_argument("--status", action="append", default=[])
     l.add_argument("--priority")
     l.add_argument("--q")
     l.add_argument("--assignee")
     l.add_argument("--blocked", choices=["true", "false"])
     l.add_argument("--ready", choices=["true", "false"])
     l.add_argument("--heartbeat", action="store_true", help="Return heartbeat view: Acceptance, Doing, Ready, and 10 from Todo")
+    l.add_argument("--summary", action="store_true", help="Human-readable grouped output with blocking comments")
     l.set_defaults(func=cmd_list)
 
     c = sub.add_parser("create")
