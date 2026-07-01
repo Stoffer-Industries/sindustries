@@ -82,6 +82,20 @@ CI currently covers:
 - `apps/tasks` Playwright e2e
 - `apps/website` unit tests + build
 
+## System spec maintenance
+
+`docs/systems/` contains durable system specs that describe how shipped features work. These must stay in sync with the code.
+
+**Every commit that changes observable system behaviour must update the relevant `docs/systems/<file>.md`** — or include a `[no-system-spec-change] <reason>` justification in the PR body or task comment explaining why no update is needed.
+
+What counts as observable system behaviour: state transitions, gate logic, comment tag contracts, API response shapes, agent orchestration protocols, cron schedules, and permission boundaries.
+
+What does not require a system spec update: internal refactors with no externally visible behaviour change, test-only changes, documentation-only changes, and build/tooling changes.
+
+If no `docs/systems/` file yet covers the area you're changing, create one. Use `agents/skills/dev/system-spec/SKILL.md` as a guide.
+
+**This rule applies to agents and humans equally.** Failing to update the system spec when shipping behaviour changes is a DoD violation.
+
 ## Pull request standards
 
 1. Code review feedback belongs on the GitHub PR.
