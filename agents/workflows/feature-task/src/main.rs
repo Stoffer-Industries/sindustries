@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt, fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -396,6 +396,88 @@ fn qa_ac_verified_failures(task: &Task) -> Vec<String> {
     }
 }
 
+/// Extract all ACs from a task description (both checked and unchecked), returning (label, text) pairs.
+fn task_description_acs(description: &str) -> Vec<(String, String)> {
+    let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
+    re.captures_iter(description)
+        .map(|cap| (cap[1].to_string(), cap[2].trim().to_string()))
+        .collect()
+}
+
+/// Parse all AC lines from a PR body's AC section.
+/// Returns label -> (description without evidence, is_checked).
+fn pr_acs_all(body: &str) -> HashMap<String, (String, bool)> {
+    let section = extract_ac_section(body);
+    let re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
+    re.captures_iter(section)
+        .map(|cap| {
+            let checked = cap[1].to_lowercase() == "x";
+            let label = cap[2].to_string();
+            let text = strip_trailing_evidence(cap[3].trim());
+            (label, (text, checked))
+        })
+        .collect()
+}
+
+/// Extract the numeric PR number from a GitHub PR URL for ordering.
+fn pr_number(url: &str) -> u64 {
+    url.rsplit('/')
+        .next()
+        .and_then(|n| n.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+/// Return the URL of the most recently merged Rowan PR (highest PR number).
+fn latest_merged_pr_url(task: &Task) -> Option<String> {
+    rowan_pr_urls(task)
+        .into_iter()
+        .filter(|url| matches!(inspect_pr(url), Ok(ReviewState::Merged)))
+        .max_by_key(|url| pr_number(url))
+}
+
+/// Compare task description ACs against the latest merged PR.
+///
+/// Three failure states:
+/// - AC missing from latest PR entirely → next PR must include it
+/// - AC present but unchecked in latest PR → not implemented
+/// - AC text differs between task and PR → spec altered, needs new PR
+fn task_ac_vs_latest_pr_failures(task: &Task) -> Vec<String> {
+    let description = task.description.clone().unwrap_or_default();
+    let task_acs = task_description_acs(&description);
+    if task_acs.is_empty() {
+        return vec![];
+    }
+    let Some(latest_url) = latest_merged_pr_url(task) else {
+        return vec!["No merged PR found — cannot verify task ACs.".to_string()];
+    };
+    let body = match pr_body(&latest_url) {
+        Ok(b) => b,
+        Err(e) => return vec![format!("Could not fetch body for {latest_url}: {e}.")],
+    };
+    let pr_acs = pr_acs_all(&body);
+    let mut failures = Vec::new();
+    for (label, task_text) in &task_acs {
+        match pr_acs.get(label) {
+            None => failures.push(format!(
+                "{label} missing from latest PR {latest_url} — next PR must include all task ACs."
+            )),
+            Some((pr_text, checked)) => {
+                if !checked {
+                    failures.push(format!(
+                        "{label} is unchecked in latest PR {latest_url} — AC was not completed."
+                    ));
+                }
+                if task_text.to_lowercase() != pr_text.to_lowercase() {
+                    failures.push(format!(
+                        "{label} text altered — task: \"{task_text}\", PR: \"{pr_text}\". Open a new PR addressing the updated AC."
+                    ));
+                }
+            }
+        }
+    }
+    failures
+}
+
 fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     if let Some(blocked) = block_on_spec_drift(env.clone(), "post_merge") {
@@ -405,6 +487,47 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     if !manual_failures.is_empty() {
         return block_with_manual_block(&args, env, "post_merge", manual_failures);
     }
+
+    // AC drift check: compare task description ACs against the latest merged PR.
+    // Runs before the qa_ac_verified gate — if the latest PR doesn't cover all ACs,
+    // bounce back to doing regardless of any existing [qa-ac-verified] comment.
+    let ac_failures = task_ac_vs_latest_pr_failures(&env.task);
+    if !ac_failures.is_empty() {
+        let target_status = if is_past(&env.task, "acceptance") {
+            // Task was already moved to done — revert to acceptance first,
+            // let next heartbeat bounce it further once Rowan opens a fix PR.
+            "acceptance"
+        } else {
+            "doing"
+        };
+        if !args.dry_run {
+            api_patch::<Task>(
+                &args.base_url,
+                &env.task.id,
+                json!({"status": target_status}),
+            )?;
+            env.task = api_get_task(&args.base_url, &env.task.id)?;
+            let fingerprint = ac_failures.join("\n");
+            if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+                env.lobster_state.failure_fingerprint = Some(fingerprint);
+                add_comment(
+                    &args.base_url,
+                    &env.task.id,
+                    &format!(
+                        "[feature-task-progress-checklist]\nQA failed — task bounced back to `{target_status}`. Next PR must include all task ACs checked with evidence.\n{}",
+                        ac_failures.join("\n")
+                    ),
+                )?;
+                write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+            }
+        }
+        env.criteria_met = false;
+        env.action_taken = format!("post_merge_bounced_to_{target_status}");
+        env.failures = ac_failures;
+        return Ok(env);
+    }
+
+    // AC coverage looks good — require Tom's explicit sign-off before closing.
     let qa_failures = qa_ac_verified_failures(&env.task);
     if is_past(&env.task, "acceptance") {
         if !qa_failures.is_empty() {
@@ -2191,7 +2314,6 @@ mod tests {
 
     #[test]
     fn manual_block_guard_does_not_touch_dependency_blocked() {
-        // dependencyBlocked is a separate computed property; the guard only watches the manual flag.
         let task = Task {
             id: "task-dep-blocked-only".to_string(),
             blocked: false,
@@ -2207,8 +2329,6 @@ mod tests {
         let failures = manual_block_failures(&task);
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("blocked: true"));
-        // The message must explicitly mention dependencyBlocked is separate so an operator
-        // reading the failure understands which flag applies.
         assert!(failures[0].contains("dependencyBlocked"));
     }
 
@@ -2223,9 +2343,6 @@ mod tests {
 
     #[test]
     fn manual_block_guard_skips_transition_when_blocked() {
-        // Envelope-level guard: a blocked task in `doing` does not get any api_patch call.
-        // We use dry_run so no network calls are made; the envelope records the block
-        // and the action_taken ends in `_blocked`.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -2251,10 +2368,6 @@ mod tests {
 
     #[test]
     fn manual_block_guard_allows_unblocked_task_to_continue() {
-        // In dry-run mode, the helper short-circuits without writing anything for an
-        // unblocked task. The caller is expected to gate the helper with manual_block_failures
-        // before invoking it, so an empty failure list should not be passed in practice.
-        // This test asserts the helper still produces a sensible envelope if called directly.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -2273,5 +2386,81 @@ mod tests {
         assert!(!result.criteria_met);
         assert_eq!(result.action_taken, "ready_checks_blocked");
         assert!(result.failures.is_empty());
+    }
+
+    // ---- task_description_acs ----
+
+    #[test]
+    fn task_description_acs_extracts_both_checked_and_unchecked() {
+        let desc = "**AC:**\n- [x] AC1: First thing\n- [ ] AC2: Second thing\n- [X] AC3: Third thing\n";
+        let acs = task_description_acs(desc);
+        assert_eq!(acs.len(), 3);
+        assert_eq!(acs[0], ("AC1".to_string(), "First thing".to_string()));
+        assert_eq!(acs[1], ("AC2".to_string(), "Second thing".to_string()));
+        assert_eq!(acs[2], ("AC3".to_string(), "Third thing".to_string()));
+    }
+
+    #[test]
+    fn task_description_acs_empty_when_no_acs() {
+        assert!(task_description_acs("No ACs here.").is_empty());
+    }
+
+    // ---- pr_acs_all ----
+
+    #[test]
+    fn pr_acs_all_captures_checked_and_unchecked() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Done thing (testID: 1)\n- [ ] AC2: Pending thing\n";
+        let acs = pr_acs_all(body);
+        assert_eq!(acs.get("AC1"), Some(&("Done thing".to_string(), true)));
+        assert_eq!(acs.get("AC2"), Some(&("Pending thing".to_string(), false)));
+    }
+
+    #[test]
+    fn pr_acs_all_strips_evidence() {
+        let body = "- [x] AC1: Build it (testID: 7)\n";
+        let acs = pr_acs_all(body);
+        assert_eq!(acs.get("AC1"), Some(&("Build it".to_string(), true)));
+    }
+
+    // ---- pr_number ----
+
+    #[test]
+    fn pr_number_extracts_from_url() {
+        assert_eq!(
+            pr_number("https://github.com/Stoffer-Industries/sindustries/pull/142"),
+            142
+        );
+        assert_eq!(pr_number("not-a-url"), 0);
+    }
+
+    // ---- task_ac_vs_latest_pr_failures ----
+
+    #[test]
+    fn task_ac_vs_latest_pr_returns_empty_when_no_task_acs() {
+        let task = Task {
+            description: Some("No ACs".to_string()),
+            ..Task::default()
+        };
+        assert!(task_ac_vs_latest_pr_failures(&task).is_empty());
+    }
+
+    #[test]
+    fn task_ac_vs_latest_pr_returns_error_when_no_merged_pr() {
+        let task = Task {
+            description: Some("- [ ] AC1: Something\n".to_string()),
+            ..Task::default()
+        };
+        let failures = task_ac_vs_latest_pr_failures(&task);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("No merged PR found"));
+    }
+
+    // ---- pr_acs_all: case-insensitive checkbox ----
+
+    #[test]
+    fn pr_acs_all_handles_uppercase_x() {
+        let body = "- [X] AC1: Done (testID: 1)\n";
+        let acs = pr_acs_all(body);
+        assert_eq!(acs.get("AC1"), Some(&("Done".to_string(), true)));
     }
 }
