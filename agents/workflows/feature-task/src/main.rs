@@ -480,9 +480,10 @@ fn task_ac_vs_latest_pr_failures(task: &Task) -> Vec<String> {
 
 fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift(env.clone(), "post_merge") {
-        return Ok(blocked);
-    }
+    // Spec drift is not blocked at post_merge: Tom owns the ACs during QA and may
+    // legitimately refine them. The resync flow (unchecking "Approved by Tom" and
+    // requiring explicit re-approval) handles drift tracking; see the spec-resync
+    // feature task for full implementation.
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
         return block_with_manual_block(&args, env, "post_merge", manual_failures);
