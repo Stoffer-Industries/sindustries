@@ -154,7 +154,9 @@ def cmd_list(args):
                     continue
                 print(f"\n=== {status.upper()} ({len(tasks)}) ===")
                 for t in tasks:
-                    blocker = _blocking_comment(t)
+                    # Fetch full task to get comments (list endpoint omits them)
+                    full = get_task(t["id"], base_url=base)
+                    blocker = _blocking_comment(full)
                     blocker_str = f"\n    ⛔ {blocker}" if blocker else ""
                     print(f"  [{t.get('id','')[:8]}] {t.get('title','')}{blocker_str}")
         else:
