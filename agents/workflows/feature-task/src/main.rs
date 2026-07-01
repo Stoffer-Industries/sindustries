@@ -76,6 +76,8 @@ struct Task {
     #[serde(default)]
     blocked: bool,
     #[serde(default)]
+    dependency_blocked: bool,
+    #[serde(default)]
     task_type: Option<String>,
     #[serde(default)]
     spec_checksum: Option<String>,
@@ -851,6 +853,7 @@ fn rowan_doing_capacity_failures(tasks: &[Task], current_id: &str) -> Vec<String
             task.id != current_id
                 && task.status == "doing"
                 && !task.blocked
+                && !task.dependency_blocked
                 && task.assignee.as_deref() == Some("Rowan")
         })
         .count();
@@ -1972,6 +1975,53 @@ mod tests {
             assignee: Some("Rowan".to_string()),
             ..Task::default()
         }];
+
+        assert_eq!(
+            rowan_doing_capacity_failures(&tasks, "current-task"),
+            vec!["Rowan already has an active task in `doing`.".to_string()]
+        );
+    }
+
+    #[test]
+    fn rowan_capacity_allows_dependency_blocked_doing_task() {
+        // A task in `doing` that is blocked by an unresolved dependency
+        // is not actually consuming Rowan's capacity — it is stuck waiting
+        // on another task. The capacity check should treat it the same
+        // as a non-`doing` task (Tom: 2026-07-01 — "needs to be taken
+        // into account for all states").
+        let tasks = vec![Task {
+            id: "other-doing".to_string(),
+            status: "doing".to_string(),
+            assignee: Some("Rowan".to_string()),
+            dependency_blocked: true,
+            ..Task::default()
+        }];
+
+        assert!(rowan_doing_capacity_failures(&tasks, "current-task").is_empty());
+    }
+
+    #[test]
+    fn rowan_capacity_still_blocks_unblocked_doing_when_manual_blocked_present() {
+        // Sanity: manual block continues to free capacity (existing
+        // behaviour), but a task that is `doing` and neither manually
+        // nor dependency-blocked still blocks. This pins down that the
+        // new `!dependency_blocked` check did not weaken the original
+        // guard.
+        let tasks = vec![
+            Task {
+                id: "manual-blocked".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                blocked: true,
+                ..Task::default()
+            },
+            Task {
+                id: "actually-progressing".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+        ];
 
         assert_eq!(
             rowan_doing_capacity_failures(&tasks, "current-task"),
