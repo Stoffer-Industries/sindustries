@@ -1,9 +1,10 @@
 # Tasks API
 
 **Type:** System reference
-**Last updated:** 2026-06-30
+**Last updated:** 2026-07-01
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries`
+**Related task:** 5dbf2967-c15e-44df-82fb-f1d0761b01ef — Task Type Filter and Type Selector on Edit Card
 **Related PR:** https://github.com/Stoffer-Industries/sindustries/pull/145
 
 ---
