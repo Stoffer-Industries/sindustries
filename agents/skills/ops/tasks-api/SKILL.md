@@ -48,6 +48,17 @@ Heartbeat view (all active + 10 open):
 python3 tasks_api_client.py list --heartbeat
 ```
 
+## Tech-design approval queue (heartbeat helper)
+
+For Quinn's heartbeat tech-design approval pass:
+
+```bash
+python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py
+python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json
+```
+
+Mirrors the lobster's `tagged_values` + `tech_design_approved` parser so substring matches in checklist complaints (`Missing task comment [tech-design-approved] true`) are correctly NOT counted as approvals.
+
 ## Content task creation
 
 When Tom approves a weekly content review, create the task with `--type content`:
