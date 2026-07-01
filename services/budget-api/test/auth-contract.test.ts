@@ -196,3 +196,126 @@ describe('budget-api auth contract (W27 0-D) — path-parameter IDOR vectors', (
     });
   });
 });
+
+/**
+ * Auth contract test (code-garden 2026-W27, follow-up to PR #144).
+ *
+ * PR #144 documented the IDOR-via-path-parameter routes (cards.ts, alerts.ts,
+ * transactions.ts). This companion spec covers the userId-from-body/query
+ * routes that the W27 audit calls out as the original vector class — routes
+ * that take a userId from the request body or query and operate on that user
+ * without verifying a Bearer token. When Theme 1 (1-A requireSession
+ * middleware) lands, every assertion below should flip to expect 401.
+ *
+ * Audit reference: docs/repo-audits/2026-W27.md, Critical finding under
+ * "Architecture & Design" (carried forward from W26). The audit lists the
+ * affected routes as /akahu/sync, /akahu/exchange, /akahu/authorize-url,
+ * /cards/balance-history, /transactions, /alerts/evaluate, /alerts,
+ * /categories/timeseries, /categorize/predict.
+ *
+ * NOTE — Scope: this spec covers the six non-Akahu routes that share a small
+ * mock footprint (linkedCard.findMany, transaction.findMany,
+ * notificationEvent.findMany, accountBalanceSnapshot.findMany, evaluateAlerts
+ * ForUser, categorizeTransaction). The three Akahu routes (/akahu/sync,
+ * /akahu/exchange, /akahu/authorize-url) need additional akahuClient mocks
+ * and env-var setup; they are tracked as a separate follow-up.
+ */
+describe('budget-api auth contract (W27 0-D follow-up) — userId-from-body/query vectors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.AKAHU_DEV_USER_ACCESS_TOKEN = '';
+
+    // Default mocks so routes proceed past the userId validation and into the
+    // database layer without returning early. The point of this spec is to
+    // observe that the routes proceed at all without a Bearer token.
+    mocks.prisma.user.findUnique.mockResolvedValue({ id: 'user_1' });
+    mocks.prisma.linkedCard.findMany.mockResolvedValue([]);
+    mocks.prisma.accountBalanceSnapshot.findMany.mockResolvedValue([]);
+    mocks.prisma.transaction.findMany.mockResolvedValue([]);
+    mocks.prisma.notificationEvent.findMany.mockResolvedValue([]);
+    mocks.evaluateAlertsForUser.mockResolvedValue({
+      createdEventIds: [],
+      evaluatedCards: 0
+    });
+    mocks.categorizeTransaction.mockResolvedValue({
+      category: 'dining',
+      confidence: 0.7,
+      source: 'rule'
+    });
+  });
+
+  describe('IDOR via userId query parameter', () => {
+    it('GET /transactions returns 200 without a Bearer token', async () => {
+      // Current behavior: route reads userId from query and lists txns (200).
+      // After 1-A lands this should return 401.
+      const res = await request(createApp())
+        .get('/api/v1/transactions')
+        .query({ userId: 'user_1' });
+      expect(res.status).toBe(200);
+    });
+
+    it('GET /alerts returns 200 without a Bearer token', async () => {
+      // Current behavior: route reads userId from query and lists alerts (200).
+      // After 1-A lands this should return 401.
+      const res = await request(createApp())
+        .get('/api/v1/alerts')
+        .query({ userId: 'user_1' });
+      expect(res.status).toBe(200);
+    });
+
+    it('GET /cards/balance-history returns 200 without a Bearer token', async () => {
+      mocks.prisma.linkedCard.findMany.mockResolvedValueOnce([
+        {
+          id: 'card_1',
+          displayName: 'Everyday account',
+          provider: 'akahu',
+          providerCardId: 'acc_1',
+          createdAt: new Date('2026-04-01T00:00:00.000Z')
+        }
+      ]);
+      mocks.prisma.accountBalanceSnapshot.findMany.mockResolvedValueOnce([]);
+      // Current behavior: route reads userId from query and reads snapshots
+      // (200). After 1-A lands this should return 401.
+      const res = await request(createApp())
+        .get('/api/v1/cards/balance-history')
+        .query({ userId: 'user_1', from: '2026-04-01', to: '2026-05-01' });
+      expect(res.status).toBe(200);
+    });
+
+    it('GET /categories/timeseries returns 200 without a Bearer token', async () => {
+      // Current behavior: route reads userId from query and groups txns into
+      // a timeseries (200). After 1-A lands this should return 401.
+      const res = await request(createApp())
+        .get('/api/v1/categories/timeseries')
+        .query({ userId: 'user_1', from: '2026-04-01', to: '2026-05-01' });
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('IDOR via userId body parameter', () => {
+    it('POST /alerts/evaluate returns 200 without a Bearer token', async () => {
+      // Current behavior: route reads userId from body and evaluates alerts
+      // (200). After 1-A lands this should return 401.
+      const res = await request(createApp())
+        .post('/api/v1/alerts/evaluate')
+        .send({ userId: 'user_1', month: '2026-04' });
+      expect(res.status).toBe(200);
+    });
+
+    it('POST /categorize/predict returns 200 without a Bearer token', async () => {
+      // Current behavior: route reads userId from body and runs the
+      // categorizer (200). After 1-A lands this should return 401.
+      const res = await request(createApp())
+        .post('/api/v1/categorize/predict')
+        .send({ userId: 'user_1', merchant: 'Acme', amountCents: 1500 });
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('control: GET /me already enforces auth (the model to mirror)', () => {
+    it('returns 401 without an Authorization header', async () => {
+      const res = await request(createApp()).get('/api/v1/me');
+      expect(res.status).toBe(401);
+    });
+  });
+});
