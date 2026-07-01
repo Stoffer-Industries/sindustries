@@ -1422,6 +1422,8 @@ enum Evidence {
     FileRef { path: String, line: u64 },
     /// Explicit reason for not adding a test, e.g. `(not tested: design tokens)`
     NotTested { reason: String },
+    /// AC fulfilled outside the codebase, e.g. `(not code: updated brain/bookmarks/specs/foo.md)`
+    NotCode { reason: String },
 }
 
 /// One parsed AC line from a PR body.
@@ -1455,10 +1457,16 @@ fn extract_ac_section(body: &str) -> &str {
 
 /// Recognise an evidence annotation that anchors the end of a string.
 fn parse_evidence(text: &str) -> Option<Evidence> {
-    // (not tested: <reason>) comes first so the reason may contain colons.
+    // (not tested: <reason>) and (not code: <reason>) come first so the reason may contain colons.
     let not_tested = Regex::new(r"\(not tested:\s*([^)]+)\)\s*$").unwrap();
     if let Some(cap) = not_tested.captures(text) {
         return Some(Evidence::NotTested {
+            reason: cap[1].trim().to_string(),
+        });
+    }
+    let not_code = Regex::new(r"\(not code:\s*([^)]+)\)\s*$").unwrap();
+    if let Some(cap) = not_code.captures(text) {
+        return Some(Evidence::NotCode {
             reason: cap[1].trim().to_string(),
         });
     }
@@ -1482,7 +1490,7 @@ fn parse_evidence(text: &str) -> Option<Evidence> {
 /// Returns the description with the trailing `(...)` evidence removed.
 fn strip_trailing_evidence(text: &str) -> String {
     let re =
-        Regex::new(r"\s+\((testID|file|not tested):\s*[^)]+\)\s*$").unwrap();
+        Regex::new(r"\s+\((testID|file|not tested|not code):\s*[^)]+\)\s*$").unwrap();
     match re.find(text) {
         Some(m) => text[..m.start()].trim_end().to_string(),
         None => text.to_string(),
@@ -1512,8 +1520,8 @@ fn parse_ac_line(line: &str) -> Option<AcEvidence> {
 }
 
 /// Build failure messages for ACs that lack evidence. Empty list = all ACs
-/// in the section carry `(testID: ...)`, `(file: path:line)`, or
-/// `(not tested: reason)` annotations.
+/// in the section carry `(testID: ...)`, `(file: path:line)`, `(not tested: reason)`,
+/// or `(not code: reason)` annotations.
 fn verify_pr_acs_failures(body: &str) -> Vec<String> {
     let section = extract_ac_section(body);
     let mut failures = Vec::new();
@@ -1521,7 +1529,7 @@ fn verify_pr_acs_failures(body: &str) -> Vec<String> {
         if let Some(ac) = parse_ac_line(line) {
             if ac.evidence.is_none() {
                 failures.push(format!(
-                    "AC {} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<line>)`, or `(not tested: <reason>)`.",
+                    "AC {} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<line>)`, `(not tested: <reason>)`, or `(not code: <reason>)`.",
                     ac.ac_label
                 ));
             }
@@ -1656,6 +1664,38 @@ mod tests {
     fn parse_evidence_rejects_bare_not_tested() {
         assert_eq!(parse_evidence("qux (not tested)"), None);
         assert_eq!(parse_evidence("quux"), None);
+    }
+
+    #[test]
+    fn parse_evidence_recognises_not_code() {
+        assert_eq!(
+            parse_evidence("foo (not code: updated brain/bookmarks/specs/foo.md)"),
+            Some(Evidence::NotCode {
+                reason: "updated brain/bookmarks/specs/foo.md".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn strip_trailing_evidence_strips_not_code() {
+        assert_eq!(
+            strip_trailing_evidence("AC text (not code: updated brain/foo.md)"),
+            "AC text"
+        );
+    }
+
+    #[test]
+    fn verify_pr_acs_passes_with_not_code_evidence() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Spec updated (not code: updated brain/bookmarks/specs/foo.md)\n";
+        assert!(verify_pr_acs_failures(body).is_empty());
+    }
+
+    #[test]
+    fn verify_pr_acs_error_message_mentions_not_code() {
+        let body = "## Acceptance Criteria\n- [x] AC1: No evidence here\n";
+        let failures = verify_pr_acs_failures(body);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("not code"));
     }
 
     #[test]
