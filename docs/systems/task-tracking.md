@@ -137,7 +137,7 @@ Base path: `/api/v1`
 | GET | /tags | List tags with usage counts |
 | GET | /health | Health check |
 
-**Spec drift guard:** PATCH with `specChecksum` rejects if the task's stored checksum differs. Rowan must resolve spec drift before patching.
+**Spec drift guard:** PATCH with `specChecksum` rejects if the task's stored checksum differs. Rowan must resolve spec drift before patching. `POST /tasks/:id/comments` does **not** apply the drift guard — comments are meta-discussion, not scope changes, and an agent should be able to discuss drift on the task without first having to resolve it.
 
 **Cursor pagination:** `GET /tasks` returns a `nextCursor` token. Pass as `cursor=` to page. Default limit: 50.
 

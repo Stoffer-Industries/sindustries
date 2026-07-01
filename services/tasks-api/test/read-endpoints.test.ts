@@ -373,7 +373,7 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.update).not.toHaveBeenCalled();
   });
 
-  it('POST /api/v1/tasks/:id/comments blocks when current ACs drifted after spec approval', async () => {
+  it('POST /api/v1/tasks/:id/comments succeeds even when current ACs drifted after spec approval', async () => {
     const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
     prismaMock.task.findFirst.mockResolvedValueOnce(
       task({
@@ -382,15 +382,24 @@ describe('tasks api endpoints', () => {
         specChecksum: checksum
       })
     );
+    prismaMock.taskComment.create.mockResolvedValueOnce({
+      id: 'c1000000-0000-0000-0000-000000000000',
+      taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+      author: 'Rowan',
+      body: 'trying to comment',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-01T00:00:00.000Z')
+    });
 
     const app = createApp();
     const response = await request(app)
       .post('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70/comments')
       .send({ author: 'Rowan', text: 'trying to comment' });
 
-    expect(response.status).toBe(409);
-    expect(response.body.error.code).toBe('SPEC_CHECKSUM_MISMATCH');
-    expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(response.body.data.author).toBe('Rowan');
+    expect(response.body.data.text).toBe('trying to comment');
+    expect(prismaMock.taskComment.create).toHaveBeenCalledTimes(1);
   });
 
   it('GET /api/v1/tasks formats task titles with taskType emoji without duplication', async () => {
