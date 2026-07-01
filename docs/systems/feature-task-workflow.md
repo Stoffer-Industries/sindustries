@@ -148,28 +148,48 @@ The first-class Tasks API target is `taskType`, `tech_design_url`, `tech_design_
 
 ## Spec Checksum Safeguards (factory-v2 last grandfathered edit)
 
-After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). A drift between the stored checksum and the current AC text blocks the write with `409 SPEC_CHECKSUM_MISMATCH`, pointing the user to write a new spec; there is no one-click create-new-spec UI yet.
+After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The fluid AC lifecycle (shipped via task `b2ab54db`) replaces the old hard-block on drift with a Tom-gated re-approval flow. The brain spec remains the source of truth in `open`; the task description is the source of truth in every other status.
 
-### Which writes hit the drift handshake
+### Fluid AC lifecycle state machine
 
-Only the two write surfaces that mutate `description` enforce the checksum:
+The lobster (`agents/workflows/feature-task/src/main.rs`) recognises three states for the `**Approved by Tom**` marker in the task description:
 
-| Surface | Trigger | Drift guard |
+| Marker | Drift present? | Outcome |
 |---|---|---|
-| `PATCH /tasks/:id` (with `description` in body) | `tasks.ts` calls `rejectSpecDrift(res, existing, newDescription)` | `409 SPEC_CHECKSUM_MISMATCH` if the canonical AC checksum no longer matches `existing.specChecksum` |
-| `POST /tasks/:id/comments` | `tasks.ts` calls `rejectSpecDrift(res, existing, existing.description)` | Same `409` response if ACs have drifted since the comment was authored |
+| `[x]` (checked) | No | Stage passes |
+| `[x]` (checked) | Yes + `[spec-resynced]` posted by Quinn | Stage passes (checksum has been reset) |
+| `[x]` (checked) | Yes + no `[spec-resynced]` | Lobster unchecks the marker via PATCH, posts a `[feature-task-progress-checklist]` comment listing the drift, and blocks |
+| `[ ]` (unchecked) | (drift recorded earlier) | Block waiting on Tom to re-check `**Approved by Tom**` on the new spec |
+| Absent (legacy tasks) | Yes | Legacy hard block with `write a new spec` message |
 
-Other task events (status changes, dependency adds, tag edits, AC-free PATCH writes, comment edits) do **not** re-check the checksum — they succeed even if ACs have drifted. If a caller needs to assert the AC is still in scope on those paths, the caller is responsible for passing `description` into a `PATCH` first.
+`open` status always uses the brain spec as source of truth and never touches the marker; the marker machinery only kicks in for `ready`, `doing`, `acceptance`, `done`.
 
-The error message returned on drift names the task id, the stored `specChecksum`, and the current recomputed checksum so the caller can decide whether to write a new spec or roll the stored checksum forward via a follow-up `PATCH /tasks/:id` with the matching `description`.
+### Tasks API writes under the fluid lifecycle
 
-`factory-v2` is the last task grandfathered with editable ACs after spec approval. From the next task onward, ACs are frozen at approval and any change requires a new task.
+| Surface | Behaviour |
+|---|---|
+| `PATCH /tasks/:id` with `description` change | Drift guard fires UNLESS the description change is marker-only (the `**Approved by Tom**` line toggling checked → unchecked). The marker-only exception lives in `services/tasks-api/src/routes/tasks/_spec.ts` (`descriptionsDifferOnlyByApprovalMarker`); bundling any AC text change with the marker toggle still returns `409 SPEC_CHECKSUM_MISMATCH`. |
+| `POST /tasks/:id/comments` | Drift-tolerant. Comments are meta-discussion, not scope changes; the lobster must be able to post `[feature-task-progress-checklist]`, `[spec-resynced]`, `[qa-ac-verified]` even when ACs have drifted. |
+| Status changes / dependency adds / tag edits / AC-free PATCH writes | No drift re-check; succeed even if ACs have drifted. |
+
+### Quinn resync contract
+
+After Tom re-checks `**Approved by Tom**` on the new spec, Quinn writes a `[spec-resynced] <summary>` task comment and resets `specChecksum` to match the current ACs (Quinn owns the brain-side bookkeeping). The lobster's `block_on_spec_drift_fluid` then unblocks the stage on its next heartbeat tick.
+
+### Source-of-truth handling
+
+- `open` status: brain spec wins. Drift against the stored checksum is treated as a blocker.
+- `ready`, `doing`, `acceptance`, `done`: task description wins. The lobster reflects drift via the marker, Quinn resyncs the brain spec to match.
 
 Lives in:
 - `services/tasks-api/prisma/schema.prisma` — `specChecksum` field on tasks
-- `services/tasks-api/src/routes/tasks/_spec.ts` — `rejectSpecDrift` helper + canonical AC checksum
-- `services/tasks-api/src/routes/tasks.ts` — write-side validation at the two PATCH/POST call sites above
-- `agents/workflows/feature-task/src/main.rs` — Rust-side checksum guard at the lobster gate
+- `services/tasks-api/src/routes/tasks/_spec.ts` — `rejectSpecDrift` helper + canonical AC checksum + marker-only exception (`descriptionsDifferOnlyByApprovalMarker`)
+- `services/tasks-api/src/routes/tasks.ts` — write-side validation at the PATCH call site; comments endpoint intentionally drift-tolerant
+- `agents/workflows/feature-task/src/main.rs` — `block_on_spec_drift_fluid`, approval marker helpers, and `[spec-resynced]` detection
+
+### Error message
+
+The `409 SPEC_CHECKSUM_MISMATCH` response names the task id, the stored `specChecksum`, and the current recomputed checksum so the caller can decide whether to write a new spec or roll the stored checksum forward via a follow-up `PATCH /tasks/:id` with the matching `description`.
 
 ---
 

@@ -116,6 +116,11 @@ struct LobsterState {
     no_system_spec_change_reason: Option<String>,
     #[serde(default)]
     failure_fingerprint: Option<String>,
+    /// True when the lobster has already PATCHed the task description to
+    /// uncheck the `Approved by Tom` marker for the current drift episode.
+    /// Used for idempotent re-runs.
+    #[serde(default)]
+    spec_drift_uncheck_applied: Option<bool>,
 }
 
 impl Default for LobsterState {
@@ -131,6 +136,7 @@ impl Default for LobsterState {
             system_spec_path: None,
             no_system_spec_change_reason: None,
             failure_fingerprint: None,
+            spec_drift_uncheck_applied: None,
         }
     }
 }
@@ -196,7 +202,7 @@ fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
 
 fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift(env.clone(), "spec_check") {
+    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "spec_check")? {
         return Ok(blocked);
     }
     let manual_failures = manual_block_failures(&env.task);
@@ -239,7 +245,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
 
 fn ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift(env.clone(), "ready_checks") {
+    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "ready_checks")? {
         return Ok(blocked);
     }
     let manual_failures = manual_block_failures(&env.task);
@@ -271,7 +277,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 
 fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift(env.clone(), "verify_delivery") {
+    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "verify_delivery")? {
         return Ok(blocked);
     }
     let manual_failures = manual_block_failures(&env.task);
@@ -323,7 +329,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
 
 fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift(env.clone(), "feedback_aggregate") {
+    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "feedback_aggregate")? {
         return Ok(blocked);
     }
     let manual_failures = manual_block_failures(&env.task);
@@ -653,15 +659,111 @@ fn transition_or_block(
     Ok(env)
 }
 
-fn block_on_spec_drift(mut env: Envelope, action: &str) -> Option<Envelope> {
-    let failures = spec_checksum_failures(&env.task);
-    if failures.is_empty() {
-        return None;
+/// Block on spec drift with the fluid AC lifecycle behaviour: detect drift,
+/// uncheck the approval marker when present, and post a checklist comment
+/// summarising the drift. Returns `None` if drift is fully cleared
+/// (marker re-checked and Quinn has resynced).
+fn block_on_spec_drift_fluid(
+    args: &StageArgs,
+    mut env: Envelope,
+    action: &str,
+) -> Result<Option<Envelope>> {
+    let raw_failures = spec_checksum_failures(&env.task);
+    if raw_failures.is_empty() {
+        return Ok(None);
     }
-    env.criteria_met = false;
-    env.action_taken = format!("{action}_blocked_spec_drift");
-    env.failures = failures.clone();
-    Some(env)
+    if task_is_open(&env.task) {
+        // Open tasks keep the legacy hard-block behaviour; no marker tracking.
+        env.criteria_met = false;
+        env.action_taken = format!("{action}_blocked_spec_drift");
+        env.failures = raw_failures;
+        return Ok(Some(env));
+    }
+    let description = env.task.description.clone().unwrap_or_default();
+    let marker_state = approval_marker_state(&description);
+    match marker_state {
+        ApprovalMarker::Checked => {
+            // Drift + checked marker: if Quinn has resynced, the gate is clear.
+            // Otherwise uncheck the marker (PATCH description) and post a
+            // checklist comment so Tom can re-check it.
+            if spec_resync_signal_present(&env.task) {
+                return Ok(None);
+            }
+            let mut failures = raw_failures.clone();
+            failures.push(
+                "Approval marker `**Approved by Tom**` is still checked and `[spec-resynced]` has not been posted. \
+                 Quinn will uncheck the marker and reset specChecksum; after that, Tom must re-check `**Approved by Tom**` on the new spec."
+                    .to_string(),
+            );
+            env.criteria_met = false;
+            env.action_taken = format!("{action}_blocked_spec_drift");
+            env.failures = failures.clone();
+            if args.dry_run {
+                return Ok(Some(env));
+            }
+            // Idempotency: only PATCH + comment when the fingerprint changes.
+            let fingerprint = failures.join("\n");
+            let already_acted =
+                env.lobster_state.failure_fingerprint.as_deref() == Some(&fingerprint)
+                    && env.lobster_state.spec_drift_uncheck_applied.unwrap_or(false);
+            if !already_acted {
+                if let Some(patched) = uncheck_approval_marker(&description) {
+                    if let Err(err) =
+                        api_patch::<Task>(&args.base_url, &env.task.id, json!({"description": patched}))
+                    {
+                        if let Some(message) = spec_checksum_mismatch_message(&err) {
+                            // Tasks-api rejected the PATCH (e.g. ACs also changed).
+                            // Surface that as a hard block.
+                            env.criteria_met = false;
+                            env.action_taken = format!("{action}_blocked_spec_drift");
+                            env.failures = vec![message];
+                            return Ok(Some(env));
+                        }
+                        return Err(err);
+                    }
+                    env.task = api_get_task(&args.base_url, &env.task.id)?;
+                    env.lobster_state.spec_drift_uncheck_applied = Some(true);
+                }
+            }
+            let checklist = format!(
+                "[feature-task-progress-checklist]\n{}\n",
+                failures.join("\n")
+            );
+            if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+                if let Err(err) = add_comment(&args.base_url, &env.task.id, &checklist) {
+                    if let Some(message) = spec_checksum_mismatch_message(&err) {
+                        // Should not happen because comments are now drift-tolerant,
+                        // but treat any 409 as a hard block anyway.
+                        env.criteria_met = false;
+                        env.action_taken = format!("{action}_blocked_spec_drift");
+                        env.failures = vec![message];
+                        return Ok(Some(env));
+                    }
+                    return Err(err);
+                }
+                env.lobster_state.failure_fingerprint = Some(fingerprint);
+            }
+            write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+            Ok(Some(env))
+        }
+        ApprovalMarker::Unchecked => {
+            env.criteria_met = false;
+            env.action_taken = format!("{action}_blocked_spec_drift");
+            env.failures = vec![
+                "Approval marker `**Approved by Tom**` is unchecked. \
+                 Waiting for Tom to re-check it before drift can be re-evaluated."
+                    .to_string()
+            ];
+            Ok(Some(env))
+        }
+        ApprovalMarker::Absent => {
+            // No marker present; legacy hard block behaviour.
+            env.criteria_met = false;
+            env.action_taken = format!("{action}_blocked_spec_drift");
+            env.failures = raw_failures;
+            Ok(Some(env))
+        }
+    }
 }
 
 fn manual_block_failures(task: &Task) -> Vec<String> {
@@ -959,6 +1061,53 @@ fn product_spec_approved_by_tom(text: &str) -> bool {
     Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$")
         .unwrap()
         .is_match(text)
+}
+
+/// State of the `- [x] **Approved by Tom**` marker in a task description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApprovalMarker {
+    Checked,
+    Unchecked,
+    Absent,
+}
+
+fn approval_marker_state(description: &str) -> ApprovalMarker {
+    let checked_re =
+        Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
+    if checked_re.is_match(description) {
+        return ApprovalMarker::Checked;
+    }
+    let unchecked_re =
+        Regex::new(r"(?m)^\s*-\s*\[\s\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
+    if unchecked_re.is_match(description) {
+        return ApprovalMarker::Unchecked;
+    }
+    ApprovalMarker::Absent
+}
+
+/// Return a description with the approval marker toggled from checked to unchecked.
+/// Returns `None` if the marker is not currently in the checked state.
+fn uncheck_approval_marker(description: &str) -> Option<String> {
+    if approval_marker_state(description) != ApprovalMarker::Checked {
+        return None;
+    }
+    let re = Regex::new(r"(?m)^(\s*-\s*)\[[xX]\]\s+(\*\*Approved by Tom\*\*\s*)$").unwrap();
+    Some(
+        re.replace(description, |caps: &regex::Captures| {
+            format!("{}[ ] {}", &caps[1], &caps[2])
+        })
+        .into_owned(),
+    )
+}
+
+/// True if any task comment starts with `[spec-resynced]`.
+fn spec_resync_signal_present(task: &Task) -> bool {
+    !tagged_values(task, "[spec-resynced]").is_empty()
+}
+
+/// True if the task is in the `open` status (uses brain spec as source of truth).
+fn task_is_open(task: &Task) -> bool {
+    task.status == "open"
 }
 
 fn resolve_product_spec_path(path: &str, repo: &Path, workspace_root: &Path) -> PathBuf {
@@ -2553,5 +2702,274 @@ mod tests {
         let body = "- [X] AC1: Done (testID: 1)\n";
         let acs = pr_acs_all(body);
         assert_eq!(acs.get("AC1"), Some(&("Done".to_string(), true)));
+    }
+
+    // ---- approval marker ----
+
+    #[test]
+    fn approval_marker_detects_checked_variant() {
+        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1\n";
+        assert_eq!(
+            approval_marker_state(description),
+            ApprovalMarker::Checked
+        );
+    }
+
+    #[test]
+    fn approval_marker_detects_uppercase_checkbox() {
+        let description = "- [X] **Approved by Tom**";
+        assert_eq!(
+            approval_marker_state(description),
+            ApprovalMarker::Checked
+        );
+    }
+
+    #[test]
+    fn approval_marker_detects_unchecked_variant() {
+        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1\n";
+        assert_eq!(
+            approval_marker_state(description),
+            ApprovalMarker::Unchecked
+        );
+    }
+
+    #[test]
+    fn approval_marker_is_absent_when_line_missing() {
+        let description = "## Acceptance Criteria\n- [ ] AC1\n";
+        assert_eq!(
+            approval_marker_state(description),
+            ApprovalMarker::Absent
+        );
+    }
+
+    #[test]
+    fn uncheck_approval_marker_toggles_checkbox_only() {
+        let description =
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n";
+        let updated = uncheck_approval_marker(description).expect("should uncheck");
+        assert_eq!(
+            approval_marker_state(&updated),
+            ApprovalMarker::Unchecked
+        );
+        assert!(updated.contains("- [ ] **Approved by Tom**"));
+        // AC text must be preserved verbatim
+        assert!(updated.contains("- [ ] AC1: Build it"));
+    }
+
+    #[test]
+    fn uncheck_approval_marker_returns_none_when_already_unchecked() {
+        let description = "- [ ] **Approved by Tom**\n";
+        assert!(uncheck_approval_marker(description).is_none());
+    }
+
+    #[test]
+    fn uncheck_approval_marker_returns_none_when_absent() {
+        let description = "## Acceptance Criteria\n- [ ] AC1\n";
+        assert!(uncheck_approval_marker(description).is_none());
+    }
+
+    #[test]
+    fn spec_resync_signal_present_detects_tagged_comment() {
+        let task = task_with_approval_comment("[spec-resynced] Reset checksum.");
+        assert!(spec_resync_signal_present(&task));
+    }
+
+    #[test]
+    fn spec_resync_signal_absent_without_tag() {
+        let task = task_with_approval_comment("Spec resync happened offline.");
+        assert!(!spec_resync_signal_present(&task));
+    }
+
+    #[test]
+    fn task_is_open_matches_status_only() {
+        let mut task = Task::default();
+        task.status = "open".to_string();
+        assert!(task_is_open(&task));
+        task.status = "ready".to_string();
+        assert!(!task_is_open(&task));
+    }
+
+    // ---- block_on_spec_drift_fluid ----
+
+    #[test]
+    fn fluid_drift_returns_none_when_no_drift() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let task = Task::default();
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "spec_check")
+            .expect("no-drift should not error");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn fluid_drift_legacy_block_when_marker_absent() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let mut task = Task {
+            id: "task-no-marker".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift".to_string(),
+            ),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            ..Task::default()
+        };
+        // ensure spec_checksum still differs from the new ACs
+        task.spec_checksum = Some(spec_checksum(&approved));
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
+            .expect("no API call in dry-run");
+        let blocked = result.expect("should block");
+        assert!(!blocked.criteria_met);
+        assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
+        assert!(blocked.failures[0].contains("write a new spec"));
+    }
+
+    #[test]
+    fn fluid_drift_blocks_when_marker_unchecked_waiting_for_tom() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let description = format!(
+            "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
+        );
+        let task = Task {
+            id: "task-unchecked".to_string(),
+            description: Some(description),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
+            .expect("no API call in dry-run");
+        let blocked = result.expect("should block");
+        assert!(!blocked.criteria_met);
+        assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
+        assert_eq!(blocked.failures.len(), 1);
+        assert!(blocked.failures[0].contains("Approval marker"));
+        assert!(blocked.failures[0].contains("unchecked"));
+    }
+
+    #[test]
+    fn fluid_drift_dry_run_blocks_when_marker_checked_and_no_resync() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let description = format!(
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
+        );
+        let task = Task {
+            id: "task-checked-no-resync".to_string(),
+            description: Some(description),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
+            .expect("dry-run should not error");
+        let blocked = result.expect("should block");
+        assert!(!blocked.criteria_met);
+        assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
+        // First failure: the raw checksum drift.
+        assert!(blocked.failures[0].contains("write a new spec"));
+        // Second failure: the resync hint.
+        let marker_hint = blocked.failures.iter().any(|f| f.contains("[spec-resynced]"));
+        assert!(marker_hint, "expected a spec-resynced hint in {:?}", blocked.failures);
+    }
+
+    #[test]
+    fn fluid_drift_allows_progression_when_marker_checked_and_resync_present() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let description = format!(
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
+        );
+        let task = Task {
+            id: "task-resynced".to_string(),
+            description: Some(description),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            comments: vec![TaskComment {
+                text: Some("[spec-resynced] Reset checksum".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
+            .expect("resynced should not error");
+        assert!(result.is_none(), "resynced drift should allow progression");
     }
 }

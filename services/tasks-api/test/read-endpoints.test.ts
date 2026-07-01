@@ -402,6 +402,67 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.taskComment.create).toHaveBeenCalledTimes(1);
   });
 
+  it('PATCH /api/v1/tasks/:id allows marker-only approval-marker uncheck after spec approval', async () => {
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
+    const updatedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(
+        task({
+          id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          description: storedDescription,
+          specChecksum: checksum
+        })
+      )
+      .mockResolvedValueOnce(
+        task({
+          id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          description: updatedDescription,
+          specChecksum: checksum
+        })
+      );
+    prismaMock.task.update.mockResolvedValue(
+      task({
+        id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+        description: updatedDescription,
+        specChecksum: checksum
+      })
+    );
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
+      .send({ description: updatedDescription });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.description).toBe(updatedDescription);
+    expect(prismaMock.task.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('PATCH /api/v1/tasks/:id rejects AC drift bundled with the marker uncheck', async () => {
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
+    // Description change attempts BOTH a marker uncheck AND a new AC line.
+    const updatedDescription =
+      '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Sneaky drift\n';
+    prismaMock.task.findFirst.mockResolvedValueOnce(
+      task({
+        id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+        description: storedDescription,
+        specChecksum: checksum
+      })
+    );
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
+      .send({ description: updatedDescription });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('SPEC_CHECKSUM_MISMATCH');
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+  });
+
   it('GET /api/v1/tasks formats task titles with taskType emoji without duplication', async () => {
     prismaMock.task.findMany.mockResolvedValue([
       task({ id: 'feature', title: 'Build factory', taskType: 'feature' }),
