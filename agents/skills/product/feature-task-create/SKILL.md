@@ -87,19 +87,12 @@ Key constraints or non-obvious integration points. One paragraph max.
 **Workstreams**
 
 - Owner: Rowan
-  Repo: Stoffer-Industries/sindustries
-  Branch: task-<first 8 chars of task ID>-<short-slug>
-  Worktree: ~/workspaces/rowan/sindustries
-  PR: (pending)
-  Scope: <what Rowan builds>
   ACs: AC1, AC2, ...
-  Status: open
-
-- Owner: Quinn          ← only if Quinn has ACs
-  Scope: <what Quinn does>
-  ACs: AC3, ...
-  Status: open
+  Branch: (pending)
+  PR: (pending)
 ```
+
+Do not add a Quinn workstream. If Quinn needs to make `.openclaw` changes, Rowan posts `[openclaw-needed]` via the established handoff. The pr-open skill fills in Branch and PR when Rowan opens a PR.
 
 **Spec line rules:**
 - Must be exactly `**Spec:** <path>` — no parentheticals after the path
@@ -115,18 +108,9 @@ Use `tasks_api_client.py create` with the `--spec` flag so the standard Spec lin
 ```bash
 cat > /tmp/task-ws.yaml <<'YAML'
 - Owner: Rowan
-  Repo: Stoffer-Industries/sindustries
-  Branch: task-<first 8 chars of task ID>-<short-slug>
-  Worktree: ~/workspaces/rowan/sindustries
-  PR: (pending)
-  Scope: <what Rowan builds>
   ACs: AC1, AC2, ...
-  Status: open
-
-- Owner: Quinn          # only if Quinn has ACs
-  Scope: <what Quinn does>
-  ACs: AC3, ...
-  Status: open
+  Branch: (pending)
+  PR: (pending)
 YAML
 
 TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} \

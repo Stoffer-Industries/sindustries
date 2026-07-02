@@ -107,6 +107,9 @@ Before writing any code on a feature task, write the tech design:
 - PR body must include all parent task ACs, with `- [x]` for done and `- [ ]` for not yet done
 - Each PR body must list which parent ACs its sub-ACs contribute to
 
+### AC checkboxes on the task — hands off
+**Never tick or untick AC checkboxes in the task description.** That is Tom/QA's gate, applied only once the task reaches `acceptance`. Rowan's evidence belongs in the PR body only.
+
 ### System spec (required before acceptance)
 
 Before the task can move from `doing` to `acceptance`, use the system-spec skill:
