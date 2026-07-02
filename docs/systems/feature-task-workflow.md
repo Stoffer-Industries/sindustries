@@ -177,7 +177,7 @@ The lobster (`agents/workflows/feature-task/src/main.rs`) recognises three state
 
 After Lobster has detected drift on a non-`open` task, it unchecks `**Approved by Tom**` and records that it has acted on the current drift episode. When Tom re-checks `**Approved by Tom**`, Lobster owns the resync:
 
-1. Resolve the task's `**Spec:** <path>` and allow only Markdown files under `brain/bookmarks/specs/`.
+1. Resolve the task's `**Spec:** <path>` and allow only Markdown files under `brain/` (for example `brain/tasks/specs/*.md` or `brain/bookmarks/specs/*.md`).
 2. Read the current task description ACs and rewrite only the brain spec's `Acceptance Criteria` section.
 3. Reset `specChecksum` to the checksum of the current task ACs. Because the Tasks API locks non-null checksum changes, Lobster clears `specChecksum` to `null` first, then sets the new sha256.
 4. Post `[spec-resynced] <summary>` with `checksum=<sha256>` and `driftFingerprint=<sha256>` fields.
