@@ -76,3 +76,30 @@ PRs without the required annotations are blocked from acceptance with a clear co
 
 **QA bounce:** after merge, the lobster compares the latest merged PR body against the task description ACs. If any AC is missing, unchecked, or has altered text, the task bounces back to `doing` and a `[feature-task-progress-checklist]` comment is posted explaining what the next PR must address.
 
+---
+
+## After Opening — Update Task Workstreams
+
+For feature-task PRs, patch the task description to record the branch and PR URL in the workstreams section. The task ID is the first 8 chars of the branch name (`task-{8chars}-...`).
+
+Find the task by ID prefix, then PATCH the description to fill in the workstream entry:
+
+```bash
+# Get the task (first 8 chars of branch = task ID prefix)
+TASK_ID_PREFIX="<first-8-chars>"
+TASK=$(TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py list | \
+  python3 -c "import json,sys; tasks=json.load(sys.stdin)['data']; \
+    t=next((t for t in tasks if t['id'].startswith('$TASK_ID_PREFIX')), None); \
+    print(t['id'], t['description']) if t else print('NOT FOUND')")
+
+# Then PATCH the description: replace the pending Branch/PR placeholders
+# with the actual branch name and PR URL
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
+    --id <full-task-id> \
+    --description '<updated description with Branch and PR filled in>'
+```
+
+If this PR covers only a subset of ACs, add a new workstream entry for the remaining ACs (still `Branch: (pending)`, `PR: (pending)`) so the task description reflects what's still outstanding.
+

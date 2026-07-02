@@ -45,35 +45,7 @@ except Exception as e:
     print(json.dumps({'error': str(e), 'in_progress': [], 'blocked': []}))
 "
 
-5) Read Lox and Quinn incident/ops state for anything needing Tom's attention:
-
-   a) Lox incidents — read brain/state/lox-incident-state.json, filter for status "blocked" or "repair_attempted":
-   python3 -c "
-import json
-try:
-    with open('/Users/quinnstoffer/.openclaw/workspace/brain/state/lox-incident-state.json') as f:
-        state = json.load(f)
-    blocked = [(k, v) for k, v in state.get('incidents', {}).items()
-               if v.get('status') in ('blocked', 'repair_attempted')]
-    print(json.dumps(blocked))
-except Exception as e:
-    print('[]')
-"
-
-   b) Quinn ops findings — read brain/state/quinn-ops-state.json, filter for needsTom: true or status "escalated":
-   python3 -c "
-import json
-try:
-    with open('/Users/quinnstoffer/.openclaw/workspace/brain/state/quinn-ops-state.json') as f:
-        state = json.load(f)
-    flagged = [(k, v) for k, v in state.get('ops', {}).items()
-               if v.get('needsTom') or v.get('status') == 'escalated']
-    print(json.dumps(flagged))
-except Exception as e:
-    print('[]')
-"
-
-6) Check MEMORY.md for focus context.
+5) Check MEMORY.md for focus context.
 
 Output format:
 🌅 Good morning Tom!
@@ -82,7 +54,7 @@ Output format:
 [Calendar events — convert times from UTC to NZT. Note which calendar each event is from.]
 
 🧠 OVERNIGHT
-[What happened since yesterday — agent activity, things resolved, things that came up]
+[What happened since yesterday — agent activity, workflow milestones, things resolved. Do NOT include ops/infra incidents or outages — those are surfaced in real-time by Lox and don't need replaying here.]
 
 ⚠️ PENDING APPROVALS
 [Only if pending bookmark approvals exist. For each: topic | title ~50 chars | #ap<id>]
@@ -93,15 +65,10 @@ Output format:
 [Active tasks — one line each: Assignee · title · status (doing/acceptance) · [BLOCKED] if blocked]
 [If no active tasks, say "no active tasks"]
 
-🚨 NEEDS YOUR ATTENTION
-[Items requiring Tom's decision, sourced from lox-incident-state.json (blocked/repair_attempted) and quinn-ops-state.json (needsTom: true). For each item:
- • [source: Lox|Quinn] slug — one-line description of what's blocked and why Lox/Quinn can't resolve it
-If nothing in either state file needs Tom: write "nothing blocking — all clear"]
-
 🎯 FOCUS
 [Top 2-3 priorities for today based on all of the above]
 
-Keep concise, practical, no fluff. The NEEDS YOUR ATTENTION section is the most important — if it's empty, say so clearly so Tom knows the agents are running clean.
+Keep concise, practical, no fluff.
 
 # notify-soft-fails
 Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
