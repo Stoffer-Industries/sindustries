@@ -240,6 +240,9 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let failures = spec_failures(&env.task, &args.repo, workspace_root(&args));
+    if failures.is_empty() && !args.dry_run {
+        mirror_task_approval_to_brain_spec_if_needed(&env.task, &args.repo, workspace_root(&args))?;
+    }
     transition_or_block(&args, env, "ready", "spec_check", failures)
 }
 
@@ -1441,7 +1444,11 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
             if !path.exists() {
                 failures.push(format!("Product spec not found at {}", spec.path));
             } else if let Ok(text) = fs::read_to_string(&path) {
-                if !product_spec_approved_by_tom(&text) {
+                let task_description = task.description.clone().unwrap_or_default();
+                let approved_in_spec = product_spec_approved_by_tom(&text);
+                let approved_in_task =
+                    approval_marker_state(&task_description) == ApprovalMarker::Checked;
+                if !approved_in_spec && !approved_in_task {
                     failures.push("Product spec not approved by Tom".to_string());
                 }
             }
@@ -1486,6 +1493,46 @@ fn product_spec_approved_by_tom(text: &str) -> bool {
     Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$")
         .unwrap()
         .is_match(text)
+}
+
+fn mirror_task_approval_to_brain_spec_if_needed(
+    task: &Task,
+    repo: &Path,
+    workspace_root: &Path,
+) -> Result<()> {
+    let task_description = task.description.clone().unwrap_or_default();
+    if approval_marker_state(&task_description) != ApprovalMarker::Checked {
+        return Ok(());
+    }
+    let Some(spec) = product_spec(task) else {
+        return Ok(());
+    };
+    let path = resolve_product_spec_path(&spec.path, repo, workspace_root);
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("reading product spec `{}`", path.display()))?;
+    if product_spec_approved_by_tom(&text) {
+        return Ok(());
+    }
+    let updated = set_approval_marker_checked(&text);
+    fs::write(&path, updated)
+        .with_context(|| format!("writing product spec `{}`", path.display()))?;
+    Ok(())
+}
+
+fn set_approval_marker_checked(text: &str) -> String {
+    let unchecked_re = Regex::new(r"(?m)^\s*-\s*\[\s*\]\s+\*\*Approved by Tom\*\*\s*$")
+        .expect("approval marker regex compiles");
+    if unchecked_re.is_match(text) {
+        return unchecked_re
+            .replace(text, "- [x] **Approved by Tom**")
+            .to_string();
+    }
+    format!(
+        "- [x] **Approved by Tom**
+
+{}",
+        text.trim_start()
+    )
 }
 
 /// State of the `- [x] **Approved by Tom**` marker in a task description.
@@ -2478,6 +2525,92 @@ mod tests {
     fn detects_tom_product_spec_approval_marker() {
         assert!(product_spec_approved_by_tom("- [x] **Approved by Tom**"));
         assert!(!product_spec_approved_by_tom("- [ ] **Approved by Tom**"));
+    }
+
+    #[test]
+    fn spec_gate_accepts_approval_marker_in_task_description() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
+        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        fs::write(
+            &spec_path,
+            "- [ ] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Implementation-ready criteria",
+        )
+        .unwrap();
+
+        let task = Task {
+            description: Some(
+                "**Spec:** brain/tasks/specs/example.md
+- [x] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Build it
+
+## Workstreams
+- Owner: Rowan
+  ACs: AC1"
+                    .to_string(),
+            ),
+            ..Task::default()
+        };
+
+        assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
+    }
+
+    #[test]
+    fn mirrors_task_approval_marker_to_unapproved_brain_spec() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
+        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        fs::write(
+            &spec_path,
+            "- [ ] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Implementation-ready criteria",
+        )
+        .unwrap();
+
+        let task = Task {
+            description: Some(
+                "**Spec:** brain/tasks/specs/example.md
+- [x] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Build it
+
+## Workstreams
+- Owner: Rowan
+  ACs: AC1"
+                    .to_string(),
+            ),
+            ..Task::default()
+        };
+
+        mirror_task_approval_to_brain_spec_if_needed(&task, repo.path(), workspace.path()).unwrap();
+        let updated = fs::read_to_string(&spec_path).unwrap();
+        assert!(product_spec_approved_by_tom(&updated));
+        assert!(updated.contains("## Acceptance Criteria"));
+    }
+
+    #[test]
+    fn set_approval_marker_checked_prepends_when_missing() {
+        let updated = set_approval_marker_checked(
+            "# Spec
+
+## Acceptance Criteria
+- [ ] AC1",
+        );
+        assert!(updated.starts_with(
+            "- [x] **Approved by Tom**
+
+# Spec"
+        ));
     }
 
     #[test]
