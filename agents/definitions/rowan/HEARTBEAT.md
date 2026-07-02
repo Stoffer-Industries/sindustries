@@ -24,6 +24,8 @@ Check for active feature tasks assigned to you:
 Follow WORKFLOW.md for full per-state instructions (tech design, implementation, system spec, acceptance):
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/definitions/rowan/WORKFLOW.md`
 
+**Ready-task tech design priority:** If any assigned feature task is in `ready` and does not yet have a posted/approved tech design, prioritize writing and posting that tech design before continuing implementation on `doing` tasks. Tech design prep is not considered parallel implementation WIP; it is the unblocker for the next task. After posting the tech design, return to the active `doing`/`acceptance` work unless Tom says otherwise.
+
 **Note on `[feature-task-progress-checklist]` comments:** Lobster posts this to list what's still outstanding. It is not a signal that work is blocked or waiting on someone else — it means you need to produce those items. Keep working.
 
 ---
@@ -35,4 +37,4 @@ Read and follow:
 
 **Limit:** Open at most 1 code-garden PR at a time. Check for open PRs first — if one exists, skip this step.
 
-**Skip code gardening entirely** if you have an active unblocked feature task in `doing` or `acceptance`.
+**Skip code gardening entirely** if you have any assigned feature task in `ready` waiting for tech design, or any active unblocked feature task in `doing` or `acceptance`.

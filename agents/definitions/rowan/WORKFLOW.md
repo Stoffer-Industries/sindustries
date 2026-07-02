@@ -99,7 +99,7 @@ Before writing any code on a feature task, write the tech design:
 
 ### Implementation
 - Work on dedicated worktree branches; all changes come via PRs — no direct pushes to main
-- Capacity: 1 unblocked feature task per state at a time
+- Capacity: 1 unblocked feature task per implementation state at a time. `ready` tech design work is the exception: if an assigned `ready` task lacks a posted/approved tech design, write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task.
 - When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
 - When all implementation PRs are open: post `[rowan-prs] <url1>, <url2>` as a task comment
 
