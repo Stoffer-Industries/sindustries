@@ -710,8 +710,8 @@ fn safe_brain_spec_path(spec_path_str: &str, workspace_root: &Path) -> Result<Pa
     // so a `brain` symlink at the workspace root (common on macOS where brain
     // is a symlink into iCloud) does not produce a `..` traversal that would
     // escape the allow-list.
-    let canonical_workspace = fs::canonicalize(workspace_root)
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let canonical_workspace =
+        fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     let canonical_workspace_with_specs = canonical_workspace
         .join("brain")
         .join("bookmarks")
@@ -765,7 +765,8 @@ fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
         // Trim trailing whitespace-only lines in the head before injecting
         // bullets, so the new bullets sit on their own line.
         let head_trimmed = head.trim_end_matches('\n');
-        let mut out = String::with_capacity(head.len() + new_block_lines.len() * 40 + tail.len() + 8);
+        let mut out =
+            String::with_capacity(head.len() + new_block_lines.len() * 40 + tail.len() + 8);
         out.push_str(head_trimmed);
         out.push('\n');
         for line in &new_block_lines {
@@ -799,9 +800,8 @@ fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
 /// process is killed mid-write.
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!("create parent directory for {}", path.display())
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create parent directory for {}", path.display()))?;
     }
     let mut tmp = path.to_path_buf();
     let file_name = path
@@ -810,9 +810,8 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         .unwrap_or_else(|| "spec".to_string());
     let tmp_name = format!(".{}.resync-{}", file_name, std::process::id());
     tmp.set_file_name(tmp_name);
-    fs::write(&tmp, content).with_context(|| {
-        format!("write temp file {} during atomic write", tmp.display())
-    })?;
+    fs::write(&tmp, content)
+        .with_context(|| format!("write temp file {} during atomic write", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| {
         format!(
             "rename {} -> {} during atomic write",
@@ -821,11 +820,6 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         )
     })?;
     Ok(())
-}
-
-/// True iff the task is past `open`.
-fn resync_status_past_open(task: &Task) -> bool {
-    !task_is_open(task)
 }
 
 /// Re-snapshot the spec checksum on the task object so subsequent
@@ -841,11 +835,7 @@ fn refresh_task_spec_checksum(task: &mut Task) {
 /// `SPEC_CHECKSUM_LOCKED` (409), so the clear step is mandatory.
 fn reset_task_spec_checksum(base_url: &str, task_id: &str, new_checksum: &str) -> Result<Task> {
     api_patch::<Task>(base_url, task_id, json!({"specChecksum": null}))?;
-    api_patch::<Task>(
-        base_url,
-        task_id,
-        json!({"specChecksum": new_checksum}),
-    )
+    api_patch::<Task>(base_url, task_id, json!({"specChecksum": new_checksum}))
 }
 
 /// Run the AC4 resync flow: rewrite the brain spec AC section from the
@@ -1082,8 +1072,7 @@ fn block_on_spec_drift_fluid(
             //       Stale `[spec-resynced]` comments from previous episodes are
             //       ignored here — they fall into the uncheck branch.
             let fingerprint = drift_episode_fingerprint(&raw_failures);
-            let we_actioned_episode =
-                env.lobster_state.spec_drift_uncheck_applied == Some(true);
+            let we_actioned_episode = env.lobster_state.spec_drift_uncheck_applied == Some(true);
             let fresh_resync_record = latest_resync_record_matches_drift(
                 &env.task,
                 &fingerprint,
@@ -1141,12 +1130,17 @@ fn block_on_spec_drift_fluid(
             let joined_fingerprint = failures.join("\n");
             let already_acted = env.lobster_state.failure_fingerprint.as_deref()
                 == Some(&joined_fingerprint)
-                && env.lobster_state.spec_drift_uncheck_applied.unwrap_or(false);
+                && env
+                    .lobster_state
+                    .spec_drift_uncheck_applied
+                    .unwrap_or(false);
             if !already_acted {
                 if let Some(patched) = uncheck_approval_marker(&description) {
-                    if let Err(err) =
-                        api_patch::<Task>(&args.base_url, &env.task.id, json!({"description": patched}))
-                    {
+                    if let Err(err) = api_patch::<Task>(
+                        &args.base_url,
+                        &env.task.id,
+                        json!({"description": patched}),
+                    ) {
                         if let Some(message) = spec_checksum_mismatch_message(&err) {
                             // Tasks-api rejected the PATCH (e.g. ACs also changed).
                             // Surface that as a hard block.
@@ -1185,11 +1179,9 @@ fn block_on_spec_drift_fluid(
         ApprovalMarker::Unchecked => {
             env.criteria_met = false;
             env.action_taken = format!("{action}_blocked_spec_drift");
-            env.failures = vec![
-                "Approval marker `**Approved by Tom**` is unchecked. \
+            env.failures = vec!["Approval marker `**Approved by Tom**` is unchecked. \
                  Waiting for Tom to re-check it before drift can be re-evaluated."
-                    .to_string()
-            ];
+                .to_string()];
             Ok(Some(env))
         }
         ApprovalMarker::Absent => {
@@ -1508,13 +1500,11 @@ enum ApprovalMarker {
 }
 
 fn approval_marker_state(description: &str) -> ApprovalMarker {
-    let checked_re =
-        Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
+    let checked_re = Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
     if checked_re.is_match(description) {
         return ApprovalMarker::Checked;
     }
-    let unchecked_re =
-        Regex::new(r"(?m)^\s*-\s*\[\s\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
+    let unchecked_re = Regex::new(r"(?m)^\s*-\s*\[\s\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
     if unchecked_re.is_match(description) {
         return ApprovalMarker::Unchecked;
     }
@@ -2191,8 +2181,7 @@ fn parse_evidence(text: &str) -> Option<Evidence> {
 /// Strip a trailing evidence annotation from a description string.
 /// Returns the description with the trailing `(...)` evidence removed.
 fn strip_trailing_evidence(text: &str) -> String {
-    let re =
-        Regex::new(r"\s+\((testID|file|not tested|not code):\s*[^)]+\)\s*$").unwrap();
+    let re = Regex::new(r"\s+\((testID|file|not tested|not code):\s*[^)]+\)\s*$").unwrap();
     match re.find(text) {
         Some(m) => text[..m.start()].trim_end().to_string(),
         None => text.to_string(),
@@ -2315,7 +2304,8 @@ mod tests {
 
     #[test]
     fn tech_design_approved_rejects_false() {
-        let task = task_with_approval_comment("[tech-design-approved] false \u{2014} pending review");
+        let task =
+            task_with_approval_comment("[tech-design-approved] false \u{2014} pending review");
         assert!(!tech_design_approved(&task));
     }
 
@@ -3181,7 +3171,8 @@ mod tests {
 
     #[test]
     fn task_description_acs_extracts_both_checked_and_unchecked() {
-        let desc = "**AC:**\n- [x] AC1: First thing\n- [ ] AC2: Second thing\n- [X] AC3: Third thing\n";
+        let desc =
+            "**AC:**\n- [x] AC1: First thing\n- [ ] AC2: Second thing\n- [X] AC3: Third thing\n";
         let acs = task_description_acs(desc);
         assert_eq!(acs.len(), 3);
         assert_eq!(acs[0], ("AC1".to_string(), "First thing".to_string()));
@@ -3198,7 +3189,8 @@ mod tests {
 
     #[test]
     fn pr_acs_all_captures_checked_and_unchecked() {
-        let body = "## Acceptance Criteria\n- [x] AC1: Done thing (testID: 1)\n- [ ] AC2: Pending thing\n";
+        let body =
+            "## Acceptance Criteria\n- [x] AC1: Done thing (testID: 1)\n- [ ] AC2: Pending thing\n";
         let acs = pr_acs_all(body);
         assert_eq!(acs.get("AC1"), Some(&("Done thing".to_string(), true)));
         assert_eq!(acs.get("AC2"), Some(&("Pending thing".to_string(), false)));
@@ -3258,19 +3250,13 @@ mod tests {
     #[test]
     fn approval_marker_detects_checked_variant() {
         let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1\n";
-        assert_eq!(
-            approval_marker_state(description),
-            ApprovalMarker::Checked
-        );
+        assert_eq!(approval_marker_state(description), ApprovalMarker::Checked);
     }
 
     #[test]
     fn approval_marker_detects_uppercase_checkbox() {
         let description = "- [X] **Approved by Tom**";
-        assert_eq!(
-            approval_marker_state(description),
-            ApprovalMarker::Checked
-        );
+        assert_eq!(approval_marker_state(description), ApprovalMarker::Checked);
     }
 
     #[test]
@@ -3285,10 +3271,7 @@ mod tests {
     #[test]
     fn approval_marker_is_absent_when_line_missing() {
         let description = "## Acceptance Criteria\n- [ ] AC1\n";
-        assert_eq!(
-            approval_marker_state(description),
-            ApprovalMarker::Absent
-        );
+        assert_eq!(approval_marker_state(description), ApprovalMarker::Absent);
     }
 
     #[test]
@@ -3296,10 +3279,7 @@ mod tests {
         let description =
             "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n";
         let updated = uncheck_approval_marker(description).expect("should uncheck");
-        assert_eq!(
-            approval_marker_state(&updated),
-            ApprovalMarker::Unchecked
-        );
+        assert_eq!(approval_marker_state(&updated), ApprovalMarker::Unchecked);
         assert!(updated.contains("- [ ] **Approved by Tom**"));
         // AC text must be preserved verbatim
         assert!(updated.contains("- [ ] AC1: Build it"));
@@ -3357,8 +3337,8 @@ mod tests {
             lobster_state: LobsterState::default(),
             failures: Vec::new(),
         };
-        let result = block_on_spec_drift_fluid(&args, env, "spec_check")
-            .expect("no-drift should not error");
+        let result =
+            block_on_spec_drift_fluid(&args, env, "spec_check").expect("no-drift should not error");
         assert!(result.is_none());
     }
 
@@ -3393,8 +3373,8 @@ mod tests {
             lobster_state: LobsterState::default(),
             failures: Vec::new(),
         };
-        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
-            .expect("no API call in dry-run");
+        let result =
+            block_on_spec_drift_fluid(&args, env, "ready_checks").expect("no API call in dry-run");
         let blocked = result.expect("should block");
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
@@ -3431,8 +3411,8 @@ mod tests {
             lobster_state: LobsterState::default(),
             failures: Vec::new(),
         };
-        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
-            .expect("no API call in dry-run");
+        let result =
+            block_on_spec_drift_fluid(&args, env, "ready_checks").expect("no API call in dry-run");
         let blocked = result.expect("should block");
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
@@ -3566,9 +3546,9 @@ mod tests {
             "fixture must produce drift so the test exercises the binding"
         );
         let fingerprint = drift_episode_fingerprint(&drift_failures);
-        let new_checksum = acceptance_criteria_checksum(
-            &acceptance_criteria_text(&task.description.clone().unwrap()),
-        );
+        let new_checksum = acceptance_criteria_checksum(&acceptance_criteria_text(
+            &task.description.clone().unwrap(),
+        ));
         // Sanity: the resync comment must already be cryptographically
         // bound to the values it claims.
         assert_eq!(fingerprint.len(), 64);
@@ -3647,7 +3627,10 @@ mod tests {
             blocked.failures
         );
         assert!(
-            !blocked.failures.iter().any(|f| f.contains("**Approved by Tom**")),
+            !blocked
+                .failures
+                .iter()
+                .any(|f| f.contains("**Approved by Tom**")),
             "open-status drift must not surface a marker hint; got {:?}",
             blocked.failures
         );
@@ -3746,8 +3729,9 @@ mod tests {
 
     #[test]
     fn parse_resync_record_extracts_bound_fields() {
-        let chk: String = "a".repeat(64);
-        let fp: String = "b".repeat(64);
+        // Use exactly-64-char lowercase hex strings so is_sha256_hex accepts them.
+        let chk = "a".repeat(64);
+        let fp = "b".repeat(64);
         let text = format!("[spec-resynced] reset checksum after approval\nchecksum={chk}\ndriftFingerprint={fp}\n");
         let record = parse_resync_record(&text).expect("record should parse");
         assert_eq!(record.checksum, chk);
@@ -3785,9 +3769,18 @@ mod tests {
         let stale = "[spec-resynced] old reset (no fields)";
         let task = Task {
             comments: vec![
-                TaskComment { text: Some("[rowan-prs] https://github.com/x/y/pull/1".to_string()), body: None },
-                TaskComment { text: Some(stale.to_string()), body: None },
-                TaskComment { text: Some(good), body: None },
+                TaskComment {
+                    text: Some("[rowan-prs] https://github.com/x/y/pull/1".to_string()),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(stale.to_string()),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(good),
+                    body: None,
+                },
             ],
             ..Task::default()
         };
@@ -3806,7 +3799,9 @@ mod tests {
         // Lowercase sha256 hex of length 64.
         let fp = drift_episode_fingerprint(&a);
         assert_eq!(fp.len(), 64);
-        assert!(fp.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(fp
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
@@ -3909,7 +3904,11 @@ mod tests {
     #[test]
     fn safe_brain_spec_path_accepts_conventional_path() {
         let workspace = tempdir().unwrap();
-        let specs = workspace.path().join("brain").join("bookmarks").join("specs");
+        let specs = workspace
+            .path()
+            .join("brain")
+            .join("bookmarks")
+            .join("specs");
         fs::create_dir_all(&specs).unwrap();
         let spec_file = specs.join("example.md");
         fs::write(&spec_file, "- [x] **Approved by Tom**\n").unwrap();
@@ -3922,13 +3921,16 @@ mod tests {
     #[test]
     fn safe_brain_spec_path_accepts_absolute_path_within_specs() {
         let workspace = tempdir().unwrap();
-        let specs = workspace.path().join("brain").join("bookmarks").join("specs");
+        let specs = workspace
+            .path()
+            .join("brain")
+            .join("bookmarks")
+            .join("specs");
         fs::create_dir_all(&specs).unwrap();
         let spec_file = specs.join("absolute.md");
         fs::write(&spec_file, "- [x] **Approved by Tom**\n").unwrap();
 
-        let resolved =
-            safe_brain_spec_path(spec_file.to_str().unwrap(), workspace.path()).unwrap();
+        let resolved = safe_brain_spec_path(spec_file.to_str().unwrap(), workspace.path()).unwrap();
         assert_eq!(resolved, spec_file);
     }
 
@@ -3940,10 +3942,12 @@ mod tests {
         let other = other_dir.join("secret.md");
         fs::write(&other, "x").unwrap();
 
-        let result =
-            safe_brain_spec_path("docs/secret.md", workspace.path());
+        let result = safe_brain_spec_path("docs/secret.md", workspace.path());
         assert!(result.is_err(), "expected rejection for non-specs path");
-        assert!(result.unwrap_err().to_string().contains("brain/bookmarks/specs"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("brain/bookmarks/specs"));
 
         let result = safe_brain_spec_path("../escapee.md", workspace.path());
         assert!(result.is_err());
@@ -3972,7 +3976,10 @@ mod tests {
         fs::write(&target, "x").unwrap();
 
         let result = safe_brain_spec_path(target.to_str().unwrap(), workspace.path());
-        assert!(result.is_err(), "absolute path inside workspace but outside `brain/bookmarks/specs/` must be rejected");
+        assert!(
+            result.is_err(),
+            "absolute path inside workspace but outside `brain/bookmarks/specs/` must be rejected"
+        );
     }
 
     #[test]
@@ -3993,7 +4000,10 @@ Lead-in paragraph.
 
 - Keep me
 ";
-        let new_acs = vec!["AC1: New criterion".to_string(), "AC2: Second new".to_string()];
+        let new_acs = vec![
+            "AC1: New criterion".to_string(),
+            "AC2: Second new".to_string(),
+        ];
         let rewritten = replace_ac_section(original, &new_acs);
         assert!(rewritten.contains("- [ ] AC1: New criterion"));
         assert!(rewritten.contains("- [ ] AC2: Second new"));
@@ -4072,7 +4082,11 @@ Lead-in paragraph.
         spec_body: &str,
     ) -> (Task, tempfile::TempDir, PathBuf, String) {
         let workspace = tempdir().unwrap();
-        let specs = workspace.path().join("brain").join("bookmarks").join("specs");
+        let specs = workspace
+            .path()
+            .join("brain")
+            .join("bookmarks")
+            .join("specs");
         fs::create_dir_all(&specs).unwrap();
         let spec_path = specs.join("example-spec.md");
         fs::write(&spec_path, spec_body).unwrap();
@@ -4146,14 +4160,9 @@ keep me
         };
         let drift_failures = spec_checksum_failures(&env.task);
         let fingerprint = drift_episode_fingerprint(&drift_failures);
-        let result = resync_spec_and_reset_checksum(
-            &args,
-            env,
-            &drift_failures,
-            &fingerprint,
-            &args.repo,
-        )
-        .expect("dry-run resync must not error");
+        let result =
+            resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
+                .expect("dry-run resync must not error");
         assert!(result.criteria_met);
         assert_eq!(result.action_taken, "spec_resync_dry_run");
         // On-disk spec must NOT be mutated under dry-run.
@@ -4168,9 +4177,8 @@ keep me
         // (so Quinn / Tom can audit the proposed change).
         assert!(result.failures[0].contains("would rewrite"));
         assert!(result.failures[0].contains("2 AC line"));
-        let expected_checksum = acceptance_criteria_checksum(
-            &acceptance_criteria_text(&drifted_description),
-        );
+        let expected_checksum =
+            acceptance_criteria_checksum(&acceptance_criteria_text(&drifted_description));
         assert!(result.failures[0].contains(&expected_checksum));
     }
 
@@ -4207,14 +4215,9 @@ keep me
         };
         let drift_failures = vec!["AC drift".to_string()];
         let fingerprint = drift_episode_fingerprint(&drift_failures);
-        let result = resync_spec_and_reset_checksum(
-            &args,
-            env,
-            &drift_failures,
-            &fingerprint,
-            &args.repo,
-        )
-        .expect("unsafe-path resync must not error");
+        let result =
+            resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
+                .expect("unsafe-path resync must not error");
         assert!(!result.criteria_met);
         assert_eq!(result.action_taken, "spec_resync_blocked_unsafe_path");
         assert!(
@@ -4229,15 +4232,15 @@ keep me
     #[test]
     fn resync_dry_run_requires_spec_approval_marker() {
         let workspace = tempdir().unwrap();
-        let specs = workspace.path().join("brain").join("bookmarks").join("specs");
+        let specs = workspace
+            .path()
+            .join("brain")
+            .join("bookmarks")
+            .join("specs");
         fs::create_dir_all(&specs).unwrap();
         let spec_path = specs.join("revoked.md");
         // Note: Tom flipped the spec back to unapproved — resync must refuse.
-        fs::write(
-            &spec_path,
-            "## Acceptance Criteria\n- [ ] AC1: legacy\n",
-        )
-        .unwrap();
+        fs::write(&spec_path, "## Acceptance Criteria\n- [ ] AC1: legacy\n").unwrap();
         let description = format!(
             "**Spec:** brain/bookmarks/specs/revoked.md\n## Acceptance Criteria\n- [ ] AC1: new\n"
         );
@@ -4264,14 +4267,9 @@ keep me
         };
         let drift_failures = vec!["drift".to_string()];
         let fingerprint = drift_episode_fingerprint(&drift_failures);
-        let result = resync_spec_and_reset_checksum(
-            &args,
-            env,
-            &drift_failures,
-            &fingerprint,
-            &args.repo,
-        )
-        .expect("revoked-spec resync must not error");
+        let result =
+            resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
+                .expect("revoked-spec resync must not error");
         assert!(!result.criteria_met);
         assert_eq!(result.action_taken, "spec_resync_blocked_spec_revoked");
         assert!(result.failures[0].contains("Approved by Tom"));
@@ -4287,7 +4285,11 @@ keep me
         // identifier-stable checksum that the orchestrator proceeds to
         // the API step without crashing on the rewrite.
         let workspace = tempdir().unwrap();
-        let specs = workspace.path().join("brain").join("bookmarks").join("specs");
+        let specs = workspace
+            .path()
+            .join("brain")
+            .join("bookmarks")
+            .join("specs");
         fs::create_dir_all(&specs).unwrap();
         let spec_path = specs.join("stable.md");
         let original_spec = "\
@@ -4303,7 +4305,9 @@ keep me
         let original_meta = fs::metadata(&spec_path).unwrap();
         let original_mtime = original_meta.modified().unwrap();
 
-        let description = "**Spec:** brain/bookmarks/specs/stable.md\n## Acceptance Criteria\n- [ ] AC1: Same\n".to_string();
+        let description =
+            "**Spec:** brain/bookmarks/specs/stable.md\n## Acceptance Criteria\n- [ ] AC1: Same\n"
+                .to_string();
         let approved = Task {
             description: Some(description.clone()),
             ..Task::default()
@@ -4332,14 +4336,9 @@ keep me
         };
         let drift_failures = spec_checksum_failures(&env.task);
         let fingerprint = drift_episode_fingerprint(&drift_failures);
-        let result = resync_spec_and_reset_checksum(
-            &args,
-            env,
-            &drift_failures,
-            &fingerprint,
-            &args.repo,
-        )
-        .expect("stable-spec resync must not error");
+        let result =
+            resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
+                .expect("stable-spec resync must not error");
         assert!(result.criteria_met);
         // In dry-run we don't touch the file at all, so its mtime is
         // untouched.
@@ -4380,9 +4379,7 @@ keep me
             dry_run: true,
         };
         let original = Task {
-            description: Some(
-                "## Acceptance Criteria\n- [ ] AC1: Original".to_string(),
-            ),
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Original".to_string()),
             ..Task::default()
         };
         let original_checksum = spec_checksum(&original);
@@ -4432,7 +4429,10 @@ keep me
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
         assert!(
-            blocked.failures.iter().any(|f| f.contains("write a new spec")),
+            blocked
+                .failures
+                .iter()
+                .any(|f| f.contains("write a new spec")),
             "expected legacy drift message, got {:?}",
             blocked.failures
         );
