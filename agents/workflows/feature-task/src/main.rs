@@ -294,7 +294,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = Vec::new();
-    let pr_urls = rowan_active_pr_urls(&env.task);
+    let pr_urls = rowan_pr_urls(&env.task);
     if pr_urls.is_empty() {
         failures.push("Missing `[rowan-prs]` task comment with at least one PR URL.".to_string());
     }
@@ -678,6 +678,17 @@ fn transition_or_block(
 
 const BRAIN_DIR: &str = "brain";
 
+fn is_typescript_spec_path(spec_path: &str) -> bool {
+    let path = spec_path.trim();
+    path.ends_with("_spec.ts") || path.ends_with(".spec.ts")
+}
+
+fn task_product_spec_is_typescript_spec(task: &Task) -> bool {
+    product_spec(task)
+        .map(|spec| is_typescript_spec_path(&spec.path))
+        .unwrap_or(false)
+}
+
 fn safe_brain_spec_path(spec_path_str: &str, workspace_root: &Path) -> Result<PathBuf> {
     let stripped = spec_path_str.trim();
     if stripped.is_empty() {
@@ -1057,6 +1068,17 @@ fn block_on_spec_drift_fluid(
         return Ok(Some(env));
     }
     let description = env.task.description.clone().unwrap_or_default();
+    if task_product_spec_is_typescript_spec(&env.task) {
+        env.criteria_met = false;
+        env.action_taken = format!("{action}_blocked_spec_drift");
+        let mut failures = raw_failures;
+        failures.push(
+            "Spec drift was detected for a TypeScript spec test file; the lobster will not auto-uncheck `**Approved by Tom**` for `_spec.ts`/`.spec.ts` specs. Resolve the drift manually or post a fresh `[spec-resynced]` record."
+                .to_string(),
+        );
+        env.failures = failures;
+        return Ok(Some(env));
+    }
     let marker_state = approval_marker_state(&description);
     match marker_state {
         ApprovalMarker::Checked => {
@@ -1481,7 +1503,8 @@ fn product_spec(task: &Task) -> Option<ProductSpecRef> {
 }
 
 fn parse_product_spec_ref(text: &str) -> Option<ProductSpecRef> {
-    let re = Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s*`?([^`\s]+\.md)`?\s*$").unwrap();
+    let re =
+        Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s*`?([^`\s]+(?:\.md|[._]spec\.ts))`?\s*$").unwrap();
     re.captures(text)
         .and_then(|cap| cap.get(1))
         .map(|m| ProductSpecRef {
@@ -1871,6 +1894,20 @@ fn tech_design_approved(task: &Task) -> bool {
         })
 }
 
+fn tagged_path_values(task: &Task, tag: &str) -> Vec<String> {
+    tagged_values(task, tag)
+        .into_iter()
+        .filter_map(|value| {
+            value
+                .trim_start()
+                .split_whitespace()
+                .next()
+                .map(|token| token.trim_matches('`').trim_matches(',').to_string())
+        })
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
 fn rowan_pr_urls(task: &Task) -> Vec<String> {
     let re = Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").unwrap();
     let mut urls = Vec::new();
@@ -1885,10 +1922,6 @@ fn rowan_pr_urls(task: &Task) -> Vec<String> {
     urls
 }
 
-fn rowan_active_pr_urls(task: &Task) -> Vec<String> {
-    rowan_active_pr_urls_with(task, inspect_pr)
-}
-
 fn rowan_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
 where
     F: Fn(&str) -> Result<ReviewState>,
@@ -1897,6 +1930,35 @@ where
         .into_iter()
         .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
         .collect()
+}
+
+fn system_spec_source_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
+where
+    F: Fn(&str) -> Result<ReviewState>,
+{
+    let urls = rowan_pr_urls(task);
+    let active: Vec<String> = urls
+        .iter()
+        .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
+        .cloned()
+        .collect();
+    if active.is_empty() {
+        urls
+    } else {
+        active
+    }
+}
+
+fn pr_branch_for_system_spec<I, B>(url: &str, inspect: I, branch_for_pr: B) -> Result<String>
+where
+    I: Fn(&str) -> Result<ReviewState> + Copy,
+    B: Fn(&str) -> Result<String> + Copy,
+{
+    match inspect(url) {
+        Ok(ReviewState::Merged) => Ok("main".to_string()),
+        Ok(_) => branch_for_pr(url),
+        Err(err) => Err(err),
+    }
 }
 
 fn openclaw_needed(task: &Task) -> bool {
@@ -1934,7 +1996,7 @@ where
     I: Fn(&str) -> Result<ReviewState> + Copy,
     B: Fn(&str) -> Result<String> + Copy,
 {
-    let system_specs = tagged_values(task, "[system-spec]");
+    let system_specs = tagged_path_values(task, "[system-spec]");
     if system_specs.is_empty() {
         let reasons = tagged_values(task, "[no-system-spec-change]");
         if reasons.iter().any(|reason| reason.len() >= 12) {
@@ -1942,26 +2004,22 @@ where
         }
         return vec!["Missing `[system-spec] docs/systems/<file>.md` or substantive `[no-system-spec-change]` reason.".to_string()];
     }
-    let active_prs = rowan_active_pr_urls_with(task, inspect);
-    let Some(active_pr_url) = active_prs.first() else {
+    let candidate_prs = system_spec_source_pr_urls_with(task, inspect);
+    let Some(source_pr_url) = candidate_prs.first() else {
         return vec![
-            "Missing active `[rowan-prs]` PR URL to read system specs from a PR branch."
+            "Missing `[rowan-prs]` PR URL to read system specs from a PR branch or main."
                 .to_string(),
         ];
     };
-    let (owner, repo_name) = match parse_pr_repo(active_pr_url) {
+    let (owner, repo_name) = match parse_pr_repo(source_pr_url) {
         Ok(parts) => parts,
-        Err(err) => {
-            return vec![format!(
-                "Could not parse active PR URL `{active_pr_url}`: {err}."
-            )]
-        }
+        Err(err) => return vec![format!("Could not parse PR URL `{source_pr_url}`: {err}.")],
     };
-    let branch = match branch_for_pr(active_pr_url) {
+    let branch = match pr_branch_for_system_spec(source_pr_url, inspect, branch_for_pr) {
         Ok(branch) => branch,
         Err(err) => {
             return vec![format!(
-                "Could not determine head branch for active PR `{active_pr_url}`: {err}."
+                "Could not determine branch for PR `{source_pr_url}`: {err}."
             )]
         }
     };
@@ -3030,6 +3088,7 @@ mod tests {
         let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
         assert!(verify_delivery_review_failure(url, ReviewState::Required).is_none());
         assert!(verify_delivery_review_failure(url, ReviewState::CommentsPresent).is_none());
+        assert!(verify_delivery_review_failure(url, ReviewState::Merged).is_none());
         assert_eq!(
             verify_delivery_review_failure(url, ReviewState::ChangesRequested),
             Some(format!("Changes requested on {url}."))
@@ -3037,6 +3096,31 @@ mod tests {
         assert_eq!(
             verify_delivery_review_failure(url, ReviewState::ClosedUnmerged),
             Some(format!("PR {url} is closed without merge."))
+        );
+    }
+
+    #[test]
+    fn rowan_pr_urls_preserve_merged_prs_for_delivery() {
+        let merged_url = "https://github.com/Stoffer-Industries/sindustries/pull/161";
+        let open_url = "https://github.com/Stoffer-Industries/sindustries/pull/164";
+        let task = Task {
+            comments: vec![TaskComment {
+                text: Some(format!("[rowan-prs] {merged_url} {open_url}")),
+                body: None,
+            }],
+            ..Task::default()
+        };
+
+        assert_eq!(rowan_pr_urls(&task), vec![merged_url, open_url]);
+        assert_eq!(
+            rowan_active_pr_urls_with(&task, |url| {
+                if url == merged_url {
+                    Ok(ReviewState::Merged)
+                } else {
+                    Ok(ReviewState::Approved)
+                }
+            }),
+            vec![open_url]
         );
     }
 
@@ -3084,6 +3168,33 @@ mod tests {
     }
 
     #[test]
+    fn system_spec_tag_uses_first_path_token_only() {
+        let mut task = Task::default();
+        task.comments.push(TaskComment {
+            text: Some(
+                "[system-spec] docs/systems/feature-task-workflow.md (updated in PR #163)"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            text: Some(
+                "[system-spec] `docs/systems/quoted.md`\n\nPR #161 merged; extra context"
+                    .to_string(),
+            ),
+            body: None,
+        });
+
+        assert_eq!(
+            tagged_path_values(&task, "[system-spec]"),
+            vec![
+                "docs/systems/feature-task-workflow.md".to_string(),
+                "docs/systems/quoted.md".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn validates_existing_current_system_spec() {
         let repo = tempdir().unwrap();
         let task = Task {
@@ -3112,6 +3223,41 @@ mod tests {
             repo.path(),
             |_| Ok(ReviewState::Approved),
             |_| Ok("task-456c92a8-depends-on".to_string()),
+            &fetcher,
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn validates_system_spec_from_main_when_all_prs_are_merged() {
+        let repo = tempdir().unwrap();
+        let task = Task {
+            id: "task-1".to_string(),
+            comments: vec![
+                TaskComment {
+                    text: Some("[system-spec] docs/systems/feature-task.md".to_string()),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(
+                        "[rowan-prs] https://github.com/Stoffer-Industries/sindustries/pull/161"
+                            .to_string(),
+                    ),
+                    body: None,
+                },
+            ],
+            ..Task::default()
+        };
+        let fetcher = StubFetcher {
+            body: "References task-1".to_string(),
+            error: None,
+        };
+
+        assert!(system_spec_failures_with(
+            &task,
+            repo.path(),
+            |_| Ok(ReviewState::Merged),
+            |_| panic!("merged PRs must read system specs from main, not a head branch"),
             &fetcher,
         )
         .is_empty());
@@ -3467,6 +3613,47 @@ mod tests {
         let result =
             block_on_spec_drift_fluid(&args, env, "spec_check").expect("no-drift should not error");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn fluid_drift_does_not_auto_uncheck_typescript_spec_files() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let task = Task {
+            id: "task-ts-spec".to_string(),
+            description: Some(
+                "**Spec:** apps/tasks/src/feature_task_workflow_spec.ts\n\n- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift"
+                    .to_string(),
+            ),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+
+        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
+            .expect("dry-run should not error");
+        let blocked = result.expect("should block without auto-unchecking");
+        assert!(!blocked.criteria_met);
+        assert!(blocked
+            .failures
+            .iter()
+            .any(|failure| failure.contains("will not auto-uncheck")));
     }
 
     #[test]

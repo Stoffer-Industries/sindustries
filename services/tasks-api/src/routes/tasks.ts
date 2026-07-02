@@ -20,7 +20,7 @@ import {
 } from './tasks/_validation.ts';
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
-import { rejectSpecDrift } from './tasks/_spec.ts';
+import { descriptionWithSpecDriftApprovalState } from './tasks/_spec.ts';
 import { connectTags, validateDependsOnIds } from './tasks/_deps.ts';
 
 export const tasksRouter = Router();
@@ -320,7 +320,9 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       return badRequest(res, 'INVALID_DEPENDS_ON_IDS', 'dependsOnIds must be an array of UUID strings');
     }
 
-    if (description !== undefined) updates.description = description || null;
+    if (description !== undefined) {
+      updates.description = descriptionWithSpecDriftApprovalState(existing, description || null);
+    }
     if (assignee !== undefined) {
       if (assignee && !validAssignees.has(assignee)) {
         return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox, Ivy');
@@ -384,10 +386,6 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         );
       }
       updates.specChecksum = specChecksum || null;
-    }
-
-    if (rejectSpecDrift(res, existing, description === undefined ? existing.description : description || null)) {
-      return;
     }
 
     const hasTagUpdate = req.body?.tags !== undefined;
