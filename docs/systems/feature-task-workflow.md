@@ -148,7 +148,7 @@ The first-class Tasks API target is `taskType`, `tech_design_url`, `tech_design_
 
 ## Spec Checksum Safeguards (factory-v2 last grandfathered edit)
 
-After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The fluid AC lifecycle (shipped via task `b2ab54db`) replaces the old hard-block on drift with a Tom-gated re-approval flow. The brain spec remains the source of truth in `open`; the task description is the source of truth in every other status.
+After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The fluid AC lifecycle (shipped via task `b2ab54db`) replaces the old hard-block on drift with a Tom-gated re-approval flow. The brain spec remains the AC source of truth in `open`, but Tom may approve the spec in either the brain spec or the task description while the task is still `open`; Lobster mirrors task-side approval back to the brain spec before moving to `ready`. The task description is the source of truth in every later status.
 
 ### Fluid AC lifecycle state machine
 
@@ -163,7 +163,7 @@ The lobster (`agents/workflows/feature-task/src/main.rs`) recognises three state
 | `[ ]` (unchecked) | (drift recorded earlier) | Block waiting on Tom to re-check `**Approved by Tom**` on the new spec |
 | Absent (legacy tasks) | Yes | Legacy hard block with `write a new spec` message |
 
-`open` status always uses the brain spec as source of truth and never touches the marker; the marker machinery only kicks in for `ready`, `doing`, `acceptance`, `done`.
+`open` status always uses the brain spec ACs as source of truth. The open → ready approval gate accepts `- [x] **Approved by Tom**` in either the brain spec or the task description; if approval was only in the task description, Lobster mirrors the checked marker into the brain spec before transition. Drift marker machinery still only kicks in for `ready`, `doing`, `acceptance`, `done`.
 
 ### Tasks API writes under the fluid lifecycle
 
@@ -187,7 +187,7 @@ A `[spec-resynced]` comment is trusted only when both bindings match the current
 
 ### Source-of-truth handling
 
-- `open` status: brain spec wins. Drift against the stored checksum is treated as a blocker.
+- `open` status: brain spec ACs win. Approval may be checked in either brain spec or task description; task-side approval is mirrored into the brain spec before transition. Drift against the stored checksum is treated as a blocker.
 - `ready`, `doing`, `acceptance`, `done`: task description wins. Lobster reflects drift via the marker, then resyncs the brain spec to match after Tom re-checks approval.
 
 Lives in:
