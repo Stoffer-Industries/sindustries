@@ -662,20 +662,18 @@ fn transition_or_block(
 // ---- Spec resync path helpers (AC4) ----
 //
 // The lobster resync writes back to the brain spec file referenced from the
-// task description. The path comes from `**Spec:** <path>` so it is a string
-// under our control, but we still want to enforce a strict allow-list so a
-// hand-edited task description cannot direct the resync at an arbitrary file
-// inside or outside the workspace. Two safety gates:
+// task description. The task's `**Spec:** <path>` is trusted as the intended
+// spec target, but resync should still never write outside the workspace brain.
+// Safety gates:
 //
-//   1. The resolved path must live under `<workspace_root>/brain/bookmarks/specs/`
-//      (relative `brain/bookmarks/specs/...` paths map cleanly; absolute
-//      paths must canonicalise into that directory after symlink resolution).
+//   1. The resolved path must live under `<workspace_root>/brain/`.
 //   2. The resolved path's extension must be `.md`.
+//   3. Relative paths must begin with `brain/` and may not contain `..`.
 //
-// Anything else is rejected with a precise error so the caller can surface
-// the spec block to Tom instead of silently doing nothing.
+// This deliberately allows both `brain/bookmarks/specs/*.md` and
+// `brain/tasks/specs/*.md`, plus future brain subtrees.
 
-const BRAIN_SPECS_DIR: &str = "brain/bookmarks/specs";
+const BRAIN_DIR: &str = "brain";
 
 fn safe_brain_spec_path(spec_path_str: &str, workspace_root: &Path) -> Result<PathBuf> {
     let stripped = spec_path_str.trim();
@@ -692,36 +690,35 @@ fn safe_brain_spec_path(spec_path_str: &str, workspace_root: &Path) -> Result<Pa
             "brain spec path `{stripped}` must not contain `..`; refusing to rewrite `{spec_path_str}`"
         ));
     }
-    // Allow either an absolute path or a workspace-relative path that begins
-    // with `brain/bookmarks/specs/` (the conventional location for feature
-    // task product specs).
+
     let target = if Path::new(stripped).is_absolute() {
         PathBuf::from(stripped)
     } else {
-        if !stripped.starts_with(BRAIN_SPECS_DIR) {
+        if !stripped.starts_with("brain/") {
             return Err(anyhow!(
-                "brain spec path `{stripped}` is not inside `{BRAIN_SPECS_DIR}`; refusing to rewrite"
+                "brain spec path `{stripped}` is not inside `{BRAIN_DIR}/`; refusing to rewrite"
             ));
         }
         workspace_root.join(Path::new(stripped))
     };
 
-    // Containment check after canonicalisation. This also normalises symlinks
-    // so a `brain` symlink at the workspace root (common on macOS where brain
-    // is a symlink into iCloud) does not produce a `..` traversal that would
-    // escape the allow-list.
+    // The file's parent must already exist before resync can rewrite the file.
+    // Canonicalise the parent so symlinked brain directories are handled safely
+    // without allowing a task description to escape the workspace brain.
     let canonical_workspace =
         fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-    let canonical_workspace_with_specs = canonical_workspace
-        .join("brain")
-        .join("bookmarks")
-        .join("specs");
-    let canonical_target = fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
-    if !canonical_target.starts_with(&canonical_workspace_with_specs) {
+    let canonical_brain = fs::canonicalize(canonical_workspace.join(BRAIN_DIR))
+        .unwrap_or_else(|_| canonical_workspace.join(BRAIN_DIR));
+    let canonical_parent = target
+        .parent()
+        .ok_or_else(|| anyhow!("brain spec path `{}` has no parent", target.display()))?
+        .canonicalize()
+        .with_context(|| format!("canonicalizing brain spec parent `{}`", target.display()))?;
+    if !canonical_parent.starts_with(&canonical_brain) {
         return Err(anyhow!(
             "brain spec path `{}` resolves outside of `{}`; refusing to rewrite",
-            canonical_target.display(),
-            canonical_workspace_with_specs.display()
+            target.display(),
+            canonical_brain.display()
         ));
     }
     Ok(target)
@@ -2489,11 +2486,11 @@ mod tests {
         let workspace = tempdir().unwrap();
         assert_eq!(
             resolve_product_spec_path(
-                "brain/bookmarks/specs/example.md",
+                "brain/tasks/specs/example.md",
                 repo.path(),
                 workspace.path()
             ),
-            workspace.path().join("brain/bookmarks/specs/example.md")
+            workspace.path().join("brain/tasks/specs/example.md")
         );
 
         assert_eq!(
@@ -2501,7 +2498,7 @@ mod tests {
             repo.path().join("docs/spec.md")
         );
 
-        let absolute = workspace.path().join("brain/bookmarks/specs/example.md");
+        let absolute = workspace.path().join("brain/tasks/specs/example.md");
         assert_eq!(
             resolve_product_spec_path(absolute.to_str().unwrap(), repo.path(), workspace.path()),
             absolute
@@ -2512,7 +2509,7 @@ mod tests {
     fn validates_existing_product_spec_under_workspace_root() {
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        let spec_path = workspace.path().join("brain/bookmarks/specs/example.md");
+        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
         fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
         fs::write(
             &spec_path,
@@ -2522,17 +2519,14 @@ mod tests {
 
         let task = Task {
             description: Some(
-                "**Spec:** brain/bookmarks/specs/example.md\n\n## Acceptance Criteria\n- [ ] Build it\n\n## Rowan Workstream\n- [ ] Build it"
+                "**Spec:** brain/tasks/specs/example.md\n\n## Acceptance Criteria\n- [ ] Build it\n\n## Rowan Workstream\n- [ ] Build it"
                     .to_string(),
             ),
             ..Task::default()
         };
 
         assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
-        assert!(!repo
-            .path()
-            .join("brain/bookmarks/specs/example.md")
-            .exists());
+        assert!(!repo.path().join("brain/tasks/specs/example.md").exists());
     }
 
     #[test]
@@ -3902,40 +3896,52 @@ mod tests {
     }
 
     #[test]
-    fn safe_brain_spec_path_accepts_conventional_path() {
+    fn safe_brain_spec_path_accepts_conventional_paths() {
         let workspace = tempdir().unwrap();
-        let specs = workspace
-            .path()
-            .join("brain")
-            .join("bookmarks")
-            .join("specs");
-        fs::create_dir_all(&specs).unwrap();
-        let spec_file = specs.join("example.md");
-        fs::write(&spec_file, "- [x] **Approved by Tom**\n").unwrap();
+        let tasks_specs = workspace.path().join("brain/tasks/specs");
+        let bookmark_specs = workspace.path().join("brain/bookmarks/specs");
+        fs::create_dir_all(&tasks_specs).unwrap();
+        fs::create_dir_all(&bookmark_specs).unwrap();
+        fs::write(
+            tasks_specs.join("example.md"),
+            "- [x] **Approved by Tom**
+",
+        )
+        .unwrap();
+        fs::write(
+            bookmark_specs.join("example.md"),
+            "- [x] **Approved by Tom**
+",
+        )
+        .unwrap();
 
         let resolved =
+            safe_brain_spec_path("brain/tasks/specs/example.md", workspace.path()).unwrap();
+        assert_eq!(resolved, tasks_specs.join("example.md"));
+        let resolved =
             safe_brain_spec_path("brain/bookmarks/specs/example.md", workspace.path()).unwrap();
-        assert_eq!(resolved, spec_file);
+        assert_eq!(resolved, bookmark_specs.join("example.md"));
     }
 
     #[test]
-    fn safe_brain_spec_path_accepts_absolute_path_within_specs() {
+    fn safe_brain_spec_path_accepts_absolute_path_within_brain() {
         let workspace = tempdir().unwrap();
-        let specs = workspace
-            .path()
-            .join("brain")
-            .join("bookmarks")
-            .join("specs");
-        fs::create_dir_all(&specs).unwrap();
-        let spec_file = specs.join("absolute.md");
-        fs::write(&spec_file, "- [x] **Approved by Tom**\n").unwrap();
+        let ideas = workspace.path().join("brain/ideas");
+        fs::create_dir_all(&ideas).unwrap();
+        let spec_file = ideas.join("absolute.md");
+        fs::write(
+            &spec_file,
+            "- [x] **Approved by Tom**
+",
+        )
+        .unwrap();
 
         let resolved = safe_brain_spec_path(spec_file.to_str().unwrap(), workspace.path()).unwrap();
         assert_eq!(resolved, spec_file);
     }
 
     #[test]
-    fn safe_brain_spec_path_rejects_paths_outside_specs() {
+    fn safe_brain_spec_path_rejects_paths_outside_brain() {
         let workspace = tempdir().unwrap();
         let other_dir = workspace.path().join("docs");
         fs::create_dir_all(&other_dir).unwrap();
@@ -3943,11 +3949,8 @@ mod tests {
         fs::write(&other, "x").unwrap();
 
         let result = safe_brain_spec_path("docs/secret.md", workspace.path());
-        assert!(result.is_err(), "expected rejection for non-specs path");
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("brain/bookmarks/specs"));
+        assert!(result.is_err(), "expected rejection for non-brain path");
+        assert!(result.unwrap_err().to_string().contains("brain"));
 
         let result = safe_brain_spec_path("../escapee.md", workspace.path());
         assert!(result.is_err());
@@ -3960,17 +3963,10 @@ mod tests {
         let result = safe_brain_spec_path("", workspace.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
-
-        // `brain/not-in-specs/...` must be rejected even though the prefix
-        // begins with `brain/`.
-        let result = safe_brain_spec_path("brain/notes.md", workspace.path());
-        assert!(result.is_err());
     }
 
     #[test]
     fn safe_brain_spec_path_rejects_paths_inside_workspace_but_outside_brain() {
-        // Construct a file that is inside the workspace but NOT inside
-        // `<workspace>/brain/bookmarks/specs/` and confirm it is rejected.
         let workspace = tempdir().unwrap();
         let target = workspace.path().join("important.md");
         fs::write(&target, "x").unwrap();
@@ -3978,7 +3974,7 @@ mod tests {
         let result = safe_brain_spec_path(target.to_str().unwrap(), workspace.path());
         assert!(
             result.is_err(),
-            "absolute path inside workspace but outside `brain/bookmarks/specs/` must be rejected"
+            "absolute path inside workspace but outside `brain/` must be rejected"
         );
     }
 
@@ -4185,7 +4181,7 @@ keep me
     #[test]
     fn resync_rejects_paths_outside_brain_specs() {
         let workspace = tempdir().unwrap();
-        // Spec path points outside `brain/bookmarks/specs/`.
+        // Spec path points outside `brain/`.
         let other = workspace.path().join("docs").join("evil.md");
         fs::create_dir_all(other.parent().unwrap()).unwrap();
         fs::write(&other, "x").unwrap();
