@@ -2972,4 +2972,144 @@ mod tests {
             .expect("resynced should not error");
         assert!(result.is_none(), "resynced drift should allow progression");
     }
+
+    // ---- source-of-truth handling (AC5) ----
+
+    #[test]
+    fn fluid_drift_open_status_uses_legacy_block() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        // Open status: marker machinery must NOT run, even if marker present.
+        let description = format!(
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
+        );
+        let task = Task {
+            id: "task-open".to_string(),
+            description: Some(description),
+            status: "open".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "spec_check")
+            .expect("open-status branch should not error");
+        let blocked = result.expect("open task with drift should block");
+        assert!(!blocked.criteria_met);
+        assert_eq!(blocked.action_taken, "spec_check_blocked_spec_drift");
+        // Legacy path: failure text mentions the brain-spec route, not the marker.
+        assert!(
+            blocked.failures[0].contains("write a new spec"),
+            "open-status drift must surface the legacy 'write a new spec' message; got {:?}",
+            blocked.failures
+        );
+        assert!(
+            !blocked.failures.iter().any(|f| f.contains("**Approved by Tom**")),
+            "open-status drift must not surface a marker hint; got {:?}",
+            blocked.failures
+        );
+    }
+
+    #[test]
+    fn fluid_drift_marker_unchecked_failure_message_is_stable() {
+        // Quinn (or anything else) parses failure text to decide what to do next.
+        // Lock the wording down so consumers can grep on it.
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let description = format!(
+            "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
+        );
+        let task = Task {
+            id: "task-unchecked-stable".to_string(),
+            description: Some(description),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "verify_delivery")
+            .expect("unchecked branch should not error");
+        let blocked = result.expect("unchecked marker should block");
+        assert_eq!(blocked.failures.len(), 1);
+        let message = &blocked.failures[0];
+        assert!(message.contains("Approval marker"));
+        assert!(message.contains("unchecked"));
+        assert!(
+            message.contains("re-check"),
+            "expected wait-for-Tom message, got {message}"
+        );
+    }
+
+    #[test]
+    fn fluid_drift_marker_unchecked_ignores_existing_resync_comment() {
+        // If Quinn previously resynced an old episode but the marker is currently
+        // unchecked (Tom is mid re-approval for a new drift), the failure
+        // message must surface the wait-for-Tom branch, not pass through.
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let description = format!(
+            "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
+        );
+        let task = Task {
+            id: "task-unchecked-old-resync".to_string(),
+            description: Some(description),
+            status: "doing".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            comments: vec![TaskComment {
+                text: Some("[spec-resynced] Previous episode".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+        let result = block_on_spec_drift_fluid(&args, env, "feedback_aggregate")
+            .expect("unchecked branch should not error");
+        let blocked = result.expect("unchecked marker should still block");
+        assert!(!blocked.criteria_met);
+        assert!(blocked.failures[0].contains("unchecked"));
+    }
 }

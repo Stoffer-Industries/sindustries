@@ -72,6 +72,7 @@ Key constraints or non-obvious integration points. One paragraph max.
 ```
 **Type:** feature
 **Spec:** <relative path from workspace root, e.g. brain/tasks/specs/my-spec-2026-06-29.md>
+- [ ] **Approved by Tom**
 
 <One paragraph describing what the feature does and why it matters>
 
@@ -91,6 +92,13 @@ Key constraints or non-obvious integration points. One paragraph max.
   Branch: (pending)
   PR: (pending)
 ```
+
+The `- [ ] **Approved by Tom**` marker is part of the fluid AC lifecycle
+(shipped via task `b2ab54db`). The line must match the lobster's regex exactly
+(`- [ ] **Approved by Tom**` or `- [x] **Approved by Tom**`, on its own line).
+Quinn flips it to `[x]` on spec approval; the lobster flips it back to `[ ]` if
+it later detects spec drift on a non-`open` task. New tasks missing the marker
+line fall onto the legacy hard-block path, so always include it.
 
 Do not add a Quinn workstream. If Quinn needs to make `.openclaw` changes, Rowan posts `[openclaw-needed]` via the established handoff. The pr-open skill fills in Branch and PR when Rowan opens a PR.
 
@@ -144,6 +152,7 @@ Direct `urllib` POSTs remain valid as a fallback if the CLI is unavailable, but 
 
 - [ ] Spec written at `brain/tasks/specs/` (or existing spec identified)
 - [ ] `**Spec:**` line is exact path, no trailing text
+- [ ] `- [ ] **Approved by Tom**` marker line is present in the task description template
 - [ ] ACs are observable outcomes, not implementation steps
 - [ ] Branch name uses first 8 chars of task ID
 - [ ] `taskType: feature` and `assignee: Rowan` set via API
