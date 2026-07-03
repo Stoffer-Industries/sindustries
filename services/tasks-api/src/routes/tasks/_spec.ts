@@ -54,6 +54,12 @@ export function descriptionWithSpecDriftApprovalState(task, description) {
   if (!task.specChecksum) return nextDescription;
   const current = specChecksumForDescription(nextDescription);
   if (current === task.specChecksum) return nextDescription;
+  // Allow Tom to check the approval marker even during spec drift — it's his
+  // signal to the lobster that he's reviewed the new ACs and authorises resync.
+  // Only auto-uncheck when the edit contains actual AC content changes too.
+  if (descriptionsDifferOnlyByApprovalMarker(task.description ?? '', nextDescription)) {
+    return nextDescription;
+  }
   return uncheckApprovalMarker(nextDescription);
 }
 

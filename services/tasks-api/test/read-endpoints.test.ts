@@ -496,6 +496,43 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(updatedDescription.trim());
   });
 
+  it('PATCH /api/v1/tasks/:id allows Tom to check approval marker during spec drift (resync signal)', async () => {
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    const storedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
+    const checkedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(
+        task({
+          id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          description: storedDescription,
+          specChecksum: checksum
+        })
+      )
+      .mockResolvedValueOnce(
+        task({
+          id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          description: checkedDescription,
+          specChecksum: checksum
+        })
+      );
+    prismaMock.task.update.mockResolvedValue(
+      task({
+        id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+        description: checkedDescription,
+        specChecksum: checksum
+      })
+    );
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
+      .send({ description: checkedDescription });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.description).toBe(checkedDescription);
+    expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(checkedDescription);
+  });
+
   it('GET /api/v1/tasks formats task titles with taskType emoji without duplication', async () => {
     prismaMock.task.findMany.mockResolvedValue([
       task({ id: 'feature', title: 'Build factory', taskType: 'feature' }),
