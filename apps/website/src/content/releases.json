@@ -138,5 +138,45 @@
     "links": [],
     "evidence": "The X bookmark tagger now returns descriptive tags such as agent architecture and token optimisation after moving through the OpenClaw gateway provider route.",
     "visibility": "draft"
+  },
+  {
+    "title": "Feature Factory v2",
+    "slug": "feature-factory-v2",
+    "releasedAt": "2026-06-29",
+    "summary": "Agents can now take an approved spec and self-orchestrate it through ready → doing → acceptance → done without Tom or Quinn driving transitions by hand.",
+    "type": "system",
+    "links": [],
+    "evidence": "Feature task workflow shipped 2026-06-29 (PR #117). The lobster handles spec approval, tech design gates, PR tracking, QA verification, and system spec requirements as a fully automated orchestration loop.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Task dependency UI",
+    "slug": "task-dependency-ui",
+    "releasedAt": "2026-06-29",
+    "summary": "Tasks now express blocking relationships. The UI shows what blocks each task, supports add/remove with title validation, and lets you copy task IDs from cards.",
+    "type": "system",
+    "links": [],
+    "evidence": "Task dependency backend (PR #128) and dependency UI (PR #129) shipped 2026-06-27–29. First capability to run the full spec → factory pipeline end-to-end.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Task type filter and selector",
+    "slug": "task-type-filter-and-selector",
+    "releasedAt": "2026-06-30",
+    "summary": "The tasks app now filters by type, edits type on existing cards, and exposes feature as a creatable task type.",
+    "type": "system",
+    "links": [],
+    "evidence": "Task type filter and editor shipped 2026-06-30 (PR #145), closing task 5dbf2967.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Fluid spec drift lifecycle",
+    "slug": "fluid-spec-drift-lifecycle",
+    "releasedAt": "2026-07-03",
+    "summary": "Spec changes after approval no longer hard-block the pipeline. The lobster unhecks Tom's approval and posts an AC diff; after Tom re-checks, the spec is resynced automatically.",
+    "type": "system",
+    "links": [],
+    "evidence": "Shipped across PRs #161, #163, #165, and #167 (2026-07-01 to 2026-07-03). Drift detection unchecks the approval marker, posts AC diff comments, and the resync path rewrites the brain spec from the task description after Tom re-approves.",
+    "visibility": "draft"
   }
 ]
