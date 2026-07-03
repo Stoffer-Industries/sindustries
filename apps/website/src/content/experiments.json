@@ -62,17 +62,18 @@
     "title": "Plano model routing",
     "slug": "plano-model-routing",
     "tag": "Agent ops",
-    "status": "active",
+    "status": "killed",
     "summary": "Local model routing for cheaper, faster, more autonomous agent work across routine operations.",
     "why": "As agent workflows scale, the cost and latency of routing everything through frontier models becomes a real constraint. Not every task needs Claude Opus or GPT-4. Most routine operations — summarisation, classification, formatting, simple transformations — are well within the capability of smaller, faster, cheaper models.\n\nPlano is an experiment in building the routing layer: classifying tasks by complexity and routing them to appropriate models. The hypothesis is that 60-70% of routine agent work can be offloaded to local or cheaper models with acceptable quality degradation, reducing cost by a significant margin.\n\nThe secondary benefit is latency: local models have sub-second response times for many tasks, which matters for interactive operations.",
     "successCriteria": "A routing layer is operational that classifies incoming tasks and routes them to appropriate models. At least 50% of routine operations run through non-frontier models.\n\nQuality benchmarks are established for key task types so routing decisions are evidence-based, not arbitrary. The system degrades gracefully — unclear cases escalate to frontier models rather than producing bad outputs silently.\n\nCost metrics are tracked before and after routing implementation to quantify the actual saving.",
     "currentLearning": [
       "Initial routing prototype showed promising results for summarisation and classification tasks with llama3 variants.",
       "Boundary conditions are harder than expected: tasks that seem simple often require judgment that smaller models handle poorly.",
-      "Routing by task type (summarise, classify, generate) works better than routing by estimated complexity."
+      "Routing by task type (summarise, classify, generate) works better than routing by estimated complexity.",
+      "Experiment killed 2026-07-03. The routing layer added complexity without sufficient quality/cost benefit at current workload scale. Frontier model costs are manageable; the overhead of maintaining routing logic and quality benchmarks outweighed the savings. Revisit if agent volume grows significantly."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-05-28",
+    "updatedAt": "2026-07-03",
     "links": [],
     "image": "/brand/studio/plano-model-routing-hero.png",
     "visibility": "published"
