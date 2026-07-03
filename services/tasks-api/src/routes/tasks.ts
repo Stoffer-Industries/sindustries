@@ -377,7 +377,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       if (specChecksum && !/^[a-f0-9]{64}$/.test(specChecksum)) {
         return badRequest(res, 'INVALID_SPEC_CHECKSUM', 'specChecksum must be a lowercase sha256 hex digest');
       }
-      if (existing.specChecksum && specChecksum !== existing.specChecksum) {
+      if (existing.specChecksum && specChecksum !== null && specChecksum !== existing.specChecksum) {
         return sendError(
           res,
           409,
