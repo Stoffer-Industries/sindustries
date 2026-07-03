@@ -3,6 +3,8 @@ import pathlib
 import unittest
 from unittest.mock import patch
 
+# Task 2cee0bcd: patch --description now replaces (not appends) the task description.
+
 
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "tasks_api_client.py"
 SPEC = importlib.util.spec_from_file_location("tasks_api_client", MODULE_PATH)
