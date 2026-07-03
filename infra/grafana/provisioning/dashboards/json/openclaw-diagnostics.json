@@ -1312,6 +1312,128 @@
         "wrapLogMessage": true,
         "sortOrder": "Descending"
       }
+    },
+    {
+      "id": 200,
+      "title": "🔧 Tool Activity",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 104,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 201,
+      "title": "Tool Call Rate by Tool × Agent",
+      "type": "timeseries",
+      "description": "Calls per second per tool name, broken down by agent (when available). Sourced from the OTel collector spanmetrics connector, which derives Prometheus counters from `openclaw.tool.execution` spans. The gateway now sets `gen_ai.tool.name` per GenAI semconv (with `openclaw.toolName` as fallback). Use this panel to find which tools are doing the most work; the duration panel below tells you which are slow.",
+      "gridPos": {
+        "x": 0,
+        "y": 105,
+        "w": 14,
+        "h": 9
+      },
+      "datasource": {
+        "uid": "${DS_PROMETHEUS}",
+        "type": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (gen_ai_tool_name, openclaw_toolname) (rate(traces_span_metrics_calls_total{span_name=\"openclaw.tool.execution\",gen_ai_tool_name=~\"$tool_name\"}[$__rate_interval]))",
+          "legendFormat": "{{gen_ai_tool_name}}",
+          "refId": "A",
+          "datasource": {
+            "uid": "${DS_PROMETHEUS}",
+            "type": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineInterpolation": "smooth",
+            "spanNulls": true,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 202,
+      "title": "Tool Call Duration (p99) by Tool",
+      "type": "timeseries",
+      "description": "p99 call duration in seconds, derived from the `traces_span_metrics_duration_seconds` histogram of `openclaw.tool.execution` spans. Watch for outlier tools whose durations creep up.",
+      "gridPos": {
+        "x": 14,
+        "y": 105,
+        "w": 10,
+        "h": 9
+      },
+      "datasource": {
+        "uid": "${DS_PROMETHEUS}",
+        "type": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, gen_ai_tool_name) (rate(traces_span_metrics_duration_seconds_bucket{span_name=\"openclaw.tool.execution\",gen_ai_tool_name=~\"$tool_name\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{gen_ai_tool_name}}",
+          "refId": "A",
+          "datasource": {
+            "uid": "${DS_PROMETHEUS}",
+            "type": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineInterpolation": "smooth",
+            "spanNulls": true,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ],
   "__requires__": [
@@ -1355,5 +1477,31 @@
     }
   ],
   "gnetId": 25068,
-  "description": "openclaw dashboard with opensearch & prometheus as datasource"
+  "description": "openclaw dashboard with opensearch & prometheus as datasource",
+  "templating": {
+    "list": [
+      {
+        "name": "tool_name",
+        "label": "Tool Name",
+        "type": "query",
+        "datasource": {
+          "uid": "${DS_PROMETHEUS}",
+          "type": "prometheus"
+        },
+        "query": {
+          "query": "label_values(traces_span_metrics_calls_total{span_name=\"openclaw.tool.execution\"}, gen_ai_tool_name)",
+          "refId": "prometheus_tool_name"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      }
+    ]
+  }
 }

@@ -17,6 +17,13 @@ connectors:
       - name: http.status_code
       # Stable HTTP semconv (OTel 1.23+); Plano/filter spans often only set this, not legacy http.status_code.
       - name: http.response.status_code
+      # OpenClaw gateway (v0.115+) emits per-tool-call spans (`openclaw.tool.execution`)
+      # with this GenAI semconv attribute on every tool invocation. Surfacing it here unlocks
+      # a `gen_ai_tool_name` label on traces_span_metrics_calls_total so the Grafana dashboard
+      # can break down tool activity by tool name. Used together with the legacy
+      # `openclaw.toolName` attribute as a fallback for spans missing the semconv attribute.
+      - name: gen_ai.tool.name
+      - name: openclaw.toolName
     # Record span duration in seconds (OTel semconv). Without wide enough buckets, LLM spans
     # all land in +Inf and histogram_quantile clamps to the last finite le (~10ms).
     histogram:
