@@ -178,8 +178,8 @@ The lobster (`agents/workflows/feature-task/src/main.rs`) recognises three state
 After Lobster has detected drift on a non-`open` task, it unchecks `**Approved by Tom**` and records that it has acted on the current drift episode. When Tom re-checks `**Approved by Tom**`, Lobster owns the resync:
 
 1. Resolve the task's `**Spec:** <path>` and allow only Markdown files under `brain/` (for example `brain/tasks/specs/*.md` or `brain/bookmarks/specs/*.md`).
-2. Read the current task description ACs and rewrite only the brain spec's `Acceptance Criteria` section.
-3. Reset `specChecksum` to the checksum of the current task ACs. Because the Tasks API locks non-null checksum changes, Lobster clears `specChecksum` to `null` first, then sets the new sha256.
+2. Read the current task description ACs and rewrite only the brain spec's `Acceptance Criteria` section. The `**Approved by Tom**` marker is stripped from the AC list before writing — it belongs in the task description only and must not appear as a spec AC.
+3. Reset `specChecksum` to the checksum of the current task ACs. Lobster clears `specChecksum` to `null` first, then sets the new sha256. The Tasks API `SPEC_CHECKSUM_LOCKED` guard allows null (a deliberate clear) but still rejects any non-null value that differs from the stored checksum, keeping the lock intact outside the resync path.
 4. Post `[spec-resynced] <summary>` with `checksum=<sha256>` and `driftFingerprint=<sha256>` fields.
 5. Clear the drift-unchecked state so a later drift episode starts the marker cycle again.
 
@@ -192,7 +192,7 @@ A `[spec-resynced]` comment is trusted only when both bindings match the current
 
 Lives in:
 - `services/tasks-api/prisma/schema.prisma` — `specChecksum` field on tasks
-- `services/tasks-api/src/routes/tasks/_spec.ts` — `rejectSpecDrift` helper + canonical AC checksum + marker-only exception (`descriptionsDifferOnlyByApprovalMarker`)
+- `services/tasks-api/src/routes/tasks/_spec.ts` — canonical AC checksum, marker-only exception (`descriptionsDifferOnlyByApprovalMarker`), `descriptionWithSpecDriftApprovalState`
 - `services/tasks-api/src/routes/tasks.ts` — write-side validation at the PATCH call site; comments endpoint intentionally drift-tolerant
 - `agents/workflows/feature-task/src/main.rs` — `block_on_spec_drift_fluid`, approval marker helpers, safe brain spec rewrite, checksum reset, and fingerprint-bound `[spec-resynced]` handling
 

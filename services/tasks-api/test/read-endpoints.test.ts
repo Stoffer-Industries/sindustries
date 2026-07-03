@@ -530,7 +530,7 @@ describe('tasks api endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data.description).toBe(checkedDescription);
-    expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(checkedDescription);
+    expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(checkedDescription.trim());
   });
 
   it('GET /api/v1/tasks formats task titles with taskType emoji without duplication', async () => {
