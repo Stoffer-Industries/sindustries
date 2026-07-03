@@ -33,7 +33,7 @@ The feature factory v2 spec already states that every AC in a feature-task PR ne
 
 A PR is treated as compliant when each AC line in the PR body provides either:
 
-- A test reference, formatted as either `(testID: <id>)` or `(file: <path>:<line>)`, appended to the AC line; or
+- A test reference, formatted as either `(testID: <id>)` or `(file: <path>:<test-name>)`, appended to the AC line; or
 - An explicit annotation `not tested: <reason>` justifying why no test exists.
 
 If any AC is checked (`- [x]`) and lacks evidence, the lobster blocks acceptance and posts a task comment listing every AC that needs evidence along with the expected formats.
@@ -52,7 +52,7 @@ Each `- [x] AC<N>: <description>` line may be suffixed with one of:
 
 Recognition rules:
 
-- A single space followed by `(testID: <value>)`, `(file: <path>:<line>)`, or `(not tested: <text up to closing paren>)` is treated as evidence.
+- A single space followed by `(testID: <value>)`, `(file: <path>:<test-name>)`, or `(not tested: <text up to closing paren>)` is treated as evidence.
 - A bare `not tested` without a reason is treated as missing evidence — the lobster surfaces it.
 - Multi-PR tasks (where a task is split into workstreams across PRs): each PR's body only needs evidence for the ACs it claims. Uncovered ACs simply don't appear on that PR's Acceptance Criteria list. The lobster validates per-PR, not per-task, so each PR independently needs evidence for what it advertises.
 
@@ -65,7 +65,7 @@ The lobster matches the same `- [ ] AC<N>` style that the product spec / task de
 - New function `parse_pr_evidence(body: &str) -> Vec<AcEvidence>` returning one record per `- [x]` AC line:
   - `ac_label: String` — captured `AC<number>` token
   - `description: String` — the AC body without evidence
-  - `evidence: Option<Evidence>` — `TestId(String)`, `FileRef { path, line }`, or `NotTested { reason }`
+  - `evidence: Option<Evidence>` — `TestId(String)`, `FileRef { path, test_name }`, or `NotTested { reason }`
 - New function `verify_pr_acs(body: &str) -> Vec<String>` returning a list of human-readable failure strings (empty on success). It scans only the `## Acceptance Criteria` (or `## ACs`) section header, parses each checked AC line, and emits one failure per AC missing evidence.
 - Helper `extract_ac_section(body: &str) -> &str` returns just the AC section text or the entire body when no header is present (defensive default so PRs without a header still get validated).
 
@@ -89,14 +89,14 @@ Failure messages follow the existing pattern (`"PR {url} — AC{label} ({head}):
 
 ### 3. Update the PR template
 
-In `agents/skills/dev/pr-open/SKILL.md`, expand the body template section to include a reminder that each AC line must end with `(testID: <id>)`, `(file: <path>:<line>)`, or `(not tested: <reason>)`. The template already lists ACs; the change is a one-line note explaining the evidence requirement.
+In `agents/skills/dev/pr-open/SKILL.md`, expand the body template section to include a reminder that each AC line must end with `(testID: <id>)`, `(file: <path>:<test-name>)`, or `(not tested: <reason>)`. The template already lists ACs; the change is a one-line note explaining the evidence requirement.
 
 ### 4. Tests
 
 New tests in `agents/workflows/feature-task/src/main.rs` `mod tests`:
 
 - `parse_pr_evidence_recognises_test_id` — `- [x] AC1: Foo (testID: 1234)` parses to `Some(TestId("1234"))`.
-- `parse_pr_evidence_recognises_file_ref` — `(file: apps/tasks/src/X.jsx:42)` parses to `FileRef` with both fields.
+- `parse_pr_evidence_recognises_file_ref` — `(file: agents/workflows/feature-task/src/main.rs: test_name)` parses to `FileRef`; numeric line-only file refs are rejected so the implementation matches the task AC.
 - `parse_pr_evidence_recognises_not_tested_reason` — `(not tested: requires manual click flow)` parses to a reason.
 - `parse_pr_evidence_rejects_bare_not_tested` — bare `not tested` without parens or reason is `None`.
 - `verify_pr_acs_passes_when_all_have_evidence` — full body with annotations returns empty failures.

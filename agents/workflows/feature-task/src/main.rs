@@ -299,8 +299,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         failures.push("Missing `[rowan-prs]` task comment with at least one PR URL.".to_string());
     }
     env.lobster_state.pr_urls = pr_urls.clone();
-    let task_acs =
-        task_description_acs(&env.task.description.clone().unwrap_or_default());
+    let task_acs = task_description_acs(&env.task.description.clone().unwrap_or_default());
     // AC text match only checks the *latest* PR (highest PR number). Earlier PRs
     // may legitimately have drifted from the current task description (e.g.
     // trailing-period fixes landed in a follow-up PR). The latest PR is the one
@@ -473,7 +472,7 @@ fn task_ac_vs_open_pr_failures(
                 }
                 if evidence.is_none() {
                     failures.push(format!(
-                        "{label} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<line>)`, `(not tested: <reason>)`, or `(not code: <reason>)`."
+                        "{label} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<test-name>)`, `(not tested: <reason>)`, or `(not code: <reason>)`."
                     ));
                 }
             }
@@ -2174,8 +2173,9 @@ fn body_has_checked_acceptance(body: &str) -> bool {
 enum Evidence {
     /// Playwright test ID reference, e.g. `(testID: 1234)`
     TestId(String),
-    /// File path and line reference, e.g. `(file: apps/tasks/src/App.jsx:42)`
-    FileRef { path: String, line: u64 },
+    /// File path plus a test name, e.g.
+    /// `(file: agents/workflows/feature-task/src/main.rs: parse_evidence_recognises_file_test_name)`.
+    FileRef { path: String, test_name: String },
     /// Explicit reason for not adding a test, e.g. `(not tested: design tokens)`
     NotTested { reason: String },
     /// AC fulfilled outside the codebase, e.g. `(not code: updated brain/bookmarks/specs/foo.md)`
@@ -2226,12 +2226,16 @@ fn parse_evidence(text: &str) -> Option<Evidence> {
             reason: cap[1].trim().to_string(),
         });
     }
-    // (file: <path>:<line>)
-    let file_ref = Regex::new(r"\(file:\s*([^)]+?):(\d+)\)\s*$").unwrap();
+    // (file: <path>:<test-name>)
+    let file_ref = Regex::new(r"\(file:\s*([^)]+?):\s*([^)]+)\)\s*$").unwrap();
     if let Some(cap) = file_ref.captures(text) {
+        let test_name = cap[2].trim();
+        if test_name.parse::<u64>().is_ok() {
+            return None;
+        }
         return Some(Evidence::FileRef {
             path: cap[1].trim().to_string(),
-            line: cap[2].parse().unwrap_or(0),
+            test_name: test_name.to_string(),
         });
     }
     // (testID: <value>)
@@ -2275,7 +2279,7 @@ fn parse_ac_line(line: &str) -> Option<AcEvidence> {
 }
 
 /// Build failure messages for ACs that lack evidence. Empty list = all ACs
-/// in the section carry `(testID: ...)`, `(file: path:line)`, `(not tested: reason)`,
+/// in the section carry `(testID: ...)`, `(file: path:test-name)`, `(not tested: reason)`,
 /// or `(not code: reason)` annotations.
 fn verify_pr_acs_failures(body: &str) -> Vec<String> {
     let section = extract_ac_section(body);
@@ -2284,7 +2288,7 @@ fn verify_pr_acs_failures(body: &str) -> Vec<String> {
         if let Some(ac) = parse_ac_line(line) {
             if ac.evidence.is_none() {
                 failures.push(format!(
-                    "AC {} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<line>)`, `(not tested: <reason>)`, or `(not code: <reason>)`.",
+                    "AC {} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<test-name>)`, `(not tested: <reason>)`, or `(not code: <reason>)`.",
                     ac.ac_label
                 ));
             }
@@ -2396,12 +2400,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_evidence_recognises_file_ref() {
+    fn parse_evidence_rejects_file_line_ref() {
+        assert_eq!(parse_evidence("bar (file: apps/tasks/src/X.jsx:42)"), None);
+    }
+
+    #[test]
+    fn parse_evidence_recognises_file_test_name_ref() {
         assert_eq!(
-            parse_evidence("bar (file: apps/tasks/src/X.jsx:42)"),
+            parse_evidence("bar (file: agents/workflows/feature-task/src/main.rs: parse_evidence_recognises_file_test_name_ref)"),
             Some(Evidence::FileRef {
-                path: "apps/tasks/src/X.jsx".to_string(),
-                line: 42,
+                path: "agents/workflows/feature-task/src/main.rs".to_string(),
+                test_name: "parse_evidence_recognises_file_test_name_ref".to_string(),
             })
         );
     }
@@ -2507,7 +2516,7 @@ mod tests {
 
     #[test]
     fn verify_pr_acs_passes_when_all_have_evidence() {
-        let body = "## Acceptance Criteria\n- [x] AC1: Foo (testID: 1)\n- [x] AC2: Bar (file: src/x.js:2)\n- [x] AC3: Baz (not tested: design tokens)\n";
+        let body = "## Acceptance Criteria\n- [x] AC1: Foo (testID: 1)\n- [x] AC2: Bar (file: src/x.test.js: bar handles evidence)\n- [x] AC3: Baz (not tested: design tokens)\n";
         assert!(verify_pr_acs_failures(body).is_empty());
     }
 
@@ -3440,8 +3449,12 @@ mod tests {
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the thing (testID: test_do_thing)\n\
             - [x] AC2: Verify the result (not tested: manual verification)\n";
-        let failures = task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
-        assert!(failures.is_empty(), "expected no failures, got: {failures:?}");
+        let failures =
+            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        assert!(
+            failures.is_empty(),
+            "expected no failures, got: {failures:?}"
+        );
     }
 
     #[test]
@@ -3449,7 +3462,8 @@ mod tests {
         let task_acs = vec![("AC1".to_string(), "Do the thing".to_string())];
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the other thing (testID: test_do_thing)\n";
-        let failures = task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures =
+            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("text altered"), "got: {}", failures[0]);
     }
@@ -3462,9 +3476,14 @@ mod tests {
         ];
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the thing (testID: test_do_thing)\n";
-        let failures = task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures =
+            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
         assert_eq!(failures.len(), 1);
-        assert!(failures[0].contains("AC2") && failures[0].contains("missing"), "got: {}", failures[0]);
+        assert!(
+            failures[0].contains("AC2") && failures[0].contains("missing"),
+            "got: {}",
+            failures[0]
+        );
     }
 
     #[test]
@@ -3472,9 +3491,14 @@ mod tests {
         let task_acs = vec![("AC1".to_string(), "Do the thing".to_string())];
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the thing\n";
-        let failures = task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures =
+            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
         assert_eq!(failures.len(), 1);
-        assert!(failures[0].contains("missing evidence"), "got: {}", failures[0]);
+        assert!(
+            failures[0].contains("missing evidence"),
+            "got: {}",
+            failures[0]
+        );
     }
 
     // ---- approval marker ----

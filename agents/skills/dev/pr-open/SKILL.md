@@ -56,7 +56,7 @@ Co-Authored-By: <Your Name> <your-email>
 **Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. Every checked `- [x]` AC line must end with one of:
 
 - `(testID: <id>)` — Playwright test ID reference
-- `(file: <path>:<line>)` — file and line reference
+- `(file: <path>:<test-name>)` — file plus test name reference
 - `(not tested: <reason>)` — implemented in code but not testable
 - `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
 
@@ -67,7 +67,7 @@ Example:
 ```markdown
 ## Acceptance Criteria
 - [x] AC1: Task detail shows dependency links. (testID: 4)
-- [x] AC2: Card click-to-copy affordance. (file: apps/tasks/src/components/TaskCardSummary.jsx:42)
+- [x] AC2: Card click-to-copy affordance. (file: apps/tasks/src/components/TaskCardSummary.test.jsx: click-to-copy affordance)
 - [x] AC3: Reduced opacity for archived tasks. (not tested: design tokens supply color; visual review only)
 - [x] AC4: Feature factory v2 spec updated. (not code: updated brain/bookmarks/specs/feature-factory-v2-2026-06-04.md)
 ```
