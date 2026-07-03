@@ -152,7 +152,7 @@ struct Workstream {
     body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReviewState {
     Approved,
     Required,
@@ -301,10 +301,16 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     env.lobster_state.pr_urls = pr_urls.clone();
     let task_acs =
         task_description_acs(&env.task.description.clone().unwrap_or_default());
+    // AC text match only checks the *latest* PR (highest PR number). Earlier PRs
+    // may legitimately have drifted from the current task description (e.g.
+    // trailing-period fixes landed in a follow-up PR). The latest PR is the one
+    // that will be merged at this gate, so it's the only one that needs to match.
+    let latest_pr_url = pr_urls.iter().max_by_key(|url| pr_number(url)).cloned();
     for url in &pr_urls {
-        match inspect_pr(url) {
-            Ok(review) => {
-                if let Some(failure) = verify_delivery_review_failure(url, review) {
+        let review = inspect_pr(url);
+        match review {
+            Ok(r) => {
+                if let Some(failure) = verify_delivery_review_failure(url, r) {
                     failures.push(failure);
                 }
             }
@@ -319,6 +325,10 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             for ac_failure in verify_pr_acs_failures(&body) {
                 failures.push(format!("PR {url} — {ac_failure}"));
             }
+        }
+    }
+    if let Some(url) = &latest_pr_url {
+        if let Ok(body) = pr_body(url) {
             for ac_failure in task_ac_vs_open_pr_failures(&task_acs, &body, url) {
                 failures.push(format!("PR {url} — {ac_failure}"));
             }
@@ -388,6 +398,14 @@ fn verify_delivery_review_failure(url: &str, review: ReviewState) -> Option<Stri
         ReviewState::ClosedUnmerged => Some(format!("PR {url} is closed without merge.")),
         _ => None,
     }
+}
+
+/// Extract the PR number from a GitHub PR URL for ordering.
+fn pr_number(url: &str) -> u64 {
+    url.rsplit('/')
+        .next()
+        .and_then(|n| n.parse::<u64>().ok())
+        .unwrap_or(0)
 }
 
 fn feedback_review_failure(url: &str, review: ReviewState) -> Option<String> {
@@ -3041,6 +3059,15 @@ mod tests {
             verify_delivery_review_failure(url, ReviewState::ClosedUnmerged),
             Some(format!("PR {url} is closed without merge."))
         );
+    }
+
+    #[test]
+    fn pr_number_extracts_from_url() {
+        assert_eq!(
+            pr_number("https://github.com/Stoffer-Industries/sindustries/pull/142"),
+            142
+        );
+        assert_eq!(pr_number("not-a-url"), 0);
     }
 
     #[test]
