@@ -847,6 +847,11 @@ export function App() {
                             setSelectedId(null);
                             scrollToTaskIfNeeded(task.id);
                           }}
+                          onPatch={async (patch) => {
+                            const didSave = await patchTask(task.id, patch);
+                            if (didSave) clearDraft(task.id);
+                            return didSave;
+                          }}
                           onArchive={() => archiveTask(task.id)}
                           onClose={() => {
                             setSelectedId(null);
@@ -934,6 +939,11 @@ export function App() {
                                     clearDraft(task.id);
                                     setSelectedId(null);
                                     scrollToTaskIfNeeded(task.id);
+                                  }}
+                                  onPatch={async (patch) => {
+                                    const didSave = await patchTask(task.id, patch);
+                                    if (didSave) clearDraft(task.id);
+                                    return didSave;
                                   }}
                                   onArchive={() => archiveTask(task.id)}
                                   onClose={() => {

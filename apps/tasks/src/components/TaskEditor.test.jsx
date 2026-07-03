@@ -22,6 +22,7 @@ const defaultProps = {
   isDirty: false,
   onDraftChange: vi.fn(),
   onSave: vi.fn(),
+  onPatch: vi.fn(),
   onArchive: vi.fn(),
   onClose: vi.fn(),
   onAddComment: vi.fn(),
@@ -76,6 +77,31 @@ describe('TaskEditor', () => {
     const rendered = screen.getByRole('button', { name: 'Click to edit description' });
     expect(rendered.innerHTML).toContain('<strong>bold</strong>');
     expect(rendered.innerHTML).toContain('<em>italic</em>');
+  });
+
+  it('toggles markdown checkboxes in description preview and persists the patch', async () => {
+    const onDraftChange = vi.fn();
+    const onPatch = vi.fn().mockResolvedValue(true);
+    render(
+      <TaskEditor
+        {...defaultProps}
+        draft={{ ...defaultProps.draft, description: '- [ ] first\n- [x] second' }}
+        onDraftChange={onDraftChange}
+        onPatch={onPatch}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+
+    await waitFor(() => {
+      expect(onDraftChange).toHaveBeenCalledWith(
+        expect.objectContaining({ description: '- [x] first\n- [x] second' })
+      );
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ description: '- [x] first\n- [x] second' })
+      );
+    });
+    expect(screen.queryByLabelText('Detail description')).not.toBeInTheDocument();
   });
 
   it('renders status select', () => {

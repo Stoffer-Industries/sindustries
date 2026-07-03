@@ -315,6 +315,9 @@
   color: var(--si-color-text-secondary);
   border: 2px solid var(--si-color-border-subtle);
   border-radius: var(--si-radius-sm);
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
   padding: 10px 12px;
   min-height: 40px;
   cursor: pointer;
@@ -339,10 +342,13 @@
 
 /* Markdown rendered content */
 .markdown-body {
+  color: inherit;
   font-size: 0.95rem;
   line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   word-wrap: break-word;
-  color: inherit;
 }
 
 .markdown-body h1,
@@ -464,15 +470,17 @@
 .markdown-body table {
   border-collapse: collapse;
   margin: 0.4em 0;
+  table-layout: fixed;
   width: 100%;
 }
 
 .markdown-body th,
 .markdown-body td {
   border: 1px solid var(--si-color-border-subtle);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
   padding: 4px 8px;
   text-align: left;
-  font-size: 0.9em;
 }
 
 .markdown-body th {
