@@ -136,8 +136,38 @@ class TasksApiClientPatchTest(unittest.TestCase):
             {"status": "doing", "priority": "high"},
         )
 
+    def test_patch_description_combined_with_other_fields(self):
+        # AC3 (task 2cee0bcd): --description must coexist with --status and
+        # --priority in a single PATCH. Closes the test gap where the existing
+        # `test_patch_other_fields_unaffected_by_description` only exercises
+        # status+priority WITHOUT --description, so the cross-field interaction
+        # was implicitly trusted rather than asserted.
+        parser = tasks_api_client.build_parser()
+        args = parser.parse_args(
+            [
+                "patch",
+                "--id",
+                "task-1",
+                "--description",
+                "new text",
+                "--status",
+                "doing",
+                "--priority",
+                "high",
+            ]
+        )
 
+        with patch.object(tasks_api_client, "get_base_url", return_value="http://tasks.test/api/v1"), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"id": "task-1"}}
+        ) as api_request, patch("builtins.print"):
+            args.func(args)
 
+        api_request.assert_called_once_with(
+            "PATCH",
+            "http://tasks.test/api/v1",
+            "/tasks/task-1",
+            {"description": "new text", "status": "doing", "priority": "high"},
+        )
 
     # ---- create --spec / --workstreams helpers (task 8ec03996) ----
 
