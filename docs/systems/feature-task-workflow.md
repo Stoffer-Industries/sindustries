@@ -59,11 +59,12 @@ The Rust CLI under `agents/workflows/feature-task/` owns parsing, gate enforceme
   - CI on the merged commits is green
   - System spec exists at `docs/systems/<file>.md` (gated via `[system-spec]` task comment) OR a substantive `[no-system-spec-change] <reason>` is recorded
   - No `[openclaw-needed]` pending without matching `[openclaw-done]` from Quinn
-  - Latest merged PR body covers all task description ACs — each checked with evidence (see QA bounce below)
   - `[qa-ac-verified] true` task comment from Tom
 - Rust commands: `feature-task feedback-aggregate`, then `feature-task post-merge`
 
-**QA bounce (acceptance → doing):** the lobster compares every AC in the task description against the latest merged PR body at the `post-merge` stage. If any AC is missing from the PR, unchecked, or has altered text, the task is bounced back to `doing` and a `[feature-task-progress-checklist]` comment is posted. The next fix PR must re-list *all* task ACs. Tom may edit ACs in the task description during QA — spec drift does not block at `post-merge` (it is covered by the resync feature; see task b2ab54db).
+**AC text check (doing → acceptance, pre-merge):** before the lobster will let the task advance from `doing` to `acceptance`, it compares every task description AC against the **open** PR body. If any AC is missing from the PR, has altered text, or lacks a valid evidence annotation `(testID|file|not tested|not code)`, the transition is blocked with a `[feature-task-progress-checklist]` comment listing the specific failures — the task stays in `doing` until Rowan opens a fix PR that lists every AC verbatim with evidence. Tom may edit ACs in the task description during QA — spec drift does not block this gate (it is covered by the resync feature; see task b2ab54db).
+
+Note: prior versions of this workflow ran an equivalent AC text check at the `post-merge` stage (the "QA bounce") that moved a task back from `acceptance` to `doing` if the latest merged PR's AC text didn't match. That path was removed because it triggered after merge, forcing a wasteful revert + fix-PR round-trip. The check now runs pre-merge so mistakes are caught before the PR is merged.
 
 **PR AC evidence formats** (every checked `[x]` AC line must end with one of):
 - `(testID: <id>)` — Playwright test ID reference
@@ -138,7 +139,7 @@ Until first-class Tasks API fields exist, the workflow reads these tags from tas
 | `[system-spec] docs/systems/<file>.md` | implementer | System spec reference |
 | `[no-system-spec-change] <reason>` | implementer | Bypass for code-only changes |
 | `[qa-ac-verified] true` | Tom | Explicit QA sign-off; required before `acceptance -> done` |
-| `[feature-task-progress-checklist] ...` | Lobster | Posted when QA bounce detected; lists ACs missing/unchecked/altered in latest PR |
+| `[feature-task-progress-checklist] ...` | Lobster | Posted when the pre-merge AC text check (doing → acceptance) finds a missing, altered, or unannotated AC in the open PR body. Also posted for other gate failures (missing `[rowan-prs]`, missing `[system-spec]`, manual block, etc.) |
 | `[lobster-state] { ... }` | Lobster | Reconciler state — `version`, `last_orchestrated_at`, gate outcomes |
 | `[scope-add] <summary>` | Quinn / Tom | Document a scope change after spec approval (used in factory-v2 grandfathering) |
 
@@ -240,7 +241,8 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 | Spec checksum mismatch | ACs edited after spec approval | Hits `PATCH /tasks/:id` when the description ACs change. Treat as spec drift: Lobster unchecks `**Approved by Tom**`, waits for Tom to re-check, then performs the resync path. Comments are drift-tolerant and remain usable for progress/checklist/resync signals. |
 | `PATCH` succeeds despite stale ACs | Other event types (status change, dependency add, tag edit) don't re-check the checksum | Pass the updated `description` through `PATCH /tasks/:id` first so the drift check fires there. |
 | CI green but PR not merged | Reviewer has not approved | Wait for `APPROVED` review state; Lobster will not mark `done` until GitHub merge is recorded |
-| Task bounced to `doing` from `acceptance` | QA AC check failed — AC missing, unchecked, or text differs in latest PR | Open a fix PR that includes ALL task ACs checked with evidence; `[feature-task-progress-checklist]` comment details what failed |
+| Task bounced to `doing` from `acceptance` | (legacy — the post-merge QA bounce path was removed; AC text mismatches now block at the doing → acceptance gate before merge instead) | n/a |
+| `doing -> acceptance` blocked on AC text | Open PR body is missing an AC, has altered AC text, or lacks a valid evidence annotation `(testID|file|not tested|not code)` | Update the PR body so every task AC appears verbatim with evidence; `[feature-task-progress-checklist]` comment lists the specific failures |
 | `acceptance -> done` blocked with "Missing `[qa-ac-verified] true`" | Tom has not signed off | Tom posts `[qa-ac-verified] true` after verifying ACs on staging |
 
 ---
