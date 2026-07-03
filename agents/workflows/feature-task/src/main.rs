@@ -905,6 +905,13 @@ fn resync_spec_and_reset_checksum(
         });
     }
     let new_checksum = acceptance_criteria_checksum(&ac_lines);
+    // Strip the workflow approval marker before writing to the spec file — it
+    // lives in the task description only and must not appear as a spec AC.
+    let spec_ac_lines: Vec<String> = ac_lines
+        .iter()
+        .filter(|l| l.trim() != "**Approved by Tom**")
+        .cloned()
+        .collect();
 
     // 2b. Validate the product spec still claims to be approved by Tom before we
     //     overwrite its AC section. If Tom has since flipped the spec to
@@ -959,7 +966,7 @@ fn resync_spec_and_reset_checksum(
     // 3. Rewrite the AC section atomically. We do this BEFORE the API PATCH
     //    so a write failure cannot leave the task with a freshly-reset
     //    checksum and a stale spec on disk.
-    let rewritten = replace_ac_section(&pre_existing_text, &ac_lines);
+    let rewritten = replace_ac_section(&pre_existing_text, &spec_ac_lines);
     if rewritten != pre_existing_text {
         if let Err(err) = atomic_write(&spec_path, &rewritten) {
             return Ok(Envelope {
