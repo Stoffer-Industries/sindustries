@@ -2390,6 +2390,20 @@ mod tests {
     }
 
     // ---- AC evidence parsing (task 6e70deb8) ----
+    //
+    // Task 44f5ed65 covers the seven tech_design_approved tests above:
+    //   AC1 (accept rationale after true):
+    //     tech_design_approved_accepts_bare_true
+    //     tech_design_approved_accepts_rationale_after_true
+    //     tech_design_approved_accepts_uppercase_true
+    //     tech_design_approved_accepts_leading_whitespace
+    //   AC2 (reject false / missing value / unrelated token):
+    //     tech_design_approved_rejects_false
+    //     tech_design_approved_rejects_missing_value
+    //     tech_design_approved_rejects_unrelated_token
+    //   AC3 (Rust unit tests cover both accept and reject cases):
+    //     all seven tests above.
+    //
 
     #[test]
     fn parse_evidence_recognises_test_id() {
