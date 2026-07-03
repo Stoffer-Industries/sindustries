@@ -3,6 +3,7 @@ import { Badge, Button, Card, Divider, Field, Input, Select, Textarea } from '@s
 import { STATUSES, STATUS_LABELS, PRIORITIES, ASSIGNEE_OPTIONS, TASK_TYPES, TASK_TYPE_LABELS } from '../utils/constants.js';
 import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
+import { toggleMarkdownTaskCheckbox } from '../utils/markdown.js';
 import { TaskCardSummary } from './TaskCardSummary.jsx';
 
 /**
@@ -13,6 +14,7 @@ import { TaskCardSummary } from './TaskCardSummary.jsx';
  * @param {boolean} props.isDirty - Whether there are unsaved changes
  * @param {Function} props.onDraftChange - Callback when draft changes
  * @param {Function} props.onSave - Callback to save changes
+ * @param {Function} [props.onPatch] - Callback to persist small inline patches without closing the editor
  * @param {Function} props.onArchive - Callback to archive task
  * @param {Function} props.onClose - Callback to close editor
  * @param {Function} props.onAddComment - Callback to add comment
@@ -27,6 +29,7 @@ export function TaskEditor({
   isDirty,
   onDraftChange,
   onSave,
+  onPatch,
   onArchive,
   onClose,
   onAddComment,
@@ -82,20 +85,21 @@ export function TaskEditor({
     e.stopPropagation();
   }
 
-  function buildSavePayload() {
+  function buildSavePayload(overrides = {}) {
+    const nextDraft = { ...draft, ...overrides };
     return {
-      title: draft.title.trim(),
-      description: draft.description.trim() || null,
-      status: draft.status,
-      priority: draft.priority,
-      assignee: draft.assignee.trim() || null,
-      dueAt: draft.dueAt ? new Date(`${draft.dueAt}T00:00:00`).toISOString() : null,
-      tags: draft.tagsText
+      title: nextDraft.title.trim(),
+      description: nextDraft.description.trim() || null,
+      status: nextDraft.status,
+      priority: nextDraft.priority,
+      assignee: nextDraft.assignee.trim() || null,
+      dueAt: nextDraft.dueAt ? new Date(`${nextDraft.dueAt}T00:00:00`).toISOString() : null,
+      tags: nextDraft.tagsText
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean),
-      taskType: draft.taskType || null,
-      blocked: draft.blocked
+      taskType: nextDraft.taskType || null,
+      blocked: nextDraft.blocked
     };
   }
 
@@ -157,6 +161,24 @@ export function TaskEditor({
     if (!didCreate) return;
     setCommentDraft({ author: '', text: '' });
     setIsCommentComposerOpen(false);
+  }
+
+  async function handleDescriptionCheckboxToggle(event, checkboxIndex) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const nextDescription = toggleMarkdownTaskCheckbox(
+      draft.description,
+      checkboxIndex,
+      event.target.checked
+    );
+    if (nextDescription === draft.description) return;
+
+    const nextDraft = { ...draft, description: nextDescription };
+    onDraftChange(nextDraft);
+
+    const persist = onPatch ?? onSave;
+    await persist(buildSavePayload({ description: nextDescription }));
   }
 
   function dependencyIds() {
@@ -314,7 +336,10 @@ export function TaskEditor({
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsDescriptionEditing(true); } }}
             >
               {draft.description ? (
-                <MarkdownContent markdown={draft.description} />
+                <MarkdownContent
+                  markdown={draft.description}
+                  onCheckboxToggle={handleDescriptionCheckboxToggle}
+                />
               ) : (
                 <p className="description-empty">No description. Click to add one.</p>
               )}

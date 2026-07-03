@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown } from '../utils/markdown.js';
+import { renderMarkdown, toggleMarkdownTaskCheckbox } from '../utils/markdown.js';
 
 describe('renderMarkdown', () => {
   it('renders empty string for null/undefined input', () => {
@@ -95,5 +95,17 @@ describe('renderMarkdown', () => {
   it('handles plain text without errors', () => {
     const html = renderMarkdown('just plain text');
     expect(html).toContain('just plain text');
+  });
+});
+
+describe('toggleMarkdownTaskCheckbox', () => {
+  it('toggles the requested markdown task-list checkbox', () => {
+    expect(toggleMarkdownTaskCheckbox('- [ ] first\n- [x] second', 0, true)).toBe('- [x] first\n- [x] second');
+    expect(toggleMarkdownTaskCheckbox('- [ ] first\n- [x] second', 1, false)).toBe('- [ ] first\n- [ ] second');
+  });
+
+  it('preserves non-checkbox lines and returns original text when index is missing', () => {
+    const markdown = 'Intro\n- [ ] task\nOutro';
+    expect(toggleMarkdownTaskCheckbox(markdown, 4, true)).toBe(markdown);
   });
 });

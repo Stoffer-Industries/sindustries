@@ -38,3 +38,29 @@ export function renderMarkdown(markdown) {
   // when the input is disabled.
   return sanitized.replaceAll(' disabled=""', '').replaceAll(' disabled', '');
 }
+
+/**
+ * Toggle the nth markdown task-list checkbox in raw markdown.
+ * @param {string} markdown - Raw markdown text
+ * @param {number} checkboxIndex - Zero-based checkbox index in rendered order
+ * @param {boolean} checked - Desired checked state
+ * @returns {string} Markdown with the checkbox state updated, or the original text if no match exists
+ */
+export function toggleMarkdownTaskCheckbox(markdown, checkboxIndex, checked) {
+  if (typeof markdown !== 'string' || checkboxIndex < 0) return markdown;
+
+  let seen = 0;
+  return markdown
+    .split('\n')
+    .map((line) => {
+      const match = line.match(/^(\s*[-*+]\s+\[)( |x|X)(\]\s+.*)$/);
+      if (!match) return line;
+      if (seen !== checkboxIndex) {
+        seen += 1;
+        return line;
+      }
+      seen += 1;
+      return `${match[1]}${checked ? 'x' : ' '}${match[3]}`;
+    })
+    .join('\n');
+}

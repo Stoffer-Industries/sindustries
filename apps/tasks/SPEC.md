@@ -25,8 +25,10 @@ A focused task management surface for Tom and the agent team. Supports capturing
 ### 2. View and edit a task
 1. User clicks a task card to expand it inline (accordion)
 2. User can edit all fields inline
-3. User can navigate to a full-screen detail view via explicit action
-4. Changes persist on save
+3. User can toggle markdown task-list checkboxes in the rendered description without entering raw-text edit mode; the checkbox state persists immediately
+4. Rendered markdown description content wraps within the task card instead of overflowing horizontally
+5. User can navigate to a full-screen detail view via explicit action
+6. Changes persist on save
 
 ### 3. Move a task through the board
 1. User drags a task card between Kanban columns (desktop)
@@ -69,6 +71,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
 | Assignee dropdown (reserved values) | `test/e2e/assignee-dropdown.spec.js` |
 | Filter by assignee | `test/e2e/assignee-filter.spec.js` |
 | Task dependencies UI | `test/e2e/dependency-ui.spec.js` |
+| Markdown checkbox toggle + description wrapping | `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/src/utils/markdown.test.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
 
 ---
