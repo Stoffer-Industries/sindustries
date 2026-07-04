@@ -1,0 +1,50 @@
+.pulse-shell {
+  display: grid;
+  grid-template-rows: var(--si-pulse-tabbar-height) 1fr;
+  height: var(--si-pulse-shell-height);
+  min-width: 1280px;
+}
+
+.pulse-tabbar {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--si-color-border, #e5e5e5);
+  background: var(--si-color-bg, #fafafa);
+  padding: 0 12px;
+  gap: 4px;
+}
+
+.pulse-tabbar__link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 16px;
+  text-decoration: none;
+  color: inherit;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+}
+
+.pulse-tabbar__link:focus-visible {
+  outline: 2px solid var(--si-color-focus, #4c8bf5);
+  outline-offset: -2px;
+}
+
+.pulse-tabbar__link[aria-current='page'] {
+  border-bottom-color: var(--si-color-accent, #4c8bf5);
+}
+
+.pulse-content {
+  overflow: auto;
+  min-height: 0;
+}
+
+.pulse-content iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  min-height: calc(100vh - var(--si-pulse-tabbar-height));
+}
