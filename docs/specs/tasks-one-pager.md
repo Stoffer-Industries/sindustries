@@ -1,5 +1,9 @@
 # Tasks App One-Pager Spec
 
+> ⚠️ **SUPERSEDED.** This V1 spec is preserved for historical reference but no longer reflects the current status flow, data model, or API surface. The actual source of truth is **`docs/systems/task-tracking.md`** (status lifecycle, data model, API contract, consumers, runbook). The status enum listed here (`todo`, `doing`, `done`) was replaced by `open → ready → doing → acceptance → done`; many other details (comments, tags, dependencies, specChecksum, taskType, assignee allowlist) have also moved on. New work should consult `docs/systems/task-tracking.md` instead.
+>
+> Original V1 spec retained below for context.
+
 > Canonical source of truth for Tasks App scope and milestones.
 > Any derived docs (handoffs, status summaries, PR notes) must reference this file and must not redefine milestones.
 
