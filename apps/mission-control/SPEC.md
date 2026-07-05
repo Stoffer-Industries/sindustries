@@ -59,6 +59,11 @@ tab registry, URL routing, and the flow-metrics calculations.
 - **No new backend, no new analytics warehouse.** All metrics are computed
   client-side from the tasks API response.
 - Optional override via `VITE_TASKS_API_BASE_URL`.
+- The Flow metrics dashboard issues a single GET against the Tasks API with
+  `?includeArchived=true&sort=priority&limit=10000` so the dashboard covers
+  the full archive (including done/closed tasks) without per-page pagination.
+  This is the only Tasks API request the dashboard makes — see
+  `apps/mission-control/src/tasksApi.js` (`getTasks`).
 
 ## Open Items
 
