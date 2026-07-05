@@ -58,6 +58,12 @@ Run:
 `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py --json`
 Report only failures, blocked tasks, or meaningful transitions.
 
+**When the lobster reports `ready_checks_blocked` due to missing `[tech-design]`:**
+- Check if Rowan is free (no tasks in `doing` assigned to Rowan)
+- If Rowan is free: spawn Rowan as a background subagent to write the tech design (see tech-design skill)
+- If Rowan is busy: log to quinn-ops-state.json as a watching entry; do not re-spawn
+- Do NOT just report the stall without acting — dispatching Rowan is Quinn's job here
+
 ---
 
 OPENCLAW HANDOFFS (FEATURE FACTORY)

@@ -69,8 +69,9 @@ Key constraints or non-obvious integration points. One paragraph max.
 
 ## Step 3 — Format the Task Description
 
+**Critical:** Copy the full AC text from the spec into the task description. Do NOT use placeholder labels like `AC1: ...` — write out the actual acceptance criterion text. The task description must be self-contained; the spec is the source of truth for detail, but the task must show the real ACs.
+
 ```
-**Type:** feature
 **Spec:** <relative path from workspace root, e.g. brain/tasks/specs/my-spec-2026-06-29.md>
 - [ ] **Approved by Tom**
 
@@ -80,8 +81,8 @@ Key constraints or non-obvious integration points. One paragraph max.
 
 **Acceptance Criteria**
 
-- [ ] AC1: ...
-- [ ] AC2: ...
+- [ ] AC1: <exact text from spec — observable outcome, not a label>
+- [ ] AC2: <exact text from spec>
 
 ---
 
@@ -153,6 +154,7 @@ Direct `urllib` POSTs remain valid as a fallback if the CLI is unavailable, but 
 - [ ] Spec written at `brain/tasks/specs/` (or existing spec identified)
 - [ ] `**Spec:**` line is exact path, no trailing text
 - [ ] `- [ ] **Approved by Tom**` marker line is present in the task description template
+- [ ] ACs are copied verbatim from the spec — not placeholder labels like "AC1: ..."
 - [ ] ACs are observable outcomes, not implementation steps
 - [ ] Branch name uses first 8 chars of task ID
 - [ ] `taskType: feature` and `assignee: Rowan` set via API
