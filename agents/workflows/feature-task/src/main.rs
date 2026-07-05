@@ -328,7 +328,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     }
     if let Some(url) = &latest_pr_url {
         if let Ok(body) = pr_body(url) {
-            for ac_failure in task_ac_vs_open_pr_failures(&task_acs, &body, url) {
+            for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
                 failures.push(format!("PR {url} — {ac_failure}"));
             }
         }
@@ -440,7 +440,15 @@ fn task_description_acs(description: &str) -> Vec<(String, String)> {
 /// Compare task description ACs against an open PR body at the doing → acceptance gate.
 ///
 /// Fails if any task AC is missing from the PR, has altered text, or lacks a valid evidence annotation.
+///
+/// When the PR body's AC section contains one or more `### Task <id>` subsections,
+/// only ACs in the subsection matching `task_id` are considered for this task's check.
+/// Sibling subsections (other tasks in the same combined delivery) are not consulted,
+/// so AC labels (`AC1`, `AC2`, ...) from different tasks don't collide in the
+/// underlying HashMap. PR bodies without any `### Task <id>` heading fall back to
+/// consuming the whole AC section — preserving the pre-#183 single-task behavior.
 fn task_ac_vs_open_pr_failures(
+    task_id: &str,
     task_acs: &[(String, String)],
     body: &str,
     pr_url: &str,
@@ -449,14 +457,33 @@ fn task_ac_vs_open_pr_failures(
         return vec![];
     }
     let section = extract_ac_section(body);
-    let re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
+    // H3-or-deeper `Task <id>` subheadings carve the AC section into per-task
+    // subsections. The first whitespace-delimited token after `Task` is the id.
+    let subsection_re =
+        Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
+    let ac_re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
     let mut pr_ac_map: HashMap<String, (String, Option<Evidence>)> = HashMap::new();
-    for cap in re.captures_iter(section) {
-        let label = cap[2].to_string();
-        let raw = cap[3].trim().to_string();
-        let evidence = parse_evidence(&raw);
-        let text = strip_trailing_evidence(&raw);
-        pr_ac_map.insert(label, (text, evidence));
+    let mut matching_section = true; // assume single-section (no `### Task`) until proven otherwise
+    let mut saw_any_subsection = false;
+    for line in section.lines() {
+        if let Some(cap) = subsection_re.captures(line) {
+            matching_section = cap[1] == *task_id;
+            saw_any_subsection = true;
+            continue;
+        }
+        if saw_any_subsection && !matching_section {
+            // AC line in a sibling task's subsection — ignore for this caller's
+            // HashMap. Without scoping, two tasks' ACs would collide on labels
+            // and the second subsection's text would silently overwrite the first.
+            continue;
+        }
+        if let Some(cap) = ac_re.captures(line) {
+            let label = cap[2].to_string();
+            let raw = cap[3].trim().to_string();
+            let evidence = parse_evidence(&raw);
+            let text = strip_trailing_evidence(&raw);
+            pr_ac_map.insert(label, (text, evidence));
+        }
     }
     let mut failures = Vec::new();
     for (label, task_text) in task_acs {
@@ -3541,8 +3568,12 @@ Lead-in.
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the thing (testID: test_do_thing)\n\
             - [x] AC2: Verify the result (not tested: manual verification)\n";
-        let failures =
-            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
         assert!(
             failures.is_empty(),
             "expected no failures, got: {failures:?}"
@@ -3554,8 +3585,12 @@ Lead-in.
         let task_acs = vec![("AC1".to_string(), "Do the thing".to_string())];
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the other thing (testID: test_do_thing)\n";
-        let failures =
-            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("text altered"), "got: {}", failures[0]);
     }
@@ -3568,8 +3603,12 @@ Lead-in.
         ];
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the thing (testID: test_do_thing)\n";
-        let failures =
-            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
         assert_eq!(failures.len(), 1);
         assert!(
             failures[0].contains("AC2") && failures[0].contains("missing"),
@@ -3583,13 +3622,198 @@ Lead-in.
         let task_acs = vec![("AC1".to_string(), "Do the thing".to_string())];
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Do the thing\n";
-        let failures =
-            task_ac_vs_open_pr_failures(&task_acs, body, "https://github.com/org/repo/pull/1");
+        let failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
         assert_eq!(failures.len(), 1);
         assert!(
             failures[0].contains("missing evidence"),
             "got: {}",
             failures[0]
+        );
+    }
+
+    #[test]
+    fn task_ac_vs_open_pr_handles_multi_task_body() {
+        // Regression for the lobster bug: when a PR body's AC section contains
+        // two `### Task <id>` subsections, each task's HashMap should only see
+        // its own subsection. Without scoping, AC labels collide and the
+        // second subsection's text silently overwrites the first.
+        let body = "## Acceptance Criteria\n\
+            ### Task alpha — Pulse shell scaffold\n\
+            - [x] AC1: Pulse loads at a single URL and renders a persistent tab bar (testID: pulse-shells-tab-bar)\n\
+            - [x] AC2: Tab bar shows Tasks, Bookmarks, and Flow metrics tabs (testID: pulse-shells-tabs-render)\n\
+            ### Task beta — Flow metrics dashboard\n\
+            - [x] AC1: Dashboard shows cycle time (median and p90) for tasks completed (testID: flow-metrics-cycle-time)\n\
+            - [x] AC2: Dashboard is reachable from the Flow metrics tab (testID: flow-metrics-reachable)\n";
+        let alpha_acs = vec![
+            (
+                "AC1".to_string(),
+                "Pulse loads at a single URL and renders a persistent tab bar".to_string(),
+            ),
+            (
+                "AC2".to_string(),
+                "Tab bar shows Tasks, Bookmarks, and Flow metrics tabs".to_string(),
+            ),
+        ];
+        let beta_acs = vec![
+            (
+                "AC1".to_string(),
+                "Dashboard shows cycle time (median and p90) for tasks completed".to_string(),
+            ),
+            (
+                "AC2".to_string(),
+                "Dashboard is reachable from the Flow metrics tab".to_string(),
+            ),
+        ];
+        let alpha_failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &alpha_acs,
+            body,
+            "https://github.com/org/repo/pull/185",
+        );
+        assert!(
+            alpha_failures.is_empty(),
+            "expected alpha to pass, got: {alpha_failures:?}"
+        );
+        let beta_failures = task_ac_vs_open_pr_failures(
+            "beta",
+            &beta_acs,
+            body,
+            "https://github.com/org/repo/pull/185",
+        );
+        assert!(
+            beta_failures.is_empty(),
+            "expected beta to pass, got: {beta_failures:?}"
+        );
+    }
+
+    #[test]
+    fn task_ac_vs_open_pr_falls_back_when_no_subsection_heading() {
+        // Single-task PR body — no `### Task <id>` headings anywhere. The whole
+        // AC section is implicitly one subsection for this task, matching the
+        // pre-#183 behavior that single-task deliveries relied on.
+        let task_acs = vec![
+            ("AC1".to_string(), "Do the thing".to_string()),
+            ("AC2".to_string(), "Verify the result".to_string()),
+        ];
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Do the thing (testID: test_do_thing)\n\
+            - [x] AC2: Verify the result (not tested: manual verification)\n";
+        let failures = task_ac_vs_open_pr_failures(
+            "anything",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert!(
+            failures.is_empty(),
+            "expected no failures, got: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn task_ac_vs_open_pr_reports_missing_when_no_matching_subsection() {
+        // PR body has a `### Task <other_id>` subsection but no subsection for
+        // this task's id. The function should report every task AC as missing
+        // rather than silently passing or borrowing from the sibling subsection.
+        let task_acs = vec![
+            ("AC1".to_string(), "Do the thing".to_string()),
+            ("AC2".to_string(), "Do the other thing".to_string()),
+        ];
+        let body = "## Acceptance Criteria\n\
+            ### Task other — something else\n\
+            - [x] AC1: Other-task text (testID: test_other)\n\
+            - [x] AC2: Other-task second thing (testID: test_other_two)\n";
+        let failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert_eq!(failures.len(), 2, "got: {failures:?}");
+        assert!(
+            failures.iter().all(|f| f.contains("missing")),
+            "expected missing-AC failures, got: {failures:?}"
+        );
+        assert!(
+            failures.iter().any(|f| f.contains("AC1")),
+            "expected AC1 in failures, got: {failures:?}"
+        );
+        assert!(
+            failures.iter().any(|f| f.contains("AC2")),
+            "expected AC2 in failures, got: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn task_ac_vs_open_pr_isolates_text_per_subsection() {
+        // Same `AC1` label appears in both subsections with intentionally
+        // different texts. Calling for task `alpha` should match alpha's text,
+        // calling for task `beta` should match beta's — proving there's no
+        // collision leaking across subsections.
+        let body = "## Acceptance Criteria\n\
+            ### Task alpha\n\
+            - [x] AC1: Alpha-specific AC1 text (testID: alpha_ac1)\n\
+            ### Task beta\n\
+            - [x] AC1: Beta-specific AC1 text (testID: beta_ac1)\n";
+        let alpha_acs = vec![(
+            "AC1".to_string(),
+            "Alpha-specific AC1 text".to_string(),
+        )];
+        let beta_acs = vec![(
+            "AC1".to_string(),
+            "Beta-specific AC1 text".to_string(),
+        )];
+
+        let alpha_failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &alpha_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert!(
+            alpha_failures.is_empty(),
+            "expected alpha to match its own AC1, got: {alpha_failures:?}"
+        );
+
+        let beta_failures = task_ac_vs_open_pr_failures(
+            "beta",
+            &beta_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert!(
+            beta_failures.is_empty(),
+            "expected beta to match its own AC1, got: {beta_failures:?}"
+        );
+
+        // Cross-check: if a caller is keyed on `alpha` but the task description
+        // contains beta's text, the function should report a text-mismatch
+        // failure rather than borrowing alpha's text. This proves the HashMap
+        // is correctly scoped.
+        let cross_acs = vec![(
+            "AC1".to_string(),
+            "Beta-specific AC1 text".to_string(),
+        )];
+        let cross_failures = task_ac_vs_open_pr_failures(
+            "alpha",
+            &cross_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert_eq!(
+            cross_failures.len(),
+            1,
+            "expected one cross-subsection mismatch, got: {cross_failures:?}"
+        );
+        assert!(
+            cross_failures[0].contains("text altered"),
+            "got: {}",
+            cross_failures[0]
         );
     }
 
