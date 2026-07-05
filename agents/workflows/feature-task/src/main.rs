@@ -459,15 +459,22 @@ fn task_ac_vs_open_pr_failures(
     let section = extract_ac_section(body);
     // H3-or-deeper `Task <id>` subheadings carve the AC section into per-task
     // subsections. The first whitespace-delimited token after `Task` is the id.
+    // Production task ids are full UUIDs (e.g. `e2e647b1-16d5-4b93-a92a-ac944b8bb48d`)
+    // but the convention documented in `agents/skills/dev/pr-open/SKILL.md` uses
+    // the 8-char branch-name short prefix in `### Task <id>` headings. Match
+    // either form so a single `### Task 513b3b02 — …` or `### Task 513b3b02-uuid — …`
+    // heading can identify the subsection.
     let subsection_re =
         Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
     let ac_re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
+    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
     let mut pr_ac_map: HashMap<String, (String, Option<Evidence>)> = HashMap::new();
     let mut matching_section = true; // assume single-section (no `### Task`) until proven otherwise
     let mut saw_any_subsection = false;
     for line in section.lines() {
         if let Some(cap) = subsection_re.captures(line) {
-            matching_section = cap[1] == *task_id;
+            let captured = &cap[1];
+            matching_section = captured == task_id || captured == task_short_id;
             saw_any_subsection = true;
             continue;
         }
@@ -3814,6 +3821,64 @@ Lead-in.
             cross_failures[0].contains("text altered"),
             "got: {}",
             cross_failures[0]
+        );
+    }
+
+    #[test]
+    fn task_ac_vs_open_pr_matches_full_uuid_section_heading() {
+        // Production task ids are full UUIDs (`e2e647b1-16d5-4b93-a92a-ac944b8bb48d`)
+        // but the PR body convention in agents/skills/dev/pr-open/SKILL.md uses the
+        // 8-char short prefix in `### Task <id>` headings. The function must match
+        // either form, otherwise the lobster's `verify-delivery` gate falsely reports
+        // "AC1 missing from open PR" for every AC when the PR body uses short prefixes
+        // (which is the convention everywhere in our repo).
+        let body = "## Acceptance Criteria\n\
+            ### Task e2e647b1 — Flow metrics dashboard\n\
+            - [x] AC1: Dashboard shows cycle time (median and p90) (testID: flow_metrics_cycle_time)\n\
+            - [x] AC2: Dashboard shows weekly throughput (testID: flow_metrics_throughput)\n";
+        let task_acs = vec![
+            (
+                "AC1".to_string(),
+                "Dashboard shows cycle time (median and p90)".to_string(),
+            ),
+            (
+                "AC2".to_string(),
+                "Dashboard shows weekly throughput".to_string(),
+            ),
+        ];
+        let failures = task_ac_vs_open_pr_failures(
+            "e2e647b1-16d5-4b93-a92a-ac944b8bb48d",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert!(
+            failures.is_empty(),
+            "expected full-UUID task id to match short-prefix heading, got: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn task_ac_vs_open_pr_matches_full_uuid_section_heading_with_uuid_in_heading() {
+        // Same regression as above but with a `### Task <full-uuid>` heading — proves
+        // the equality check still works when the heading uses the same full UUID
+        // the caller passes in.
+        let body = "## Acceptance Criteria\n\
+            ### Task e2e647b1-16d5-4b93-a92a-ac944b8bb48d — Flow metrics dashboard\n\
+            - [x] AC1: Dashboard shows cycle time (median and p90) (testID: flow_metrics_cycle_time)\n";
+        let task_acs = vec![(
+            "AC1".to_string(),
+            "Dashboard shows cycle time (median and p90)".to_string(),
+        )];
+        let failures = task_ac_vs_open_pr_failures(
+            "e2e647b1-16d5-4b93-a92a-ac944b8bb48d",
+            &task_acs,
+            body,
+            "https://github.com/org/repo/pull/1",
+        );
+        assert!(
+            failures.is_empty(),
+            "expected full-UUID heading to match full-UUID task id, got: {failures:?}"
         );
     }
 
