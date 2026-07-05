@@ -74,6 +74,20 @@ Example:
 
 PRs without the required annotations are blocked from acceptance with a clear comment listing the ACs that need evidence.
 
+**Multi-task combined deliveries:** when one PR covers two or more feature tasks (e.g. a combined delivery), use one `## Acceptance Criteria` section containing a `### Task <task-id> — <short description>` subsection per task. The lobster scopes the AC vs task comparison by `### Task <id>` heading, so AC labels (`AC1`, `AC2`, ...) in different subsections do not collide. Each task's ACs still need their own evidence annotation.
+
+```markdown
+## Acceptance Criteria
+### Task 513b3b02 — Pulse shell scaffold
+- [x] AC1: Pulse loads at a single URL and renders a persistent tab bar. (testID: 4)
+- [x] AC2: Tab bar shows Tasks, Bookmarks, and Flow metrics tabs. (not tested: design tokens; visual review only)
+### Task e2e647b1 — Flow metrics dashboard
+- [x] AC1: Dashboard shows cycle time (median and p90) for tasks completed. (testID: 5)
+- [x] AC2: Dashboard is reachable from the Flow metrics tab. (file: apps/mission-control/src/dashboard.test.jsx: flow metrics reachable)
+```
+
+The lobster walks the AC section line-by-line and tracks the current `### Task <id>` heading. ACs in a sibling task's subsection are not considered for the current task's text/evidence comparison. PR bodies without any `### Task <id>` heading fall back to the pre-#183 behavior (the whole AC section is implicitly one subsection).
+
 **QA bounce:** after merge, the lobster compares the latest merged PR body against the task description ACs. If any AC is missing, unchecked, or has altered text, the task bounces back to `doing` and a `[feature-task-progress-checklist]` comment is posted explaining what the next PR must address.
 
 ---
