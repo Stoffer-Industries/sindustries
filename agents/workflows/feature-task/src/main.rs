@@ -563,7 +563,14 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
     }
-    transition_or_block(&args, env, "done", "post_merge", failures)
+    let env = transition_or_block(&args, env, "done", "post_merge", failures)?;
+    // If the transition succeeded, archive the task spec into brain/tasks/specs/done/
+    // and rewrite the description's Spec line. Idempotent: re-running post_merge
+    // on an already-archived task is a no-op.
+    if env.criteria_met && env.task.status == "done" {
+        return archive_done_task_spec(&args, env);
+    }
+    Ok(env)
 }
 
 fn transition_or_block(
@@ -658,6 +665,251 @@ fn transition_or_block(
 // `brain/tasks/specs/*.md`, plus future brain subtrees.
 
 const BRAIN_DIR: &str = "brain";
+
+// ---- Spec archive path helpers (feature task c40ae956) ----
+//
+// When a feature task transitions to `done`, the spec referenced in the task's
+// `**Spec:**` line should move from `brain/tasks/specs/` into
+// `brain/tasks/specs/done/`. The boundary is intentionally narrow:
+//   1. Only specs under `brain/tasks/specs/<slug>.md` are eligible.
+//   2. Specs already under `brain/tasks/specs/done/` are a no-op (idempotent).
+//   3. `brain/bookmarks/specs/`, `docs/specs/`, and other paths are out of scope.
+//
+// These helpers intentionally differ from `safe_brain_spec_path`, which is
+// permissive about the brain subtree to support spec resync. The archive path
+// is much stricter — only one subtree, one target directory.
+
+const TASK_SPECS_DIR: &str = "brain/tasks/specs";
+const TASK_SPECS_DONE_DIR: &str = "brain/tasks/specs/done";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ArchiveSpecPlan {
+    Move {
+        from_rel: String,
+        to_rel: String,
+        from_abs: PathBuf,
+        to_abs: PathBuf,
+    },
+    AlreadyArchived,
+    NotTaskSpec,
+    MissingSpecRef,
+}
+
+/// Decide what should happen to the spec referenced from this task's Spec line.
+/// Pure function: no filesystem access. The caller resolves the relative paths
+/// to absolute paths once the workspace root is known.
+fn plan_task_spec_archive(spec_path: Option<&str>) -> ArchiveSpecPlan {
+    let Some(path) = spec_path.map(str::trim).filter(|p| !p.is_empty()) else {
+        return ArchiveSpecPlan::MissingSpecRef;
+    };
+    // Normalize trailing slashes and resolve `./` prefixes.
+    let normalized = path.trim_start_matches("./");
+    if !normalized.ends_with(".md") {
+        return ArchiveSpecPlan::NotTaskSpec;
+    }
+    if normalized.contains("..") {
+        return ArchiveSpecPlan::NotTaskSpec;
+    }
+    // Already in done/ — idempotent no-op.
+    let done_prefix = format!("{TASK_SPECS_DONE_DIR}/");
+    if normalized == TASK_SPECS_DONE_DIR || normalized.starts_with(&done_prefix) {
+        return ArchiveSpecPlan::AlreadyArchived;
+    }
+    // Eligible if it's directly under brain/tasks/specs/ (one level deep).
+    let live_prefix = format!("{TASK_SPECS_DIR}/");
+    if !normalized.starts_with(&live_prefix) {
+        return ArchiveSpecPlan::NotTaskSpec;
+    }
+    let suffix = &normalized[live_prefix.len()..];
+    if suffix.is_empty()
+        || suffix.contains('/')
+        || !suffix.ends_with(".md")
+    {
+        // Subdirectories or non-md under brain/tasks/specs/ are not archivable.
+        return ArchiveSpecPlan::NotTaskSpec;
+    }
+    let from_rel = normalized.to_string();
+    let to_rel = format!("{TASK_SPECS_DONE_DIR}/{suffix}");
+    ArchiveSpecPlan::Move {
+        from_rel,
+        to_rel,
+        from_abs: PathBuf::new(), // populated by caller
+        to_abs: PathBuf::new(),
+    }
+}
+
+/// Resolve the `from_abs`/`to_abs` paths against the workspace root and ensure
+/// the source exists. Returns `Err` only on filesystem or path-canonicalization
+/// failures — caller decides how to surface them.
+fn resolve_archive_plan(
+    plan: ArchiveSpecPlan,
+    workspace_root: &Path,
+) -> Result<ArchiveSpecPlan> {
+    let ArchiveSpecPlan::Move { from_rel, to_rel, .. } = plan else {
+        return Ok(plan);
+    };
+    let from_abs = workspace_root.join(&from_rel);
+    let to_abs = workspace_root.join(&to_rel);
+    if !from_abs.exists() {
+        // The spec is referenced but doesn't exist on disk — treat as not archivable
+        // rather than blowing up post-merge. The lobster will log a checklist comment
+        // so a follow-up run can address it.
+        return Ok(ArchiveSpecPlan::NotTaskSpec);
+    }
+    // Ensure the destination directory exists.
+    if let Some(parent) = to_abs.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("creating archive directory `{}`", parent.display())
+        })?;
+    }
+    Ok(ArchiveSpecPlan::Move {
+        from_rel,
+        to_rel,
+        from_abs,
+        to_abs,
+    })
+}
+
+/// Rewrite the task description's `**Spec:** <path>` line to point at the new
+/// archived path. If the line is missing, the description is returned unchanged.
+/// Returns `None` if no rewrite was needed (line missing or already at the new path).
+fn rewrite_spec_line_in_description(
+    description: &str,
+    old_path: &str,
+    new_path: &str,
+) -> Option<String> {
+    // Match the bold-prefixed form documented in TASK_TEMPLATE.md:
+    //   **Spec:** <path>
+    // Case-insensitive on `Spec`. Allow optional trailing whitespace before EOL.
+    let re = Regex::new(r"(?m)^(\s*\*\*Spec:\*\*\s+)([^\s].*?)\s*$").ok()?;
+    let mut updated = false;
+    let rewritten = re.replace_all(description, |caps: &regex::Captures| {
+        let prefix = &caps[1];
+        let existing = caps[2].trim();
+        if existing == new_path {
+            // Already points at the archived path — leave it.
+            caps[0].to_string()
+        } else if existing == old_path {
+            updated = true;
+            format!("{prefix}{new_path}")
+        } else {
+            // Some other spec line, leave it alone.
+            caps[0].to_string()
+        }
+    });
+    if updated {
+        Some(rewritten.into_owned())
+    } else {
+        None
+    }
+}
+
+/// Run the spec-archive step for a task that just moved to `done`. The caller
+/// must have already updated `env.task` to reflect the new `done` status.
+/// Failures are surfaced as a `[feature-task-progress-checklist]` comment and
+/// a blocked envelope — the task stays at `done` (the move is idempotent and
+/// can be retried on the next post-merge run), but the lobster records the
+/// failure so it's visible in the heartbeat.
+fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
+    let Some(spec) = product_spec(&env.task) else {
+        env.action_taken = "post_merge_no_spec_to_archive".to_string();
+        return Ok(env);
+    };
+    let plan = plan_task_spec_archive(Some(&spec.path));
+    if matches!(plan, ArchiveSpecPlan::MissingSpecRef | ArchiveSpecPlan::NotTaskSpec | ArchiveSpecPlan::AlreadyArchived) {
+        env.action_taken = format!("post_merge_archive_noop_{}", plan_name(&plan));
+        return Ok(env);
+    }
+
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let resolved = match resolve_archive_plan(plan, &workspace_root) {
+        Ok(p) => p,
+        Err(err) => {
+            return Ok(archive_block(&args, env, format!(
+                "Failed to resolve spec archive plan: {err}."
+            )));
+        }
+    };
+    let ArchiveSpecPlan::Move { from_abs, to_abs, from_rel, to_rel } = resolved else {
+        return Ok(env);
+    };
+
+    if args.dry_run {
+        env.action_taken = "would_archive_task_spec".to_string();
+        return Ok(env);
+    }
+
+    // Idempotency check: if destination already exists and matches, skip the move.
+    if to_abs.exists() {
+        // File already in done/ — rewrite the spec line and exit.
+        if let Some(new_desc) = rewrite_spec_line_in_description(
+            env.task.description.as_deref().unwrap_or(""),
+            &from_rel,
+            &to_rel,
+        ) {
+            match api_patch::<Task>(&args.base_url, &env.task.id, json!({"description": new_desc})) {
+                Ok(_) => {
+                    env.task = api_get_task(&args.base_url, &env.task.id)?;
+                    env.action_taken = "post_merge_archive_already_present".to_string();
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        return Ok(env);
+    }
+
+    fs::rename(&from_abs, &to_abs).with_context(|| {
+        format!(
+            "moving task spec from `{}` to `{}`",
+            from_abs.display(),
+            to_abs.display()
+        )
+    })?;
+
+    // Update the task description to point at the archived path.
+    let description = env.task.description.clone().unwrap_or_default();
+    let new_description = rewrite_spec_line_in_description(&description, &from_rel, &to_rel)
+        .unwrap_or(description);
+    if new_description != env.task.description.clone().unwrap_or_default() {
+        api_patch::<Task>(
+            &args.base_url,
+            &env.task.id,
+            json!({"description": new_description}),
+        )?;
+        env.task = api_get_task(&args.base_url, &env.task.id)?;
+    }
+
+    env.action_taken = "post_merge_archived_task_spec".to_string();
+    Ok(env)
+}
+
+fn plan_name(plan: &ArchiveSpecPlan) -> &'static str {
+    match plan {
+        ArchiveSpecPlan::Move { .. } => "move",
+        ArchiveSpecPlan::AlreadyArchived => "already_archived",
+        ArchiveSpecPlan::NotTaskSpec => "not_task_spec",
+        ArchiveSpecPlan::MissingSpecRef => "missing_spec_ref",
+    }
+}
+
+fn archive_block(args: &StageArgs, mut env: Envelope, message: String) -> Envelope {
+    if !args.dry_run {
+        let fingerprint = message.clone();
+        if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+            env.lobster_state.failure_fingerprint = Some(fingerprint.clone());
+            let _ = add_comment(
+                &args.base_url,
+                &env.task.id,
+                &format!("[feature-task-progress-checklist]\n{message}"),
+            );
+            let _ = write_state(&args.base_url, &env.task.id, &env.lobster_state, None);
+        }
+    }
+    env.criteria_met = false;
+    env.action_taken = "post_merge_archive_failed".to_string();
+    env.failures = vec![message];
+    env
+}
 
 fn is_typescript_spec_path(spec_path: &str) -> bool {
     let path = spec_path.trim();
@@ -4595,6 +4847,168 @@ Lead-in.
             result.is_err(),
             "absolute path inside workspace but outside `brain/` must be rejected"
         );
+    }
+
+    // ---- plan_task_spec_archive ----
+
+    #[test]
+    fn plan_task_spec_archive_moves_eligible_spec() {
+        let plan = plan_task_spec_archive(Some("brain/tasks/specs/example-2026.md"));
+        match plan {
+            ArchiveSpecPlan::Move { from_rel, to_rel, .. } => {
+                assert_eq!(from_rel, "brain/tasks/specs/example-2026.md");
+                assert_eq!(to_rel, "brain/tasks/specs/done/example-2026.md");
+            }
+            other => panic!("expected Move plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_task_spec_archive_strips_leading_dot_slash() {
+        let plan = plan_task_spec_archive(Some("./brain/tasks/specs/example-2026.md"));
+        assert!(matches!(plan, ArchiveSpecPlan::Move { .. }));
+    }
+
+    #[test]
+    fn plan_task_spec_archive_treats_already_archived_as_noop() {
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/tasks/specs/done/example-2026.md")),
+            ArchiveSpecPlan::AlreadyArchived
+        );
+        // An absolute path that points inside done/ is also a no-op.
+        let plan = plan_task_spec_archive(Some("/abs/brain/tasks/specs/done/example-2026.md"));
+        // Absolute paths don't match the done-prefix, but they're rejected as NotTaskSpec.
+        assert_eq!(plan, ArchiveSpecPlan::NotTaskSpec);
+    }
+
+    #[test]
+    fn plan_task_spec_archive_rejects_bookmark_specs() {
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/bookmarks/specs/example.md")),
+            ArchiveSpecPlan::NotTaskSpec
+        );
+    }
+
+    #[test]
+    fn plan_task_spec_archive_rejects_docs_specs() {
+        assert_eq!(
+            plan_task_spec_archive(Some("docs/specs/example.md")),
+            ArchiveSpecPlan::NotTaskSpec
+        );
+    }
+
+    #[test]
+    fn plan_task_spec_archive_rejects_subdirectory() {
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/tasks/specs/sub/foo.md")),
+            ArchiveSpecPlan::NotTaskSpec
+        );
+    }
+
+    #[test]
+    fn plan_task_spec_archive_rejects_non_md() {
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/tasks/specs/example.txt")),
+            ArchiveSpecPlan::NotTaskSpec
+        );
+    }
+
+    #[test]
+    fn plan_task_spec_archive_rejects_dotdot() {
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/tasks/specs/../escapee.md")),
+            ArchiveSpecPlan::NotTaskSpec
+        );
+    }
+
+    #[test]
+    fn plan_task_spec_archive_missing_or_empty_is_missing() {
+        assert_eq!(plan_task_spec_archive(None), ArchiveSpecPlan::MissingSpecRef);
+        assert_eq!(plan_task_spec_archive(Some("")), ArchiveSpecPlan::MissingSpecRef);
+        assert_eq!(
+            plan_task_spec_archive(Some("   ")),
+            ArchiveSpecPlan::MissingSpecRef
+        );
+    }
+
+    // ---- rewrite_spec_line_in_description ----
+
+    #[test]
+    fn rewrite_spec_line_replaces_old_path_with_new() {
+        let description = "\
+**Spec:** brain/tasks/specs/example-2026.md
+
+## Outcome
+
+Whatever.
+";
+        let rewritten = rewrite_spec_line_in_description(
+            description,
+            "brain/tasks/specs/example-2026.md",
+            "brain/tasks/specs/done/example-2026.md",
+        )
+        .expect("rewrite should fire when paths differ");
+        assert!(rewritten.contains("**Spec:** brain/tasks/specs/done/example-2026.md"));
+        assert!(!rewritten.contains("**Spec:** brain/tasks/specs/example-2026.md\n"));
+    }
+
+    #[test]
+    fn rewrite_spec_line_returns_none_when_already_archived() {
+        let description = "\
+**Spec:** brain/tasks/specs/done/example-2026.md
+
+## Outcome
+
+Whatever.
+";
+        let rewritten = rewrite_spec_line_in_description(
+            description,
+            "brain/tasks/specs/example-2026.md",
+            "brain/tasks/specs/done/example-2026.md",
+        );
+        assert!(rewritten.is_none(), "already archived must be a no-op");
+    }
+
+    #[test]
+    fn rewrite_spec_line_returns_none_when_spec_line_missing() {
+        let description = "## Outcome\nNo spec line here.\n";
+        let rewritten = rewrite_spec_line_in_description(
+            description,
+            "brain/tasks/specs/example-2026.md",
+            "brain/tasks/specs/done/example-2026.md",
+        );
+        assert!(rewritten.is_none());
+    }
+
+    // ---- resolve_archive_plan (filesystem) ----
+
+    #[test]
+    fn resolve_archive_plan_moves_existing_spec_into_done() {
+        let workspace = tempdir().unwrap();
+        let live = workspace.path().join("brain/tasks/specs");
+        fs::create_dir_all(&live).unwrap();
+        let src = live.join("example-2026.md");
+        fs::write(&src, "# Example\n").unwrap();
+
+        let plan = plan_task_spec_archive(Some("brain/tasks/specs/example-2026.md"));
+        let resolved = resolve_archive_plan(plan, workspace.path()).expect("plan resolves");
+        let ArchiveSpecPlan::Move { from_abs, to_abs, .. } = resolved else {
+            panic!("expected Move plan");
+        };
+        assert_eq!(from_abs, src);
+        assert_eq!(to_abs, workspace.path().join("brain/tasks/specs/done/example-2026.md"));
+        // done/ dir is created on demand.
+        assert!(to_abs.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn resolve_archive_plan_returns_not_task_spec_when_source_missing() {
+        let workspace = tempdir().unwrap();
+        fs::create_dir_all(workspace.path().join("brain/tasks/specs")).unwrap();
+        // Intentionally do not create the source file.
+        let plan = plan_task_spec_archive(Some("brain/tasks/specs/missing-2026.md"));
+        let resolved = resolve_archive_plan(plan, workspace.path()).expect("plan resolves");
+        assert_eq!(resolved, ArchiveSpecPlan::NotTaskSpec);
     }
 
     #[test]
