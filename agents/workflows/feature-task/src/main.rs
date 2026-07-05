@@ -702,10 +702,10 @@ fn safe_brain_spec_path(spec_path_str: &str, workspace_root: &Path) -> Result<Pa
 /// (matching the format used elsewhere for `acceptance_criteria_text`). Each
 /// line is wrapped with `- [ ] ` and trimmed.
 fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
-    const HEADER_PATTERN: &str = r"(?im)^\s{0,3}#{1,6}\s+Acceptance Criteria\s*:?\s*$\n?";
-    const NEXT_HEADING_PATTERN: &str = r"(?m)^\s{0,3}#{1,6}\s+\S";
+    // Header regex captures the leading hash run so we know the section level.
+    const HEADER_PATTERN: &str =
+        r"(?im)^\s{0,3}(#{1,6})\s+Acceptance Criteria\s*:?\s*$\n?";
     let header_re = Regex::new(HEADER_PATTERN).expect("header pattern compiles");
-    let next_re = Regex::new(NEXT_HEADING_PATTERN).expect("next-heading pattern compiles");
 
     // Compute the new AC block as lines.
     let mut new_block_lines: Vec<String> = ac_lines
@@ -720,7 +720,17 @@ fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
         return content.to_string();
     }
 
-    if let Some(header_match) = header_re.find(content) {
+    if let Some(header_cap) = header_re.captures(content) {
+        let header_match = header_cap.get(0).unwrap();
+        let header_level = header_cap.get(1).unwrap().as_str().len();
+        // Only headings at the captured level or higher end the AC section.
+        // Deeper headings (`### …`, `#### …`, …) belong to the section's body
+        // and must not truncate the rewrite.
+        let closer_pattern =
+            format!(r"(?m)^\s{{0,3}}#{{1,{header_level}}}\s+\S");
+        let next_re = Regex::new(&closer_pattern).unwrap_or_else(|e| {
+            panic!("closer pattern compiles for header level {header_level}: {e}")
+        });
         let section_start = header_match.end();
         let tail = &content[section_start..];
         let next_match = next_re.find(tail);
@@ -2196,15 +2206,25 @@ struct AcEvidence {
 /// no header is found, the whole body is returned so PRs without a section
 /// still get validated.
 fn extract_ac_section(body: &str) -> &str {
+    // Header regex captures the leading hash run so we know the section level.
     let header_re =
-        Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(?:Acceptance Criteria|ACs?)\s*:?\s*$").unwrap();
-    let Some(header) = header_re.find(body) else {
+        Regex::new(r"(?im)^\s{0,3}(#{2,6})\s+(?:Acceptance Criteria|ACs?)\s*:?\s*$").unwrap();
+    let Some(header_cap) = header_re.captures(body) else {
         return body;
     };
-    let start = header.end();
+    let header_match = header_cap.get(0).unwrap();
+    let header_level = header_cap.get(1).unwrap().as_str().len();
+    let start = header_match.end();
     let tail = &body[start..];
-    // Same-or-higher heading ends the section.
-    let next_re = Regex::new(r"(?im)^\s{0,3}#{2,6}\s+\S").unwrap();
+    // Same-or-higher heading ends the section. Deeper headings (`### …`,
+    // `#### …`, …) are subsections and stay inside the AC section — that's
+    // how multi-task PR bodies (one `## Acceptance Criteria` containing
+    // several `### Task …` subheadings) keep their ACs together.
+    let closer_pattern =
+        format!(r"(?m)^\s{{0,3}}#{{1,{header_level}}}\s+\S");
+    let next_re = Regex::new(&closer_pattern).unwrap_or_else(|e| {
+        panic!("closer pattern compiles for header level {header_level}: {e}")
+    });
     match next_re.find(tail) {
         Some(next) => &tail[..next.start()],
         None => tail,
@@ -2526,6 +2546,64 @@ mod tests {
         let body = "## ACs\n- [x] AC1: First (testID: 1)\n";
         let section = extract_ac_section(body);
         assert!(section.contains("AC1: First"));
+    }
+
+    #[test]
+    fn extract_ac_section_preserves_h3_subheadings_inside_h2_section() {
+        // Regression for the lobster bug: a `### Task …` heading inside
+        // `## Acceptance Criteria` (e.g., PRs that ship multiple tasks at
+        // once) used to close the AC section prematurely, dropping every AC
+        // in the trailing subheading. Same-or-higher headings (h2/h1) must
+        // still end the section.
+        let body = "\
+## Summary
+Lead-in.
+
+## Acceptance Criteria
+
+### Task alpha — Pulse shell
+- [x] AC1: First alpha AC (testID: 1)
+- [x] AC2: Second alpha AC (testID: 2)
+
+### Task beta — Flow metrics dashboard
+- [x] AC1: First beta AC (testID: 3)
+- [x] AC2: Second beta AC (testID: 4)
+
+## Test plan
+- [x] run tests
+";
+        let section = extract_ac_section(body);
+        // All four ACs across both subheadings must survive.
+        assert!(section.contains("First alpha AC"));
+        assert!(section.contains("Second alpha AC"));
+        assert!(section.contains("First beta AC"));
+        assert!(section.contains("Second beta AC"));
+        // The h3 subheadings themselves should also be preserved (they
+        // belong to the AC section body).
+        assert!(section.contains("### Task alpha"));
+        assert!(section.contains("### Task beta"));
+        // The next h2 closes the section as before.
+        assert!(!section.contains("Test plan"));
+        assert!(!section.contains("run tests"));
+    }
+
+    #[test]
+    fn extract_ac_section_stops_at_h2_or_higher() {
+        // h1 headings (like a stray top-level divider inside the body)
+        // must also close the section.
+        let body = "\
+## Acceptance Criteria
+
+### Subsection
+- [x] AC1: kept (testID: 1)
+
+# Conclusion
+
+- [x] AC2: dropped (testID: 2)
+";
+        let section = extract_ac_section(body);
+        assert!(section.contains("AC1: kept"));
+        assert!(!section.contains("AC2: dropped"));
     }
 
     #[test]
@@ -4364,6 +4442,46 @@ Lead-in paragraph.
         assert_eq!(
             rewritten,
             "## Acceptance Criteria\n- [ ] AC1: A\n- [ ] AC2: B\n"
+        );
+    }
+
+    #[test]
+    fn replace_ac_section_extends_past_h3_subheadings_inside_h2_section() {
+        // Regression for the lobster bug: a `### Subsection` heading inside
+        // `## Acceptance Criteria` used to be treated as the next-heading
+        // closer, so the rewrite only replaced the lines above it and left
+        // stale old ACs (and the next section) untouched. The fix uses a
+        // level-aware closer so the section spans to the next h2.
+        let original = "\
+## Acceptance Criteria
+
+### Subsection A
+- [ ] AC1: Old AC for A
+
+### Subsection B
+- [ ] AC2: Old AC for B
+
+## Notes
+
+- Keep me
+";
+        let new_acs = vec!["AC1: New criterion".to_string()];
+        let rewritten = replace_ac_section(original, &new_acs);
+        // The new AC block replaced the entire AC section body (everything
+        // between the AC header and `## Notes`).
+        assert!(rewritten.contains("- [ ] AC1: New criterion"));
+        // Old bullets are gone.
+        assert!(!rewritten.contains("Old AC for A"));
+        assert!(!rewritten.contains("Old AC for B"));
+        // Trailing h2 + body survives untouched.
+        assert!(rewritten.contains("## Notes"));
+        assert!(rewritten.contains("- Keep me"));
+        // Pre-buggy behaviour would have left old ACs duplicated with the
+        // new ones; assert exactly one new bullet, no old.
+        assert_eq!(
+            rewritten.matches("- [ ]").count(),
+            1,
+            "expected only the single new AC line as a `- [ ]` bullet, got: {rewritten}"
         );
     }
 
