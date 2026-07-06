@@ -43,6 +43,26 @@ jobs:
       - name: Run otel-node tests
         run: npm test --workspace @sindustries/otel-node
 
+  mission-control-tests:
+    name: mission-control tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run mission-control tests
+        run: npm test --workspace @sindustries/mission-control
+
   tasks-api-tests:
     name: tasks-api tests (unit + db integration)
     runs-on: ubuntu-latest
