@@ -12,6 +12,7 @@ case "$MODE" in
     export TASKS_API_PORT="4000"
     export BUDGET_API_PORT="4002"
     export TASKS_APP_PORT="5173"
+    export MISSION_CONTROL_PORT="5174"
     export TILT_PORT="10350"
     export POSTGRES_DB="sindustries_dev"
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-dev"
@@ -38,6 +39,7 @@ case "$MODE" in
     export TASKS_API_PORT="4001"
     export BUDGET_API_PORT="4003"
     export TASKS_APP_PORT="5174"
+    export MISSION_CONTROL_PORT="5175"
     export TILT_PORT="10351"
     export POSTGRES_DB="sindustries_prodlike"
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-prodlike"
@@ -67,4 +69,4 @@ export BUDGET_DATABASE_URL="postgresql://postgres:postgres@localhost:${POSTGRES_
 
 # Back-compat default used by existing tasks scripts.
 export DATABASE_URL="$TASKS_DATABASE_URL"
-export CORS_ALLOWED_ORIGINS="http://localhost:${TASKS_APP_PORT},http://127.0.0.1:${TASKS_APP_PORT}"
+export CORS_ALLOWED_ORIGINS="http://localhost:${TASKS_APP_PORT},http://127.0.0.1:${TASKS_APP_PORT},http://localhost:${MISSION_CONTROL_PORT},http://127.0.0.1:${MISSION_CONTROL_PORT}"
