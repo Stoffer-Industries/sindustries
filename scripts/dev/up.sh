@@ -144,6 +144,7 @@ echo "Starting $MODE stack"
 echo "  API: $TASKS_API_BASE_URL"
 echo "  Budget API: $BUDGET_API_BASE_URL"
 echo "  App: http://localhost:$TASKS_APP_PORT"
+echo "  Mission Control: http://localhost:$MISSION_CONTROL_PORT"
 echo "  Postgres: localhost:$POSTGRES_PORT/$POSTGRES_DB"
 if [[ "$OBSERVABILITY" == "1" ]]; then
   echo "  Observability: Grafana http://localhost:$GRAFANA_PORT (Tempo :$TEMPO_PORT, Prometheus :$PROMETHEUS_PORT, OTLP :$OTLP_HTTP_PORT)"

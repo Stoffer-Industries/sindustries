@@ -5,6 +5,7 @@ mode = os.getenv('MODE', 'dev')
 tasks_api_port = os.getenv('TASKS_API_PORT', '4000')
 budget_api_port = os.getenv('BUDGET_API_PORT', '4002')
 tasks_app_port = os.getenv('TASKS_APP_PORT', '5173')
+mission_control_port = os.getenv('MISSION_CONTROL_PORT', '5174')  # dev default; prodlike uses 5175 via mode-env.sh
 tasks_api_base_url = os.getenv('TASKS_API_BASE_URL', 'http://localhost:4000/api/v1')
 tasks_api_env_file = os.getenv('TASKS_API_ENV_FILE', 'services/tasks-api/.env.dev')
 compose_project = os.getenv('COMPOSE_PROJECT_NAME', 'sindustries-' + mode)
@@ -86,5 +87,23 @@ local_resource(
   ],
   resource_deps=['tasks-api'],
   labels=['tasks', 'app', mode],
+  allow_parallel=False,
+)
+
+local_resource(
+  'mission-control',
+  serve_cmd='cd ../../apps/mission-control && VITE_TASKS_API_BASE_URL={} npm run dev -- --host 0.0.0.0 --port {}'.format(
+    tasks_api_base_url,
+    mission_control_port,
+  ),
+  deps=[
+    '../../apps/mission-control/src',
+    '../../apps/mission-control/index.html',
+    '../../apps/mission-control/vite.config.js',
+    '../../apps/mission-control/package.json',
+    '../../apps/mission-control/package-lock.json',
+  ],
+  resource_deps=['tasks-api'],
+  labels=['mission-control', 'app', mode],
   allow_parallel=False,
 )

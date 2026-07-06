@@ -38,6 +38,7 @@ kill_port_listener() {
 
 cleanup_mode_ports() {
   kill_port_listener "$TASKS_APP_PORT" "tasks app"
+  kill_port_listener "${MISSION_CONTROL_PORT:-5174}" "mission control"
   kill_port_listener "$TASKS_API_PORT" "tasks api"
   kill_port_listener "${BUDGET_API_PORT:-4002}" "budget api"
   kill_port_listener "$TILT_PORT" "Tilt"
