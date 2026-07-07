@@ -1,18 +1,9 @@
 import React from 'react';
 
-const TASKS_APP_HOSTS = {
-  '5173': 'http://localhost:5173',
-  '5174': 'http://localhost:5174',
-  '5175': 'http://localhost:5175',
-  '5176': 'http://localhost:5176',
-  '5177': 'http://localhost:5177'
-};
-
 function tasksAppUrl() {
-  const port = window.location.port;
-  if (TASKS_APP_HOSTS[port]) return TASKS_APP_HOSTS[port];
-  // Fallback: assume the running Tasks app is on the next port.
-  return 'http://localhost:5173';
+  // Prefer build-time env var (set by Tiltfile / CI). Falls back to the
+  // dev default where tasks-app runs on 5173 and mission-control on 5174.
+  return import.meta.env.VITE_TASKS_APP_URL ?? 'http://localhost:5173';
 }
 
 /**
