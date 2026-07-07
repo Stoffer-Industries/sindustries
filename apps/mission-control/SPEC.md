@@ -35,9 +35,18 @@ surface.
 4. **Use the Tasks app from inside Pulse.** User clicks the Tasks tab.
    - Embeds the existing Tasks app via iframe at the same path the
      standalone Tasks app serves, preserving its functionality.
-5. **Reach the placeholder tabs.** Bookmarks shows a "tracked under a
-   separate spec" placeholder; the tab registry pattern lets each future
-   tool replace the placeholder without shell changes.
+5. **View the bookmark pipeline.** User is on the Bookmarks tab.
+   - On mount, fetches `bookmark-review-state.json` and
+     `bookmark-transitions.jsonl` from the dev-only `/api/*` endpoints
+     served by the Vite plugin in `vite.config.js`.
+   - Renders a header, a toolbar (time window + topic select + refresh),
+     a pending-approvals banner when `approvalLocks` has entries, a KPI
+     grid of `reviewStatus` counts, a three-column curation breakdown
+     (Implement-bound / Monitoring / Uncurated), a pipeline funnel and
+     per-topic count, and the most recent 20 transitions in scope.
+   - Auto-refresh on `window.focus`; manual refresh via the toolbar
+     button. Filter state does NOT persist across reloads (matches the
+     standalone `tools/bookmark-dashboard/` behaviour).
 
 ## Screens
 
@@ -45,7 +54,7 @@ surface.
 |---|---|---|---|
 | Sidebar | `(shell-level)` | `Sidebar.jsx` | Vertical collapsible nav, built from Design System `Button` (`variant="nav"`) + icon, persisted via `localStorage` |
 | Tasks | `/tasks` | `Tabs/TasksTab.jsx` (iframe) | Embedded tasks app — all existing flows remain available |
-| Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Static placeholder; returns no actions |
+| Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, funnel, topics, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
 | 404 / unknown path | `/<anything>` | falls back to Tasks tab | The default tab renders; no error surface |
 
@@ -53,10 +62,12 @@ surface.
 
 The Playwright e2e suite for Pulse is **deferred** until the shell lands
 in production and the team settles on viewport styling. Until then, the
-unit tests in `src/App.test.jsx`, `src/Sidebar.test.jsx`, and
-`src/flowMetrics.test.jsx` cover the tab registry, URL routing, sidebar
-collapse/expand, localStorage persistence, and the flow-metrics
-calculations.
+unit tests in `src/App.test.jsx`, `src/Sidebar.test.jsx`,
+`src/flowMetrics.test.jsx`, `src/bookmarkPipeline.test.js`,
+`src/bookmarkStateSource.test.js`, and `src/tabs/BookmarksTab.test.jsx`
+cover the tab registry, URL routing, sidebar collapse/expand,
+localStorage persistence, the flow-metrics calculations, and the
+bookmark pipeline dashboard behaviour.
 
 | Flow | Plan |
 |---|---|
@@ -65,6 +76,11 @@ calculations.
 | Cycle-time math | Vitest: `flowMetrics.test.js` covers median, p90, windowing |
 | Weekly throughput bucketing | Vitest: `flowMetrics.test.js` covers Monday-aligned buckets |
 | WIP by status | Vitest: `flowMetrics.test.js` covers status grouping |
+| Bookmark pipeline counts (KPIs, funnel, topics) | Vitest: `bookmarkPipeline.test.js` covers `kpiCounts`, `funnelRows`, `topicCounts` |
+| Curation bucketing | Vitest: `bookmarkPipeline.test.js` covers `curationGroups` threshold + sort |
+| Recent transitions | Vitest: `bookmarkPipeline.test.js` covers `recentTransitions` scope + ordering |
+| State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
+| BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
 
 ## Data Sources
 
@@ -77,11 +93,27 @@ calculations.
   the full archive (including done/closed tasks) without per-page pagination.
   This is the only Tasks API request the dashboard makes — see
   `apps/mission-control/src/tasksApi.js` (`getTasks`).
+- **Bookmark state** is read by the Bookmarks tab from
+  `brain/state/bookmark-review-state.json` and
+  `brain/state/bookmark-transitions.jsonl` via the dev-only Vite plugin
+  in `vite.config.js`. The plugin serves `/api/state` and
+  `/api/transitions` from the workspace `brain/` directory (resolved via
+  the `WORKSPACE_ROOT` env var or three levels up from the Vite config).
+  In production (`vite build`) the plugin is a no-op and the tab renders
+  an empty state. Optional override via `VITE_BOOKMARK_STATE_BASE_URL`
+  for staging/prod.
 
 ## Open Items
 
 - E2e Playwright suite (spec-driven, deferred).
-- Extend the tab registry with a Real Bookmarks tab when that spec lands.
-- Address the unaddressed `BookmarksTab` URL once the Bookmarks app has a route.
 - Promote the inline tab icons into a Design System `Icon` primitive so
   other shells can stop inlining SVGs.
+- Bookmark Sankey (deferred from the Bookmarks tab PR per the Q1
+  trade-off — `d3-sankey` integration dominated the diff; AC2 is met by
+  the KPI grid + funnel + per-topic counts without it). Track as a
+  follow-up if/when the d3-sankey dep budget is approved.
+- State counts over time line chart (deferred from the Bookmarks tab PR —
+  no AC requires it; the same data is reachable via the JSONL log +
+  `recentTransitions`). Track as a follow-up if a use case surfaces.
+- Filter persistence across reloads (deferred per Q4 — the standalone
+  `tools/bookmark-dashboard/` does not persist filters either).

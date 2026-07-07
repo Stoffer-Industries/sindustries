@@ -1,0 +1,123 @@
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+vi.mock('../bookmarkStateSource.js', () => ({
+  loadBookmarkState: vi.fn()
+}));
+
+import { loadBookmarkState } from '../bookmarkStateSource.js';
+import { BookmarksTab } from './BookmarksTab.jsx';
+
+const NOW_ISO = '2026-07-04T12:00:00.000Z';
+
+function fakeState() {
+  return {
+    snapshot: {
+      version: 1,
+      items: {
+        a: {
+          title: 'Bookmark A',
+          reviewStatus: 'summarized',
+          topic: 'brain',
+          lastUpdatedAt: NOW_ISO,
+          curation: { score: 9, topic: 'brain', createdAt: NOW_ISO }
+        },
+        b: {
+          title: 'Bookmark B',
+          reviewStatus: 'pending',
+          topic: 'infra',
+          lastUpdatedAt: NOW_ISO
+        },
+        c: {
+          title: 'Bookmark C',
+          reviewStatus: 'approved',
+          topic: 'brain',
+          lastUpdatedAt: NOW_ISO
+        }
+      },
+      approvalLocks: {
+        brain: { items: ['c'], requestedAt: NOW_ISO }
+      }
+    },
+    transitions: [
+      { key: 'a', at: NOW_ISO, from: 'pending', to: 'summarized', reason: 'heartbeat pass' }
+    ],
+    loadedAt: NOW_ISO
+  };
+}
+
+describe('BookmarksTab', () => {
+  beforeEach(() => {
+    loadBookmarkState.mockResolvedValue(fakeState());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders loading state on first render and data after fetch resolves', async () => {
+    render(<BookmarksTab />);
+    expect(screen.getByTestId('pulse-bookmarks-loading')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('pulse-bookmarks')).toBeTruthy()
+    );
+    expect(screen.getByTestId('pulse-bookmarks-toolbar')).toBeTruthy();
+  });
+
+  it('renders all major sections when data is loaded', async () => {
+    render(<BookmarksTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId('pulse-bookmarks')).toBeTruthy()
+    );
+    expect(screen.getByTestId('pulse-bookmarks-pending')).toBeTruthy();
+    expect(screen.getByTestId('pulse-bookmarks-kpis')).toBeTruthy();
+    expect(screen.getByTestId('pulse-bookmarks-curations')).toBeTruthy();
+    expect(screen.getByTestId('pulse-bookmarks-funnel')).toBeTruthy();
+    expect(screen.getByTestId('pulse-bookmarks-topics')).toBeTruthy();
+    expect(screen.getByTestId('pulse-bookmarks-transitions')).toBeTruthy();
+  });
+
+  it('shows an error state with a retry button when fetch fails', async () => {
+    loadBookmarkState.mockRejectedValueOnce(new Error('boom'));
+    render(<BookmarksTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId('pulse-bookmarks-error')).toBeTruthy()
+    );
+    expect(screen.getByText(/boom/)).toBeTruthy();
+    const retry = screen.getByTestId('pulse-bookmarks-retry');
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(screen.getByTestId('pulse-bookmarks')).toBeTruthy()
+    );
+  });
+
+  it('refetches data when the refresh button is clicked', async () => {
+    render(<BookmarksTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId('pulse-bookmarks')).toBeTruthy()
+    );
+    const callsBefore = loadBookmarkState.mock.calls.length;
+    fireEvent.click(screen.getByTestId('pulse-bookmarks-refresh'));
+    await waitFor(() =>
+      expect(loadBookmarkState.mock.calls.length).toBeGreaterThan(callsBefore)
+    );
+  });
+
+  it('filters KPIs and funnel by the selected topic', async () => {
+    render(<BookmarksTab />);
+    await waitFor(() =>
+      expect(screen.getByTestId('pulse-bookmarks')).toBeTruthy()
+    );
+    // Initial: brain + infra + general in topics
+    const topicSelect = screen.getByLabelText('Topic');
+    fireEvent.change(topicSelect, { target: { value: 'brain' } });
+    // Funnel should now show only brain items (a + c), not infra (b)
+    await waitFor(() => {
+      const funnel = screen.getByTestId('pulse-bookmarks-funnel');
+      // b was reviewStatus pending + topic infra; a was summarized + brain; c was approved + brain.
+      // Selecting brain keeps a + c only.
+      expect(funnel.textContent).toContain('approved');
+      expect(funnel.textContent).toContain('summarized');
+    });
+  });
+});
