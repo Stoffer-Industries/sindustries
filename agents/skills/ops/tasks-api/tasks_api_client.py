@@ -306,7 +306,7 @@ def build_parser():
     c.add_argument("--status", default="open", help="Initial status (default: open)")
     c.add_argument("--priority", default="medium", help="Priority: urgent|high|medium|low (default: medium)")
     c.add_argument("--tags", nargs="*", help="Tags to apply")
-    c.add_argument("--type", help="Task type e.g. feature|content|chore")
+    c.add_argument("--type", help="Task type: feature|content|code|research. See agents/skills/ops/tasks-create/SKILL.md for selection rules.")
     c.add_argument("--assignee", help="Assignee name e.g. Rowan")
     c.set_defaults(func=cmd_create)
 

@@ -7,7 +7,7 @@ description: "Create or clean up a feature task: decide whether to use the featu
 
 Use when turning a request into a tracked feature task. Covers the factory vs direct decision, spec placement, and task format.
 
-> **Task type selection and field format rules** live in `agents/skills/ops/tasks-create/SKILL.md`. Read that skill for the correct `--type` flag, AC checkbox rules, and when not to create a task at all.
+**Role:** This is the feature-task deep-dive. It assumes you've already decided it's a feature (not code/content/research) — for type selection and "should I create a task at all?", read `agents/skills/ops/tasks-create/SKILL.md` first. Both skills are warranted: `tasks-create` is the quick type-selection reference covering all types; this one is the end-to-end feature workflow (spec format, AC text fidelity, workstreams YAML, exact CLI invocation). The two deliberately cross-link rather than duplicate.
 
 ## Step 1 — Feature Factory or Direct?
 

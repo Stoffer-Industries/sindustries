@@ -7,6 +7,8 @@ description: "Decide when and how to create a task via the Tasks API. Covers tas
 
 Use this skill whenever you need to create a task via the Tasks API. It tells you which type to use, what fields are required, and when creating a task is the wrong move entirely.
 
+**Role:** This is the entry-point for task creation — covers all task types, type selection, when *not* to create a task, and common mistakes. For the feature-specific end-to-end workflow (spec format, AC text fidelity, workstreams YAML, exact CLI invocation), read `agents/skills/product/feature-task-create/SKILL.md`. Both skills are warranted: this one is the quick "which type?" reference; feature-task-create is the feature-task deep-dive that links back here for type selection.
+
 ---
 
 ## Step 1 — Should you create a task at all?
@@ -27,16 +29,20 @@ Use this skill whenever you need to create a task via the Tasks API. It tells yo
 
 ## Step 2 — Pick the task type
 
+The API accepts these `taskType` values (nullable string; leave unset and you lose type-driven routing — see "Blank type" below):
+
 | Type | Use when | `--type` flag |
 |---|---|---|
-| `feature` | New capability, requires spec + Tom approval before Rowan starts, goes through the feature factory | `feature` |
-| `bug` | Something broken that needs a fix PR; no spec required but needs ACs | `bug` |
-| `chore` | Maintenance, cleanup, dependency bumps, non-functional changes | `chore` |
-| `content` | SIndustries website content updates (Ivy workflow) | `content` |
+| `feature` | New capability. Requires spec + Tom approval before Rowan starts. Goes through the feature factory. | `feature` |
+| `code` | Bug fixes, maintenance, cleanup, dependency bumps, refactors, chores — anything that's a PR to fix or change existing code with no new capability. | `code` |
+| `content` | SIndustries website content updates (Ivy workflow). | `content` |
+| `research` | Spikes, investigation, feasibility checks. Output is a doc/decision, not a code PR. | `research` |
 
-**When in doubt between `feature` and `bug`:** if it's adding something new → `feature`. If it's fixing something that was supposed to work → `bug`.
+**When in doubt between `feature` and `code`:** if it's adding something new → `feature`. If it's fixing, refactoring, or maintaining existing behaviour → `code`.
 
-**When in doubt between `feature` and `chore`:** if it requires a spec and Tom's approval before starting → `feature`. If it's routine maintenance with no new user-facing behaviour → `chore`.
+**When in doubt between `code` and `research`:** if the output is a code PR → `code`. If the output is a written decision or doc → `research`.
+
+**Blank type — discouraged.** The Tasks API allows `taskType` to be null, but the lobsters and dashboards key off the value to route and filter work. If you genuinely can't pick a type, stop and ask Tom rather than leaving it unset.
 
 ---
 
@@ -44,7 +50,7 @@ Use this skill whenever you need to create a task via the Tasks API. It tells yo
 
 ### Feature task
 
-Feature tasks go through the feature factory. Rowan cannot start until Tom has approved the spec (added `- [x] **Approved by Tom**` to the task description).
+Feature tasks go through the feature factory. Rowan cannot start until Tom has approved the spec (added `- [x] **Approved by Tom**` to the task description). For the full feature-task workflow (spec format, AC text fidelity, workstreams YAML, exact CLI invocation), see `agents/skills/product/feature-task-create/SKILL.md`.
 
 ```
 tasks_api_client.py create \
@@ -82,59 +88,31 @@ tasks_api_client.py create \
 - ACs must be unchecked — never pre-tick them; Tom/QA ticks after testing
 - Workstreams section must be present with `Branch: (pending)` and `PR: (pending)` placeholders
 
-### Bug task
+### Code task
+
+Code covers both bug fixes and chores — anything that touches existing code without adding new capability. No spec file required, but still needs a description and ACs.
 
 ```
 tasks_api_client.py create \
-  --title "🔧 🐛 <short description>" \
-  --type bug \
+  --title "🔧 <short description>" \
+  --type code \
   --priority <low|medium|high> \
   --assignee Rowan \
   --tags rowan <topic> \
-  --description "**Type:** bug
-**Spec:** brain/bookmarks/specs/feature-factory-v2-2026-06-04.md
-
-- [ ] **Approved by Tom**
-
-<One sentence description of the bug and expected fix.>
+  --description "<One sentence description of the change and why it matters.>
 
 ---
 
 **Acceptance Criteria**
 
 - [ ] AC1: <observable outcome>
-
----
-
-**Workstreams**
-
-- Owner: Rowan
-  ACs: AC1, ...
-  Branch: (pending)
-  PR: (pending)"
+- [ ] AC2: <observable outcome>"
 ```
 
-**Rules:** Same AC and approval-marker rules as feature tasks.
-
-### Chore task
-
-Chore tasks are lighter — no spec file required, but still need a description and ACs.
-
-```
-tasks_api_client.py create \
-  --title "🔧 <short description>" \
-  --type chore \
-  --priority low \
-  --assignee Rowan \
-  --tags rowan <topic> \
-  --description "<One sentence description.>
-
----
-
-**Acceptance Criteria**
-
-- [ ] AC1: <observable outcome>"
-```
+**Rules:**
+- No spec file required, but ACs are still required and observable
+- Use a 🐛 emoji in the title for bug fixes (`🔧 🐛 <short description>`) so they stand out in lists
+- Pure chores (typos, renames, dep bumps) are fine with a single AC; bugs and refactors need ACs that describe the fix
 
 ### Content task
 
@@ -165,8 +143,10 @@ tasks_api_client.py create \
 
 | Mistake | Correct approach |
 |---|---|
-| Creating without `--type` flag | Always pass `--type feature\|bug\|chore\|content` |
+| Creating without `--type` flag | Always pass `--type feature\|code\|content\|research` |
 | Pre-ticking ACs in description | Leave all checkboxes unchecked |
 | No spec file for a feature task | Write the spec first, then create the task |
 | Creating a task for immediate one-turn work | Just do it; no task needed |
-| Putting `feature-factory` tag on a bug/chore | Only feature tasks get the `feature-factory` tag |
+| Putting `feature-factory` tag on a code/content/research task | Only feature tasks get the `feature-factory` tag |
+| Using `--type bug` or `--type chore` | Those don't exist. Use `--type code` (covers both) |
+| Leaving `--type` unset because you're unsure | Ask Tom — don't ship a typeless task |
