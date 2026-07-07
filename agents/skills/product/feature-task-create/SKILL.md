@@ -7,6 +7,8 @@ description: "Create or clean up a feature task: decide whether to use the featu
 
 Use when turning a request into a tracked feature task. Covers the factory vs direct decision, spec placement, and task format.
 
+> **Task type selection and field format rules** live in `agents/skills/ops/tasks-create/SKILL.md`. Read that skill for the correct `--type` flag, AC checkbox rules, and when not to create a task at all.
+
 ## Step 1 — Feature Factory or Direct?
 
 **Use the feature factory** when the work:
