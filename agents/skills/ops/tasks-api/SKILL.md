@@ -7,6 +7,8 @@ description: Manage Stoffer Industries tasks through the Tasks API from workspac
 
 Use API-first task operations for all automation flows.
 
+> **Creating a new task?** Read `agents/skills/ops/tasks-create/SKILL.md` first — it covers task type selection, required field formats, and when not to create a task at all.
+
 ## Rules
 
 1. Prefer Tasks API as source of truth.
