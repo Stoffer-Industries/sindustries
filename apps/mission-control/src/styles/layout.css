@@ -1,50 +1,119 @@
 .pulse-shell {
   display: grid;
-  grid-template-rows: var(--si-pulse-tabbar-height) 1fr;
+  grid-template-columns: var(--si-pulse-sidebar-width) 1fr;
   height: var(--si-pulse-shell-height);
   min-width: 1280px;
+  background: var(--si-color-bg-canvas, #111213);
+  color: var(--si-color-text-primary, #ece3cc);
 }
 
-.pulse-tabbar {
+.pulse-sidebar {
   display: flex;
+  flex-direction: column;
   align-items: stretch;
-  border-bottom: 1px solid var(--si-color-border, #e5e5e5);
-  background: var(--si-color-bg, #fafafa);
-  padding: 0 12px;
-  gap: 4px;
+  gap: var(--si-space-2);
+  background: var(--si-color-bg-surface, #1a1f24);
+  border-right: 1px solid var(--si-color-border-subtle, rgba(143, 150, 158, 0.18));
+  padding: var(--si-space-3) var(--si-space-2);
+  min-height: 0;
+  width: var(--si-pulse-sidebar-width);
+  transition: width var(--si-pulse-sidebar-transition, 160ms ease);
 }
 
-.pulse-tabbar__link {
-  display: inline-flex;
+.pulse-sidebar--collapsed {
+  width: var(--si-pulse-sidebar-width-collapsed, 48px);
+}
+
+.pulse-sidebar__toggle {
   align-items: center;
-  padding: 0 16px;
+  display: inline-flex;
+  gap: var(--si-space-2);
+  justify-content: flex-start;
+  padding: var(--si-space-2) var(--si-space-3);
+  white-space: nowrap;
+  width: 100%;
+}
+
+.pulse-sidebar--collapsed .pulse-sidebar__toggle {
+  justify-content: center;
+  padding: var(--si-space-2);
+}
+
+.pulse-sidebar__toggle-glyph {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.pulse-sidebar__items {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--si-space-1);
+  margin-top: var(--si-space-2);
+}
+
+.pulse-sidebar__item {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--si-space-3);
+  justify-content: flex-start;
+  padding: var(--si-space-2) var(--si-space-3);
   text-decoration: none;
-  color: inherit;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
+  width: 100%;
+}
+
+.pulse-sidebar--collapsed .pulse-sidebar__item {
+  justify-content: center;
+  padding: var(--si-space-2);
+}
+
+.pulse-sidebar__icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.pulse-sidebar__label {
+  flex: 1 1 auto;
   font-weight: 500;
-  border-bottom: 2px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pulse-tabbar__link:focus-visible {
-  outline: 2px solid var(--si-color-focus, #4c8bf5);
-  outline-offset: -2px;
+.pulse-sidebar--collapsed .pulse-sidebar__label {
+  /* Visually hide in collapsed state — keep available for screen
+     readers via aria-label on the parent Button. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.pulse-tabbar__link[aria-current='page'] {
-  border-bottom-color: var(--si-color-accent, #4c8bf5);
+.pulse-sidebar--collapsed .pulse-sidebar__item .si-button--nav.is-active {
+  /* Strong active indicator when the label is hidden — rely on the
+     border highlight already supplied by the Design System. */
 }
 
 .pulse-content {
-  overflow: auto;
   min-height: 0;
+  overflow: auto;
 }
 
 .pulse-content iframe {
   border: 0;
   width: 100%;
   height: 100%;
-  min-height: calc(100vh - var(--si-pulse-tabbar-height));
+  min-height: calc(100vh - var(--si-pulse-tabbar-height, 0px));
+}
+
+.pulse-placeholder {
+  padding: var(--si-space-6);
 }

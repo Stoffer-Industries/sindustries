@@ -1,4 +1,10 @@
 :root {
   --si-pulse-shell-height: 100vh;
+  --si-pulse-sidebar-width: 200px;
+  --si-pulse-sidebar-width-collapsed: 48px;
+  --si-pulse-sidebar-transition: 160ms ease;
+  /* Retained as a no-op alias so older snapshot tests that referenced the
+     old horizontal tabbar height don't break; new code should use
+     --si-pulse-sidebar-width. */
   --si-pulse-tabbar-height: 48px;
 }
