@@ -114,3 +114,343 @@
   font-weight: 600;
   margin: 0 0 8px;
 }
+
+/* Bookmarks pipeline tab */
+
+.bookmarks-tab {
+  padding: 24px 32px;
+  display: grid;
+  gap: 20px;
+  max-width: 1280px;
+}
+
+.bookmarks-tab__header {
+  display: grid;
+  gap: 4px;
+}
+
+.bookmarks-tab__title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.bookmarks-tab__subtitle {
+  margin: 0;
+  color: var(--si-color-text-muted, #666);
+  font-size: 13px;
+}
+
+.bookmarks-tab__subtitle code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.bookmarks-tab__toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid var(--si-color-border, #e5e5e5);
+  border-radius: 8px;
+  background: var(--si-color-bg-elevated, #fff);
+}
+
+.bookmarks-tab__pending {
+  background: var(--si-color-brand-200, #ffe891);
+  color: var(--si-color-ink-900, #161a1e);
+  border-color: var(--si-color-brand-500, #ffc935);
+}
+
+.bookmarks-tab__pending-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.bookmarks-tab__pending-item {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: grid;
+  gap: 2px;
+}
+
+.bookmarks-tab__pending-topic {
+  font-weight: 700;
+}
+
+.bookmarks-tab__pending-meta {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.bookmarks-tab__kpi-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--si-color-text-muted, #666);
+}
+
+.bookmarks-tab__kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 4px;
+}
+
+.bookmarks-tab__kpi-note {
+  margin-top: 6px;
+  color: var(--si-color-text-muted, #888);
+  font-size: 12px;
+}
+
+.bookmarks-tab__section-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.bookmarks-tab__section-subtitle {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--si-color-text-muted, #666);
+}
+
+.bookmarks-tab__curation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.bookmarks-tab__curation-block {
+  border: 1px solid var(--si-color-border, #e5e5e5);
+  border-radius: 8px;
+  background: var(--si-color-bg-elevated, #fff);
+  overflow: hidden;
+}
+
+.bookmarks-tab__curation-header {
+  padding: 10px 14px;
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookmarks-tab__curation-header--implement-bound {
+  background: var(--si-color-success-200, #9ee9b0);
+  color: #0a5a2c;
+}
+
+.bookmarks-tab__curation-header--curated-waiting {
+  background: var(--si-color-brand-200, #ffe891);
+  color: #7a4500;
+}
+
+.bookmarks-tab__curation-header--uncurated {
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  color: var(--si-color-graphite-700, #3d444d);
+}
+
+.bookmarks-tab__curation-hint {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.bookmarks-tab__curation-count {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmarks-tab__curation-items {
+  padding: 6px 0;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.bookmarks-tab__curation-item {
+  padding: 6px 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  border-bottom: 1px solid var(--si-color-bg-subtle, #f1f1f4);
+}
+
+.bookmarks-tab__curation-item:last-child {
+  border-bottom: none;
+}
+
+.bookmarks-tab__curation-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.bookmarks-tab__curation-item-meta {
+  font-size: 11px;
+  color: var(--si-color-text-muted, #666);
+}
+
+.bookmarks-tab__score-pill {
+  align-self: start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmarks-tab__score-pill--high {
+  background: var(--si-color-success-200, #9ee9b0);
+  color: #0a5a2c;
+}
+
+.bookmarks-tab__score-pill--low {
+  background: var(--si-color-brand-200, #ffe891);
+  color: #7a4500;
+}
+
+.bookmarks-tab__two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 2.1fr) minmax(250px, 0.9fr);
+  gap: 18px;
+}
+
+.bookmarks-tab__funnel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.bookmarks-tab__funnel-row {
+  display: grid;
+  grid-template-columns: 132px 1fr 58px;
+  align-items: center;
+  gap: 10px;
+}
+
+.bookmarks-tab__funnel-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bookmarks-tab__funnel-track {
+  height: 16px;
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bookmarks-tab__funnel-bar {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 2px;
+}
+
+.bookmarks-tab__funnel-count {
+  text-align: right;
+  color: var(--si-color-text-muted, #666);
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmarks-tab__topics {
+  margin-top: 12px;
+}
+
+.bookmarks-tab__topic-row {
+  display: grid;
+  grid-template-columns: 88px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  margin: 9px 0;
+}
+
+.bookmarks-tab__topic-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bookmarks-tab__topic-track {
+  height: 10px;
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bookmarks-tab__topic-bar {
+  height: 100%;
+  background: var(--si-color-accent-500, #ff3e8a);
+  border-radius: 999px;
+}
+
+.bookmarks-tab__topic-count {
+  text-align: right;
+  color: var(--si-color-text-muted, #666);
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmarks-tab__recent {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.bookmarks-tab__recent-row {
+  padding: 8px 10px;
+  border: 1px solid var(--si-color-bg-subtle, #f1f1f4);
+  border-radius: 5px;
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  overflow-wrap: anywhere;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+}
+
+.bookmarks-tab__recent-time {
+  color: var(--si-color-text-muted, #666);
+}
+
+.bookmarks-tab__recent-key {
+  font-weight: 700;
+}
+
+.bookmarks-tab__recent-reason {
+  color: var(--si-color-text-muted, #888);
+  font-style: italic;
+}
+
+.bookmarks-tab__empty,
+.bookmarks-tab__error-detail {
+  color: var(--si-color-text-muted, #666);
+  padding: 12px 0;
+}
+
+.bookmarks-tab__error-detail {
+  color: var(--si-color-danger-500, #ff5252);
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1080px) {
+  .bookmarks-tab__two-col {
+    grid-template-columns: 1fr;
+  }
+}
