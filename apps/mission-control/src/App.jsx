@@ -1,38 +1,16 @@
 import React from 'react';
-import { PULSE_TABS, findTabByPath, getDefaultTab } from './pulseTabs.js';
+import { PULSE_TABS, findTabByPath, getDefaultTab } from './pulseTabs.jsx';
 import { useLocation, navigate } from './useLocation.js';
+import { StatefulSidebar } from './Sidebar.jsx';
 
 export function App() {
   const pathname = useLocation();
   const tab = findTabByPath(pathname);
   const ActiveComponent = tab.component;
 
-  function handleTabClick(e, path) {
-    // Anchor button: let the browser update the URL via pushState; prevent
-    // full page reload by calling navigate() and stopping the link.
-    e.preventDefault();
-    navigate(path);
-  }
-
   return (
     <div className="pulse-shell" data-testid="pulse-shell">
-      <nav className="pulse-tabbar" aria-label="Pulse tabs" data-testid="pulse-tabbar">
-        {PULSE_TABS.map((t) => {
-          const isActive = t.id === tab.id;
-          return (
-            <a
-              key={t.id}
-              href={t.path}
-              className="pulse-tabbar__link"
-              data-testid={`pulse-tab-${t.id}`}
-              aria-current={isActive ? 'page' : undefined}
-              onClick={(e) => handleTabClick(e, t.path)}
-            >
-              {t.label}
-            </a>
-          );
-        })}
-      </nav>
+      <StatefulSidebar tabs={PULSE_TABS} activeTabId={tab.id} />
 
       <main className="pulse-content" data-testid="pulse-content">
         <ActiveComponent />
