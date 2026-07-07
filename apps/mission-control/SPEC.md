@@ -70,3 +70,11 @@ tab registry, URL routing, and the flow-metrics calculations.
 - E2e Playwright suite (spec-driven, deferred).
 - Extend the tab registry with a Real Bookmarks tab when that spec lands.
 - Address the unaddressed `BookmarksTab` URL once the Bookmarks app has a route.
+
+## Architecture decisions
+
+The iframe embed of the Tasks app, the local-dev port assumptions, and
+the deferred sandbox/CSP posture are recorded in
+[`docs/systems/pulse-shell.md`](../../systems/pulse-shell.md). Revisit
+that document when authentication lands, production deploy is scheduled,
+Tasks gains cross-app state, or the shell grows a third or fourth tab.
