@@ -515,6 +515,173 @@ fn task_ac_vs_open_pr_failures(
     failures
 }
 
+/// Parse the output of `git worktree list --porcelain` into discrete
+/// entries. Each entry is a blank-line-separated block whose first line is
+/// `worktree <path>`; subsequent lines may include `HEAD <sha>` and
+/// `branch refs/heads/<name>`. Detached worktrees have no branch line.
+fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
+    let mut entries: Vec<WorktreeEntry> = Vec::new();
+    for block in output.split("\n\n") {
+        let mut path: Option<PathBuf> = None;
+        let mut branch: Option<String> = None;
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("worktree ") {
+                path = Some(PathBuf::from(rest.trim()));
+            } else if let Some(rest) = line.strip_prefix("branch ") {
+                // Strip the `refs/heads/` prefix to match typical branch names.
+                let name = rest.trim().strip_prefix("refs/heads/").unwrap_or(rest.trim());
+                branch = Some(name.to_string());
+            }
+        }
+        if let Some(p) = path {
+            entries.push(WorktreeEntry { path: p, branch });
+        }
+    }
+    entries
+}
+
+/// Return the 8-char task-id prefix used in Rowan worktree/branch names,
+/// e.g. `ba116063-382a-446c-ab91-c01b60d9a7c3` -> `ba116063`.
+fn task_id_prefix(task_id: &str) -> &str {
+    let cut = TASK_ID_PREFIX_LEN.min(task_id.len());
+    &task_id[..cut]
+}
+
+/// Select worktrees that should be removed for the given task. Matches both
+/// the worktree path and the branch name against `task-<prefix>`, and
+/// restricts to paths under the Rowan workspace root so the cleanup cannot
+/// touch another agent's worktrees.
+fn select_matching_rowan_worktrees<'a>(
+    entries: &'a [WorktreeEntry],
+    task_id: &str,
+) -> Vec<&'a WorktreeEntry> {
+    let prefix = task_id_prefix(task_id);
+    let marker = format!("task-{prefix}");
+    let root = Path::new(ROWAN_WORKSPACE_ROOT);
+    entries
+        .iter()
+        .filter(|entry| {
+            if !entry.path.starts_with(root) {
+                return false;
+            }
+            // Never remove the primary sindustries worktree (it lives under
+            // the same root but its path is the repo itself, not a
+            // task-prefixed worktree).
+            if entry.path == root.join("sindustries") {
+                return false;
+            }
+            let path_str = entry.path.to_string_lossy();
+            let path_match = path_str.contains(&marker);
+            let branch_match = entry
+                .branch
+                .as_deref()
+                .map(|b| b.contains(&marker))
+                .unwrap_or(false);
+            path_match || branch_match
+        })
+        .collect()
+}
+
+/// Run `git worktree remove --force <path>` for each candidate. Missing
+/// paths are reported as `AlreadyAbsent` so re-runs stay idempotent.
+/// All other failures are captured as `Failed(<message>)` and surfaced as
+/// non-fatal warnings; this function never returns Err.
+fn remove_worktrees_best_effort(repo: &Path, candidates: &[WorktreeEntry]) -> Vec<WorktreeCleanupResult> {
+    let mut results = Vec::with_capacity(candidates.len());
+    for entry in candidates {
+        let path = &entry.path;
+        if !path.exists() {
+            results.push(WorktreeCleanupResult {
+                path: path.clone(),
+                branch: entry.branch.clone(),
+                outcome: WorktreeCleanupOutcome::AlreadyAbsent,
+            });
+            continue;
+        }
+        let output = Command::new("git")
+            .args(["-C", repo.to_string_lossy().as_ref(), "worktree", "remove", "--force"])
+            .arg(path)
+            .output();
+        let outcome = match output {
+            Ok(out) if out.status.success() => WorktreeCleanupOutcome::Removed,
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let combined = if stderr.is_empty() { stdout } else { stderr };
+                WorktreeCleanupOutcome::Failed(if combined.is_empty() {
+                    format!("git worktree remove exited with status {:?}", out.status.code())
+                } else {
+                    combined
+                })
+            }
+            Err(err) => WorktreeCleanupOutcome::Failed(format!("failed to spawn git: {err}")),
+        };
+        results.push(WorktreeCleanupResult {
+            path: path.clone(),
+            branch: entry.branch.clone(),
+            outcome,
+        });
+    }
+    results
+}
+
+/// Top-level worktree cleanup for a feature task. Returns a list of cleanup
+/// results (empty when nothing matched). Failures are non-fatal by design.
+fn cleanup_rowan_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCleanupResult> {
+    let list_output = Command::new("git")
+        .args(["-C", repo.to_string_lossy().as_ref(), "worktree", "list", "--porcelain"])
+        .output();
+    let stdout = match list_output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+        Ok(out) => {
+            // Treat `git worktree list` failure as a soft warning so the lobster
+            // can still advance the task; surface the error in the results.
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return vec![WorktreeCleanupResult {
+                path: PathBuf::from("<git-worktree-list>"),
+                branch: None,
+                outcome: WorktreeCleanupOutcome::Failed(if stderr.is_empty() {
+                    format!("git worktree list exited with status {:?}", out.status.code())
+                } else {
+                    stderr
+                }),
+            }];
+        }
+        Err(err) => {
+            return vec![WorktreeCleanupResult {
+                path: PathBuf::from("<git-worktree-list>"),
+                branch: None,
+                outcome: WorktreeCleanupOutcome::Failed(format!("failed to spawn git: {err}")),
+            }];
+        }
+    };
+    let entries = parse_git_worktree_porcelain(&stdout);
+    let candidates: Vec<WorktreeEntry> = select_matching_rowan_worktrees(&entries, task_id)
+        .into_iter()
+        .cloned()
+        .collect();
+    remove_worktrees_best_effort(repo, &candidates)
+}
+
+fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult]) -> String {
+    if results.is_empty() {
+        return "No matching Rowan worktrees found for this task.".to_string();
+    }
+    results
+        .iter()
+        .map(|r| {
+            let branch = r.branch.as_deref().unwrap_or("(detached)");
+            let status = match &r.outcome {
+                WorktreeCleanupOutcome::Removed => "removed".to_string(),
+                WorktreeCleanupOutcome::AlreadyAbsent => "already absent (idempotent)".to_string(),
+                WorktreeCleanupOutcome::Failed(msg) => format!("FAILED: {msg}"),
+            };
+            format!("- {} (branch: {}) -> {}", r.path.display(), branch, status)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     // Spec drift is not blocked at post_merge: Tom owns the ACs during QA and may
@@ -560,7 +727,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_acceptance".to_string();
-        return Ok(env);
+        return run_post_merge_worktree_cleanup(&args, env);
     }
     let mut failures = qa_failures;
     for url in rowan_pr_urls(&env.task) {
@@ -575,7 +742,48 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     // and rewrite the description's Spec line. Idempotent: re-running post_merge
     // on an already-archived task is a no-op.
     if env.criteria_met && env.task.status == "done" {
-        return archive_done_task_spec(&args, env);
+        let env = archive_done_task_spec(&args, env)?;
+        return run_post_merge_worktree_cleanup(&args, env);
+    }
+    Ok(env)
+}
+
+/// Best-effort removal of any Rowan worktree that was created for this
+/// task. Runs on every post_merge invocation that reaches the `done` state
+/// (including idempotent re-runs) so stale worktrees cannot accumulate.
+/// Cleanup failures are surfaced as a `[feature-task-progress-checklist]`
+/// comment but never block the lobster.
+fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
+    if args.dry_run {
+        return Ok(env);
+    }
+    let results = cleanup_rowan_worktree_for_task(&args.repo, &env.task.id);
+    let had_failure = results
+        .iter()
+        .any(|r| matches!(r.outcome, WorktreeCleanupOutcome::Failed(_)));
+    if results.is_empty() {
+        return Ok(env);
+    }
+    let header = if had_failure {
+        "Post-merge worktree cleanup encountered errors (non-fatal):"
+    } else {
+        "Post-merge worktree cleanup:"
+    };
+    let body = format_worktree_cleanup_summary(&results);
+    // Best-effort: a comment write failure should not block the lobster.
+    let _ = add_comment(
+        &args.base_url,
+        &env.task.id,
+        &format!("[feature-task-progress-checklist]\n{header}\n{body}"),
+    );
+    if had_failure {
+        // Surface the failure on the envelope so the heartbeat can see it,
+        // but do not flip criteria_met -- the task is still done.
+        if env.action_taken.is_empty() || env.action_taken == "moved_to_done" {
+            env.action_taken = "moved_to_done_worktree_cleanup_warning".to_string();
+        } else {
+            env.action_taken = format!("{}_worktree_cleanup_warning", env.action_taken);
+        }
     }
     Ok(env)
 }
@@ -688,6 +896,39 @@ const BRAIN_DIR: &str = "brain";
 
 const TASK_SPECS_DIR: &str = "brain/tasks/specs";
 const TASK_SPECS_DONE_DIR: &str = "brain/tasks/specs/done";
+
+// ---- Post-merge worktree cleanup (feature task ba116063) ----
+//
+// Rowan runs feature-task PRs from dedicated worktrees under
+// `/Users/quinnstoffer/workspaces/rowan/`, registered with the primary
+// `sindustries` worktree. After a task's PR merges, the post-merge stage
+// removes the matching worktree so stale directories don't accumulate.
+// The cleanup is best-effort: a failure logs a warning but does not block
+// the lobster from advancing the task.
+const ROWAN_WORKSPACE_ROOT: &str = "/Users/quinnstoffer/workspaces/rowan";
+/// Number of leading UUID chars used in worktree/branch names like
+/// `sindustries-task-<8chars>-<slug>`.
+const TASK_ID_PREFIX_LEN: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorktreeEntry {
+    path: PathBuf,
+    branch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorktreeCleanupOutcome {
+    Removed,
+    AlreadyAbsent,
+    Failed(String),
+}
+
+#[derive(Debug, Clone)]
+struct WorktreeCleanupResult {
+    path: PathBuf,
+    branch: Option<String>,
+    outcome: WorktreeCleanupOutcome,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ArchiveSpecPlan {
@@ -5570,5 +5811,184 @@ keep me
             "expected legacy drift message, got {:?}",
             blocked.failures
         );
+    }
+
+    // ---- Post-merge worktree cleanup (feature task ba116063) ----
+
+    #[test]
+    fn parse_worktree_porcelain_handles_main_and_task_worktrees() {
+        let sample = "\
+worktree /Users/quinnstoffer/workspaces/rowan/sindustries
+HEAD 0123456789abcdef0123456789abcdef01234567
+branch refs/heads/main
+
+worktree /Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-lobster-worktree-cleanup
+HEAD fedcba9876543210fedcba9876543210fedcba98
+branch refs/heads/task-ba116063-lobster-worktree-cleanup
+
+worktree /Users/quinnstoffer/workspaces/rowan/sindustries-task-zz999999-orphan
+HEAD 1111111111111111111111111111111111111111
+detached
+";
+        let entries = parse_git_worktree_porcelain(sample);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(
+            entries[0].path,
+            PathBuf::from("/Users/quinnstoffer/workspaces/rowan/sindustries")
+        );
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+        assert_eq!(
+            entries[1].branch.as_deref(),
+            Some("task-ba116063-lobster-worktree-cleanup")
+        );
+        assert_eq!(entries[2].branch, None, "detached entries have no branch");
+    }
+
+    #[test]
+    fn parse_worktree_porcelain_handles_empty_output() {
+        let entries = parse_git_worktree_porcelain("");
+        assert!(entries.is_empty());
+        let entries = parse_git_worktree_porcelain("\n\n\n");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn task_id_prefix_takes_first_eight_chars() {
+        assert_eq!(
+            task_id_prefix("ba116063-382a-446c-ab91-c01b60d9a7c3"),
+            "ba116063"
+        );
+        // Short id safety: never panic, just return the whole id.
+        assert_eq!(task_id_prefix("abc"), "abc");
+    }
+
+    #[test]
+    fn select_matching_rowan_worktrees_finds_only_task_worktrees() {
+        let entries = vec![
+            WorktreeEntry {
+                path: PathBuf::from("/Users/quinnstoffer/workspaces/rowan/sindustries"),
+                branch: Some("main".to_string()),
+            },
+            WorktreeEntry {
+                path: PathBuf::from(
+                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-lobster-worktree-cleanup",
+                ),
+                branch: Some("task-ba116063-lobster-worktree-cleanup".to_string()),
+            },
+            WorktreeEntry {
+                path: PathBuf::from(
+                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-b179c0e3-bookmark-analytics-postgres",
+                ),
+                branch: Some("task-b179c0e3-bookmark-analytics-postgres".to_string()),
+            },
+            // Path outside the Rowan root must be ignored even if the branch
+            // contains the marker (defence in depth against typo'd roots).
+            WorktreeEntry {
+                path: PathBuf::from(
+                    "/Users/quinnstoffer/workspaces/lox/sindustries-task-ba116063-bogus",
+                ),
+                branch: Some("task-ba116063-bogus".to_string()),
+            },
+            // Branch-prefixed worktree whose path lives outside the root
+            // (also must be ignored).
+            WorktreeEntry {
+                path: PathBuf::from("/tmp/some-other-worktree"),
+                branch: Some("task-ba116063-anything".to_string()),
+            },
+        ];
+        let matches =
+            select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0]
+            .path
+            .to_string_lossy()
+            .contains("sindustries-task-ba116063-lobster-worktree-cleanup"));
+    }
+
+    #[test]
+    fn select_matching_rowan_worktrees_never_picks_primary_sindustries() {
+        let entries = vec![WorktreeEntry {
+            path: PathBuf::from("/Users/quinnstoffer/workspaces/rowan/sindustries"),
+            branch: Some("main".to_string()),
+        }];
+        let matches =
+            select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
+        assert!(matches.is_empty(), "primary worktree must never be selected");
+    }
+
+    #[test]
+    fn select_matching_rowan_worktrees_handles_branch_only_match() {
+        // A worktree whose path does not include the task marker but whose
+        // branch does (e.g. renamed path) should still match.
+        let entries = vec![WorktreeEntry {
+            path: PathBuf::from("/Users/quinnstoffer/workspaces/rowan/some-odd-path"),
+            branch: Some("task-ba116063-renamed".to_string()),
+        }];
+        let matches =
+            select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
+        assert_eq!(matches.len(), 1);
+    }
+
+    #[test]
+    fn format_worktree_cleanup_summary_handles_empty() {
+        assert_eq!(
+            format_worktree_cleanup_summary(&[]),
+            "No matching Rowan worktrees found for this task."
+        );
+    }
+
+    #[test]
+    fn format_worktree_cleanup_summary_mixes_outcomes() {
+        let results = vec![
+            WorktreeCleanupResult {
+                path: PathBuf::from(
+                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-a",
+                ),
+                branch: Some("task-ba116063-a".to_string()),
+                outcome: WorktreeCleanupOutcome::Removed,
+            },
+            WorktreeCleanupResult {
+                path: PathBuf::from(
+                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-b",
+                ),
+                branch: Some("task-ba116063-b".to_string()),
+                outcome: WorktreeCleanupOutcome::AlreadyAbsent,
+            },
+            WorktreeCleanupResult {
+                path: PathBuf::from(
+                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-c",
+                ),
+                branch: None,
+                outcome: WorktreeCleanupOutcome::Failed("permission denied".to_string()),
+            },
+        ];
+        let summary = format_worktree_cleanup_summary(&results);
+        assert!(summary.contains("removed"), "got: {summary}");
+        assert!(summary.contains("already absent"), "got: {summary}");
+        assert!(
+            summary.contains("FAILED: permission denied"),
+            "got: {summary}"
+        );
+        assert!(summary.contains("(detached)"), "got: {summary}");
+    }
+
+    #[test]
+    fn remove_worktrees_best_effort_marks_missing_paths_as_already_absent() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        // No worktrees registered; the missing-path entry must be reported
+        // as AlreadyAbsent without invoking git.
+        let results = remove_worktrees_best_effort(
+            repo,
+            &[WorktreeEntry {
+                path: dir.path().join("nonexistent"),
+                branch: Some("task-ba116063-x".to_string()),
+            }],
+        );
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            results[0].outcome,
+            WorktreeCleanupOutcome::AlreadyAbsent
+        ));
     }
 }
