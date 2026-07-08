@@ -133,6 +133,35 @@ function useThemeSync() {
   }, []);
 }
 
+// AC8: brand mark shown in place of the expand button when the sidebar is
+// collapsed. Kept as a simple inline SVG so there's no external asset
+// dependency. The "SI" monogram fits inside the 48 px collapsed rail.
+function SILogo() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 32 32"
+      width="24"
+      height="24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect width="32" height="32" rx="6" fill="currentColor" fillOpacity="0.15" />
+      <text
+        x="16"
+        y="22"
+        textAnchor="middle"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        fontSize="14"
+        fontWeight="700"
+        fill="currentColor"
+        letterSpacing="-0.5"
+      >
+        SI
+      </text>
+    </svg>
+  );
+}
 export function Sidebar({ tabs, activeTabId, onToggleCollapsed, collapsed }) {
   const toggleLabel = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
   const toggleGlyph = collapsed ? '▶' : '◀';
@@ -160,10 +189,18 @@ export function Sidebar({ tabs, activeTabId, onToggleCollapsed, collapsed }) {
         aria-pressed={collapsed}
         onClick={onToggleCollapsed}
       >
-        <span aria-hidden="true" className="pulse-sidebar__toggle-glyph">{toggleGlyph}</span>
-        <span className={cx('pulse-sidebar__toggle-label', collapsed && 'pulse-sidebar--sr-only')}>
-          {toggleLabel}
-        </span>
+        {collapsed ? (
+          /* AC8: collapsed state — show only the SI logo mark, no text */
+          <SILogo />
+        ) : (
+          /* Expanded state — show chevron glyph + label */
+          <>
+            <span aria-hidden="true" className="pulse-sidebar__toggle-glyph">{toggleGlyph}</span>
+            <span className="pulse-sidebar__toggle-label">
+              {toggleLabel}
+            </span>
+          </>
+        )}
       </Button>
 
       <nav
