@@ -10,12 +10,13 @@ beforeEach(() => {
 });
 
 describe('Pulse shell', () => {
-  it('renders the sidebar with three tabs', () => {
+  it('renders the sidebar with four tabs', () => {
     render(<App />);
     expect(screen.getByTestId('pulse-sidebar')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-tasks')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-bookmarks')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-flow-metrics')).toBeTruthy();
+    expect(screen.getByTestId('pulse-sidebar-tab-design-system')).toBeTruthy();
   });
 
   it('routes to a tab matching the URL path on first render', () => {
@@ -38,5 +39,12 @@ describe('Pulse shell', () => {
     fireEvent.click(bookmarks);
     expect(window.location.pathname).toBe('/bookmarks');
     expect(bookmarks.getAttribute('aria-current')).toBe('page');
+  });
+
+  it('routes to the Design System tab when /design-system is the initial URL', () => {
+    window.history.pushState({}, '', '/design-system');
+    render(<App />);
+    const designSystem = screen.getByTestId('pulse-sidebar-tab-design-system');
+    expect(designSystem.getAttribute('aria-current')).toBe('page');
   });
 });

@@ -16,6 +16,7 @@ import React from 'react';
 import { FlowMetricsTab } from './tabs/FlowMetricsTab.jsx';
 import { TasksTab } from './tabs/TasksTab.jsx';
 import { BookmarksTab } from './tabs/BookmarksTab.jsx';
+import { DesignSystemTab } from './tabs/DesignSystemTab.jsx';
 
 function IconClipboard() {
   return (
@@ -46,6 +47,18 @@ function IconBarChart() {
   );
 }
 
+function IconPalette() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+      <path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2v-.5c0-.8.7-1.5 1.5-1.5H17a4 4 0 0 0 4-4c0-4.97-4.03-9-9-9z" />
+      <circle cx="7.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="11.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="9" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="13" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export const PULSE_TABS = [
   {
     id: 'tasks',
@@ -67,6 +80,13 @@ export const PULSE_TABS = [
     path: '/flow-metrics',
     icon: <IconBarChart />,
     component: FlowMetricsTab
+  },
+  {
+    id: 'design-system',
+    label: 'Design System',
+    path: '/design-system',
+    icon: <IconPalette />,
+    component: DesignSystemTab
   }
 ];
 

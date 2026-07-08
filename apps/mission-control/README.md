@@ -1,7 +1,7 @@
 # Pulse — `@sindustries/mission-control`
 
 The Sindustries desktop shell. Hosts multiple tabs (Tasks, Bookmarks, Flow
-metrics) behind a single URL.
+metrics, Design System) behind a single URL.
 
 See `SPEC.md` for behaviour and `docs/specs/pulse-shell-app-tech-design.md`
 for the design that introduced this app.
@@ -32,6 +32,6 @@ an empty state rather than failing. Override the API base with
 
 ## Adding a new tab
 
-1. Create a component in `src/tabs/MyTab.jsx`.
-2. Register it in `src/pulseTabs.js`.
+1. Create a component in `src/tabs/DesignSystemTab.jsx` (or any `MyTab.jsx`).
+2. Register it in `src/pulseTabs.jsx` with `id`, `label`, `path`, `icon`, and `component`.
 3. Done — no App.jsx changes needed.
