@@ -1,7 +1,9 @@
 # Pulse — `@sindustries/mission-control`
 
 The Sindustries desktop shell. Hosts multiple tabs (Tasks, Bookmarks, Flow
-metrics, Design System) behind a single URL.
+metrics, Design System) behind a single URL. The shell also owns the
+day/night theme toggle (bottom of the vertical sidebar) and broadcasts
+the chosen theme to iframe-based tabs via `pulse:theme` postMessage.
 
 See `SPEC.md` for behaviour and `docs/specs/pulse-shell-app-tech-design.md`
 for the design that introduced this app.

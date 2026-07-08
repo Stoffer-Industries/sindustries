@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from '../utils/storage.js';
+import { getStoredTheme, getStoredView, getStoredPulseTheme, setStoredTheme, setStoredPulseTheme, setStoredView } from '../utils/storage.js';
 
 const VIEW_STORAGE_KEY = 'tasks-app-view';
 const THEME_STORAGE_KEY = 'tasks-app-theme';
+const PULSE_THEME_STORAGE_KEY = 'pulse-theme';
 
 describe('storage', () => {
   let localStorageMock;
@@ -113,6 +114,65 @@ describe('storage', () => {
         throw new Error('Storage error');
       });
       expect(() => setStoredTheme('dark')).not.toThrow();
+    });
+  });
+
+  describe('getStoredPulseTheme', () => {
+    it('returns null when nothing is stored under pulse-theme', () => {
+      localStorageMock.getItem.mockImplementation((key) => (key === PULSE_THEME_STORAGE_KEY ? null : null));
+      expect(getStoredPulseTheme()).toBeNull();
+    });
+
+    it('returns null for invalid stored value', () => {
+      localStorageMock.getItem.mockImplementation((key) => (key === PULSE_THEME_STORAGE_KEY ? 'system' : null));
+      expect(getStoredPulseTheme()).toBeNull();
+    });
+
+    it('returns "light" when stored', () => {
+      localStorageMock.getItem.mockImplementation((key) => (key === PULSE_THEME_STORAGE_KEY ? 'light' : null));
+      expect(getStoredPulseTheme()).toBe('light');
+    });
+
+    it('returns "dark" when stored', () => {
+      localStorageMock.getItem.mockImplementation((key) => (key === PULSE_THEME_STORAGE_KEY ? 'dark' : null));
+      expect(getStoredPulseTheme()).toBe('dark');
+    });
+
+    it('handles localStorage error gracefully', () => {
+      localStorageMock.getItem.mockImplementation(() => {
+        throw new Error('Storage error');
+      });
+      expect(getStoredPulseTheme()).toBeNull();
+    });
+  });
+
+  describe('setStoredPulseTheme', () => {
+    it('stores "light" theme', () => {
+      setStoredPulseTheme('light');
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        PULSE_THEME_STORAGE_KEY,
+        'light'
+      );
+    });
+
+    it('stores "dark" theme', () => {
+      setStoredPulseTheme('dark');
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        PULSE_THEME_STORAGE_KEY,
+        'dark'
+      );
+    });
+
+    it('ignores invalid values', () => {
+      setStoredPulseTheme('system');
+      expect(localStorageMock.setItem).not.toHaveBeenCalled();
+    });
+
+    it('handles localStorage error gracefully', () => {
+      localStorageMock.setItem.mockImplementation(() => {
+        throw new Error('Storage error');
+      });
+      expect(() => setStoredPulseTheme('dark')).not.toThrow();
     });
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -24,7 +24,7 @@ import { TaskEditor } from './components/TaskEditor.jsx';
 import { ToastStack } from './components/ToastStack.jsx';
 import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS, TASK_TYPES, TASK_TYPE_LABELS } from './utils/constants.js';
 import { createConfettiPieces, normalizeTaskForEditor, taskCardTilt } from './utils/helpers.js';
-import { getStoredTheme, getStoredView, setStoredTheme, setStoredView } from './utils/storage.js';
+import { getStoredView, setStoredView } from './utils/storage.js';
 
 function isReadyTask(task) {
   return task.status === 'ready';
@@ -40,7 +40,6 @@ function cardState(task, isSelected) {
 
 export function App() {
   const [view, setView] = useState(getStoredView);
-  const [theme, setTheme] = useState(getStoredTheme);
   const [selectedId, setSelectedId] = useState(null);
   const initialStatusSelection = ['open', 'ready', 'doing', 'acceptance'];
   const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', taskType: '', includeArchived: false });
@@ -102,11 +101,6 @@ export function App() {
   useEffect(() => {
     setStoredView(view);
   }, [view]);
-
-  useLayoutEffect(() => {
-    document.documentElement.setAttribute('data-si-theme', theme);
-    setStoredTheme(theme);
-  }, [theme]);
 
   // Debounce search filter
   const debouncedSearch = useDebounce(filters.q, 300);
@@ -406,8 +400,6 @@ export function App() {
     element.style.removeProperty('--pulse-speed');
   }
 
-  const nextTheme = theme === 'dark' ? 'light' : 'dark';
-
   return (
     <main className="app-shell">
       <header className="hero-header">
@@ -436,14 +428,6 @@ export function App() {
             />
             <Button variant="nav" active={view === 'backlog'} onClick={() => setView('backlog')}>Backlog</Button>
             <Button variant="nav" active={view === 'board'} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Kanban</Button>
-            <Button
-              type="button"
-              variant="outline"
-              aria-label={`Switch to ${nextTheme} theme`}
-              onClick={() => setTheme(nextTheme)}
-            >
-              {theme === 'dark' ? 'Dark' : 'Light'}
-            </Button>
             <Button type="button" variant="primary" tone="display" onClick={() => setNewTask((current) => ({ ...current, expanded: true }))}>+ New Task</Button>
           </div>
         </div>
