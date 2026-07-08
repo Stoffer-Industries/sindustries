@@ -26,6 +26,24 @@ surface.
    - Persists the choice to `localStorage` (`pulse.sidebar.collapsed`).
    - The toggle exposes `aria-pressed` and `aria-label` ("Collapse
      sidebar" / "Expand sidebar") so screen readers announce the action.
+2a. **Toggle the day/night theme.** User clicks the theme toggle at the
+    bottom of the sidebar (above the collapse toggle, separated by a
+    thin divider).
+   - Flips `data-si-theme` on the shell's `<html>` between `dark` and
+     `light`. The chosen value is the source of truth and persists to
+     `localStorage` under the `pulse-theme` key (the canonical storage
+     key, shared with iframe-based tabs).
+   - Broadcasts a `pulse:theme` postMessage to every `<iframe>` in the
+     document so iframe-based tabs (currently the Tasks tab) follow
+     along live without a reload.
+   - The toggle's `aria-label` reflects the *next* theme ("Switch to
+     light theme" when current is `dark`, "Switch to dark theme" when
+     current is `light`) so screen readers announce the action.
+   - When the sidebar is collapsed, the toggle is icon-only but the
+     `aria-label` is preserved.
+   - The shell re-renders the toggle's label when another browser tab
+     updates the same key (storage event) so multi-tab users see the
+     latest value.
 3. **View flow metrics.** User is on the Flow metrics tab.
    - Fetches tasks from the Tasks API on mount.
    - Shows three cards: median cycle time, p90 cycle time, tasks counted.
@@ -61,7 +79,7 @@ surface.
 
 | Screen | Route | Component | Key interaction |
 |---|---|---|---|
-| Sidebar | `(shell-level)` | `Sidebar.jsx` | Vertical collapsible nav, built from Design System `Button` (`variant="nav"`) + icon, persisted via `localStorage` |
+| Sidebar | `(shell-level)` | `Sidebar.jsx` | Vertical collapsible nav with collapse toggle + day/night theme toggle (Design System `Button` `variant="nav"` and `variant="ghost"`); state persisted via `localStorage` |
 | Tasks | `/tasks` | `Tabs/TasksTab.jsx` (iframe) | Embedded tasks app — all existing flows remain available |
 | Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, funnel, topics, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
@@ -85,6 +103,7 @@ specimen mount.
 |---|---|
 | Switch tabs | Vitest: `App.test.jsx` covers sidebar click → URL update |
 | Sidebar collapse/expand | Vitest: `Sidebar.test.jsx` covers toggle, persistence, active-row marker, and aria-label contract |
+| Day/Night theme toggle | Vitest: `Sidebar.test.jsx` covers shell toggle click → `data-si-theme` flip + `pulse-theme` write + iframe `postMessage` broadcast, aria-label reflects next theme, storage-event cross-tab sync, collapsed-state icon-only behaviour |
 | Cycle-time math | Vitest: `flowMetrics.test.js` covers median, p90, windowing |
 | Weekly throughput bucketing | Vitest: `flowMetrics.test.js` covers Monday-aligned buckets |
 | WIP by status | Vitest: `flowMetrics.test.js` covers status grouping |
@@ -100,6 +119,13 @@ specimen mount.
 - **Tasks API** at `http://localhost:4001/api/v1/tasks` (port-overridable).
 - **No new backend, no new analytics warehouse.** All metrics are computed
   client-side from the tasks API response.
+- **Cross-origin theme broadcast.** The shell and the Tasks app run on
+  different ports (5174 vs 5173), so they cannot share `localStorage`.
+  The shell owns the canonical `pulse-theme` key and broadcasts a
+  `{ type: 'pulse:theme', theme: 'dark' | 'light' }` postMessage to
+  every `<iframe>` `contentWindow` on toggle. Iframes verify the
+  `event.origin` against the shell's `VITE_SHELL_ORIGIN` env var
+  (default `http://localhost:5174`) before applying the value.
 - Optional override via `VITE_TASKS_API_BASE_URL`.
 - The Flow metrics dashboard issues a single GET against the Tasks API with
   `?includeArchived=true&sort=priority&limit=10000` so the dashboard covers

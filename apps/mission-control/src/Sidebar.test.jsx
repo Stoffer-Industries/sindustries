@@ -90,3 +90,72 @@ describe('StatefulSidebar', () => {
     expect(screen.getByTestId('pulse-sidebar-toggle').getAttribute('aria-pressed')).toBe('false');
   });
 });
+
+describe('ThemeToggle (shell-owned day/night theme)', () => {
+  beforeEach(() => {
+    document.documentElement.removeAttribute('data-si-theme');
+  });
+
+  it('renders with a "Switch to light" label when the persisted theme is dark', () => {
+    window.localStorage.setItem('pulse-theme', 'dark');
+    render(<Sidebar tabs={TABS} activeTabId="a" collapsed={false} onToggleCollapsed={() => {}} />);
+    expect(screen.getByTestId('pulse-sidebar-theme-toggle').getAttribute('aria-label')).toBe('Switch to light theme');
+  });
+
+  it('renders with a "Switch to dark" label when the persisted theme is light', () => {
+    window.localStorage.setItem('pulse-theme', 'light');
+    render(<Sidebar tabs={TABS} activeTabId="a" collapsed={false} onToggleCollapsed={() => {}} />);
+    expect(screen.getByTestId('pulse-sidebar-theme-toggle').getAttribute('aria-label')).toBe('Switch to dark theme');
+  });
+
+  it('flips data-si-theme on <html> and writes the new value to localStorage on click', () => {
+    window.localStorage.setItem('pulse-theme', 'dark');
+    render(<Sidebar tabs={TABS} activeTabId="a" collapsed={false} onToggleCollapsed={() => {}} />);
+    expect(document.documentElement.getAttribute('data-si-theme')).toBe('dark');
+    fireEvent.click(screen.getByTestId('pulse-sidebar-theme-toggle'));
+    expect(document.documentElement.getAttribute('data-si-theme')).toBe('light');
+    expect(window.localStorage.getItem('pulse-theme')).toBe('light');
+  });
+
+  it('broadcasts a pulse:theme postMessage to every iframe on click', () => {
+    window.localStorage.setItem('pulse-theme', 'dark');
+    const iframe = document.createElement('iframe');
+    const posted = [];
+    // jsdom does not provide contentWindow.postMessage; install a stub
+    // that records the call so we can assert the broadcast contract.
+    Object.defineProperty(iframe, 'contentWindow', {
+      configurable: true,
+      value: { postMessage: (payload, origin) => posted.push({ payload, origin }) }
+    });
+    document.body.appendChild(iframe);
+
+    render(<Sidebar tabs={TABS} activeTabId="a" collapsed={false} onToggleCollapsed={() => {}} />);
+    fireEvent.click(screen.getByTestId('pulse-sidebar-theme-toggle'));
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0].payload).toEqual({ type: 'pulse:theme', theme: 'light' });
+    expect(posted[0].origin).toBe(window.location.origin);
+
+    document.body.removeChild(iframe);
+  });
+
+  it('hides the textual label in collapsed state while keeping aria-label', () => {
+    window.localStorage.setItem('pulse-theme', 'dark');
+    render(<Sidebar tabs={TABS} activeTabId="a" collapsed={true} onToggleCollapsed={() => {}} />);
+    const toggle = screen.getByTestId('pulse-sidebar-theme-toggle');
+    expect(toggle.getAttribute('aria-label')).toBe('Switch to light theme');
+    expect(toggle.className).toContain('pulse-sidebar__theme-toggle--collapsed');
+  });
+
+  it('updates the toggle label when another tab writes to pulse-theme via a storage event', () => {
+    window.localStorage.setItem('pulse-theme', 'dark');
+    render(<Sidebar tabs={TABS} activeTabId="a" collapsed={false} onToggleCollapsed={() => {}} />);
+    expect(screen.getByTestId('pulse-sidebar-theme-toggle').getAttribute('aria-label')).toBe('Switch to light theme');
+
+    // Simulate a sibling tab flipping the value.
+    window.localStorage.setItem('pulse-theme', 'light');
+    fireEvent(window, new StorageEvent('storage', { key: 'pulse-theme', newValue: 'light' }));
+
+    expect(screen.getByTestId('pulse-sidebar-theme-toggle').getAttribute('aria-label')).toBe('Switch to dark theme');
+  });
+});
