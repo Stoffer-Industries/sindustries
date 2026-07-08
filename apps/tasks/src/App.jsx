@@ -436,7 +436,6 @@ export function App() {
             />
             <Button variant="nav" active={view === 'backlog'} onClick={() => setView('backlog')}>Backlog</Button>
             <Button variant="nav" active={view === 'board'} onClick={() => { setView('board'); setFilters((current) => ({ ...current, status: '' })); }}>Kanban</Button>
-            <Button as="a" href="/design-system" variant="nav">Design System</Button>
             <Button
               type="button"
               variant="outline"

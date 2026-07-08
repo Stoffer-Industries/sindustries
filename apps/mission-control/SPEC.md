@@ -9,7 +9,7 @@ surface.
 
 - **Audience:** internal Sindustries operators (Tom and the agent team).
 - **Route:** `apps/mission-control` is deployed at the `/` surface.
-- **Tabs in MVP:** Tasks, Bookmarks, Flow metrics.
+- **Tabs in MVP:** Tasks, Bookmarks, Flow metrics, Design System.
 - **Non-goal:** mobile/responsive (desktop ≥ 1280px only).
 
 ## Flows
@@ -47,6 +47,15 @@ surface.
    - Auto-refresh on `window.focus`; manual refresh via the toolbar
      button. Filter state does NOT persist across reloads (matches the
      standalone `tools/bookmark-dashboard/` behaviour).
+6. **View the Design System.** User is on the Design System tab.
+   - Renders the shared `DesignSystemPage` specimen from
+     `@sindustries/ui/specimen` (the same component that previously lived
+     inside the Tasks app).
+   - The specimen owns its own design-kit navigation, theme toggle, and
+     kit-page state (Tokens / Pulse / Brand).
+   - Renders correctly in both light and dark mode via the
+     `@sindustries/design-tokens/styles.css` palette that the shell
+     already loads — no new opaque colours.
 
 ## Screens
 
@@ -56,6 +65,7 @@ surface.
 | Tasks | `/tasks` | `Tabs/TasksTab.jsx` (iframe) | Embedded tasks app — all existing flows remain available |
 | Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, funnel, topics, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
+| Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand) with back link to Tasks |
 | 404 / unknown path | `/<anything>` | falls back to Tasks tab | The default tab renders; no error surface |
 
 ## E2e Coverage
@@ -64,10 +74,12 @@ The Playwright e2e suite for Pulse is **deferred** until the shell lands
 in production and the team settles on viewport styling. Until then, the
 unit tests in `src/App.test.jsx`, `src/Sidebar.test.jsx`,
 `src/flowMetrics.test.jsx`, `src/bookmarkPipeline.test.js`,
-`src/bookmarkStateSource.test.js`, and `src/tabs/BookmarksTab.test.jsx`
+`src/bookmarkStateSource.test.js`, `src/tabs/BookmarksTab.test.jsx`,
+and `src/tabs/DesignSystemTab.test.jsx`
 cover the tab registry, URL routing, sidebar collapse/expand,
-localStorage persistence, the flow-metrics calculations, and the
-bookmark pipeline dashboard behaviour.
+localStorage persistence, the flow-metrics calculations, the
+bookmark pipeline dashboard behaviour, and the Design System
+specimen mount.
 
 | Flow | Plan |
 |---|---|
@@ -78,6 +90,7 @@ bookmark pipeline dashboard behaviour.
 | WIP by status | Vitest: `flowMetrics.test.js` covers status grouping |
 | Bookmark pipeline counts (KPIs, funnel, topics) | Vitest: `bookmarkPipeline.test.js` covers `kpiCounts`, `funnelRows`, `topicCounts` |
 | Curation bucketing | Vitest: `bookmarkPipeline.test.js` covers `curationGroups` threshold + sort |
+| Design System specimen mount | Vitest: `tabs/DesignSystemTab.test.jsx` covers kit nav, back link, default active kit tab |
 | Recent transitions | Vitest: `bookmarkPipeline.test.js` covers `recentTransitions` scope + ordering |
 | State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
