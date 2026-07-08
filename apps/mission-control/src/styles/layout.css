@@ -1,6 +1,9 @@
 .pulse-shell {
   display: grid;
-  grid-template-columns: var(--si-pulse-sidebar-width) 1fr;
+  /* AC7: use `auto` so the grid column tracks the sidebar's CSS-driven
+     width. When the sidebar transitions to its collapsed width the content
+     area automatically expands to fill the freed space — no dead gap. */
+  grid-template-columns: auto 1fr;
   height: var(--si-pulse-shell-height);
   min-width: 1280px;
   background: var(--si-color-bg-canvas, #111213);
