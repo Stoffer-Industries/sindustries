@@ -75,7 +75,7 @@ Note: prior versions of this workflow ran an equivalent AC text check at the `po
 ### 4. `done` — terminal
 
 - Lobster writes `done` after `post-merge` checks pass
-- After moving to `done`, the lobster's `post-merge` stage runs a best-effort **worktree cleanup** that removes the Rowan feature worktree (e.g. `~/workspaces/rowan/sindustries-task-<8char-prefix>-<slug>`) registered with the primary `sindustries` worktree. The cleanup is idempotent (missing paths are no-ops) and non-fatal (a failure is logged via `[feature-task-progress-checklist]` but does not block `done`)
+- After moving to `done`, the lobster's `post-merge` stage runs a best-effort **worktree cleanup** that removes the Rowan feature worktree (e.g. `~/workspaces/rowan/sindustries-task-<8char-prefix>-<slug>`) registered with the primary `sindustries` worktree. The cleanup is idempotent (missing paths are no-ops) and non-fatal (a failure is logged via `[feature-task-progress-checklist]` but does not block `done`). Shipped by feature task `ba116063-382a-446c-ab91-c01b60d9a7c3` (PR https://github.com/Stoffer-Industries/sindustries/pull/208, merge commit `8c6a16f`).
 - No further workflow steps
 
 ---
