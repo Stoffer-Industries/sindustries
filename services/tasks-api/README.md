@@ -33,6 +33,33 @@ REST API (M3 slice):
 - `GET /api/v1/tags`
 - `POST /api/v1/tags`
 
+Content Scheduler endpoints (`/api/v1/content-scheduler/*`, see
+`docs/specs/content-scheduler-tab-tech-design.md`):
+- `GET /items?status=` — list non-`removed` items; sorted by status, position, createdAt.
+- `POST /items` — create (body, source, sourceRef, scheduledFor).
+- `PATCH /items/:id` — edit body/scheduledFor/source/sourceRef; 409 on published/removed.
+- `POST /items/:id/approve` — sets `status=approved`, `approvedAt`, `approvedBy`.
+- `POST /items/:id/unapprove` — clears approval (status back to `queued`).
+- `POST /items/:id/publish` — guarded; posts to X via the configured X client.
+- `POST /items/:id/remove` — soft-delete (status=`removed`); 409 on published.
+- `POST /reorder` — `{ ids: [...] }` rewrites `position` per id in a transaction.
+- `GET /today-status` — `{ date, publishedCount, publishedItemId, cap }` for `Pacific/Auckland` today.
+
+### Content Scheduler env vars
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `X_CLIENT` | `fake` | `fake` returns a deterministic FakeXClient (dev/test). `real` calls `api.twitter.com/2/tweets`. |
+| `X_API_BEARER_TOKEN` | unset | Required when `X_CLIENT=real`; missing token → publish returns 503 `MISSING_CREDENTIALS`. |
+| `X_HANDLE` | `sindustries` | Used to build the published post URL when `X_CLIENT=real`. |
+
+### Content Scheduler timezone
+
+The "max one X post per day" rule is computed in `Pacific/Auckland` (Tom's
+local time). UTC `publishedAt` timestamps are stored; the daily window is
+derived via `Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland' })`
+on each publish/today-status request.
+
 ## Database workflow
 ```bash
 # generate Prisma client

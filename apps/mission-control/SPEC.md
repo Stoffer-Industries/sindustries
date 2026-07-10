@@ -132,6 +132,12 @@ specimen mount.
   the full archive (including done/closed tasks) without per-page pagination.
   This is the only Tasks API request the dashboard makes — see
   `apps/mission-control/src/tasksApi.js` (`getTasks`).
+- **Content Scheduler** state is read from the Tasks API at
+  `/api/v1/content-scheduler/items` and `/api/v1/content-scheduler/today-status`.
+  The publish flow is server-side (Tasks API posts to X with bearer auth);
+  the Mission Control client never holds X credentials. The "max one
+  X post per day" rule is computed in `Pacific/Auckland`. See
+  `docs/specs/content-scheduler-tab-tech-design.md` for the full design.
 - **Bookmark state** is read by the Bookmarks tab from
   `brain/state/bookmark-review-state.json` and
   `brain/state/bookmark-transitions.jsonl` via the dev-only Vite plugin

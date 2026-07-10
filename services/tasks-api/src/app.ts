@@ -2,6 +2,7 @@ import express from 'express';
 import { healthRouter } from './routes/health';
 import { tasksRouter } from './routes/tasks';
 import { tagsRouter } from './routes/tags';
+import { contentSchedulerRouter } from './routes/contentScheduler.ts';
 
 function getAllowedOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.split(',')
@@ -52,6 +53,7 @@ export function createApp() {
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', tasksRouter);
   app.use('/api/v1', tagsRouter);
+  app.use('/api/v1', contentSchedulerRouter);
 
   app.use((error, _req, res, _next) => {
     console.error(error);
