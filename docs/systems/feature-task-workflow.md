@@ -254,3 +254,7 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 - `brain/bookmarks/specs/feature-factory-v2-2026-06-04.md` — factory-v2 product spec
 - `docs/systems/agent-orchestration.md` — wider agent map
 - `docs/systems/bookmark-workflow.md` — bookmark-driven spec intake (parallel pipeline)
+
+## Related Tasks / PRs
+
+- Task `ba116063-382a-446c-ab91-c01b60d9a7c3` — Lobster worktree cleanup after merge (PR #208): the source of the post-merge worktree cleanup step in the `done` section above
