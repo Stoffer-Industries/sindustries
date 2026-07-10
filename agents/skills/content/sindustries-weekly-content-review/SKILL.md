@@ -180,7 +180,42 @@ Read `docs/state-of-the-nation.md`. Using the ops notes already collected, apply
 
 ---
 
-## Step 7 — Notify
+## Step 7 — Commit and PR state-of-the-nation changes
+
+After updating `docs/state-of-the-nation.md`, commit and open a PR so the changes are not lost.
+
+```bash
+cd /Users/quinnstoffer/.openclaw/workspace
+
+# Only act if there are changes to state-of-the-nation.md
+git diff --quiet docs/state-of-the-nation.md || {
+  BRANCH="chore/state-of-the-nation-$(date +%Y-%m-%d)"
+  git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+  git add docs/state-of-the-nation.md
+  git commit -m "chore(docs): state-of-the-nation update $(date +%Y-%m-%d)"
+  git push -u origin "$BRANCH"
+  GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" GH_CONFIG_DIR=~/.config/gh-quinn \
+    gh pr create \
+      --repo Stoffer-Industries/workspace \
+      --title "chore(docs): state-of-the-nation update $(date +%Y-%m-%d)" \
+      --body "Weekly state-of-the-nation update from the content review cron.
+
+Changes applied by the \`sindustries-weekly-content-review\` skill:
+- New shipped items added to **What Already Exists**
+- Resolved frictions marked with strikethrough
+- New recurring frictions noted if any
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+      --assignee quinnstoffer
+  git checkout main
+}
+```
+
+If the branch already exists from a prior run this week, check out the existing branch, stage, and commit rather than creating a new one.
+
+---
+
+## Step 8 — Notify
 
 After writing the file, post a short message to the session that triggered this skill:
 
