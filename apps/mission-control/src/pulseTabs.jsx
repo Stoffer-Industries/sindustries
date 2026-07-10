@@ -17,6 +17,7 @@ import { FlowMetricsTab } from './tabs/FlowMetricsTab.jsx';
 import { TasksTab } from './tabs/TasksTab.jsx';
 import { BookmarksTab } from './tabs/BookmarksTab.jsx';
 import { DesignSystemTab } from './tabs/DesignSystemTab.jsx';
+import { ContentSchedulerTab } from './tabs/ContentSchedulerTab.jsx';
 
 function IconClipboard() {
   return (
@@ -59,6 +60,15 @@ function IconPalette() {
   );
 }
 
+function IconContent() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M8 9h8M8 13h6" />
+    </svg>
+  );
+}
+
 export const PULSE_TABS = [
   {
     id: 'tasks',
@@ -87,6 +97,13 @@ export const PULSE_TABS = [
     path: '/design-system',
     icon: <IconPalette />,
     component: DesignSystemTab
+  },
+  {
+    id: 'content-scheduler',
+    label: 'Content',
+    path: '/content-scheduler',
+    icon: <IconContent />,
+    component: ContentSchedulerTab
   }
 ];
 

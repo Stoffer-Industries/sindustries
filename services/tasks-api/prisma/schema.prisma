@@ -94,3 +94,40 @@ model TaskTag {
   @@id([taskId, tagId])
   @@index([tagId])
 }
+
+enum ContentSchedulerItemStatus {
+  draft
+  queued
+  approved
+  published
+  removed
+}
+
+enum ContentSchedulerSource {
+  ops_notes
+  cto_craft
+  manual
+  other
+}
+
+model ContentSchedulerItem {
+  id            String                       @id @default(uuid()) @db.Uuid
+  body          String                       @db.VarChar(1000)
+  source        ContentSchedulerSource       @default(manual)
+  sourceRef     String?
+  status        ContentSchedulerItemStatus   @default(queued)
+  scheduledFor  DateTime?
+  position      Int                          @default(0)
+  approvedAt    DateTime?
+  approvedBy    String?
+  publishedAt   DateTime?
+  publishedUrl  String?
+  publishError  String?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
+  removedAt     DateTime?
+
+  @@index([status, position])
+  @@index([status, scheduledFor])
+  @@index([status, publishedAt])
+}

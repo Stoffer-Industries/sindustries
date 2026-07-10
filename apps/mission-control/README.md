@@ -1,8 +1,8 @@
 # Pulse — `@sindustries/mission-control`
 
 The Sindustries desktop shell. Hosts multiple tabs (Tasks, Bookmarks, Flow
-metrics, Design System) behind a single URL. The shell also owns the
-day/night theme toggle (bottom of the vertical sidebar) and broadcasts
+metrics, Design System, Content) behind a single URL. The shell also owns
+the day/night theme toggle (bottom of the vertical sidebar) and broadcasts
 the chosen theme to iframe-based tabs via `pulse:theme` postMessage.
 
 See `SPEC.md` for behaviour and `docs/specs/pulse-shell-app-tech-design.md`
@@ -37,3 +37,12 @@ an empty state rather than failing. Override the API base with
 1. Create a component in `src/tabs/DesignSystemTab.jsx` (or any `MyTab.jsx`).
 2. Register it in `src/pulseTabs.jsx` with `id`, `label`, `path`, `icon`, and `component`.
 3. Done — no App.jsx changes needed.
+
+## Content tab
+
+The Content tab surfaces the Content Scheduler — a single-user queue for
+X posts. Items go through `queued → approved → published`; the publish
+endpoint enforces "max one X post per day" in `Pacific/Auckland`. The
+queue is read from `services/tasks-api`; see
+`docs/specs/content-scheduler-tab-tech-design.md` for the full design and
+`services/tasks-api/README.md` for the backend endpoints it depends on.
