@@ -31,10 +31,11 @@
       "Build-in-public framing (showing the process, not just the result) consistently outperforms polished announcement-style posts.",
       "The content factory changes the channel plan: weekly website updates are now a reliable source of short-form social material. Treating the website as the source of truth and social as the distribution layer removes the manual writing bottleneck that kept cadence at 1-2 posts per week.",
       "Original cadence target (3-4 standalone posts per week) is being replaced by 1-2 distribution posts per week sourced from the weekly update. Quality and reliability matter more than raw post count.",
-      "2026-06-17 X thread on the Lobster + Quinn state-handoff pattern shifted the channel from announcement-style posts to architecture-and-process posts. The thread landed because it explains a real design decision (where intelligence lives in an agent pipeline) rather than selling a product outcome — supporting the hypothesis that process posts are now the strongest format for the SIndustries audience, not just a planned pivot."
+      "2026-06-17 X thread on the Lobster + Quinn state-handoff pattern shifted the channel from announcement-style posts to architecture-and-process posts. The thread landed because it explains a real design decision (where intelligence lives in an agent pipeline) rather than selling a product outcome — supporting the hypothesis that process posts are now the strongest format for the SIndustries audience, not just a planned pivot.",
+      "Mission Control creates a new short-form source arc: the week moved from shell MVP to saved-signal visibility, design-system access, and shell-owned theme sync. This is strong candidate material for a process post about turning internal operating loops into one visible workspace."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-06-19",
+    "updatedAt": "2026-07-10",
     "links": [],
     "image": "/brand/studio/social-content-hero.png",
     "visibility": "published"
