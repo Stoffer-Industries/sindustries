@@ -62,10 +62,22 @@ On every heartbeat:
 7. If the status is healthy, write/update state as `resolved` and stay quiet unless another item needs action.
 8. If the status is unhealthy and the runbook says repair is safe, run the repair command once.
 9. Verify the service after repair.
-10. Update state:
-    - repair succeeded + verify healthy: `resolved`
-    - repair attempted + still unhealthy: `repair_attempted`, with `nextRetryAt` at least 2 hours in the future
-    - repair blocked/not safe/no runbook: `blocked`, with `nextRetryAt` tomorrow unless new evidence appears
+10. Update state (unified agent incident schema — task 75ec1c8c, see `docs/systems/agent-incidents.md`):
+    - repair succeeded + verify healthy: `status: "resolved"`, `resolvedAt: <now>`
+    - repair attempted + still unhealthy: `status: "watching"`, `nextRetryAt` at least 2 hours in the future, increment `attempts`
+    - repair blocked/not safe/no runbook: `status: "escalated"`, `nextRetryAt` tomorrow unless new evidence appears, set `needsTom: true`
+
+    Lox must also record the four new unified fields the schema requires:
+    `firstSeen` (ISO-8601 UTC; fall back to `dailyReviewDate` if absent),
+    `attempts` (int ≥ 0), `needsTom` (bool, true when escalated), and `severity`
+    (one of `low`/`medium`/`high`/`critical`). The shared parser
+    (`agents/lib/incident_state.py`) auto-fills missing values, but Lox should
+    record them at write time so the live file validates against the schema.
+
+    The legacy statuses `repair_attempted` and `blocked` are accepted by the
+    parser and normalized to `watching` / `escalated` respectively. Stop using
+    them in new writes; only emit the canonical four (`watching` /
+    `escalated` / `resolved` / `false_positive`).
 11. Escalate to Tom with `openclaw message send --channel telegram --account lox --target 6435140143 --message "<message>"` when:
     - a repair was attempted, or
     - a repair is blocked/failed, or
