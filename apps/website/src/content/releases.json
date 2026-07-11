@@ -178,5 +178,55 @@
     "links": [],
     "evidence": "Shipped across PRs #161, #163, #165, and #167 (2026-07-01 to 2026-07-03). Drift detection unchecks the approval marker, posts AC diff comments, and the resync path rewrites the brain spec from the task description after Tom re-approves.",
     "visibility": "draft"
+  },
+  {
+    "title": "Mission Control shell MVP",
+    "slug": "mission-control-shell-mvp",
+    "releasedAt": "2026-07-05",
+    "summary": "A persistent operating shell shipped with tabs for active work, saved-signal review, and flow metrics, giving the studio one place to see its core loops.",
+    "type": "system",
+    "links": [],
+    "evidence": "Mission Control shell MVP shipped 2026-07-05 with a persistent navigation shell and embedded operating surfaces for tasks, bookmarks, and flow metrics.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Mission Control bookmarks tab",
+    "slug": "mission-control-bookmarks-tab",
+    "releasedAt": "2026-07-08",
+    "summary": "Saved-signal review moved into Mission Control with live KPIs, topic breakdowns, pending approvals, and recent state changes.",
+    "type": "system",
+    "links": [],
+    "evidence": "The Mission Control bookmarks tab shipped 2026-07-08, exposing saved-signal pipeline KPIs, topic breakdowns, pending approvals, and recent transitions.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Mission Control shell-owned theme",
+    "slug": "mission-control-shell-owned-theme",
+    "releasedAt": "2026-07-10",
+    "summary": "Day/night mode moved to the Mission Control shell, so the preference now stays consistent across the workspace and embedded task views.",
+    "type": "system",
+    "links": [],
+    "evidence": "Shell-owned theme preference shipped 2026-07-10 with cross-tab and embedded task-view synchronisation.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Worktree cleanup after feature delivery",
+    "slug": "worktree-cleanup-after-feature-delivery",
+    "releasedAt": "2026-07-10",
+    "summary": "Feature-delivery cleanup now removes matching task worktrees after merge, keeping the build environment tidy without manual follow-up.",
+    "type": "system",
+    "links": [],
+    "evidence": "Post-merge feature-task cleanup shipped 2026-07-10 and now removes matching task worktrees idempotently.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Task creation operating standard",
+    "slug": "task-creation-operating-standard",
+    "releasedAt": "2026-07-07",
+    "summary": "The task-creation standard now separates product acceptance from implementation evidence, making the workflow clearer for agents and reviewers.",
+    "type": "system",
+    "links": [],
+    "evidence": "Task creation guidance updated 2026-07-07 to use real task types and keep acceptance checkbox state reserved for QA/product approval.",
+    "visibility": "draft"
   }
 ]
