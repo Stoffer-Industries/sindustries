@@ -94,7 +94,8 @@ ingested  summarized  needs_research (human-gated)                      declined
 | File | Role |
 |---|---|
 | `brain/state/bookmark-review-state.json` | Single source of truth for all bookmark states |
-| `brain/state/bookmark-transitions.jsonl` | Append-only transition log (used by dashboard) |
+| `brain/state/bookmark-transitions.jsonl` | Append-only transition log (used by dashboard; authoritative source of truth) |
+| `analytics.bookmark_transitions` (Postgres) | Queryable mirror of every transition; best-effort, write happens after JSONL append. See "Analytics Mirror" below. |
 | `brain/state/focus-config.json` | Curation config: topics, relevanceThreshold, recurationDays, batchSize |
 | `brain/state/bookmark-approval-topics.json` | Telegram delivery config: chatId + threadId per topic |
 | `brain/bookmarks/x/<slug>.md` | Raw bookmark files |
@@ -165,3 +166,29 @@ If a spec's topic isn't in the config, falls back to `general`. If `general` is 
 | Spec not dispatched for re-curated item | Item was previously approved+tasked; `list_spec_requests.py` drift guard skips it permanently | By design — tasked bookmarks don't re-enter spec dispatch. If a genuinely new spec angle is needed, create a new bookmark or task manually. |
 | Curation not refreshing | `recurationDays` not elapsed or item in terminal status | Check `focus-config.json`, lower `recurationDays` or manually clear `item.curation` |
 | Lobster exits 137 | OOM during lobster run | Check available memory; lobster may need to be run with a lower batch `limit` arg |
+
+---
+
+## Analytics Mirror (Postgres)
+
+Every call to `log_transition()` writes the JSONL line first (authoritative
+source of truth) and then attempts to mirror the event into Postgres. The
+mirror is **best-effort**: any failure is logged as a debug warning and
+never raised, so the JSONL path is unaffected.
+
+- **Table:** `analytics.bookmark_transitions` (created by the Prisma
+  migration `services/tasks-api/prisma/migrations/20260708120000_add_analytics_transitions/migration.sql`).
+- **Helper:** `agents/workflows/bookmarks/scripts/analytics_db.py::insert_transition()`.
+- **Driver:** prefers `psycopg2`; falls back to `pg8000` when psycopg2 is
+  not importable.
+- **Connect timeout:** 2s. Inserts use a short-lived connection (no pool in
+  v1).
+- **No-op when `DATABASE_URL` is unset:** the helper returns `False`
+  silently — the JSONL still gets the row.
+- **Read path:** Pulse queries the table directly via SQL; there is no REST
+  endpoint in v1. Indexes are on `occurred_at`, `bookmark_key`, and
+  `to_status`.
+- **Reserved table:** `analytics.task_transitions` is created by the same
+  migration but stays empty until the feature-task workflow wires its
+  equivalent helper. It exists now so Pulse can build queries against the
+  full pipeline shape without a second migration.

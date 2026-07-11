@@ -294,6 +294,26 @@ def log_transition(
     finally:
         os.close(fd)
 
+    # Best-effort Postgres analytics mirror. Runs only after the JSONL
+    # append has succeeded so the JSONL remains the authoritative source
+    # of truth; a DB failure here is logged but never raised. See
+    # analytics_db.insert_transition() for the full contract.
+    try:
+        from analytics_db import insert_transition
+
+        insert_transition(
+            {
+                "bookmark_key": event["key"],
+                "from_status": event["from"],
+                "to_status": event["to"],
+                "actor": event["actor"],
+                "source": "bookmark-workflow",
+                "payload": {"reason": event["reason"], "at": event["at"]},
+            }
+        )
+    except Exception as e:  # pragma: no cover - defensive guard
+        log_debug(f"[bookmark-analytics] insert skipped: {e}")
+
 
 def bookmark_record(path: Path) -> dict[str, Any]:
     text = load_text(path)

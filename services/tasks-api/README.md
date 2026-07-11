@@ -96,6 +96,28 @@ extend the same minute as a recent migration, increment the last 2 digits
 A repo-wide check enforces this: run `make check-migrations` (or
 `./scripts/check-migration-prefixes.sh`) before pushing, and the
 `tasks-api-tests` job runs the same check in CI before applying migrations.
+
+### Analytics schema (raw SQL migrations, not Prisma models)
+
+The `analytics` schema in this database is intentionally **not** declared in
+`schema.prisma`. It holds tables that are populated by Python helper scripts
+outside the Tasks API domain (`agents/workflows/bookmarks/scripts/analytics_db.py`
+and future equivalents) and queried directly by Pulse / analytics tools via
+raw SQL.
+
+New analytics tables must:
+
+1. Live under `services/tasks-api/prisma/migrations/` so `make migrate-db`
+   applies them.
+2. Use `CREATE … IF NOT EXISTS` so the migration is idempotent.
+3. Be created inside the `analytics` schema (`CREATE SCHEMA IF NOT EXISTS analytics;`).
+4. **Not** be added to `schema.prisma` — they are managed by raw SQL only.
+   `prisma migrate dev` may print an "unmanaged table" notice; that is
+   expected.
+
+See `docs/systems/bookmark-workflow.md` for the runtime contract of the
+analytics mirror (graceful degradation when `DATABASE_URL` is unset, no
+connection pooling in v1, etc.).
 The check fails with a non-zero exit if any two `prisma/migrations/*`
 directories share a 14-char timestamp prefix.
 
