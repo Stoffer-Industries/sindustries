@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sindustries.co.nz/schemas/agent-incident-state.schema.json",
+  "title": "Agent incident state",
+  "description": "Unified incident state file written by Quinn (workflow/pipeline anomalies) and Lox (infra/host reliability). Each agent owns its own file; this schema is the superset both must conform to after migration.",
+  "type": "object",
+  "required": ["incidents"],
+  "additionalProperties": false,
+  "properties": {
+    "incidents": {
+      "type": "object",
+      "description": "Slug-keyed map of incidents. Keys are stable, kebab-cased identifiers derived from the failure pattern (e.g. 'tasks-api-dev-down', 'bookmark-acpx-openai-401-no-scopes').",
+      "additionalProperties": { "$ref": "#/$defs/incident" }
+    },
+    "_meta": {
+      "type": "object",
+      "description": "Optional operator-only metadata. Not part of the incident contract; never required. Use for last-write bookkeeping.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "incident": {
+      "type": "object",
+      "required": ["owner", "status"],
+      "description": "Single incident record. The schema marks only `owner` and `status` as required; other fields default to safe values on read so legacy entries still validate.",
+      "additionalProperties": true,
+      "properties": {
+        "owner": {
+          "type": "string",
+          "enum": ["lox", "quinn"],
+          "description": "Which agent owns this entry. Set explicitly when writing; legacy entries default to filename-derived owner during read-time normalization."
+        },
+        "firstSeen": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp when the incident was first observed."
+        },
+        "lastCheckedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp of the most recent check or write."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["watching", "escalated", "resolved", "false_positive"],
+          "description": "Current state of the incident. `watching` = under observation, `escalated` = needs human attention, `resolved` = fixed, `false_positive` = turned out not to be a real issue."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "How serious the incident is. `high` and `critical` are surfaced to Tom automatically by Quinn's heartbeat roll-up."
+        },
+        "needsTom": {
+          "type": "boolean",
+          "description": "Set true once the incident has been escalated to Tom (or `severity` is `high`/`critical`). Quinn's heartbeat surfaces these."
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of times the owning agent has attempted to investigate/auto-recover."
+        },
+        "escalatedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp when the incident was first escalated. Null if never escalated."
+        },
+        "resolvedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp when the incident was resolved. Null if still open."
+        },
+        "nextRetryAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp of the earliest time the next retry is allowed. Used to back off auto-recovery attempts."
+        },
+        "recurrenceCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of times the same slug has re-appeared after resolution. Used for trending and runbook effectiveness."
+        },
+        "lastAction": {
+          "type": "string",
+          "description": "Free-form description of the most recent action taken (investigation, repair attempt, escalation, resolution)."
+        },
+        "details": {
+          "type": "object",
+          "description": "Operator-defined structured context (links to PRs, runbooks, blast radius, follow-up tasks, etc.). Schema is intentionally open.",
+          "additionalProperties": true
+        },
+        "linkedPr": {
+          "type": ["string", "array"],
+          "items": { "type": "string" },
+          "description": "Optional shortcut for the remediation PR(s). Single string for one PR; array when multiple PRs share the root cause. Mirrors `details.linkedPr` for agents that prefer a top-level field."
+        },
+        "linkedRunbook": {
+          "type": ["string", "array"],
+          "items": { "type": "string" },
+          "description": "Optional shortcut for the runbook path(s). Mirrors `details.linkedRunbook`."
+        },
+        "followUp": {
+          "type": "array",
+          "description": "Optional list of follow-up items. Each entry is a short string (a task, PR, or note).",
+          "items": { "type": "string" }
+        },
+        "dailyReviewDate": {
+          "type": "string",
+          "description": "Lox-specific: the daily review date that produced this entry. Format YYYY-MM-DD."
+        }
+      }
+    }
+  }
+}

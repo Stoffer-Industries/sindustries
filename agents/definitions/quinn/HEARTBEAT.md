@@ -118,9 +118,12 @@ OPS STATE MANAGEMENT
 
 Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` but for workflow/pipeline anomalies rather than infra issues.
 
-**Schema for each entry:**
+**Schema (task 75ec1c8c — unified with Lox):** The state file uses the **unified agent incident schema** described in `docs/systems/agent-incidents.md`. Top-level key is `incidents` (renamed from the legacy `ops` key). The schema marks only `owner` and `status` as required; the rest default to safe values on read.
+
+**Minimal entry shape Quinn should write:**
 ```json
 {
+  "owner": "quinn",
   "firstSeen": "<ISO timestamp>",
   "lastCheckedAt": "<ISO timestamp>",
   "status": "watching | escalated | resolved | false_positive",
@@ -129,9 +132,27 @@ Quinn maintains a persistent operational findings registry at `brain/state/quinn
   "attempts": 1,
   "lastAction": "what was tried / what happened",
   "resolvedAt": null,
-  "escalatedAt": null
+  "escalatedAt": null,
+  "nextRetryAt": null,
+  "recurrenceCount": 0,
+  "details": {}
 }
 ```
+
+**Reading from both agents (preferred path):** Use the shared parser at `agents/lib/incident_state.py`. Import it from the agents package and call `load_all_incidents()` / `needs_tom()` instead of hand-rolling the schema. The parser handles Lox's file too and normalizes legacy shapes on the fly, so Quinn's heartbeat does not need to branch on file format.
+
+```python
+import sys
+sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
+from agents.lib.incident_state import load_all_incidents, needs_tom
+
+all_incidents = load_all_incidents()
+for inc in needs_tom(all_incidents):
+    # Telegram Tom, set escalatedAt, etc.
+    ...
+```
+
+**Legacy compatibility:** The parser still accepts Quinn's pre-migration `ops` key. Once the migration script (`agents/lib/incident_migrate.py`) has been run against live state (Quinn does this once after PR merge via `[openclaw-needed]`), all entries are in the unified shape and the legacy normalizer is just a safety net.
 
 **What to write entries for** (after each heartbeat section above):
 - Guardrail skips on the same item for 2+ consecutive heartbeats
@@ -158,19 +179,34 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
   - Set `escalatedAt: <now>` on the entry so it only fires once per incident
   - Do not re-escalate already-escalated items unless they've been updated
 
-**State file read/write pattern:**
+**State file read/write pattern (unified schema, task 75ec1c8c):**
 ```python
-import json, os
+import json, os, sys
 from datetime import datetime, timezone
 
 STATE_FILE = '/Users/quinnstoffer/.openclaw/workspace/brain/state/quinn-ops-state.json'
+
+# Prefer the shared parser; fall back to a hand-rolled read if the package
+# isn't importable (e.g. when running outside the repo worktree).
+try:
+    sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
+    from agents.lib.incident_state import load_all_incidents, needs_tom as _shared_needs_tom
+    def read_all_incidents():
+        return load_all_incidents()
+    def read_needs_tom():
+        return _shared_needs_tom(load_all_incidents())
+except Exception:
+    def read_all_incidents():
+        return []  # parser unavailable; callers should log and continue
+    def read_needs_tom():
+        return []
 
 def read_ops_state():
     try:
         with open(STATE_FILE) as f:
             return json.load(f)
     except Exception:
-        return {"ops": {}}
+        return {"incidents": {}}  # unified key (was "ops" pre-75ec1c8c)
 
 def write_ops_state(state):
     with open(STATE_FILE, 'w') as f:
@@ -178,10 +214,20 @@ def write_ops_state(state):
 
 def upsert_op(state, slug, severity, last_action, resolved=False):
     now = datetime.now(timezone.utc).isoformat()
-    ops = state.setdefault("ops", {})
-    if slug not in ops:
-        ops[slug] = {"firstSeen": now, "attempts": 0, "needsTom": False, "escalatedAt": None, "resolvedAt": None}
-    entry = ops[slug]
+    incidents = state.setdefault("incidents", {})  # unified key (was "ops")
+    if slug not in incidents:
+        incidents[slug] = {
+            "owner": "quinn",  # unified schema: owner is required
+            "firstSeen": now,
+            "attempts": 0,
+            "needsTom": False,
+            "escalatedAt": None,
+            "resolvedAt": None,
+            "nextRetryAt": None,
+            "recurrenceCount": 0,
+            "details": {},
+        }
+    entry = incidents[slug]
     entry["lastCheckedAt"] = now
     entry["lastAction"] = last_action
     entry["severity"] = severity
@@ -196,3 +242,5 @@ def upsert_op(state, slug, severity, last_action, resolved=False):
             entry["severity"] = severity if severity in ("high", "critical") else "high"
     return state
 ```
+
+**Migration note:** After task 75ec1c8c's PR merges, Quinn runs `python3 agents/lib/incident_migrate.py --in-place` once against live state to convert the legacy `ops` key to `incidents` and add the unified fields. Until that runs, the legacy `ops` key is still readable through the parser's safety-net normalizer, so heartbeats do not block.
