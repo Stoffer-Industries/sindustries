@@ -192,3 +192,11 @@ never raised, so the JSONL path is unaffected.
   migration but stays empty until the feature-task workflow wires its
   equivalent helper. It exists now so Pulse can build queries against the
   full pipeline shape without a second migration.
+
+---
+
+## Related
+
+- Task: `b179c0e3-c6b0-4c9d-97dc-982d3b841783` — Bookmark pipeline analytics — Postgres transition log
+- PR: https://github.com/Stoffer-Industries/sindustries/pull/216
+- Tech design: `docs/specs/bookmark-pipeline-analytics-postgres-transition-log-tech-design.md`
