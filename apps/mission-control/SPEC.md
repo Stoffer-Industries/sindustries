@@ -9,7 +9,7 @@ surface.
 
 - **Audience:** internal Sindustries operators (Tom and the agent team).
 - **Route:** `apps/mission-control` is deployed at the `/` surface.
-- **Tabs in MVP:** Tasks, Bookmarks, Flow metrics, Design System.
+- **Tabs in MVP:** Tasks, Bookmarks, Flow metrics, Design System, Content, SIndustries.
 - **Non-goal:** mobile/responsive (desktop ≥ 1280px only).
 
 ## Flows
@@ -84,6 +84,8 @@ surface.
 | Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, funnel, topics, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
 | Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand) with back link to Tasks |
+| Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler queue: list + create/approve/publish/remove/reorder; embeds content via iframe + Tasks-API proxy |
+| SIndustries | `/sindustries` | `Tabs/SIndustriesTab.jsx` | Embedded `sindustries.co.nz` via iframe; falls back to an external-link card if the upstream `X-Frame-Options`/`CSP` blocks embedding (timeout-based detection, ~8s) |
 | 404 / unknown path | `/<anything>` | falls back to Tasks tab | The default tab renders; no error surface |
 
 ## E2e Coverage
@@ -113,6 +115,7 @@ specimen mount.
 | Recent transitions | Vitest: `bookmarkPipeline.test.js` covers `recentTransitions` scope + ordering |
 | State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
+| SIndustries tab iframe + fallback | Vitest: `tabs/SIndustriesTab.test.jsx` covers initial iframe render, fallback after timeout, and success-path load event |
 
 ## Data Sources
 
