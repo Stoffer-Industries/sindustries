@@ -18,6 +18,7 @@ import { TasksTab } from './tabs/TasksTab.jsx';
 import { BookmarksTab } from './tabs/BookmarksTab.jsx';
 import { DesignSystemTab } from './tabs/DesignSystemTab.jsx';
 import { ContentSchedulerTab } from './tabs/ContentSchedulerTab.jsx';
+import { SIndustriesTab } from './tabs/SIndustriesTab.jsx';
 
 function IconClipboard() {
   return (
@@ -69,6 +70,17 @@ function IconContent() {
   );
 }
 
+function IconSindustries() {
+  // Globe-with-S glyph: simple brand-style mark for sindustries.co.nz.
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" strokeLinecap="round" />
+      <path d="M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18" />
+    </svg>
+  );
+}
+
 export const PULSE_TABS = [
   {
     id: 'tasks',
@@ -104,6 +116,13 @@ export const PULSE_TABS = [
     path: '/content-scheduler',
     icon: <IconContent />,
     component: ContentSchedulerTab
+  },
+  {
+    id: 'sindustries',
+    label: 'SIndustries',
+    path: '/sindustries',
+    icon: <IconSindustries />,
+    component: SIndustriesTab
   }
 ];
 

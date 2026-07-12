@@ -10,13 +10,24 @@ beforeEach(() => {
 });
 
 describe('Pulse shell', () => {
-  it('renders the sidebar with four tabs', () => {
+  it('renders the sidebar with the registered tabs', () => {
     render(<App />);
     expect(screen.getByTestId('pulse-sidebar')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-tasks')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-bookmarks')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-flow-metrics')).toBeTruthy();
     expect(screen.getByTestId('pulse-sidebar-tab-design-system')).toBeTruthy();
+    expect(screen.getByTestId('pulse-sidebar-tab-content-scheduler')).toBeTruthy();
+    expect(screen.getByTestId('pulse-sidebar-tab-sindustries')).toBeTruthy();
+  });
+
+  it('routes /sindustries to the SIndustries tab', () => {
+    window.history.pushState({}, '', '/sindustries');
+    render(<App />);
+    const active = screen.getByTestId('pulse-sidebar-tab-sindustries');
+    expect(active.getAttribute('aria-current')).toBe('page');
+    // The SIndustries iframe is in the active content area.
+    expect(screen.getByTestId('pulse-sindustries')).toBeTruthy();
   });
 
   it('routes to a tab matching the URL path on first render', () => {
