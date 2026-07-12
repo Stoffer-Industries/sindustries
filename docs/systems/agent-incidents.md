@@ -1,21 +1,21 @@
 ---
 title: Agent Incidents
 type: System reference
-last_updated: 2026-07-11
+last_updated: 2026-07-13
 owner: Rowan
 repos: Stoffer-Industries/sindustries
-related_pr: null
-shipped_date: null
+related_pr: 214
+shipped_date: 2026-07-11
 ---
 
 # Agent Incidents
 
 **Type:** System reference (keep updated as the unified schema evolves)
-**Last updated:** 2026-07-11
+**Last updated:** 2026-07-13
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries` (parser, schema, migration script)
-**Related PR:** TBD — task 75ec1c8c
-**Shipped date:** TBD
+**Related PR:** https://github.com/Stoffer-Industries/sindustries/pull/214 — task 75ec1c8c
+**Shipped date:** 2026-07-11
 
 ## Purpose
 
