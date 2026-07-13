@@ -186,6 +186,11 @@ def create_task_for_spec(
         try:
             moved_doc, moved = move_bookmark_spec_to_task_in_progress(spec_doc)
             patch_task_spec_line(base_url, str(existing['id']), spec_doc, moved_doc, existing)
+        except FileNotFoundError:
+            # Backward-compatible reuse path for legacy tasks/tests where the
+            # dedupe marker already exists but the source spec is absent. New
+            # task creation still requires a movable source file.
+            moved_doc, moved = spec_doc, False
         except Exception as exc:  # noqa: BLE001
             return None, {
                 'bookmarkKey': bookmark_key,
