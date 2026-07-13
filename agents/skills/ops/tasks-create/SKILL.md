@@ -116,17 +116,40 @@ tasks_api_client.py create \
 
 ### Content task
 
-Content tasks are created by the weekly content review workflow, not manually. Only create one manually if explicitly asked.
+Content tasks are created after Tom approves a weekly content review. Only create one manually if explicitly asked.
+
+The description **must** follow this exact format — the content task lobster validates it:
 
 ```
 tasks_api_client.py create \
-  --title "✍️ <description>" \
+  --title "✍️ SIndustries website content — YYYY-MM-DD weekly review (Tom approved)" \
   --type content \
   --priority high \
   --assignee Ivy \
-  --description "**Source:** brain/content/sindustries-weekly-content/<date>.md
-..."
+  --description "**Source:** brain/content/sindustries-weekly-content/YYYY-MM-DD.md
+
+**Review window:** YYYY-MM-DD to YYYY-MM-DD
+
+---
+
+## Quinn can execute
+
+- [ ] EDIT experiment/slug — description of change
+- [ ] ADD release — ...
+
+## Needs Tom approval
+
+- [ ] ADD system/slug — description of change
+- [ ] EDIT story/slug — ..."
 ```
+
+**Format rules (enforced by the content task lobster):**
+- The `**Source:**` line must point to a real file at `brain/content/sindustries-weekly-content/YYYY-MM-DD.md`
+- The heading names must be exactly `## Quinn can execute` and `## Needs Tom approval` — these mirror the sections in the review file and the lobster validates that each heading contains "Tom" or "Quinn"
+- Each heading must have at least one checkbox line (`- [ ] ...`) beneath it — the lobster rejects tasks where a heading has no checkboxes
+- Copy items verbatim from the review file into the relevant section; do not paraphrase or reword
+- If a section has no approved items, omit that heading rather than leaving it empty
+- The `**Review window:**` line is informational; include it but it is not validated
 
 ---
 
@@ -150,3 +173,5 @@ tasks_api_client.py create \
 | Putting `feature-factory` tag on a code/content/research task | Only feature tasks get the `feature-factory` tag |
 | Using `--type bug` or `--type chore` | Those don't exist. Use `--type code` (covers both) |
 | Leaving `--type` unset because you're unsure | Ask Tom — don't ship a typeless task |
+| Content task headings like `## Tom` / `## Quinn` | Use exact names `## Quinn can execute` and `## Needs Tom approval` — mirrors review file sections |
+| Content task has no checkbox lines under a heading | Each Tom/Quinn heading must have `- [ ] ...` lines beneath it or the lobster rejects it |

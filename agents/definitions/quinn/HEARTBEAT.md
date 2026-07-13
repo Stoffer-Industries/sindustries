@@ -1,26 +1,25 @@
 # HEARTBEAT
 
+**SILENCE RULE: Default to HEARTBEAT_OK. Only produce output when there is a new, actionable item that Tom or Quinn needs to act on RIGHT NOW. Do not narrate zero-counts, unchanged state, chronic items already escalated, sections with nothing to do, or items already tracked in ops state with `escalatedAt` set. Each section below should contribute nothing to output unless it has a genuine new finding. When in doubt, stay silent.**
+
+---
+
 BOOKMARK STATE OBSERVABILITY
 
 Heartbeat does not curate bookmarks, write specs, validate spec artifacts, or
 advance bookmark review state. Production bookmark curation and spec generation
 now run from the bookmark review cron.
 
-Heartbeat only reports bookmark pipeline health:
-
 1. Read the state analyzer skill:
    `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/SKILL.md`
 2. Run the compact analyzer:
    `python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py --json`
-3. Report counts by `reviewStatus`, topic, and approval status.
-4. Flag blocked or stale states across heartbeats:
-   - approvals pending for Tom
-   - specs requested but not created
-   - specs created but no approval requested
-   - tasks requested or task creation follow-up needed
-   - repeated likely-follow-up buckets that have not changed since the last heartbeat
-5. Track repeated stalls in `brain/state/quinn-ops-state.json` under OPS STATE MANAGEMENT.
-6. Do not mutate bookmark state from heartbeat.
+3. **Only output if at least one of these is true:**
+   - `approvalPendingCount > 0` (new approvals waiting for Tom — report which items)
+   - A stall appeared that is NOT already in ops state (specs requested but missing, tasks blocked)
+   - **Otherwise: skip this section entirely. Do not report counts, stale items, or unchanged state.**
+4. Track new stalls in `brain/state/quinn-ops-state.json` under OPS STATE MANAGEMENT.
+5. Do not mutate bookmark state from heartbeat.
 
 ---
 
@@ -33,12 +32,13 @@ Each heartbeat:
 2. Find feature tasks with a `[tech-design]` comment but no proper `[tech-design-approved] true` comment:
    `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
    The script mirrors the lobster's parser (`tagged_values` + `tech_design_approved` in `agents/workflows/feature-task/src/main.rs`): a comment counts as approval only if its trimmed text STARTS WITH the tag and the first whitespace-separated token after the tag is `true` (case-insensitive). Substring matches in the lobster's progress-checklist complaints (e.g. `Missing task comment [tech-design-approved] true`) are intentionally NOT counted.
-3. For each pending task:
+3. **If 0 pending: skip this section entirely. No output.**
+4. For each pending task:
    - Read the design at the linked path.
    - Check: all required sections present, aligned with spec, no unbounded scope, `.openclaw` boundary notes where relevant.
    - If it looks good: post task comment `[tech-design-approved] true`
    - If something looks wrong or risky: flag to Tom via Telegram instead of approving.
-4. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
+5. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
 
 ---
 
@@ -47,7 +47,7 @@ CONTENT TASK LOBSTER CHECK
 Quinn dispatches content task workflow passes from heartbeat; Lobster owns all status transitions.
 Run:
 `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-tasks/run.py --json`
-Report only failures, blocked closed-unmerged PRs, or meaningful transitions.
+Report only failures, blocked closed-unmerged PRs, or meaningful transitions. If nothing actionable: no output.
 
 ---
 
@@ -55,8 +55,8 @@ FEATURE TASK LOBSTER CHECK
 
 Quinn dispatches feature task workflow passes from heartbeat; Lobster owns all status transitions.
 Run:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py --json`
-Report only failures, blocked tasks, or meaningful transitions.
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py`
+Report only failures, newly blocked tasks, or meaningful transitions. **Do not report tasks already in ops state with `escalatedAt` set — Tom has already been notified. Do not summarise routine doing/acceptance counts.**
 
 **When the lobster reports `ready_checks_blocked` due to missing `[tech-design]`:**
 - Check if Rowan is free (no tasks in `doing` assigned to Rowan)
@@ -81,6 +81,7 @@ Each heartbeat:
    - Validate using the command in the comment.
    - Post a task comment: `[openclaw-done] <changed paths> | validated: <command output summary> | <any follow-up notes>`
 4. If `[openclaw-needed]` comments exist but are unclear or unsafe, mark the task blocked and post a comment explaining what is missing.
+5. **If no unresolved handoffs: skip this section entirely. No output.**
 
 Do not apply `.openclaw` changes speculatively. Only act on explicit `[openclaw-needed]` comments from Rowan.
 
@@ -90,6 +91,8 @@ Process any PRs that need your attention.
 
 Read and follow the reviewer section of:
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
+
+**Only output if you took a review action (submitted a review, requested changes, approved). Do not report PRs already reviewed or awaiting Tom.**
 
 ---
 
@@ -110,7 +113,7 @@ Run this check every heartbeat. Write at most 1 ops note per run.
 - Use the content-notes skill: `codebases/sindustries/agents/skills/content-notes/SKILL.md`
 - The `why:` field must be specific ("first time the pipeline ran end-to-end without manual intervention") not vague ("shows how we're hardening the system")
 
-**If nothing passes the tweet test:** do not write a note. Silence is correct.
+**If nothing passes the tweet test:** do not write a note. Silence is correct. Do not report that you checked.
 
 ---
 
@@ -148,7 +151,7 @@ from agents.lib.incident_state import load_all_incidents, needs_tom
 
 all_incidents = load_all_incidents()
 for inc in needs_tom(all_incidents):
-    # Telegram Tom, set escalatedAt, etc.
+    # include in heartbeat output, set escalatedAt, etc.
     ...
 ```
 
@@ -172,12 +175,12 @@ for inc in needs_tom(all_incidents):
 4. If an entry has `attempts >= 3` and is still unresolved: set `needsTom: true`, `severity` to at least `high`
 5. Always increment `attempts` and update `lastCheckedAt` when re-checking an existing entry
 
-**Escape early — direct Tom ping:**
+**Escalation — announce count and new items:**
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
-- For any entry where `needsTom: true` AND `escalatedAt` is null (not yet escalated):
-  - Send a direct Telegram message to Tom (session key: `telegram:6435140143` or via main session) with a concise summary of what needs him
-  - Set `escalatedAt: <now>` on the entry so it only fires once per incident
-  - Do not re-escalate already-escalated items unless they've been updated
+1. Count all entries where `needsTom: true` AND `status` is not `resolved` or `false_positive`. Call this N.
+2. For any entry where `needsTom: true` AND `escalatedAt` is null (newly escalated this pass): set `escalatedAt: <now>` and include a one-line summary of the new item in the output.
+3. **Always output a single closing line:** `N items need your attention` (where N is the open count). If N = 0: output nothing and reply HEARTBEAT_OK instead.
+4. Do not re-list items that were already escalated in previous heartbeats — just the count covers them.
 
 **State file read/write pattern (unified schema, task 75ec1c8c):**
 ```python
