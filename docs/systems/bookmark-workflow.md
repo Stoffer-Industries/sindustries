@@ -1,7 +1,7 @@
 # Bookmark Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-06-26
+**Last updated:** 2026-07-14
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmarks/`
 
 ---
@@ -59,10 +59,13 @@ ingested  summarized  needs_research (human-gated)                      declined
 - Lobster pipeline runs to `prepare_topic_approval.py` → produces `requiresApproval` payload
 - `request_topic_approval.py` receives the payload, checks for `specDocs`, sends Telegram message to Tom
 - Approval message includes: spec path, approval ID, `approve / decline / revise: <changes>` prompt
-- `handle_approval_reply.py` parses Tom's reply and calls `resolve_topic_approval.py`
+- `handle_approval_reply.py` parses Tom's reply, toggles `- [x] **Approved by Tom**` in each approved bookmark spec, and calls `resolve_topic_approval.py`
+- Approved bookmark specs stay under `brain/bookmarks/specs/`; approval alone never moves them into task spec folders
 
 ### 6. Task Creation
 - After `approve`, `create_tasks_from_proposals.py` pushes tasks to the Tasks API
+- On task creation or task reuse, the workflow moves each approved spec from `brain/bookmarks/specs/<slug>-<key>.md` to `brain/tasks/specs/in-progress/<slug>-<key>.md` and creates/repairs the task `**Spec:**` line to point at the destination
+- Once moved to `brain/tasks/specs/in-progress/`, bookmark-origin specs follow the feature-task lifecycle (`in-progress/` → `done/` on task completion)
 - Sets `reviewStatus: tasked` — **terminal**
 
 ---
@@ -100,7 +103,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `brain/state/bookmark-approval-topics.json` | Telegram delivery config: chatId + threadId per topic |
 | `brain/bookmarks/x/<slug>.md` | Raw bookmark files |
 | `brain/bookmarks/summaries/<slug>-<key>.md` | LLM-produced summaries |
-| `brain/bookmarks/specs/<slug>-<key>.md` | Spec files written by Quinn |
+| `brain/bookmarks/specs/<slug>-<key>.md` | Spec files written by Quinn; remain here through approval until a task is created |
 | `agents/workflows/bookmarks/bookmarks.lobster.yaml` | Lobster pipeline definition |
 
 ---
@@ -124,7 +127,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `handle_approval_reply.py` | Approval | openclaw extension | Parses Tom's reply; routes to approve/decline/revise (lives in `.openclaw/extensions/approval-reply/`) |
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
 | `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
-| `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown |
+| `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown; moves approved-and-tasked specs into `brain/tasks/specs/in-progress/` |
 | `run_bookmark_state_analyzer.py` | Inspect | skill | Compact state summary without loading full JSON (in `agents/skills/bookmarks/state/`) |
 
 ---
@@ -166,6 +169,8 @@ If a spec's topic isn't in the config, falls back to `general`. If `general` is 
 | Spec not dispatched for re-curated item | Item was previously approved+tasked; `list_spec_requests.py` drift guard skips it permanently | By design — tasked bookmarks don't re-enter spec dispatch. If a genuinely new spec angle is needed, create a new bookmark or task manually. |
 | Curation not refreshing | `recurationDays` not elapsed or item in terminal status | Check `focus-config.json`, lower `recurationDays` or manually clear `item.curation` |
 | Lobster exits 137 | OOM during lobster run | Check available memory; lobster may need to be run with a lower batch `limit` arg |
+| Approved spec checkbox stayed unchecked | Approval handler failed before atomic marker write or spec file is malformed | Re-run approval handling after restoring a `- [ ] **Approved by Tom**` marker in the bookmark spec. |
+| Task points at `brain/bookmarks/specs/` after task creation | Previous run created/reused a task but failed before repairing the `**Spec:**` line | Re-run `lobster_create_tasks_from_proposals.py`; destination-present/source-absent is treated as an idempotent repair path. |
 
 ---
 
@@ -198,5 +203,6 @@ never raised, so the JSONL path is unaffected.
 ## Related
 
 - Task: `b179c0e3-c6b0-4c9d-97dc-982d3b841783` — Bookmark pipeline analytics — Postgres transition log
+- Task: `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and lobster sync
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/216
 - Tech design: `docs/specs/bookmark-pipeline-analytics-postgres-transition-log-tech-design.md`

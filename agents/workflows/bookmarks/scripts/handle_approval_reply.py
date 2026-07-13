@@ -169,6 +169,35 @@ def run_lobster_resume(token: str, approve: bool) -> tuple[dict | None, str | No
 
 
 
+def _workspace_rel_path(path: str) -> Path:
+    rel = Path(str(path).strip())
+    if rel.is_absolute() or '..' in rel.parts:
+        raise ValueError(f"unsafe spec path: {path}")
+    return WORKSPACE / rel
+
+
+def set_spec_approval_checkbox(spec_doc: str, approved: bool) -> bool:
+    """Set the Tom approval checkbox in a bookmark spec without moving the file."""
+    if not approved:
+        return False
+    rel = str(spec_doc).strip()
+    if not rel.startswith('brain/bookmarks/specs/'):
+        raise ValueError(f"approval checkbox toggle only applies to bookmark specs: {spec_doc}")
+    path = _workspace_rel_path(rel)
+    text = path.read_text(encoding='utf-8')
+    checked_re = re.compile(r'^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$', re.MULTILINE)
+    unchecked_re = re.compile(r'^(\s*-\s*)\[\s\](\s+\*\*Approved by Tom\*\*\s*)$', re.MULTILINE)
+    if checked_re.search(text):
+        return False
+    if not unchecked_re.search(text):
+        raise ValueError(f"missing unchecked Approved by Tom marker in {spec_doc}")
+    updated = unchecked_re.sub(r'\1[x]\2', text, count=1)
+    tmp = path.with_name(f'.{path.name}.tmp')
+    tmp.write_text(updated, encoding='utf-8')
+    os.replace(tmp, path)
+    return True
+
+
 def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> int:
     cleared = 0
     for key, item in (state.get("items") or {}).items():
@@ -647,6 +676,24 @@ def main() -> int:
             continue
 
         if token:
+            toggled_specs = 0
+            toggle_error = None
+            if decision == "approve":
+                try:
+                    for summary in approval_items:
+                        for spec_doc in summary.get("specDocs") or []:
+                            if set_spec_approval_checkbox(str(spec_doc), True):
+                                toggled_specs += 1
+                except Exception as exc:  # noqa: BLE001
+                    toggle_error = str(exc)
+            if toggle_error:
+                results.append({
+                    "status": "error",
+                    "decision": decision,
+                    "approvalId": matched_id,
+                    "reason": f"approval checkbox toggle failed: {toggle_error}",
+                })
+                continue
             resumed, err = run_lobster_resume(token, decision == "approve")
             cleared = 0
             if not err:
@@ -700,7 +747,7 @@ def main() -> int:
                 pending_ids="|".join(sorted(pending.keys())),
                 result_status=status,
                 error=err,
-                details=f"token={token};cleared={cleared}",
+                details=f"token={token};cleared={cleared};toggledSpecs={toggled_specs}",
             )
             results.append({
                 "status": status,

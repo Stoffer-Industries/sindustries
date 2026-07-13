@@ -1,7 +1,7 @@
 # Feature Task Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-07-02
+**Last updated:** 2026-07-14
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/feature-task/`
 
 ---
@@ -192,6 +192,18 @@ A `[spec-resynced]` comment is trusted only when both bindings match the current
 - `open` status: brain spec ACs win. Approval may be checked in either brain spec or task description; task-side approval is mirrored into the brain spec before transition. Drift against the stored checksum is treated as a blocker.
 - `ready`, `doing`, `acceptance`, `done`: task description wins. Lobster reflects drift via the marker, then resyncs the brain spec to match after Tom re-checks approval.
 
+### Spec folder lifecycle
+
+Feature specs use a forward-only file lifecycle under `brain/tasks/specs/`:
+
+- `brain/tasks/specs/open/` — new chat-created feature specs awaiting Tom approval. `feature-task-create` and `tasks-create` must create new chat specs here with an unchecked `- [ ] **Approved by Tom**` marker.
+- `brain/tasks/specs/in-progress/` — approved specs attached to active feature work. On each `spec-check` run, the Rust lobster bootstraps `open/`, `in-progress/`, and `done/`, then fails loudly if any other direct subdirectory exists under `brain/tasks/specs/`. When a chat spec in `open/` is checked as approved, the lobster moves it to `in-progress/` and patches the task `**Spec:**` line. The move is idempotent; unchecked specs already in `in-progress/` are never moved back.
+- `brain/tasks/specs/done/` — specs for completed feature tasks. After `post-merge` transitions a task to `done`, the lobster moves its spec from `in-progress/` to `done/` and patches the task `**Spec:**` line. Specs already in `done/` stay there even if a task later reopens.
+
+Bookmark specs stay in `brain/bookmarks/specs/` through approval. The bookmark approval handler only toggles the file checkbox to `- [x] **Approved by Tom**`; it does not move the file. When the bookmark workflow creates or links a task from an approved bookmark spec, it moves that spec to `brain/tasks/specs/in-progress/<same-filename>.md` and creates/repairs the task `**Spec:**` line to point at the destination. From that point onward, the feature-task lifecycle treats bookmark-origin specs the same as chat-origin specs.
+
+The task description `**Spec:**` line is the authoritative pointer for `spec-check`; every move is paired with a best-effort idempotent description patch so the next lobster run reads the new path without fallback scanning.
+
 Lives in:
 - `services/tasks-api/prisma/schema.prisma` — `specChecksum` field on tasks
 - `services/tasks-api/src/routes/tasks/_spec.ts` — canonical AC checksum, marker-only exception (`descriptionsDifferOnlyByApprovalMarker`), `descriptionWithSpecDriftApprovalState`
@@ -240,6 +252,8 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 | `[openclaw-needed]` never resolved | Quinn missed the heartbeat step | Quinn scans active feature tasks on the next heartbeat tick |
 | `acceptance -> done` blocked | `[system-spec]` missing or no `[no-system-spec-change]` reason | Author `docs/systems/<system>.md` and post `[system-spec] <path>` |
 | Spec checksum mismatch | ACs edited after spec approval | Hits `PATCH /tasks/:id` when the description ACs change. Treat as spec drift: Lobster unchecks `**Approved by Tom**`, waits for Tom to re-check, then performs the resync path. Comments are drift-tolerant and remain usable for progress/checklist/resync signals. |
+| Spec lifecycle layout failure | Unexpected direct subdirectory under `brain/tasks/specs/` | Remove or migrate the unexpected subdir so only `open/`, `in-progress/`, and `done/` remain. The lobster creates missing expected dirs automatically. |
+| Stale `**Spec:**` line after a move | Prior run moved a spec but failed before patching the task description | Re-run the relevant lobster stage; move helpers treat destination-present/source-absent as idempotent and repair the task `**Spec:**` path. |
 | `PATCH` succeeds despite stale ACs | Other event types (status change, dependency add, tag edit) don't re-check the checksum | Pass the updated `description` through `PATCH /tasks/:id` first so the drift check fires there. |
 | CI green but PR not merged | Reviewer has not approved | Wait for `APPROVED` review state; Lobster will not mark `done` until GitHub merge is recorded |
 | Task bounced to `doing` from `acceptance` | (legacy — the post-merge QA bounce path was removed; AC text mismatches now block at the doing → acceptance gate before merge instead) | n/a |
@@ -258,3 +272,4 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 ## Related Tasks / PRs
 
 - Task `ba116063-382a-446c-ab91-c01b60d9a7c3` — Lobster worktree cleanup after merge (PR #208): the source of the post-merge worktree cleanup step in the `done` section above
+- Task `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and bookmark/feature lobster sync

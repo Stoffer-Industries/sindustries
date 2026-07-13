@@ -18,6 +18,58 @@ if str(SCRIPT_ROOT) not in sys.path:
 from tasks_api_client import api_request, list_tasks  # noqa: E402
 
 
+TASK_SPECS_IN_PROGRESS = 'brain/tasks/specs/in-progress'
+BOOKMARK_SPECS_PREFIX = 'brain/bookmarks/specs/'
+
+
+def task_spec_destination(spec_doc: str) -> str:
+    rel = str(spec_doc).strip()
+    if rel.startswith(f'{TASK_SPECS_IN_PROGRESS}/'):
+        return rel
+    if not rel.startswith(BOOKMARK_SPECS_PREFIX):
+        return rel
+    return f'{TASK_SPECS_IN_PROGRESS}/{Path(rel).name}'
+
+
+def rewrite_spec_line(description: str, old_path: str, new_path: str) -> str:
+    pattern = re.compile(r'(?m)^(\s*\*\*Spec:\*\*\s+)([^\s].*?)\s*$')
+    return pattern.sub(
+        lambda match: f'{match.group(1)}{new_path}' if match.group(2).strip() == old_path else match.group(0),
+        description,
+        count=1,
+    )
+
+
+def move_bookmark_spec_to_task_in_progress(spec_doc: str) -> tuple[str, bool]:
+    dest_doc = task_spec_destination(spec_doc)
+    if dest_doc == spec_doc:
+        return dest_doc, False
+    source = WORKSPACE / spec_doc
+    dest = WORKSPACE / dest_doc
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        if source.exists() and source.read_bytes() != dest.read_bytes():
+            raise RuntimeError(f'destination already exists with different content: {dest_doc}')
+        return dest_doc, False
+    if not source.exists():
+        raise FileNotFoundError(f'spec file not found: {spec_doc}')
+    source.rename(dest)
+    return dest_doc, True
+
+
+def patch_task_spec_line(base_url: str, task_id: str, old_path: str, new_path: str, task: dict | None = None) -> None:
+    task_data = task or {}
+    if not task_data.get('description'):
+        resp = api_request('GET', base_url, f'/tasks/{task_id}')
+        task_data = resp.get('data') if isinstance(resp, dict) else resp
+        if not isinstance(task_data, dict):
+            return
+    desc = str(task_data.get('description') or '')
+    new_desc = rewrite_spec_line(desc, old_path, new_path)
+    if new_desc != desc:
+        api_request('PATCH', base_url, f'/tasks/{task_id}', {'description': new_desc})
+
+
 def proposal_marker(bookmark_key: str, spec_docs: list[str], proposal: dict) -> str:
     """Legacy marker for per-proposedTask dedup. Kept for backward compat with existing tasks."""
     payload = {
@@ -83,7 +135,7 @@ def _extract_section(text: str, heading: str) -> str:
     return (section[:next_h.start()] if next_h else section).strip()
 
 
-def build_task_from_spec(spec_doc: str, bookmark_key: str, topic: str) -> dict | None:
+def build_task_from_spec(spec_doc: str, task_spec_doc: str, bookmark_key: str, topic: str) -> dict | None:
     """Read a spec markdown file and build a task dict (title + description)."""
     spec_path = WORKSPACE / spec_doc
     if not spec_path.exists():
@@ -100,7 +152,7 @@ def build_task_from_spec(spec_doc: str, bookmark_key: str, topic: str) -> dict |
     outcome = _extract_section(text, 'Outcome')
 
     parts = [
-        f'**Spec:** {spec_doc}',
+        f'**Spec:** {task_spec_doc}',
         f'**Topic:** {topic}',
         f'**Bookmark:** {bookmark_key}',
     ]
@@ -126,19 +178,34 @@ def create_task_for_spec(
     spec_docs: list[str],
     existing_by_marker: dict[str, dict],
 ) -> tuple[dict | None, dict | None]:
-    marker = spec_marker(spec_doc)
-    existing = existing_by_marker.get(marker)
+    task_spec_doc = task_spec_destination(spec_doc)
+    marker = spec_marker(task_spec_doc)
+    legacy_marker = spec_marker(spec_doc)
+    existing = existing_by_marker.get(marker) or existing_by_marker.get(legacy_marker)
     if existing and existing.get('id'):
+        try:
+            moved_doc, moved = move_bookmark_spec_to_task_in_progress(spec_doc)
+            patch_task_spec_line(base_url, str(existing['id']), spec_doc, moved_doc, existing)
+        except Exception as exc:  # noqa: BLE001
+            return None, {
+                'bookmarkKey': bookmark_key,
+                'topic': topic,
+                'specDoc': spec_doc,
+                'marker': marker,
+                'error': str(exc),
+            }
         return {
             'bookmarkKey': bookmark_key,
             'topic': topic,
-            'specDoc': spec_doc,
+            'specDoc': moved_doc,
+            'sourceSpecDoc': spec_doc,
             'taskId': str(existing['id']),
             'reused': True,
+            'moved': moved,
             'marker': marker,
         }, None
 
-    task_def = build_task_from_spec(spec_doc, bookmark_key, topic)
+    task_def = build_task_from_spec(spec_doc, task_spec_doc, bookmark_key, topic)
     if not task_def:
         return None, {
             'bookmarkKey': bookmark_key,
@@ -153,7 +220,7 @@ def create_task_for_spec(
         'description': task_def['description'],
         'priority': task_def['priority'],
         'status': 'open',
-        'tags': task_tags(topic, bookmark_key, spec_docs, marker),
+        'tags': task_tags(topic, bookmark_key, [task_spec_destination(d) for d in spec_docs], marker),
     }
     response = api_request('POST', base_url, '/tasks', payload)
     task = response.get('data') if isinstance(response, dict) else None
@@ -168,13 +235,29 @@ def create_task_for_spec(
             'response': response,
         }
 
+    try:
+        moved_doc, moved = move_bookmark_spec_to_task_in_progress(spec_doc)
+        if moved_doc != task_spec_doc:
+            patch_task_spec_line(base_url, str(task_id), task_spec_doc, moved_doc, task if isinstance(task, dict) else None)
+    except Exception as exc:  # noqa: BLE001
+        return None, {
+            'bookmarkKey': bookmark_key,
+            'topic': topic,
+            'specDoc': spec_doc,
+            'marker': marker,
+            'taskId': str(task_id),
+            'error': str(exc),
+        }
+
     created = {
         'bookmarkKey': bookmark_key,
         'topic': topic,
-        'specDoc': spec_doc,
+        'specDoc': moved_doc,
+        'sourceSpecDoc': spec_doc,
         'title': task_def['title'],
         'taskId': str(task_id),
         'reused': False,
+        'moved': moved,
         'marker': marker,
     }
     existing_by_marker[marker] = task if isinstance(task, dict) else {'id': task_id, 'tags': payload['tags']}
@@ -208,6 +291,8 @@ def main() -> int:
                 )
                 if result:
                     created.append(result)
+                    if result.get('sourceSpecDoc') and result.get('specDoc'):
+                        item['specDocs'] = [result['specDoc'] if d == result['sourceSpecDoc'] else d for d in spec_docs]
                 if error:
                     errors.append(error)
 

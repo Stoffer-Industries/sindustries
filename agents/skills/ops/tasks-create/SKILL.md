@@ -59,7 +59,7 @@ tasks_api_client.py create \
   --priority <low|medium|high> \
   --assignee Rowan \
   --tags feature-factory rowan <topic> \
-  --description "**Spec:** brain/tasks/specs/<slug>-YYYY-MM-DD.md
+  --description "**Spec:** brain/tasks/specs/open/<slug>-YYYY-MM-DD.md
 
 - [ ] **Approved by Tom**
 
@@ -83,7 +83,7 @@ tasks_api_client.py create \
 ```
 
 **Rules:**
-- The `**Spec:**` line must point to a real file in `brain/tasks/specs/` (write it first)
+- The `**Spec:**` line for new chat-created feature specs must point to a real file in `brain/tasks/specs/open/` (write it first)
 - The `- [ ] **Approved by Tom**` line must be unchecked — never pre-tick it
 - ACs must be unchecked — never pre-tick them; Tom/QA ticks after testing
 - Workstreams section must be present with `Branch: (pending)` and `PR: (pending)` placeholders

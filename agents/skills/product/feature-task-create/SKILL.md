@@ -33,13 +33,13 @@ For direct work: hand it to Rowan with a clear instruction and let him open a PR
 
 | Situation | Spec location |
 |---|---|
-| New spec for this feature | `brain/tasks/specs/<slug>-YYYY-MM-DD.md` |
+| New spec for this feature | `brain/tasks/specs/open/<slug>-YYYY-MM-DD.md` |
 | Bookmark pipeline produced a spec | `brain/bookmarks/specs/<slug>-<key>.md` |
 | An existing sindustries spec covers this | `docs/specs/<filename>.md` |
 
 Do **not** amend an existing approved spec unless the task is explicitly an amendment. Do **not** create a new spec inside `docs/specs/` — that dir is for committed, reviewed specs only.
 
-### Spec format (brain/tasks/specs/)
+### Spec format (brain/tasks/specs/open/)
 
 ```markdown
 # Spec — <Title>
@@ -74,7 +74,7 @@ Key constraints or non-obvious integration points. One paragraph max.
 **Critical:** Copy the full AC text from the spec into the task description. Do NOT use placeholder labels like `AC1: ...` — write out the actual acceptance criterion text. The task description must be self-contained; the spec is the source of truth for detail, but the task must show the real ACs.
 
 ```
-**Spec:** <relative path from workspace root, e.g. brain/tasks/specs/my-spec-2026-06-29.md>
+**Spec:** <relative path from workspace root, e.g. brain/tasks/specs/open/my-spec-2026-06-29.md>
 - [ ] **Approved by Tom**
 
 <One paragraph describing what the feature does and why it matters>
@@ -127,7 +127,7 @@ YAML
 TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} \
   python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
     --title '<Title>' \
-    --spec 'brain/tasks/specs/<slug>-YYYY-MM-DD.md' \
+    --spec 'brain/tasks/specs/open/<slug>-YYYY-MM-DD.md' \
     --workstreams /tmp/task-ws.yaml \
     --description '<body text from Step 3, minus Spec/Workstreams>' \
     --priority high \
@@ -153,7 +153,7 @@ Direct `urllib` POSTs remain valid as a fallback if the CLI is unavailable, but 
 
 ## Checklist before declaring done
 
-- [ ] Spec written at `brain/tasks/specs/` (or existing spec identified)
+- [ ] Spec written at `brain/tasks/specs/open/` for new chat-created specs (or existing spec identified)
 - [ ] `**Spec:**` line is exact path, no trailing text
 - [ ] `- [ ] **Approved by Tom**` marker line is present in the task description template
 - [ ] ACs are copied verbatim from the spec — not placeholder labels like "AC1: ..."

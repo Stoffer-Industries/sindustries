@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44
 product_spec: brain/tasks/specs/spec-folder-lifecycle-2026-07-07.md
 shipped_pr: null
