@@ -60,6 +60,17 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 
 ---
 
+## Escalate on Failure
+
+If any step fails due to an external dependency (API key invalid, auth error, quota exceeded, service unavailable, unexpected empty output from an external call):
+
+1. Do NOT silently fall back or generate a placeholder
+2. Note which step failed and what the error was
+3. Read and follow `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md` — escalate to Lox's main session
+4. Skip the remainder of that task — do not ship partial or degraded output
+
+---
+
 ## HEARTBEAT.md Maintenance
 
 Heartbeat is for discovery and authoring rhythm. Workflow changes go in WORKFLOW.md. Voice/identity changes go in SOUL.md. Quality bar changes go in DoD.md. This file is just the heartbeat cadence and procedures.

@@ -230,79 +230,10 @@ None. This is a backend / Python / docs change.
 - **Q8 — Backwards-compat window.** After the migration runs, both files are unified. But if either agent writes a legacy-shaped entry by mistake, the parser still handles it. We don't break anything by introducing the schema; we just add the superset.
 - **Q9 — AC count discrepancy.** The task description's "Acceptance Criteria" lists 7 bullets; the "Workstreams" block says AC1–AC5. This design addresses all 7 (they're the real list). If Tom confirms only AC1–AC5 are in scope, drop AC6 and AC7 — but the design recommends keeping them since they're cheap and complete the picture.
 
-## Phase 2 — Active resolution + cross-agent handoff (not yet tasked)
+## Phase 2
 
-Tom's post-ship feedback surfaced two new capabilities that extend the unified schema into runtime behaviour. These are not part of the original AC1–AC7 scope but are the natural next step once the unified schema is live.
+See task 326d4520 — Incident actioning system. Active resolution and cross-agent handoff are designed there.
 
-### AC8 — Quinn active resolution via runbooks
-
-**Problem:** Quinn's current OPS STATE MANAGEMENT loop is passive. It detects incidents, increments `checkCount`, and escalates after N passes — but never *attempts remediation*. Lox already uses runbooks to attempt fixes before escalating; Quinn should follow the same pattern.
-
-**Design:**
-
-- Add remediation metadata fields to the schema (all optional, default null):
-  - `attemptCount` — how many remediation attempts have been made (distinct from detection `checkCount`)
-  - `lastAttemptAt` — ISO timestamp of most recent attempt
-  - `nextRetryAt` — backoff fence; Quinn skips re-attempt until this time passes
-  - `linkedRunbook` — path to the runbook Quinn should invoke for this incident type
-- Quinn's heartbeat OPS STATE MANAGEMENT section changes from passive-log to active-remediation loop:
-  1. Load all incidents where `owner == "quinn"` and status is not `resolved`/`false_positive`.
-  2. For each incident, skip if `nextRetryAt` is in the future.
-  3. Look up `linkedRunbook` (or fall back to deterministic default by incident type).
-  4. Attempt remediation per the runbook.
-  5. On success: mark `status: resolved`, set `resolvedAt`.
-  6. On failure: increment `attemptCount`, set `lastAttemptAt`, compute `nextRetryAt` (exponential backoff, e.g. 15m → 30m → 60m).
-  7. After N failed attempts (suggested N=3): set `needsTom: true`, `status: escalated`, `escalatedAt`, and ping Tom via Telegram.
-- Missing or invalid `linkedRunbook` → escalate immediately; don't silently skip.
-
-**Runbook stubs Quinn will need** (paths in `infra/runbooks/quinn/`):
-- `task-workflow-stall.md`
-- `agent-pipeline-stall.md`
-- `bookmark-pipeline-stall.md`
-- `feature-task-lobster-stall.md`
-
-**Schema additions (additive, backwards-compatible):**
-```json
-"attemptCount":     { "type": "integer", "default": 0 },
-"lastAttemptAt":    { "type": ["string", "null"], "format": "date-time" },
-"nextRetryAt":      { "type": ["string", "null"], "format": "date-time" },
-"linkedRunbook":    { "type": ["string", "null"] }
-```
-
-### AC9 — Lox → Quinn cross-agent handoff
-
-**Problem:** When Lox detects a problem in Quinn's domain (lobster workflow stall, bookmark pipeline issue), it currently either misses it or escalates directly to Tom. The unified schema's `owner` field enables a cleaner path: Lox writes an incident with `owner: "quinn"` and Quinn picks it up via `load_all_incidents()`.
-
-**Design:**
-
-- No shared file. Each agent keeps its own state file.
-- Lox writes an incident to `lox-incident-state.json` with `owner: "quinn"` and `linkedRunbook` pointing at the relevant Quinn runbook.
-- Quinn's `load_all_incidents()` already reads both files — so Quinn discovers Lox-assigned incidents automatically. No polling or queue needed.
-- Add optional `reportedBy` / `sourceAgent` field for provenance (so we know Lox created it, not Quinn).
-- Quinn updates the incident **in the source file** (Lox's state file) when it attempts remediation or resolves. This requires `load_all_incidents()` to tag each incident with its `sourceFile` at parse time so Quinn knows where to write back.
-- Lox escalates to Tom for Quinn-domain incidents **only if**:
-  - The handoff itself fails (e.g. Quinn's state file is unreadable)
-  - The incident is an infra/safety concern that can't wait for Quinn's next heartbeat
-  - Owner assignment is ambiguous
-
-**Domain boundary:**
-- **Lox owns:** infra, containers, hosts, network, process crashes, service availability
-- **Quinn owns:** task workflow stalls, agent pipeline state, bookmark pipeline, feature-task lobster stalls
-
-**Schema additions:**
-```json
-"reportedBy":   { "type": ["string", "null"] },
-"sourceFile":   { "type": ["string", "null"], "description": "Runtime-only: set by parser, not stored" }
-```
-Note: `sourceFile` is injected by the parser at load time, not persisted to disk.
-
-### Open questions for Phase 2
-
-- Exact retry threshold N and backoff schedule.
-- Whether `reportedBy` becomes required or stays optional.
-- Whether a Lox-assigned incident can be re-assigned back to Lox if Quinn can't fix it (one bounce allowed? immediate escalation?).
-- Whitelist/allowlist for runnable runbook paths (prevent arbitrary code execution).
-- Migration: add new fields to existing entries via a `--phase2` flag on `incident_migrate.py`, or let them default-null on first read.
 
 ## Out of scope
 
