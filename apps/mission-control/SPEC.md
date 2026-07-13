@@ -74,6 +74,31 @@ surface.
    - Renders correctly in both light and dark mode via the
      `@sindustries/design-tokens/styles.css` palette that the shell
      already loads — no new opaque colours.
+7. **Manage the Content Scheduler queue.** User is on the Content tab.
+   - On mount, fetches the queue from the Tasks API
+     (`/api/v1/content-scheduler/items`) and today's publish status
+     (`/api/v1/content-scheduler/today-status`).
+   - Renders the day-status banner ("✓ 0/1 posts published today" etc.)
+     so the operator can see at-a-glance whether the daily X-post cap is
+     reached.
+   - **Create.** The "Add to queue" form takes a content source URL (the
+     page is rendered for preview via the Tasks-API proxy), a label, and
+     an optional scheduled-for timestamp. Submit posts to the Tasks API
+     and prepends the new item to the local list.
+   - **Queue actions.** Each non-published item exposes Approve,
+     Unapprove, Publish, Remove, and ↑/↓ reorder controls. Reorder
+     patches the item's `position` via the Tasks API and re-sorts the
+     list optimistically.
+   - **Approve gate.** Items are not publishable until `approvedAt` is
+     set (per-item explicit approval — AC6 of the feature spec). The
+     Publish button is disabled with a tooltip when the item is
+     unapproved.
+   - **Publish cap.** The Tasks API rejects publish attempts that would
+     exceed one post per `Pacific/Auckland` day; the client surfaces the
+     409 response with a tooltip ("Max one X post per day — already
+     published today"). Published items flip to a "published at <ISO>"
+     badge with the X post URL when the response includes one.
+
 
 ## Screens
 
@@ -116,6 +141,7 @@ specimen mount.
 | State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
 | SIndustries tab iframe + fallback | Vitest: `tabs/SIndustriesTab.test.jsx` covers initial iframe render, fallback after timeout, and success-path load event |
+| Content Scheduler queue lifecycle | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers create/approve/publish/remove; day-status cap, approve gate, and reorder are exercised via the component |
 
 ## Data Sources
 
