@@ -175,12 +175,15 @@ for inc in needs_tom(all_incidents):
 4. If an entry has `attempts >= 3` and is still unresolved: set `needsTom: true`, `severity` to at least `high`
 5. Always increment `attempts` and update `lastCheckedAt` when re-checking an existing entry
 
-**Escalation — announce count and new items:**
+**Escalation — always surface the top unblock:**
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
-1. Count all entries where `needsTom: true` AND `status` is not `resolved` or `false_positive`. Call this N.
-2. For any entry where `needsTom: true` AND `escalatedAt` is null (newly escalated this pass): set `escalatedAt: <now>` and include a one-line summary of the new item in the output.
-3. **Always output a single closing line:** `N items need your attention` (where N is the open count). If N = 0: output nothing and reply HEARTBEAT_OK instead.
-4. Do not re-list items that were already escalated in previous heartbeats — just the count covers them.
+1. Collect all entries where `needsTom: true` AND `status` is not `resolved` or `false_positive`. Call this N.
+2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
+3. **Always end the heartbeat with the single most important thing Tom can unblock right now:**
+   - Sort candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first).
+   - Pick the top candidate and output one line: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
+   - If N = 0: output nothing and reply HEARTBEAT_OK instead.
+4. This line appears every heartbeat while the item is open — even if previously escalated. Tom seeing it repeatedly is the point.
 
 **State file read/write pattern (unified schema, task 75ec1c8c):**
 ```python
