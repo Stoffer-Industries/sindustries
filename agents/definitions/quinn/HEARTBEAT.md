@@ -179,11 +179,12 @@ for inc in needs_tom(all_incidents):
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
 1. Collect all entries where `needsTom: true` AND `status` is not `resolved` or `false_positive`. Call this N.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
-3. **Always end the heartbeat with the single most important thing Tom can unblock right now:**
-   - Sort candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first).
-   - Pick the top candidate and output one line: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
+3. **Always end the heartbeat with a count + the top unblock:**
    - If N = 0: output nothing and reply HEARTBEAT_OK instead.
-4. This line appears every heartbeat while the item is open — even if previously escalated. Tom seeing it repeatedly is the point.
+   - If N > 0: output two lines:
+     - `N incident(s) waiting on you.`
+     - Sort candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first). Pick the top candidate and output: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
+4. Both lines appear every heartbeat while items are open — even if previously escalated. Tom seeing it repeatedly is the point.
 
 **State file read/write pattern (unified schema, task 75ec1c8c):**
 ```python
