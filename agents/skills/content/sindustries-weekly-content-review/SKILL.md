@@ -180,35 +180,46 @@ Read `docs/state-of-the-nation.md`. Using the ops notes already collected, apply
 
 ---
 
-## Step 7 — Commit and PR state-of-the-nation changes
+## Step 7 — Weekly workspace roll-up commit
 
-After updating `docs/state-of-the-nation.md`, commit and open a PR so the changes are not lost.
+After updating `docs/state-of-the-nation.md`, bundle ALL pending changes in the workspace repo into a single weekly commit and open a PR. This catches memory files, daily notes, HEARTBEAT updates, skill edits, and anything else that accumulated since the last commit.
 
 ```bash
 cd /Users/quinnstoffer/.openclaw/workspace
 
-# Only act if there are changes to state-of-the-nation.md
-git diff --quiet docs/state-of-the-nation.md || {
-  BRANCH="chore/state-of-the-nation-$(date +%Y-%m-%d)"
+# Check for any uncommitted changes (tracked or untracked under memory/, docs/, agents/, skills/)
+if [ -n "$(git status --porcelain)" ]; then
+  BRANCH="chore/weekly-rollup-$(date +%Y-%m-%d)"
   git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
-  git add docs/state-of-the-nation.md
-  git commit -m "chore(docs): state-of-the-nation update $(date +%Y-%m-%d)"
+
+  # Stage everything except secrets
+  git add --all
+  git reset HEAD .env* */.env* 2>/dev/null || true
+
+  git commit -m "chore(docs): weekly workspace roll-up $(date +%Y-%m-%d)
+
+- state-of-the-nation update
+- memory and daily notes
+- any accumulated skill/agent/doc edits"
+
   git push -u origin "$BRANCH"
+
   GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" GH_CONFIG_DIR=~/.config/gh-quinn \
     gh pr create \
       --repo Stoffer-Industries/workspace \
-      --title "chore(docs): state-of-the-nation update $(date +%Y-%m-%d)" \
-      --body "Weekly state-of-the-nation update from the content review cron.
+      --title "chore(docs): weekly workspace roll-up $(date +%Y-%m-%d)" \
+      --body "Weekly roll-up of all workspace changes from the content review cron.
 
-Changes applied by the \`sindustries-weekly-content-review\` skill:
-- New shipped items added to **What Already Exists**
-- Resolved frictions marked with strikethrough
-- New recurring frictions noted if any
+Includes:
+- state-of-the-nation updates (What Already Exists / Current Frictions)
+- memory files and daily notes accumulated this week
+- any skill, agent-def, or doc edits made since last commit
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
       --assignee quinnstoffer
+
   git checkout main
-}
+fi
 ```
 
 If the branch already exists from a prior run this week, check out the existing branch, stage, and commit rather than creating a new one.
