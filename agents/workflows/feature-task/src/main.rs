@@ -202,12 +202,16 @@ fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
 
 fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    bootstrap_task_spec_layout(workspace_root(&args))?;
     if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "spec_check")? {
         return Ok(blocked);
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
         return block_with_manual_block(&args, env, "spec_check", manual_failures);
+    }
+    if !args.dry_run {
+        env = move_approved_chat_spec_if_needed(&args, env)?;
     }
     if is_past(&env.task, "open") {
         let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
@@ -464,8 +468,7 @@ fn task_ac_vs_open_pr_failures(
     // the 8-char branch-name short prefix in `### Task <id>` headings. Match
     // either form so a single `### Task 513b3b02 — …` or `### Task 513b3b02-uuid — …`
     // heading can identify the subsection.
-    let subsection_re =
-        Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
+    let subsection_re = Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
     let ac_re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
     let task_short_id = task_id.split('-').next().unwrap_or(task_id);
     let mut pr_ac_map: HashMap<String, (String, Option<Evidence>)> = HashMap::new();
@@ -529,7 +532,10 @@ fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
                 path = Some(PathBuf::from(rest.trim()));
             } else if let Some(rest) = line.strip_prefix("branch ") {
                 // Strip the `refs/heads/` prefix to match typical branch names.
-                let name = rest.trim().strip_prefix("refs/heads/").unwrap_or(rest.trim());
+                let name = rest
+                    .trim()
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(rest.trim());
                 branch = Some(name.to_string());
             }
         }
@@ -586,7 +592,10 @@ fn select_matching_rowan_worktrees<'a>(
 /// paths are reported as `AlreadyAbsent` so re-runs stay idempotent.
 /// All other failures are captured as `Failed(<message>)` and surfaced as
 /// non-fatal warnings; this function never returns Err.
-fn remove_worktrees_best_effort(repo: &Path, candidates: &[WorktreeEntry]) -> Vec<WorktreeCleanupResult> {
+fn remove_worktrees_best_effort(
+    repo: &Path,
+    candidates: &[WorktreeEntry],
+) -> Vec<WorktreeCleanupResult> {
     let mut results = Vec::with_capacity(candidates.len());
     for entry in candidates {
         let path = &entry.path;
@@ -599,7 +608,13 @@ fn remove_worktrees_best_effort(repo: &Path, candidates: &[WorktreeEntry]) -> Ve
             continue;
         }
         let output = Command::new("git")
-            .args(["-C", repo.to_string_lossy().as_ref(), "worktree", "remove", "--force"])
+            .args([
+                "-C",
+                repo.to_string_lossy().as_ref(),
+                "worktree",
+                "remove",
+                "--force",
+            ])
             .arg(path)
             .output();
         let outcome = match output {
@@ -609,7 +624,10 @@ fn remove_worktrees_best_effort(repo: &Path, candidates: &[WorktreeEntry]) -> Ve
                 let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 let combined = if stderr.is_empty() { stdout } else { stderr };
                 WorktreeCleanupOutcome::Failed(if combined.is_empty() {
-                    format!("git worktree remove exited with status {:?}", out.status.code())
+                    format!(
+                        "git worktree remove exited with status {:?}",
+                        out.status.code()
+                    )
                 } else {
                     combined
                 })
@@ -629,7 +647,13 @@ fn remove_worktrees_best_effort(repo: &Path, candidates: &[WorktreeEntry]) -> Ve
 /// results (empty when nothing matched). Failures are non-fatal by design.
 fn cleanup_rowan_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCleanupResult> {
     let list_output = Command::new("git")
-        .args(["-C", repo.to_string_lossy().as_ref(), "worktree", "list", "--porcelain"])
+        .args([
+            "-C",
+            repo.to_string_lossy().as_ref(),
+            "worktree",
+            "list",
+            "--porcelain",
+        ])
         .output();
     let stdout = match list_output {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -641,7 +665,10 @@ fn cleanup_rowan_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCl
                 path: PathBuf::from("<git-worktree-list>"),
                 branch: None,
                 outcome: WorktreeCleanupOutcome::Failed(if stderr.is_empty() {
-                    format!("git worktree list exited with status {:?}", out.status.code())
+                    format!(
+                        "git worktree list exited with status {:?}",
+                        out.status.code()
+                    )
                 } else {
                     stderr
                 }),
@@ -886,16 +913,19 @@ const BRAIN_DIR: &str = "brain";
 // When a feature task transitions to `done`, the spec referenced in the task's
 // `**Spec:**` line should move from `brain/tasks/specs/` into
 // `brain/tasks/specs/done/`. The boundary is intentionally narrow:
-//   1. Only specs under `brain/tasks/specs/<slug>.md` are eligible.
+//   1. Only specs under `brain/tasks/specs/in-progress/<slug>.md` are eligible.
 //   2. Specs already under `brain/tasks/specs/done/` are a no-op (idempotent).
-//   3. `brain/bookmarks/specs/`, `docs/specs/`, and other paths are out of scope.
+//   3. `brain/tasks/specs/open/`, `brain/bookmarks/specs/`, `docs/specs/`, and other paths are out of scope.
 //
 // These helpers intentionally differ from `safe_brain_spec_path`, which is
 // permissive about the brain subtree to support spec resync. The archive path
 // is much stricter — only one subtree, one target directory.
 
 const TASK_SPECS_DIR: &str = "brain/tasks/specs";
+const TASK_SPECS_OPEN_DIR: &str = "brain/tasks/specs/open";
+const TASK_SPECS_IN_PROGRESS_DIR: &str = "brain/tasks/specs/in-progress";
 const TASK_SPECS_DONE_DIR: &str = "brain/tasks/specs/done";
+const TASK_SPEC_LIFECYCLE_DIRS: [&str; 3] = ["open", "in-progress", "done"];
 
 // ---- Post-merge worktree cleanup (feature task ba116063) ----
 //
@@ -939,49 +969,174 @@ enum ArchiveSpecPlan {
         to_abs: PathBuf,
     },
     AlreadyArchived,
+    OpenSpecCannotArchive,
     NotTaskSpec,
     MissingSpecRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChatApprovalMovePlan {
+    Move { from_rel: String, to_rel: String },
+    AlreadyMoved { from_rel: String, to_rel: String },
+    Noop,
 }
 
 /// Decide what should happen to the spec referenced from this task's Spec line.
 /// Pure function: no filesystem access. The caller resolves the relative paths
 /// to absolute paths once the workspace root is known.
+fn bootstrap_task_spec_layout(workspace_root: &Path) -> Result<()> {
+    let specs_root = workspace_root.join(TASK_SPECS_DIR);
+    for dir in TASK_SPEC_LIFECYCLE_DIRS {
+        fs::create_dir_all(specs_root.join(dir)).with_context(|| {
+            format!(
+                "creating task specs lifecycle dir `{}`",
+                specs_root.join(dir).display()
+            )
+        })?;
+    }
+    for entry in fs::read_dir(&specs_root)
+        .with_context(|| format!("reading task specs root `{}`", specs_root.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !TASK_SPEC_LIFECYCLE_DIRS.contains(&name.as_str()) {
+            return Err(anyhow!(
+                "unexpected subdir under `{}`: `{}`; expected only open/, in-progress/, done/",
+                specs_root.display(),
+                name
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_rel_path(path: &str) -> String {
+    path.trim().trim_start_matches("./").to_string()
+}
+
+fn plan_chat_spec_approval_move(spec_path: &str, spec_text: &str) -> ChatApprovalMovePlan {
+    let normalized = normalize_rel_path(spec_path);
+    if !normalized.ends_with(".md") || normalized.contains("..") {
+        return ChatApprovalMovePlan::Noop;
+    }
+    let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
+    let in_progress_prefix = format!("{TASK_SPECS_IN_PROGRESS_DIR}/");
+    if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
+        if suffix.is_empty() || suffix.contains('/') || !product_spec_approved_by_tom(spec_text) {
+            return ChatApprovalMovePlan::Noop;
+        }
+        let suffix = suffix.to_string();
+        return ChatApprovalMovePlan::Move {
+            from_rel: normalized,
+            to_rel: format!("{TASK_SPECS_IN_PROGRESS_DIR}/{suffix}"),
+        };
+    }
+    if let Some(suffix) = normalized.strip_prefix(&in_progress_prefix) {
+        if !suffix.is_empty() && !suffix.contains('/') {
+            return ChatApprovalMovePlan::AlreadyMoved {
+                from_rel: format!("{TASK_SPECS_OPEN_DIR}/{suffix}"),
+                to_rel: normalized,
+            };
+        }
+    }
+    ChatApprovalMovePlan::Noop
+}
+
+fn move_approved_chat_spec_if_needed(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
+    let Some(spec) = product_spec(&env.task) else {
+        return Ok(env);
+    };
+    let normalized = normalize_rel_path(&spec.path);
+    let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
+    if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
+        let to_rel = format!("{TASK_SPECS_IN_PROGRESS_DIR}/{suffix}");
+        if workspace_root(args).join(&to_rel).exists() {
+            let description = env.task.description.clone().unwrap_or_default();
+            if let Some(new_desc) =
+                rewrite_spec_line_in_description(&description, &normalized, &to_rel)
+            {
+                api_patch::<Task>(
+                    &args.base_url,
+                    &env.task.id,
+                    json!({"description": new_desc}),
+                )?;
+                env.task = api_get_task(&args.base_url, &env.task.id)?;
+                env.action_taken = "repaired_chat_spec_in_progress_path".to_string();
+            }
+            return Ok(env);
+        }
+    }
+    let spec_abs = resolve_product_spec_path(&spec.path, &args.repo, workspace_root(args));
+    let spec_text = match fs::read_to_string(&spec_abs) {
+        Ok(text) => text,
+        Err(_) => return Ok(env),
+    };
+    let plan = plan_chat_spec_approval_move(&spec.path, &spec_text);
+    let (from_rel, to_rel, should_move) = match plan {
+        ChatApprovalMovePlan::Move { from_rel, to_rel } => (from_rel, to_rel, true),
+        ChatApprovalMovePlan::AlreadyMoved { from_rel, to_rel } => (from_rel, to_rel, false),
+        ChatApprovalMovePlan::Noop => return Ok(env),
+    };
+    let from_abs = workspace_root(args).join(&from_rel);
+    let to_abs = workspace_root(args).join(&to_rel);
+    if should_move && from_abs.exists() {
+        if let Some(parent) = to_abs.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if !to_abs.exists() {
+            fs::rename(&from_abs, &to_abs).with_context(|| {
+                format!(
+                    "moving approved chat spec from `{}` to `{}`",
+                    from_abs.display(),
+                    to_abs.display()
+                )
+            })?;
+        }
+    }
+    let description = env.task.description.clone().unwrap_or_default();
+    if let Some(new_desc) = rewrite_spec_line_in_description(&description, &from_rel, &to_rel) {
+        api_patch::<Task>(
+            &args.base_url,
+            &env.task.id,
+            json!({"description": new_desc}),
+        )?;
+        env.task = api_get_task(&args.base_url, &env.task.id)?;
+        env.action_taken = "moved_approved_chat_spec_to_in_progress".to_string();
+    }
+    Ok(env)
+}
+
 fn plan_task_spec_archive(spec_path: Option<&str>) -> ArchiveSpecPlan {
     let Some(path) = spec_path.map(str::trim).filter(|p| !p.is_empty()) else {
         return ArchiveSpecPlan::MissingSpecRef;
     };
-    // Normalize trailing slashes and resolve `./` prefixes.
-    let normalized = path.trim_start_matches("./");
-    if !normalized.ends_with(".md") {
+    let normalized = normalize_rel_path(path);
+    if !normalized.ends_with(".md") || normalized.contains("..") {
         return ArchiveSpecPlan::NotTaskSpec;
     }
-    if normalized.contains("..") {
-        return ArchiveSpecPlan::NotTaskSpec;
-    }
-    // Already in done/ — idempotent no-op.
     let done_prefix = format!("{TASK_SPECS_DONE_DIR}/");
-    if normalized == TASK_SPECS_DONE_DIR || normalized.starts_with(&done_prefix) {
+    if normalized.starts_with(&done_prefix) {
         return ArchiveSpecPlan::AlreadyArchived;
     }
-    // Eligible if it's directly under brain/tasks/specs/ (one level deep).
-    let live_prefix = format!("{TASK_SPECS_DIR}/");
-    if !normalized.starts_with(&live_prefix) {
+    let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
+    if normalized.starts_with(&open_prefix) {
+        return ArchiveSpecPlan::OpenSpecCannotArchive;
+    }
+    let in_progress_prefix = format!("{TASK_SPECS_IN_PROGRESS_DIR}/");
+    let Some(suffix) = normalized.strip_prefix(&in_progress_prefix) else {
+        return ArchiveSpecPlan::NotTaskSpec;
+    };
+    if suffix.is_empty() || suffix.contains('/') || !suffix.ends_with(".md") {
         return ArchiveSpecPlan::NotTaskSpec;
     }
-    let suffix = &normalized[live_prefix.len()..];
-    if suffix.is_empty()
-        || suffix.contains('/')
-        || !suffix.ends_with(".md")
-    {
-        // Subdirectories or non-md under brain/tasks/specs/ are not archivable.
-        return ArchiveSpecPlan::NotTaskSpec;
-    }
-    let from_rel = normalized.to_string();
-    let to_rel = format!("{TASK_SPECS_DONE_DIR}/{suffix}");
+    let suffix = suffix.to_string();
     ArchiveSpecPlan::Move {
-        from_rel,
-        to_rel,
-        from_abs: PathBuf::new(), // populated by caller
+        from_rel: normalized,
+        to_rel: format!("{TASK_SPECS_DONE_DIR}/{suffix}"),
+        from_abs: PathBuf::new(),
         to_abs: PathBuf::new(),
     }
 }
@@ -989,26 +1144,23 @@ fn plan_task_spec_archive(spec_path: Option<&str>) -> ArchiveSpecPlan {
 /// Resolve the `from_abs`/`to_abs` paths against the workspace root and ensure
 /// the source exists. Returns `Err` only on filesystem or path-canonicalization
 /// failures — caller decides how to surface them.
-fn resolve_archive_plan(
-    plan: ArchiveSpecPlan,
-    workspace_root: &Path,
-) -> Result<ArchiveSpecPlan> {
-    let ArchiveSpecPlan::Move { from_rel, to_rel, .. } = plan else {
+fn resolve_archive_plan(plan: ArchiveSpecPlan, workspace_root: &Path) -> Result<ArchiveSpecPlan> {
+    let ArchiveSpecPlan::Move {
+        from_rel, to_rel, ..
+    } = plan
+    else {
         return Ok(plan);
     };
     let from_abs = workspace_root.join(&from_rel);
     let to_abs = workspace_root.join(&to_rel);
-    if !from_abs.exists() {
-        // The spec is referenced but doesn't exist on disk — treat as not archivable
-        // rather than blowing up post-merge. The lobster will log a checklist comment
-        // so a follow-up run can address it.
-        return Ok(ArchiveSpecPlan::NotTaskSpec);
-    }
-    // Ensure the destination directory exists.
+    // Ensure the destination directory exists before deciding whether this is
+    // a first move or an idempotent stale-Spec-line repair.
     if let Some(parent) = to_abs.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!("creating archive directory `{}`", parent.display())
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("creating archive directory `{}`", parent.display()))?;
+    }
+    if !from_abs.exists() && !to_abs.exists() {
+        return Ok(ArchiveSpecPlan::NotTaskSpec);
     }
     Ok(ArchiveSpecPlan::Move {
         from_rel,
@@ -1064,21 +1216,34 @@ fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelop
         return Ok(env);
     };
     let plan = plan_task_spec_archive(Some(&spec.path));
-    if matches!(plan, ArchiveSpecPlan::MissingSpecRef | ArchiveSpecPlan::NotTaskSpec | ArchiveSpecPlan::AlreadyArchived) {
+    if matches!(
+        plan,
+        ArchiveSpecPlan::MissingSpecRef
+            | ArchiveSpecPlan::NotTaskSpec
+            | ArchiveSpecPlan::AlreadyArchived
+            | ArchiveSpecPlan::OpenSpecCannotArchive
+    ) {
         env.action_taken = format!("post_merge_archive_noop_{}", plan_name(&plan));
         return Ok(env);
     }
 
-    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let resolved = match resolve_archive_plan(plan, &workspace_root) {
+    let resolved = match resolve_archive_plan(plan, workspace_root(args)) {
         Ok(p) => p,
         Err(err) => {
-            return Ok(archive_block(&args, env, format!(
-                "Failed to resolve spec archive plan: {err}."
-            )));
+            return Ok(archive_block(
+                &args,
+                env,
+                format!("Failed to resolve spec archive plan: {err}."),
+            ));
         }
     };
-    let ArchiveSpecPlan::Move { from_abs, to_abs, from_rel, to_rel } = resolved else {
+    let ArchiveSpecPlan::Move {
+        from_abs,
+        to_abs,
+        from_rel,
+        to_rel,
+    } = resolved
+    else {
         return Ok(env);
     };
 
@@ -1095,7 +1260,11 @@ fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelop
             &from_rel,
             &to_rel,
         ) {
-            match api_patch::<Task>(&args.base_url, &env.task.id, json!({"description": new_desc})) {
+            match api_patch::<Task>(
+                &args.base_url,
+                &env.task.id,
+                json!({"description": new_desc}),
+            ) {
                 Ok(_) => {
                     env.task = api_get_task(&args.base_url, &env.task.id)?;
                     env.action_taken = "post_merge_archive_already_present".to_string();
@@ -1116,8 +1285,8 @@ fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelop
 
     // Update the task description to point at the archived path.
     let description = env.task.description.clone().unwrap_or_default();
-    let new_description = rewrite_spec_line_in_description(&description, &from_rel, &to_rel)
-        .unwrap_or(description);
+    let new_description =
+        rewrite_spec_line_in_description(&description, &from_rel, &to_rel).unwrap_or(description);
     if new_description != env.task.description.clone().unwrap_or_default() {
         api_patch::<Task>(
             &args.base_url,
@@ -1135,6 +1304,7 @@ fn plan_name(plan: &ArchiveSpecPlan) -> &'static str {
     match plan {
         ArchiveSpecPlan::Move { .. } => "move",
         ArchiveSpecPlan::AlreadyArchived => "already_archived",
+        ArchiveSpecPlan::OpenSpecCannotArchive => "open_spec_cannot_archive",
         ArchiveSpecPlan::NotTaskSpec => "not_task_spec",
         ArchiveSpecPlan::MissingSpecRef => "missing_spec_ref",
     }
@@ -1230,8 +1400,7 @@ fn safe_brain_spec_path(spec_path_str: &str, workspace_root: &Path) -> Result<Pa
 /// line is wrapped with `- [ ] ` and trimmed.
 fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
     // Header regex captures the leading hash run so we know the section level.
-    const HEADER_PATTERN: &str =
-        r"(?im)^\s{0,3}(#{1,6})\s+Acceptance Criteria\s*:?\s*$\n?";
+    const HEADER_PATTERN: &str = r"(?im)^\s{0,3}(#{1,6})\s+Acceptance Criteria\s*:?\s*$\n?";
     let header_re = Regex::new(HEADER_PATTERN).expect("header pattern compiles");
 
     // Compute the new AC block as lines.
@@ -1253,8 +1422,7 @@ fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
         // Only headings at the captured level or higher end the AC section.
         // Deeper headings (`### …`, `#### …`, …) belong to the section's body
         // and must not truncate the rewrite.
-        let closer_pattern =
-            format!(r"(?m)^\s{{0,3}}#{{1,{header_level}}}\s+\S");
+        let closer_pattern = format!(r"(?m)^\s{{0,3}}#{{1,{header_level}}}\s+\S");
         let next_re = Regex::new(&closer_pattern).unwrap_or_else(|e| {
             panic!("closer pattern compiles for header level {header_level}: {e}")
         });
@@ -2747,11 +2915,9 @@ fn extract_ac_section(body: &str) -> &str {
     // `#### …`, …) are subsections and stay inside the AC section — that's
     // how multi-task PR bodies (one `## Acceptance Criteria` containing
     // several `### Task …` subheadings) keep their ACs together.
-    let closer_pattern =
-        format!(r"(?m)^\s{{0,3}}#{{1,{header_level}}}\s+\S");
-    let next_re = Regex::new(&closer_pattern).unwrap_or_else(|e| {
-        panic!("closer pattern compiles for header level {header_level}: {e}")
-    });
+    let closer_pattern = format!(r"(?m)^\s{{0,3}}#{{1,{header_level}}}\s+\S");
+    let next_re = Regex::new(&closer_pattern)
+        .unwrap_or_else(|e| panic!("closer pattern compiles for header level {header_level}: {e}"));
     match next_re.find(tail) {
         Some(next) => &tail[..next.start()],
         None => tail,
@@ -4260,14 +4426,8 @@ Lead-in.
             - [x] AC1: Alpha-specific AC1 text (testID: alpha_ac1)\n\
             ### Task beta\n\
             - [x] AC1: Beta-specific AC1 text (testID: beta_ac1)\n";
-        let alpha_acs = vec![(
-            "AC1".to_string(),
-            "Alpha-specific AC1 text".to_string(),
-        )];
-        let beta_acs = vec![(
-            "AC1".to_string(),
-            "Beta-specific AC1 text".to_string(),
-        )];
+        let alpha_acs = vec![("AC1".to_string(), "Alpha-specific AC1 text".to_string())];
+        let beta_acs = vec![("AC1".to_string(), "Beta-specific AC1 text".to_string())];
 
         let alpha_failures = task_ac_vs_open_pr_failures(
             "alpha",
@@ -4295,10 +4455,7 @@ Lead-in.
         // contains beta's text, the function should report a text-mismatch
         // failure rather than borrowing alpha's text. This proves the HashMap
         // is correctly scoped.
-        let cross_acs = vec![(
-            "AC1".to_string(),
-            "Beta-specific AC1 text".to_string(),
-        )];
+        let cross_acs = vec![("AC1".to_string(), "Beta-specific AC1 text".to_string())];
         let cross_failures = task_ac_vs_open_pr_failures(
             "alpha",
             &cross_acs,
@@ -5159,10 +5316,12 @@ Lead-in.
 
     #[test]
     fn plan_task_spec_archive_moves_eligible_spec() {
-        let plan = plan_task_spec_archive(Some("brain/tasks/specs/example-2026.md"));
+        let plan = plan_task_spec_archive(Some("brain/tasks/specs/in-progress/example-2026.md"));
         match plan {
-            ArchiveSpecPlan::Move { from_rel, to_rel, .. } => {
-                assert_eq!(from_rel, "brain/tasks/specs/example-2026.md");
+            ArchiveSpecPlan::Move {
+                from_rel, to_rel, ..
+            } => {
+                assert_eq!(from_rel, "brain/tasks/specs/in-progress/example-2026.md");
                 assert_eq!(to_rel, "brain/tasks/specs/done/example-2026.md");
             }
             other => panic!("expected Move plan, got {other:?}"),
@@ -5171,7 +5330,7 @@ Lead-in.
 
     #[test]
     fn plan_task_spec_archive_strips_leading_dot_slash() {
-        let plan = plan_task_spec_archive(Some("./brain/tasks/specs/example-2026.md"));
+        let plan = plan_task_spec_archive(Some("./brain/tasks/specs/in-progress/example-2026.md"));
         assert!(matches!(plan, ArchiveSpecPlan::Move { .. }));
     }
 
@@ -5206,7 +5365,7 @@ Lead-in.
     #[test]
     fn plan_task_spec_archive_rejects_subdirectory() {
         assert_eq!(
-            plan_task_spec_archive(Some("brain/tasks/specs/sub/foo.md")),
+            plan_task_spec_archive(Some("brain/tasks/specs/in-progress/sub/foo.md")),
             ArchiveSpecPlan::NotTaskSpec
         );
     }
@@ -5214,7 +5373,7 @@ Lead-in.
     #[test]
     fn plan_task_spec_archive_rejects_non_md() {
         assert_eq!(
-            plan_task_spec_archive(Some("brain/tasks/specs/example.txt")),
+            plan_task_spec_archive(Some("brain/tasks/specs/in-progress/example.txt")),
             ArchiveSpecPlan::NotTaskSpec
         );
     }
@@ -5222,19 +5381,118 @@ Lead-in.
     #[test]
     fn plan_task_spec_archive_rejects_dotdot() {
         assert_eq!(
-            plan_task_spec_archive(Some("brain/tasks/specs/../escapee.md")),
+            plan_task_spec_archive(Some("brain/tasks/specs/in-progress/../escapee.md")),
             ArchiveSpecPlan::NotTaskSpec
         );
     }
 
     #[test]
     fn plan_task_spec_archive_missing_or_empty_is_missing() {
-        assert_eq!(plan_task_spec_archive(None), ArchiveSpecPlan::MissingSpecRef);
-        assert_eq!(plan_task_spec_archive(Some("")), ArchiveSpecPlan::MissingSpecRef);
+        assert_eq!(
+            plan_task_spec_archive(None),
+            ArchiveSpecPlan::MissingSpecRef
+        );
+        assert_eq!(
+            plan_task_spec_archive(Some("")),
+            ArchiveSpecPlan::MissingSpecRef
+        );
         assert_eq!(
             plan_task_spec_archive(Some("   ")),
             ArchiveSpecPlan::MissingSpecRef
         );
+    }
+
+    #[test]
+    fn spec_lifecycle_bootstrap_creates_expected_dirs_and_is_idempotent() {
+        let workspace = tempdir().unwrap();
+        bootstrap_task_spec_layout(workspace.path()).unwrap();
+        for dir in [
+            TASK_SPECS_OPEN_DIR,
+            TASK_SPECS_IN_PROGRESS_DIR,
+            TASK_SPECS_DONE_DIR,
+        ] {
+            assert!(workspace.path().join(dir).is_dir(), "missing {dir}");
+        }
+        bootstrap_task_spec_layout(workspace.path()).unwrap();
+    }
+
+    #[test]
+    fn spec_lifecycle_bootstrap_rejects_unexpected_subdir() {
+        let workspace = tempdir().unwrap();
+        fs::create_dir_all(workspace.path().join("brain/tasks/specs/other")).unwrap();
+        let err = bootstrap_task_spec_layout(workspace.path()).unwrap_err();
+        assert!(err.to_string().contains("unexpected subdir"));
+    }
+
+    #[test]
+    fn spec_lifecycle_chat_approval_move_only_moves_open_checked_specs() {
+        let checked = "- [x] **Approved by Tom**\n";
+        assert_eq!(
+            plan_chat_spec_approval_move("brain/tasks/specs/open/example.md", checked),
+            ChatApprovalMovePlan::Move {
+                from_rel: "brain/tasks/specs/open/example.md".to_string(),
+                to_rel: "brain/tasks/specs/in-progress/example.md".to_string()
+            }
+        );
+        assert_eq!(
+            plan_chat_spec_approval_move(
+                "brain/tasks/specs/open/example.md",
+                "- [ ] **Approved by Tom**\n"
+            ),
+            ChatApprovalMovePlan::Noop
+        );
+        assert_eq!(
+            plan_chat_spec_approval_move(
+                "brain/tasks/specs/in-progress/example.md",
+                "- [ ] **Approved by Tom**\n"
+            ),
+            ChatApprovalMovePlan::AlreadyMoved {
+                from_rel: "brain/tasks/specs/open/example.md".to_string(),
+                to_rel: "brain/tasks/specs/in-progress/example.md".to_string()
+            }
+        );
+        assert_eq!(
+            plan_chat_spec_approval_move("brain/tasks/specs/done/example.md", checked),
+            ChatApprovalMovePlan::Noop
+        );
+    }
+
+    #[test]
+    fn spec_lifecycle_archive_moves_only_in_progress_to_done() {
+        let plan = plan_task_spec_archive(Some("brain/tasks/specs/in-progress/example.md"));
+        match plan {
+            ArchiveSpecPlan::Move {
+                from_rel, to_rel, ..
+            } => {
+                assert_eq!(from_rel, "brain/tasks/specs/in-progress/example.md");
+                assert_eq!(to_rel, "brain/tasks/specs/done/example.md");
+            }
+            other => panic!("expected move, got {other:?}"),
+        }
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/tasks/specs/open/example.md")),
+            ArchiveSpecPlan::OpenSpecCannotArchive
+        );
+        assert_eq!(
+            plan_task_spec_archive(Some("brain/tasks/specs/done/example.md")),
+            ArchiveSpecPlan::AlreadyArchived
+        );
+    }
+
+    #[test]
+    fn spec_lifecycle_folder_agnostic_spec_paths_resolve_under_brain() {
+        let workspace = tempdir().unwrap();
+        for rel in [
+            "brain/tasks/specs/open/example.md",
+            "brain/tasks/specs/in-progress/example.md",
+            "brain/tasks/specs/done/example.md",
+            "brain/bookmarks/specs/example.md",
+        ] {
+            let path = workspace.path().join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "- [x] **Approved by Tom**\n").unwrap();
+            assert_eq!(safe_brain_spec_path(rel, workspace.path()).unwrap(), path);
+        }
     }
 
     // ---- rewrite_spec_line_in_description ----
@@ -5242,7 +5500,7 @@ Lead-in.
     #[test]
     fn rewrite_spec_line_replaces_old_path_with_new() {
         let description = "\
-**Spec:** brain/tasks/specs/example-2026.md
+**Spec:** brain/tasks/specs/in-progress/example-2026.md
 
 ## Outcome
 
@@ -5250,12 +5508,12 @@ Whatever.
 ";
         let rewritten = rewrite_spec_line_in_description(
             description,
-            "brain/tasks/specs/example-2026.md",
+            "brain/tasks/specs/in-progress/example-2026.md",
             "brain/tasks/specs/done/example-2026.md",
         )
         .expect("rewrite should fire when paths differ");
         assert!(rewritten.contains("**Spec:** brain/tasks/specs/done/example-2026.md"));
-        assert!(!rewritten.contains("**Spec:** brain/tasks/specs/example-2026.md\n"));
+        assert!(!rewritten.contains("**Spec:** brain/tasks/specs/in-progress/example-2026.md\n"));
     }
 
     #[test]
@@ -5269,7 +5527,7 @@ Whatever.
 ";
         let rewritten = rewrite_spec_line_in_description(
             description,
-            "brain/tasks/specs/example-2026.md",
+            "brain/tasks/specs/in-progress/example-2026.md",
             "brain/tasks/specs/done/example-2026.md",
         );
         assert!(rewritten.is_none(), "already archived must be a no-op");
@@ -5280,7 +5538,7 @@ Whatever.
         let description = "## Outcome\nNo spec line here.\n";
         let rewritten = rewrite_spec_line_in_description(
             description,
-            "brain/tasks/specs/example-2026.md",
+            "brain/tasks/specs/in-progress/example-2026.md",
             "brain/tasks/specs/done/example-2026.md",
         );
         assert!(rewritten.is_none());
@@ -5291,18 +5549,26 @@ Whatever.
     #[test]
     fn resolve_archive_plan_moves_existing_spec_into_done() {
         let workspace = tempdir().unwrap();
-        let live = workspace.path().join("brain/tasks/specs");
+        let live = workspace.path().join("brain/tasks/specs/in-progress");
         fs::create_dir_all(&live).unwrap();
         let src = live.join("example-2026.md");
         fs::write(&src, "# Example\n").unwrap();
 
-        let plan = plan_task_spec_archive(Some("brain/tasks/specs/example-2026.md"));
+        let plan = plan_task_spec_archive(Some("brain/tasks/specs/in-progress/example-2026.md"));
         let resolved = resolve_archive_plan(plan, workspace.path()).expect("plan resolves");
-        let ArchiveSpecPlan::Move { from_abs, to_abs, .. } = resolved else {
+        let ArchiveSpecPlan::Move {
+            from_abs, to_abs, ..
+        } = resolved
+        else {
             panic!("expected Move plan");
         };
         assert_eq!(from_abs, src);
-        assert_eq!(to_abs, workspace.path().join("brain/tasks/specs/done/example-2026.md"));
+        assert_eq!(
+            to_abs,
+            workspace
+                .path()
+                .join("brain/tasks/specs/done/example-2026.md")
+        );
         // done/ dir is created on demand.
         assert!(to_abs.parent().unwrap().exists());
     }
@@ -5913,7 +6179,10 @@ detached
         }];
         let matches =
             select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
-        assert!(matches.is_empty(), "primary worktree must never be selected");
+        assert!(
+            matches.is_empty(),
+            "primary worktree must never be selected"
+        );
     }
 
     #[test]
