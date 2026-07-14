@@ -175,8 +175,15 @@ for inc in needs_tom(all_incidents):
 4. If an entry has `attempts >= 3` and is still unresolved: set `needsTom: true`, `severity` to at least `high`
 5. Always increment `attempts` and update `lastCheckedAt` when re-checking an existing entry
 
-**Escalation — always surface the top unblock:**
+**Escalation — validate before escalating, then surface the top unblock:**
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
+
+**Before escalating any `needsTom` entry, re-validate it is still a real problem:**
+- For bookmark pipeline stalls: re-run the bookmark state analyzer. If `approvalPendingCount == 0` and no genuine stall exists (no `spec_created` items without a `specPath`, no items stuck in the same status for multiple heartbeats), mark the entry `resolved` with `resolvedAt: <now>` and do NOT escalate.
+- For feature task stalls: re-check the lobster output. If the task is no longer in the reported state, mark resolved.
+- For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
+- Only escalate if the condition is confirmed present in live state this pass.
+
 1. Collect all entries where `needsTom: true` AND `status` is not `resolved` or `false_positive`. Call this N.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
 3. **Always end the heartbeat with a count + the top unblock:**
