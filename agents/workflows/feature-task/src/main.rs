@@ -925,7 +925,7 @@ const TASK_SPECS_DIR: &str = "brain/tasks/specs";
 const TASK_SPECS_OPEN_DIR: &str = "brain/tasks/specs/open";
 const TASK_SPECS_IN_PROGRESS_DIR: &str = "brain/tasks/specs/in-progress";
 const TASK_SPECS_DONE_DIR: &str = "brain/tasks/specs/done";
-const TASK_SPEC_LIFECYCLE_DIRS: [&str; 3] = ["open", "in-progress", "done"];
+const TASK_SPEC_LIFECYCLE_DIRS: [&str; 4] = ["open", "in-progress", "done", "archived"];
 
 // ---- Post-merge worktree cleanup (feature task ba116063) ----
 //
@@ -1004,7 +1004,7 @@ fn bootstrap_task_spec_layout(workspace_root: &Path) -> Result<()> {
         let name = entry.file_name().to_string_lossy().to_string();
         if !TASK_SPEC_LIFECYCLE_DIRS.contains(&name.as_str()) {
             return Err(anyhow!(
-                "unexpected subdir under `{}`: `{}`; expected only open/, in-progress/, done/",
+                "unexpected subdir under `{}`: `{}`; expected only open/, in-progress/, done/, archived/",
                 specs_root.display(),
                 name
             ));
