@@ -112,6 +112,17 @@ A tech design that introduces a new runtime for a domain must state:
 3. how it is built, tested, deployed, and observed;
 4. what API/data boundary keeps it from leaking into unrelated domains.
 
+## Work classification
+
+Use the lightest workflow that preserves traceability and safety:
+
+- Code garden: behavior-preserving cleanup only.
+- Code tasks: fixes, hardening, migrations, refactors, and architecture corrections with no new product capability.
+- Feature tasks: new user/product capability or product behavior requiring scope approval.
+- Research tasks: investigation before an implementation path is known.
+
+Repo audit findings that are important but not code-garden-safe should become tracked tasks rather than staying indefinitely skipped.
+
 ## Documentation expectations
 
 - Architecture principles and best practices: `docs/ARCHITECTURE.md`.

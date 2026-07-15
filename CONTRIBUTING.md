@@ -5,9 +5,10 @@
 This repo uses a **spec-first** workflow for any non-trivial change, plus a strict **dev vs prodlike** split for local work.
 
 For non-trivial code tasks:
-- create or update a tech design in `docs/specs/` before implementation starts
-- record the spec doc path in the task
-- task notes are not a substitute for a spec doc
+- no product spec is required
+- create or update a tech design in `docs/specs/` before implementation starts when the task changes security posture, service boundaries, data ownership, migrations, cross-service APIs, or significant internal architecture
+- record the tech design path in the task
+- task notes are not a substitute for a needed tech design
 
 See [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) for the full doc taxonomy: tech designs, system docs, app specs, and their lifecycle. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for repo-level architecture principles, service boundaries, and ownership rules.
 
@@ -66,6 +67,19 @@ For non-trivial work:
 3. Implement in small, mergeable slices.
 4. Validate with the right tests/checks and note any manual verification.
 5. Capture rollback, mitigation, or follow-up notes if risk remains.
+
+## Audit findings and follow-up tasks
+
+Weekly repo audits are the ledger for technical findings.
+
+- Code-garden-safe findings stay in the code-garden lane and are marked done by the code-garden PR link.
+- Important findings that are not code-garden-safe should become tracked tasks during the audit when the follow-up is clear.
+- Use `code` tasks for non-functional/security/refactor/migration/service-boundary work with no new product capability.
+- Use `feature` tasks for new product/user capability or behavior requiring product scope.
+- Use `research` tasks when the right implementation path is not known yet.
+- The audit finding line should link the task while work is pending, then the implementation PR when fixed.
+
+This keeps traceability as: `audit finding → task → tech design when needed → PR → audit marked done`.
 
 ## Validation expectations
 
