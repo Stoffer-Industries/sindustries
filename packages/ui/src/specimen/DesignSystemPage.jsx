@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { Button } from '../react/index.jsx';
+import React, { useEffect, useState } from 'react';
 import { SPECIMEN_PAGES } from './generated/pages.js';
 import { SpecimenSection } from './SpecimenSections.jsx';
 import './styles.css';
@@ -22,29 +21,64 @@ function shellPackForPage(page) {
   return page?.pack ?? 'pulse';
 }
 
-export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
+// Read the shell's current data-si-theme attribute (Mission Control
+// owns it on <html>; tests can simulate by setting it on documentElement).
+// Falls back to 'dark' so SSR / no-DOM callers get a deterministic value.
+function readShellTheme() {
+  if (typeof document === 'undefined') return 'dark';
+  const value = document.documentElement.getAttribute('data-si-theme');
+  return value === 'light' ? 'light' : 'dark';
+}
+
+/**
+ * DesignSystemPage — design-kit specimen viewer used by Mission Control's
+ * Design System tab and (historically) the Tasks app.
+ *
+ * Per AC5/AC6 of task 205d7615 (Design System tab in Mission Control),
+ * the page no longer owns its own in-page theme toggle or back link:
+ *   - The shell's Day/Night sidebar toggle is the single source of truth
+ *     for `data-si-theme`. We track <html data-si-theme> via a
+ *     MutationObserver so theme flips propagate without a remount.
+ *   - Navigation lives in the Mission Control tab bar; the in-page back
+ *     link to "/tasks" is redundant and has been removed.
+ *
+ * Per-kit-page overrides (`SPECIMEN_PAGES[*].theme`) still apply to the
+ * individual section element (e.g. the Brand kit renders `data-si-theme="light"`
+ * on its own section so its pale palette survives the shell being dark).
+ */
+export function DesignSystemPage() {
   const [activePageId, setActivePageId] = useState(SPECIMEN_PAGES[0]?.id ?? 'tokens');
-  const [theme, setTheme] = useState(SPECIMEN_PAGES[0]?.theme ?? 'dark');
+  const [shellTheme, setShellTheme] = useState(readShellTheme);
+
+  // Mirror the shell's data-si-theme attribute. Mission Control sets it
+  // on <html> via the sidebar ThemeToggle; this observer keeps the
+  // specimen shell in sync without a reload or remount.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    setShellTheme(readShellTheme());
+    const target = document.documentElement;
+    const observer = new MutationObserver(() => {
+      const next = readShellTheme();
+      setShellTheme((current) => (current === next ? current : next));
+    });
+    observer.observe(target, { attributes: true, attributeFilter: ['data-si-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
   const activePage = SPECIMEN_PAGES.find((page) => page.id === activePageId) ?? SPECIMEN_PAGES[0];
-  const nextTheme = theme === 'dark' ? 'light' : 'dark';
 
   function selectPage(pageId) {
-    const page = SPECIMEN_PAGES.find((entry) => entry.id === pageId);
     setActivePageId(pageId);
-    if (page?.theme) setTheme(page.theme);
   }
 
   return (
     <main
       className="si-specimen-shell"
-      data-si-theme={theme}
+      data-si-theme={shellTheme}
       data-si-pack={shellPackForPage(activePage)}
       data-si-surface="bgCanvas"
     >
       <header className="si-specimen-header">
-        <a href={backHref} className="si-specimen-back">
-          {backLabel}
-        </a>
         <nav className="si-specimen-kit-tabs" aria-label="Design kit">
           {KIT_TABS.map((tab) => (
             <button
@@ -58,17 +92,6 @@ export function DesignSystemPage({ backHref = '/', backLabel = '← Back' }) {
             </button>
           ))}
         </nav>
-        <div className="si-specimen-header-actions">
-          <p className="si-specimen-eyebrow">Design system</p>
-          <Button
-            type="button"
-            variant="outline"
-            aria-label={`Switch to ${nextTheme} theme`}
-            onClick={() => setTheme(nextTheme)}
-          >
-            {theme === 'dark' ? 'Dark' : 'Light'}
-          </Button>
-        </div>
       </header>
 
       <div className="si-specimen-page">

@@ -9,14 +9,14 @@
   align-items: center;
   background: var(--si-color-bg-section);
   border-bottom: 1px solid var(--si-color-border-subtle);
-  display: grid;
-  gap: 16px;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  justify-content: center;
   padding: 16px 20px;
 }
 
 .si-specimen-kit-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
 }

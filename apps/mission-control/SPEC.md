@@ -111,7 +111,7 @@ surface.
 | Tasks | `/tasks` | `Tabs/TasksTab.jsx` (iframe) | Embedded tasks app — all existing flows remain available |
 | Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, Sankey of the curation pipeline, funnel, per-topic counts, state counts over time, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
-| Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand) with back link to Tasks |
+| Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand); follows the shell's `data-si-theme` (the Mission Control tab bar is the canonical navigation — no in-page back link, no in-page theme toggle) |
 | Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler queue: list + create/approve/publish/remove/reorder; embeds content via iframe + Tasks-API proxy |
 | SIndustries | `/sindustries` | `Tabs/SIndustriesTab.jsx` | Embedded `sindustries.co.nz` via iframe; falls back to an external-link card if the upstream `X-Frame-Options`/`CSP` blocks embedding (timeout-based detection, ~8s) |
 | 404 / unknown path | `/<anything>` | falls back to Tasks tab | The default tab renders; no error surface |
@@ -139,7 +139,7 @@ specimen mount.
 | WIP by status | Vitest: `flowMetrics.test.js` covers status grouping |
 | Bookmark pipeline counts (KPIs, funnel, topics) | Vitest: `bookmarkPipeline.test.js` covers `kpiCounts`, `funnelRows`, `topicCounts` |
 | Curation bucketing | Vitest: `bookmarkPipeline.test.js` covers `curationGroups` threshold + sort |
-| Design System specimen mount | Vitest: `tabs/DesignSystemTab.test.jsx` covers kit nav, back link, default active kit tab |
+| Design System specimen mount | Vitest: `tabs/DesignSystemTab.test.jsx` covers kit nav, default active kit tab, no in-page back link, no in-page theme toggle, mirror of `data-si-theme` on first render and on shell theme flip |
 | Recent transitions | Vitest: `bookmarkPipeline.test.js` covers `recentTransitions` scope + ordering |
 | State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
