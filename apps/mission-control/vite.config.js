@@ -21,8 +21,8 @@ function brainStateApi() {
   function resolveBrainRoot() {
     const explicit = process.env.WORKSPACE_ROOT;
     if (explicit) return path.resolve(explicit, 'brain');
-    // apps/mission-control/vite.config.js -> ../../.. = workspace root
-    return path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..', 'brain');
+    // apps/mission-control/vite.config.js -> ../../../.. = workspace root (codebases/sindustries/apps/mission-control -> workspace)
+    return path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../../..', 'brain');
   }
 
   return {

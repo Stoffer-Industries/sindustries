@@ -12,7 +12,7 @@ case "$MODE" in
     export TASKS_API_PORT="4000"
     export BUDGET_API_PORT="4002"
     export TASKS_APP_PORT="5173"
-    export MISSION_CONTROL_PORT="5174"
+    export MISSION_CONTROL_PORT="5176"
     export TILT_PORT="10350"
     export POSTGRES_DB="sindustries_dev"
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-dev"
