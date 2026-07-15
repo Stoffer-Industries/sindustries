@@ -442,12 +442,34 @@ fn task_description_acs(description: &str) -> Vec<(String, String)> {
 }
 
 /// Returns the labels of ACs in the task description that are still unchecked (`- [ ] ACN:`).
-/// Used at post_merge to detect ACs added after the initial PR — they require a new PR before
-/// Tom can give `[qa-ac-verified] true`.
 fn unchecked_task_ac_labels(description: &str) -> Vec<String> {
     let re = Regex::new(r"(?m)^\s*-\s*\[ \]\s+(AC\d+):").unwrap();
     re.captures_iter(description)
         .map(|cap| cap[1].to_string())
+        .collect()
+}
+
+/// Returns the labels of AC lines referenced anywhere in `body` (checked or unchecked).
+/// Used to determine which ACs a PR covers — if an AC label appears in the PR body it was
+/// included in that delivery, even if Tom hasn't checked it off the task yet.
+fn ac_labels_in_pr_body(body: &str) -> Vec<String> {
+    let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(AC\d+):").unwrap();
+    re.captures_iter(body)
+        .map(|cap| cap[1].to_string())
+        .collect()
+}
+
+/// Returns unchecked task ACs that are not mentioned in any of the provided merged PR bodies.
+/// These are ACs Tom added after the PRs merged — they require a new PR before QA can verify.
+fn ac_labels_needing_new_pr(unchecked: &[String], pr_bodies: &[String]) -> Vec<String> {
+    unchecked
+        .iter()
+        .filter(|label| {
+            !pr_bodies
+                .iter()
+                .any(|body| ac_labels_in_pr_body(body).contains(label))
+        })
+        .cloned()
         .collect()
 }
 
@@ -730,17 +752,26 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         return block_with_manual_block(&args, env, "post_merge", manual_failures);
     }
 
-    // If the task description has unchecked ACs, the merged PRs don't cover all the
-    // work yet (Tom may have added ACs after the initial PR). Block until a new PR
-    // lands covering the remaining ACs — only then can Tom give [qa-ac-verified] true.
+    // If the task has unchecked ACs that don't appear in any merged PR body, those ACs
+    // were added after the PRs landed and are not yet implemented. Block until a new PR
+    // covers them — only then can Tom give [qa-ac-verified] true.
+    // Unchecked ACs that DO appear in a merged PR are mid-QA (Tom hasn't checked them
+    // off yet) — those are fine to leave until qa-ac-verified.
     let description = env.task.description.clone().unwrap_or_default();
     let unchecked_acs = unchecked_task_ac_labels(&description);
     if !unchecked_acs.is_empty() {
-        let labels = unchecked_acs.join(", ");
-        let failures = vec![format!(
-            "Task has unchecked ACs ({labels}). Open a new PR covering these ACs; once merged, Tom can verify with `[qa-ac-verified] true`."
-        )];
-        return transition_or_block(&args, env, "done", "post_merge", failures);
+        let pr_bodies: Vec<String> = rowan_pr_urls(&env.task)
+            .iter()
+            .filter_map(|url| pr_body(url).ok())
+            .collect();
+        let needs_pr = ac_labels_needing_new_pr(&unchecked_acs, &pr_bodies);
+        if !needs_pr.is_empty() {
+            let labels = needs_pr.join(", ");
+            let failures = vec![format!(
+                "Unchecked ACs ({labels}) are not covered by any merged PR. Open a new PR covering these ACs; once merged, Tom can verify with `[qa-ac-verified] true`."
+            )];
+            return transition_or_block(&args, env, "done", "post_merge", failures);
+        }
     }
 
     // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
@@ -4228,7 +4259,7 @@ Lead-in.
         assert!(result.failures.is_empty());
     }
 
-    // ---- unchecked_task_ac_labels ----
+    // ---- unchecked_task_ac_labels / ac_labels_in_pr_body / ac_labels_needing_new_pr ----
 
     #[test]
     fn unchecked_task_ac_labels_returns_only_unchecked() {
@@ -4241,6 +4272,30 @@ Lead-in.
     fn unchecked_task_ac_labels_empty_when_all_checked() {
         let desc = "## Acceptance Criteria\n- [x] AC1: Done\n- [X] AC2: Also done\n";
         assert!(unchecked_task_ac_labels(desc).is_empty());
+    }
+
+    #[test]
+    fn ac_labels_in_pr_body_finds_all_labels() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [ ] AC2: Not done\n- [X] AC5: Also done\n";
+        let labels = ac_labels_in_pr_body(body);
+        assert_eq!(labels, vec!["AC1".to_string(), "AC2".to_string(), "AC5".to_string()]);
+    }
+
+    #[test]
+    fn ac_labels_needing_new_pr_returns_uncovered_acs() {
+        // AC1 unchecked but in PR body (mid-QA) — no new PR needed
+        // AC5 unchecked and NOT in any PR body — new PR needed
+        let unchecked = vec!["AC1".to_string(), "AC5".to_string()];
+        let pr_body1 = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [x] AC2: Done (testID: 2)\n".to_string();
+        let needs_pr = ac_labels_needing_new_pr(&unchecked, &[pr_body1]);
+        assert_eq!(needs_pr, vec!["AC5".to_string()]);
+    }
+
+    #[test]
+    fn ac_labels_needing_new_pr_empty_when_all_covered() {
+        let unchecked = vec!["AC1".to_string(), "AC2".to_string()];
+        let pr_body1 = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [x] AC2: Done (testID: 2)\n".to_string();
+        assert!(ac_labels_needing_new_pr(&unchecked, &[pr_body1]).is_empty());
     }
 
     // ---- task_description_acs ----
