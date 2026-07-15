@@ -441,6 +441,16 @@ fn task_description_acs(description: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Returns the labels of ACs in the task description that are still unchecked (`- [ ] ACN:`).
+/// Used at post_merge to detect ACs added after the initial PR — they require a new PR before
+/// Tom can give `[qa-ac-verified] true`.
+fn unchecked_task_ac_labels(description: &str) -> Vec<String> {
+    let re = Regex::new(r"(?m)^\s*-\s*\[ \]\s+(AC\d+):").unwrap();
+    re.captures_iter(description)
+        .map(|cap| cap[1].to_string())
+        .collect()
+}
+
 /// Compare task description ACs against an open PR body at the doing → acceptance gate.
 ///
 /// Fails if any task AC is missing from the PR, has altered text, or lacks a valid evidence annotation.
@@ -718,6 +728,19 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
         return block_with_manual_block(&args, env, "post_merge", manual_failures);
+    }
+
+    // If the task description has unchecked ACs, the merged PRs don't cover all the
+    // work yet (Tom may have added ACs after the initial PR). Block until a new PR
+    // lands covering the remaining ACs — only then can Tom give [qa-ac-verified] true.
+    let description = env.task.description.clone().unwrap_or_default();
+    let unchecked_acs = unchecked_task_ac_labels(&description);
+    if !unchecked_acs.is_empty() {
+        let labels = unchecked_acs.join(", ");
+        let failures = vec![format!(
+            "Task has unchecked ACs ({labels}). Open a new PR covering these ACs; once merged, Tom can verify with `[qa-ac-verified] true`."
+        )];
+        return transition_or_block(&args, env, "done", "post_merge", failures);
     }
 
     // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
@@ -4203,6 +4226,21 @@ Lead-in.
         assert!(!result.criteria_met);
         assert_eq!(result.action_taken, "ready_checks_blocked");
         assert!(result.failures.is_empty());
+    }
+
+    // ---- unchecked_task_ac_labels ----
+
+    #[test]
+    fn unchecked_task_ac_labels_returns_only_unchecked() {
+        let desc = "## Acceptance Criteria\n- [x] AC1: Done\n- [ ] AC2: Pending\n- [X] AC3: Also done\n- [ ] AC4: Also pending\n";
+        let labels = unchecked_task_ac_labels(desc);
+        assert_eq!(labels, vec!["AC2".to_string(), "AC4".to_string()]);
+    }
+
+    #[test]
+    fn unchecked_task_ac_labels_empty_when_all_checked() {
+        let desc = "## Acceptance Criteria\n- [x] AC1: Done\n- [X] AC2: Also done\n";
+        assert!(unchecked_task_ac_labels(desc).is_empty());
     }
 
     // ---- task_description_acs ----
