@@ -61,6 +61,8 @@ For non-trivial work:
    - Ask questions if needed, or explicitly note why no clarification is needed.
    - Record assumptions.
 2. Write or update a tech design in `docs/specs/` before implementation (see [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)).
+   - The tech design must map each acceptance criterion to planned verification before coding starts.
+   - User-visible/app-flow ACs should plan E2E coverage where possible; if not possible, record why and name the fallback test layer.
 3. Implement in small, mergeable slices.
 4. Validate with the right tests/checks and note any manual verification.
 5. Capture rollback, mitigation, or follow-up notes if risk remains.
