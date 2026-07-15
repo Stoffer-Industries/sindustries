@@ -32,7 +32,9 @@ Tech designs are historical record. Do not delete them. When a feature ships, up
 - `.openclaw` boundary notes for work outside this repo
 - Implementation plan with file/module scope
 - Data model or API contract changes
-- Test plan
+- Test plan with an acceptance-criterion verification matrix
+  - Prefer E2E coverage for user-visible/app-flow ACs
+  - If E2E is not possible or is disproportionate, record the reason and fallback layer before implementation starts
 - Open questions and risks
 
 ### 2. System docs — `docs/systems/<system>.md`

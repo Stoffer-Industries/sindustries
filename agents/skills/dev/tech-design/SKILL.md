@@ -19,7 +19,9 @@ Include:
 - Implementation plan with file/module scope
 - Data model or API contract changes
 - Workflow, cron, and skill changes
-- Test plan
+- Test plan with an AC-by-AC verification matrix
+  - User-visible/app-flow ACs should plan E2E coverage where possible
+  - If E2E is not possible or is disproportionate, record why and name the fallback test layer (`file`, unit, component, integration, or manual)
 - Open questions and risks
 
 After writing the design, post the durable task comment:
