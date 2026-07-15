@@ -9,7 +9,7 @@ For non-trivial code tasks:
 - record the spec doc path in the task
 - task notes are not a substitute for a spec doc
 
-See [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) for the full doc taxonomy: tech designs, system docs, app specs, and their lifecycle.
+See [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) for the full doc taxonomy: tech designs, system docs, app specs, and their lifecycle. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for repo-level architecture principles, service boundaries, and ownership rules.
 
 ## Environment rules
 
@@ -52,6 +52,8 @@ Use prodlike for final verification, smoke checks, and automation that should ta
 ## Non-trivial work
 
 A change is non-trivial if it changes architecture, introduces/refactors modules, crosses service/app boundaries, materially changes behavior, or is more than a tiny isolated edit.
+
+Before changing backend ownership, adding persistence, or wiring a new service/API boundary, check [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Architecture principles belong there; task notes, PR comments, and agent workflow docs may reference them but are not the canonical source.
 
 For non-trivial work:
 
@@ -137,4 +139,4 @@ Avoid vague messages like `wip`, `misc`, `fix`, or `stuff`.
 - `services/` for backend APIs, workers, and processes
 - `packages/` for shared libraries, types, and config
 - `infra/` for deployment/runtime/infrastructure config
-- `docs/` for architecture, specs, and decision records
+- `docs/` for architecture principles, system docs, specs, and decision records

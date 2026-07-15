@@ -2,6 +2,8 @@
 
 This file is the single source of truth for how spec and system documentation is structured, maintained, and linked across the Sindustries repo. All agents must read this before writing or updating any spec or system doc.
 
+For architecture principles and service-boundary best practices, read [`docs/ARCHITECTURE.md`](ARCHITECTURE.md). This file defines documentation taxonomy; `docs/ARCHITECTURE.md` defines architectural direction.
+
 ---
 
 ## Document taxonomy

@@ -69,16 +69,9 @@ Rowan must pass the clarification gate from `TASK_TEMPLATE.md` before implementa
 
 ## Service Boundary Guardrail
 
-Sindustries is a micro-service architecture. Mission Control is a multi-service client, not a reason to centralize unrelated backend state behind `services/tasks-api`.
+Canonical architecture principles live in `docs/ARCHITECTURE.md`. Rowan must read and apply that file before adding any API route, database table/model, queue, cron, worker, external integration, or cross-service dependency.
 
-Before adding any API route, database table/model, queue, cron, or external integration, Rowan must answer in the design/PR:
-- Which service owns this domain and why?
-- Is the data about tasks, task comments, tags, task dependencies, task lifecycle, or task workflow metadata?
-- If not, why is it being added to an existing service instead of a dedicated service?
-- Which apps/services consume this API directly?
-- What migration or extraction path exists if this is intentionally temporary?
-
-Default rule: `services/tasks-api` only owns task/workflow state. Content scheduling/publishing, bookmarks, finance, analytics, agent incidents, and other product domains need their own service boundary unless Tom explicitly approves an exception.
+At minimum, designs/PRs must identify service ownership, data ownership, direct consumers, why existing services are or are not appropriate, and the extraction/migration plan for any temporary placement. `services/tasks-api` remains task/workflow-only unless Tom explicitly approves an exception.
 
 ---
 
