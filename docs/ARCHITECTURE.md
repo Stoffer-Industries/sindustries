@@ -60,6 +60,51 @@ If a service split or data move is needed:
 - verify row counts and representative records before removing old ownership;
 - avoid coupling rollback to destructive drops.
 
+## Technology choices
+
+Default to the repo's existing stack unless there is a clear reason not to. New languages/runtimes add operational and review cost, so the tech design must justify them.
+
+### TypeScript / JavaScript
+
+Use TypeScript/JavaScript for:
+
+- user-facing apps in `apps/`;
+- backend product APIs in `services/` unless a different runtime is explicitly justified;
+- shared packages, UI, domain types, and config in `packages/`;
+- code that benefits from sharing types and validation with frontend clients.
+
+This is the default product-surface choice because most of the repo, test tooling, and app/service conventions already live here.
+
+### Python
+
+Use Python for:
+
+- agent workflow glue and operational automation;
+- scripts that primarily orchestrate files, subprocesses, HTTP calls, or LLM/tooling workflows;
+- quick data migration/backfill helpers where the logic is small, auditable, and one-shot;
+- research/prototype code that is not on a product request path.
+
+Do not let Python scripts become hidden product services. If Python starts owning durable APIs, long-running workers, or core domain state, promote the boundary into an explicit service design first.
+
+### Rust
+
+Use Rust for:
+
+- durable workflow engines, validators, and state-machine-heavy automation where correctness and explicit types matter;
+- CLIs or workers where a single static binary, predictable performance, or stronger compile-time guarantees are valuable;
+- code that benefits from making invalid states hard to represent.
+
+Do not choose Rust just because code is important. Prefer it when the problem is correctness-sensitive, concurrent, performance-sensitive, or a stable tool/engine that will be maintained for a while. Small glue scripts should usually stay Python; product APIs should usually stay TypeScript unless there is a documented reason.
+
+### Language decision rule
+
+A tech design that introduces a new runtime for a domain must state:
+
+1. why the existing TypeScript/Python/Rust precedent is insufficient;
+2. who will maintain and review it;
+3. how it is built, tested, deployed, and observed;
+4. what API/data boundary keeps it from leaking into unrelated domains.
+
 ## Documentation expectations
 
 - Architecture principles and best practices: `docs/ARCHITECTURE.md`.
