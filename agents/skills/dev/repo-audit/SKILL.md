@@ -76,7 +76,38 @@ Constraints:
 - Do not modify any source files while auditing. Analysis only.
 - Do not pad the report. If a dimension is healthy, say so in one sentence.
 - Calibrate to the project's maturity.
-- Do not create Tasks API tasks, code-garden tags, `Resolved:` lines, or `Closes:` lines.
+- Do not add `Resolved:` lines or `Closes:` lines.
+- Do not create code-garden tags from the audit PR.
+- You may create/link Tasks API tasks for important findings that are not code-garden-safe, following the audit follow-up workflow below.
+
+## Audit follow-up task workflow
+
+Code garden remains a narrow, behavior-preserving cleanup lane. Do not loosen it to pick up security, product, behavior, data migration, or architecture work.
+
+During the weekly audit, classify actionable findings:
+
+| Classification | Meaning | Follow-up |
+|---|---|---|
+| `garden-safe` | Functionally equivalent cleanup that fits code-garden guardrails | Leave for normal code-garden PR selection |
+| `tracked-code-task` | Non-functional or corrective code work that is too risky for code-garden, including security hardening, architecture refactors, service-boundary fixes, migrations, or behavior-sensitive bug fixes | Create a `code` task and link it from the audit finding |
+| `tracked-feature-task` | New user/product capability or product behavior that needs product scope | Create a `feature` task/spec and link it from the audit finding |
+| `tracked-research-task` | Needs investigation before implementation is clear | Create a `research` task and link it from the audit finding |
+| `needs-human-decision` | Needs Tom/Quinn judgement before tasking | List in Open Questions; do not create a task yet |
+
+When creating a task during the audit:
+
+1. Create the task with the correct `taskType`.
+2. Include the source audit file and exact finding title in the task description.
+3. Explain why the finding is not code-garden-safe.
+4. Add observable ACs.
+5. For code tasks with security implications, data migrations, service boundaries, cross-service APIs, or non-trivial refactors, include a linked tech design in `docs/specs/<slug>-tech-design.md`.
+6. Update the audit finding line with `➡️ Tracked by task <short-id> (<full-id>)` or a task URL if available.
+
+When the implementation lands, its PR updates the same audit finding line with `✅ [PR #<n>](https://github.com/Stoffer-Industries/sindustries/pull/<n>)`. The ledger is therefore:
+
+`audit finding → task → tech design when needed → implementation PR → audit marked done`
+
+If a task is created after the audit PR has already merged, open a tiny docs-only audit-ledger PR to add the task link. If the task is created before the audit PR merges, include the task link directly in the audit PR.
 
 ## Runbook
 

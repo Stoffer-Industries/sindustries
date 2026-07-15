@@ -34,7 +34,7 @@ The API accepts these `taskType` values (nullable string; leave unset and you lo
 | Type | Use when | `--type` flag |
 |---|---|---|
 | `feature` | New capability. Requires spec + Tom approval before Rowan starts. Goes through the feature factory. | `feature` |
-| `code` | Bug fixes, maintenance, cleanup, dependency bumps, refactors, chores — anything that's a PR to fix or change existing code with no new capability. | `code` |
+| `code` | Bug fixes, maintenance, cleanup, dependency bumps, refactors, security hardening, migrations, chores — anything that's a PR to fix or change existing code with no new product capability. | `code` |
 | `content` | SIndustries website content updates (Ivy workflow). | `content` |
 | `research` | Spikes, investigation, feasibility checks. Output is a doc/decision, not a code PR. | `research` |
 
@@ -90,7 +90,7 @@ tasks_api_client.py create \
 
 ### Code task
 
-Code covers both bug fixes and chores — anything that touches existing code without adding new capability. No spec file required, but still needs a description and ACs.
+Code covers bug fixes, maintenance, cleanup, dependency bumps, refactors, security hardening, migrations, and architecture/service-boundary corrections that do not add a new product capability. Code tasks do **not** need a product spec. They still need a description, observable ACs, and sometimes a tech design.
 
 ```
 tasks_api_client.py create \
@@ -110,10 +110,12 @@ tasks_api_client.py create \
 ```
 
 **Rules:**
-- No spec file required by default, but ACs are still required and observable
-- Attach a `docs/specs/<slug>-tech-design.md` when a code task changes service boundaries, moves data ownership, splits/merges services, adds migrations, or touches cross-service API contracts
+- Product spec is not required for code tasks
+- ACs are still required and observable
+- Attach a `docs/specs/<slug>-tech-design.md` when a code task changes service boundaries, moves data ownership, splits/merges services, adds migrations, touches cross-service API contracts, changes security posture, or is a non-trivial refactor
+- Tech designs for code tasks do not require Tom product sign-off by default; they require review/sign-off only when they introduce security risk, data-loss/migration risk, user-visible behavior changes, new external credentials, or architecture decisions that need Tom/Quinn judgement
 - Do not add prefix emoji manually; the Tasks UI renders type icons in the browser
-- Pure chores (typos, renames, dep bumps) are fine with a single AC; bugs and refactors need ACs that describe the fix
+- Pure chores (typos, renames, dep bumps) are fine with a single AC; bugs, security hardening, migrations, and refactors need ACs that describe the fix and verification
 
 ### Content task
 
