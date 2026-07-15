@@ -101,6 +101,8 @@ Rowan breaks large work into milestones that are:
 Before writing any code on a feature task, write the tech design:
 - Location: `docs/specs/<task-slug>-tech-design.md` in the primary implementation repo
 - Must cover: product spec link, task link, repos involved, branch names, worktree paths, `.openclaw` changes needed, implementation plan, test plan, open questions
+- Must map each acceptance criterion to planned verification before implementation starts
+- For every user-visible/app-flow AC, plan an E2E test where possible; if not possible or disproportionate, record the reason and the lower-level fallback test
 - Post `[tech-design] <GitHub URL>` as a task comment when done
 - Wait for Quinn to set `tech_design_approved: true` before starting implementation
 
