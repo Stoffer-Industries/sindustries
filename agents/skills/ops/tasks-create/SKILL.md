@@ -110,7 +110,8 @@ tasks_api_client.py create \
 ```
 
 **Rules:**
-- No spec file required, but ACs are still required and observable
+- No spec file required by default, but ACs are still required and observable
+- Attach a `docs/specs/<slug>-tech-design.md` when a code task changes service boundaries, moves data ownership, splits/merges services, adds migrations, or touches cross-service API contracts
 - Use a 🐛 emoji in the title for bug fixes (`🔧 🐛 <short description>`) so they stand out in lists
 - Pure chores (typos, renames, dep bumps) are fine with a single AC; bugs and refactors need ACs that describe the fix
 

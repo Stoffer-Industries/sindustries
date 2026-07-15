@@ -26,6 +26,7 @@ Tech designs are historical record. Do not delete them. When a feature ships, up
 **What to include:**
 - Product intent summary (quote key goals from the brain spec — Rowan may not have direct access to brain)
 - Task ID, branch, worktree, and repo names
+- Service boundary and data ownership: which service owns the domain, why existing services are/are not appropriate, direct app/service consumers, and extraction/migration plan for temporary placements
 - `.openclaw` boundary notes for work outside this repo
 - Implementation plan with file/module scope
 - Data model or API contract changes

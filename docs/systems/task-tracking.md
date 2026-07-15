@@ -33,7 +33,13 @@ PostgreSQL
   sindustries_prodlike (port 7432)
 ```
 
-The API is the single source of truth. The frontend is a thin client — no local task state beyond a session's in-memory view.
+The API is the single source of truth for task tracking. The frontend is a thin client — no local task state beyond a session's in-memory view.
+
+### Service boundary
+
+`services/tasks-api` owns task/workflow state only: tasks, comments, tags, dependencies, task lifecycle metadata, and workflow comments consumed by agents/lobsters.
+
+It must not become the default backend for Mission Control or other apps. New product domains such as content scheduling/publishing, bookmarks, finance, analytics, or agent incident reporting should expose their own service APIs and be called directly by the consuming apps/services. Exceptions need an explicit service-boundary note in the tech design/PR explaining why the placement is temporary or domain-correct, plus an extraction path if temporary.
 
 ---
 
