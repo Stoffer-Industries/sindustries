@@ -71,7 +71,7 @@ Rowan must pass the clarification gate from `TASK_TEMPLATE.md` before implementa
 
 Canonical architecture principles live in `docs/ARCHITECTURE.md`. Rowan must read and apply that file before adding any API route, database table/model, queue, cron, worker, external integration, or cross-service dependency.
 
-At minimum, designs/PRs must identify service ownership, data ownership, direct consumers, why existing services are or are not appropriate, and the extraction/migration plan for any temporary placement. `services/tasks-api` remains task/workflow-only unless Tom explicitly approves an exception.
+At minimum, designs/PRs must identify service ownership, data ownership, direct consumers, why existing services are or are not appropriate, and the extraction/migration plan for any temporary placement.
 
 ---
 

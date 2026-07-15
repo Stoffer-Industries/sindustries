@@ -30,7 +30,14 @@ Use an existing service only when the new state or behavior is part of that serv
 - task lifecycle metadata
 - workflow metadata/comments consumed by agents and lobsters
 
-It must not become the default backend for Mission Control or other apps. Product domains such as content scheduling/publishing, bookmarks, finance, analytics, agent incidents, or website content operations need their own service boundary unless Tom explicitly approves an exception.
+It must not become the default backend for Mission Control or other apps. Product domains such as content scheduling/publishing, bookmarks, budget/finance, analytics, agent incidents, or website content operations need their own service boundary unless Tom explicitly approves an exception.
+
+### Existing domain service examples
+
+- `services/tasks-api` owns task/workflow state.
+- `services/budget-api` owns budget/finance data and Akahu integration boundaries.
+
+New work should extend the matching domain service when one exists, or create a new domain service when it does not. Do not route unrelated domains through `tasks-api` for convenience.
 
 ### Required service-boundary questions
 
