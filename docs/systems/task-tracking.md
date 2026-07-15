@@ -39,7 +39,7 @@ The API is the single source of truth for task tracking. The frontend is a thin 
 
 `services/tasks-api` owns task/workflow state only: tasks, comments, tags, dependencies, task lifecycle metadata, and workflow comments consumed by agents/lobsters.
 
-It must not become the default backend for Mission Control or other apps. New product domains such as content scheduling/publishing, bookmarks, finance, analytics, or agent incident reporting should expose their own service APIs and be called directly by the consuming apps/services. Exceptions need an explicit service-boundary note in the tech design/PR explaining why the placement is temporary or domain-correct, plus an extraction path if temporary.
+It must not become the default backend for Mission Control or other apps. New product domains such as content scheduling/publishing, bookmarks, budget/finance, analytics, or agent incident reporting should expose their own service APIs and be called directly by the consuming apps/services. Budget/finance already has a separate service boundary in `services/budget-api`; related work should extend that service or justify a new finance-domain service, not land in `tasks-api`. Exceptions need an explicit service-boundary note in the tech design/PR explaining why the placement is temporary or domain-correct, plus an extraction path if temporary.
 
 ---
 
