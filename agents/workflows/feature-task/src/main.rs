@@ -753,10 +753,10 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     }
 
     // If the task has unchecked ACs that don't appear in any merged PR body, those ACs
-    // were added after the PRs landed and are not yet implemented. Block until a new PR
-    // covers them — only then can Tom give [qa-ac-verified] true.
+    // were added after the PRs landed and are not yet implemented. Revert to `doing`
+    // so Rowan picks up the new work and opens a follow-up PR.
     // Unchecked ACs that DO appear in a merged PR are mid-QA (Tom hasn't checked them
-    // off yet) — those are fine to leave until qa-ac-verified.
+    // off yet) — those are fine; leave them until qa-ac-verified.
     let description = env.task.description.clone().unwrap_or_default();
     let unchecked_acs = unchecked_task_ac_labels(&description);
     if !unchecked_acs.is_empty() {
@@ -767,10 +767,32 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         let needs_pr = ac_labels_needing_new_pr(&unchecked_acs, &pr_bodies);
         if !needs_pr.is_empty() {
             let labels = needs_pr.join(", ");
-            let failures = vec![format!(
-                "Unchecked ACs ({labels}) are not covered by any merged PR. Open a new PR covering these ACs; once merged, Tom can verify with `[qa-ac-verified] true`."
+            let fingerprint = format!("uncovered_acs:{labels}");
+            if !args.dry_run {
+                api_patch::<Task>(
+                    &args.base_url,
+                    &env.task.id,
+                    json!({"status": "doing"}),
+                )?;
+                env.task = api_get_task(&args.base_url, &env.task.id)?;
+                if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+                    env.lobster_state.failure_fingerprint = Some(fingerprint);
+                    add_comment(
+                        &args.base_url,
+                        &env.task.id,
+                        &format!(
+                            "[feature-task-progress-checklist]\nUnchecked ACs ({labels}) are not covered by any merged PR — reverted to `doing`. Open a new PR covering these ACs; once merged, Tom can verify with `[qa-ac-verified] true`."
+                        ),
+                    )?;
+                    write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+                }
+            }
+            env.criteria_met = false;
+            env.action_taken = "post_merge_reverted_to_doing".to_string();
+            env.failures = vec![format!(
+                "Unchecked ACs ({labels}) are not covered by any merged PR."
             )];
-            return transition_or_block(&args, env, "done", "post_merge", failures);
+            return Ok(env);
         }
     }
 
