@@ -187,6 +187,66 @@ export function availableTags(tasks) {
 }
 
 /**
+ * Backlog size at the start of each week for the last `weeks` calendar weeks.
+ * A task counts as "in backlog" at snapshot time T if:
+ *   - createdAt <= T  (task existed at that point)
+ *   - completedAt is null or completedAt >= T  (not yet done)
+ *   - archivedAt  is null or archivedAt  >= T  (not yet archived)
+ */
+export function weeklyBacklogSize(tasks, now, weeks = 16) {
+  const thisMonday = isoMonday(now);
+  const points = [];
+  for (let i = weeks - 1; i >= 0; i -= 1) {
+    const snap = new Date(thisMonday);
+    snap.setDate(snap.getDate() - i * 7);
+    let count = 0;
+    for (const t of tasks) {
+      const created = parseTaskDate(t.createdAt);
+      if (!created || created > snap) continue;
+      const completed = parseTaskDate(t.completedAt);
+      if (completed && completed < snap) continue;
+      const archived = parseTaskDate(t.archivedAt);
+      if (archived && archived < snap) continue;
+      count += 1;
+    }
+    points.push({ weekStart: snap.toISOString().slice(0, 10), backlogCount: count });
+  }
+  return points;
+}
+
+/**
+ * Rolling P90 cycle time (in days) at each week boundary for the last `weeks`
+ * weeks. For each week W the P90 is computed over tasks completed in the
+ * trailing `rollingWeeks` weeks ending at W. Returns null for weeks where
+ * fewer than 3 completions fall in the window (too sparse for a meaningful
+ * percentile).
+ */
+export function weeklyRollingP90(tasks, now, weeks = 16, rollingWeeks = 4) {
+  const thisMonday = isoMonday(now);
+  const points = [];
+  for (let i = weeks - 1; i >= 0; i -= 1) {
+    const weekEnd = new Date(thisMonday);
+    weekEnd.setDate(weekEnd.getDate() - i * 7 + 7);
+    const windowStart = new Date(weekEnd.getTime() - rollingWeeks * 7 * 24 * 60 * 60 * 1000);
+    const weekStart = new Date(weekEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const cycleTimes = [];
+    for (const t of tasks) {
+      if (!isCompleted(t)) continue;
+      const completed = parseTaskDate(t.completedAt);
+      if (!completed || completed < windowStart || completed >= weekEnd) continue;
+      const ct = cycleTimeDays(t);
+      if (ct != null && Number.isFinite(ct) && ct >= 0) cycleTimes.push(ct);
+    }
+    const p90 = cycleTimes.length >= 3 ? percentile(cycleTimes, 90) : null;
+    points.push({
+      weekStart: weekStart.toISOString().slice(0, 10),
+      p90Days: p90 == null ? null : Math.round(p90 * 10) / 10
+    });
+  }
+  return points;
+}
+
+/**
  * Apply assignee + tag filters to a task list.
  * Filter pass: a task is included if it matches the assignee filter AND
  * the tag filter. "All" is the sentinel string for "no filter".

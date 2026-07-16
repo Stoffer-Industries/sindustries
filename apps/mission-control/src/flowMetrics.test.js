@@ -6,6 +6,8 @@ import {
   percentile,
   cycleTimeSummary,
   weeklyThroughput,
+  weeklyBacklogSize,
+  weeklyRollingP90,
   wipByStatus,
   isoMonday,
   availableAssignees,
@@ -186,6 +188,87 @@ describe('filter helpers', () => {
       expect.objectContaining({ id: 1 }),
       expect.objectContaining({ id: 2 })
     ]);
+  });
+});
+
+describe('weeklyBacklogSize', () => {
+  it('returns `weeks` data points in chronological order', () => {
+    const points = weeklyBacklogSize([], NOW, 8);
+    expect(points).toHaveLength(8);
+    for (let i = 1; i < points.length; i += 1) {
+      expect(new Date(points[i].weekStart).getTime())
+        .toBeGreaterThan(new Date(points[i - 1].weekStart).getTime());
+    }
+  });
+
+  it('counts tasks that existed and were not yet done at each snapshot', () => {
+    const thisMonday = isoMonday(NOW);
+    // Task created 3 weeks ago, completed 1 week ago
+    const completedWeek3To1 = {
+      status: 'done',
+      createdAt: new Date(thisMonday.getTime() - 3 * 7 * 86400000).toISOString(),
+      completedAt: new Date(thisMonday.getTime() - 1 * 7 * 86400000).toISOString(),
+      archivedAt: null
+    };
+    // Task created 2 weeks ago, still open
+    const openSince2 = {
+      status: 'open',
+      createdAt: new Date(thisMonday.getTime() - 2 * 7 * 86400000).toISOString(),
+      completedAt: null,
+      archivedAt: null
+    };
+    // weeks=4 produces 4 snapshots: thisMonday-3w, thisMonday-2w, thisMonday-1w, thisMonday
+    const points = weeklyBacklogSize([completedWeek3To1, openSince2], NOW, 4);
+    // 3 weeks ago: completedWeek3To1 just created (created==snap counts), openSince2 not yet → 1
+    expect(points[0].backlogCount).toBe(1);
+    // 2 weeks ago: both exist, neither completed yet → 2
+    expect(points[1].backlogCount).toBe(2);
+    // 1 week ago: completedWeek3To1 completed exactly at this snap (not yet excluded), openSince2 open → 2
+    expect(points[2].backlogCount).toBe(2);
+    // now (thisMonday): completedWeek3To1 completed 1 week ago (< snap) → excluded, openSince2 open → 1
+    expect(points[3].backlogCount).toBe(1);
+  });
+
+  it('excludes archived tasks from the point when they were archived', () => {
+    const thisMonday = isoMonday(NOW);
+    const archivedTask = {
+      status: 'open',
+      createdAt: new Date(thisMonday.getTime() - 3 * 7 * 86400000).toISOString(),
+      completedAt: null,
+      archivedAt: new Date(thisMonday.getTime() - 1 * 7 * 86400000).toISOString()
+    };
+    const points = weeklyBacklogSize([archivedTask], NOW, 4);
+    expect(points[1].backlogCount).toBe(1); // existed 3 weeks ago
+    expect(points[2].backlogCount).toBe(1); // existed 2 weeks ago, not yet archived
+    expect(points[3].backlogCount).toBe(0); // archived 1 week ago
+  });
+});
+
+describe('weeklyRollingP90', () => {
+  it('returns `weeks` data points', () => {
+    const points = weeklyRollingP90([], NOW, 8);
+    expect(points).toHaveLength(8);
+  });
+
+  it('returns null for weeks with fewer than 3 completions in the rolling window', () => {
+    const tasks = [completedTask(3), completedTask(4)]; // only 2 recent completions
+    const points = weeklyRollingP90(tasks, NOW, 4, 4);
+    const lastPoint = points[points.length - 1];
+    expect(lastPoint.p90Days).toBeNull();
+  });
+
+  it('computes p90 when 3+ tasks complete within the rolling window', () => {
+    // 5 tasks completed in the last 2 weeks with known cycle times
+    const tasks = [
+      completedTask(1, { createdAt: new Date(NOW.getTime() - 11 * 86400000).toISOString() }), // 10d
+      completedTask(2, { createdAt: new Date(NOW.getTime() - 7  * 86400000).toISOString() }), // 5d
+      completedTask(3, { createdAt: new Date(NOW.getTime() - 8  * 86400000).toISOString() }), // 5d
+      completedTask(4, { createdAt: new Date(NOW.getTime() - 9  * 86400000).toISOString() }), // 5d
+      completedTask(5, { createdAt: new Date(NOW.getTime() - 10 * 86400000).toISOString() }), // 5d
+    ];
+    const points = weeklyRollingP90(tasks, NOW, 4, 4);
+    const lastPoint = points[points.length - 1];
+    expect(lastPoint.p90Days).toBeGreaterThan(0);
   });
 });
 
