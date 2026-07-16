@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: f8f38a04-d27e-4c33-a538-7ed4d9bc5929
 product_spec: brain/tasks/specs/in-progress/budget-mobile-testflight-ota-2026-07-16.md
 shipped_pr: null
