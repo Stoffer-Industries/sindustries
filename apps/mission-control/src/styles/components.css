@@ -192,6 +192,41 @@
   opacity: 0.85;
 }
 
+/* KPI grid (AC8): a single row of cards. `auto-fit` + minmax makes the
+   row collapse gracefully on narrow viewports (the cards wrap to a new
+   row) without changing the AC8 contract — when the row fits, it's all
+   on row 1; pending approvals stay above in their own Card. */
+.bookmarks-tab__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 10px;
+}
+
+.bookmarks-tab__field {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.bookmarks-tab__field-label {
+  color: var(--si-color-text-muted, #666);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bookmarks-tab__select {
+  height: 32px;
+  border: 1px solid var(--si-color-border, #cbd6e5);
+  border-radius: 5px;
+  background: var(--si-color-bg-elevated, #fff);
+  color: var(--si-color-text, #111);
+  padding: 0 10px;
+  min-width: 142px;
+  font: inherit;
+}
+
 .bookmarks-tab__kpi-label {
   font-size: 12px;
   text-transform: uppercase;
@@ -453,6 +488,96 @@
   .bookmarks-tab__two-col {
     grid-template-columns: 1fr;
   }
+}
+
+/* Sankey section (AC9). The collapsed placeholder sits where the chart
+   would render so the layout doesn't jump when the operator expands
+   the section. The chart itself is SVG; we only need min-height + a
+   sane background so it sits inside the Card chrome. */
+.bookmarks-tab__sankey-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.bookmarks-tab__sankey-wrap {
+  min-height: 320px;
+  padding: 8px 0;
+}
+
+.bookmarks-tab__sankey-collapsed {
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  border: 1px dashed var(--si-color-border, #cbd6e5);
+  border-radius: 6px;
+  color: var(--si-color-text-muted, #666);
+  font-size: 13px;
+  min-height: 320px;
+  padding: 16px;
+}
+
+/* States-over-time line chart (AC9). SVG renders inline; the legend
+   sits below as plain HTML so screen readers / no-JS clients still see
+   the status list. The tooltip is fixed-positioned inside the
+   container, so a chart re-render doesn't drag stale coordinates. */
+.bookmarks-tab__state-chart-wrap {
+  min-height: 240px;
+  position: relative;
+  width: 100%;
+}
+
+.bookmarks-tab__state-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  color: var(--si-color-text-muted, #666);
+  font-size: 12px;
+}
+
+.bookmarks-tab__state-chart-legend-item {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.bookmarks-tab__state-chart-swatch {
+  border-radius: 2px;
+  display: inline-block;
+  height: 3px;
+  width: 18px;
+}
+
+.bookmarks-tab__state-chart-tooltip {
+  background: var(--si-color-bg-elevated, #fff);
+  border: 1px solid var(--si-color-border, #cbd6e5);
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  min-width: 160px;
+  padding: 10px 13px;
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+}
+
+.bookmarks-tab__state-chart-tooltip-date {
+  color: var(--si-color-text, #111);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.bookmarks-tab__state-chart-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 1px 0;
+}
+
+.bookmarks-tab__state-chart-tooltip-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 /* SIndustries tab — iframe + fallback styles */
 .sindustries-tab {
