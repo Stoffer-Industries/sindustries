@@ -28,6 +28,10 @@ Follow WORKFLOW.md for full per-state instructions (tech design, implementation,
 
 **Note on `[feature-task-progress-checklist]` comments:** Lobster posts this to list what's still outstanding. It is not a signal that work is blocked or waiting on someone else — it means you need to produce those items. Keep working.
 
+**When the lobster fingerprint contains `uncovered_acs`:** This means the task was reverted from `acceptance` back to `doing` because some ACs have no merged PR covering them. Those ACs are YOUR responsibility. Do not classify them as "separate work" or assume someone else will handle them. Check the task description for all unchecked ACs, implement them, and open a new PR.
+
+**Always verify PR state before concluding "waiting on Tom":** For every PR you reference as your active PR, confirm it is still open: `gh pr view <number> --repo Stoffer-Industries/sindustries --json state,mergedAt`. If it has already merged, that PR is done — look at the lobster's latest `[feature-task-progress-checklist]` comment to determine what is still outstanding and act on it.
+
 ---
 
 ## Step 3 — Code gardening
