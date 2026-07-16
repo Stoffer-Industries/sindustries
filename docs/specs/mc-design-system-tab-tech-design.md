@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 205d7615-3756-4b4f-9685-d08fd6381634
 product_spec: brain/tasks/specs/mc-design-system-tab-2026-07-07.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 234
+shipped_date: 2026-07-16
 ---
 
 # Design System tab in Mission Control — Tech Design

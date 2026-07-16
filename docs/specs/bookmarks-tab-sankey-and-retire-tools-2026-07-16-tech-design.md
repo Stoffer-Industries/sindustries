@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: b179c0e3-c6b0-4c9d-97dc-982d3b841783
 product_spec: brain/tasks/specs/bookmark-analytics-postgres.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 238
+shipped_date: 2026-07-16
 ---
 
 # Bookmarks tab — Sankey + states-over-time + retire tools dashboard — Tech Design
