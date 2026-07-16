@@ -74,8 +74,9 @@ local_resource(
 
 local_resource(
   'tasks-app',
-  serve_cmd='cd ../../apps/tasks && VITE_TASKS_API_BASE_URL={} npm run dev -- --host 0.0.0.0 --port {}'.format(
+  serve_cmd='cd ../../apps/tasks && VITE_TASKS_API_BASE_URL={} VITE_SHELL_ORIGIN={} npm run dev -- --host 0.0.0.0 --port {}'.format(
     tasks_api_base_url,
+    'http://localhost:' + mission_control_port,
     tasks_app_port,
   ),
   deps=[

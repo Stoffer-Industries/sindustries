@@ -2,7 +2,8 @@ import React from 'react';
 
 function tasksAppUrl() {
   // Prefer build-time env var (set by Tiltfile / CI). Falls back to the
-  // dev default where tasks-app runs on 5173 and mission-control on 5174.
+  // dev default: tasks-app on 5173, mission-control on 5176. Prodlike
+  // overrides both ports via mode-env.sh.
   return import.meta.env.VITE_TASKS_APP_URL ?? 'http://localhost:5173';
 }
 
