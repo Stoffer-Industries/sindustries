@@ -158,7 +158,7 @@ When Rowan opens a PR:
 
 When all ACs are implemented and the PR is ready for review:
 - convert draft → ready-for-review
-- assign **Tom** (`Stoff81`)
+- assign **Tom** (`Stoff81`) and add **Quinn** (`quinnstoffer`) as a reviewer — Quinn does the code review, Tom does final QA/product approval
 - post `[rowan-prs] <url>` as a task comment
 
 ---

@@ -65,6 +65,7 @@ This skill is role-based, not agent-based. Any agent can play any role on a give
 
 Concrete patterns in our workflows:
 
+- **Feature tasks:** Rowan opens (`--assignee Stoff81 --reviewer quinnstoffer,Stoff81`). Quinn does the code review; Tom does final QA/product approval. Rowan merges after both approve and CI is green.
 - **Content tasks:** opener opens (`--assignee <self>`, `--reviewer quinn,tomstoffer`). Quinn and Tom review. Opener merges after both approvals.
 - **Code-garden tasks:** opener opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Opener merges after approval.
 - **Cross-repo PRs (workspace repo, infra scripts):** same pattern — opener opens, reviewer reviews, opener merges.
