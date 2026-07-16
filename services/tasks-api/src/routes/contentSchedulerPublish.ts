@@ -96,26 +96,65 @@ export class FakeXClient implements XClient {
 }
 
 /**
- * Real client for production. Posts to api.twitter.com/2/tweets with bearer
- * auth. Wraps the fetch in a 10s timeout. Returns the URL the response
- * includes in `data.id` (i.e. https://x.com/<handle>/status/<id>).
+ * Real client for production. Posts to api.twitter.com/2/tweets using
+ * OAuth 1.0a User Context (the only auth type X permits for creating tweets).
+ * Requires X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET.
  */
 export class RealXClient implements XClient {
   constructor(
-    private readonly bearerToken: string,
+    private readonly apiKey: string,
+    private readonly apiSecret: string,
+    private readonly accessToken: string,
+    private readonly accessTokenSecret: string,
     private readonly handle: string = 'sindustries',
     private readonly timeoutMs: number = 10_000
   ) {}
 
+  private async oauthHeader(method: string, url: string, bodyParams: Record<string, string>): Promise<string> {
+    const { createHmac } = await import('node:crypto');
+
+    const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+
+    const oauthParams: Record<string, string> = {
+      oauth_consumer_key: this.apiKey,
+      oauth_nonce: nonce,
+      oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp: timestamp,
+      oauth_token: this.accessToken,
+      oauth_version: '1.0'
+    };
+
+    const allParams = { ...oauthParams, ...bodyParams };
+    const paramString = Object.keys(allParams)
+      .sort()
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`)
+      .join('&');
+
+    const baseString = [method.toUpperCase(), encodeURIComponent(url), encodeURIComponent(paramString)].join('&');
+    const signingKey = `${encodeURIComponent(this.apiSecret)}&${encodeURIComponent(this.accessTokenSecret)}`;
+    const signature = createHmac('sha1', signingKey).update(baseString).digest('base64');
+
+    const headerParams = { ...oauthParams, oauth_signature: signature };
+    const headerString = Object.keys(headerParams)
+      .sort()
+      .map(k => `${encodeURIComponent(k)}="${encodeURIComponent(headerParams[k])}"`)
+      .join(', ');
+
+    return `OAuth ${headerString}`;
+  }
+
   async createTweet({ text }: { text: string }): Promise<{ url: string; postedAt: Date }> {
+    const url = 'https://api.twitter.com/2/tweets';
+    const authorization = await this.oauthHeader('POST', url, {});
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const res = await fetch('https://api.twitter.com/2/tweets', {
+      const res = await fetch(url, {
         method: 'POST',
         signal: controller.signal,
         headers: {
-          authorization: `Bearer ${this.bearerToken}`,
+          authorization,
           'content-type': 'application/json'
         },
         body: JSON.stringify({ text })
@@ -144,18 +183,22 @@ export class RealXClient implements XClient {
  * credentials are configured so the route can return a 503 with a clear
  * "missing credential" error.
  *
- * Selection rules (per tech design):
+ * Selection rules:
  *  - X_CLIENT=fake (default in dev/test): returns FakeXClient
- *  - X_CLIENT=real: requires X_API_BEARER_TOKEN; returns null otherwise
- *  - X_CLIENT unset: defaults to fake (returns FakeXClient)
+ *  - X_CLIENT=real: requires X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN,
+ *    X_ACCESS_TOKEN_SECRET; returns null if any are missing
+ *  - X_CLIENT unset: defaults to fake
  */
 export function getXClient(): XClient | null {
   const kind = (process.env.X_CLIENT ?? 'fake').toLowerCase();
   if (kind === 'real') {
-    const token = process.env.X_API_BEARER_TOKEN;
-    if (!token) return null;
+    const apiKey = process.env.X_API_KEY;
+    const apiSecret = process.env.X_API_SECRET;
+    const accessToken = process.env.X_ACCESS_TOKEN;
+    const accessTokenSecret = process.env.X_ACCESS_TOKEN_SECRET;
+    if (!apiKey || !apiSecret || !accessToken || !accessTokenSecret) return null;
     const handle = process.env.X_HANDLE ?? 'sindustries';
-    return new RealXClient(token, handle);
+    return new RealXClient(apiKey, apiSecret, accessToken, accessTokenSecret, handle);
   }
   return new FakeXClient();
 }
