@@ -17,6 +17,193 @@ import {
   filterTasks
 } from '../flowMetrics.js';
 
+const CHART_W = 600;
+const CHART_H = 160;
+const PAD = { top: 16, right: 16, bottom: 32, left: 44 };
+const PLOT_W = CHART_W - PAD.left - PAD.right;
+const PLOT_H = CHART_H - PAD.top - PAD.bottom;
+
+/**
+ * Inline SVG area/line chart for time-series data. Handles null values
+ * in the series by drawing separate line+area segments across the gaps.
+ *
+ * Props:
+ *   points     — array of data objects
+ *   getValue   — (point) => number | null
+ *   getLabel   — (point) => string  (x-axis label)
+ *   yUnit      — optional string appended to y-axis tick values (e.g. "d")
+ *   emptyText  — shown when all values are null
+ */
+function AreaChart({
+  points,
+  getValue,
+  getLabel,
+  yUnit,
+  emptyText,
+  gradientId = 'si-area-gradient'
+}) {
+  const values = points.map(getValue).filter((v) => v != null);
+  if (values.length === 0) {
+    return (
+      <div className="flow-metrics__empty">{emptyText}</div>
+    );
+  }
+
+  const max = Math.max(1, ...values);
+  const n = points.length;
+  const plotBottom = PAD.top + PLOT_H;
+
+  const coords = points.map((p, i) => {
+    const v = getValue(p);
+    return {
+      x: PAD.left + (n === 1 ? PLOT_W / 2 : (i / (n - 1)) * PLOT_W),
+      y: v == null ? null : PAD.top + (1 - v / max) * PLOT_H,
+      value: v,
+      label: getLabel(p),
+    };
+  });
+
+  // Split into continuous segments (gap at each null)
+  const segments = [];
+  let current = [];
+  for (const pt of coords) {
+    if (pt.y == null) {
+      if (current.length > 0) segments.push(current);
+      current = [];
+    } else {
+      current.push(pt);
+    }
+  }
+  if (current.length > 0) segments.push(current);
+
+  // Y-axis grid lines at 0 %, 50 %, 100 %
+  const gridLines = [0, 0.5, 1].map((frac) => ({
+    y: PAD.top + (1 - frac) * PLOT_H,
+    label: yUnit
+      ? `${Math.round(max * frac * 10) / 10}${yUnit}`
+      : String(Math.round(max * frac)),
+  }));
+
+  // X-axis: label every other point so they don't crowd (show MM-DD)
+  const xLabels = coords.filter((_, i) => i % 2 === 0 || i === n - 1);
+
+  return (
+    <svg
+      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+      style={{ width: '100%', height: 'auto', display: 'block' }}
+      aria-hidden="true"
+    >
+      {/* Gradient definition for the area fill — top fades to transparent at baseline */}
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--si-color-accent, #4c8bf5)" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="var(--si-color-accent, #4c8bf5)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Baseline (x-axis) so the area is visibly anchored */}
+      <line
+        x1={PAD.left}
+        y1={plotBottom}
+        x2={PAD.left + PLOT_W}
+        y2={plotBottom}
+        stroke="var(--si-color-text-muted, #666)"
+        strokeWidth="1"
+      />
+
+      {/* Y-axis grid lines + labels */}
+      {gridLines.map((gl) => (
+        <g key={gl.label}>
+          <line
+            x1={PAD.left}
+            y1={gl.y}
+            x2={PAD.left + PLOT_W}
+            y2={gl.y}
+            stroke="var(--si-color-border, #e5e5e5)"
+            strokeWidth="1"
+          />
+          <text
+            x={PAD.left - 6}
+            y={gl.y}
+            textAnchor="end"
+            dominantBaseline="middle"
+            fontSize="10"
+            fill="var(--si-color-text-muted, #666)"
+          >
+            {gl.label}
+          </text>
+        </g>
+      ))}
+
+      {/* Area fills */}
+      {segments.map((seg, si) => {
+        if (seg.length < 2) return null;
+        const areaD = [
+          `M ${seg[0].x},${seg[0].y}`,
+          ...seg.slice(1).map((pt) => `L ${pt.x},${pt.y}`),
+          `L ${seg[seg.length - 1].x},${plotBottom}`,
+          `L ${seg[0].x},${plotBottom}`,
+          'Z',
+        ].join(' ');
+        return (
+          <path
+            key={si}
+            d={areaD}
+            fill={`url(#${gradientId})`}
+          />
+        );
+      })}
+
+      {/* Lines */}
+      {segments.map((seg, si) => {
+        if (seg.length < 2) return null;
+        const lineD = [
+          `M ${seg[0].x},${seg[0].y}`,
+          ...seg.slice(1).map((pt) => `L ${pt.x},${pt.y}`),
+        ].join(' ');
+        return (
+          <path
+            key={si}
+            d={lineD}
+            fill="none"
+            stroke="var(--si-color-accent, #4c8bf5)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        );
+      })}
+
+      {/* Data point dots */}
+      {coords
+        .filter((pt) => pt.y != null)
+        .map((pt) => (
+          <circle
+            key={pt.label}
+            cx={pt.x}
+            cy={pt.y}
+            r="3"
+            fill="var(--si-color-accent, #4c8bf5)"
+          />
+        ))}
+
+      {/* X-axis labels (MM-DD only) */}
+      {xLabels.map((pt) => (
+        <text
+          key={pt.label}
+          x={pt.x}
+          y={plotBottom + 18}
+          textAnchor="middle"
+          fontSize="9"
+          fill="var(--si-color-text-muted, #666)"
+        >
+          {pt.label.slice(5)}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
 export function FlowMetricsTab() {
   const [tasks, setTasks] = useState(null);
   const [error, setError] = useState(null);
@@ -101,9 +288,6 @@ export function FlowMetricsTab() {
   const throughputMax = Math.max(1, ...throughput.map((w) => w.doneCount));
   const wipValues = wip ? Object.values(wip) : [0];
   const wipMax = Math.max(1, ...wipValues);
-  const backlogMax = Math.max(1, ...backlog.map((p) => p.backlogCount));
-  const p90Values = p90Series.map((p) => p.p90Days).filter((v) => v != null);
-  const p90Max = Math.max(1, ...p90Values);
 
   return (
     <section className="flow-metrics" data-testid="flow-metrics">
@@ -206,46 +390,23 @@ export function FlowMetricsTab() {
 
       <div className="flow-metrics__chart" data-testid="flow-metrics-backlog">
         <div className="flow-metrics__chart-title">Backlog size over time (16 weeks)</div>
-        {backlog.every((p) => p.backlogCount === 0) ? (
-          <div className="flow-metrics__empty">No backlog data in the last 16 weeks.</div>
-        ) : (
-          backlog.map((p) => (
-            <div key={p.weekStart} className="flow-metrics__bar-row">
-              <div>{p.weekStart}</div>
-              <div className="flow-metrics__bar-track">
-                <div
-                  className="flow-metrics__bar-fill"
-                  style={{ width: `${(p.backlogCount / backlogMax) * 100}%` }}
-                />
-              </div>
-              <div>{p.backlogCount}</div>
-            </div>
-          ))
-        )}
+        <AreaChart
+          points={backlog}
+          getValue={(p) => p.backlogCount}
+          getLabel={(p) => p.weekStart}
+          emptyText="No backlog data in the last 16 weeks."
+        />
       </div>
 
       <div className="flow-metrics__chart" data-testid="flow-metrics-p90">
         <div className="flow-metrics__chart-title">P90 cycle time over time — 4-week rolling (days)</div>
-        {p90Values.length === 0 ? (
-          <div className="flow-metrics__empty">Not enough completions to compute P90 (need ≥ 3 per 4-week window).</div>
-        ) : (
-          p90Series.map((p) => (
-            <div key={p.weekStart} className="flow-metrics__bar-row">
-              <div>{p.weekStart}</div>
-              <div className="flow-metrics__bar-track">
-                {p.p90Days != null ? (
-                  <div
-                    className="flow-metrics__bar-fill"
-                    style={{ width: `${(p.p90Days / p90Max) * 100}%` }}
-                  />
-                ) : (
-                  <div className="flow-metrics__bar-fill" style={{ width: '0%' }} />
-                )}
-              </div>
-              <div>{p.p90Days != null ? `${p.p90Days}d` : '—'}</div>
-            </div>
-          ))
-        )}
+        <AreaChart
+          points={p90Series}
+          getValue={(p) => p.p90Days}
+          getLabel={(p) => p.weekStart}
+          yUnit="d"
+          emptyText="Not enough completions to compute P90 (need ≥ 3 per 4-week window)."
+        />
       </div>
     </section>
   );
