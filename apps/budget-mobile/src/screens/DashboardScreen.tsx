@@ -338,7 +338,7 @@ export function DashboardScreen({ navigation }: Props) {
       <BudgetHeader
         title="Accounts"
         subtitle={subtitle}
-        right={<IconButton action="more" label="Account actions" />}
+        right={<IconButton action="more" label="Open settings" onPress={() => navigation.navigate('Settings')} />}
       />
 
       <MetricPanel

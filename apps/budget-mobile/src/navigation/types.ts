@@ -3,5 +3,6 @@ export type RootStackParamList = {
   Transactions: undefined;
   CategoryTransactions: { category: string };
   Alerts: undefined;
+  Settings: undefined;
   TokenSpecimen: undefined;
 };

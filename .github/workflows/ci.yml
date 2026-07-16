@@ -6,6 +6,37 @@ on:
     branches: [main]
 
 jobs:
+  eas-update-on-main:
+    name: EAS update on main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: eas-update-main
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Publish EAS update
+        working-directory: apps/budget-mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          MESSAGE="$(printf '%s' "$COMMIT_MESSAGE" | tr '\n\r' '  ' | tr -s ' ' | cut -c1-180)"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          npx eas update --branch main --message "ci: ${MESSAGE} (sha ${SHORT_SHA})" --non-interactive
+
   python-workflow-tests:
     name: python workflow tests
     runs-on: ubuntu-latest
