@@ -36,7 +36,7 @@ The API accepts these `taskType` values (nullable string; leave unset and you lo
 | `feature` | New capability. Requires spec + Tom approval before Rowan starts. Goes through the feature factory. | `feature` |
 | `code` | Bug fixes, maintenance, cleanup, dependency bumps, refactors, security hardening, migrations, chores — anything that's a PR to fix or change existing code with no new product capability. | `code` |
 | `content` | SIndustries website content updates (Ivy workflow). | `content` |
-| `research` | Spikes, investigation, feasibility checks. Output is a doc/decision, not a code PR. | `research` |
+| `research` | Spikes, investigation, feasibility checks. Output is a doc/decision, not a code PR. Output files always go to `brain/research/` in the workspace — never into the sindustries repo. | `research` |
 
 **When in doubt between `feature` and `code`:** if it's adding something new → `feature`. If it's fixing, refactoring, or maintaining existing behaviour → `code`.
 
