@@ -65,7 +65,7 @@ This skill is role-based, not agent-based. Any agent can play any role on a give
 
 Concrete patterns in our workflows:
 
-- **Feature tasks:** Rowan opens (`--assignee rowanstoffer --reviewer quinnstoffer`). Quinn does the code review. Rowan merges after Quinn approves and CI is green. Tom tests post-merge in main — his sign-off is the `[qa-ac-verified] true` task comment, not a PR review approval.
+- **Feature tasks:** Rowan opens (`--assignee rowanstoffer --reviewer quinnstoffer,Stoff81`). Quinn does the blocking code review; Tom is an optional/non-blocking reviewer for GitHub inbox visibility. Rowan merges after Quinn approves and CI is green — do not wait for Tom's PR approval. Tom tests post-merge in main; his sign-off is the `[qa-ac-verified] true` task comment.
 - **Content tasks:** opener opens (`--assignee <self>`, `--reviewer quinn,tomstoffer`). Quinn and Tom review. Opener merges after both approvals.
 - **Code-garden tasks:** opener opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Opener merges after approval.
 - **Cross-repo PRs (workspace repo, infra scripts):** same pattern — opener opens, reviewer reviews, opener merges.
