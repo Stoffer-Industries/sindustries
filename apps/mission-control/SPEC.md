@@ -58,13 +58,16 @@ surface.
      `bookmark-transitions.jsonl` from the dev-only `/api/*` endpoints
      served by the Vite plugin in `vite.config.js`.
    - Renders a header, a toolbar (time window + topic select + refresh),
-     a pending-approvals banner when `approvalLocks` has entries, a KPI
-     grid of `reviewStatus` counts, a three-column curation breakdown
-     (Implement-bound / Monitoring / Uncurated), a pipeline funnel and
-     per-topic count, and the most recent 20 transitions in scope.
+     a pending-approvals banner when `approvalLocks` has entries, a
+     single-row KPI grid of `reviewStatus` counts (pending approvals sit
+     above the row in their own Card), a three-column curation breakdown
+     (Implement-bound / Monitoring / Uncurated), a Sankey diagram of the
+     curation pipeline (collapsed by default; Expand to render), a
+     pipeline funnel and per-topic count, a line chart of state counts
+     over time (with hover crosshair + tooltip), and the most recent 20
+     transitions in scope.
    - Auto-refresh on `window.focus`; manual refresh via the toolbar
-     button. Filter state does NOT persist across reloads (matches the
-     standalone `tools/bookmark-dashboard/` behaviour).
+     button. Filter state does NOT persist across reloads.
 6. **View the Design System.** User is on the Design System tab.
    - Renders the shared `DesignSystemPage` specimen from
      `@sindustries/ui/specimen` (the same component that previously lived
@@ -106,7 +109,7 @@ surface.
 |---|---|---|---|
 | Sidebar | `(shell-level)` | `Sidebar.jsx` | Vertical collapsible nav with collapse toggle + day/night theme toggle (Design System `Button` `variant="nav"` and `variant="ghost"`); state persisted via `localStorage` |
 | Tasks | `/tasks` | `Tabs/TasksTab.jsx` (iframe) | Embedded tasks app — all existing flows remain available |
-| Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, funnel, topics, recent transitions); toolbar filters by time window + topic |
+| Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, Sankey of the curation pipeline, funnel, per-topic counts, state counts over time, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
 | Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand) with back link to Tasks |
 | Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler queue: list + create/approve/publish/remove/reorder; embeds content via iframe + Tasks-API proxy |
@@ -182,12 +185,10 @@ specimen mount.
 - E2e Playwright suite (spec-driven, deferred).
 - Promote the inline tab icons into a Design System `Icon` primitive so
   other shells can stop inlining SVGs.
-- Bookmark Sankey (deferred from the Bookmarks tab PR per the Q1
-  trade-off — `d3-sankey` integration dominated the diff; AC2 is met by
-  the KPI grid + funnel + per-topic counts without it). Track as a
-  follow-up if/when the d3-sankey dep budget is approved.
-- State counts over time line chart (deferred from the Bookmarks tab PR —
-  no AC requires it; the same data is reachable via the JSONL log +
-  `recentTransitions`). Track as a follow-up if a use case surfaces.
-- Filter persistence across reloads (deferred per Q4 — the standalone
-  `tools/bookmark-dashboard/` does not persist filters either).
+- Filter persistence across reloads (deferred per Q4 — matches the
+  standalone dashboard's behaviour before `tools/bookmark-dashboard/`
+  was retired on 2026-07-16).
+- Migrate the Bookmarks tab off `bookmark-transitions.jsonl` to
+  `analytics.bookmark_transitions` once Postgres has enough rows to
+  render Sankey + states-over-time directly from the analytics schema
+  (separate feature task).

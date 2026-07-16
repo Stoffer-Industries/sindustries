@@ -1,10 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, CardContainer, Field, Select } from '@sindustries/ui/react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Card } from '@sindustries/ui/react';
+import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from 'd3-sankey';
 import { loadBookmarkState } from '../bookmarkStateSource.js';
 import {
   DEFAULT_TIME_WINDOWS,
+  STATUS_COLOR_VAR,
   curationGroups,
   formatRelativeAge,
+  formatTimeSeriesDate,
   funnelRows,
   itemList,
   kpiCounts,
@@ -12,33 +15,15 @@ import {
   recentTransitions,
   topicCounts,
   availableTopics,
-  itemByKey
+  itemByKey,
+  sankeyNodesAndLinks,
+  stateCountsTimeSeries
 } from '../bookmarkPipeline.js';
-
-// Status color tokens. The standalone dashboard uses raw hex values for
-// some legacy statuses that don't have a matching design-system token
-// (Q6 in the tech design). We centralise them here so the tab inherits
-// the design tokens where they exist and only deviates for legacy states.
-const STATUS_COLOR_VAR = {
-  pending: 'var(--si-color-graphite-500, #8aa0bd)',
-  ingested: 'var(--si-color-graphite-500, #8aa0bd)',
-  summarized: 'var(--si-color-graphite-700, #5a6b83)',
-  monitoring: 'var(--si-color-brand-700, #b46a00)',
-  curated_implement: 'var(--si-color-info-500, #2f75d6)',
-  spec_requested: 'var(--si-color-accent-500, #5e3f8a)',
-  spec_created: 'var(--si-color-accent-500, #bd1e66)',
-  revision_staged: '#7254bd',
-  approval_pending: 'var(--si-color-accent-500, #d9257a)',
-  tasked: 'var(--si-color-success-500, #148f46)',
-  approved: 'var(--si-color-success-500, #0f9b59)',
-  declined: 'var(--si-color-danger-500, #a3312b)',
-  reviewed: 'var(--si-color-neutral-200, #c8d0db)',
-  summarised: 'var(--si-color-neutral-200, #c8d0db)',
-  queued_for_spec: 'var(--si-color-neutral-200, #c8d0db)'
-};
 
 const ALL_TOPICS = 'all';
 const DEFAULT_WINDOW = '30';
+const SANKEY_HEIGHT = 300;
+const SANKEY_PADDING = { top: 20, right: 168, bottom: 20, left: 10 };
 
 function relativeAge(iso) {
   return formatRelativeAge(iso, new Date());
@@ -50,6 +35,7 @@ export function BookmarksTab() {
   const [windowValue, setWindowValue] = useState(DEFAULT_WINDOW);
   const [topic, setTopic] = useState(ALL_TOPICS);
   const [loadedAt, setLoadedAt] = useState(null);
+  const [sankeyExpanded, setSankeyExpanded] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -106,6 +92,11 @@ export function BookmarksTab() {
     [transitions, byKey, scope]
   );
   const pending = useMemo(() => pendingApprovals(snapshot), [snapshot]);
+  const sankey = useMemo(() => sankeyNodesAndLinks(items), [items]);
+  const timeSeries = useMemo(
+    () => stateCountsTimeSeries(items, transitions, { topic, windowValue }),
+    [items, transitions, topic, windowValue]
+  );
 
   if (error) {
     return (
@@ -211,7 +202,10 @@ export function BookmarksTab() {
         </Card>
       ) : null}
 
-      <CardContainer data-testid="pulse-bookmarks-kpis">
+      <div
+        className="bookmarks-tab__kpis"
+        data-testid="pulse-bookmarks-kpi-row"
+      >
         {Object.entries(kpis)
           .filter(([, count]) => count > 0)
           .map(([status, count]) => (
@@ -228,7 +222,7 @@ export function BookmarksTab() {
               </div>
             </Card>
           ))}
-      </CardContainer>
+      </div>
 
       <Card data-testid="pulse-bookmarks-curations">
         <h2 className="bookmarks-tab__section-title">Curations</h2>
@@ -284,6 +278,32 @@ export function BookmarksTab() {
         </div>
       </Card>
 
+      <Card data-testid="pulse-bookmarks-sankey">
+        <header className="bookmarks-tab__sankey-header">
+          <div>
+            <h2 className="bookmarks-tab__section-title">Curation Pipeline Flow</h2>
+            <p className="bookmarks-tab__section-subtitle">
+              From summarization through curator verdict → spec generation → Tom's
+              decision. Cumulative pass-through keeps every link visible.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            onClick={() => setSankeyExpanded((prev) => !prev)}
+            data-testid="pulse-bookmarks-sankey-toggle"
+          >
+            {sankeyExpanded ? 'Collapse' : 'Expand'}
+          </Button>
+        </header>
+        {sankeyExpanded ? (
+          <SankeySection sankey={sankey} />
+        ) : (
+          <div className="bookmarks-tab__sankey-collapsed">
+            Collapsed. Click Expand to render the Sankey diagram.
+          </div>
+        )}
+      </Card>
+
       <div className="bookmarks-tab__two-col" data-testid="pulse-bookmarks-funnel-topics">
         <Card data-testid="pulse-bookmarks-funnel">
           <h2 className="bookmarks-tab__section-title">Pipeline funnel</h2>
@@ -336,6 +356,15 @@ export function BookmarksTab() {
         </Card>
       </div>
 
+      <Card data-testid="pulse-bookmarks-state-chart">
+        <h2 className="bookmarks-tab__section-title">State counts over time</h2>
+        <p className="bookmarks-tab__section-subtitle">
+          X: date · Y: bookmark count · one line per state. Historical counts are
+          reconstructed from the JSONL transition log.
+        </p>
+        <StateCountsChart timeSeries={timeSeries} />
+      </Card>
+
       <Card data-testid="pulse-bookmarks-transitions">
         <h2 className="bookmarks-tab__section-title">Recent transitions</h2>
         <div className="bookmarks-tab__recent">
@@ -369,6 +398,377 @@ export function BookmarksTab() {
   );
 }
 
+function SankeySection({ sankey }) {
+  const containerRef = useRef(null);
+  const [width, setWidth] = useState(800);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const w = el.clientWidth || 800;
+      setWidth(Math.max(360, w));
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      window.addEventListener('resize', measure);
+      return () => {
+        ro.disconnect();
+        window.removeEventListener('resize', measure);
+      };
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  if (!sankey || !sankey.nodes.length) {
+    return (
+      <div
+        ref={containerRef}
+        className="bookmarks-tab__sankey-wrap"
+        data-testid="pulse-bookmarks-sankey-empty"
+      >
+        Not enough data to render.
+      </div>
+    );
+  }
+
+  const innerWidth = Math.max(1, width - SANKEY_PADDING.left - SANKEY_PADDING.right);
+  const innerHeight = SANKEY_HEIGHT - SANKEY_PADDING.top - SANKEY_PADDING.bottom;
+  const layout = d3Sankey()
+    .nodeWidth(18)
+    .nodePadding(22)
+    .extent([
+      [SANKEY_PADDING.left, SANKEY_PADDING.top],
+      [SANKEY_PADDING.left + innerWidth, SANKEY_PADDING.top + innerHeight]
+    ])
+    .nodeAlign(sankeyLeft);
+
+  // d3-sankey mutates its input nodes, so we deep-clone before layout
+  // to keep the data source stable for subsequent renders.
+  const inputNodes = sankey.nodes.map((n) => ({ ...n }));
+  const inputLinks = sankey.links.map((l) => ({ ...l }));
+  const { nodes, links } = layout({
+    nodes: inputNodes,
+    links: inputLinks.map((l, i) => ({
+      ...l,
+      source: typeof l.source === 'object' ? sankey.nodes.indexOf(l.source) : i,
+      target: typeof l.target === 'object' ? sankey.nodes.indexOf(l.target) : i
+    }))
+  });
+
+  return (
+    <div
+      ref={containerRef}
+      className="bookmarks-tab__sankey-wrap"
+      data-testid="pulse-bookmarks-sankey-chart"
+    >
+      <svg
+        role="presentation"
+        aria-hidden="true"
+        viewBox={`0 0 ${width} ${SANKEY_HEIGHT}`}
+        width={width}
+        height={SANKEY_HEIGHT}
+      >
+        <defs>
+          {links.map((link, i) => (
+            <linearGradient
+              key={i}
+              id={`sankey-grad-${i}`}
+              gradientUnits="userSpaceOnUse"
+              x1={link.source.x1}
+              x2={link.target.x0}
+            >
+              <stop offset="0%" stopColor={link.source.color} />
+              <stop offset="100%" stopColor={link.target.color} />
+            </linearGradient>
+          ))}
+        </defs>
+        <g>
+          {links.map((link, i) => (
+            <path
+              key={i}
+              d={sankeyLinkHorizontal()(link)}
+              fill="none"
+              stroke={`url(#sankey-grad-${i})`}
+              strokeOpacity={0.25}
+              strokeWidth={Math.max(1, link.width)}
+              data-testid={`pulse-bookmarks-sankey-link-${link.source.name}-${link.target.name}`}
+            >
+              <title>{`${link.source.name} → ${link.target.name}: ${link.value}`}</title>
+            </path>
+          ))}
+        </g>
+        <g>
+          {nodes.map((node) => (
+            <g key={node.name}>
+              <rect
+                x={node.x0}
+                y={node.y0}
+                width={node.x1 - node.x0}
+                height={Math.max(1, node.y1 - node.y0)}
+                fill={node.color}
+                rx={3}
+                data-testid={`pulse-bookmarks-sankey-node-${node.name}`}
+              />
+              <text
+                x={node.x1 + 8}
+                y={(node.y0 + node.y1) / 2 - 10}
+                dy="0.35em"
+                textAnchor="start"
+                fontSize={12}
+                fontWeight={700}
+                fill="var(--si-color-text, #111)"
+              >
+                {node.name}
+              </text>
+              <text
+                x={node.x1 + 8}
+                y={(node.y0 + node.y1) / 2 + 2}
+                dy="0.35em"
+                textAnchor="start"
+                fontSize={10}
+                fill="var(--si-color-text-muted, #6f819b)"
+              >
+                {`${node.count} items`}
+              </text>
+              <text
+                x={node.x1 + 8}
+                y={(node.y0 + node.y1) / 2 + 14}
+                dy="0.35em"
+                textAnchor="start"
+                fontSize={10}
+                fill="var(--si-color-text-muted, #9aaabb)"
+              >
+                {(() => {
+                  const inFlow = node.targetLinks.reduce((s, l) => s + l.value, 0);
+                  const outFlow = node.sourceLinks.reduce((s, l) => s + l.value, 0);
+                  if (!inFlow) return `out: ${outFlow}`;
+                  if (!outFlow) return `in: ${inFlow}`;
+                  return `in: ${inFlow}  out: ${outFlow}`;
+                })()}
+              </text>
+            </g>
+          ))}
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function StateCountsChart({ timeSeries }) {
+  const containerRef = useRef(null);
+  const [width, setWidth] = useState(800);
+  const [hovered, setHovered] = useState(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const w = el.clientWidth || 800;
+      setWidth(Math.max(360, w));
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      window.addEventListener('resize', measure);
+      return () => {
+        ro.disconnect();
+        window.removeEventListener('resize', measure);
+      };
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  if (!timeSeries || timeSeries.points.length === 0 || timeSeries.statuses.length === 0) {
+    return (
+      <div
+        ref={containerRef}
+        className="bookmarks-tab__state-chart-wrap"
+        data-testid="pulse-bookmarks-state-chart-empty"
+      >
+        No data.
+      </div>
+    );
+  }
+
+  const { statuses, points } = timeSeries;
+  const height = 240;
+  const pad = { left: 42, right: 18, top: 16, bottom: 34 };
+  const innerW = Math.max(1, width - pad.left - pad.right);
+  const innerH = Math.max(1, height - pad.top - pad.bottom);
+  const maxY = Math.max(
+    1,
+    ...points.flatMap((p) => statuses.map((s) => p.counts[s] || 0))
+  );
+  const xScale = (i) =>
+    points.length === 1 ? pad.left : pad.left + (i * innerW) / (points.length - 1);
+  const yScale = (v) => pad.top + innerH - (v / maxY) * innerH;
+
+  const step = Math.max(1, Math.floor(points.length / 4));
+
+  const handleMove = (event) => {
+    const svg = event.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const mx = event.clientX - rect.left;
+    const ratio = innerW === 0 ? 0 : (mx - pad.left) / innerW;
+    const idx = Math.max(
+      0,
+      Math.min(points.length - 1, Math.round(ratio * (points.length - 1)))
+    );
+    setHovered({ idx, x: event.clientX, y: event.clientY });
+  };
+  const handleLeave = () => setHovered(null);
+
+  return (
+    <div
+      ref={containerRef}
+      className="bookmarks-tab__state-chart-wrap"
+      data-testid="pulse-bookmarks-state-chart-svg"
+    >
+      <svg
+        role="presentation"
+        aria-hidden="true"
+        viewBox={`0 0 ${width} ${height}`}
+        width={width}
+        height={height}
+        onMouseMove={handleMove}
+        onMouseLeave={handleLeave}
+      >
+        {/* Axes */}
+        <line
+          x1={pad.left}
+          y1={height - pad.bottom}
+          x2={width - pad.right}
+          y2={height - pad.bottom}
+          stroke="var(--si-color-border, #cbd6e5)"
+        />
+        <line
+          x1={pad.left}
+          y1={pad.top}
+          x2={pad.left}
+          y2={height - pad.bottom}
+          stroke="var(--si-color-border, #cbd6e5)"
+        />
+        {[0, Math.ceil(maxY / 2), maxY].map((tick, i) => (
+          <text
+            key={`y-${i}-${tick}`}
+            x={pad.left - 6}
+            y={yScale(tick) + 4}
+            textAnchor="end"
+            fontSize={11}
+            fill="var(--si-color-text-muted, #6f819b)"
+          >
+            {tick}
+          </text>
+        ))}
+        {points.map((p, i) => {
+          if (i % step !== 0 && i !== points.length - 1) return null;
+          return (
+            <text
+              key={p.date}
+              x={xScale(i)}
+              y={height - 6}
+              textAnchor={i === 0 ? 'start' : 'middle'}
+              fontSize={11}
+              fill="var(--si-color-text-muted, #6f819b)"
+            >
+              {p.date.slice(5)}
+            </text>
+          );
+        })}
+        {/* Lines (one per status) */}
+        {statuses.map((status) => {
+          const d = points
+            .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i)} ${yScale(p.counts[status] || 0)}`)
+            .join(' ');
+          return (
+            <path
+              key={status}
+              d={d}
+              fill="none"
+              stroke={STATUS_COLOR_VAR[status] ?? 'var(--si-color-text, #111)'}
+              strokeWidth={2.5}
+              data-testid={`pulse-bookmarks-state-chart-line-${status}`}
+            >
+              <title>{status}</title>
+            </path>
+          );
+        })}
+        {/* Crosshair */}
+        {hovered ? (
+          <line
+            x1={xScale(hovered.idx)}
+            x2={xScale(hovered.idx)}
+            y1={pad.top}
+            y2={height - pad.bottom}
+            stroke="var(--si-color-border, #cbd6e5)"
+            strokeDasharray="4,3"
+          />
+        ) : null}
+        {/* Hit area for mouse events */}
+        <rect
+          x={pad.left}
+          y={pad.top}
+          width={innerW + pad.right}
+          height={innerH}
+          fill="transparent"
+          pointerEvents="all"
+        />
+      </svg>
+      <div className="bookmarks-tab__state-chart-legend" data-testid="pulse-bookmarks-state-chart-legend">
+        {statuses.map((status) => (
+          <span key={status} className="bookmarks-tab__state-chart-legend-item">
+            <i
+              className="bookmarks-tab__state-chart-swatch"
+              style={{ background: STATUS_COLOR_VAR[status] ?? 'var(--si-color-text, #111)' }}
+            />
+            {status}
+          </span>
+        ))}
+      </div>
+      {hovered ? (
+        <div
+          className="bookmarks-tab__state-chart-tooltip"
+          style={{
+            left:
+              hovered.x + 220 > (typeof window !== 'undefined' ? window.innerWidth : 1000)
+                ? Math.max(8, hovered.x - 200)
+                : hovered.x + 14,
+            top: hovered.y - 10
+          }}
+          data-testid="pulse-bookmarks-state-chart-tooltip"
+        >
+          <div className="bookmarks-tab__state-chart-tooltip-date">
+            {points[hovered.idx]?.date}
+          </div>
+          {statuses
+            .filter((s) => points[hovered.idx]?.counts[s])
+            .sort((a, b) => (points[hovered.idx].counts[b] || 0) - (points[hovered.idx].counts[a] || 0))
+            .map((s) => (
+              <div key={s} className="bookmarks-tab__state-chart-tooltip-row">
+                <span>
+                  <i
+                    className="bookmarks-tab__state-chart-swatch"
+                    style={{ background: STATUS_COLOR_VAR[s] ?? 'var(--si-color-text, #111)' }}
+                  />
+                  {s}
+                </span>
+                <span className="bookmarks-tab__state-chart-tooltip-val">
+                  {points[hovered.idx].counts[s]}
+                </span>
+              </div>
+            ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function CurationItemRow({ item }) {
   const c = item.curation;
   const title = item.title || item.key;
@@ -396,4 +796,17 @@ function CurationItemRow({ item }) {
       ) : null}
     </div>
   );
+}
+
+function Field({ label, children, ...props }) {
+  return (
+    <label className="bookmarks-tab__field" {...props}>
+      <span className="bookmarks-tab__field-label">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Select(props) {
+  return <select {...props} className={`bookmarks-tab__select ${props.className ?? ''}`} />;
 }

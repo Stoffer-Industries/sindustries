@@ -97,7 +97,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | File | Role |
 |---|---|
 | `brain/state/bookmark-review-state.json` | Single source of truth for all bookmark states |
-| `brain/state/bookmark-transitions.jsonl` | Append-only transition log (used by dashboard; authoritative source of truth) |
+| `brain/state/bookmark-transitions.jsonl` | Append-only transition log (used by Mission Control's `/bookmarks` dashboard; authoritative source of truth) |
 | `analytics.bookmark_transitions` (Postgres) | Queryable mirror of every transition; best-effort, write happens after JSONL append. See "Analytics Mirror" below. |
 | `brain/state/focus-config.json` | Curation config: topics, relevanceThreshold, recurationDays, batchSize |
 | `brain/state/bookmark-approval-topics.json` | Telegram delivery config: chatId + threadId per topic |
@@ -205,4 +205,6 @@ never raised, so the JSONL path is unaffected.
 - Task: `b179c0e3-c6b0-4c9d-97dc-982d3b841783` — Bookmark pipeline analytics — Postgres transition log
 - Task: `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and lobster sync
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/216
+- PR: https://github.com/Stoffer-Industries/sindustries/pull/236 (Sankey + states-over-time + retire tools dashboard tech design)
 - Tech design: `docs/specs/bookmark-pipeline-analytics-postgres-transition-log-tech-design.md`
+- Tech design: `docs/specs/bookmarks-tab-sankey-and-retire-tools-2026-07-16-tech-design.md`
