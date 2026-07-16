@@ -134,7 +134,7 @@ describe('ThemeToggle (shell-owned day/night theme)', () => {
 
     expect(posted).toHaveLength(1);
     expect(posted[0].payload).toEqual({ type: 'pulse:theme', theme: 'light' });
-    expect(posted[0].origin).toBe(window.location.origin);
+    expect(posted[0].origin).toBe('*');
 
     document.body.removeChild(iframe);
   });

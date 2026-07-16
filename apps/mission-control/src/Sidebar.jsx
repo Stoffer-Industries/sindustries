@@ -49,6 +49,10 @@ function handleTabClick(e, path) {
  * to every iframe in the document so iframe-based tabs follow along.
  */
 function ThemeToggle({ collapsed }) {
+  // Tick forces a re-render after each click so `readStoredTheme()` picks
+  // up the newly-written value and `target` is computed fresh. Without this,
+  // clicking twice in the same tab applies the same transition both times.
+  const [, setTick] = useState(0);
   const theme = readStoredTheme();
   const target = nextTheme(theme);
   const label = `Switch to ${target} theme`;
@@ -69,13 +73,16 @@ function ThemeToggle({ collapsed }) {
   function handleClick() {
     writeStoredTheme(target);
     document.documentElement.setAttribute('data-si-theme', target);
-    if (typeof window !== 'undefined' && window.location?.origin) {
-      const origin = window.location.origin;
+    setTick((t) => t + 1);
+    if (typeof window !== 'undefined') {
       for (const frame of document.querySelectorAll('iframe')) {
         try {
-          frame.contentWindow?.postMessage({ type: THEME_MESSAGE, theme: target }, origin);
+          // Use '*' so cross-origin iframes (e.g. Tasks on a different port)
+          // receive the broadcast. The theme value is non-sensitive; the
+          // receiver validates event.origin before acting.
+          frame.contentWindow?.postMessage({ type: THEME_MESSAGE, theme: target }, '*');
         } catch {
-          // Cross-origin or detached iframe — ignore.
+          // Detached iframe — ignore.
         }
       }
     }
