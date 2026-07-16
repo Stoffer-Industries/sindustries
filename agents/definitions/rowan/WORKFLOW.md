@@ -98,6 +98,8 @@ Rowan breaks large work into milestones that are:
 ## Feature Factory v2 — Task Requirements
 
 ### Tech design first
+Use the tech-design skill: `agents/skills/dev/tech-design/SKILL.md`
+
 Before writing any code on a feature task, write the tech design:
 - Create the implementation branch first: `task-<id>-<slug>`
 - Location: `docs/specs/<task-slug>-tech-design.md` committed to the **implementation branch** — not a separate branch or PR
@@ -132,6 +134,8 @@ Before the task can move from `doing` to `acceptance`, use the system-spec skill
 The skill covers when to create vs update an existing spec. Post the resulting task comment (`[system-spec]` or `[no-system-spec-change]`) — Lobster verify-delivery blocks until one is present.
 
 ### Acceptance
+Use the pr-address-feedback skill when handling review comments: `agents/skills/dev/pr-address-feedback/SKILL.md`
+
 - Stay in `acceptance` while addressing PR review feedback — do not regress to `doing`
 - Address valid feedback on the same branch and push; do not open new PRs for review iterations
 - Mark task blocked when waiting on Tom to approve a PR
@@ -142,6 +146,9 @@ Rowan cannot write to `~/.openclaw/`. Post `[openclaw-needed]` and wait for Quin
 ---
 
 ## PR Standards
+Use the pr-open skill for branch setup and PR creation: `agents/skills/dev/pr-open/SKILL.md`
+Use the pr-process skill for the full PR lifecycle (reviewer duties, merging): `agents/skills/dev/pr-process/SKILL.md`
+
 When Rowan opens a PR:
 - open as **draft** with **no assignee** — this signals the PR is not yet ready for Tom's attention
 - include clear description of changes and full AC checklist (with `- [ ]` placeholders until each AC is done)
