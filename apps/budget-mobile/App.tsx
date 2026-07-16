@@ -5,9 +5,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppEdgeSwipeBack } from './src/components/AppEdgeSwipeBack';
+import { UpdateBanner } from './src/components/UpdateBanner';
 import { AlertsScreen } from './src/screens/AlertsScreen';
 import { CategoryTransactionsScreen } from './src/screens/CategoryTransactionsScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TokenSpecimenScreen } from './src/screens/TokenSpecimenScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
 import { SessionProvider } from './src/state/SessionContext';
@@ -33,11 +35,13 @@ export default function App() {
                   Transactions: 'transactions',
                   CategoryTransactions: 'transactions/:category',
                   Alerts: 'alerts',
+                  Settings: 'settings',
                   TokenSpecimen: 'tokens'
                 }
               }
             }}
           >
+            <UpdateBanner />
             <Stack.Navigator
               initialRouteName="Dashboard"
               screenOptions={{
@@ -68,6 +72,11 @@ export default function App() {
                   headerBackTitle: 'Back',
                   headerBackButtonDisplayMode: 'generic'
                 }}
+              />
+              <Stack.Screen
+                name="Settings"
+                component={SettingsScreen}
+                options={{ headerShown: false }}
               />
               <Stack.Screen
                 name="TokenSpecimen"
