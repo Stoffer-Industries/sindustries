@@ -99,22 +99,27 @@ Rowan breaks large work into milestones that are:
 
 ### Tech design first
 Before writing any code on a feature task, write the tech design:
-- Location: `docs/specs/<task-slug>-tech-design.md` in the primary implementation repo
+- Create the implementation branch first: `task-<id>-<slug>`
+- Location: `docs/specs/<task-slug>-tech-design.md` committed to the **implementation branch** — not a separate branch or PR
 - Must cover: product spec link, task link, repos involved, branch names, worktree paths, `.openclaw` changes needed, implementation plan, test plan, open questions
-- Must map each acceptance criterion to planned verification before implementation starts
+- Must map each acceptance criterion to planned verification before implementation starts — this matrix belongs inside the tech design doc only, never in a PR body
 - For every user-visible/app-flow AC, plan an E2E test where possible; if not possible or disproportionate, record the reason and the lower-level fallback test
-- Post `[tech-design] <GitHub URL>` as a task comment when done
-- Wait for Quinn to set `tech_design_approved: true` before starting implementation
+- Post `[tech-design] <GitHub blob URL on the branch>` as a task comment — e.g. `https://github.com/Stoffer-Industries/sindustries/blob/<branch>/docs/specs/<slug>-tech-design.md`
+- No separate tech design PR is needed; Quinn reads the design from the branch blob URL
+- Wait for Quinn to set `[tech-design-approved] true` before starting implementation
 
 ### Implementation
-- Work on dedicated worktree branches; all changes come via PRs — no direct pushes to main
+- Work on the same branch as the tech design; all changes come via PRs — no direct pushes to main
+- Open a **DRAFT PR** after the tech design is approved and implementation begins; this keeps the branch reviewable but signals work is in progress
 - Capacity: 1 unblocked feature task per implementation state at a time. `ready` tech design work is the exception: if an assigned `ready` task lacks a posted/approved tech design, write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task.
 - When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
-- When all implementation PRs are open: post `[rowan-prs] <url1>, <url2>` as a task comment
+- **Do not post `[rowan-prs]`** until all task ACs are implemented and the PR is converted from draft to ready-for-review
+- When the PR is ready: convert draft → ready-for-review, then post `[rowan-prs] <url>` as a task comment
 
 ### PR requirements
-- PR body must include all parent task ACs, with `- [x]` for done and `- [ ]` for not yet done
+- The implementation PR body must include all parent task ACs, with `- [x]` for done and evidence annotation, or `- [ ]` for not yet done
 - Each PR body must list which parent ACs its sub-ACs contribute to
+- Do not include the AC checklist in tech design docs or any other non-implementation PR body — ACs in a merged PR body are treated by the lobster as "covered"; only include them when the code is actually done
 
 ### AC checkboxes on the task — hands off
 **Never tick or untick AC checkboxes in the task description.** That is Tom/QA's gate, applied only once the task reaches `acceptance`. Rowan's evidence belongs in the PR body only.

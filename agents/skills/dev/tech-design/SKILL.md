@@ -9,7 +9,7 @@ Use this skill when a feature task needs a design before Rowan starts implementa
 
 Read [`docs/CONVENTIONS.md`](../../../../docs/CONVENTIONS.md) for the full doc taxonomy and required frontmatter before writing.
 
-Write the design to `docs/specs/<task-slug>-tech-design.md`.
+Write the design to `docs/specs/<task-slug>-tech-design.md` **on the implementation branch** — no separate branch or PR is needed for the tech design.
 
 Include:
 
@@ -24,9 +24,11 @@ Include:
   - If E2E is not possible or is disproportionate, record why and name the fallback test layer (`file`, unit, component, integration, or manual)
 - Open questions and risks
 
-After writing the design, post the durable task comment:
+**The AC verification matrix belongs inside this doc only.** Do not include the AC checklist (`- [x] AC1: ...`) in the PR body of the tech design or any other non-implementation PR — the lobster treats ACs appearing in a merged PR body as "covered by implementation", so listing them in a docs-only commit creates a false signal.
 
-`[tech-design] <repo URL or local path>`
+After committing the design to the branch, post the durable task comment pointing to the branch blob URL:
+
+`[tech-design] https://github.com/Stoffer-Industries/sindustries/blob/<branch>/docs/specs/<slug>-tech-design.md`
 
 Quinn approves tech designs as part of heartbeat. After reading the design at the linked path, post the durable task comment:
 
