@@ -541,7 +541,7 @@ fn task_ac_vs_open_pr_failures(
                 }
                 if evidence.is_none() {
                     failures.push(format!(
-                        "{label} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<test-name>)`, `(not tested: <reason>)`, or `(not code: <reason>)`."
+                        "{label} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<test-name>)`, `(not tested: <reason>)`, `(not code: <reason>)`, or `(pr: #<n>)` if covered by another merged PR."
                     ));
                 }
             }
@@ -2961,6 +2961,8 @@ enum Evidence {
     NotTested { reason: String },
     /// AC fulfilled outside the codebase, e.g. `(not code: updated brain/bookmarks/specs/foo.md)`
     NotCode { reason: String },
+    /// AC covered by another merged PR, e.g. `(pr: #216)`
+    Pr { reference: String },
 }
 
 /// One parsed AC line from a PR body.
@@ -3032,13 +3034,20 @@ fn parse_evidence(text: &str) -> Option<Evidence> {
     if let Some(cap) = test_id.captures(text) {
         return Some(Evidence::TestId(cap[1].trim().to_string()));
     }
+    // (pr: #<n> or url)
+    let pr_ref = Regex::new(r"\(pr:\s*([^)]+)\)\s*$").unwrap();
+    if let Some(cap) = pr_ref.captures(text) {
+        return Some(Evidence::Pr {
+            reference: cap[1].trim().to_string(),
+        });
+    }
     None
 }
 
 /// Strip a trailing evidence annotation from a description string.
 /// Returns the description with the trailing `(...)` evidence removed.
 fn strip_trailing_evidence(text: &str) -> String {
-    let re = Regex::new(r"\s+\((testID|file|not tested|not code):\s*[^)]+\)\s*$").unwrap();
+    let re = Regex::new(r"\s+\((testID|file|not tested|not code|pr):\s*[^)]+\)\s*$").unwrap();
     match re.find(text) {
         Some(m) => text[..m.start()].trim_end().to_string(),
         None => text.to_string(),
