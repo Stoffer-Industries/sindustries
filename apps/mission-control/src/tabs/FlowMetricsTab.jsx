@@ -9,6 +9,8 @@ import { fetchAllTasks } from '../tasksApi.js';
 import {
   cycleTimeSummary,
   weeklyThroughput,
+  weeklyBacklogSize,
+  weeklyRollingP90,
   wipByStatus,
   availableAssignees,
   availableTags,
@@ -59,6 +61,16 @@ export function FlowMetricsTab() {
     [tasks, filtered]
   );
 
+  const backlog = useMemo(
+    () => (tasks ? weeklyBacklogSize(filtered, now, 16) : []),
+    [tasks, filtered, now]
+  );
+
+  const p90Series = useMemo(
+    () => (tasks ? weeklyRollingP90(filtered, now, 16) : []),
+    [tasks, filtered, now]
+  );
+
   const assignees = useMemo(() => (tasks ? availableAssignees(tasks) : []), [tasks]);
   const tags = useMemo(() => (tasks ? availableTags(tasks) : []), [tasks]);
 
@@ -89,6 +101,9 @@ export function FlowMetricsTab() {
   const throughputMax = Math.max(1, ...throughput.map((w) => w.doneCount));
   const wipValues = wip ? Object.values(wip) : [0];
   const wipMax = Math.max(1, ...wipValues);
+  const backlogMax = Math.max(1, ...backlog.map((p) => p.backlogCount));
+  const p90Values = p90Series.map((p) => p.p90Days).filter((v) => v != null);
+  const p90Max = Math.max(1, ...p90Values);
 
   return (
     <section className="flow-metrics" data-testid="flow-metrics">
@@ -187,6 +202,50 @@ export function FlowMetricsTab() {
               <div>{wip[s]}</div>
             </div>
           ))}
+      </div>
+
+      <div className="flow-metrics__chart" data-testid="flow-metrics-backlog">
+        <div className="flow-metrics__chart-title">Backlog size over time (16 weeks)</div>
+        {backlog.every((p) => p.backlogCount === 0) ? (
+          <div className="flow-metrics__empty">No backlog data in the last 16 weeks.</div>
+        ) : (
+          backlog.map((p) => (
+            <div key={p.weekStart} className="flow-metrics__bar-row">
+              <div>{p.weekStart}</div>
+              <div className="flow-metrics__bar-track">
+                <div
+                  className="flow-metrics__bar-fill"
+                  style={{ width: `${(p.backlogCount / backlogMax) * 100}%` }}
+                />
+              </div>
+              <div>{p.backlogCount}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="flow-metrics__chart" data-testid="flow-metrics-p90">
+        <div className="flow-metrics__chart-title">P90 cycle time over time — 4-week rolling (days)</div>
+        {p90Values.length === 0 ? (
+          <div className="flow-metrics__empty">Not enough completions to compute P90 (need ≥ 3 per 4-week window).</div>
+        ) : (
+          p90Series.map((p) => (
+            <div key={p.weekStart} className="flow-metrics__bar-row">
+              <div>{p.weekStart}</div>
+              <div className="flow-metrics__bar-track">
+                {p.p90Days != null ? (
+                  <div
+                    className="flow-metrics__bar-fill"
+                    style={{ width: `${(p.p90Days / p90Max) * 100}%` }}
+                  />
+                ) : (
+                  <div className="flow-metrics__bar-fill" style={{ width: '0%' }} />
+                )}
+              </div>
+              <div>{p.p90Days != null ? `${p.p90Days}d` : '—'}</div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
