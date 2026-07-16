@@ -158,7 +158,7 @@ When Rowan opens a PR:
 
 When all ACs are implemented and the PR is ready for review:
 - convert draft → ready-for-review
-- assign **Tom** (`Stoff81`) as product owner; add **Quinn** (`quinnstoffer`) as the code reviewer
+- set yourself (`rowanstoffer`) as PR assignee and **Quinn** (`quinnstoffer`) as reviewer
 - post `[rowan-prs] <url>` as a task comment
 - merge after Quinn approves and CI is green — do not wait for Tom's PR approval
 - Tom tests post-merge in main; his sign-off is `[qa-ac-verified] true` on the task, not a PR review
