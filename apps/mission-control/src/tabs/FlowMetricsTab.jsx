@@ -50,7 +50,7 @@ export function FlowMetricsTab() {
   );
 
   const throughput = useMemo(
-    () => (tasks ? weeklyThroughput(filtered, now, 8) : []),
+    () => (tasks ? weeklyThroughput(filtered, now, 16) : []),
     [tasks, filtered, now]
   );
 
@@ -153,9 +153,9 @@ export function FlowMetricsTab() {
       </CardContainer>
 
       <div className="flow-metrics__chart" data-testid="flow-metrics-throughput">
-        <div className="flow-metrics__chart-title">Weekly throughput (8 weeks)</div>
+        <div className="flow-metrics__chart-title">Weekly throughput (16 weeks)</div>
         {throughput.every((w) => w.doneCount === 0) ? (
-          <div className="flow-metrics__empty">No tasks completed in the last 8 weeks.</div>
+          <div className="flow-metrics__empty">No tasks completed in the last 16 weeks.</div>
         ) : (
           throughput.map((w) => (
             <div key={w.weekStart} className="flow-metrics__bar-row">
