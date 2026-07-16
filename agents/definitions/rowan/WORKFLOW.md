@@ -143,11 +143,16 @@ Rowan cannot write to `~/.openclaw/`. Post `[openclaw-needed]` and wait for Quin
 
 ## PR Standards
 When Rowan opens a PR:
-- assign to **Tom** (`Stoff81`)
-- include clear description of changes and full AC checklist
+- open as **draft** with **no assignee** — this signals the PR is not yet ready for Tom's attention
+- include clear description of changes and full AC checklist (with `- [ ]` placeholders until each AC is done)
 - include validation evidence
 - include screenshots/GIFs for UI work where useful
 - reference the task in the PR body
+
+When all ACs are implemented and the PR is ready for review:
+- convert draft → ready-for-review
+- assign **Tom** (`Stoff81`)
+- post `[rowan-prs] <url>` as a task comment
 
 ---
 
