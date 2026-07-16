@@ -7,7 +7,10 @@ import { App } from './App.jsx';
 import { getStoredTheme, getStoredPulseTheme, setStoredPulseTheme, setStoredTheme } from './utils/storage.js';
 
 const PULSE_THEME_MESSAGE = 'pulse:theme';
-const SHELL_ORIGIN = (import.meta.env?.VITE_SHELL_ORIGIN) || 'http://localhost:5174';
+// `VITE_SHELL_ORIGIN` is set by the Tiltfile for this app. The fallback
+// matches the dev default port for mission-control — Tilt in prodlike
+// mode overrides it via MISSION_CONTROL_PORT (see infra/tilt/Tiltfile).
+const SHELL_ORIGIN = (import.meta.env?.VITE_SHELL_ORIGIN) || 'http://localhost:5176';
 const TASKS_APP_ORIGIN = (import.meta.env?.VITE_TASKS_APP_URL) || 'http://localhost:5173';
 
 // One-time migration: prefer the canonical pulse-theme key, fall back
