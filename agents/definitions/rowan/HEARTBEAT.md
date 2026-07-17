@@ -45,4 +45,4 @@ Read and follow:
 
 **Limit:** Open at most 1 code-garden PR at a time. Check for open PRs first — if one exists, skip this step.
 
-**Skip code gardening entirely** if you have any assigned feature task in `ready` waiting for tech design, or any active unblocked feature task in `doing` or `acceptance`.
+**Skip code gardening entirely** if you have any assigned feature task in `ready` waiting for tech design, or any active feature task in `doing`/`acceptance` that you can materially progress in this pass (implementation, review feedback, merge/post-merge work, required comments/specs, or validation). If all active feature tasks are waiting on Quinn/Tom/reviewer action and you have already sent any needed nudge, code garden is on the table.
