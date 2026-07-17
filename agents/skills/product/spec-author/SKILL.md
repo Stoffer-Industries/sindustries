@@ -1,13 +1,22 @@
 ---
 name: spec-author
-description: "Write product specs for bookmark-reviewed items. Reads workspace context files directly to produce durable, implementation-agnostic specs under brain/bookmarks/specs/."
+description: "Write implementation-agnostic specs from direct requests, tasks, bookmarks, or reviews, choosing the correct brain/specs destination by intake type."
 ---
 
 # Spec Author
 
-Write a product spec from a reviewed item. This skill runs with full tool access — read the relevant context files, then write a grounded spec rather than reasoning blind from a payload.
+Write durable, implementation-agnostic specs. A spec describes what the system can do after the work ships, not how Rowan should build it.
 
-**Key principle:** A spec describes what the system *can do* after this ships. It does not describe how to build it. Rowan will read the approved spec plus the reference docs and produce the implementation plan. The spec must stay useful even if the codebase changes before work begins.
+This skill supports two intake modes:
+
+1. **Manual task spec** — Tom/Quinn directly asks for a spec, references an initiative/task, or provides a reference document that is not a bookmark pipeline item.
+2. **Bookmark-origin spec** — the bookmark/review pipeline provides a bookmark, review, summary, bookmark key, or bookmark workflow state.
+
+If the intake mode is ambiguous, do **not** default to bookmark mode. Direct user requests are manual task specs unless explicitly tied to the bookmark pipeline.
+
+## Key Principle
+
+A spec describes observable outcomes and requirements. It does not describe implementation details, code structure, scripts, schemas, CLI flags, rollout sequencing, or migration steps. Rowan will produce the implementation plan separately.
 
 ## Inputs
 
@@ -15,55 +24,98 @@ The caller may provide any of these and any number of additional reference docs:
 
 | Input | Description |
 |---|---|
-| `bookmark_path` | Absolute path to the bookmark markdown file |
-| `review_path` | Absolute path to the review markdown file |
-| `topic` | Topic slug (e.g. `infra`, `app-assistant`, `app-tasks`, `crypto`, `design`) |
-| `bookmark_key` | Short unique key used to name the output file |
+| `request` | Direct user request or task/initiative description |
+| `reference_path` | Absolute or workspace-relative path to source/reference material |
+| `bookmark_path` | Absolute path to bookmark markdown; implies bookmark-origin mode |
+| `review_path` | Absolute path to review markdown; usually implies bookmark-origin mode |
+| `summary_path` | Absolute path to bookmark summary markdown; implies bookmark-origin mode |
+| `topic` | Topic slug, e.g. `infra`, `app-assistant`, `app-tasks`, `crypto`, `design` |
+| `bookmark_key` | Short unique key used to name bookmark-origin output |
 
-These are passed in; do not guess paths from state files.
+Use provided paths. Do not guess paths from state files unless the caller explicitly asks for pipeline recovery.
 
-## Step 1 — Read Context
+## Step 1 — Choose Intake Mode
 
-Before writing anything, read these files:
+Before reading/writing, decide the destination mode:
+
+- Use **manual task spec** when Tom asks directly for a spec, references an initiative/task, or names a non-bookmark reference document.
+- Use **bookmark-origin spec** only when source material is explicitly a bookmark/review/summary pipeline item or a `bookmark_key` is provided.
+- If a manual request mentions a bookmark-like idea but does not provide pipeline state, keep it manual unless Tom says it should enter the bookmark pipeline.
+
+## Step 2 — Read Context
+
+Before writing anything, read relevant context:
 
 **Always:**
-- `/Users/quinnstoffer/.openclaw/workspace/docs/state-of-the-nation.md` — current frictions, active projects, what's already being worked on
-- Any source material provided (bookmark, review, reference docs)
+- `/Users/quinnstoffer/.openclaw/workspace/docs/state-of-the-nation.md` when available.
+- Any source/reference material provided by the caller.
 
-**Sindustries system specs (already-implemented systems):**
-- Read all specs at `codebases/sindustries/docs/specs/` — these describe what actually exists and is live. Read all of them; they are the ground truth for what to build on or supersede.
+**Relevant existing systems:**
+- Read existing system specs that may overlap the new work under `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/docs/systems/`.
+- Read older specs under `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/docs/specs/` only when they are relevant to the area being specified. Do not blindly load unrelated historical specs.
 
-The goal: walk in knowing what the source material says, what systems already exist, and what frictions are live. A spec that duplicates an existing system or proposes something at odds with current state is a quality failure.
+**Bookmark-origin specs:**
+- Read the provided bookmark, review, and/or summary files.
 
-## Step 2 — Assess Before Writing
+**Manual task specs:**
+- Read any named reference documents or memory references.
+- If a named reference is missing, search likely workspace locations once. If it is still missing but durable context is enough, explicitly note the missing source in the spec's Source section.
+
+The goal: know what the source material says, what systems already exist, and what frictions are live. A spec that duplicates an existing system or proposes something at odds with current state is a quality failure.
+
+## Step 3 — Assess Before Writing
 
 Before drafting:
 
-1. **Does this overlap with something already implemented?** If an existing sindustries spec already covers the ground, either propose a narrower complementary slice and name what it builds on, or explain why a replacement is warranted.
+1. **Destination:** Confirm the output folder from the table below.
+2. **Overlap:** If an existing system already covers the work, either propose a narrower complementary slice and name what it builds on, or explain why replacement is warranted.
+3. **Scope:** Default to one spec. Split only when the work naturally separates into tracks with independent delivery value.
+4. **Source honesty:** If source material includes roadmap/sequencing but Tom excluded it, keep it out and list it as a Non-Goal.
+5. **Implementation leakage:** Remove technical design details from ACs.
 
-2. **Are current frictions reflected honestly?** Use the state-of-the-nation as a relevance filter, not a target list to reshape the spec onto.
+## Step 4 — Write the Spec
 
-3. **How many specs?** Default to one. Split only when the work naturally separates into tracks with independent delivery value — different codebases, different rollout timelines, or clearly separable outcomes. Do not split by acceptance criterion alone.
+### File locations
 
-## Step 3 — Write the Spec
+#### Manual task specs
 
-### File location
+New manually requested specs go here:
 
+```text
+/Users/quinnstoffer/.openclaw/workspace/brain/tasks/specs/open/<slug>.md
 ```
+
+Use kebab-case for the slug, derived from the spec title. Do not append a bookmark key for manual task specs unless the caller explicitly requests it.
+
+If the spec is already attached to an in-progress task and the task points elsewhere, preserve the established task path rather than moving it unexpectedly.
+
+#### Bookmark-origin specs
+
+Bookmark pipeline specs go here:
+
+```text
 /Users/quinnstoffer/.openclaw/workspace/brain/bookmarks/specs/<slug>-<bookmark_key>.md
 ```
 
-Use kebab-case for the slug, derived from the spec title. No topic subfolder — flat.
+Use this only for bookmark/review pipeline items. Do not write direct/manual specs to `brain/bookmarks/specs/`.
 
-### Relative link paths — important
+#### Completed specs
 
-The spec lives at `brain/bookmarks/specs/` (one level inside `brain/bookmarks/`). The `brain/` directory is a symlink to iCloud. Links must stay **within** the `brain/` tree.
+Do not move specs to `done/` from this skill unless explicitly asked. Completion/archive movement belongs to task lifecycle cleanup.
 
-- Bookmark link: `../x/<filename>.md` — one level up reaches `brain/bookmarks/`, then `x/`
-- Summary link: `../summaries/<filename>.md` — same base, into `summaries/`
-- Do **not** use `../../brain/...` or deeper — that exits the symlink boundary
+### Relative link paths
 
-Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs) cannot be linked relatively. Reference by name only, no link.
+The `brain/` directory is a symlink to iCloud. Keep links within the `brain/` tree when possible.
+
+For bookmark-origin specs in `brain/bookmarks/specs/`:
+- Bookmark link: `../x/<filename>.md`
+- Summary link: `../summaries/<filename>.md`
+- Do **not** use `../../brain/...` or deeper — that exits the symlink boundary.
+
+For manual task specs in `brain/tasks/specs/open/`:
+- Prefer source names or stable workspace-relative paths.
+- Do not invent relative links to missing reference files.
+- Files outside the `brain/` vault can be referenced by name/path, but do not rely on portable relative links.
 
 ### Format
 
@@ -71,12 +123,11 @@ Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs)
 # Spec — <Title>
 
 ## Source
-- **Bookmark:** [<bookmark filename>](../x/<bookmark filename>)
-- **Summary:** [<summary filename>](../summaries/<summary filename>)
+- **Reference:** <source name/path, or `_none_` if direct request>
 - **Topic:** `<topic>`
-- **Spec Type:** `<infra workflow | assistant feature | app feature | data pipeline | tooling>`
-- **Systems:** [<system name>](<path to relevant system spec or state file>) — omit if none
-- **Previous revision:** _none_ (or link if this is a revision)
+- **Spec Type:** `<infra workflow | assistant feature | app feature | data pipeline | tooling | product feature>`
+- **Systems:** <relevant existing systems, or `_none_`>
+- **Previous revision:** _none_ (or link/name if this is a revision)
 - **Created:** <YYYY-MM-DD>
 
 **Status:** Draft
@@ -86,7 +137,7 @@ Files outside the `brain/` vault (e.g. workspace `MEMORY.md`, sindustries specs)
 
 ## Outcome
 
-One paragraph: what is demonstrably different after this ships? Name the capability, artifact, or behaviour change. Avoid "improved" or "enhanced". Write this as a user/operator observation — what can someone *do* or *see* that they couldn't before?
+One paragraph: what is demonstrably different after this ships? Name the capability, artifact, or behaviour change. Avoid "improved" or "enhanced". Write this as a user/operator observation — what can someone do or see that they could not before?
 
 ## Why
 
@@ -97,15 +148,6 @@ Why this is worth doing now, grounded in the source material.
 - [ ] AC1: ...
 - [ ] AC2: ...
 
-Rules:
-- Up to 8 ACs per spec, prefer fewer
-- Each AC is an **observable outcome**: a behaviour, capability, or property that can be verified without knowing how it was built
-- ACs must be implementation-agnostic: no script names, file paths, field names, CLI flags, or class names
-- ACs do not prescribe the approach — "the pipeline can retrieve relevant prior knowledge before writing a review" is correct; "build_index.py scans brain/bookmarks/ and writes bookmark-corpus-index.jsonl with fields path, topic, kind..." is not
-- Sub-ACs only for genuinely independent delivery tracks (different codebases, different timelines):
-  - [ ] AC2.1 workspace: ...
-  - [ ] AC2.2 sindustries: ...
-
 ## Non-Goals
 
 What this spec deliberately does not cover. Name adjacent things that are out of scope for this slice.
@@ -113,45 +155,58 @@ What this spec deliberately does not cover. Name adjacent things that are out of
 ## Notes
 
 One short paragraph: the key insight from the source material and any hard constraints or non-obvious integration points Rowan should know before designing the implementation. Do not describe the implementation — that is Rowan's job.
-
-Optionally, name the area of the codebase this work lands in (e.g. "bookmark pipeline", "tasks API", "OpenClaw gateway extension") so Rowan knows where to start reading. Do not name specific files, scripts, or schemas.
 ```
 
-## Step 4 — Return Metadata
+## Acceptance Criteria Rules
 
-If the caller expects pipeline-consumable output, print this JSON to stdout after writing the file(s):
+- Up to 8 ACs per spec; prefer fewer.
+- Each AC is an **observable outcome**: a behaviour, capability, or property that can be verified without knowing how it was built.
+- ACs must be implementation-agnostic: no script names, file paths, field names, CLI flags, class names, schemas, or test file names.
+- ACs do not prescribe the approach.
+- Do not include roadmap, sequencing, or migration plan unless Tom explicitly asks for those to be part of the spec.
+- Sub-ACs only for genuinely independent delivery tracks with different codebases, timelines, or outcomes.
+
+## Step 5 — Return Metadata
+
+If invoked interactively, confirm the path written.
+
+If the caller expects pipeline-consumable output, print JSON after writing:
 
 ```json
 {
   "specs": [
     {
       "title": "Spec title",
-      "specDoc": "brain/bookmarks/specs/<slug>-<key>.md",
+      "specDoc": "brain/tasks/specs/open/<slug>.md",
       "specType": "infra workflow"
     }
   ]
 }
 ```
 
-If invoked interactively, skip the JSON — just confirm the path written.
+For bookmark-origin specs, `specDoc` should point at `brain/bookmarks/specs/...`.
 
 ## Quality Bar
 
-**Outcome-focused ACs:** Each AC describes a state of the world after the feature ships. A reader who has never seen the codebase should be able to understand every AC. If an AC requires knowing a file path or script name to make sense, rewrite it.
+**Outcome-focused ACs:** Each AC describes a state of the world after the feature ships. A reader who has never seen the codebase should be able to understand every AC.
 
-**Durable:** The spec should still be valid if Rowan starts work six months from now and the codebase has evolved. ACs that name specific scripts will rot; ACs that describe capabilities won't.
+**Durable:** The spec should still be valid if Rowan starts work six months from now and the codebase has evolved.
 
 **Honest scope:** If this spec only covers part of the source material, say why.
 
-**No placeholder language:** "validate", "explore", "refine" only appear with a concrete deliverable. "The system validates bookmark keys against the pipeline state" is fine. "Validate approach" is not.
+**No placeholder language:** "validate", "explore", and "refine" only appear with a concrete deliverable.
 
-**No duplication:** Specs don't re-implement what's described in the sindustries system specs. Reference existing systems by name in Source and Notes; don't rebuild them in ACs.
+**No duplication:** Specs do not re-implement what is described in existing system specs. Reference existing systems by name in Source and Notes; do not rebuild them in ACs.
+
+**Correct destination:** Bookmark specs go to bookmark specs; manual task specs go to task specs/open.
 
 ## Anti-patterns
 
-- Writing implementation steps into ACs: "write a script at scripts/bookmarks/build_index.py that scans..." — this is a tech design, not a product spec
-- Naming specific scripts, field schemas, CLI flags, or class names anywhere except Notes (and even there, only if they are hard constraints, not proposals)
-- Using current frictions as targets to reshape the spec onto (frictions are context, not spec drivers)
-- Writing the spec before reading all sindustries system specs — duplication is the most common quality failure
-- Splitting specs to match AC count rather than delivery boundaries
-- Notes longer than one paragraph — if it needs more than that, it is leaking into tech design
+- Writing manually requested specs to `brain/bookmarks/specs/`.
+- Using bookmark-specific source/filename/link rules for direct user-requested specs.
+- Writing implementation steps into ACs.
+- Naming specific scripts, field schemas, CLI flags, or class names anywhere except Notes, and even there only when they are hard constraints rather than proposals.
+- Using current frictions as targets to reshape the spec onto; frictions are context, not spec drivers.
+- Treating roadmap/sequencing as in scope after Tom excludes it.
+- Splitting specs to match AC count rather than delivery boundaries.
+- Notes longer than one paragraph — if it needs more than that, it is leaking into tech design.
