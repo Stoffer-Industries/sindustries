@@ -910,6 +910,9 @@ fn transition_or_block(
             let mut patch = json!({"status": next_status});
             if next_status == "ready" {
                 patch["specChecksum"] = Value::String(spec_checksum(&env.task));
+                if env.task.assignee.is_none() {
+                    patch["assignee"] = Value::String("Rowan".to_string());
+                }
             }
             if let Err(err) = api_patch::<Task>(&args.base_url, &env.task.id, patch) {
                 if let Some(message) = spec_checksum_mismatch_message(&err) {

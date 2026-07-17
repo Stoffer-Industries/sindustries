@@ -24,7 +24,11 @@ Check for active feature tasks assigned to you:
 Follow WORKFLOW.md for full per-state instructions (tech design, implementation, system spec, acceptance):
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/definitions/rowan/WORKFLOW.md`
 
-**Ready-task tech design priority:** If any assigned feature task is in `ready` and does not yet have a posted/approved tech design, prioritize writing and posting that tech design before continuing implementation on `doing` tasks. Tech design prep is not considered parallel implementation WIP; it is the unblocker for the next task. After posting the tech design, return to the active `doing`/`acceptance` work unless Tom says otherwise.
+**State boundaries — do not cross them:**
+- `ready` = **tech design only**. Your only job on a `ready` task is to write the tech design, commit it to the implementation branch, and post `[tech-design] <blob-url>`. Do NOT write any feature code. Do NOT open a feature PR. Wait for Quinn to post `[tech-design-approved] true` and for the lobster to move the task to `doing` before touching implementation.
+- `doing` / `acceptance` = implementation. Only pick up implementation work on tasks the lobster has already moved to `doing`.
+
+**Ready-task tech design priority:** If any assigned feature task is in `ready` and does not yet have a posted tech design, prioritize writing and posting that tech design before continuing implementation on `doing` tasks. After posting the tech design comment, return to the active `doing`/`acceptance` work — do not start implementing the `ready` task.
 
 **Note on `[feature-task-progress-checklist]` comments:** Lobster posts this to list what's still outstanding. It is not a signal that work is blocked or waiting on someone else — it means you need to produce those items. Keep working.
 
