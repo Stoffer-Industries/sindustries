@@ -2893,7 +2893,24 @@ fn pr_body(url: &str) -> Result<String> {
             .trim()
             .to_string()));
     }
-    Ok(String::from_utf8(output.stdout)?)
+    let raw = String::from_utf8(output.stdout)?;
+    Ok(decode_pr_body_output(&raw))
+}
+
+/// Decode the raw stdout of `gh pr view --jq .body` into a PR body string.
+///
+/// gh 2.87.3 sometimes emits a JSON-encoded string (quote-wrapped, with
+/// escaped newlines) when the body contains non-ASCII Unicode. Fall back to
+/// raw passthrough if decoding fails so unexpected gh output preserves the
+/// previous behaviour.
+fn decode_pr_body_output(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.starts_with('"') {
+        if let Ok(Value::String(decoded)) = serde_json::from_str(trimmed) {
+            return decoded;
+        }
+    }
+    raw.to_string()
 }
 
 fn parse_github_review_state(raw: &str) -> Result<ReviewState> {
@@ -3268,6 +3285,27 @@ mod tests {
     fn verify_pr_acs_passes_with_not_code_evidence() {
         let body = "## Acceptance Criteria\n- [x] AC1: Spec updated (not code: updated brain/bookmarks/specs/foo.md)\n";
         assert!(verify_pr_acs_failures(body).is_empty());
+    }
+
+    #[test]
+    fn pr_body_decode_handles_json_encoded_output() {
+        // gh 2.87.3 can emit a JSON-encoded string when the body contains
+        // Unicode like →; decode it before multiline AC regexes inspect it.
+        let gh_output = "\"## Acceptance Criteria\\n- [x] AC1: foo → bar (not tested: unit)\\n\"";
+        let decoded = decode_pr_body_output(gh_output);
+
+        assert!(
+            decoded.contains('\n'),
+            "decoded body must contain real newlines"
+        );
+        assert!(
+            body_has_checked_acceptance(&decoded),
+            "body_has_checked_acceptance must match after decode"
+        );
+        assert!(verify_pr_acs_failures(&decoded).is_empty());
+
+        let raw = "## Acceptance Criteria\n- [x] AC1: foo (not tested: unit)\n";
+        assert_eq!(decode_pr_body_output(raw), raw);
     }
 
     #[test]
