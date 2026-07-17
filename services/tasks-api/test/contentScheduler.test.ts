@@ -150,18 +150,27 @@ describe('getXClient', () => {
     expect(client).toBeInstanceOf(FakeXClient);
   });
 
-  it('returns null when X_CLIENT=real without bearer token', () => {
+  it('returns null when X_CLIENT=real without credentials', () => {
     process.env.X_CLIENT = 'real';
-    delete process.env.X_API_BEARER_TOKEN;
+    delete process.env.X_API_KEY;
+    delete process.env.X_API_SECRET;
+    delete process.env.X_ACCESS_TOKEN;
+    delete process.env.X_ACCESS_TOKEN_SECRET;
     expect(getXClient()).toBeNull();
   });
 
-  it('returns RealXClient when X_CLIENT=real and bearer token is set', () => {
+  it('returns RealXClient when X_CLIENT=real and OAuth credentials are set', () => {
     process.env.X_CLIENT = 'real';
-    process.env.X_API_BEARER_TOKEN = 'test-token';
+    process.env.X_API_KEY = 'test-key';
+    process.env.X_API_SECRET = 'test-secret';
+    process.env.X_ACCESS_TOKEN = 'test-access-token';
+    process.env.X_ACCESS_TOKEN_SECRET = 'test-access-token-secret';
     const client = getXClient();
     expect(client).toBeInstanceOf(RealXClient);
-    delete process.env.X_API_BEARER_TOKEN;
+    delete process.env.X_API_KEY;
+    delete process.env.X_API_SECRET;
+    delete process.env.X_ACCESS_TOKEN;
+    delete process.env.X_ACCESS_TOKEN_SECRET;
   });
 });
 
@@ -280,7 +289,10 @@ describe('contentScheduler routes', () => {
 
   it('POST /content-scheduler/items/:id/publish returns 503 when credentials missing', async () => {
     process.env.X_CLIENT = 'real';
-    delete process.env.X_API_BEARER_TOKEN;
+    delete process.env.X_API_KEY;
+    delete process.env.X_API_SECRET;
+    delete process.env.X_ACCESS_TOKEN;
+    delete process.env.X_ACCESS_TOKEN_SECRET;
     const item = itemFixture({
       id: 'dddd1111-1111-1111-1111-111111111111',
       status: 'approved',
