@@ -12,9 +12,6 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "updates": {
-      "url": "https://u.expo.dev/00000000-0000-0000-0000-000000000000"
-    },
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
@@ -38,8 +35,12 @@
     },
     "extra": {
       "eas": {
-        "projectId": "00000000-0000-0000-0000-000000000000"
+        "projectId": "291287e0-33cd-45fa-b7f7-786de56944fe"
       }
+    },
+    "owner": "tomstoffer",
+    "updates": {
+      "url": "https://u.expo.dev/291287e0-33cd-45fa-b7f7-786de56944fe"
     }
   }
 }
