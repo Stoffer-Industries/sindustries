@@ -20,8 +20,8 @@ Include:
 - Data model or API contract changes
 - Workflow, cron, and skill changes
 - Test plan with an AC-by-AC verification matrix
-  - User-visible/app-flow ACs should plan E2E coverage where possible
-  - If E2E is not possible or is disproportionate, record why and name the fallback test layer (`file`, unit, component, integration, or manual)
+  - Default: plan a Playwright E2E test for every user-visible/app-flow AC; note the planned test description so it becomes the `(testID: <id>)` evidence in the PR
+  - If E2E is genuinely not possible or disproportionate, state why explicitly and name the fallback (unit, component, integration, or manual) — this becomes `(not tested: <reason>)` evidence; do not use `(file: ...)` as evidence in PR bodies
 - Open questions and risks
 
 **The AC verification matrix belongs inside this doc only.** Do not include the AC checklist (`- [x] AC1: ...`) in the PR body of the tech design or any other non-implementation PR — the lobster treats ACs appearing in a merged PR body as "covered by implementation", so listing them in a docs-only commit creates a false signal.

@@ -55,10 +55,10 @@ Co-Authored-By: <Your Name> <your-email>
 
 **Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. Every checked `- [x]` AC line must end with one of:
 
-- `(testID: <id>)` — Playwright test ID reference
-- `(file: <path>:<test-name>)` — file plus test name reference
-- `(not tested: <reason>)` — implemented in code but not testable
+- `(testID: <id>)` — **default choice**: Playwright test ID. If the AC is testable, write an E2E test and use this.
+- `(not tested: <reason>)` — implemented in code but not testable via Playwright; reason must be specific (e.g. `pure algorithm, covered by unit test at src/foo.test.ts:myTest`)
 - `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
+- `(pr: #<n>)` — covered by another already-merged PR
 
 **Every task AC must appear in the PR body** — checked with evidence. Fix PRs must re-list all task ACs, not just the ones being addressed.
 
@@ -67,7 +67,7 @@ Example:
 ```markdown
 ## Acceptance Criteria
 - [x] AC1: Task detail shows dependency links. (testID: 4)
-- [x] AC2: Card click-to-copy affordance. (file: apps/tasks/src/components/TaskCardSummary.test.jsx: click-to-copy affordance)
+- [x] AC2: Card click-to-copy affordance. (testID: 7)
 - [x] AC3: Reduced opacity for archived tasks. (not tested: design tokens supply color; visual review only)
 - [x] AC4: Feature factory v2 spec updated. (not code: updated brain/bookmarks/specs/feature-factory-v2-2026-06-04.md)
 ```
@@ -83,7 +83,7 @@ PRs without the required annotations are blocked from acceptance with a clear co
 - [x] AC2: Tab bar shows Tasks, Bookmarks, and Flow metrics tabs. (not tested: design tokens; visual review only)
 ### Task e2e647b1 — Flow metrics dashboard
 - [x] AC1: Dashboard shows cycle time (median and p90) for tasks completed. (testID: 5)
-- [x] AC2: Dashboard is reachable from the Flow metrics tab. (file: apps/mission-control/src/dashboard.test.jsx: flow metrics reachable)
+- [x] AC2: Dashboard is reachable from the Flow metrics tab. (testID: 6)
 ```
 
 The lobster walks the AC section line-by-line and tracks the current `### Task <id>` heading. ACs in a sibling task's subsection are not considered for the current task's text/evidence comparison. PR bodies without any `### Task <id>` heading fall back to the pre-#183 behavior (the whole AC section is implicitly one subsection).

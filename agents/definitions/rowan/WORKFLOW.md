@@ -123,6 +123,14 @@ Before writing any code on a feature task, write the tech design:
 - Each PR body must list which parent ACs its sub-ACs contribute to
 - Do not include the AC checklist in tech design docs or any other non-implementation PR body — ACs in a merged PR body are treated by the lobster as "covered"; only include them when the code is actually done
 
+**Evidence annotation — default to `testID:`:**
+- `(testID: <id>)` — **use this whenever the AC is testable**. Write a Playwright E2E test and reference its ID.
+- `(not tested: <reason>)` — only when Playwright coverage is genuinely not possible; reason must be specific (e.g. `pure algorithm, covered by unit test at src/foo.test.ts:myTest`). Do not use this as a shortcut.
+- `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
+- `(pr: #<n>)` — covered by a separate already-merged PR
+
+Do not use `(file: ...)` — it is not an accepted evidence form.
+
 ### AC checkboxes on the task — hands off
 **Never tick or untick AC checkboxes in the task description.** That is Tom/QA's gate, applied only once the task reaches `acceptance`. Rowan's evidence belongs in the PR body only.
 
