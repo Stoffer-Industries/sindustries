@@ -46,3 +46,14 @@ Read and follow:
 **Limit:** Open at most 1 code-garden PR at a time. Check for open PRs first — if one exists, skip this step.
 
 **Skip code gardening entirely** if you have any assigned feature task in `ready` waiting for tech design, or any active feature task in `doing`/`acceptance` that you can materially progress in this pass (implementation, review feedback, merge/post-merge work, required comments/specs, or validation). If all active feature tasks are waiting on Quinn/Tom/reviewer action and you have already sent any needed nudge, code garden is on the table.
+
+---
+
+## Escalate on Failure
+
+If any step fails due to an external dependency or operational issue (GitHub auth/scope error, Tasks API error, service unavailable, command traceback, unexpected empty output, or a brittle diagnostic command failure):
+
+1. Do NOT silently fall back, spam Tom with raw command failure output, or treat the failure as ordinary heartbeat progress
+2. Note which step failed and what the error was
+3. Read and follow `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md` — escalate to Lox's main session
+4. Continue only if the remaining heartbeat steps are safe and independent; otherwise stop after the Lox escalation
