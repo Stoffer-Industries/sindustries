@@ -68,6 +68,26 @@ Report only failures, newly blocked tasks, or meaningful transitions. **Do not r
 
 ---
 
+QUINN OPS TASKS
+
+Quinn-assigned tasks with no taskType (not feature/content) have no lobster. Heartbeat is the engine.
+
+Each heartbeat:
+1. Fetch open Quinn-assigned tasks:
+   `curl -s "http://localhost:4001/api/v1/tasks?assignee=Quinn&status=open" | python3 -c "import json,sys; tasks=[t for t in json.load(sys.stdin)['data'] if not t.get('taskType')]; print(json.dumps(tasks, indent=2))"`
+2. **If none: skip this section entirely. No output.**
+3. Sort by `createdAt` ascending (oldest first). Take the top task.
+4. Read the description fully. Determine if it can be completed this heartbeat pass:
+   - **Yes (self-contained ops work):** Do it. Mark the task `doing`, complete the work, mark it `done`. Report to Tom what was done.
+   - **Needs Tom input/approval:** Post a task comment explaining what's needed, ping Tom via Telegram. Log in ops state.
+   - **Multi-step (takes >1 heartbeat):** Mark it `doing`, do the first meaningful chunk, post a progress comment, leave in `doing` for next pass.
+5. Never start a second task in the same heartbeat pass. One task at a time.
+6. If a task has been `doing` for >3 heartbeats with no progress comment from Quinn, escalate to Tom.
+
+**Silence rule:** Only output if you actioned a task or need Tom's input. Do not narrate that you checked and found nothing.
+
+---
+
 OPENCLAW HANDOFFS (FEATURE FACTORY)
 
 Quinn is the only agent that can write to `~/.openclaw/`. When a feature task has an unresolved `[openclaw-needed]` comment from Rowan, Quinn applies the change.
