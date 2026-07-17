@@ -66,6 +66,11 @@ Report only failures, newly blocked tasks, or meaningful transitions. **Do not r
 - If Rowan is busy: log to quinn-ops-state.json as a watching entry; do not re-spawn
 - Do NOT just report the stall without acting — dispatching Rowan is Quinn's job here
 
+**Heartbeat/subagent reporting contract:**
+- Heartbeat progress that matters to Tom should be announced here by Quinn's heartbeat output.
+- Rowan subagent completions are worker results: collect them back into the spawning Quinn heartbeat/session, then summarize the meaningful progress in Quinn's own heartbeat output.
+- Do not let Rowan subagent completion text become a standalone Tom-facing progress announcement; Tom should see the heartbeat summary, not raw worker handoff output.
+
 ---
 
 QUINN OPS TASKS
