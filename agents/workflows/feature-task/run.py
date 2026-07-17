@@ -15,8 +15,9 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
 CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
-FEATURE_FACTORY_REPO = Path(os.environ.get("FEATURE_FACTORY_REPO", "/Users/quinnstoffer/workspaces/rowan/sindustries"))
-REPO = FEATURE_FACTORY_REPO if FEATURE_FACTORY_REPO.exists() else CODEBASE_REPO
+_ff_env = os.environ.get("FEATURE_FACTORY_REPO")
+FEATURE_FACTORY_REPO = Path(_ff_env) if _ff_env else None
+REPO = FEATURE_FACTORY_REPO if (FEATURE_FACTORY_REPO and FEATURE_FACTORY_REPO.exists()) else CODEBASE_REPO
 WORKSPACE_ROOT = Path("/Users/quinnstoffer/.openclaw/workspace")
 if not WORKSPACE_ROOT.exists():
     WORKSPACE_ROOT = CODEBASE_REPO.parents[1] if len(CODEBASE_REPO.parents) > 1 else CODEBASE_REPO.parent
