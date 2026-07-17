@@ -19,6 +19,7 @@ export function TasksTab() {
     <iframe
       title="Tasks"
       src={src}
+      allow="clipboard-write"
       data-testid="pulse-tasks-iframe"
       aria-label="Tasks application"
     />
