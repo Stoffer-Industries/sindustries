@@ -174,4 +174,30 @@ describe('ContentSchedulerTab', () => {
     const call = createItem.mock.calls[createItem.mock.calls.length - 1][0];
     expect(call.body).toBe('New draft tweet');
   });
+
+  // AC6 — the mounted tab must refresh every 10 seconds so auto-posted
+  // items (driven by the worker's delayed job) appear in the UI within one
+  // cycle.
+  it('refreshes the queue and today-status every 10 seconds while mounted', async () => {
+    vi.useFakeTimers();
+    try {
+      const initialCallCount = listItems.mock.calls.length;
+      render(<ContentSchedulerTab />);
+      await vi.waitFor(() => expect(listItems.mock.calls.length).toBeGreaterThan(initialCallCount));
+      const beforeAdvance = listItems.mock.calls.length;
+      const beforeAdvanceToday = getTodayStatus.mock.calls.length;
+      // Advance just under one interval — no refresh yet.
+      vi.advanceTimersByTime(9_000);
+      expect(listItems.mock.calls.length).toBe(beforeAdvance);
+      // Advance past one interval — one refresh.
+      vi.advanceTimersByTime(2_000);
+      expect(listItems.mock.calls.length).toBe(beforeAdvance + 1);
+      expect(getTodayStatus.mock.calls.length).toBe(beforeAdvanceToday + 1);
+      // Advance past another interval — second refresh.
+      vi.advanceTimersByTime(10_000);
+      expect(listItems.mock.calls.length).toBe(beforeAdvance + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
