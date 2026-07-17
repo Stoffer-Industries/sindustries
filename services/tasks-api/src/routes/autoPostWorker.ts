@@ -123,9 +123,11 @@ export async function processAutoPostJob(
     case 'NOT_FOUND':
     case 'NOT_APPROVED':
     case 'ALREADY_PUBLISHED':
+      return `rejected-${result.code.toLowerCase().replaceAll('_', '-')}` as AutoPostJobOutcome;
     case 'DAY_CAP_REACHED':
+      return 'rejected-day-cap';
     case 'SCHEDULED_IN_FUTURE':
-      return `rejected-${result.code.toLowerCase().replace('_', '-')}` as AutoPostJobOutcome;
+      return 'rejected-future-schedule';
     case 'MISSING_CREDENTIALS':
       return 'failed-missing-credentials';
     case 'PUBLISH_FAILED':
