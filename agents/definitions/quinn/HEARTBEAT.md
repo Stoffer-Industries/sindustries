@@ -58,6 +58,8 @@ Run:
 `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py`
 Report only failures, newly blocked tasks, or meaningful transitions. **Do not report tasks already in ops state with `escalatedAt` set — Tom has already been notified. Do not summarise routine doing/acceptance counts.**
 
+**Ops-state logging rule for blocked tasks:** When the lobster reports any `*_blocked` action on a task, check ops-state for an entry whose slug includes both the task ID AND the current gate (e.g. `verify_delivery`, `ready_checks`, `qa_ac_verified`). A task-level entry from a *different* gate does NOT count — create a new entry. Slug format: `feature-task-<task-id-prefix>-<gate>-<YYYY-MM-DD>`. This prevents a resolved blockage from masking a new one on the same task.
+
 **When the lobster reports `ready_checks_blocked` due to missing `[tech-design]`:**
 - Check if Rowan is free (no tasks in `doing` assigned to Rowan)
 - If Rowan is free: spawn Rowan as a background subagent to write the tech design (see tech-design skill)
