@@ -139,7 +139,10 @@ describe('FakeXClient', () => {
 describe('getXClient', () => {
   it('returns FakeXClient by default', () => {
     delete process.env.X_CLIENT;
-    delete process.env.X_API_BEARER_TOKEN;
+    delete process.env.X_API_KEY;
+    delete process.env.X_API_SECRET;
+    delete process.env.X_ACCESS_TOKEN;
+    delete process.env.X_ACCESS_TOKEN_SECRET;
     const client = getXClient();
     expect(client).toBeInstanceOf(FakeXClient);
   });
@@ -150,7 +153,7 @@ describe('getXClient', () => {
     expect(client).toBeInstanceOf(FakeXClient);
   });
 
-  it('returns null when X_CLIENT=real without credentials', () => {
+  it('returns null when X_CLIENT=real and any OAuth 1.0a credential is missing', () => {
     process.env.X_CLIENT = 'real';
     delete process.env.X_API_KEY;
     delete process.env.X_API_SECRET;
@@ -159,12 +162,22 @@ describe('getXClient', () => {
     expect(getXClient()).toBeNull();
   });
 
-  it('returns RealXClient when X_CLIENT=real and OAuth credentials are set', () => {
+  it('returns null when X_CLIENT=real and only some OAuth 1.0a credentials are set', () => {
     process.env.X_CLIENT = 'real';
-    process.env.X_API_KEY = 'test-key';
-    process.env.X_API_SECRET = 'test-secret';
-    process.env.X_ACCESS_TOKEN = 'test-access-token';
-    process.env.X_ACCESS_TOKEN_SECRET = 'test-access-token-secret';
+    process.env.X_API_KEY = 'k';
+    delete process.env.X_API_SECRET;
+    delete process.env.X_ACCESS_TOKEN;
+    delete process.env.X_ACCESS_TOKEN_SECRET;
+    expect(getXClient()).toBeNull();
+    delete process.env.X_API_KEY;
+  });
+
+  it('returns RealXClient when X_CLIENT=real and all OAuth 1.0a creds are set', () => {
+    process.env.X_CLIENT = 'real';
+    process.env.X_API_KEY = 'k';
+    process.env.X_API_SECRET = 's';
+    process.env.X_ACCESS_TOKEN = 't';
+    process.env.X_ACCESS_TOKEN_SECRET = 'ts';
     const client = getXClient();
     expect(client).toBeInstanceOf(RealXClient);
     delete process.env.X_API_KEY;
