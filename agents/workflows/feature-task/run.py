@@ -14,10 +14,12 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
-REPO = SCRIPT_DIR.parent.parent.parent
+CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
+FEATURE_FACTORY_REPO = Path(os.environ.get("FEATURE_FACTORY_REPO", "/Users/quinnstoffer/workspaces/rowan/sindustries"))
+REPO = FEATURE_FACTORY_REPO if FEATURE_FACTORY_REPO.exists() else CODEBASE_REPO
 WORKSPACE_ROOT = Path("/Users/quinnstoffer/.openclaw/workspace")
 if not WORKSPACE_ROOT.exists():
-    WORKSPACE_ROOT = REPO.parents[1] if len(REPO.parents) > 1 else REPO.parent
+    WORKSPACE_ROOT = CODEBASE_REPO.parents[1] if len(CODEBASE_REPO.parents) > 1 else CODEBASE_REPO.parent
 DEFAULT_BASE_URL = "http://localhost:4001/api/v1"
 PATH_PREFIXES = [
     str(Path.home() / ".cargo" / "bin"),
@@ -45,7 +47,7 @@ def workflow_env() -> dict[str, str]:
         path_parts.append(existing_path)
     env["PATH"] = os.pathsep.join(path_parts)
     if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
-        token = _load_dotenv_token("LOBSTER_GITHUB_TOKEN") or _load_dotenv_token("QUINN_GITHUB_TOKEN")
+        token = _load_dotenv_token("LOBSTER_GITHUB_TOKEN")
         if token:
             env["GH_TOKEN"] = token
     return env

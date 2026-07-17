@@ -115,8 +115,8 @@ Before writing any code on a feature task, write the tech design:
 - Open a **DRAFT PR** after the tech design is approved and implementation begins; this keeps the branch reviewable but signals work is in progress
 - Capacity: 1 unblocked feature task per implementation state at a time. `ready` tech design work is the exception: if an assigned `ready` task lacks a posted/approved tech design, write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task.
 - When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
-- **Do not post `[rowan-prs]`** until all task ACs are implemented and the PR is converted from draft to ready-for-review
-- When the PR is ready: convert draft → ready-for-review, then post `[rowan-prs] <url>` as a task comment
+- **Do not post `[implementer-prs]`** until all task ACs are implemented and the PR is converted from draft to ready-for-review
+- When the PR is ready: convert draft → ready-for-review, then post `[implementer-prs] <url>` as a task comment
 
 ### PR requirements
 - The implementation PR body must include all parent task ACs, with `- [x]` for done and evidence annotation, or `- [ ]` for not yet done
@@ -159,7 +159,7 @@ When Rowan opens a PR:
 When all ACs are implemented and the PR is ready for review:
 - convert draft → ready-for-review
 - set yourself (`rowanstoffer`) as PR assignee; add **Quinn** (`quinnstoffer`) and **Tom** (`Stoff81`) as reviewers — Quinn is the blocking code reviewer, Tom is non-blocking (visibility only)
-- post `[rowan-prs] <url>` as a task comment
+- post `[implementer-prs] <url>` as a task comment
 - merge after Quinn approves and CI is green — do not wait for Tom's PR approval
 - Tom tests post-merge in main; his sign-off is `[qa-ac-verified] true` on the task, not a PR review
 

@@ -49,13 +49,19 @@ gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-bra
 
 **Repo merge policy:** sindustries only accepts `rebase` merge (squash and merge-commit are rejected by repo settings). Use `--rebase`.
 
-**Auth gotcha (read-only default token):** the default `gh` token in agent envs is often read-only. Both `gh pr merge` and `gh pr create` return `Resource not accessible by integration` even though `gh pr view` works. Workaround: set `GH_TOKEN` to a write-capable token before running either command (the exact env var name is per-agent — check the agent's environment, `gh auth status` will show which token is active). For `gh pr merge` you can also fall back to the API directly:
+**Auth gotcha (read-only/default token):** the default `gh` token in agent envs may be read-only or may belong to a service account. Both `gh pr merge` and `gh pr create` can return `Resource not accessible...` even though `gh pr view` works. Before any PR write, verify the active login is the intended opener/assignee:
+
+```bash
+gh api user --jq '.login'
+```
+
+If auth is wrong, set the opener's own write-capable token/config and verify again. Do **not** switch to another agent's token/account to get past `gh pr create`; that changes the PR author and prevents that agent from reviewing. For `gh pr merge`, the assignee/opener may fall back to the API directly with their own token:
 
 ```bash
 GH_TOKEN="$GITHUB_TOKEN" gh api PUT /repos/Stoffer-Industries/sindustries/pulls/<number>/merge -f merge_method=rebase
 ```
 
-Confirmed working 2026-07-06 on PR #182 (W28 weekly audit) for both `gh pr create` and `gh pr merge`. If you see `Resource not accessible` on either command, this is the fix.
+Confirmed working 2026-07-06 on PR #182 (W28 weekly audit) for both `gh pr create` and `gh pr merge` when the token belongs to the opener.
 
 ---
 
@@ -65,7 +71,7 @@ This skill is role-based, not agent-based. Any agent can play any role on a give
 
 Concrete patterns in our workflows:
 
-- **Feature tasks:** Rowan opens (`--assignee rowanstoffer --reviewer quinnstoffer,Stoff81`). Quinn does the blocking code review; Tom is an optional/non-blocking reviewer for GitHub inbox visibility. Rowan merges after Quinn approves and CI is green — do not wait for Tom's PR approval. Tom tests post-merge in main; his sign-off is the `[qa-ac-verified] true` task comment.
+- **Feature tasks:** The task implementer/assignee opens the PR and is the PR assignee. The blocking reviewer is Quinn; Tom may be added as a visibility-only reviewer for GitHub inbox visibility. The opener/assignee merges after Quinn approves and CI is green — do not wait for Tom's PR approval. Tom tests post-merge in main; his sign-off is the `[qa-ac-verified] true` task comment. The feature-task workflow is role-based: implementer opens/merges, reviewer reviews. Do not hardcode a specific agent into the workflow.
 - **Content tasks:** opener opens (`--assignee <self>`, `--reviewer quinn,tomstoffer`). Quinn and Tom review. Opener merges after both approvals.
 - **Code-garden tasks:** opener opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Opener merges after approval.
 - **Cross-repo PRs (workspace repo, infra scripts):** same pattern — opener opens, reviewer reviews, opener merges.

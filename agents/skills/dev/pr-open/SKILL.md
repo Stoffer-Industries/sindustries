@@ -15,17 +15,25 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 
 ## The gh pr create Command
 
-Always set `--assignee` to yourself and `--reviewer` to the designated reviewer. Check the skill or heartbeat that invoked you for who the reviewer is; if not stated, default to `tomstoffer`.
+Always set `--assignee` to the implementation owner/opener and `--reviewer` to the designated reviewer(s). Check the invoking skill, task, or workflow for reviewer routing. If the reviewer is not stated, stop and ask/escalate — do **not** guess a default reviewer.
 
-`GITHUB_TOKEN` is provided by your agent config — do not define it in skills.
+For feature-task PRs, the opener is the task implementer/assignee. Reviewers are the blocking reviewer plus any visibility-only reviewers defined by the workflow. The reviewer must not open the implementer's PR on their own account.
+
+Use the opener's GitHub identity/token for `gh pr create`. Before creating the PR, verify the active GitHub login matches the intended opener:
+
+```bash
+gh api user --jq '.login'
+```
+
+If `gh pr create` fails with an auth/scope error (`Resource not accessible...`, `createPullRequest`, `Bad credentials`, etc.), fix the opener's GitHub token/config or escalate. Do **not** retry with another agent's token/account; that makes the PR unreviewable by that agent and breaks the opener-reviewer-merge split.
 
 ```bash
 gh pr create \
   --repo Stoffer-Industries/sindustries \
   --base main \
   --title "<type>(<scope>): <short description>" \
-  --assignee <your-github-username> \
-  --reviewer <reviewer-github-username> \
+  --assignee <opener-github-username> \
+  --reviewer <reviewer-github-username>[,<visibility-reviewer>] \
   --body "$(cat <<'EOF'
 ## Summary
 - <bullet: what changed and why>
@@ -94,7 +102,9 @@ The lobster walks the AC section line-by-line and tracks the current `### Task <
 
 ## After Opening — Update Task Workstreams
 
-For feature-task PRs, patch the task description to record the branch and PR URL in the workstreams section. The task ID is the first 8 chars of the branch name (`task-{8chars}-...`).
+For feature-task PRs, post `[implementer-prs] <url>` as a task comment when the PR is ready for review. Existing `[rowan-prs]` comments are treated as a legacy alias only; new work should use `[implementer-prs]`.
+
+Patch the task description to record the branch and PR URL in the workstreams section. The task ID is the first 8 chars of the branch name (`task-{8chars}-...`).
 
 Find the task by ID prefix, then PATCH the description to fill in the workstream entry:
 

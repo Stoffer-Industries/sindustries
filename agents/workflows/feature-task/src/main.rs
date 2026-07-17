@@ -272,12 +272,21 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     if !tech_design_approved(&env.task) {
         failures.push("Missing task comment `[tech-design-approved] true`.".to_string());
     }
-    if env.task.assignee.as_deref() != Some("Rowan") {
-        failures.push("Task must be assigned to Rowan.".to_string());
+    let implementer = task_implementer(&env.task);
+    if implementer.is_none() {
+        failures
+            .push("Task must have an assignee/implementer before moving to `doing`.".to_string());
     }
-    if let Ok(tasks) = list_active_feature_tasks(&args.base_url) {
+    if let (Some(implementer), Ok(tasks)) = (
+        implementer.as_deref(),
+        list_active_feature_tasks(&args.base_url),
+    ) {
         let current_id = &env.task.id;
-        failures.extend(rowan_doing_capacity_failures(&tasks, current_id));
+        failures.extend(implementer_doing_capacity_failures(
+            &tasks,
+            current_id,
+            implementer,
+        ));
     }
     transition_or_block(&args, env, "doing", "ready_checks", failures)
 }
@@ -298,9 +307,10 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = Vec::new();
-    let pr_urls = rowan_pr_urls(&env.task);
+    let pr_urls = implementer_pr_urls(&env.task);
     if pr_urls.is_empty() {
-        failures.push("Missing `[rowan-prs]` task comment with at least one PR URL.".to_string());
+        failures
+            .push("Missing `[implementer-prs]` task comment with at least one PR URL.".to_string());
     }
     env.lobster_state.pr_urls = pr_urls.clone();
     let task_acs = task_description_acs(&env.task.description.clone().unwrap_or_default());
@@ -358,7 +368,7 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
         return block_with_manual_block(&args, env, "feedback_aggregate", manual_failures);
     }
     let mut failures = Vec::new();
-    for url in rowan_pr_urls(&env.task) {
+    for url in implementer_pr_urls(&env.task) {
         match inspect_pr(&url) {
             Ok(review) => {
                 if let Some(failure) = feedback_review_failure(&url, review) {
@@ -377,7 +387,7 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
         if let Err(err) = add_comment(
             &args.base_url,
             &env.task.id,
-            &format!("[rowan-feedback]\n{}", failures.join("\n")),
+            &format!("[implementer-feedback]\n{}", failures.join("\n")),
         ) {
             if let Some(message) = spec_checksum_mismatch_message(&err) {
                 env.criteria_met = false;
@@ -578,7 +588,7 @@ fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
     entries
 }
 
-/// Return the 8-char task-id prefix used in Rowan worktree/branch names,
+/// Return the 8-char task-id prefix used in feature-task worktree/branch names,
 /// e.g. `ba116063-382a-446c-ab91-c01b60d9a7c3` -> `ba116063`.
 fn task_id_prefix(task_id: &str) -> &str {
     let cut = TASK_ID_PREFIX_LEN.min(task_id.len());
@@ -586,26 +596,28 @@ fn task_id_prefix(task_id: &str) -> &str {
 }
 
 /// Select worktrees that should be removed for the given task. Matches both
-/// the worktree path and the branch name against `task-<prefix>`, and
-/// restricts to paths under the Rowan workspace root so the cleanup cannot
-/// touch another agent's worktrees.
-fn select_matching_rowan_worktrees<'a>(
+/// the worktree path and the branch name against `task-<prefix>`. The input
+/// entries come from `git -C <primary_repo> worktree list`, so they are already
+/// scoped to worktrees registered to this repository. Never remove the primary
+/// worktree used to run the workflow.
+fn select_matching_task_worktrees<'a>(
     entries: &'a [WorktreeEntry],
     task_id: &str,
+    primary_repo: &Path,
 ) -> Vec<&'a WorktreeEntry> {
     let prefix = task_id_prefix(task_id);
     let marker = format!("task-{prefix}");
-    let root = Path::new(ROWAN_WORKSPACE_ROOT);
+    let primary_repo = primary_repo
+        .canonicalize()
+        .unwrap_or_else(|_| primary_repo.to_path_buf());
     entries
         .iter()
         .filter(|entry| {
-            if !entry.path.starts_with(root) {
-                return false;
-            }
-            // Never remove the primary sindustries worktree (it lives under
-            // the same root but its path is the repo itself, not a
-            // task-prefixed worktree).
-            if entry.path == root.join("sindustries") {
+            let entry_path = entry
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| entry.path.clone());
+            if entry_path == primary_repo {
                 return false;
             }
             let path_str = entry.path.to_string_lossy();
@@ -677,7 +689,7 @@ fn remove_worktrees_best_effort(
 
 /// Top-level worktree cleanup for a feature task. Returns a list of cleanup
 /// results (empty when nothing matched). Failures are non-fatal by design.
-fn cleanup_rowan_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCleanupResult> {
+fn cleanup_task_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCleanupResult> {
     let list_output = Command::new("git")
         .args([
             "-C",
@@ -715,7 +727,7 @@ fn cleanup_rowan_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCl
         }
     };
     let entries = parse_git_worktree_porcelain(&stdout);
-    let candidates: Vec<WorktreeEntry> = select_matching_rowan_worktrees(&entries, task_id)
+    let candidates: Vec<WorktreeEntry> = select_matching_task_worktrees(&entries, task_id, repo)
         .into_iter()
         .cloned()
         .collect();
@@ -724,7 +736,7 @@ fn cleanup_rowan_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCl
 
 fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult]) -> String {
     if results.is_empty() {
-        return "No matching Rowan worktrees found for this task.".to_string();
+        return "No matching task worktrees found for this task.".to_string();
     }
     results
         .iter()
@@ -754,13 +766,13 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
 
     // If the task has unchecked ACs that don't appear in any merged PR body, those ACs
     // were added after the PRs landed and are not yet implemented. Revert to `doing`
-    // so Rowan picks up the new work and opens a follow-up PR.
+    // so the implementer picks up the new work and opens a follow-up PR.
     // Unchecked ACs that DO appear in a merged PR are mid-QA (Tom hasn't checked them
     // off yet) — those are fine; leave them until qa-ac-verified.
     let description = env.task.description.clone().unwrap_or_default();
     let unchecked_acs = unchecked_task_ac_labels(&description);
     if !unchecked_acs.is_empty() {
-        let pr_bodies: Vec<String> = rowan_pr_urls(&env.task)
+        let pr_bodies: Vec<String> = implementer_pr_urls(&env.task)
             .iter()
             .filter_map(|url| pr_body(url).ok())
             .collect();
@@ -769,11 +781,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             let labels = needs_pr.join(", ");
             let fingerprint = format!("uncovered_acs:{labels}");
             if !args.dry_run {
-                api_patch::<Task>(
-                    &args.base_url,
-                    &env.task.id,
-                    json!({"status": "doing"}),
-                )?;
+                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "doing"}))?;
                 env.task = api_get_task(&args.base_url, &env.task.id)?;
                 if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
                     env.lobster_state.failure_fingerprint = Some(fingerprint);
@@ -833,7 +841,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         return run_post_merge_worktree_cleanup(&args, env);
     }
     let mut failures = qa_failures;
-    for url in rowan_pr_urls(&env.task) {
+    for url in implementer_pr_urls(&env.task) {
         match inspect_pr(&url) {
             Ok(ReviewState::Merged) => {}
             Ok(state) => failures.push(format!("PR {url} is not merged: {state:?}.")),
@@ -851,7 +859,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     Ok(env)
 }
 
-/// Best-effort removal of any Rowan worktree that was created for this
+/// Best-effort removal of any feature-task worktree that was created for this
 /// task. Runs on every post_merge invocation that reaches the `done` state
 /// (including idempotent re-runs) so stale worktrees cannot accumulate.
 /// Cleanup failures are surfaced as a `[feature-task-progress-checklist]`
@@ -860,7 +868,7 @@ fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Resul
     if args.dry_run {
         return Ok(env);
     }
-    let results = cleanup_rowan_worktree_for_task(&args.repo, &env.task.id);
+    let results = cleanup_task_worktree_for_task(&args.repo, &env.task.id);
     let had_failure = results
         .iter()
         .any(|r| matches!(r.outcome, WorktreeCleanupOutcome::Failed(_)));
@@ -910,9 +918,6 @@ fn transition_or_block(
             let mut patch = json!({"status": next_status});
             if next_status == "ready" {
                 patch["specChecksum"] = Value::String(spec_checksum(&env.task));
-                if env.task.assignee.is_none() {
-                    patch["assignee"] = Value::String("Rowan".to_string());
-                }
             }
             if let Err(err) = api_patch::<Task>(&args.base_url, &env.task.id, patch) {
                 if let Some(message) = spec_checksum_mismatch_message(&err) {
@@ -1008,13 +1013,11 @@ const TASK_SPEC_LIFECYCLE_DIRS: [&str; 4] = ["open", "in-progress", "done", "arc
 
 // ---- Post-merge worktree cleanup (feature task ba116063) ----
 //
-// Rowan runs feature-task PRs from dedicated worktrees under
-// `/Users/quinnstoffer/workspaces/rowan/`, registered with the primary
-// `sindustries` worktree. After a task's PR merges, the post-merge stage
-// removes the matching worktree so stale directories don't accumulate.
-// The cleanup is best-effort: a failure logs a warning but does not block
-// the lobster from advancing the task.
-const ROWAN_WORKSPACE_ROOT: &str = "/Users/quinnstoffer/workspaces/rowan";
+// Implementers may run feature-task PRs from dedicated git worktrees registered
+// with the primary `sindustries` worktree. After a task's PR merges, the
+// post-merge stage removes matching task worktrees so stale directories don't
+// accumulate. The cleanup is best-effort: a failure logs a warning but does not
+// block the lobster from advancing the task.
 /// Number of leading UUID chars used in worktree/branch names like
 /// `sindustries-task-<8chars>-<slug>`.
 const TASK_ID_PREFIX_LEN: usize = 8;
@@ -2143,7 +2146,19 @@ fn list_active_feature_tasks(base_url: &str) -> Result<Vec<Task>> {
     Ok(out)
 }
 
-fn rowan_doing_capacity_failures(tasks: &[Task], current_id: &str) -> Vec<String> {
+fn task_implementer(task: &Task) -> Option<String> {
+    task.assignee
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn implementer_doing_capacity_failures(
+    tasks: &[Task],
+    current_id: &str,
+    implementer: &str,
+) -> Vec<String> {
     let active_doing = tasks
         .iter()
         .filter(|task| {
@@ -2151,11 +2166,13 @@ fn rowan_doing_capacity_failures(tasks: &[Task], current_id: &str) -> Vec<String
                 && task.status == "doing"
                 && !task.blocked
                 && !task.dependency_blocked
-                && task.assignee.as_deref() == Some("Rowan")
+                && task.assignee.as_deref() == Some(implementer)
         })
         .count();
     if active_doing >= 1 {
-        vec!["Rowan already has an active task in `doing`.".to_string()]
+        vec![format!(
+            "Implementer `{implementer}` already has an active task in `doing`."
+        )]
     } else {
         Vec::new()
     }
@@ -2543,15 +2560,9 @@ fn parse_workstreams(text: &str) -> Vec<Workstream> {
         return owner_section;
     }
 
-    let heading =
-        Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(?:workstream\s*[:/-]?\s*)?(.+?)\s*$").unwrap();
+    let heading = Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(.+?)\s*$").unwrap();
     let mut matches: Vec<_> = heading.find_iter(text).collect();
-    matches.retain(|m| {
-        m.as_str().to_lowercase().contains("workstream")
-            || ["rowan", "quinn", "tom", "lox", "ivy"]
-                .iter()
-                .any(|name| m.as_str().to_lowercase().contains(name))
-    });
+    matches.retain(|m| m.as_str().to_lowercase().contains("workstream"));
     matches
         .iter()
         .enumerate()
@@ -2561,14 +2572,23 @@ fn parse_workstreams(text: &str) -> Vec<Workstream> {
                 .get(idx + 1)
                 .map(|n| n.start())
                 .unwrap_or(text.len());
-            let title = m.as_str();
-            let owner = ["Rowan", "Quinn", "Tom", "Lox", "Ivy"]
-                .iter()
-                .find(|name| title.contains(*name))
-                .unwrap_or(&"Rowan")
+            let title = heading
+                .captures(m.as_str())
+                .and_then(|cap| cap.get(1))
+                .map(|m| m.as_str().trim())
+                .unwrap_or("Implementer");
+            let owner = title
+                .replace("Workstream", "")
+                .replace("workstream", "")
+                .trim_matches(|c: char| c.is_whitespace() || c == ':' || c == '-' || c == '/')
+                .trim()
                 .to_string();
             Workstream {
-                owner,
+                owner: if owner.is_empty() {
+                    "Implementer".to_string()
+                } else {
+                    owner
+                },
                 body: text[start..end].trim().to_string(),
             }
         })
@@ -2603,7 +2623,7 @@ fn parse_owner_workstreams(text: &str) -> Vec<Workstream> {
                 .captures(owner_match.as_str())
                 .and_then(|cap| cap.get(1))
                 .map(|m| m.as_str().trim().to_string())
-                .unwrap_or_else(|| "Rowan".to_string());
+                .unwrap_or_else(|| "Implementer".to_string());
             Workstream {
                 owner,
                 body: section[body_start..body_end].trim().to_string(),
@@ -2653,25 +2673,29 @@ fn tagged_path_values(task: &Task, tag: &str) -> Vec<String> {
         .collect()
 }
 
-fn rowan_pr_urls(task: &Task) -> Vec<String> {
+fn implementer_pr_urls(task: &Task) -> Vec<String> {
     let re = Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").unwrap();
     let mut urls = Vec::new();
-    for value in tagged_values(task, "[rowan-prs]") {
-        for m in re.find_iter(&value) {
-            let url = m.as_str().to_string();
-            if !urls.contains(&url) {
-                urls.push(url);
+    // `[implementer-prs]` is the role-based tag. Keep `[rowan-prs]` as a
+    // compatibility alias for existing tasks while they drain.
+    for tag in ["[implementer-prs]", "[rowan-prs]"] {
+        for value in tagged_values(task, tag) {
+            for m in re.find_iter(&value) {
+                let url = m.as_str().to_string();
+                if !urls.contains(&url) {
+                    urls.push(url);
+                }
             }
         }
     }
     urls
 }
 
-fn rowan_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
+fn implementer_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
 where
     F: Fn(&str) -> Result<ReviewState>,
 {
-    rowan_pr_urls(task)
+    implementer_pr_urls(task)
         .into_iter()
         .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
         .collect()
@@ -2681,7 +2705,7 @@ fn system_spec_source_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
 where
     F: Fn(&str) -> Result<ReviewState>,
 {
-    let urls = rowan_pr_urls(task);
+    let urls = implementer_pr_urls(task);
     let active: Vec<String> = urls
         .iter()
         .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
@@ -2752,7 +2776,7 @@ where
     let candidate_prs = system_spec_source_pr_urls_with(task, inspect);
     let Some(source_pr_url) = candidate_prs.first() else {
         return vec![
-            "Missing `[rowan-prs]` PR URL to read system specs from a PR branch or main."
+            "Missing `[implementer-prs]` PR URL to read system specs from a PR branch or main."
                 .to_string(),
         ];
     };
@@ -2784,7 +2808,7 @@ where
                     ))
                 }
             };
-            let current = rowan_pr_urls(task)
+            let current = implementer_pr_urls(task)
                 .into_iter()
                 .any(|url| text.contains(&url))
                 || text.contains(&task.id);
@@ -3491,7 +3515,7 @@ Lead-in.
 - [ ] Build it
 
 ## Workstreams
-- Owner: Rowan
+- Owner: Implementer
   ACs: AC1"
                     .to_string(),
             ),
@@ -3525,7 +3549,7 @@ Lead-in.
 - [ ] Build it
 
 ## Workstreams
-- Owner: Rowan
+- Owner: Implementer
   ACs: AC1"
                     .to_string(),
             ),
@@ -3592,7 +3616,7 @@ Lead-in.
 
         let task = Task {
             description: Some(
-                "**Spec:** brain/tasks/specs/example.md\n\n## Acceptance Criteria\n- [ ] Build it\n\n## Rowan Workstream\n- [ ] Build it"
+                "**Spec:** brain/tasks/specs/example.md\n\n## Acceptance Criteria\n- [ ] Build it\n\n## Implementer Workstream\n- [ ] Build it"
                     .to_string(),
             ),
             ..Task::default()
@@ -3703,7 +3727,7 @@ Lead-in.
     }
 
     #[test]
-    fn rowan_capacity_allows_other_ready_and_acceptance_tasks() {
+    fn implementer_capacity_allows_other_ready_and_acceptance_tasks() {
         let tasks = vec![
             Task {
                 id: "other-ready".to_string(),
@@ -3719,11 +3743,11 @@ Lead-in.
             },
         ];
 
-        assert!(rowan_doing_capacity_failures(&tasks, "current-task").is_empty());
+        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
-    fn rowan_capacity_blocks_existing_doing_task() {
+    fn implementer_capacity_blocks_existing_doing_task() {
         let tasks = vec![Task {
             id: "other-doing".to_string(),
             status: "doing".to_string(),
@@ -3732,15 +3756,15 @@ Lead-in.
         }];
 
         assert_eq!(
-            rowan_doing_capacity_failures(&tasks, "current-task"),
-            vec!["Rowan already has an active task in `doing`.".to_string()]
+            implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
+            vec!["Implementer `Rowan` already has an active task in `doing`.".to_string()]
         );
     }
 
     #[test]
-    fn rowan_capacity_allows_dependency_blocked_doing_task() {
+    fn implementer_capacity_allows_dependency_blocked_doing_task() {
         // A task in `doing` that is blocked by an unresolved dependency
-        // is not actually consuming Rowan's capacity — it is stuck waiting
+        // is not actually consuming the implementer's capacity — it is stuck waiting
         // on another task. The capacity check should treat it the same
         // as a non-`doing` task (Tom: 2026-07-01 — "needs to be taken
         // into account for all states").
@@ -3752,11 +3776,11 @@ Lead-in.
             ..Task::default()
         }];
 
-        assert!(rowan_doing_capacity_failures(&tasks, "current-task").is_empty());
+        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
-    fn rowan_capacity_still_blocks_unblocked_doing_when_manual_blocked_present() {
+    fn implementer_capacity_still_blocks_unblocked_doing_when_manual_blocked_present() {
         // Sanity: manual block continues to free capacity (existing
         // behaviour), but a task that is `doing` and neither manually
         // nor dependency-blocked still blocks. This pins down that the
@@ -3779,8 +3803,8 @@ Lead-in.
         ];
 
         assert_eq!(
-            rowan_doing_capacity_failures(&tasks, "current-task"),
-            vec!["Rowan already has an active task in `doing`.".to_string()]
+            implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
+            vec!["Implementer `Rowan` already has an active task in `doing`.".to_string()]
         );
     }
 
@@ -3795,7 +3819,7 @@ Lead-in.
     #[test]
     fn parses_bold_workstreams_section_with_owner_blocks() {
         let text = r#"**Workstreams**
-- Owner: Rowan
+- Owner: Implementer
   Repo: Stoffer-Industries/sindustries
   Branch: task-456c92a8-depends-on
   Worktree: ~/workspaces/rowan/sindustries
@@ -3812,7 +3836,7 @@ Lead-in.
 "#;
         let streams = parse_workstreams(text);
         assert_eq!(streams.len(), 2);
-        assert_eq!(streams[0].owner, "Rowan");
+        assert_eq!(streams[0].owner, "Implementer");
         assert!(streams[0].body.contains("task-456c92a8-depends-on"));
         assert_eq!(streams[1].owner, "Quinn");
     }
@@ -3827,7 +3851,7 @@ Lead-in.
 - [ ] AC1: Build it
 
 **Workstreams**
-- Owner: Rowan
+- Owner: Implementer
   Repo: Stoffer-Industries/sindustries
   Branch: task-456c92a8-depends-on
   Status: open
@@ -3847,16 +3871,16 @@ Lead-in.
     }
 
     #[test]
-    fn extracts_multiple_rowan_pr_urls() {
+    fn extracts_multiple_implementer_pr_urls() {
         let task = Task {
             comments: vec![TaskComment { text: Some("[rowan-prs]\nhttps://github.com/Stoffer-Industries/sindustries/pull/1\nhttps://github.com/Stoffer-Industries/sindustries/pull/2".to_string()), body: None }],
             ..Task::default()
         };
-        assert_eq!(rowan_pr_urls(&task).len(), 2);
+        assert_eq!(implementer_pr_urls(&task).len(), 2);
     }
 
     #[test]
-    fn active_rowan_pr_urls_skip_merged_prs() {
+    fn active_implementer_pr_urls_skip_merged_prs() {
         let task = Task {
             comments: vec![
                 TaskComment {
@@ -3876,7 +3900,7 @@ Lead-in.
             ],
             ..Task::default()
         };
-        let active = rowan_active_pr_urls_with(&task, |url| {
+        let active = implementer_active_pr_urls_with(&task, |url| {
             if url.ends_with("/120") {
                 Ok(ReviewState::Merged)
             } else {
@@ -3991,7 +4015,7 @@ Lead-in.
     }
 
     #[test]
-    fn rowan_pr_urls_preserve_merged_prs_for_delivery() {
+    fn implementer_pr_urls_preserve_merged_prs_for_delivery() {
         let merged_url = "https://github.com/Stoffer-Industries/sindustries/pull/161";
         let open_url = "https://github.com/Stoffer-Industries/sindustries/pull/164";
         let task = Task {
@@ -4002,9 +4026,9 @@ Lead-in.
             ..Task::default()
         };
 
-        assert_eq!(rowan_pr_urls(&task), vec![merged_url, open_url]);
+        assert_eq!(implementer_pr_urls(&task), vec![merged_url, open_url]);
         assert_eq!(
-            rowan_active_pr_urls_with(&task, |url| {
+            implementer_active_pr_urls_with(&task, |url| {
                 if url == merged_url {
                     Ok(ReviewState::Merged)
                 } else {
@@ -4350,7 +4374,10 @@ Lead-in.
     fn ac_labels_in_pr_body_finds_all_labels() {
         let body = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [ ] AC2: Not done\n- [X] AC5: Also done\n";
         let labels = ac_labels_in_pr_body(body);
-        assert_eq!(labels, vec!["AC1".to_string(), "AC2".to_string(), "AC5".to_string()]);
+        assert_eq!(
+            labels,
+            vec!["AC1".to_string(), "AC2".to_string(), "AC5".to_string()]
+        );
     }
 
     #[test]
@@ -4358,7 +4385,9 @@ Lead-in.
         // AC1 unchecked but in PR body (mid-QA) — no new PR needed
         // AC5 unchecked and NOT in any PR body — new PR needed
         let unchecked = vec!["AC1".to_string(), "AC5".to_string()];
-        let pr_body1 = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [x] AC2: Done (testID: 2)\n".to_string();
+        let pr_body1 =
+            "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [x] AC2: Done (testID: 2)\n"
+                .to_string();
         let needs_pr = ac_labels_needing_new_pr(&unchecked, &[pr_body1]);
         assert_eq!(needs_pr, vec!["AC5".to_string()]);
     }
@@ -4366,7 +4395,9 @@ Lead-in.
     #[test]
     fn ac_labels_needing_new_pr_empty_when_all_covered() {
         let unchecked = vec!["AC1".to_string(), "AC2".to_string()];
-        let pr_body1 = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [x] AC2: Done (testID: 2)\n".to_string();
+        let pr_body1 =
+            "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [x] AC2: Done (testID: 2)\n"
+                .to_string();
         assert!(ac_labels_needing_new_pr(&unchecked, &[pr_body1]).is_empty());
     }
 
@@ -6249,15 +6280,15 @@ keep me
     #[test]
     fn parse_worktree_porcelain_handles_main_and_task_worktrees() {
         let sample = "\
-worktree /Users/quinnstoffer/workspaces/rowan/sindustries
+worktree /Users/quinnstoffer/workspaces/implementer/sindustries
 HEAD 0123456789abcdef0123456789abcdef01234567
 branch refs/heads/main
 
-worktree /Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-lobster-worktree-cleanup
+worktree /Users/quinnstoffer/workspaces/implementer/sindustries-task-ba116063-lobster-worktree-cleanup
 HEAD fedcba9876543210fedcba9876543210fedcba98
 branch refs/heads/task-ba116063-lobster-worktree-cleanup
 
-worktree /Users/quinnstoffer/workspaces/rowan/sindustries-task-zz999999-orphan
+worktree /Users/quinnstoffer/workspaces/implementer/sindustries-task-zz999999-orphan
 HEAD 1111111111111111111111111111111111111111
 detached
 ";
@@ -6265,7 +6296,7 @@ detached
         assert_eq!(entries.len(), 3);
         assert_eq!(
             entries[0].path,
-            PathBuf::from("/Users/quinnstoffer/workspaces/rowan/sindustries")
+            PathBuf::from("/Users/quinnstoffer/workspaces/implementer/sindustries")
         );
         assert_eq!(entries[0].branch.as_deref(), Some("main"));
         assert_eq!(
@@ -6294,56 +6325,71 @@ detached
     }
 
     #[test]
-    fn select_matching_rowan_worktrees_finds_only_task_worktrees() {
+    fn select_matching_task_worktrees_finds_only_task_worktrees() {
         let entries = vec![
             WorktreeEntry {
-                path: PathBuf::from("/Users/quinnstoffer/workspaces/rowan/sindustries"),
+                path: PathBuf::from("/Users/quinnstoffer/workspaces/implementer/sindustries"),
                 branch: Some("main".to_string()),
             },
             WorktreeEntry {
                 path: PathBuf::from(
-                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-lobster-worktree-cleanup",
+                    "/Users/quinnstoffer/workspaces/implementer/sindustries-task-ba116063-lobster-worktree-cleanup",
                 ),
                 branch: Some("task-ba116063-lobster-worktree-cleanup".to_string()),
             },
             WorktreeEntry {
                 path: PathBuf::from(
-                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-b179c0e3-bookmark-analytics-postgres",
+                    "/Users/quinnstoffer/workspaces/implementer/sindustries-task-b179c0e3-bookmark-analytics-postgres",
                 ),
                 branch: Some("task-b179c0e3-bookmark-analytics-postgres".to_string()),
             },
-            // Path outside the Rowan root must be ignored even if the branch
-            // contains the marker (defence in depth against typo'd roots).
+            // A registered worktree outside the primary checkout root is still
+            // valid; implementers keep task worktrees in dedicated workspace roots.
             WorktreeEntry {
                 path: PathBuf::from(
                     "/Users/quinnstoffer/workspaces/lox/sindustries-task-ba116063-bogus",
                 ),
                 branch: Some("task-ba116063-bogus".to_string()),
             },
-            // Branch-prefixed worktree whose path lives outside the root
-            // (also must be ignored).
+            // Branch-prefixed worktree whose path lives outside the primary root
+            // should still be removed because it is registered to this repo.
             WorktreeEntry {
                 path: PathBuf::from("/tmp/some-other-worktree"),
                 branch: Some("task-ba116063-anything".to_string()),
             },
         ];
-        let matches =
-            select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
-        assert_eq!(matches.len(), 1);
-        assert!(matches[0]
-            .path
-            .to_string_lossy()
-            .contains("sindustries-task-ba116063-lobster-worktree-cleanup"));
+        let matches = select_matching_task_worktrees(
+            &entries,
+            "ba116063-382a-446c-ab91-c01b60d9a7c3",
+            Path::new("/Users/quinnstoffer/workspaces/implementer/sindustries"),
+        );
+        assert_eq!(matches.len(), 3);
+        let paths: Vec<String> = matches
+            .iter()
+            .map(|entry| entry.path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths
+            .iter()
+            .any(|path| path.contains("sindustries-task-ba116063-lobster-worktree-cleanup")));
+        assert!(paths
+            .iter()
+            .any(|path| path.contains("workspaces/lox/sindustries-task-ba116063-bogus")));
+        assert!(paths
+            .iter()
+            .any(|path| path.contains("/tmp/some-other-worktree")));
     }
 
     #[test]
-    fn select_matching_rowan_worktrees_never_picks_primary_sindustries() {
+    fn select_matching_task_worktrees_never_picks_primary_sindustries() {
         let entries = vec![WorktreeEntry {
-            path: PathBuf::from("/Users/quinnstoffer/workspaces/rowan/sindustries"),
+            path: PathBuf::from("/Users/quinnstoffer/workspaces/implementer/sindustries"),
             branch: Some("main".to_string()),
         }];
-        let matches =
-            select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
+        let matches = select_matching_task_worktrees(
+            &entries,
+            "ba116063-382a-446c-ab91-c01b60d9a7c3",
+            Path::new("/Users/quinnstoffer/workspaces/implementer/sindustries"),
+        );
         assert!(
             matches.is_empty(),
             "primary worktree must never be selected"
@@ -6351,15 +6397,18 @@ detached
     }
 
     #[test]
-    fn select_matching_rowan_worktrees_handles_branch_only_match() {
+    fn select_matching_task_worktrees_handles_branch_only_match() {
         // A worktree whose path does not include the task marker but whose
         // branch does (e.g. renamed path) should still match.
         let entries = vec![WorktreeEntry {
-            path: PathBuf::from("/Users/quinnstoffer/workspaces/rowan/some-odd-path"),
+            path: PathBuf::from("/Users/quinnstoffer/workspaces/implementer/some-odd-path"),
             branch: Some("task-ba116063-renamed".to_string()),
         }];
-        let matches =
-            select_matching_rowan_worktrees(&entries, "ba116063-382a-446c-ab91-c01b60d9a7c3");
+        let matches = select_matching_task_worktrees(
+            &entries,
+            "ba116063-382a-446c-ab91-c01b60d9a7c3",
+            Path::new("/Users/quinnstoffer/workspaces/implementer/sindustries"),
+        );
         assert_eq!(matches.len(), 1);
     }
 
@@ -6367,7 +6416,7 @@ detached
     fn format_worktree_cleanup_summary_handles_empty() {
         assert_eq!(
             format_worktree_cleanup_summary(&[]),
-            "No matching Rowan worktrees found for this task."
+            "No matching task worktrees found for this task."
         );
     }
 
@@ -6376,21 +6425,21 @@ detached
         let results = vec![
             WorktreeCleanupResult {
                 path: PathBuf::from(
-                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-a",
+                    "/Users/quinnstoffer/workspaces/implementer/sindustries-task-ba116063-a",
                 ),
                 branch: Some("task-ba116063-a".to_string()),
                 outcome: WorktreeCleanupOutcome::Removed,
             },
             WorktreeCleanupResult {
                 path: PathBuf::from(
-                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-b",
+                    "/Users/quinnstoffer/workspaces/implementer/sindustries-task-ba116063-b",
                 ),
                 branch: Some("task-ba116063-b".to_string()),
                 outcome: WorktreeCleanupOutcome::AlreadyAbsent,
             },
             WorktreeCleanupResult {
                 path: PathBuf::from(
-                    "/Users/quinnstoffer/workspaces/rowan/sindustries-task-ba116063-c",
+                    "/Users/quinnstoffer/workspaces/implementer/sindustries-task-ba116063-c",
                 ),
                 branch: None,
                 outcome: WorktreeCleanupOutcome::Failed("permission denied".to_string()),
