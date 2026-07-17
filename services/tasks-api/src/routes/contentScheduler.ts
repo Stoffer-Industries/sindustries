@@ -1,20 +1,27 @@
 // Content Scheduler routes — Express router mounted at /api/v1/content-scheduler.
 //
-// Implements AC1-AC6 from task 115e8d89-be43-4b81-9e0e-9ab422810f5f:
+// Implements AC1-AC6 from task 115e8d89-be43-4b81-9e0e-9ab422810f5f
+// (Content Scheduler tab) and AC1-AC6 from task ac74e9bb-beb6-4d97-b604-8102d35176ee
+// (Event-Driven Auto-Post):
 //  - GET    /items               list non-removed items, optional status filter
 //  - POST   /items               create
 //  - PATCH  /items/:id           edit body / scheduledFor / source / sourceRef
-//  - POST   /items/:id/approve   mark approved (AC6 — explicit gate)
-//  - POST   /items/:id/unapprove clear approval
-//  - POST   /items/:id/publish   publish (guarded; X integration via helper)
-//  - POST   /items/:id/remove    soft-delete
+//  - POST   /items/:id/approve   mark approved (AC6 — explicit gate) + enqueue
+//  - POST   /items/:id/unapprove clear approval + cancel auto-post
+//  - POST   /items/:id/publish   publish (guarded; X integration via shared service)
+//  - POST   /items/:id/remove    soft-delete + cancel auto-post
 //  - POST   /reorder             rewrite positions from an id list
 //  - GET    /today-status        daily cap (Pacific/Auckland)
 //
 // All write endpoints accept an `x-actor` header that defaults to "unknown"
 // — there is no auth in v1 (single-user MVP per the tech design).
 //
+// Auto-post enqueue uses the provider-neutral `JobSchedulerAdapter` so the
+// trigger is event-driven (no polling loop) and the cloud swap is a
+// single-class change.
+//
 // Tech design: docs/specs/content-scheduler-tab-tech-design.md
+//              docs/specs/content-scheduler-auto-post-2026-07-16-tech-design.md
 
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
@@ -25,6 +32,11 @@ import {
   getXClient,
   TERMINAL_STATUSES
 } from './contentSchedulerPublish.ts';
+import {
+  decideAutoPostAction,
+  getJobSchedulerAdapter
+} from './contentSchedulerJobs.ts';
+import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts';
 
 const MAX_BODY = 1000;
 
@@ -40,7 +52,7 @@ function actor(req: any): string {
 }
 
 function parseId(raw: string): string | null {
-  return uuidPattern.test(raw) ? raw : null;
+  return uuidPattern.test(raw) ? raw.toLowerCase() : null;
 }
 
 function parseDate(value: unknown): Date | null | 'invalid' {
@@ -55,6 +67,64 @@ function validateBody(body: unknown): string | null {
   if (trimmed.length === 0) return 'body must not be empty';
   if (body.length > MAX_BODY) return `body must be <= ${MAX_BODY} characters`;
   return null;
+}
+
+/**
+ * Apply the auto-post schedule decision after a write. Best-effort: if the
+ * adapter throws (e.g. Redis is down), we surface a 503 from the route so
+ * Tom sees the failure rather than silently dropping the schedule. The
+ * database write has already committed at this point, so the item state
+ * is the source of truth.
+ */
+async function applyAutoPostSchedule(
+  itemId: string,
+  prior: {
+    id: string;
+    status: typeof TERMINAL_STATUSES[number] | 'draft' | 'queued' | 'approved';
+    scheduledFor: Date | null;
+    autoPostJobId: string | null;
+    autoPostScheduleVersion: number;
+  },
+  next: { status: typeof TERMINAL_STATUSES[number] | 'draft' | 'queued' | 'approved'; scheduledFor: Date | null }
+): Promise<void> {
+  const decision = decideAutoPostAction({ prior, next });
+  const adapter = getJobSchedulerAdapter();
+  if (decision.kind === 'cancel') {
+    try {
+      await adapter.cancelAutoPost(decision.jobId);
+    } catch (err) {
+      // Cancellation is best-effort. The stale-version check in the worker
+      // is the defense in depth.
+    }
+    await prisma.contentSchedulerItem.update({
+      where: { id: itemId },
+      data: {
+        autoPostJobId: null,
+        autoPostScheduleVersion: prior.autoPostScheduleVersion + 1,
+        autoPostLastEnqueuedAt: new Date()
+      }
+    });
+    return;
+  }
+  if (decision.kind === 'schedule') {
+    const job = {
+      itemId,
+      scheduledFor: next.scheduledFor as Date,
+      scheduleVersion: prior.autoPostScheduleVersion + 1
+    };
+    const scheduled = await adapter.scheduleAutoPost(job);
+    await prisma.contentSchedulerItem.update({
+      where: { id: itemId },
+      data: {
+        autoPostJobId: scheduled.jobId,
+        autoPostScheduleVersion: prior.autoPostScheduleVersion + 1,
+        autoPostScheduledAt: next.scheduledFor,
+        autoPostLastEnqueuedAt: new Date()
+      }
+    });
+    return;
+  }
+  // noop
 }
 
 export const contentSchedulerRouter = Router();
@@ -164,6 +234,31 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
       data: updates
     });
 
+    // Re-evaluate auto-post schedule when scheduledFor changed. Body /
+    // source / sourceRef do not affect auto-post timing.
+    if (Object.prototype.hasOwnProperty.call(updates, 'scheduledFor')) {
+      try {
+        await applyAutoPostSchedule(
+          id,
+          {
+            id: existing.id,
+            status: existing.status as any,
+            scheduledFor: existing.scheduledFor,
+            autoPostJobId: existing.autoPostJobId,
+            autoPostScheduleVersion: existing.autoPostScheduleVersion
+          },
+          { status: updated.status as any, scheduledFor: updated.scheduledFor }
+        );
+        // Re-read so the response reflects the latest autoPost* fields.
+        const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+        if (refreshed) return res.json({ data: refreshed });
+      } catch (err) {
+        // Adapter failure surfaces as 503; DB has already been updated so
+        // Tom can still see the new scheduledFor value.
+        return sendError(res, 503, 'AUTO_POST_SCHEDULE_FAILED', 'Failed to enqueue auto-post job');
+      }
+    }
+
     res.json({ data: updated });
   } catch (err) {
     next(err);
@@ -193,6 +288,26 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/approve', async (req, 
       }
     });
 
+    if (updated.scheduledFor) {
+      try {
+        await applyAutoPostSchedule(
+          id,
+          {
+            id: existing.id,
+            status: existing.status as any,
+            scheduledFor: existing.scheduledFor,
+            autoPostJobId: existing.autoPostJobId,
+            autoPostScheduleVersion: existing.autoPostScheduleVersion
+          },
+          { status: 'approved', scheduledFor: updated.scheduledFor }
+        );
+        const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+        if (refreshed) return res.json({ data: refreshed });
+      } catch (err) {
+        return sendError(res, 503, 'AUTO_POST_SCHEDULE_FAILED', 'Failed to enqueue auto-post job');
+      }
+    }
+
     res.json({ data: updated });
   } catch (err) {
     next(err);
@@ -219,6 +334,24 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/unapprove', async (req
       }
     });
 
+    try {
+      await applyAutoPostSchedule(
+        id,
+        {
+          id: existing.id,
+          status: existing.status as any,
+          scheduledFor: existing.scheduledFor,
+          autoPostJobId: existing.autoPostJobId,
+          autoPostScheduleVersion: existing.autoPostScheduleVersion
+        },
+        { status: 'queued', scheduledFor: null }
+      );
+    } catch (err) {
+      // Best-effort; the worker stale-version check covers missed cancels.
+    }
+    const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+    if (refreshed) return res.json({ data: refreshed });
+
     res.json({ data: updated });
   } catch (err) {
     next(err);
@@ -230,53 +363,37 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/publish', async (req, 
     const id = parseId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
 
-    const item = await prisma.contentSchedulerItem.findUnique({ where: { id } });
-    if (!item) return notFound(res, 'NOT_FOUND', 'Item not found');
+    const result = await publishContentSchedulerItem(id, 'manual');
 
-    const { startUtc, endUtc, date } = getAucklandTodayParts();
-    const todays = await prisma.contentSchedulerItem.findMany({
-      where: {
-        status: 'published',
-        publishedAt: { gte: startUtc, lt: endUtc }
-      },
-      select: { id: true }
-    });
-    const publishedCount = todays.length;
-    const publishedItemId = publishedCount > 0 ? todays[0].id : null;
-
-    const guard = guardPublish(item, { publishedCount, publishedItemId });
-    if (!guard.ok) {
-      return sendError(res, 409, guard.code, `Publish refused: ${guard.code}`);
+    if (!result.ok) {
+      if (result.code === 'NOT_FOUND') return notFound(res, 'NOT_FOUND', result.message);
+      if (result.code === 'MISSING_CREDENTIALS')
+        return sendError(res, 503, 'MISSING_CREDENTIALS', result.message);
+      if (result.code === 'PUBLISH_FAILED')
+        return sendError(res, 502, 'PUBLISH_FAILED', result.message);
+      return sendError(res, 409, result.code, result.message);
     }
 
-    const client = getXClient();
-    if (!client) {
-      return sendError(res, 503, 'MISSING_CREDENTIALS', 'X credentials are not configured');
-    }
-
-    let result: { url: string; postedAt: Date };
-    try {
-      result = await client.createTweet({ text: item.body });
-    } catch (publishError) {
-      const message = publishError instanceof Error ? publishError.message : String(publishError);
-      const updated = await prisma.contentSchedulerItem.update({
-        where: { id },
-        data: { publishError: message }
-      });
-      return sendError(res, 502, 'PUBLISH_FAILED', message);
-    }
-
-    const updated = await prisma.contentSchedulerItem.update({
-      where: { id },
-      data: {
-        status: 'published',
-        publishedAt: result.postedAt,
-        publishedUrl: result.url,
-        publishError: null
+    // On successful manual publish, cancel any in-flight auto-post job and
+    // bump the schedule version so a stale delayed job exits cleanly.
+    if (result.item?.autoPostJobId) {
+      try {
+        await getJobSchedulerAdapter().cancelAutoPost(result.item.autoPostJobId);
+      } catch (err) {
+        // Stale-version check is the safety net.
       }
-    });
+      await prisma.contentSchedulerItem.update({
+        where: { id },
+        data: {
+          autoPostJobId: null,
+          autoPostScheduleVersion: (result.item.autoPostScheduleVersion ?? 0) + 1,
+          autoPostLastEnqueuedAt: new Date()
+        }
+      });
+    }
 
-    res.json({ data: updated, today: date });
+    const { date } = getAucklandTodayParts();
+    res.json({ data: result.item, today: date });
   } catch (err) {
     next(err);
   }
@@ -300,6 +417,24 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/remove', async (req, r
         removedAt: new Date()
       }
     });
+
+    try {
+      await applyAutoPostSchedule(
+        id,
+        {
+          id: existing.id,
+          status: existing.status as any,
+          scheduledFor: existing.scheduledFor,
+          autoPostJobId: existing.autoPostJobId,
+          autoPostScheduleVersion: existing.autoPostScheduleVersion
+        },
+        { status: 'removed', scheduledFor: null }
+      );
+    } catch (err) {
+      // best-effort
+    }
+    const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+    if (refreshed) return res.json({ data: refreshed });
 
     res.json({ data: updated });
   } catch (err) {

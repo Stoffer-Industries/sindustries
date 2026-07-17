@@ -232,6 +232,17 @@ export function ContentSchedulerTab() {
     reload();
   }, [reload]);
 
+  // AC6: refresh the queue + today-status every 10s while the tab is
+  // mounted so auto-posted items (driven by the worker's delayed job)
+  // show up in the UI within one refresh cycle. The interval is UI-only;
+  // it does not drive publishing.
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      reload();
+    }, 10_000);
+    return () => clearInterval(intervalId);
+  }, [reload]);
+
   const grouped = useMemo(() => {
     const out = { queued: [], approved: [], published: [] };
     for (const item of items ?? []) {

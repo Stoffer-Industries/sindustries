@@ -159,7 +159,7 @@ describe('getXClient', () => {
     expect(getXClient()).toBeNull();
   });
 
-  it('returns RealXClient when X_CLIENT=real and OAuth credentials are set', () => {
+it('returns RealXClient when X_CLIENT=real and OAuth credentials are set', () => {
     process.env.X_CLIENT = 'real';
     process.env.X_API_KEY = 'test-key';
     process.env.X_API_SECRET = 'test-secret';

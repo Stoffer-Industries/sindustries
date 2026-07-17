@@ -3,6 +3,29 @@ import { healthRouter } from './routes/health';
 import { tasksRouter } from './routes/tasks';
 import { tagsRouter } from './routes/tags';
 import { contentSchedulerRouter } from './routes/contentScheduler.ts';
+import { createInProcessJobSchedulerAdapter } from './routes/contentSchedulerJobs.inProcess.ts';
+import {
+  getJobSchedulerAdapterKind,
+  setJobSchedulerAdapter
+} from './routes/contentSchedulerJobs.ts';
+import { processAutoPostJob } from './routes/autoPostWorker.ts';
+
+// Install the default in-process JobSchedulerAdapter so the route layer
+// always has an adapter available. Tests can override this via
+// `setJobSchedulerAdapter(...)` in their setup. The adapter is registered
+// exactly once per process; calling `setJobSchedulerAdapter` again would
+// replace it, which is what tests use.
+let _adapterInstalled = false;
+function installDefaultAdapter() {
+  if (_adapterInstalled) return;
+  if (getJobSchedulerAdapterKind()) return;
+  const adapter = createInProcessJobSchedulerAdapter();
+  adapter.setHandler(async (job) => {
+    await processAutoPostJob(job);
+  });
+  setJobSchedulerAdapter(adapter, 'in-process');
+  _adapterInstalled = true;
+}
 
 function getAllowedOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.split(',')
@@ -23,6 +46,7 @@ function getAllowedOrigins() {
 }
 
 export function createApp() {
+  installDefaultAdapter();
   const app = express();
   const allowedOrigins = getAllowedOrigins();
 

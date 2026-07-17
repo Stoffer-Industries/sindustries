@@ -17,7 +17,9 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "content-scheduler:worker": "tsx --require @sindustries/otel-node/register src/autoPostWorkerMain.ts",
+    "content-scheduler:worker:dev": "tsx watch --require @sindustries/otel-node/register src/autoPostWorkerMain.ts"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
