@@ -10,10 +10,11 @@
     "currentLearning": [
       "Sourcing research underway — evaluating 3 product candidates against margin, lead time, and SIndustries narrative fit.",
       "Positioning hypothesis: the SIndustries audience responds to practical tools and systems, not lifestyle products.",
-      "Fulfilment approach TBD: exploring direct-to-consumer vs marketplace to understand control/effort tradeoff."
+      "Fulfilment approach TBD: exploring direct-to-consumer vs marketplace to understand control/effort tradeoff.",
+      "Stale-status review on 2026-07-17: no newer product-drop evidence was available in the weekly review, so the experiment remains active but needs a fresh sourcing or go/no-go update before the next content pass."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-05-28",
+    "updatedAt": "2026-07-17",
     "links": [],
     "image": "/brand/studio/drop-1-hero.png",
     "visibility": "published"
@@ -25,16 +26,17 @@
     "status": "active",
     "summary": "Short-form public signal to build distribution, sharpen narrative, and learn what people respond to.",
     "why": "Distribution is a structural problem. Without an audience or a reliable channel, every other experiment runs in a vacuum. Getting early signal about what earns attention is more valuable than optimising content quality in isolation.\n\nX/Twitter is the first channel because the audience overlap with builders, founders, and technical practitioners is highest. The format — short-form threads and notes — is low-friction to produce and easy to iterate.\n\nThe goal isn't growth for its own sake. It's to understand which topics, formats, and claims earn useful engagement from people who might eventually become customers, collaborators, or advocates.",
-    "successCriteria": "A repeatable posting cadence is established and maintained for at least 30 days. Each piece of content generates observable signal: impressions, replies, follows, or link clicks.\n\nBy the end of the first cycle, I should be able to answer: What topics generate the most engagement from the right audience? What formats work best (threads vs. single posts vs. images)? What claims or framings earn the strongest reactions?\n\nThe secondary outcome is narrative sharpening — publishing forces clarity that internal thinking doesn't.\n\nCadence target revised in light of the content factory: the website ships a structured weekly update on a reliable cycle. Social posting should treat each weekly drop as source material for short-form distribution, not compete with it. Target: 1-2 social posts per week sourced from the weekly website update, plus standalone experiments when something warrants immediate signal.",
+    "successCriteria": "A repeatable posting cadence is established and maintained for at least 30 days. Each piece of content generates observable signal: impressions, replies, follows, or link clicks.\n\nBy the end of the first cycle, I should be able to answer: What topics generate the most engagement from the right audience? What formats work best (threads vs. single posts vs. images)? What claims or framings earn the strongest reactions?\n\nThe secondary outcome is narrative sharpening — publishing forces clarity that internal thinking doesn't.\n\nCadence target revised in light of the content factory: the website ships a structured weekly update on a reliable cycle. Social posting should treat each weekly drop as source material for short-form distribution, not compete with it. Target: 1-2 social posts per week sourced from the weekly website update, plus standalone experiments when something warrants immediate signal.\n\nContent Scheduler adds a new operating surface for the experiment: weekly website updates can now be turned into approved and scheduled X posts from inside Mission Control. The cadence test should shift from 'can posts be produced?' to 'does a scheduled distribution loop preserve quality while increasing consistency?'",
     "currentLearning": [
       "Initial posts about OpenClaw and AI operations earned higher engagement than general SIndustries positioning content.",
       "Build-in-public framing (showing the process, not just the result) consistently outperforms polished announcement-style posts.",
       "The content factory changes the channel plan: weekly website updates are now a reliable source of short-form social material. Treating the website as the source of truth and social as the distribution layer removes the manual writing bottleneck that kept cadence at 1-2 posts per week.",
       "Original cadence target (3-4 standalone posts per week) is being replaced by 1-2 distribution posts per week sourced from the weekly update. Quality and reliability matter more than raw post count.",
-      "2026-06-17 X thread on the Lobster + Quinn state-handoff pattern shifted the channel from announcement-style posts to architecture-and-process posts. The thread landed because it explains a real design decision (where intelligence lives in an agent pipeline) rather than selling a product outcome — supporting the hypothesis that process posts are now the strongest format for the SIndustries audience, not just a planned pivot."
+      "2026-06-17 X thread on the Lobster + Quinn state-handoff pattern shifted the channel from announcement-style posts to architecture-and-process posts. The thread landed because it explains a real design decision (where intelligence lives in an agent pipeline) rather than selling a product outcome — supporting the hypothesis that process posts are now the strongest format for the SIndustries audience, not just a planned pivot.",
+      "Content Scheduler changes the experiment from manual posting cadence to an approval-and-scheduling loop. The next learning is whether scheduled posts sourced from weekly site updates create more consistent public signal without lowering specificity."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-06-19",
+    "updatedAt": "2026-07-17",
     "links": [],
     "image": "/brand/studio/social-content-hero.png",
     "visibility": "published"
@@ -50,10 +52,11 @@
     "currentLearning": [
       "First scan completed: identified 6 candidates across commerce, tools, and content. 2 advanced to further evaluation.",
       "NZ-specific opportunities appear underexplored in the AI-native tools category — global tools often miss local compliance and context.",
-      "Recurring scans need a lightweight template to avoid inconsistent depth between cycles."
+      "Recurring scans need a lightweight template to avoid inconsistent depth between cycles.",
+      "Stale-status review on 2026-07-17: no newer scan output was available in the weekly review, so the experiment remains active but needs a fresh scan cadence update or an explicit pause decision."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-05-28",
+    "updatedAt": "2026-07-17",
     "links": [],
     "image": "/brand/studio/product-market-scans-hero.png",
     "visibility": "published"
@@ -111,5 +114,24 @@
     "links": [],
     "image": "/brand/studio/roadmapping-scenarios-hero.png",
     "visibility": "published"
+  },
+  {
+    "title": "GymTrack",
+    "slug": "gymtrack",
+    "tag": "Workout logging MVP",
+    "status": "active",
+    "summary": "A mobile-capable workout logging app experiment for testing whether lightweight fitness tracking can become a useful consumer product wedge.",
+    "why": "GymTrack is a small consumer-app experiment under the Stoffer umbrella: narrow enough to ship quickly, but real enough to test account creation, repeated use, and mobile-first product quality.\n\nThe first bet is intentionally practical. Workout logging is familiar, recurring, and easy to validate without a large marketplace or complex integrations. A useful MVP only needs to make workouts and sets quick to capture, easy to review, and reliable on the phone someone already brings to the gym.\n\nThe experiment is less about building a full fitness platform and more about testing whether SIndustries can repeatedly take a focused consumer workflow from idea to mobile-capable MVP, then learn from actual usage constraints before overbuilding.",
+    "successCriteria": "The MVP supports authenticated users, workout creation, set logging, and repeated use from iOS Safari without breaking the flow.\n\nThe next evidence gate is live deployment after Supabase provisioning: can the app be used outside the development environment, and does the logging loop feel fast enough to use during a real workout?\n\nSuccess means the product exposes a clear next decision: continue into habit-building features, narrow the use case further, or stop because the workflow is too generic to earn attention.",
+    "currentLearning": [
+      "The first MVP is built with Vite, React, Supabase auth, and row-level-secured workout and set records.",
+      "Mobile web is the first distribution path: the app is designed for iOS Safari before any native wrapper work.",
+      "Live deployment is pending Supabase provisioning, making the next useful learning whether the app holds up in real repeated workout sessions."
+    ],
+    "startedAt": "2026-07-13",
+    "updatedAt": "2026-07-17",
+    "links": [],
+    "image": "/brand/studio/gymtrack-hero.jpg",
+    "visibility": "draft"
   }
 ]

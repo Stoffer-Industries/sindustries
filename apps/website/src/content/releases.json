@@ -228,5 +228,15 @@
     "links": [],
     "evidence": "Task creation guidance updated 2026-07-07 to use real task types and keep acceptance checkbox state reserved for QA/product approval.",
     "visibility": "draft"
+  },
+  {
+    "title": "GymTrack MVP",
+    "slug": "gymtrack-mvp",
+    "releasedAt": "2026-07-13",
+    "summary": "A mobile-capable workout logging MVP shipped under the Stoffer umbrella, with authenticated workout and set tracking ready for live deployment once provisioning is complete.",
+    "type": "product",
+    "links": [],
+    "evidence": "GymTrack MVP shipped 2026-07-13 with Vite, React, Supabase auth, row-level-secured workout and set records, and iOS Safari support; live deploy is pending Supabase provisioning.",
+    "visibility": "draft"
   }
 ]
