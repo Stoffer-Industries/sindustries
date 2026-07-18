@@ -238,5 +238,35 @@
     "links": [],
     "evidence": "GymTrack MVP shipped 2026-07-13 with Vite, React, Supabase auth, row-level-secured workout and set records, and iOS Safari support; live deploy is pending Supabase provisioning.",
     "visibility": "draft"
+  },
+  {
+    "title": "Content Scheduler",
+    "slug": "content-scheduler",
+    "releasedAt": "2026-07-16",
+    "summary": "Mission Control can now compose, approve, schedule, and publish X posts through a guarded one-per-day publishing loop.",
+    "type": "system",
+    "links": [],
+    "evidence": "Content Scheduler shipped 2026-07-16 with compose, approval, scheduling, and publishing gates inside Mission Control.",
+    "visibility": "draft"
+  },
+  {
+    "title": "SIndustries tab in Mission Control",
+    "slug": "sindustries-tab-in-mission-control",
+    "releasedAt": "2026-07-13",
+    "summary": "The public SIndustries site now runs inside Mission Control as an operating-surface tab, keeping website review closer to the studio's daily workflow.",
+    "type": "system",
+    "links": [],
+    "evidence": "SIndustries tab shipped in Mission Control on 2026-07-13, embedding the public brand site in the operating shell.",
+    "visibility": "draft"
+  },
+  {
+    "title": "Unified agent incident schema",
+    "slug": "unified-agent-incident-schema",
+    "releasedAt": "2026-07-12",
+    "summary": "Quinn and Lox now share a validated incident-state contract, making agent-layer incident reporting more consistent across operating workflows.",
+    "type": "system",
+    "links": [],
+    "evidence": "Unified incident schema shipped 2026-07-12 with a shared JSON-Schema-validated state contract and parser for Quinn and Lox.",
+    "visibility": "draft"
   }
 ]
