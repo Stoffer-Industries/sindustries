@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 95e65d06-e529-466e-a6b0-d8dfb1e2eb87
 product_spec: /Users/quinnstoffer/.openclaw/workspace/brain/tasks/specs/in-progress/content-scheduler-calendar-view-2026-07-16.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 257
+shipped_date: 2026-07-18
 ---
 
 # Content Scheduler 10-day calendar view — tech design

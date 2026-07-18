@@ -77,30 +77,49 @@ surface.
    - Renders correctly in both light and dark mode via the
      `@sindustries/design-tokens/styles.css` palette that the shell
      already loads — no new opaque colours.
-7. **Manage the Content Scheduler queue.** User is on the Content tab.
+7. **Manage the Content Scheduler 10-day calendar.** User is on the Content tab.
    - On mount, fetches the queue from the Tasks API
      (`/api/v1/content-scheduler/items`) and today's publish status
      (`/api/v1/content-scheduler/today-status`).
-   - Renders the day-status banner ("✓ 0/1 posts published today" etc.)
-     so the operator can see at-a-glance whether the daily X-post cap is
-     reached.
-   - **Create.** The "Add to queue" form takes a content source URL (the
-     page is rendered for preview via the Tasks-API proxy), a label, and
-     an optional scheduled-for timestamp. Submit posts to the Tasks API
-     and prepends the new item to the local list.
-   - **Queue actions.** Each non-published item exposes Approve,
-     Unapprove, Publish, Remove, and ↑/↓ reorder controls. Reorder
-     patches the item's `position` via the Tasks API and re-sorts the
-     list optimistically.
+   - Renders the **day-status banner** ("✓ 0/1 posts published today" etc.)
+     at the bottom so the operator can see at-a-glance whether the daily
+     X-post cap is reached.
+   - **Composer (top).** The "Add to queue" form takes a tweet body
+     (≤1000 chars), a source (`ops_notes` / `cto_craft` / `manual` /
+     `other`), and an optional `scheduledFor` timestamp. Submit posts to
+     the Tasks API and reloads the calendar.
+   - **Calendar grid.** The primary view is a 10-day forward calendar
+     from today through today + 9 in `Pacific/Auckland`. Each day is a
+     column labelled "Wed 16 Jul" style (weekday short + day + month
+     short). Approved, queued, and published items render as cards in
+     the day column matching their `scheduledFor` date.
+   - **Unscheduled overflow.** Items with no `scheduledFor` or a date
+     outside the 10-day window appear in an "Unscheduled" overflow panel
+     after the calendar grid.
+   - **Drag-and-drop reschedule.** Tom drags a non-published card onto
+     a different day column. The client computes the new ISO via
+     `Intl.DateTimeFormat` (handles NZST/NZDT and the DST start edge),
+     preserving the existing HH:MM or defaulting to 09:00, and PATCHes
+     `/api/v1/content-scheduler/items/:id`. **No reorder API call is
+     made when the drop is refused at the UI layer** — see the max-one
+     guard below.
+   - **Published cards.** `draggable={false}`, greyed style, with a
+     "Published" badge and the X post URL link when present. The day
+     column header shows a `✓ Published` indicator when a card on that
+     day has already published.
    - **Approve gate.** Items are not publishable until `approvedAt` is
-     set (per-item explicit approval — AC6 of the feature spec). The
-     Publish button is disabled with a tooltip when the item is
-     unapproved.
-   - **Publish cap.** The Tasks API rejects publish attempts that would
-     exceed one post per `Pacific/Auckland` day; the client surfaces the
-     409 response with a tooltip ("Max one X post per day — already
-     published today"). Published items flip to a "published at <ISO>"
-     badge with the X post URL when the response includes one.
+     set. The Publish button is disabled with a tooltip when the item is
+     unapproved. Manual publish is still available in the composer flow
+     for on-demand posting; event-driven auto-publish on `scheduledFor`
+     arrival is documented in the [auto-post system spec](../systems/content-scheduler-auto-post.md).
+   - **Max-one-published-per-day guard.** When Tom drags a card onto a
+     day column that already has a published item, the drop is refused
+     at the UI layer with the inline error `"Already has a published
+     post — choose another day."`. No API call is made. The same rule is
+     enforced server-side by `guardPublish` (`code:
+     already_published_today`, `409 Conflict`) for manual and auto-post
+     publish attempts. The day boundary is computed in
+     `Pacific/Auckland` on both sides.
 
 
 ## Screens
@@ -112,7 +131,7 @@ surface.
 | Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, Sankey of the curation pipeline, funnel, per-topic counts, state counts over time, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
 | Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand); follows the shell's `data-si-theme` (the Mission Control tab bar is the canonical navigation — no in-page back link, no in-page theme toggle) |
-| Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler queue: list + create/approve/publish/remove/reorder; embeds content via iframe + Tasks-API proxy |
+| Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler 10-day calendar: composer + 10-column day grid (Pacific/Auckland) + Unscheduled overflow + drag-and-drop reschedule; max-one-published-per-day drop guard at the UI layer |
 | SIndustries | `/sindustries` | `Tabs/SIndustriesTab.jsx` | Embedded `sindustries.co.nz` via iframe; falls back to an external-link card if the upstream `X-Frame-Options`/`CSP` blocks embedding (timeout-based detection, ~8s) |
 | 404 / unknown path | `/<anything>` | falls back to Tasks tab | The default tab renders; no error surface |
 
@@ -144,7 +163,7 @@ specimen mount.
 | State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
 | SIndustries tab iframe + fallback | Vitest: `tabs/SIndustriesTab.test.jsx` covers initial iframe render, fallback after timeout, and success-path load event |
-| Content Scheduler queue lifecycle | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers create/approve/publish/remove; day-status cap, approve gate, and reorder are exercised via the component |
+| Content Scheduler 10-day calendar | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers composer create/approve/publish/remove, calendar grid layout, Unscheduled overflow, drag-and-drop reschedule (HH:MM preservation + 09:00 default), max-one-per-day drop guard, published read-only badge, today-status banner; pure helpers in `tabs/contentSchedulerCalendar.test.js` cover NZST/NZDT offset + DST start edge + day-key grouping |
 
 ## Data Sources
 
@@ -166,10 +185,17 @@ specimen mount.
   `apps/mission-control/src/tasksApi.js` (`getTasks`).
 - **Content Scheduler** state is read from the Tasks API at
   `/api/v1/content-scheduler/items` and `/api/v1/content-scheduler/today-status`.
-  The publish flow is server-side (Tasks API posts to X with bearer auth);
+  The publish flow is server-side (Tasks API posts to X with OAuth 1.0a);
   the Mission Control client never holds X credentials. The "max one
-  X post per day" rule is computed in `Pacific/Auckland`. See
-  `docs/specs/content-scheduler-tab-tech-design.md` for the full design.
+  X post per day" rule is computed in `Pacific/Auckland` on both the
+  client (UI drop guard) and the server (`guardPublish`). The calendar
+  grid uses native HTML5 drag-and-drop; pure timezone helpers live in
+  `apps/mission-control/src/tabs/contentSchedulerCalendar.js` and use
+  `Intl.DateTimeFormat` to handle the NZST/NZDT offset and DST start
+  edge. Auto-publish on `scheduledFor` arrival is a separate subsystem
+  documented in [`docs/systems/content-scheduler-auto-post.md`](../systems/content-scheduler-auto-post.md).
+  See [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
+  for the full system contract.
 - **Bookmark state** is read by the Bookmarks tab from
   `brain/state/bookmark-review-state.json` and
   `brain/state/bookmark-transitions.jsonl` via the dev-only Vite plugin
