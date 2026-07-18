@@ -418,6 +418,41 @@ describe('processAutoPostJob', () => {
     expect(outcome).toBe('rejected-not-approved');
   });
 
+  it('exits rejected-day-cap when the daily publish cap is reached', async () => {
+    const now = new Date('2026-07-17T09:00:00.000Z');
+    const item = itemFixture({ id: 'i1', status: 'approved', scheduledFor: new Date(now.getTime() - 5_000) });
+    prismaMock.contentSchedulerItem.findUnique
+      .mockResolvedValueOnce(item)
+      .mockResolvedValueOnce(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([{ id: 'already-published' }]);
+
+    const outcome = await processAutoPostJob(
+      { itemId: 'i1', scheduledFor: item.scheduledFor, scheduleVersion: 1 },
+      { now: () => now }
+    );
+
+    expect(outcome).toBe('rejected-day-cap');
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+  });
+
+  it('exits rejected-future-schedule when the publish guard refuses a future schedule', async () => {
+    const now = new Date();
+    const workerItem = itemFixture({ id: 'i1', status: 'approved', scheduledFor: new Date(now.getTime() - 5_000) });
+    const publishItem = itemFixture({ id: 'i1', status: 'approved', scheduledFor: new Date(now.getTime() + 120_000) });
+    prismaMock.contentSchedulerItem.findUnique
+      .mockResolvedValueOnce(workerItem)
+      .mockResolvedValueOnce(publishItem);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+
+    const outcome = await processAutoPostJob(
+      { itemId: 'i1', scheduledFor: workerItem.scheduledFor, scheduleVersion: 1 },
+      { now: () => now }
+    );
+
+    expect(outcome).toBe('rejected-future-schedule');
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+  });
+
   it('exits rejected-not-found when the item does not exist', async () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(null);
     const outcome = await processAutoPostJob({
