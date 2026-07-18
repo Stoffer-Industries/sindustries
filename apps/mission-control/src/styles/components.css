@@ -646,3 +646,138 @@
 .sindustries-tab__fallback-link:focus-visible {
   text-decoration: underline;
 }
+
+/* =========================================================================
+ * Content Scheduler: 10-day calendar view
+ * Task 95e65d06-e529-466e-a6b0-d8dfb1e2eb87
+ * Replaces the prior three-status-group listing as the primary view.
+ * ======================================================================= */
+
+.content-scheduler-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.content-scheduler-calendar {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(220px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.content-scheduler-day-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 180px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--si-color-bg-elevated, #fff);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.content-scheduler-day-column--drag-over {
+  border-color: var(--si-color-brand-500, #b46a00);
+  background: var(--si-color-bg-subtle, #f7f4ee);
+}
+
+.content-scheduler-day-column--drop-error {
+  border-color: var(--si-color-danger-500, #a3312b);
+  background: var(--si-color-danger-bg, #fbeceb);
+}
+
+.content-scheduler-day-column__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--si-color-border, #e5e5e5);
+}
+
+.content-scheduler-day-column__header--published {
+  background: var(--si-color-success-bg, #e8f4ec);
+}
+
+.content-scheduler-day-column__label {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1 1 auto;
+}
+
+.content-scheduler-day-column__count {
+  font-size: 11px;
+  color: var(--si-color-text-muted, #666);
+  background: var(--si-color-bg-subtle, #f1f1f4);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.content-scheduler-day-column__drop-error {
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--si-color-danger-bg, #fbeceb);
+  color: var(--si-color-danger-500, #a3312b);
+  font-size: 12px;
+}
+
+.content-scheduler-day-column__cards {
+  flex: 1 1 auto;
+}
+
+.content-scheduler-row--published {
+  opacity: 0.7;
+  background: var(--si-color-bg-subtle, #f7f4ee);
+  cursor: not-allowed;
+}
+
+.content-scheduler-row__published-day-hint {
+  color: var(--si-color-text-muted, #888);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.content-scheduler-unscheduled {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--si-color-border, #e5e5e5);
+  border-radius: 8px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.content-scheduler-unscheduled--drag-over {
+  border-color: var(--si-color-brand-500, #b46a00);
+  background: var(--si-color-bg-subtle, #f7f4ee);
+}
+
+.content-scheduler-unscheduled__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.content-scheduler-unscheduled__header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.content-scheduler-empty {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--si-color-text-muted, #888);
+  font-style: italic;
+  text-align: center;
+}
+
+@media (max-width: 1280px) {
+  .content-scheduler-calendar {
+    grid-template-columns: repeat(10, 220px);
+  }
+}

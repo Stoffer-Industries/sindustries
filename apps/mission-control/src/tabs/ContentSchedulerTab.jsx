@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, CardContainer, Field, Select, Textarea } from '@sindustries/ui/react';
+import { Badge, Button, Card, CardContainer, Field, Select, Textarea } from '@sindustries/ui/react';
 import {
   approveItem,
   createItem,
@@ -7,10 +7,18 @@ import {
   listItems,
   publishItem,
   removeItem,
-  reorderItems,
   unapproveItem,
   updateItem
 } from '../contentSchedulerApi.js';
+import {
+  SCHEDULER_TIME_ZONE,
+  buildCalendarDays,
+  dayDropBlocked,
+  getAucklandDayKey,
+  getAucklandTimeOfDay,
+  groupItemsForCalendar,
+  rescheduleIsoForDay
+} from './contentSchedulerCalendar.js';
 
 const ACTOR = 'Tom';
 
@@ -26,6 +34,14 @@ const STATUS_LABELS = {
   approved: 'Approved',
   published: 'Published'
 };
+
+const STATUS_BADGE_VARIANT = {
+  queued: 'neutral',
+  approved: 'info',
+  published: 'success'
+};
+
+const DROP_REFUSED_MESSAGE = 'Already has a published post — choose another day.';
 
 function defaultScheduledFor() {
   const d = new Date(Date.now() + 60_000);
@@ -75,7 +91,17 @@ function publishTooltip(item, today) {
   return '';
 }
 
-function ItemRow({ item, today, onApprove, onUnapprove, onPublish, onRemove, onSave, onDragStart, onDragOver, onDrop, isDragOver }) {
+function SchedulerItemCard({
+  item,
+  today,
+  onApprove,
+  onUnapprove,
+  onPublish,
+  onRemove,
+  onSave,
+  onDragStart,
+  isPublishedInCalendar
+}) {
   const [editing, setEditing] = useState(false);
   const [draftBody, setDraftBody] = useState(item.body);
   const [draftSchedule, setDraftSchedule] = useState(toDatetimeLocal(item.scheduledFor));
@@ -88,16 +114,24 @@ function ItemRow({ item, today, onApprove, onUnapprove, onPublish, onRemove, onS
   const disabled = isPublishDisabled(item, today);
   const tip = publishTooltip(item, today);
   const published = item.status === 'published';
+  const cardClass = `content-scheduler-row${published ? ' content-scheduler-row--published' : ''}`;
 
   return (
     <Card
-      className="content-scheduler-row"
+      className={cardClass}
       data-testid={`content-scheduler-row-${item.id}`}
+      data-item-id={item.id}
+      data-status={item.status}
       draggable={!published}
-      onDragStart={(e) => onDragStart(e, item.id)}
-      onDragOver={(e) => onDragOver(e, item.id)}
-      onDrop={(e) => onDrop(e, item.id)}
-      style={isDragOver ? { outline: '2px dashed var(--si-color-brand-500, #b46a00)' } : undefined}
+      onDragStart={(e) => {
+        if (published) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.id);
+        onDragStart(item.id);
+      }}
     >
       <div className="content-scheduler-row__body">
         {editing ? (
@@ -113,8 +147,18 @@ function ItemRow({ item, today, onApprove, onUnapprove, onPublish, onRemove, onS
           <p data-testid={`content-scheduler-body-${item.id}`}>{item.body}</p>
         )}
         <div className="content-scheduler-row__meta">
+          <Badge
+            variant={STATUS_BADGE_VARIANT[item.status] ?? 'neutral'}
+            data-testid={`content-scheduler-status-${item.id}`}
+          >
+            {STATUS_LABELS[item.status] ?? item.status}
+          </Badge>
           <span>Source: {item.source}</span>
-          {item.scheduledFor && <span>Scheduled: {new Date(item.scheduledFor).toLocaleString()}</span>}
+          {item.scheduledFor && (
+            <span data-testid={`content-scheduler-schedule-display-${item.id}`}>
+              Scheduled: {getAucklandTimeOfDay(item.scheduledFor, SCHEDULER_TIME_ZONE)} {SCHEDULER_TIME_ZONE}
+            </span>
+          )}
           {item.approvedAt && <span>Approved by {item.approvedBy ?? 'unknown'} at {new Date(item.approvedAt).toLocaleString()}</span>}
           {item.publishedAt && (
             <span>
@@ -131,6 +175,11 @@ function ItemRow({ item, today, onApprove, onUnapprove, onPublish, onRemove, onS
             </span>
           )}
           {item.publishError && <span style={{ color: 'var(--si-color-danger-500, #a3312b)' }}>Publish error: {item.publishError}</span>}
+          {isPublishedInCalendar && !published && (
+            <span className="content-scheduler-row__published-day-hint">
+              Published today — drop another day
+            </span>
+          )}
         </div>
         {editing && (
           <Field label="Scheduled for">
@@ -196,10 +245,10 @@ function ItemRow({ item, today, onApprove, onUnapprove, onPublish, onRemove, onS
                 Remove
               </Button>
             )}
-            {item.status === 'published' && (
-              <span className="content-scheduler-row__badge" data-testid={`content-scheduler-published-${item.id}`}>
+            {published && (
+              <Badge variant="success" data-testid={`content-scheduler-published-${item.id}`}>
                 Published
-              </span>
+              </Badge>
             )}
           </>
         )}
@@ -215,7 +264,9 @@ export function ContentSchedulerTab() {
   const [body, setBody] = useState('');
   const [source, setSource] = useState('manual');
   const [scheduledFor, setScheduledFor] = useState(defaultScheduledFor());
-  const [dragOverId, setDragOverId] = useState(null);
+  const [draggingItemId, setDraggingItemId] = useState(null);
+  const [dragOverZone, setDragOverZone] = useState(null);
+  const [dropError, setDropError] = useState(null); // { dayKey, message } | null
 
   const reload = useCallback(async () => {
     try {
@@ -243,16 +294,8 @@ export function ContentSchedulerTab() {
     return () => clearInterval(intervalId);
   }, [reload]);
 
-  const grouped = useMemo(() => {
-    const out = { queued: [], approved: [], published: [] };
-    for (const item of items ?? []) {
-      if (out[item.status]) out[item.status].push(item);
-    }
-    for (const status of Object.keys(out)) {
-      out[status].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-    }
-    return out;
-  }, [items]);
+  const days = useMemo(() => buildCalendarDays(new Date(), SCHEDULER_TIME_ZONE), [items]); // eslint-disable-line react-hooks/exhaustive-deps
+  const grouped = useMemo(() => groupItemsForCalendar(items, days, SCHEDULER_TIME_ZONE), [items, days]);
 
   const handleCreate = useCallback(async () => {
     if (!body.trim()) return;
@@ -331,24 +374,97 @@ export function ContentSchedulerTab() {
     [reload]
   );
 
-  const handleReorder = useCallback(
-    async (sourceId, targetId) => {
-      if (sourceId === targetId) return;
-      const current = (items ?? []).filter((i) => i.status === 'queued');
-      const fromIdx = current.findIndex((i) => i.id === sourceId);
-      const toIdx = current.findIndex((i) => i.id === targetId);
-      if (fromIdx < 0 || toIdx < 0) return;
-      const reordered = [...current];
-      const [moved] = reordered.splice(fromIdx, 1);
-      reordered.splice(toIdx, 0, moved);
+  const handleDragStart = useCallback((id) => {
+    setDraggingItemId(id);
+    setDropError(null);
+  }, []);
+
+  const handleDayDragOver = useCallback(
+    (e, dayKey) => {
+      if (!draggingItemId) return;
+      const item = (items ?? []).find((i) => i.id === draggingItemId);
+      if (!item || item.status === 'published') return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverZone(`day:${dayKey}`);
+      const { blocked } = dayDropBlocked(grouped.publishedByDayKey, dayKey, draggingItemId);
+      if (blocked) {
+        setDropError({ dayKey, message: DROP_REFUSED_MESSAGE });
+      } else if (dropError?.dayKey === dayKey) {
+        setDropError(null);
+      }
+    },
+    [draggingItemId, items, grouped.publishedByDayKey, dropError]
+  );
+
+  const handleDayDrop = useCallback(
+    async (e, dayKey) => {
+      e.preventDefault();
+      setDragOverZone(null);
+      const sourceId = e.dataTransfer.getData('text/plain') || draggingItemId;
+      setDraggingItemId(null);
+      if (!sourceId) return;
+      const item = (items ?? []).find((i) => i.id === sourceId);
+      if (!item || item.status === 'published') {
+        setDropError(null);
+        return;
+      }
+      const { blocked } = dayDropBlocked(grouped.publishedByDayKey, dayKey, sourceId);
+      if (blocked) {
+        setDropError({ dayKey, message: DROP_REFUSED_MESSAGE });
+        return;
+      }
+      const currentDayKey = getAucklandDayKey(item.scheduledFor, SCHEDULER_TIME_ZONE);
+      if (currentDayKey === dayKey) {
+        // No-op drop on the same day; clear any stale error.
+        setDropError(null);
+        return;
+      }
+      const nextIso = rescheduleIsoForDay(item, dayKey, SCHEDULER_TIME_ZONE);
+      if (!nextIso) {
+        setError('Failed to compute new scheduled time.');
+        return;
+      }
       try {
-        await reorderItems(reordered.map((i) => i.id), ACTOR);
+        await updateItem(sourceId, { scheduledFor: nextIso }, { actor: ACTOR });
+        setDropError(null);
         await reload();
       } catch (err) {
         setError(err?.message ?? String(err));
       }
     },
-    [items, reload]
+    [draggingItemId, items, grouped.publishedByDayKey, reload]
+  );
+
+  const handleUnscheduledDragOver = useCallback((e) => {
+    if (!draggingItemId) return;
+    const item = (items ?? []).find((i) => i.id === draggingItemId);
+    if (!item || item.status === 'published') return;
+    e.preventDefault();
+    setDragOverZone('unscheduled');
+  }, [draggingItemId, items]);
+
+  const handleUnscheduledDrop = useCallback(
+    async (e) => {
+      e.preventDefault();
+      setDragOverZone(null);
+      const sourceId = e.dataTransfer.getData('text/plain') || draggingItemId;
+      setDraggingItemId(null);
+      if (!sourceId) return;
+      const item = (items ?? []).find((i) => i.id === sourceId);
+      if (!item || item.status === 'published') return;
+      if (!item.scheduledFor) {
+        // Already unscheduled — no-op.
+        return;
+      }
+      try {
+        await updateItem(sourceId, { scheduledFor: null }, { actor: ACTOR });
+        await reload();
+      } catch (err) {
+        setError(err?.message ?? String(err));
+      }
+    },
+    [draggingItemId, items, reload]
   );
 
   if (error && !items) {
@@ -414,45 +530,105 @@ export function ContentSchedulerTab() {
         {error && <p className="content-scheduler-error" data-testid="pulse-content-scheduler-error">{error}</p>}
       </Card>
 
-      {(['queued', 'approved', 'published']).map((status) => (
-        <section
-          key={status}
-          className={`content-scheduler-group content-scheduler-group--${status}`}
-          data-testid={`pulse-content-scheduler-group-${status}`}
-        >
-          <h3>{STATUS_LABELS[status]} ({grouped[status].length})</h3>
-          {grouped[status].length === 0 ? (
-            <p className="content-scheduler-empty">No {STATUS_LABELS[status].toLowerCase()} items.</p>
-          ) : (
-            <CardContainer>
-              {grouped[status].map((item) => (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  today={today}
-                  onApprove={handleApprove}
-                  onUnapprove={handleUnapprove}
-                  onPublish={handlePublish}
-                  onRemove={handleRemove}
-                  onSave={handleSave}
-                  onDragStart={(e, id) => e.dataTransfer.setData('text/plain', id)}
-                  onDragOver={(e, id) => {
-                    e.preventDefault();
-                    setDragOverId(id);
-                  }}
-                  onDrop={async (e, id) => {
-                    e.preventDefault();
-                    const sourceId = e.dataTransfer.getData('text/plain');
-                    setDragOverId(null);
-                    await handleReorder(sourceId, id);
-                  }}
-                  isDragOver={dragOverId === item.id}
-                />
-              ))}
-            </CardContainer>
-          )}
-        </section>
-      ))}
+      <section
+        className="content-scheduler-calendar"
+        data-testid="pulse-content-scheduler-calendar"
+        aria-label="10-day publishing calendar (Pacific/Auckland)"
+      >
+        {days.map((day) => {
+          const dayItems = grouped.byDayKey[day.key] ?? [];
+          const publishedItem = grouped.publishedByDayKey[day.key] ?? null;
+          const isOver = dragOverZone === `day:${day.key}`;
+          const dayError = dropError?.dayKey === day.key ? dropError.message : null;
+          const headerClasses = ['content-scheduler-day-column__header'];
+          if (publishedItem) headerClasses.push('content-scheduler-day-column__header--published');
+          const columnClasses = ['content-scheduler-day-column'];
+          if (isOver) columnClasses.push('content-scheduler-day-column--drag-over');
+          if (dayError) columnClasses.push('content-scheduler-day-column--drop-error');
+          return (
+            <div
+              key={day.key}
+              className={columnClasses.join(' ')}
+              data-testid={`pulse-content-scheduler-day-${day.key}`}
+              data-day-key={day.key}
+              onDragOver={(e) => handleDayDragOver(e, day.key)}
+              onDrop={(e) => handleDayDrop(e, day.key)}
+            >
+              <header className={headerClasses.join(' ')} data-testid={`pulse-content-scheduler-day-header-${day.key}`}>
+                <span className="content-scheduler-day-column__label">{day.label}</span>
+                {publishedItem && (
+                  <Badge variant="success" data-testid={`pulse-content-scheduler-day-published-${day.key}`}>
+                    Published
+                  </Badge>
+                )}
+                <span className="content-scheduler-day-column__count" data-testid={`pulse-content-scheduler-day-count-${day.key}`}>
+                  {dayItems.length}
+                </span>
+              </header>
+              {dayError && (
+                <p
+                  className="content-scheduler-day-column__drop-error"
+                  data-testid={`pulse-content-scheduler-day-drop-error-${day.key}`}
+                  role="alert"
+                >
+                  {dayError}
+                </p>
+              )}
+              <CardContainer className="content-scheduler-day-column__cards">
+                {dayItems.length === 0 ? (
+                  <p className="content-scheduler-empty">No items.</p>
+                ) : (
+                  dayItems.map((item) => (
+                    <SchedulerItemCard
+                      key={item.id}
+                      item={item}
+                      today={today}
+                      onApprove={handleApprove}
+                      onUnapprove={handleUnapprove}
+                      onPublish={handlePublish}
+                      onRemove={handleRemove}
+                      onSave={handleSave}
+                      onDragStart={handleDragStart}
+                      isPublishedInCalendar={Boolean(publishedItem) && item.id !== publishedItem.id}
+                    />
+                  ))
+                )}
+              </CardContainer>
+            </div>
+          );
+        })}
+      </section>
+
+      <section
+        className={`content-scheduler-unscheduled${dragOverZone === 'unscheduled' ? ' content-scheduler-unscheduled--drag-over' : ''}`}
+        data-testid="pulse-content-scheduler-unscheduled"
+        onDragOver={handleUnscheduledDragOver}
+        onDrop={handleUnscheduledDrop}
+      >
+        <header className="content-scheduler-unscheduled__header">
+          <h3>Unscheduled</h3>
+          <span data-testid="pulse-content-scheduler-unscheduled-count">{grouped.unscheduled.length}</span>
+        </header>
+        {grouped.unscheduled.length === 0 ? (
+          <p className="content-scheduler-empty">No unscheduled items.</p>
+        ) : (
+          <CardContainer>
+            {grouped.unscheduled.map((item) => (
+              <SchedulerItemCard
+                key={item.id}
+                item={item}
+                today={today}
+                onApprove={handleApprove}
+                onUnapprove={handleUnapprove}
+                onPublish={handlePublish}
+                onRemove={handleRemove}
+                onSave={handleSave}
+                onDragStart={handleDragStart}
+              />
+            ))}
+          </CardContainer>
+        )}
+      </section>
 
       <div className="content-scheduler-day-strip" data-testid="pulse-content-scheduler-day-strip">
         {dayStatusLabel(today)}
