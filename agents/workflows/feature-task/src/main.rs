@@ -561,7 +561,7 @@ fn task_ac_vs_open_pr_failures(
                 }
                 if evidence.is_none() {
                     failures.push(format!(
-                        "{label} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<test-name>)`, `(not tested: <reason>)`, `(not code: <reason>)`, or `(pr: #<n>)` if covered by another merged PR."
+                        "{label} — missing evidence. Append `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, or `(🔗 pr: #<n>)` if covered by another merged PR. Emojis are optional but encouraged."
                     ));
                 }
             }
@@ -3014,18 +3014,28 @@ fn body_system_spec_decl(body: &str) -> SystemSpecBodyDecl {
 }
 
 /// Evidence annotation recognised on a feature-task PR AC line.
+///
+/// Priority order: `TestId` (e2e/unit, always prefer this) → `NotTested`
+/// (explicit opt-out with reason) → `NotCode` / `Pr` (non-code ACs).
+///
+/// `file:` was removed — it encouraged citing implementation files instead of
+/// test files. Use `testID` for any automated test, or `not tested` with a
+/// substantive reason when automation is genuinely impractical.
+///
+/// All variants accept an optional emoji prefix before the keyword so PRs are
+/// visually scannable at a glance (e.g. `(🧪 testID: 4)` ≡ `(testID: 4)`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Evidence {
-    /// Playwright test ID reference, e.g. `(testID: 1234)`
+    /// Playwright (e2e) or unit test reference — the default. Use this first.
+    /// e.g. `(🧪 testID: cal-10-day-render)`
     TestId(String),
-    /// File path plus a test name, e.g.
-    /// `(file: agents/workflows/feature-task/src/main.rs: parse_evidence_recognises_file_test_name)`.
-    FileRef { path: String, test_name: String },
-    /// Explicit reason for not adding a test, e.g. `(not tested: design tokens)`
+    /// Explicit opt-out with a reason. Use only when automated testing is
+    /// genuinely impractical. e.g. `(⚠️ not tested: drag requires manual browser QA)`
     NotTested { reason: String },
-    /// AC fulfilled outside the codebase, e.g. `(not code: updated brain/bookmarks/specs/foo.md)`
+    /// AC fulfilled outside the codebase (doc, spec, config).
+    /// e.g. `(📄 not code: updated docs/systems/content-scheduler.md)`
     NotCode { reason: String },
-    /// AC covered by another merged PR, e.g. `(pr: #216)`
+    /// Covered by another merged PR. e.g. `(🔗 pr: #216)`
     Pr { reference: String },
 }
 
@@ -3067,39 +3077,32 @@ fn extract_ac_section(body: &str) -> &str {
 }
 
 /// Recognise an evidence annotation that anchors the end of a string.
+///
+/// Each pattern allows an optional emoji (or any non-ASCII / non-letter) prefix
+/// inside the parentheses so `(🧪 testID: 4)` and `(testID: 4)` are both valid.
+/// The prefix is matched by `[^a-zA-Z)]*` which accepts emojis, spaces, and
+/// punctuation but not letters or `)`.
 fn parse_evidence(text: &str) -> Option<Evidence> {
     // (not tested: <reason>) and (not code: <reason>) come first so the reason may contain colons.
-    let not_tested = Regex::new(r"\(not tested:\s*([^)]+)\)\s*$").unwrap();
+    let not_tested = Regex::new(r"\([^a-zA-Z)]*not tested:\s*([^)]+)\)\s*$").unwrap();
     if let Some(cap) = not_tested.captures(text) {
         return Some(Evidence::NotTested {
             reason: cap[1].trim().to_string(),
         });
     }
-    let not_code = Regex::new(r"\(not code:\s*([^)]+)\)\s*$").unwrap();
+    let not_code = Regex::new(r"\([^a-zA-Z)]*not code:\s*([^)]+)\)\s*$").unwrap();
     if let Some(cap) = not_code.captures(text) {
         return Some(Evidence::NotCode {
             reason: cap[1].trim().to_string(),
         });
     }
-    // (file: <path>:<test-name>)
-    let file_ref = Regex::new(r"\(file:\s*([^)]+?):\s*([^)]+)\)\s*$").unwrap();
-    if let Some(cap) = file_ref.captures(text) {
-        let test_name = cap[2].trim();
-        if test_name.parse::<u64>().is_ok() {
-            return None;
-        }
-        return Some(Evidence::FileRef {
-            path: cap[1].trim().to_string(),
-            test_name: test_name.to_string(),
-        });
-    }
-    // (testID: <value>)
-    let test_id = Regex::new(r"\(testID:\s*([^)]+)\)\s*$").unwrap();
+    // (testID: <value>) — preferred evidence type
+    let test_id = Regex::new(r"\([^a-zA-Z)]*testID:\s*([^)]+)\)\s*$").unwrap();
     if let Some(cap) = test_id.captures(text) {
         return Some(Evidence::TestId(cap[1].trim().to_string()));
     }
     // (pr: #<n> or url)
-    let pr_ref = Regex::new(r"\(pr:\s*([^)]+)\)\s*$").unwrap();
+    let pr_ref = Regex::new(r"\([^a-zA-Z)]*pr:\s*([^)]+)\)\s*$").unwrap();
     if let Some(cap) = pr_ref.captures(text) {
         return Some(Evidence::Pr {
             reference: cap[1].trim().to_string(),
@@ -3111,7 +3114,8 @@ fn parse_evidence(text: &str) -> Option<Evidence> {
 /// Strip a trailing evidence annotation from a description string.
 /// Returns the description with the trailing `(...)` evidence removed.
 fn strip_trailing_evidence(text: &str) -> String {
-    let re = Regex::new(r"\s+\((testID|file|not tested|not code|pr):\s*[^)]+\)\s*$").unwrap();
+    let re = Regex::new(r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr):\s*[^)]+\)\s*$")
+        .unwrap();
     match re.find(text) {
         Some(m) => text[..m.start()].trim_end().to_string(),
         None => text.to_string(),
@@ -3141,8 +3145,9 @@ fn parse_ac_line(line: &str) -> Option<AcEvidence> {
 }
 
 /// Build failure messages for ACs that lack evidence. Empty list = all ACs
-/// in the section carry `(testID: ...)`, `(file: path:test-name)`, `(not tested: reason)`,
-/// or `(not code: reason)` annotations.
+/// in the section carry a valid evidence annotation: `(testID: ...)`,
+/// `(not tested: reason)`, `(not code: reason)`, or `(pr: #<n>)`.
+/// Emojis are optional before the keyword.
 fn verify_pr_acs_failures(body: &str) -> Vec<String> {
     let section = extract_ac_section(body);
     let mut failures = Vec::new();
@@ -3150,7 +3155,7 @@ fn verify_pr_acs_failures(body: &str) -> Vec<String> {
         if let Some(ac) = parse_ac_line(line) {
             if ac.evidence.is_none() {
                 failures.push(format!(
-                    "AC {} — missing evidence. Append `(testID: <id>)`, `(file: <path>:<test-name>)`, `(not tested: <reason>)`, or `(not code: <reason>)`.",
+                    "AC {} — missing evidence. Use `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, or `(🔗 pr: #<n>)` if covered by another merged PR.",
                     ac.ac_label
                 ));
             }
@@ -3276,17 +3281,49 @@ mod tests {
     }
 
     #[test]
-    fn parse_evidence_rejects_file_line_ref() {
+    fn parse_evidence_rejects_file_annotation() {
+        // file: was removed — it must not be recognised as valid evidence.
         assert_eq!(parse_evidence("bar (file: apps/tasks/src/X.jsx:42)"), None);
+        assert_eq!(
+            parse_evidence("bar (file: src/main.rs: some_test_name)"),
+            None
+        );
     }
 
     #[test]
-    fn parse_evidence_recognises_file_test_name_ref() {
+    fn parse_evidence_recognises_emoji_prefix_test_id() {
         assert_eq!(
-            parse_evidence("bar (file: agents/workflows/feature-task/src/main.rs: parse_evidence_recognises_file_test_name_ref)"),
-            Some(Evidence::FileRef {
-                path: "agents/workflows/feature-task/src/main.rs".to_string(),
-                test_name: "parse_evidence_recognises_file_test_name_ref".to_string(),
+            parse_evidence("foo (🧪 testID: cal-10-day-render)"),
+            Some(Evidence::TestId("cal-10-day-render".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_evidence_recognises_emoji_prefix_not_tested() {
+        assert_eq!(
+            parse_evidence("foo (⚠️ not tested: drag requires manual browser QA)"),
+            Some(Evidence::NotTested {
+                reason: "drag requires manual browser QA".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_evidence_recognises_emoji_prefix_not_code() {
+        assert_eq!(
+            parse_evidence("foo (📄 not code: updated docs/systems/content-scheduler.md)"),
+            Some(Evidence::NotCode {
+                reason: "updated docs/systems/content-scheduler.md".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_evidence_recognises_emoji_prefix_pr() {
+        assert_eq!(
+            parse_evidence("foo (🔗 pr: #216)"),
+            Some(Evidence::Pr {
+                reference: "#216".to_string()
             })
         );
     }
@@ -3471,7 +3508,7 @@ Lead-in.
 
     #[test]
     fn verify_pr_acs_passes_when_all_have_evidence() {
-        let body = "## Acceptance Criteria\n- [x] AC1: Foo (testID: 1)\n- [x] AC2: Bar (file: src/x.test.js: bar handles evidence)\n- [x] AC3: Baz (not tested: design tokens)\n";
+        let body = "## Acceptance Criteria\n- [x] AC1: Foo (🧪 testID: 1)\n- [x] AC2: Bar (not tested: design tokens)\n- [x] AC3: Baz (📄 not code: updated docs/systems/foo.md)\n";
         assert!(verify_pr_acs_failures(body).is_empty());
     }
 

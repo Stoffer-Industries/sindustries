@@ -72,12 +72,16 @@ Co-Authored-By: <Your Name> <your-email>
 
 **Test plan:** concrete, checkable steps. Not "tests pass" — what specifically should a reviewer verify? For non-functional changes, it's fine to write "No logic changes — diff is purely structural."
 
-**Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. Every checked `- [x]` AC line must end with one of:
+**Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. Every checked `- [x]` AC line must end with one of the following annotations, in priority order:
 
-- `(testID: <id>)` — Playwright test ID reference
-- `(file: <path>:<test-name>)` — file plus test name reference
-- `(not tested: <reason>)` — implemented in code but not testable
-- `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
+| Priority | Annotation | When to use |
+|---|---|---|
+| 1st | `(🧪 testID: <id>)` | Playwright e2e test or unit test ID — **always prefer this** |
+| 2nd | `(⚠️ not tested: <reason>)` | When automation is genuinely impractical — requires a substantive reason |
+| — | `(📄 not code: <reason>)` | AC fulfilled outside the codebase (doc, spec, config update) |
+| — | `(🔗 pr: #<n>)` | Covered by a different merged PR |
+
+`file:` has been removed. If you wrote a unit test, reference it via `testID` or explain in `not tested` why it wasn't feasible to add a Playwright test. Emojis are optional but encouraged for visual clarity.
 
 **Every task AC must appear in the PR body** — checked with evidence. Fix PRs must re-list all task ACs, not just the ones being addressed.
 
@@ -85,10 +89,10 @@ Example:
 
 ```markdown
 ## Acceptance Criteria
-- [x] AC1: Task detail shows dependency links. (testID: 4)
-- [x] AC2: Card click-to-copy affordance. (file: apps/tasks/src/components/TaskCardSummary.test.jsx: click-to-copy affordance)
-- [x] AC3: Reduced opacity for archived tasks. (not tested: design tokens supply color; visual review only)
-- [x] AC4: Feature factory v2 spec updated. (not code: updated brain/bookmarks/specs/feature-factory-v2-2026-06-04.md)
+- [x] AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-10-day-render)
+- [x] AC2: Drag to reschedule updates scheduledFor. (🧪 testID: cal-drag-reschedule)
+- [x] AC3: Published items show read-only badge. (⚠️ not tested: visual badge; covered by CSS class assertion in unit test — no Playwright testID yet)
+- [x] AC4: System spec updated. (📄 not code: updated docs/systems/content-scheduler.md)
 ```
 
 PRs without the required annotations are blocked from acceptance with a clear comment listing the ACs that need evidence.
@@ -102,7 +106,7 @@ PRs without the required annotations are blocked from acceptance with a clear co
 - [x] AC2: Tab bar shows Tasks, Bookmarks, and Flow metrics tabs. (not tested: design tokens; visual review only)
 ### Task e2e647b1 — Flow metrics dashboard
 - [x] AC1: Dashboard shows cycle time (median and p90) for tasks completed. (testID: 5)
-- [x] AC2: Dashboard is reachable from the Flow metrics tab. (file: apps/mission-control/src/dashboard.test.jsx: flow metrics reachable)
+- [x] AC2: Dashboard is reachable from the Flow metrics tab. (🧪 testID: flow-metrics-tab-reachable)
 ```
 
 The lobster walks the AC section line-by-line and tracks the current `### Task <id>` heading. ACs in a sibling task's subsection are not considered for the current task's text/evidence comparison. PR bodies without any `### Task <id>` heading fall back to the pre-#183 behavior (the whole AC section is implicitly one subsection).
