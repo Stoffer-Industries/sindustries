@@ -131,7 +131,13 @@ Before writing any code on a feature task, write the tech design:
 Before converting the PR from draft to ready-for-review, write or update the system spec using the system-spec skill:
 `agents/skills/dev/system-spec/SKILL.md`
 
-The spec must be committed on the implementation branch and included in the **same PR as the feature code** — not in a separate follow-up PR. A backfill PR for the system spec is not acceptable. Post the resulting task comment (`[system-spec]` or `[no-system-spec-change]`) before posting `[implementer-prs]`. Lobster verify-delivery blocks until one is present.
+The spec must be committed on the implementation branch and included in the **same PR as the feature code** — not in a separate follow-up PR.
+
+Add a `## System Spec` section to the PR body (before `## Out of scope` or at the end):
+- If a spec was written or updated: `docs/systems/<file>.md` (plain or backtick-quoted)
+- If no spec change: a substantive sentence explaining why (>= 12 non-whitespace characters)
+
+The lobster's verify-delivery gate reads this section from the PR body and blocks until it is present and non-trivial. **No task comment is needed** — the PR body section is the gate.
 
 ### Acceptance
 Use the pr-address-feedback skill when handling review comments: `agents/skills/dev/pr-address-feedback/SKILL.md`
@@ -158,9 +164,10 @@ When Rowan opens a PR:
 
 When all ACs are implemented and the PR is ready for review:
 - commit the system spec on this branch (see System spec section above) — it must be in this PR, not a follow-up
+- add `## System Spec` section to the PR body with the spec path or no-change reason
 - convert draft → ready-for-review
 - set yourself (`rowanstoffer`) as PR assignee; add **Quinn** (`quinnstoffer`) and **Tom** (`Stoff81`) as reviewers — Quinn is the blocking code reviewer, Tom is non-blocking (visibility only)
-- post `[system-spec]` (or `[no-system-spec-change]`) task comment, then post `[implementer-prs] <url>` — in that order
+- post `[implementer-prs] <url>` as a task comment
 - merge after Quinn approves and CI is green — do not wait for Tom's PR approval
 - Tom tests post-merge in main; his sign-off is `[qa-ac-verified] true` on the task, not a PR review
 
