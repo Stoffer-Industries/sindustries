@@ -341,15 +341,21 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         }
     }
     if let Some(url) = &latest_pr_url {
-        if let Ok(body) = pr_body(url) {
-            for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
-                failures.push(format!("PR {url} — {ac_failure}"));
+        match pr_body(url) {
+            Ok(body) => {
+                for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
+                    failures.push(format!("PR {url} — {ac_failure}"));
+                }
+                let decl = body_system_spec_decl(&body);
+                failures.extend(system_spec_pr_body_failures(&decl, url, &env.task));
             }
-            let decl = body_system_spec_decl(&body);
-            failures.extend(system_spec_pr_body_failures(&decl, url, &env.task));
+            Err(err) => {
+                failures.push(format!(
+                    "Could not read PR body for {url}: {err}. Cannot validate AC text or system spec."
+                ));
+            }
         }
     } else if !pr_urls.is_empty() {
-        // pr_urls is non-empty but latest_pr_url is None — shouldn't happen, but guard it
         failures.push("Could not determine latest PR URL to validate system spec.".to_string());
     }
     if workstreams(&env.task).is_empty() {
@@ -4238,6 +4244,15 @@ Lead-in.
             &StubFetcher { body: "References task-1".to_string(), error: None },
         )
         .is_empty());
+    }
+
+    #[test]
+    fn body_system_spec_decl_path_in_middle_of_section() {
+        let body = "## Summary\nFoo.\n\n## System Spec\nUpdated `docs/systems/content-scheduler.md` to cover the 10-day calendar.\n\n## Test plan\n- [ ] CI green";
+        assert_eq!(
+            body_system_spec_decl(body),
+            SystemSpecBodyDecl::Path("docs/systems/content-scheduler.md".to_string())
+        );
     }
 
     #[test]
