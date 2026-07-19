@@ -1,7 +1,7 @@
 # Feature Task Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-07-14
+**Last updated:** 2026-07-19
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/feature-task/`
 
 ---
@@ -44,11 +44,12 @@ The Rust CLI under `agents/workflows/feature-task/` owns parsing, gate enforceme
 - **Owner:** Rowan, working on the agreed worktree branch
 - Required Rowan behaviour:
   - All changes land via PR (no direct pushes to `main`)
-  - `[rowan-prs] <url1>, <url2>` task comment lists every open PR
+  - `[implementer-prs] <url>` task comment lists every open PR (legacy alias `[rowan-prs]` still accepted)
   - `[openclaw-needed]` task comment if any `.openclaw` file edits are required (with proposed diff + rollback note) — Rowan does not touch `.openclaw/` directly
-  - PR body lists every parent task AC checked off
-  - When implementation is complete, `[rowan-done] <files> | <validation commands> | <pr url>` task comment
-- Rust command: `feature-task verify-delivery` runs after the `[rowan-prs]` signal to confirm PRs and CI state
+  - PR body lists every parent task AC checked off with evidence annotations
+  - PR body includes a `## System Spec` section (see below) — required before the PR is converted from draft to ready-for-review
+  - When implementation is complete, post `[implementer-prs] <url>` task comment
+- Rust command: `feature-task verify-delivery` runs after the `[implementer-prs]` signal to confirm PRs, CI state, AC text, and system spec
 
 ### 3. `acceptance` — review and gate enforcement
 
@@ -57,10 +58,16 @@ The Rust CLI under `agents/workflows/feature-task/` owns parsing, gate enforceme
   - All PRs linked from `[rowan-prs]` are merged
   - GitHub review state on every linked PR is `APPROVED` (no `CHANGES_REQUESTED` outstanding)
   - CI on the merged commits is green
-  - System spec exists at `docs/systems/<file>.md` (gated via `[system-spec]` task comment) OR a substantive `[no-system-spec-change] <reason>` is recorded
+  - PR body `## System Spec` section declares either a spec path (`docs/systems/<file>.md`) or a substantive no-change reason — validated at `verify_delivery` (doing → acceptance gate), not acceptance → done
   - No `[openclaw-needed]` pending without matching `[openclaw-done]` from Quinn
   - `[qa-ac-verified] true` task comment from Tom
 - Rust commands: `feature-task feedback-aggregate`, then `feature-task post-merge`
+
+**`## System Spec` PR body section (doing → acceptance, pre-merge):** `verify_delivery` reads the `## System Spec` section from the **latest implementer PR body** (highest PR number). The section must contain either:
+- A path to the spec file committed on the same branch: `docs/systems/<file>.md` (plain or backtick-quoted). The lobster fetches the file from the PR branch (or `main` when merged) and confirms it references the task ID or PR URL.
+- A substantive no-change reason (≥ 12 non-whitespace characters, no `docs/systems/` path): use when no system-level behaviour changed.
+
+A stub like "No change" (< 12 non-whitespace chars) is treated as missing and blocks acceptance. **The system spec must be committed in the same PR as the feature code** — a separate backfill PR is not acceptable. No task comment is needed; the PR body section is the gate. See `agents/skills/dev/pr-open/SKILL.md` for the canonical PR body template.
 
 **AC text check (doing → acceptance, pre-merge):** before the lobster will let the task advance from `doing` to `acceptance`, it compares every task description AC against the **open** PR body. If any AC is missing from the PR, has altered text, or lacks a valid evidence annotation `(testID|file|not tested|not code)`, the transition is blocked with a `[feature-task-progress-checklist]` comment listing the specific failures — the task stays in `doing` until Rowan opens a fix PR that lists every AC verbatim with evidence. Tom may edit ACs in the task description during QA — spec drift does not block this gate (it is covered by the resync feature; see task b2ab54db).
 
@@ -133,12 +140,9 @@ Until first-class Tasks API fields exist, the workflow reads these tags from tas
 |---|---|---|
 | `[tech-design] <url>` | Rowan | Tech design URL (durable `tech_design_url` is the eventual home) |
 | `[tech-design-approved] true` | Quinn | Tom signed off on the tech design |
-| `[rowan-prs] <url1>, <url2>` | Rowan | PRs implementing this task |
-| `[rowan-done] <files> \| <validation> \| <pr url>` | Rowan | Implementation complete signal |
+| `[implementer-prs] <url>` | Rowan | PRs implementing this task (`[rowan-prs]` is a legacy alias, still accepted) |
 | `[openclaw-needed] <reason>` | Rowan | Flag a `.openclaw` change for Quinn |
 | `[openclaw-done] <summary>` | Quinn | `.openclaw` change applied |
-| `[system-spec] docs/systems/<file>.md` | implementer | System spec reference |
-| `[no-system-spec-change] <reason>` | implementer | Bypass for code-only changes |
 | `[qa-ac-verified] true` | Tom | Explicit QA sign-off; required before `acceptance -> done` |
 | `[feature-task-progress-checklist] ...` | Lobster | Posted when the pre-merge AC text check (doing → acceptance) finds a missing, altered, or unannotated AC in the open PR body. Also posted for other gate failures (missing `[rowan-prs]`, missing `[system-spec]`, manual block, etc.) |
 | `[lobster-state] { ... }` | Lobster | Reconciler state — `version`, `last_orchestrated_at`, gate outcomes |
@@ -250,7 +254,7 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 |---|---|---|
 | `ready -> doing` blocked | Missing `[tech-design-approved]` or `specChecksum` drift | Quinn confirms Tom sign-off and posts `[tech-design-approved] true`; for drift, write a new spec |
 | `[openclaw-needed]` never resolved | Quinn missed the heartbeat step | Quinn scans active feature tasks on the next heartbeat tick |
-| `acceptance -> done` blocked | `[system-spec]` missing or no `[no-system-spec-change]` reason | Author `docs/systems/<system>.md` and post `[system-spec] <path>` |
+| `doing -> acceptance` blocked on system spec | PR body `## System Spec` section absent, empty, or stub (< 12 non-whitespace chars) | Add `## System Spec` to the PR body with the spec path or a substantive no-change reason; the spec file must be committed on the same branch |
 | Spec checksum mismatch | ACs edited after spec approval | Hits `PATCH /tasks/:id` when the description ACs change. Treat as spec drift: Lobster unchecks `**Approved by Tom**`, waits for Tom to re-check, then performs the resync path. Comments are drift-tolerant and remain usable for progress/checklist/resync signals. |
 | Spec lifecycle layout failure | Unexpected direct subdirectory under `brain/tasks/specs/` | Remove or migrate the unexpected subdir so only `open/`, `in-progress/`, and `done/` remain. The lobster creates missing expected dirs automatically. |
 | Stale `**Spec:**` line after a move | Prior run moved a spec but failed before patching the task description | Re-run the relevant lobster stage; move helpers treat destination-present/source-absent as idempotent and repair the task `**Spec:**` path. |
@@ -273,3 +277,4 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 
 - Task `ba116063-382a-446c-ab91-c01b60d9a7c3` — Lobster worktree cleanup after merge (PR #208): the source of the post-merge worktree cleanup step in the `done` section above
 - Task `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and bookmark/feature lobster sync
+- PR #259 — system spec gate moved from `[system-spec]` task comment to `## System Spec` PR body section (shipped 2026-07-19)
