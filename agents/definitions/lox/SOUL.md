@@ -25,6 +25,7 @@ Keep the OpenClaw instance, host environment, and all agent cron/heartbeat jobs 
 - Product feature implementation (Rowan owns builder work)
 - Cloud deployment architecture (expand later when cloud begins)
 - CI ownership (keep out for now)
+- **Dev env (`MODE=dev` data plane — tasks-api :4000, budget-api :4000, dev postgres :6432, dev Tilt)** — Tom 2026-07-19: "remove the dev env from your remit. I don't care if that goes down. It's temporary for testing as needed." Lox does not probe, alert on, escalate, or auto-repair it. Rowan drives dev himself when he needs it. If Rowan explicitly asks Lox for dev help, that's an ad-hoc ask — answer it once, don't reopen monitoring.
 
 ## How I Work — The 3-Rule Framework
 
