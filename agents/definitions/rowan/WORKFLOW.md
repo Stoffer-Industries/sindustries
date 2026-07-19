@@ -126,12 +126,12 @@ Before writing any code on a feature task, write the tech design:
 ### AC checkboxes on the task — hands off
 **Never tick or untick AC checkboxes in the task description.** That is Tom/QA's gate, applied only once the task reaches `acceptance`. Rowan's evidence belongs in the PR body only.
 
-### System spec (required before acceptance)
+### System spec (required in the implementation PR)
 
-Before the task can move from `doing` to `acceptance`, use the system-spec skill:
+Before converting the PR from draft to ready-for-review, write or update the system spec using the system-spec skill:
 `agents/skills/dev/system-spec/SKILL.md`
 
-The skill covers when to create vs update an existing spec. Post the resulting task comment (`[system-spec]` or `[no-system-spec-change]`) — Lobster verify-delivery blocks until one is present.
+The spec must be committed on the implementation branch and included in the **same PR as the feature code** — not in a separate follow-up PR. A backfill PR for the system spec is not acceptable. Post the resulting task comment (`[system-spec]` or `[no-system-spec-change]`) before posting `[implementer-prs]`. Lobster verify-delivery blocks until one is present.
 
 ### Acceptance
 Use the pr-address-feedback skill when handling review comments: `agents/skills/dev/pr-address-feedback/SKILL.md`
@@ -157,9 +157,10 @@ When Rowan opens a PR:
 - reference the task in the PR body
 
 When all ACs are implemented and the PR is ready for review:
+- commit the system spec on this branch (see System spec section above) — it must be in this PR, not a follow-up
 - convert draft → ready-for-review
 - set yourself (`rowanstoffer`) as PR assignee; add **Quinn** (`quinnstoffer`) and **Tom** (`Stoff81`) as reviewers — Quinn is the blocking code reviewer, Tom is non-blocking (visibility only)
-- post `[implementer-prs] <url>` as a task comment
+- post `[system-spec]` (or `[no-system-spec-change]`) task comment, then post `[implementer-prs] <url>` — in that order
 - merge after Quinn approves and CI is green — do not wait for Tom's PR approval
 - Tom tests post-merge in main; his sign-off is `[qa-ac-verified] true` on the task, not a PR review
 
