@@ -113,7 +113,7 @@ Note: prior versions of this workflow ran an equivalent AC text check at the `po
 | `agents/skills/dev/tech-design/SKILL.md` | Authoring guide for tech designs |
 | `agents/skills/dev/system-spec/SKILL.md` | Authoring guide for system specs (this file is one) |
 | `docs/specs/<task-slug>-tech-design.md` | Per-task tech design, branch URL recorded as `[tech-design]` task comment |
-| `docs/systems/<system>.md` | Per-system spec; recorded as `[system-spec]` task comment |
+| `docs/systems/<system>.md` | Per-system spec; committed on the implementation branch and declared in the PR body's `## System Spec` section |
 | `services/tasks-api/prisma/schema.prisma` | Tasks API persistence — `taskType`, `specChecksum` |
 
 ---
