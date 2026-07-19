@@ -39,6 +39,11 @@ gh pr create \
 - <bullet: what changed and why>
 - <bullet: any notable decisions or trade-offs>
 
+## System Spec
+<path to docs/systems/<file>.md that was written or updated>
+— OR —
+No system spec change — <substantive reason, e.g. "CI-only fix, no user-facing behaviour">
+
 ## Test plan
 - [ ] <specific thing to verify>
 - [ ] <another check>
@@ -47,6 +52,12 @@ gh pr create \
 EOF
 )"
 ```
+
+**`## System Spec` is required on every feature-task PR.** The lobster's `verify_delivery` gate reads this section and blocks if it is absent or empty. Provide either:
+- The path to the spec file that was written or updated (`docs/systems/<file>.md`), plain or backtick-quoted.
+- A substantive no-change reason (at least 12 non-whitespace characters, no spec path) explaining why no spec was touched.
+
+A short stub like "No change" will be treated as missing and will block acceptance.
 
 Include a `Co-Authored-By` trailer in your commit messages identifying yourself:
 ```
