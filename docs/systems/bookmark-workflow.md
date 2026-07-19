@@ -68,6 +68,31 @@ ingested  summarized  needs_research (human-gated)                      declined
 - Once moved to `brain/tasks/specs/in-progress/`, bookmark-origin specs follow the feature-task lifecycle (`in-progress/` → `done/` on task completion)
 - Sets `reviewStatus: tasked` — **terminal**
 
+### 7. Author Tweet Notification
+
+For X-sourced bookmarks that land in `tasked` with at least one task ID created, the workflow best-effort posts a reply tweet at the original author. The goal is **building-in-public transparency**: tell the author their post made it through triage and that work has started, and invite a brief on-topic follow-up question.
+
+- **Trigger condition:** bookmark `source == "x"` AND `next_status == "tasked"` AND `merged_task_ids` is non-empty. Non-X sources silently skip; the no-tasks branch (`next_status == "approved"`) also skips — there is no work to mention to the original author when the spec was the artifact.
+- **Where it runs:** inline at the end of `lobster_resolve_spec_request.py`'s per-item approve loop, after `log_transition()` and the existing `save_state()` write. The hook site is intentionally small (~30 lines plus a small status filter).
+- **Helper module:** `agents/workflows/bookmarks/scripts/x_author_tweet.py::try_post_author_tweet()`. Exposes a unified return shape (`{"status": "posted"|"skipped"|"error", ...}`) so the hook site can persist outcomes without caring about the underlying failure mode.
+- **tasks-api route:** `POST /api/v1/x/tweets` (`services/tasks-api/src/routes/xTweet.ts`) is the new generic entry point that wraps the existing OAuth 1.0a `getXClient()` from `services/tasks-api/src/routes/contentSchedulerPublish.ts`. The route accepts `{ text, in_reply_to_tweet_id }` and returns `{ data: { url, postedAt } }`. It enforces the 280-char X limit and returns `503 MISSING_CREDENTIALS` when `getXClient()` is `null` — the helper catches that and records `tweetLog.status == "skipped"`.
+- **Credential reuse:** no new OAuth flow. The route uses the same OAuth 1.0a credentials (`X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`, `X_CLIENT`, `X_HANDLE`) the content-scheduler publish path already reads. Tom does not need to re-auth — see task comment `48101f8f` (Quinn guidance) that explicitly dropped the spec's original "re-auth for `tweet.write`" pre-req.
+- **`XClient` interface:** now accepts `{ text, in_reply_to_tweet_id? }`. Existing content-scheduler publish call sites (`createTweet({ text })`) continue to work unchanged. `FakeXClient` hashes `text + reply_id` so different `(text, reply)` pairs produce deterministic but distinct URLs. `RealXClient` forwards the reply id into the `reply: { in_reply_to_tweet_id }` field of the `POST https://api.twitter.com/2/tweets` body when present.
+- **`tweetLog` write-back:** persisted onto the bookmark item only when the helper returned `status == "posted"`, `status == "error"`, or `status == "skipped"` with `error == "missing_credentials"`. Non-X source skips and malformed-link skips deliberately do NOT carry a `tweetLog` field — the spec is explicit that those paths must be silent (AC2). The shape written to state:
+  ```
+  state.items[<key>]["tweetLog"] = {
+    "status": "posted" | "skipped" | "error",
+    "tweetUrl"?: string,        # status == "posted"
+    "postedAt"?: ISO-8601,      # status == "posted"
+    "error"?: string,           # status in {"skipped", "error"}
+    "authorHandle"?: string     # e.g. "somebody" — denormalised for UI surfaces
+  }
+  ```
+- **Failure semantics (AC3):** any exception inside the helper is caught at the hook site and recorded as `tweetLog.status == "error", error == "unexpected:<reason>"`. The approval transition still resolves cleanly and `tasks-api` is unaffected. The lobster exits 0 and downstream steps run.
+- **Operational notes:** the tweet step is fire-and-forget; no retry, no rate-limit cache, no human-in-the-loop. If `tasks-api` is unreachable, the helper records `tasks_api_unreachable:<reason>` and the approval still completes. The route trusts `localhost` — see the file header for the auth caveat if the lobster and `tasks-api` ever stop sharing a host.
+- **Where it does NOT run:** non-X sources, `next_status == "approved"` (no tasks created), and `next_status == "declined"`. These branches never invoke `try_post_author_tweet()`.
+- **Out of scope (parking lot):** reply-to-quoted-tweet threading, engagement tracking, draft-then-approve UX, `tweetAttempts[]` append-only history, `analytics.bookmark_transitions` payload column, rate-limit-aware retry/backoff, auth header on `POST /x/tweets`. See the tech design (`docs/specs/bookmark-approval-author-tweet-tech-design.md`) for the full parking lot and the open questions log.
+
 ---
 
 ## State Machine
@@ -128,6 +153,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
 | `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
 | `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown; moves approved-and-tasked specs into `brain/tasks/specs/in-progress/` |
+| `x_author_tweet.py` | Author tweet | resumed lobster | Best-effort reply tweet at the original X author when an X-sourced bookmark lands in `tasked` with ≥1 task ID; writes `tweetLog` back to state. Lives next to the lobster scripts. |
 | `run_bookmark_state_analyzer.py` | Inspect | skill | Compact state summary without loading full JSON (in `agents/skills/bookmarks/state/`) |
 
 ---
@@ -204,6 +230,7 @@ never raised, so the JSONL path is unaffected.
 
 - Task: `b179c0e3-c6b0-4c9d-97dc-982d3b841783` — Bookmark pipeline analytics — Postgres transition log
 - Task: `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and lobster sync
+- Task: `55ac9240-d54a-4b2c-88c4-8bb8af85d2b2` — Bookmark approval: tweet at original X author when tasked (this PR)
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/216
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/236 (Sankey + states-over-time + retire tools dashboard tech design)
 - Tech design: `docs/specs/bookmark-pipeline-analytics-postgres-transition-log-tech-design.md`

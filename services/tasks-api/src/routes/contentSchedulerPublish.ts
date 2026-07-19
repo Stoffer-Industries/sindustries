@@ -76,7 +76,7 @@ export function guardPublish(
  * URLs so dev/test flows have stable assertions.
  */
 export interface XClient {
-  createTweet(input: { text: string }): Promise<{ url: string; postedAt: Date }>;
+  createTweet(input: { text: string; in_reply_to_tweet_id?: string }): Promise<{ url: string; postedAt: Date }>;
 }
 
 /**
@@ -85,9 +85,14 @@ export interface XClient {
  * input always produces the same URL.
  */
 export class FakeXClient implements XClient {
-  async createTweet({ text }: { text: string }): Promise<{ url: string; postedAt: Date }> {
+  async createTweet(input: { text: string; in_reply_to_tweet_id?: string }): Promise<{ url: string; postedAt: Date }> {
     const { createHash } = await import('node:crypto');
-    const id = createHash('sha256').update(text).digest('hex').slice(0, 16);
+    // Deterministic URL: hash of (text + reply id) so the same (text, reply)
+    // pair always yields the same URL while keeping different inputs
+    // distinguishable. Existing callers pass no reply id and continue to
+    // produce the original behaviour.
+    const seed = input.in_reply_to_tweet_id ? `${input.text}\u0001${input.in_reply_to_tweet_id}` : input.text;
+    const id = createHash('sha256').update(seed).digest('hex').slice(0, 16);
     return {
       url: `https://x.com/sindustries/status/${id}`,
       postedAt: new Date()
@@ -144,9 +149,17 @@ export class RealXClient implements XClient {
     return `OAuth ${headerString}`;
   }
 
-  async createTweet({ text }: { text: string }): Promise<{ url: string; postedAt: Date }> {
+  async createTweet(input: { text: string; in_reply_to_tweet_id?: string }): Promise<{ url: string; postedAt: Date }> {
     const url = 'https://api.twitter.com/2/tweets';
-    const authorization = await this.oauthHeader('POST', url, {});
+    const body: Record<string, string> = { text: input.text };
+    if (input.in_reply_to_tweet_id) {
+      body.reply = JSON.stringify({ in_reply_to_tweet_id: input.in_reply_to_tweet_id });
+    }
+    const bodyParams: Record<string, string> = {};
+    if (input.in_reply_to_tweet_id) {
+      bodyParams.reply = body.reply;
+    }
+    const authorization = await this.oauthHeader('POST', url, bodyParams);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -157,7 +170,7 @@ export class RealXClient implements XClient {
           authorization,
           'content-type': 'application/json'
         },
-        body: JSON.stringify({ text })
+        body: JSON.stringify(body)
       });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
