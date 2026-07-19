@@ -73,11 +73,13 @@ A stub like "No change" (< 12 non-whitespace chars) is treated as missing and bl
 
 Note: prior versions of this workflow ran an equivalent AC text check at the `post-merge` stage (the "QA bounce") that moved a task back from `acceptance` to `doing` if the latest merged PR's AC text didn't match. That path was removed because it triggered after merge, forcing a wasteful revert + fix-PR round-trip. The check now runs pre-merge so mistakes are caught before the PR is merged.
 
-**PR AC evidence formats** (every checked `[x]` AC line must end with one of):
-- `(testID: <id>)` — Playwright test ID reference
-- `(file: <path>:<line>)` — file and line reference
-- `(not tested: <reason>)` — implemented in code but not testable
-- `(not code: <reason>)` — AC fulfilled outside the codebase (brain file, spec doc, etc.)
+**PR AC evidence formats** — priority order (use the first that applies):
+- `(🧪 testID: <id>)` — e2e (Playwright) or unit test reference. **Default — always prefer this.**
+- `(⚠️ not tested: <reason>)` — explicit opt-out; requires a substantive reason
+- `(📄 not code: <reason>)` — AC fulfilled outside the codebase (doc, spec, config)
+- `(🔗 pr: #<n>)` — covered by another merged PR
+
+`file:` has been removed (it was being used to cite implementation files rather than tests). Emojis are optional but encouraged for visual clarity in reviews.
 
 ### 4. `done` — terminal
 
