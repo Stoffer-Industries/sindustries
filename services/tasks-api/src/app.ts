@@ -3,6 +3,7 @@ import { healthRouter } from './routes/health';
 import { tasksRouter } from './routes/tasks';
 import { tagsRouter } from './routes/tags';
 import { contentSchedulerRouter } from './routes/contentScheduler.ts';
+import { xTweetRouter } from './routes/xTweet.ts';
 import { createInProcessJobSchedulerAdapter } from './routes/contentSchedulerJobs.inProcess.ts';
 import {
   getJobSchedulerAdapterKind,
@@ -78,6 +79,7 @@ export function createApp() {
   app.use('/api/v1', tasksRouter);
   app.use('/api/v1', tagsRouter);
   app.use('/api/v1', contentSchedulerRouter);
+  app.use('/api/v1', xTweetRouter());
 
   app.use((error, _req, res, _next) => {
     console.error(error);

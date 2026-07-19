@@ -3,9 +3,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 from pathlib import Path
 
 from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
+from x_author_tweet import try_post_author_tweet
+
+logger = logging.getLogger("bookmark.lobster_resolve_spec_request")
+
+# Default tasks-api base URL — same default the x_author_tweet module
+# uses internally. Override via TASKS_API_BASE_URL env var when the
+# lobster runs against a non-local tasks-api (CI, prod).
+_TASKS_API_BASE_URL = os.getenv("TASKS_API_BASE_URL", "http://localhost:4001/api/v1")
 
 
 def task_ids_for_bookmark(created: list[dict], bookmark_key: str) -> list[str]:
@@ -92,6 +102,58 @@ def main() -> int:
                 f"approval {resolution_status}; taskIds={len(merged_task_ids)}",
                 transitions_path=transition_log_path(Path(STATE_PATH)),
             )
+
+            # AC1 / AC2 / AC5: best-effort reply tweet at the original X
+            # author when the bookmark was X-sourced AND landed in `tasked`
+            # AND produced at least one task ID. The `tasked` gate is
+            # critical: if no tasks were created (the spec was the artifact),
+            # we must NOT post a tweet because there is no work to mention
+            # to the original author. Non-X sources are filtered at the
+            # helper boundary and the resulting `skipped / non_x_source`
+            # payload is intentionally NOT persisted — AC2 says non-X
+            # sources MUST skip without writing a tweetLog. Any exception
+            # inside the tweet helper is swallowed so the approval always
+            # resolves cleanly (AC3).
+            if next_status == "tasked" and (state_item.get("source") or "").lower() == "x":
+                try:
+                    tweet_log = try_post_author_tweet(
+                        state_item,
+                        tasks_api_base_url=_TASKS_API_BASE_URL,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    logger.warning("author-tweet step raised for %s: %s", bookmark_key, exc)
+                    tweet_log = {"status": "error", "error": f"unexpected:{exc}"}
+                # Persist `tweetLog` for the outcomes we care about:
+                #   - posted  → the tweet is live (AC1, AC4)
+                #   - error   → something failed, surface for ops (AC3, AC4)
+                #   - skipped with reason=missing_credentials → AC5 reframed:
+                #     the route refused without an upstream X HTTP call.
+                #     Surfacing the reason lets us tell, at a glance, why
+                #     a bookmark that should have been tweeted wasn't.
+                # The other `skipped` variants (non_x_source, missing_x_link)
+                # are deliberately discarded — the spec says non-X sources
+                # MUST NOT carry the field.
+                persist = bool(tweet_log) and (
+                    tweet_log.get("status") in {"posted", "error"}
+                    or (
+                        tweet_log.get("status") == "skipped"
+                        and tweet_log.get("error") == "missing_credentials"
+                    )
+                )
+                if persist:
+                    # Carry over the author handle for downstream surfaces
+                    # that want to render the @-mention without re-parsing
+                    # `link`. Cheap re-parse; cached only at write time.
+                    parsed = None
+                    try:
+                        from x_author_tweet import parse_x_link
+                        parsed = parse_x_link(state_item.get("link"))
+                    except Exception:
+                        parsed = None
+                    if parsed and "authorHandle" not in tweet_log:
+                        tweet_log["authorHandle"] = parsed[0]
+                    state_item["tweetLog"] = tweet_log
+
             resolved_items.append({
                 "bookmarkKey": bookmark_key,
                 "reviewStatus": next_status,

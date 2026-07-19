@@ -60,6 +60,36 @@ local time). UTC `publishedAt` timestamps are stored; the daily window is
 derived via `Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland' })`
 on each publish/today-status request.
 
+## X tweet route
+
+`POST /api/v1/x/tweets` exposes the same OAuth 1.0a X client that the
+content-scheduler publish path uses as a generic "post a tweet" endpoint
+for sibling services. The first caller is the bookmark approval workflow
+(`agents/workflows/bookmarks/scripts/x_author_tweet.py`), which posts a
+reply at the original X author when an approved X-sourced bookmark lands
+in `tasked`. See `docs/systems/bookmark-workflow.md` → "Author tweet
+notification" and `docs/specs/bookmark-approval-author-tweet-tech-design.md`
+for the full contract.
+
+- Request body: `{ text: string, in_reply_to_tweet_id?: string }`
+- Response: `{ data: { url: string, postedAt: ISO-8601 } }`
+- 400 `TWEET_TOO_LONG` — `text.length > 280` (with `maxLength` and `length`)
+- 400 `INVALID_BODY` — missing or empty `text`, non-string `in_reply_to_tweet_id`
+- 502 `X_API_ERROR` — the underlying `XClient.createTweet` call threw; the truncated upstream message is surfaced for diagnostics but never includes secrets
+- 503 `MISSING_CREDENTIALS` — `getXClient()` returned `null`; **no upstream X HTTP call was attempted** (AC5 reframed — fail fast without burning a doomed request)
+
+The same OAuth 1.0a env vars the content-scheduler publish path consumes
+apply here: `X_CLIENT` (`fake` default; `real` for production),
+`X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`,
+and the optional `X_HANDLE`. No new credentials are needed.
+
+**Auth:** the endpoint trusts `localhost` — matching the existing pattern
+where the bookmark lobster's Python process calls
+`http://localhost:4001/api/v1` unauthenticated. If `tasks-api` ever stops
+being localhost-only, this route MUST be locked down (header token or LAN
+allowlist) before exposing it externally. The auth caveat is also
+documented in the route's header comment.
+
 ## Database workflow
 ```bash
 # generate Prisma client

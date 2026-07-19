@@ -1834,6 +1834,169 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["taskIds"], [])
         self.assertIsNotNone(item.get("approvalResolvedAt"))
 
+    # --- Task 55ac9240: author-tweet notification at approval -----------
+
+    def _seed_pending_state(self, source: str, link: str) -> None:
+        """Seed a single pending item with the given source/link for the
+        approval→tasked tests. Mirrors the shape used in the
+        approve-with-created-tasks tests above."""
+        state = common.state_template()
+        state["items"][self.bookmark["bookmarkKey"]] = {
+            "bookmarkKey": self.bookmark["bookmarkKey"],
+            "path": self.bookmark["path"],
+            "topic": self.bookmark["topic"],
+            "source": source,
+            "title": self.bookmark["title"],
+            "link": link,
+            "reviewStatus": "approval_pending",
+            "approvalTopic": "infra",
+            "specDocs": ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
+            "taskIds": [],
+        }
+        common.save_state(state, self.state_path)
+
+    def _run_resolve_with_created_tasks(self) -> int:
+        stdin = io.StringIO(json.dumps({
+            "approvals": [{
+                "topic": "infra",
+                "items": [{"bookmarkKey": self.bookmark["bookmarkKey"]}],
+            }],
+            "created": [{
+                "bookmarkKey": self.bookmark["bookmarkKey"],
+                "taskId": "task-123",
+            }],
+        }))
+        stdout = io.StringIO()
+        with patch.object(resolve_spec_request, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_resolve_spec_request.py", "--decision", "approve", "--json"]):
+                return resolve_spec_request.main()
+
+    def test_resolve_spec_request_x_source_with_tasks_writes_tweet_log(self):
+        # AC1 / AC4: an X-sourced bookmark that lands in `tasked` with at
+        # least one task ID gets a tweetLog entry recording the tweet step
+        # outcome. `try_post_author_tweet` is mocked so we exercise the
+        # integration boundary, not the LLM/tasks-api path.
+        self._seed_pending_state(
+            source="x",
+            link="https://x.com/somebody/status/1234567890",
+        )
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+            return_value={
+                "status": "posted",
+                "tweetUrl": "https://x.com/u/status/abc",
+                "postedAt": "2026-07-19T00:00:00.000Z",
+            },
+        ) as mocked:
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        mocked.assert_called_once()
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "tasked")
+        self.assertEqual(item["taskIds"], ["task-123"])
+        self.assertEqual(item["tweetLog"]["status"], "posted")
+        self.assertEqual(item["tweetLog"]["tweetUrl"], "https://x.com/u/status/abc")
+        self.assertEqual(item["tweetLog"]["authorHandle"], "somebody")
+
+    def test_resolve_spec_request_non_x_source_writes_no_tweet_log(self):
+        # AC2: a non-X source must NOT have a tweetLog entry written, even
+        # when the approval lands in `tasked`. The hook site filters
+        # non-X sources before invoking the helper — the helper is
+        # defensive but never reached in this path.
+        self._seed_pending_state(source="web", link="https://example.com/post")
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+        ) as mocked:
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        mocked.assert_not_called()
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "tasked")
+        self.assertNotIn("tweetLog", item)
+
+    def test_resolve_spec_request_x_source_no_tasks_writes_no_tweet_log(self):
+        # AC1 gate: when the approval lands in `approved` (no tasks
+        # created), the tweet step MUST NOT be invoked. This guards the
+        # "≥1 task created" precondition.
+        self._seed_pending_state(
+            source="x",
+            link="https://x.com/somebody/status/1234567890",
+        )
+        state = common.load_state(self.state_path)
+        state["items"][self.bookmark["bookmarkKey"]]["reviewStatus"] = "approval_pending"
+        common.save_state(state, self.state_path)
+
+        stdin = io.StringIO(json.dumps({
+            "approvals": [{
+                "topic": "infra",
+                "items": [{"bookmarkKey": self.bookmark["bookmarkKey"]}],
+            }],
+            "created": [],  # no tasks created → next_status == "approved"
+        }))
+        stdout = io.StringIO()
+        with patch.object(resolve_spec_request, "STATE_PATH", self.state_path):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_resolve_spec_request.py", "--decision", "approve", "--json"]):
+                with patch.object(resolve_spec_request, "try_post_author_tweet") as mocked:
+                    rc = resolve_spec_request.main()
+
+        self.assertEqual(rc, 0)
+        mocked.assert_not_called()
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "approved")
+        self.assertNotIn("tweetLog", item)
+
+    def test_resolve_spec_request_tweet_step_exception_is_swallowed(self):
+        # AC3: any exception inside the tweet helper must not block the
+        # approval. The script still exits 0 and the item still lands in
+        # `tasked` with the task IDs persisted; a defensive tweetLog is
+        # written with status=error and an `unexpected:` reason.
+        self._seed_pending_state(
+            source="x",
+            link="https://x.com/somebody/status/1234567890",
+        )
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+            side_effect=RuntimeError("boom"),
+        ):
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "tasked")
+        self.assertEqual(item["taskIds"], ["task-123"])
+        self.assertEqual(item["tweetLog"]["status"], "error")
+        self.assertIn("unexpected:boom", item["tweetLog"]["error"])
+
+    def test_resolve_spec_request_tweet_step_skipped_credentials(self):
+        # AC5 reframed: missing credentials → tweetLog.status == "skipped"
+        # with error == "missing_credentials". Verifies the helper's own
+        # skipped branch flows back into state correctly.
+        self._seed_pending_state(
+            source="x",
+            link="https://x.com/somebody/status/1234567890",
+        )
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+            return_value={"status": "skipped", "error": "missing_credentials"},
+        ):
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["reviewStatus"], "tasked")
+        self.assertEqual(item["tweetLog"]["status"], "skipped")
+        self.assertEqual(item["tweetLog"]["error"], "missing_credentials")
+
 
 
 if __name__ == "__main__":
