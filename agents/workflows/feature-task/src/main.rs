@@ -2669,20 +2669,6 @@ fn tech_design_approved(task: &Task) -> bool {
         })
 }
 
-fn tagged_path_values(task: &Task, tag: &str) -> Vec<String> {
-    tagged_values(task, tag)
-        .into_iter()
-        .filter_map(|value| {
-            value
-                .trim_start()
-                .split_whitespace()
-                .next()
-                .map(|token| token.trim_matches('`').trim_matches(',').to_string())
-        })
-        .filter(|path| !path.is_empty())
-        .collect()
-}
-
 fn implementer_pr_urls(task: &Task) -> Vec<String> {
     let re = Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").unwrap();
     let mut urls = Vec::new();

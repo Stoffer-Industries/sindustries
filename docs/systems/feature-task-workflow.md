@@ -144,7 +144,7 @@ Until first-class Tasks API fields exist, the workflow reads these tags from tas
 | `[openclaw-needed] <reason>` | Rowan | Flag a `.openclaw` change for Quinn |
 | `[openclaw-done] <summary>` | Quinn | `.openclaw` change applied |
 | `[qa-ac-verified] true` | Tom | Explicit QA sign-off; required before `acceptance -> done` |
-| `[feature-task-progress-checklist] ...` | Lobster | Posted when the pre-merge AC text check (doing → acceptance) finds a missing, altered, or unannotated AC in the open PR body. Also posted for other gate failures (missing `[rowan-prs]`, missing `[system-spec]`, manual block, etc.) |
+| `[feature-task-progress-checklist] ...` | Lobster | Posted when the pre-merge AC text check (doing → acceptance) finds a missing, altered, or unannotated AC in the open PR body. Also posted for other gate failures (missing `[implementer-prs]`, missing `## System Spec` PR body section, manual block, etc.) |
 | `[lobster-state] { ... }` | Lobster | Reconciler state — `version`, `last_orchestrated_at`, gate outcomes |
 | `[scope-add] <summary>` | Quinn / Tom | Document a scope change after spec approval (used in factory-v2 grandfathering) |
 
