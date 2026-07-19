@@ -4,72 +4,21 @@
 
 ---
 
-BOOKMARK STATE OBSERVABILITY
-
-Heartbeat does not curate bookmarks, write specs, validate spec artifacts, or
-advance bookmark review state. Production bookmark curation and spec generation
-now run from the bookmark review cron.
-
-1. Read the state analyzer skill:
-   `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/SKILL.md`
-2. Run the compact analyzer:
-   `python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/bookmarks/state/scripts/run_bookmark_state_analyzer.py --json`
-3. **Only output if at least one of these is true:**
-   - `approvalPendingCount > 0` (new approvals waiting for Tom — report which items)
-   - A stall appeared that is NOT already in ops state (specs requested but missing, tasks blocked)
-   - **Otherwise: skip this section entirely. Do not report counts, stale items, or unchanged state.**
-4. Track new stalls in `brain/state/quinn-ops-state.json` under OPS STATE MANAGEMENT.
-5. Do not mutate bookmark state from heartbeat.
-
----
-
 TECH DESIGN APPROVAL
 
 Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated this.
 
 Each heartbeat:
-1. Run the feature task workflow check (see FEATURE TASK LOBSTER CHECK below).
-2. Find feature tasks with a `[tech-design]` comment but no proper `[tech-design-approved] true` comment:
+1. Find feature tasks with a `[tech-design]` comment but no proper `[tech-design-approved] true` comment:
    `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
    The script mirrors the lobster's parser (`tagged_values` + `tech_design_approved` in `agents/workflows/feature-task/src/main.rs`): a comment counts as approval only if its trimmed text STARTS WITH the tag and the first whitespace-separated token after the tag is `true` (case-insensitive). Substring matches in the lobster's progress-checklist complaints (e.g. `Missing task comment [tech-design-approved] true`) are intentionally NOT counted.
-3. **If 0 pending: skip this section entirely. No output.**
-4. For each pending task:
+2. **If 0 pending: skip this section entirely. No output.**
+3. For each pending task:
    - Read the design at the linked path.
    - Check: all required sections present, aligned with spec, no unbounded scope, `.openclaw` boundary notes where relevant.
    - If it looks good: post task comment `[tech-design-approved] true`
    - If something looks wrong or risky: flag to Tom via Telegram instead of approving.
-5. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
-
----
-
-CONTENT TASK LOBSTER CHECK
-
-Quinn dispatches content task workflow passes from heartbeat; Lobster owns all status transitions.
-Run:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-tasks/run.py --json`
-Report only failures, blocked closed-unmerged PRs, or meaningful transitions. If nothing actionable: no output.
-
----
-
-FEATURE TASK LOBSTER CHECK
-
-Quinn dispatches feature task workflow passes from heartbeat; Lobster owns all status transitions.
-Run:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py`
-Report only failures, newly blocked tasks, or meaningful transitions. **Do not report tasks already in ops state with `escalatedAt` set — Tom has already been notified. Do not summarise routine doing/acceptance counts.**
-
-**Ops-state logging rule for blocked tasks:** When the lobster reports any `*_blocked` action on a task, check ops-state for an entry whose slug includes both the task ID AND the current gate (e.g. `verify_delivery`, `ready_checks`, `qa_ac_verified`). A task-level entry from a *different* gate does NOT count — create a new entry. Slug format: `feature-task-<task-id-prefix>-<gate>-<YYYY-MM-DD>`. This prevents a resolved blockage from masking a new one on the same task.
-
-**When the lobster reports `ready_checks_blocked` due to missing `[tech-design]`:**
-- Check if Rowan is free (no tasks in `doing` assigned to Rowan)
-- If Rowan is free: spawn Rowan as a background subagent to write the tech design (see tech-design skill)
-- If Rowan is busy: log to quinn-ops-state.json as a watching entry; do not re-spawn
-- Do NOT just report the stall without acting — dispatching Rowan is Quinn's job here
-
-**Heartbeat/subagent reporting contract:**
-- Heartbeat progress that matters to Tom should be announced here by Quinn's heartbeat output.
-- Rowan subagent completions are worker results: collect them back into the spawning Quinn heartbeat/session, then summarize the meaningful progress in Quinn's own heartbeat output.
-- Do not let Rowan subagent completion text become a standalone Tom-facing progress announcement; Tom should see the heartbeat summary, not raw worker handoff output.
+4. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
 
 ---
 
@@ -206,7 +155,6 @@ for inc in needs_tom(all_incidents):
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
 
 **Before escalating any `needsTom` entry, re-validate it is still a real problem:**
-- For bookmark pipeline stalls: re-run the bookmark state analyzer. If `approvalPendingCount == 0` and no genuine stall exists (no `spec_created` items without a `specPath`, no items stuck in the same status for multiple heartbeats), mark the entry `resolved` with `resolvedAt: <now>` and do NOT escalate.
 - For feature task stalls: re-check the lobster output. If the task is no longer in the reported state, mark resolved.
 - For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
 - Only escalate if the condition is confirmed present in live state this pass.

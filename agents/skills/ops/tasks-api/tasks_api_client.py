@@ -55,7 +55,7 @@ def get_task(task_id: str, base_url: str | None = None) -> dict:
 
 def list_tasks(
     limit: int = 20,
-    status: str | None = None,
+    status: str | list[str] | None = None,
     assignee: str | None = None,
     blocked: bool | None = None,
     ready: bool | None = None,
@@ -66,6 +66,14 @@ def list_tasks(
 ) -> list:
     """List tasks with optional filters. Returns list of task dicts."""
     base = base_url or get_base_url()
+    # If multiple statuses requested, fan out one call per status and merge.
+    if isinstance(status, list):
+        results = []
+        for s in status:
+            results.extend(list_tasks(limit=limit, status=s, assignee=assignee,
+                                       blocked=blocked, ready=ready, priority=priority,
+                                       q=q, base_url=base_url, **extra_params))
+        return results
     params = {"limit": str(limit)}
     if status is not None:
         params["status"] = status

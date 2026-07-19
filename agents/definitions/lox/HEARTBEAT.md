@@ -6,6 +6,8 @@ My operating principles are in `SOUL.md`. The 3-rule framework (investigate → 
 
 Do not run broad maintenance or updates from heartbeat. Exact scheduled checks belong in cron.
 
+**Out-of-scope reminder (Tom 2026-07-19):** dev env (`MODE=dev` data plane — tasks-api :4000, budget-api :4000, dev postgres :6432, dev Tilt) is NOT Lox's charter. Don't probe it on heartbeat, don't alert Tom about it, don't run any runbook for it. Rowan drives dev himself. Full policy in `SOUL.md` "Out of Scope".
+
 ## Incident feed
 
 Incidents are created in Telegram DMs with Tom channel by cron and heartbeat agents when a failure is detected. Lox reads new messages from that channel, investigates, applies fixes if safe, and escalates to Tom with `openclaw message send --channel telegram --account lox --target 6435140143 --message "<message>"`.
@@ -175,3 +177,31 @@ This check is the **same diagnostic that caught Ivy's stall on 2026-06-05** (her
 **Known false-positive history (2026-06-07):** Lox incorrectly flagged Ivy's main session as stale because (a) the staleness check was reading the wrong session type for isolatedSession agents, and (b) the expected cadence was listed as 10 min when the actual config is 4h. Both bugs are fixed in this update.
 
 See `infra/runbooks/agent-main-session-stale-no-heartbeat.md` for the full diagnostic + recovery procedure.
+
+## Common false-positive patterns
+
+These are detection/classification bugs that produce noisy or wrong outputs even when the underlying check is healthy. Add new ones as they recur — pattern-matching on what *almost* failed is cheaper than re-debugging from scratch.
+
+### Existence-probe chains must end with `|| true`
+
+When a heartbeat/turn needs to check "does this file/dir exist?" across multiple candidate paths, the naive form exits non-zero the moment the first missing path is hit, which OpenClaw renders as `⚠️ 🛠️ Exec failed` even when "not found" is exactly the expected result. Saw this on 2026-07-19 (#481) when verifying prior runbook/incident-tracking claims:
+
+```bash
+# BAD — exit 2 on first missing dir, exit 1 on first unmatched glob.
+# OpenClaw flags the whole chain as a failure even though each line's
+# output is what we wanted.
+ls -la .../infra/runbooks/ && \
+ls -la .../infra/RUNBOOKS* && \
+ls -la .../brain/state/lox-incident-state.json
+
+# GOOD — `|| true` flattens each probe's exit to 0, so the chain stays
+# green when "not found" is the answer. Read each line's output to
+# classify the result.
+ls -la .../infra/runbooks/ || true
+ls -la .../infra/RUNBOOKS*  || true
+ls -la .../brain/state/lox-incident-state.json || true
+```
+
+Rule: any existence/optional-path probe in a heartbeat procedure should end with `|| true`. Reserve non-zero exits for checks where "not found" really is a failure (mandatory config files, expected runbook targets, etc.).
+
+Related: see also the Tailscale-wedge false-positive lesson in `MEMORY.md` — the `pgrep <GUI-binary>` check is what distinguishes a genuine wedge from an operator-quit state. Same shape: a partial signature matches the alert, but one extra probe disambiguates.
