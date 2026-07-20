@@ -305,12 +305,78 @@ describe('tasks api endpoints', () => {
 
     prismaMock.task.findFirst.mockResolvedValueOnce(null);
     const missingTask = await request(app)
-      .post('/api/v1/tasks/missing/comments')
+      .post('/api/v1/tasks/99999999-9999-9999-9999-999999999999/comments')
       .send({ author: 'Rowan', text: 'hello' });
     expect(missingTask.status).toBe(404);
     expect(missingTask.body).toEqual({
       error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
     });
+  });
+
+  it.each([
+    {
+      method: 'get',
+      path: '/api/v1/tasks/95e65d06',
+      label: 'GET /api/v1/tasks/:id rejects 8-char hex prefix',
+    },
+    {
+      method: 'patch',
+      path: '/api/v1/tasks/95e65d06',
+      label: 'PATCH /api/v1/tasks/:id rejects 8-char hex prefix',
+      body: { status: 'doing' },
+    },
+    {
+      method: 'post',
+      path: '/api/v1/tasks/95e65d06/comments',
+      label: 'POST /api/v1/tasks/:id/comments rejects 8-char hex prefix',
+      body: { author: 'Rowan', text: 'hello' },
+    },
+    {
+      method: 'delete',
+      path: '/api/v1/tasks/95e65d06',
+      label: 'DELETE /api/v1/tasks/:id rejects 8-char hex prefix',
+    },
+    {
+      method: 'get',
+      path: '/api/v1/tasks/not-a-uuid-at-all',
+      label: 'GET /api/v1/tasks/:id rejects arbitrary non-UUID string',
+    },
+    {
+      method: 'patch',
+      path: '/api/v1/tasks/11111111-1111-1111-1111-11111111111', // truncated by one char
+      label: 'PATCH /api/v1/tasks/:id rejects short-truncated UUID',
+      body: { status: 'doing' },
+    }
+  ])('$label with 400 INVALID_TASK_ID and skips the prisma lookup', async ({ method, path, body }) => {
+    const app = createApp();
+
+    const req = request(app)[method](path);
+    const response = body ? await req.send(body) : await req;
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: {
+        code: 'INVALID_TASK_ID',
+        message: 'Task id must be a 36-char UUID'
+      }
+    });
+    expect(prismaMock.task.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+    expect(prismaMock.task.create).not.toHaveBeenCalled();
+    expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
+  });
+
+  it('GET /api/v1/tasks/:id with valid-shape UUID but missing row returns 404 TASK_NOT_FOUND', async () => {
+    prismaMock.task.findFirst.mockResolvedValueOnce(null);
+
+    const app = createApp();
+    const response = await request(app).get('/api/v1/tasks/99999999-9999-9999-9999-999999999999');
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({
+      error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
+    });
+    expect(prismaMock.task.findFirst).toHaveBeenCalledTimes(1);
   });
 
   it('POST /api/v1/tasks creates a feature task', async () => {
@@ -756,7 +822,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findFirst.mockResolvedValue(null);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks/missing');
+    const response = await request(app).get('/api/v1/tasks/99999999-9999-9999-9999-999999999999');
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({

@@ -16,7 +16,8 @@ import {
   normalizeString,
   normalizeTags,
   parseDate,
-  parseLimit
+  parseLimit,
+  parseTaskId
 } from './tasks/_validation.ts';
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
@@ -205,7 +206,8 @@ tasksRouter.get('/tasks', async (req, res, next) => {
 
 tasksRouter.get('/tasks/:id', async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = parseTaskId(req.params.id);
+    if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
 
     const task = await prisma.task.findFirst({
       where: { id, archivedAt: null },
@@ -300,7 +302,8 @@ tasksRouter.post('/tasks', async (req, res, next) => {
 
 tasksRouter.patch('/tasks/:id', async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = parseTaskId(req.params.id);
+    if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
@@ -439,7 +442,8 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
 tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = parseTaskId(req.params.id);
+    if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
     // Comments are meta-discussion, not scope changes. The drift check
@@ -469,7 +473,8 @@ tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
 
 tasksRouter.delete('/tasks/:id', async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = parseTaskId(req.params.id);
+    if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
 
     const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
