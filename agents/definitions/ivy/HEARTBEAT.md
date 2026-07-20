@@ -41,7 +41,16 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 3. For each `acceptance` task:
    a. Check the linked PR(s) for new review comments
    b. Address comments with new commits on the same branch — read and follow the assignee section of `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
-   c. The Lobster will move the task to `done` once all PRs are merged
+   c. For each PR: check review decision and CI status:
+      ```bash
+      GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusCheckRollup \
+        --jq '{decision: .reviewDecision, ci: [.statusCheckRollup[].state]}'
+      ```
+   d. If `reviewDecision` is `APPROVED` and all CI states are `SUCCESS`: merge the PR
+      ```bash
+      GH_CONFIG_DIR=~/.config/gh-ivy gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-branch
+      ```
+   e. The Lobster moves the task to `done` once all PRs are merged
 
 4. For each `blocked` task:
    a. Read the blocked reason from the task
@@ -54,7 +63,7 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 
 - Never patch task `status` - the Lobster owns transitions
 - Never open multiple PRs for the same AC - one Tom PR (if needed) and one Quinn PR max
-- Never close a PR unilaterally - let the approver merge
+- Never close a PR — merge only after the reviewer has approved and CI is green
 - Always write `[ivy-prs]` comment with the exact URL format the Lobster parses
 - Always check the ACs in PR body match the ACs in the task body
 

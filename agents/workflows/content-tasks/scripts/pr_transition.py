@@ -16,6 +16,7 @@ from common import (
     gh_pr_assignees,
     gh_pr_ci_checks,
     gh_pr_ci_state,
+    gh_pr_reviewers,
     heading_level,
     is_at,
     is_past,
@@ -108,6 +109,7 @@ def pr_heading_urls(task: dict) -> list[str]:
 
 QUINN_LOGINS = {"quinnstoffer"}
 TOM_LOGINS = {"stoff81"}
+IVY_LOGINS = {"ivystoffer"}
 
 
 def _heading_index_for_assignees(assignees: list[str]) -> int | None:
@@ -120,12 +122,38 @@ def _heading_index_for_assignees(assignees: list[str]) -> int | None:
     return None
 
 
+def _heading_index_for_pr(url: str) -> int | None:
+    """Return heading index for a PR.
+
+    Checks assignees first (legacy pattern where Quinn/Tom are assigned).
+    When Ivy self-assigns, falls back to reviewer logins to determine section.
+    Quinn reviewer → 0, Tom reviewer → 1.
+    """
+    try:
+        assignees = gh_pr_assignees(url)
+        idx = _heading_index_for_assignees(assignees)
+        if idx is not None:
+            return idx
+    except Exception:
+        pass
+    try:
+        reviewers = gh_pr_reviewers(url)
+        reviewer_logins = {r.lower() for r in reviewers if r}
+        if reviewer_logins & QUINN_LOGINS:
+            return 0
+        if reviewer_logins & TOM_LOGINS:
+            return 1
+    except Exception:
+        pass
+    return None
+
+
 def url_to_heading_index(url: str, pr_urls: list[str], description: str = "") -> int | None:
     """Map a PR URL to its owner heading index.
 
     Priority order:
     1. Scan owner sections in the description (URL already injected).
-    2. Look up PR assignees: quinnstoffer → 0 (Quinn), Stoff81 → 1 (Tom).
+    2. Look up PR assignees (legacy) or reviewers (Ivy self-assign flow).
     3. Fall back to reversed-position formula (fragile, last resort).
     """
     if not url or url not in pr_urls:
@@ -134,12 +162,9 @@ def url_to_heading_index(url: str, pr_urls: list[str], description: str = "") ->
         for idx, (block_text, _) in enumerate(owner_sections(description)):
             if url in block_text:
                 return idx
-    try:
-        idx = _heading_index_for_assignees(gh_pr_assignees(url))
-        if idx is not None:
-            return idx
-    except Exception:
-        pass
+    idx = _heading_index_for_pr(url)
+    if idx is not None:
+        return idx
     pos = pr_urls.index(url)
     return 1 - pos  # last resort: pr_urls[0] → Tom(1), pr_urls[1] → Quinn(0)
 
@@ -162,12 +187,8 @@ def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str
         pr_num_match = re.search(r"pull/(\d+)", url or "")
         pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
 
-        # Determine target heading by assignee first, fall back to first empty heading.
-        target_idx: int | None = None
-        try:
-            target_idx = _heading_index_for_assignees(gh_pr_assignees(url))
-        except Exception:
-            pass
+        # Determine target heading by assignee/reviewer, fall back to first empty heading.
+        target_idx: int | None = _heading_index_for_pr(url)
 
         if target_idx is not None:
             # Inject into the assignee-matched heading if it doesn't already have a PR URL.
@@ -327,15 +348,16 @@ def main() -> int:
                     failures.extend(ac_fails)
                     # Assignee check: heading_idx 0 = Quinn's section, 1 = Tom's section
                     assignees = gh_pr_assignees(url)
+                    # Accept ivy self-assign (new flow) or legacy approver-assign
                     expected_assignees = {
-                        0: {"quinnstoffer"},  # Quinn's PR → assign to Quinn
-                        1: {"Stoff81"},       # Tom's PR → assign to Tom
+                        0: {"quinnstoffer"} | IVY_LOGINS,  # Quinn's PR → Quinn or Ivy
+                        1: {"Stoff81"} | IVY_LOGINS,       # Tom's PR → Tom or Ivy
                     }
                     expected = expected_assignees.get(heading_idx, set())
                     if expected and not expected.intersection(set(assignees)):
                         failures.append(
-                            f"{url} is not assigned to {expected} — "
-                            f"PR must be assigned to the owner ({'Quinn' if heading_idx == 0 else 'Tom'})."
+                            f"{url} is not assigned to one of {expected} — "
+                            f"PR must be assigned to Ivy (self-merge flow) or the owner ({'Quinn' if heading_idx == 0 else 'Tom'})."
                         )
             except Exception as exc:
                 failures.append(f"Could not inspect PR description for {url}: {exc}")
