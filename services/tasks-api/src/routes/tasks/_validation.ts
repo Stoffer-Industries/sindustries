@@ -46,6 +46,20 @@ export function normalizeDependsOnIds(value) {
   return normalized;
 }
 
+/**
+ * Validate a task id from a route param. Returns the trimmed id when it
+ * matches the canonical 36-char dashed UUID shape, otherwise null. Routes
+ * should map null → 400 INVALID_TASK_ID so a malformed identifier surfaces
+ * as a clear client error instead of leaking Prisma's "Inconsistent column
+ * data: invalid UUID length" P2023 as a generic 500. The trim is defensive:
+ * URL-encoded path segments can carry stray whitespace.
+ */
+export function parseTaskId(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return uuidPattern.test(trimmed) ? trimmed : null;
+}
+
 export function acceptanceCriteriaText(description) {
   if (!description) return [];
   const criteria = [];
