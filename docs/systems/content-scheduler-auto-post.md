@@ -115,6 +115,41 @@ The product truth remains the existing Content Scheduler model (`status` / `sche
 
 ---
 
+## In-process adapter: durability and isolation limitations
+
+The default `JobSchedulerAdapter` is the in-process implementation (`services/tasks-api/src/routes/contentSchedulerJobs.inProcess.ts`). It is correct for local development but has two failure modes every operator must understand before relying on auto-post in any non-local environment.
+
+### Durability: pending jobs are lost on process restart
+
+The in-process adapter stores every pending job in a single `Map<string, Entry>` (line 46) keyed by an internal job id and fires each one with `setTimeout` + `unref()` (lines 97–112). There is no disk persistence, no replay log, and no recovery path on boot. Any pending job is silently lost on:
+
+- a clean API restart (deploy, signal-triggered shutdown, container scale-in);
+- an API crash (out-of-memory, unhandled rejection, host reboot);
+- `setTimeout` reaching its unref'd tail in a busy event loop — the timer is intentionally not ref'd so it never blocks process exit, but this also means it can be dropped before firing.
+
+Recovery for lost jobs is manual: Tom clicks the existing Publish button on each affected item (the route calls `publishContentSchedulerItem`, the same code path the worker would have used). Bulk re-hydration from the DB is not wired into the in-process adapter.
+
+### Isolation: the worker entrypoint's Map is a separate, empty instance
+
+`npm run content-scheduler:worker` boots `services/tasks-api/src/autoPostWorkerMain.ts`, which calls `createInProcessJobSchedulerAdapter()` (line 21) and `setJobSchedulerAdapter(adapter, 'in-process')`. That adapter instantiates its OWN local `Map<string, Entry>` inside the worker process — a different map from the one in the API process. Consequence:
+
+- The worker process never receives delayed jobs enqueued by the API.
+- The worker process only fires jobs its own boot path enqueued — and the worker has no enqueue path. It only attaches a handler to the in-process adapter via `adapter.setHandler(...)`.
+- Result: the worker runs, accepts `SIGINT` cleanly, and processes zero jobs against API-enqueued work.
+- The auto-post worker is therefore a **silent no-op** against API-enqueued jobs while `CONTENT_SCHEDULER_JOB_ADAPTER=in-process`. Running `npm run content-scheduler:worker` does not pick up any in-flight jobs the API scheduled, even though both processes are healthy and reachable.
+
+### When the in-process adapter is appropriate
+
+The in-process adapter is fine for local development and short-lived single-process deploys where losing a handful of scheduled posts to a restart is acceptable. It is **not** appropriate for any environment where:
+
+- API processes can restart or crash (all current candidate deploy targets);
+- the API and the worker run as separate processes (all current candidate deploy topologies);
+- automatic recovery of `approved` items with `scheduledFor > now` after boot is required.
+
+The production fix is to switch to the BullMQ adapter (`services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts`) by setting `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq` plus a Redis URL; both processes then enqueue and consume against the same Redis-backed queue, so jobs survive restarts and the worker entrypoint becomes a real consumer. The BullMQ adapter is currently a throw-stub and requires wiring before the swap.
+
+---
+
 ## Runbook notes and common failure modes
 
 ### "Item is `approved` with `scheduledFor` but never auto-posts"
