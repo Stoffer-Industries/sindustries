@@ -80,7 +80,7 @@ def needs_curation(item: dict[str, Any], recuration_days: int) -> bool:
     if not last:
         return True
     try:
-        last_dt = dt.datetime.fromisoformat(last)
+        last_dt = dt.datetime.fromisoformat(last.replace("Z", "+00:00"))
         age = dt.datetime.now(dt.timezone.utc) - last_dt
         return age.days >= recuration_days
     except Exception:
@@ -108,7 +108,7 @@ def _curation_age_days(curation: dict[str, Any]) -> int | None:
     if not last:
         return None
     try:
-        last_dt = dt.datetime.fromisoformat(last)
+        last_dt = dt.datetime.fromisoformat(last.replace("Z", "+00:00"))
         return (dt.datetime.now(dt.timezone.utc) - last_dt).days
     except Exception:
         return None
