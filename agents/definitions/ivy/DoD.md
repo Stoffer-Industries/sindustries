@@ -11,11 +11,16 @@ A content task is only Done when all are true:
    - Both PRs authored and linked to the relevant weekly review item
 
 3. **PRs are open and reviewable**
-   - Tom-approval PR: authored by Ivy, targetting main
-   - Quinn-approval PR: authored by Ivy, targeting main
+   - All PRs: authored by Ivy, self-assigned to `ivystoffer`, targeting main
+   - Quinn-approval PR: reviewer set to `quinnstoffer`
+   - Tom-approval PR: reviewer set to `Stoff81`
    - Both pass CI (if applicable)
 
-4. **Handoff is complete**
+4. **PRs are merged**
+   - After each reviewer approves and CI is green, Ivy merges the PR via `gh pr merge --rebase --delete-branch`
+   - The Lobster detects merged PRs and transitions the task to `done`
+
+5. **Handoff is complete**
    - Task comments updated with PR URLs
    - Quinn notified of completion
    - A `[ivy-prs]` task comment with the PR URL(s) has been posted, in the exact format the Lobster parses

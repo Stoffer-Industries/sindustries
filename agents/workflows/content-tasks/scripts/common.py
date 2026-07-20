@@ -381,6 +381,22 @@ def gh_pr_review_decision(url: str) -> str:
     return decision.strip().upper() if isinstance(decision, str) and decision.strip() else "UNKNOWN"
 
 
+def gh_pr_reviewers(url: str) -> list[str]:
+    """Return login names of all reviewers (requested + completed) for a PR."""
+    pr = gh_pr_view(url, ["reviewRequests", "reviews"])
+    logins: list[str] = []
+    for entry in pr.get("reviewRequests") or []:
+        login = entry.get("login")
+        if login and login not in logins:
+            logins.append(login)
+    for review in pr.get("reviews") or []:
+        author = review.get("author")
+        login = author.get("login") if isinstance(author, dict) else None
+        if login and login not in logins:
+            logins.append(login)
+    return logins
+
+
 def gh_pr_review_comments(url: str) -> list[dict[str, Any]]:
     parsed = parse_pr_url(url)
     if parsed is None:

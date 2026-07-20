@@ -30,10 +30,10 @@ Use `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills
 ### 3. Decide which PRs to open
 
 The task body's PR headings tell me who must approve:
-- **Quinn-approval section** -> I open a Quinn PR (Quinn reviews and merges)
-- **Tom-approval section** -> I open a Tom PR (Tom reviews and merges)
+- **Quinn-approval section** -> I open a Quinn PR (Quinn reviews; I merge after approval)
+- **Tom-approval section** -> I open a Tom PR (Tom reviews; I merge after approval)
 - **No Tom section in task** -> I do not open a Tom PR; Quinn approval is enough
-- **Both sections** -> I open two PRs (one per approver)
+- **Both sections** -> I open two PRs (one per approver); I merge each after its reviewer approves
 
 **Risk classification (from sindustries-copy skill) — use this when labelling:**
 - `low` → Quinn approves: factual metadata, stack updates, experiment status changes with evidence, `currentLearning` additions
@@ -73,21 +73,24 @@ GH_CONFIG_DIR=~/.config/gh-ivy git -C ~/workspaces/ivy/sindustries push -u origi
 
 Always tag with the `content-task` label: `GH_CONFIG_DIR=~/.config/gh-ivy gh pr create --label "content-task" ...`
 
-**PR assignees (required):**
-- Quinn-approval PR → `--assignee quinnstoffer`
-- Tom-approval PR → `--assignee Stoff81`
+**PR assignees and reviewers (required):**
+- Ivy self-assigns all PRs: `--assignee ivystoffer`
+- Quinn-approval PR → `--reviewer quinnstoffer`
+- Tom-approval PR → `--reviewer Stoff81`
 
 ```bash
 # Quinn PR example
 GH_CONFIG_DIR=~/.config/gh-ivy gh pr create \
   --title "content: ... (Quinn-approval)" \
-  --assignee quinnstoffer \
+  --assignee ivystoffer \
+  --reviewer quinnstoffer \
   --label "content-task" ...
 
 # Tom PR example
 GH_CONFIG_DIR=~/.config/gh-ivy gh pr create \
   --title "content: ... (Tom-approval)" \
-  --assignee Stoff81 \
+  --assignee ivystoffer \
+  --reviewer Stoff81 \
   --label "content-task" ...
 ```
 
@@ -119,13 +122,24 @@ Post this as a task comment immediately after opening the PR(s). The Lobster wil
 
 **If a PR is closed and I need to retry:** Post a new `[ivy-prs]` comment with the replacement PR URLs. The Lobster always reads the most recent `[ivy-prs]` comment, so the new one supersedes the old.
 
-### 6. Respond to review
+### 6. Respond to review and merge
 
 While the task is in `acceptance`:
 - Monitor both PRs for review comments
 - Address feedback with new commits on the same branch (never open a new PR)
 - Reply to review threads using `GH_CONFIG_DIR=~/.config/gh-ivy gh pr comment <url> --body "..."` — always use the ivy prefix or comments appear as rowanstoffer
-- When a review is satisfied, comment on the PR and it will be merged by the approver
+- Once the reviewer has approved (`reviewDecision: APPROVED`) and CI is green, **merge the PR yourself**:
+
+```bash
+GH_CONFIG_DIR=~/.config/gh-ivy gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-branch
+```
+
+Check review decision before merging:
+```bash
+GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusCheckRollup --jq '{decision: .reviewDecision, ci: [.statusCheckRollup[].state]}'
+```
+
+Merge only when `reviewDecision` is `APPROVED` and all CI states are `SUCCESS`. The Lobster detects the merged PR and moves the task to `done`.
 
 ### 7. Status transitions are NOT my job
 
