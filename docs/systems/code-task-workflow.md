@@ -149,3 +149,7 @@ A code task implementation PR should:
 - include validation results;
 - update relevant `docs/systems/` docs, or include `[no-system-spec-change] <reason>`;
 - update the source audit ledger line if the task came from an audit.
+
+## Tasks using this workflow
+
+- [`f77b7a60-225c-445c-b3d9-042e38a86cde`](https://github.com/Stoffer-Industries/sindustries/pull/276) — initial implementation of the code-task lobster extension (this doc was authored as part of that task's deliverable).
