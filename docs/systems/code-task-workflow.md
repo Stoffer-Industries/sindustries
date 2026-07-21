@@ -1,7 +1,7 @@
 # Code Task Workflow
 
 **Type:** System reference
-**Last updated:** 2026-07-15
+**Last updated:** 2026-07-22
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries`
 
@@ -12,6 +12,39 @@
 Code tasks track implementation work that changes existing code without adding a new product capability. They cover bug fixes, security hardening, maintenance, refactors, migrations, dependency work, and architecture/service-boundary corrections.
 
 They are lighter than feature tasks: no product spec is required. They still need enough design and review to keep risky code changes visible.
+
+---
+
+## Pipeline
+
+Code tasks flow through a simplified lobster pipeline that skips the product spec machinery entirely:
+
+```
+open ──────→ ready ──────→ doing ──────→ acceptance ──────→ done
+  ↓             ↓             ↓              ↓
+blocked      blocked      in-flight      blocked (PR review)
+  ↓             ↓             ↓              ↓
+code-task-   code-task-   code-task-     code-task-
+ready-       ready-       verify-        verify-
+checks       checks       delivery       delivery
+```
+
+The lobster dispatches `taskType: code` tasks through `agents/workflows/feature-task/code-task.lobster.yaml`. The same Rust binary that runs the feature-task pipeline is reused; the YAML selects a smaller set of subcommands.
+
+### Stage mapping
+
+| Code-task stage | Feature-task stage | Difference |
+|---|---|---|
+| `code-task-ready-checks` | `ready_checks` + `spec_check` | Spec machinery removed; tech design gate is optional (`[tech-design]` + `[tech-design-approved] true` **or** `[tech-design-not-required] <reason>`) |
+| `code-task-verify-delivery` | `verify_delivery` | Spec drift check removed; no `specChecksum` writes |
+| `feedback_aggregate` | `feedback_aggregate` | Reused unchanged |
+| `post_merge` | `post_merge` | Reused unchanged; `archive_done_task_spec()` no-ops when no `**Spec:**` is present |
+
+### `LobsterState.workflow`
+
+Code-task state comments persist `workflow: "code-task-workflow"` in the `[lobster-state]` block (versus `"feature-task-workflow"` for feature tasks). `agents/workflows/feature-task/src/main.rs::workflow_for_task` picks the right value from `task.taskType` on every read so the two pipelines stay distinguishable on re-runs.
+
+Progress-checklist comments use `[code-task-progress-checklist]` and `[code-task-blocked]` tags (versus `[feature-task-progress-checklist]` and `[feature-task-blocked]`).
 
 ---
 

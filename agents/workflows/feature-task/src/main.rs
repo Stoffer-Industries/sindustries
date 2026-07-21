@@ -15,6 +15,7 @@ use std::{
 
 const AUTHOR: &str = "Lobster";
 const WORKFLOW: &str = "feature-task-workflow";
+const CODE_TASK_WORKFLOW: &str = "code-task-workflow";
 const STATE_TAG: &str = "[lobster-state]";
 const STATUS_ORDER: [&str; 5] = ["open", "ready", "doing", "acceptance", "done"];
 
@@ -38,6 +39,8 @@ enum Commands {
     VerifyDelivery(StageArgs),
     FeedbackAggregate(StageArgs),
     PostMerge(StageArgs),
+    CodeTaskReadyChecks(StageArgs),
+    CodeTaskVerifyDelivery(StageArgs),
 }
 
 #[derive(Parser, Clone)]
@@ -189,6 +192,8 @@ fn main() -> Result<()> {
         Commands::VerifyDelivery(args) => verify_delivery(args)?,
         Commands::FeedbackAggregate(args) => feedback_aggregate(args)?,
         Commands::PostMerge(args) => post_merge(args)?,
+        Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
+        Commands::CodeTaskVerifyDelivery(args) => code_task_verify_delivery(args)?,
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
     Ok(())
@@ -208,7 +213,13 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
-        return block_with_manual_block(&args, env, "spec_check", manual_failures);
+        return block_with_manual_block(
+            &args,
+            env,
+            "spec_check",
+            manual_failures,
+            "[feature-task-blocked]",
+        );
     }
     if !args.dry_run {
         env = move_approved_chat_spec_if_needed(&args, env)?;
@@ -247,7 +258,15 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
     if failures.is_empty() && !args.dry_run {
         mirror_task_approval_to_brain_spec_if_needed(&env.task, &args.repo, workspace_root(&args))?;
     }
-    transition_or_block(&args, env, "ready", "spec_check", failures)
+    transition_or_block(
+        &args,
+        env,
+        "ready",
+        "spec_check",
+        failures,
+        "[feature-task-progress-checklist]",
+        "Feature task workflow moved task to `ready`.",
+    )
 }
 
 fn ready_checks(args: StageArgs) -> Result<Envelope> {
@@ -257,7 +276,13 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
-        return block_with_manual_block(&args, env, "ready_checks", manual_failures);
+        return block_with_manual_block(
+            &args,
+            env,
+            "ready_checks",
+            manual_failures,
+            "[feature-task-blocked]",
+        );
     }
     if is_past(&env.task, "ready") {
         env.already_past = true;
@@ -288,7 +313,180 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
             implementer,
         ));
     }
-    transition_or_block(&args, env, "doing", "ready_checks", failures)
+    transition_or_block(
+        &args,
+        env,
+        "doing",
+        "ready_checks",
+        failures,
+        "[feature-task-progress-checklist]",
+        "Feature task workflow moved task to `doing`.",
+    )
+}
+
+// ---- Code-task stages (task f77b7a60) ----
+//
+// `code-task-ready-checks` and `code-task-verify-delivery` mirror
+// `ready_checks` and `verify_delivery` for `taskType: code` tasks. They:
+//   * Skip the spec-drift machinery entirely — code tasks have no
+//     `**Spec:**` line and no `specChecksum`.
+//   * Set `LobsterState.workflow` to `"code-task-workflow"` on every state
+//     comment so feature and code task state stay distinguishable.
+//   * Use `[code-task-progress-checklist]` and `[code-task-blocked]` comment
+//     tags instead of the feature-task equivalents.
+//   * Replace the strict tech-design gate with an optional gate: either
+//     `[tech-design]` + `[tech-design-approved] true`, or an explicit
+//     `[tech-design-not-required] <reason>` waiver.
+//
+// `feedback_aggregate` and `post_merge` are reused unchanged: their only
+// task-type-specific behaviour is reading `[implementer-prs]` and reviewing
+// PRs, both of which work identically for feature and code tasks.
+
+fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
+    let mut env = read_envelope()?;
+    env.lobster_state.workflow = workflow_for_task(&env.task);
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(
+            &args,
+            env,
+            "code_task_ready_checks",
+            manual_failures,
+            "[code-task-blocked]",
+        );
+    }
+    if is_past(&env.task, "ready") {
+        env.already_past = true;
+        env.criteria_met = true;
+        env.action_taken = "already_past_ready".to_string();
+        return Ok(env);
+    }
+    let mut failures = Vec::new();
+    // Tech design gate is optional: either an approved tech design or an
+    // explicit waiver must be present. If both are present, prefer the
+    // approved design (a waiver without an approved design is fine for
+    // small tasks).
+    let has_tech_design = tech_design_url(&env.task).is_some();
+    let has_tech_design_approved = tech_design_approved(&env.task);
+    let has_waiver = tech_design_waived(&env.task);
+    if !has_tech_design && !has_waiver {
+        failures.push(
+            "Missing task comment `[tech-design] <url>` or `[tech-design-not-required] <reason>`."
+                .to_string(),
+        );
+    } else if has_tech_design && !has_tech_design_approved && !has_waiver {
+        failures.push("Missing task comment `[tech-design-approved] true`.".to_string());
+    }
+    let implementer = task_implementer(&env.task);
+    if implementer.is_none() {
+        failures
+            .push("Task must have an assignee/implementer before moving to `doing`.".to_string());
+    }
+    if let (Some(implementer), Ok(tasks)) = (
+        implementer.as_deref(),
+        list_active_feature_tasks(&args.base_url),
+    ) {
+        let current_id = &env.task.id;
+        failures.extend(implementer_doing_capacity_failures(
+            &tasks,
+            current_id,
+            implementer,
+        ));
+    }
+    transition_or_block(
+        &args,
+        env,
+        "doing",
+        "code_task_ready_checks",
+        failures,
+        "[code-task-progress-checklist]",
+        "Code task workflow moved task to `doing`.",
+    )
+}
+
+fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
+    let mut env = read_envelope()?;
+    env.lobster_state.workflow = workflow_for_task(&env.task);
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(
+            &args,
+            env,
+            "code_task_verify_delivery",
+            manual_failures,
+            "[code-task-blocked]",
+        );
+    }
+    if is_past(&env.task, "doing") {
+        env.already_past = true;
+        env.criteria_met = true;
+        env.action_taken = "already_past_doing".to_string();
+        return Ok(env);
+    }
+    let mut failures = Vec::new();
+    let pr_urls = implementer_pr_urls(&env.task);
+    if pr_urls.is_empty() {
+        failures
+            .push("Missing `[implementer-prs]` task comment with at least one PR URL.".to_string());
+    }
+    env.lobster_state.pr_urls = pr_urls.clone();
+    let task_acs = task_description_acs(&env.task.description.clone().unwrap_or_default());
+    let latest_pr_url = pr_urls.iter().max_by_key(|url| pr_number(url)).cloned();
+    for url in &pr_urls {
+        let review = inspect_pr(url);
+        match review {
+            Ok(r) => {
+                if let Some(failure) = verify_delivery_review_failure(url, r) {
+                    failures.push(failure);
+                }
+            }
+            Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
+        }
+        if let Ok(body) = pr_body(url) {
+            if !body_has_checked_acceptance(&body) {
+                failures.push(format!(
+                    "PR {url} does not show checked acceptance criteria in its body."
+                ));
+            }
+            for ac_failure in verify_pr_acs_failures(&body) {
+                failures.push(format!("PR {url} — {ac_failure}"));
+            }
+        }
+    }
+    if let Some(url) = &latest_pr_url {
+        match pr_body(url) {
+            Ok(body) => {
+                for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
+                    failures.push(format!("PR {url} — {ac_failure}"));
+                }
+                let decl = body_system_spec_decl(&body);
+                failures.extend(system_spec_pr_body_failures(&decl, url, &env.task));
+            }
+            Err(err) => {
+                failures.push(format!(
+                    "Could not read PR body for {url}: {err}. Cannot validate AC text or system spec."
+                ));
+            }
+        }
+    } else if !pr_urls.is_empty() {
+        failures.push("Could not determine latest PR URL to validate system spec.".to_string());
+    }
+    if workstreams(&env.task).is_empty() {
+        failures.push("Task description must include at least one workstream.".to_string());
+    }
+    if openclaw_needed(&env.task) && !openclaw_done(&env.task) {
+        failures
+            .push("`[openclaw-needed]` is present but `[openclaw-done]` is missing.".to_string());
+    }
+    transition_or_block(
+        &args,
+        env,
+        "acceptance",
+        "code_task_verify_delivery",
+        failures,
+        "[code-task-progress-checklist]",
+        "Code task workflow moved task to `acceptance`.",
+    )
 }
 
 fn verify_delivery(args: StageArgs) -> Result<Envelope> {
@@ -298,7 +496,13 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
-        return block_with_manual_block(&args, env, "verify_delivery", manual_failures);
+        return block_with_manual_block(
+            &args,
+            env,
+            "verify_delivery",
+            manual_failures,
+            "[feature-task-blocked]",
+        );
     }
     if is_past(&env.task, "doing") {
         env.already_past = true;
@@ -365,7 +569,15 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         failures
             .push("`[openclaw-needed]` is present but `[openclaw-done]` is missing.".to_string());
     }
-    transition_or_block(&args, env, "acceptance", "verify_delivery", failures)
+    transition_or_block(
+        &args,
+        env,
+        "acceptance",
+        "verify_delivery",
+        failures,
+        "[feature-task-progress-checklist]",
+        "Feature task workflow moved task to `acceptance`.",
+    )
 }
 
 fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
@@ -375,7 +587,13 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
-        return block_with_manual_block(&args, env, "feedback_aggregate", manual_failures);
+        return block_with_manual_block(
+            &args,
+            env,
+            "feedback_aggregate",
+            manual_failures,
+            "[feature-task-blocked]",
+        );
     }
     let mut failures = Vec::new();
     for url in implementer_pr_urls(&env.task) {
@@ -771,7 +989,13 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     // feature task for full implementation.
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
-        return block_with_manual_block(&args, env, "post_merge", manual_failures);
+        return block_with_manual_block(
+            &args,
+            env,
+            "post_merge",
+            manual_failures,
+            "[feature-task-blocked]",
+        );
     }
 
     // If the task has unchecked ACs that don't appear in any merged PR body, those ACs
@@ -858,7 +1082,15 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
     }
-    let env = transition_or_block(&args, env, "done", "post_merge", failures)?;
+    let env = transition_or_block(
+        &args,
+        env,
+        "done",
+        "post_merge",
+        failures,
+        "[feature-task-progress-checklist]",
+        "Feature task workflow moved task to `done`.",
+    )?;
     // If the transition succeeded, archive the task spec into brain/tasks/specs/done/
     // and rewrite the description's Spec line. Idempotent: re-running post_merge
     // on an already-archived task is a no-op.
@@ -909,12 +1141,18 @@ fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Resul
     Ok(env)
 }
 
+/// `comment_tag` is the bracket tag written on the progress-checklist
+/// comment when failures are present (e.g. `[feature-task-progress-checklist]`
+/// or `[code-task-progress-checklist]`). `move_message` is the human prose
+/// prepended to the `[lobster-state]` write when the task transitions.
 fn transition_or_block(
     args: &StageArgs,
     mut env: Envelope,
     next_status: &str,
     action: &str,
     failures: Vec<String>,
+    comment_tag: &str,
+    move_message: &str,
 ) -> Result<Envelope> {
     env.failures = failures.clone();
     env.criteria_met = failures.is_empty();
@@ -943,9 +1181,7 @@ fn transition_or_block(
                 &args.base_url,
                 &env.task.id,
                 &env.lobster_state,
-                Some(&format!(
-                    "Feature task workflow moved task to `{next_status}`."
-                )),
+                Some(move_message),
             ) {
                 if let Some(message) = spec_checksum_mismatch_message(&err) {
                     env.criteria_met = false;
@@ -964,7 +1200,7 @@ fn transition_or_block(
             if let Err(err) = add_comment(
                 &args.base_url,
                 &env.task.id,
-                &format!("[feature-task-progress-checklist]\n{}", failures.join("\n")),
+                &format!("{comment_tag}\n{}", failures.join("\n")),
             ) {
                 if let Some(message) = spec_checksum_mismatch_message(&err) {
                     env.action_taken = format!("{action}_blocked_spec_drift");
@@ -1986,11 +2222,14 @@ fn manual_block_failures(task: &Task) -> Vec<String> {
     }
 }
 
+/// `comment_tag` is the bracket tag written on the manual-block comment
+/// (e.g. `[feature-task-blocked]` or `[code-task-blocked]`).
 fn block_with_manual_block(
     args: &StageArgs,
     mut env: Envelope,
     action: &str,
     failures: Vec<String>,
+    comment_tag: &str,
 ) -> Result<Envelope> {
     env.criteria_met = false;
     env.action_taken = format!("{action}_blocked");
@@ -2004,7 +2243,7 @@ fn block_with_manual_block(
         if let Err(err) = add_comment(
             &args.base_url,
             &env.task.id,
-            &format!("[feature-task-blocked]\n{}", failures.join("\n")),
+            &format!("{comment_tag}\n{}", failures.join("\n")),
         ) {
             if let Some(message) = spec_checksum_mismatch_message(&err) {
                 env.action_taken = format!("{action}_blocked_spec_drift");
@@ -2215,8 +2454,21 @@ fn parse_lobster_state(task: &Task) -> LobsterState {
             state = parsed;
         }
     }
-    state.workflow = WORKFLOW.to_string();
+    // Pick the workflow string from the task's `taskType` so feature and
+    // code task state comments stay distinguishable on subsequent reads.
+    state.workflow = workflow_for_task(task);
     state
+}
+
+/// Return the LobsterState `workflow` value that should be persisted for a
+/// given task. Code tasks (`taskType: code`) use a distinct workflow string
+/// so the code-task pipeline can be told apart from the feature-task
+/// pipeline on re-runs.
+fn workflow_for_task(task: &Task) -> String {
+    match task.task_type.as_deref() {
+        Some("code") => CODE_TASK_WORKFLOW.to_string(),
+        _ => WORKFLOW.to_string(),
+    }
 }
 
 fn status_rank(status: &str) -> usize {
@@ -2667,6 +2919,16 @@ fn tech_design_approved(task: &Task) -> bool {
             let token = v.trim_start().split_whitespace().next().unwrap_or("");
             token.eq_ignore_ascii_case("true")
         })
+}
+
+/// True if any task comment starts with `[tech-design-not-required]` followed
+/// by a non-empty rationale. Used by the code-task lobster to allow code
+/// tasks to skip the tech design gate when they are small enough not to
+/// warrant one.
+fn tech_design_waived(task: &Task) -> bool {
+    tagged_values(task, "[tech-design-not-required]")
+        .into_iter()
+        .any(|v| !v.trim().is_empty())
 }
 
 fn implementer_pr_urls(task: &Task) -> Vec<String> {
@@ -3254,6 +3516,120 @@ mod tests {
     fn tech_design_approved_rejects_unrelated_token() {
         let task = task_with_approval_comment("[tech-design-approved] maybe");
         assert!(!tech_design_approved(&task));
+    }
+
+    // ---- tech_design_waived (task f77b7a60) ----
+    //
+    // `[tech-design-not-required]` is the code-task lobster's escape hatch for
+    // tasks that are small enough not to warrant a full tech design. A
+    // non-empty reason after the tag satisfies the gate; an empty value
+    // (whitespace only) does not.
+
+    fn task_with_waiver_comment(text: &str) -> Task {
+        Task {
+            id: "task-waiver".to_string(),
+            comments: vec![TaskComment {
+                text: Some(text.to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn tech_design_waived_accepts_bare_reason() {
+        let task = task_with_waiver_comment("[tech-design-not-required] trivial change");
+        assert!(tech_design_waived(&task));
+    }
+
+    #[test]
+    fn tech_design_waived_accepts_leading_whitespace() {
+        let task =
+            task_with_waiver_comment("[tech-design-not-required]    trivial config tweak");
+        assert!(tech_design_waived(&task));
+    }
+
+    #[test]
+    fn tech_design_waived_rejects_missing_reason() {
+        let task = task_with_waiver_comment("[tech-design-not-required]");
+        assert!(!tech_design_waived(&task));
+    }
+
+    #[test]
+    fn tech_design_waived_rejects_whitespace_only_reason() {
+        let task = task_with_waiver_comment("[tech-design-not-required]    \t  ");
+        assert!(!tech_design_waived(&task));
+    }
+
+    #[test]
+    fn tech_design_waived_rejects_unrelated_tag() {
+        let task = task_with_waiver_comment("[tech-design-not-required-forever] nope");
+        assert!(!tech_design_waived(&task));
+    }
+
+    #[test]
+    fn tech_design_waived_picks_up_among_other_comments() {
+        let task = Task {
+            id: "task-multi".to_string(),
+            comments: vec![
+                TaskComment {
+                    text: Some("random chatter".to_string()),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some(
+                        "[tech-design-not-required] small PR — no design needed".to_string(),
+                    ),
+                    body: None,
+                },
+            ],
+            ..Task::default()
+        };
+        assert!(tech_design_waived(&task));
+    }
+
+    // ---- workflow_for_task (task f77b7a60) ----
+    //
+    // The lobster must write `code-task-workflow` to LobsterState.workflow
+    // for code tasks so feature and code task state stay distinguishable
+    // on re-runs.
+
+    #[test]
+    fn workflow_for_task_returns_code_workflow_for_code_tasks() {
+        let task = Task {
+            task_type: Some("code".to_string()),
+            ..Task::default()
+        };
+        assert_eq!(workflow_for_task(&task), "code-task-workflow");
+    }
+
+    #[test]
+    fn workflow_for_task_returns_feature_workflow_for_feature_tasks() {
+        let task = Task {
+            task_type: Some("feature".to_string()),
+            ..Task::default()
+        };
+        assert_eq!(workflow_for_task(&task), "feature-task-workflow");
+    }
+
+    #[test]
+    fn workflow_for_task_returns_feature_workflow_when_task_type_missing() {
+        let task = Task {
+            task_type: None,
+            ..Task::default()
+        };
+        assert_eq!(workflow_for_task(&task), "feature-task-workflow");
+    }
+
+    #[test]
+    fn workflow_for_task_returns_feature_workflow_for_unknown_types() {
+        // Defensive: future taskType additions should default to the
+        // feature-task workflow unless explicitly opted in.
+        let task = Task {
+            task_type: Some("research".to_string()),
+            ..Task::default()
+        };
+        assert_eq!(workflow_for_task(&task), "feature-task-workflow");
     }
 
     // ---- AC evidence parsing (task 6e70deb8) ----
@@ -4386,8 +4762,14 @@ Lead-in.
             failures: Vec::new(),
         };
         let failures = manual_block_failures(&env.task);
-        let result = block_with_manual_block(&args, env, "ready_checks", failures)
-            .expect("block_with_manual_block should not error in dry-run");
+        let result = block_with_manual_block(
+            &args,
+            env,
+            "ready_checks",
+            failures,
+            "[feature-task-blocked]",
+        )
+        .expect("block_with_manual_block should not error in dry-run");
         assert!(!result.criteria_met);
         assert_eq!(result.action_taken, "ready_checks_blocked");
         assert_eq!(result.failures.len(), 1);
@@ -4410,7 +4792,14 @@ Lead-in.
             lobster_state: LobsterState::default(),
             failures: Vec::new(),
         };
-        let result = block_with_manual_block(&args, env, "ready_checks", Vec::new()).unwrap();
+        let result = block_with_manual_block(
+            &args,
+            env,
+            "ready_checks",
+            Vec::new(),
+            "[feature-task-blocked]",
+        )
+        .unwrap();
         assert!(!result.criteria_met);
         assert_eq!(result.action_taken, "ready_checks_blocked");
         assert!(result.failures.is_empty());
