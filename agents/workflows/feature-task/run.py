@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
+FEATURE_TASK_PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
+CODE_TASK_PIPELINE = SCRIPT_DIR / "code-task.lobster.yaml"
+# Kept for backwards compatibility with any caller that imports `PIPELINE`.
+PIPELINE = FEATURE_TASK_PIPELINE
 CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
 _ff_env = os.environ.get("FEATURE_FACTORY_REPO")
 FEATURE_FACTORY_REPO = Path(_ff_env) if _ff_env else None
@@ -67,17 +70,35 @@ def list_tasks(base_url: str, status: str, limit: int) -> list[dict[str, Any]]:
 
 
 def discover_tasks(base_url: str, limit: int) -> list[dict[str, Any]]:
+    """Return every active feature or code task, paired with the pipeline YAML
+    that should run for it.
+
+    A task is dispatchable if:
+      * `taskType == "feature"` (with or without the `feature-factory` tag),
+        routed to `feature-task.lobster.yaml`; or
+      * `taskType == "code"`, routed to `code-task.lobster.yaml`.
+
+    Each task is returned exactly once even if it appears in multiple status
+    lists.
+    """
     tasks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for status in ("open", "ready", "doing", "acceptance"):
         for task in list_tasks(base_url, status, limit):
             tags = task.get("tags") if isinstance(task.get("tags"), list) else []
-            if task.get("taskType") != "feature" and "feature-factory" not in tags:
+            task_type = task.get("taskType")
+            if task_type == "code":
+                pipeline = CODE_TASK_PIPELINE
+            elif task_type == "feature" or "feature-factory" in tags:
+                pipeline = FEATURE_TASK_PIPELINE
+            else:
                 continue
             task_id = str(task.get("id") or "")
-            if task_id and task_id not in seen:
-                seen.add(task_id)
-                tasks.append(task)
+            if not task_id or task_id in seen:
+                continue
+            seen.add(task_id)
+            task["_pipeline"] = str(pipeline)
+            tasks.append(task)
     return tasks
 
 
@@ -94,7 +115,7 @@ def stream_reader(pipe, prefix: str, sink: list[str]) -> None:
         pipe.close()
 
 
-def run_workflow(task_id: str, base_url: str, dry_run: bool) -> dict[str, Any]:
+def run_workflow(task_id: str, base_url: str, dry_run: bool, pipeline: Path) -> dict[str, Any]:
     args_json = json.dumps(
         {
             "taskId": task_id,
@@ -104,7 +125,7 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool) -> dict[str, Any]:
             "dryRun": dry_run,
         }
     )
-    cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
+    cmd = ["lobster", "run", "--mode", "tool", str(pipeline), "--args-json", args_json]
     proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=workflow_env())
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -138,9 +159,24 @@ def main() -> int:
     args = parser.parse_args()
 
     tasks = discover_tasks(args.base_url, args.limit)
-    results = [run_workflow(str(task["id"]), args.base_url, args.dry_run) for task in tasks]
+    results = [
+        run_workflow(str(task["id"]), args.base_url, args.dry_run, Path(task["_pipeline"]))
+        for task in tasks
+    ]
     errors = [result for result in results if result.get("returncode") != 0 or result.get("error")]
-    print(json.dumps({"ok": not errors, "pipeline": str(PIPELINE), "count": len(tasks), "results": results, "errors": errors}, indent=2))
+    pipelines = sorted({task.get("_pipeline", str(PIPELINE)) for task in tasks})
+    print(
+        json.dumps(
+            {
+                "ok": not errors,
+                "pipelines": pipelines,
+                "count": len(tasks),
+                "results": results,
+                "errors": errors,
+            },
+            indent=2,
+        )
+    )
     return 0 if not errors else 1
 
 

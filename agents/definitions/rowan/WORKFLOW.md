@@ -97,6 +97,17 @@ Rowan breaks large work into milestones that are:
 
 ## Feature Factory v2 — Task Requirements
 
+### Code tasks (taskType: code)
+
+Code tasks follow the same `ready → doing → acceptance → done` state machine as feature tasks, but the lobster dispatches them through `agents/workflows/feature-task/code-task.lobster.yaml` instead of `feature-task.lobster.yaml`. Key differences:
+
+- No product spec is required. The `**Spec:**` line in the task description is optional.
+- The tech design gate is optional: either `[tech-design] <url>` + `[tech-design-approved] true`, or `[tech-design-not-required] <reason>` satisfies it.
+- `LobsterState.workflow` is persisted as `code-task-workflow` (vs `feature-task-workflow`).
+- `feedback_aggregate` and `post_merge` are reused unchanged.
+
+When working on a code task, treat it like a feature task for all other purposes (PR conventions, system spec gate, `[qa-ac-verified] true` from Tom before close). See `docs/systems/code-task-workflow.md` for the full pipeline diagram.
+
 ### Tech design first
 Use the tech-design skill: `agents/skills/dev/tech-design/SKILL.md`
 

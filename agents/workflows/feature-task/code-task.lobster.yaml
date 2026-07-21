@@ -1,0 +1,61 @@
+name: code-task
+
+# Code-task pipeline (task f77b7a60).
+#
+# Mirrors feature-task.lobster.yaml but dispatches `taskType: code` tasks
+# through a simplified open → ready → doing → acceptance → done flow that:
+#   * skips the product spec machinery entirely (no spec_check, no
+#     spec-drift guard, no specChecksum);
+#   * makes the tech design gate optional — either an approved tech design
+#     or an explicit `[tech-design-not-required]` waiver satisfies the gate;
+#   * reuses `feedback_aggregate` and `post_merge` unchanged.
+#
+# `feedback_aggregate` and `post_merge` are byte-identical to the feature
+# task stages: their only task-type-specific behaviour is reading
+# `[implementer-prs]` and inspecting PR review state, both of which work
+# identically for feature and code tasks.
+
+args:
+  taskId:
+    required: true
+  tasksApiBaseUrl:
+    default: ${TASKS_API_BASE_URL}
+  sindustriesRepo:
+    default: /Users/quinnstoffer/workspaces/rowan/sindustries
+  workspaceRoot:
+    default: /Users/quinnstoffer/.openclaw/workspace
+  dryRun:
+    default: false
+
+steps:
+  - id: load_task
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      load-task --base-url ${tasksApiBaseUrl} --task-id ${taskId}
+
+  - id: code_task_ready_checks
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      code-task-ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+    stdin: $load_task.stdout
+
+  - id: code_task_verify_delivery
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      code-task-verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+    stdin: $code_task_ready_checks.stdout
+    condition: $code_task_ready_checks.json.criteriaMet
+
+  - id: feedback_aggregate
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+    stdin: $code_task_verify_delivery.stdout
+    condition: $code_task_verify_delivery.json.criteriaMet
+
+  - id: post_merge
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+    stdin: $feedback_aggregate.stdout
+    condition: $feedback_aggregate.json.criteriaMet
