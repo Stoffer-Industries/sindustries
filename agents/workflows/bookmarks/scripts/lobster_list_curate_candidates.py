@@ -216,12 +216,16 @@ def main() -> int:
         seen_keys.add(bk)
         existing = items.get(bk, {})
 
-        # Check if we have a valid review on disk - if so, skip (never rewrite)
-        if existing.get("reviewDoc"):
-            review_path = WORKSPACE / existing["reviewDoc"]
+        # Check if we have a valid review or summary on disk - if so, skip (never rewrite).
+        # summaryDoc is the new-pipeline equivalent of reviewDoc.
+        _active_doc = existing.get("reviewDoc") or existing.get("summaryDoc")
+        if _active_doc:
+            review_path = WORKSPACE / _active_doc
             if review_path.exists():
                 # Review exists - check content to see if it's "implement" but no specs.
                 # Two signals: old explicit classification OR new curation score.
+                # summaryDoc format never contains the classification string, so this
+                # safely falls through to the curation-score check.
                 content = review_path.read_text()
                 has_implement_classification = (
                     "Classified as 'implement'" in content
