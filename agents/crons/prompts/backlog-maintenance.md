@@ -92,39 +92,35 @@ Do NOT auto-create spec files — spec content requires understanding the task. 
 
 ## Step 6 — Spec integrity: spec files with no task
 
-Check each open or in-progress spec file to confirm a task references it.
+Check each **open** spec file (not in-progress — those have active tasks) to confirm a task references it.
 
 ```bash
 python3 << 'EOF'
 import os, re, json, urllib.request
 
 WORKSPACE = '/Users/quinnstoffer/.openclaw/workspace'
-SPEC_DIRS = [
-    os.path.join(WORKSPACE, 'brain/tasks/specs/open'),
-    os.path.join(WORKSPACE, 'brain/tasks/specs/in-progress'),
-]
+# Only scan open/ — specs in in-progress/ belong to tasks in doing/acceptance
+SPEC_DIR = os.path.join(WORKSPACE, 'brain/tasks/specs/open')
 
-# Collect all active spec paths (relative to WORKSPACE)
+# Collect open spec paths (relative to WORKSPACE)
 spec_files = []
-for d in SPEC_DIRS:
-    if os.path.isdir(d):
-        for f in os.listdir(d):
-            if f.endswith('.md'):
-                rel = os.path.relpath(os.path.join(d, f), WORKSPACE)
-                spec_files.append(rel)
+if os.path.isdir(SPEC_DIR):
+    for f in os.listdir(SPEC_DIR):
+        if f.endswith('.md'):
+            rel = os.path.relpath(os.path.join(SPEC_DIR, f), WORKSPACE)
+            spec_files.append(rel)
 
 if not spec_files:
     print(json.dumps([]))
 else:
-    # Fetch all open tasks
-    with urllib.request.urlopen('http://localhost:4001/api/v1/tasks?status=open&limit=1000') as r:
-        tasks = json.loads(r.read())['data']
-
-    # Build set of spec paths referenced by tasks
+    # Fetch tasks across all active statuses so in-flight tasks don't look orphaned
     referenced = set()
-    for t in tasks:
-        for m in re.finditer(r'brain/tasks/specs/\S+\.md', t.get('description', '')):
-            referenced.add(m.group(0))
+    for status in ('open', 'doing', 'acceptance'):
+        url = f'http://localhost:4001/api/v1/tasks?status={status}&limit=1000'
+        with urllib.request.urlopen(url) as r:
+            for t in json.loads(r.read())['data']:
+                for m in re.finditer(r'brain/tasks/specs/\S+\.md', t.get('description', '')):
+                    referenced.add(m.group(0))
 
     orphans = [p for p in spec_files if p not in referenced]
     print(json.dumps(orphans, indent=2))
