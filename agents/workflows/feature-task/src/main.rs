@@ -457,7 +457,7 @@ fn qa_ac_verified_failures(task: &Task) -> Vec<String> {
 fn task_description_acs(description: &str) -> Vec<(String, String)> {
     let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
     re.captures_iter(description)
-        .map(|cap| (cap[1].to_string(), cap[2].trim().to_string()))
+        .map(|cap| (cap[1].to_string(), strip_trailing_evidence(cap[2].trim())))
         .collect()
 }
 
@@ -4478,6 +4478,14 @@ Lead-in.
     #[test]
     fn task_description_acs_empty_when_no_acs() {
         assert!(task_description_acs("No ACs here.").is_empty());
+    }
+
+    #[test]
+    fn task_description_acs_strips_trailing_evidence() {
+        let desc = "- [x] AC1: Do the thing (🧪 testID: my-test)\n- [ ] AC2: Other thing (⚠️ not tested: manual)\n";
+        let acs = task_description_acs(desc);
+        assert_eq!(acs[0], ("AC1".to_string(), "Do the thing".to_string()));
+        assert_eq!(acs[1], ("AC2".to_string(), "Other thing".to_string()));
     }
 
     // ---- task_ac_vs_open_pr_failures ----
