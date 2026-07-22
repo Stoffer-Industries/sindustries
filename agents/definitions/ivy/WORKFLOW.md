@@ -27,6 +27,21 @@ Use `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills
 - Title and dek
 - Claim-risk notes (which ACs need Tom approval)
 
+### 2b. Edit all copy through the no-ai-slop skill
+
+After sindustries-copy produces drafts, run every piece of copy through the no-ai-slop skill before committing it:
+
+`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/content/no-ai-slop/SKILL.md`
+
+Apply it in edit mode (default). The skill removes AI writing patterns and sharpens the voice. Key rules to apply every time:
+- Cut banned words (delve, leverage, robust, transformative, etc.)
+- Replace importance puffery with the concrete fact
+- Remove throat-clearing openers and fake-profound kickers
+- No em-dash clusters, no formatting slop (emoji in headings, bold sprinkled for emphasis)
+- End on the last concrete point — no "In conclusion" recap
+
+If you're unsure whether a line reads as AI slop, run the detect job first, then fix.
+
 ### 3. Decide which PRs to open
 
 The task body's PR headings tell me who must approve:
