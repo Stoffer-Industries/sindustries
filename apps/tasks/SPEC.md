@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-06-30
+**Last updated:** 2026-07-22
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** n/a (tasks app is a standalone surface, no cross-cutting system doc)
 
@@ -44,6 +44,8 @@ A focused task management surface for Tom and the agent team. Supports capturing
 ### 5. Assign a task
 1. User selects an assignee from a dropdown of reserved values (Tom, Quinn, Rowan, Lox, Ivy)
 2. Assignee is stored and displayed on task cards
+3. Task cards render the assignee's display name (e.g. "Quinn") in the avatar aria-label and any visible assignee text, falling back to the trimmed raw assignee when the id is not in the reserved set
+4. Task cards show the assignee's avatar image when one is set, with a graceful fallback to the existing first-letter rendering when the avatar is unset or the asset fails to load
 
 ### 6. Add and filter by priority
 1. Task priority is one of: low, medium, high, urgent (default: medium)
@@ -89,6 +91,8 @@ A focused task management surface for Tom and the agent team. Supports capturing
 | dueAt | Timestamp | Nullable |
 | completedAt | Timestamp | Set when status → done, cleared on transition away |
 | assignee | Enum | Tom, Quinn, Rowan, Lox, Ivy |
+
+The list of reserved assignees and their display metadata (id → display name, optional avatar) lives in `apps/tasks/src/users/assignees.js`. v1 ships with no avatar image files in the repo; adding real avatar assets is a separate follow-up task.
 | archivedAt | Timestamp | Soft delete |
 | tags | String[] | Ad-hoc, case-insensitive unique |
 | blockedBy | UUID[] | Dependency references |

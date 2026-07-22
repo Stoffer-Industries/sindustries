@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Avatar, Badge, Button, Card, CardContainer, Divider, DropdownOption, Field, Input, SearchInput, Toast, Tooltip } from './index.jsx';
 
@@ -102,6 +102,37 @@ describe('@sindustries/ui/react', () => {
     expect(screen.getByLabelText('Assignee Q')).toHaveClass('si-avatar');
     expect(screen.getByText('Saved')).toHaveClass('si-toast__title');
     expect(screen.getByText('Saved').closest('.si-toast')).toHaveClass('si-toast--success');
+  });
+
+  describe('Avatar', () => {
+    it('renders children text when no src is provided', () => {
+      render(<Avatar aria-label="Assignee Q">Q</Avatar>);
+      const avatar = screen.getByLabelText('Assignee Q');
+      expect(avatar).toHaveClass('si-avatar');
+      expect(avatar).toHaveTextContent('Q');
+      expect(avatar.querySelector('img')).toBeNull();
+    });
+
+    it('renders an <img> with src and alt when src is provided', () => {
+      render(<Avatar src="/avatars/quinn.png" alt="Quinn" aria-label="Assignee Quinn" />);
+      const avatar = screen.getByLabelText('Assignee Quinn');
+      const img = avatar.querySelector('img');
+      expect(img).not.toBeNull();
+      expect(img).toHaveClass('si-avatar__img');
+      expect(img).toHaveAttribute('src', '/avatars/quinn.png');
+      expect(img).toHaveAttribute('alt', 'Quinn');
+    });
+
+    it('falls back to children when the image fails to load', () => {
+      render(<Avatar src="/missing.png" alt="Quinn" aria-label="Assignee Quinn">Q</Avatar>);
+      const avatar = screen.getByLabelText('Assignee Quinn');
+      const img = avatar.querySelector('img');
+      expect(img).not.toBeNull();
+      fireEvent.error(img);
+      // After error, the children render and the img is gone.
+      expect(avatar.querySelector('img')).toBeNull();
+      expect(avatar).toHaveTextContent('Q');
+    });
   });
 
   it('renders dashed and subtle dividers', () => {

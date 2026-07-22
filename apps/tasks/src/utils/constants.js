@@ -12,7 +12,9 @@ export const PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 
 export const PRIORITY_SCORE = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-export const ASSIGNEE_OPTIONS = ['Quinn', 'Rowan', 'Lox', 'Tom', 'Ivy'];
+// Re-exported from the apps/tasks user registry so existing import sites keep working.
+// The source of truth lives in `../users/assignees.js`.
+export { ASSIGNEE_OPTIONS } from '../users/assignees.js';
 
 export const TASK_TYPES = ['content', 'code', 'research', 'feature'];
 

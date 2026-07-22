@@ -417,8 +417,17 @@
   font-weight: 900;
   height: 24px;
   justify-content: center;
+  overflow: hidden;
   text-transform: uppercase;
   width: 24px;
+}
+
+.si-avatar__img {
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
 }
 
 .si-toast-viewport {
