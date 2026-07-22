@@ -6,9 +6,9 @@ args:
   tasksApiBaseUrl:
     default: ${TASKS_API_BASE_URL}
   sindustriesRepo:
-    default: /Users/quinnstoffer/workspaces/rowan/sindustries
+    default: ${SINDUSTRIES_REPO}
   workspaceRoot:
-    default: /Users/quinnstoffer/.openclaw/workspace
+    default: ${WORKSPACE_ROOT}
   dryRun:
     default: false
 
