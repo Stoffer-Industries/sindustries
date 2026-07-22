@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export function cx(...values) {
   return values.flatMap((value) => {
@@ -178,10 +178,27 @@ export function Divider({ variant = 'subtle', className, ...props }) {
   return <hr className={cx('si-divider', `si-divider--${variant}`, className)} aria-hidden="true" {...props} />;
 }
 
-export function Avatar({ children, className, ...props }) {
+export function Avatar({ src, alt, children, className, onError, ...props }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(src) && !imageFailed;
+
+  function handleImageError(event) {
+    setImageFailed(true);
+    if (typeof onError === 'function') onError(event);
+  }
+
   return (
     <span className={cx('si-avatar', className)} {...props}>
-      {children}
+      {showImage ? (
+        <img
+          className="si-avatar__img"
+          src={src}
+          alt={alt ?? ''}
+          onError={handleImageError}
+        />
+      ) : (
+        children
+      )}
     </span>
   );
 }
