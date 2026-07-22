@@ -134,12 +134,25 @@ While the task is in `acceptance`:
 GH_CONFIG_DIR=~/.config/gh-ivy gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-branch
 ```
 
-Check review decision before merging:
+Check review decision and mergeability before merging:
 ```bash
-GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusCheckRollup --jq '{decision: .reviewDecision, ci: [.statusCheckRollup[].state]}'
+GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusCheckRollup,mergeable,mergeStateStatus --jq '{decision: .reviewDecision, ci: [.statusCheckRollup[].state], mergeable: .mergeable, mergeState: .mergeStateStatus}'
 ```
 
-Merge only when `reviewDecision` is `APPROVED` and all CI states are `SUCCESS`. The Lobster detects the merged PR and moves the task to `done`.
+**If `mergeStateStatus` is `DIRTY` (merge conflict):**
+1. Rebase the branch onto `origin/main` in my worktree (`~/workspaces/ivy/sindustries`)
+2. For JSON content files: keep all new entries from both branches (do not drop entries from either side)
+3. Force-push with `--force-with-lease` using my identity:
+   ```bash
+   GH_CONFIG_DIR=~/.config/gh-ivy git -C ~/workspaces/ivy/sindustries push origin <branch> --force-with-lease
+   ```
+4. Force-pushing dismisses any existing approval — re-request review from the original reviewer:
+   ```bash
+   GH_CONFIG_DIR=~/.config/gh-ivy gh pr edit <number> --repo Stoffer-Industries/sindustries --add-reviewer <quinnstoffer|Stoff81>
+   ```
+5. Post a task comment noting the rebase and that re-approval is needed
+
+Merge only when `reviewDecision` is `APPROVED`, `mergeStateStatus` is `CLEAN`, and all CI states are `SUCCESS`. The Lobster detects the merged PR and moves the task to `done`.
 
 ### 7. Status transitions are NOT my job
 
