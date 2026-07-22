@@ -6,7 +6,7 @@ args:
   tasksApiBaseUrl:
     default: ${TASKS_API_BASE_URL}
   sindustriesRepo:
-    default: /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+    default: ${SINDUSTRIES_REPO}
   ivyCapacityLimit:
     default: 1
   dryRun:
