@@ -62,7 +62,9 @@ Identical wording to today. If the matching subsection is empty (or missing), `p
 
 ### `verify_pr_acs_failures` is unchanged
 
-It operates on the whole section by design. Evidence format checking does not depend on which task an AC belongs to: every checked `- [x] ACn: ...` line in the PR body must carry `(testID: ...)`, `(file: ...)`, `(not tested: ...)`, or `(not code: ...)`. The function continues to scan the whole section.
+It operates on the whole section by design. Evidence format checking does not depend on which task an AC belongs to: every checked `- [x] ACn: ...` line in the PR body must carry one of the current evidence formats documented in `agents/skills/dev/pr-open/SKILL.md`. The function continues to scan the whole section.
+
+Note: this tech design predates removal of `file:` evidence. Do not treat old examples in shipped tech designs as the current process contract; `pr-open/SKILL.md` is canonical.
 
 ## Edge cases
 
