@@ -69,17 +69,11 @@ The Rust CLI under `agents/workflows/feature-task/` owns parsing, gate enforceme
 
 A stub like "No change" (< 12 non-whitespace chars) is treated as missing and blocks acceptance. **The system spec must be committed in the same PR as the feature code** — a separate backfill PR is not acceptable. No task comment is needed; the PR body section is the gate. See `agents/skills/dev/pr-open/SKILL.md` for the canonical PR body template.
 
-**AC text check (doing → acceptance, pre-merge):** before the lobster will let the task advance from `doing` to `acceptance`, it compares every task description AC against the **open** PR body. If any AC is missing from the PR, has altered text, or lacks a valid evidence annotation `(testID|file|not tested|not code)`, the transition is blocked with a `[feature-task-progress-checklist]` comment listing the specific failures — the task stays in `doing` until Rowan opens a fix PR that lists every AC verbatim with evidence. Tom may edit ACs in the task description during QA — spec drift does not block this gate (it is covered by the resync feature; see task b2ab54db).
+**AC text check (doing → acceptance, pre-merge):** before the lobster will let the task advance from `doing` to `acceptance`, it compares every task description AC against the **open** PR body. If any AC is missing from the PR, has altered text, or lacks a valid evidence annotation `(testID|not tested|not code|pr)`, the transition is blocked with a `[feature-task-progress-checklist]` comment listing the specific failures — the task stays in `doing` until Rowan opens a fix PR that lists every AC verbatim with evidence. Tom may edit ACs in the task description during QA — spec drift does not block this gate (it is covered by the resync feature; see task b2ab54db).
 
 Note: prior versions of this workflow ran an equivalent AC text check at the `post-merge` stage (the "QA bounce") that moved a task back from `acceptance` to `doing` if the latest merged PR's AC text didn't match. That path was removed because it triggered after merge, forcing a wasteful revert + fix-PR round-trip. The check now runs pre-merge so mistakes are caught before the PR is merged.
 
-**PR AC evidence formats** — priority order (use the first that applies):
-- `(🧪 testID: <id>)` — e2e (Playwright) or unit test reference. **Default — always prefer this.**
-- `(⚠️ not tested: <reason>)` — explicit opt-out; requires a substantive reason
-- `(📄 not code: <reason>)` — AC fulfilled outside the codebase (doc, spec, config)
-- `(🔗 pr: #<n>)` — covered by another merged PR
-
-`file:` has been removed (it was being used to cite implementation files rather than tests). Emojis are optional but encouraged for visual clarity in reviews.
+**PR AC evidence formats:** the canonical process lives in `agents/skills/dev/pr-open/SKILL.md`. Do not duplicate the accepted-format list here; the Lobster parser and `pr-open` skill are the source of truth. Historical note: `file:` evidence was removed because agents used it to cite implementation files rather than tests.
 
 ### 4. `done` — terminal
 
@@ -131,6 +125,69 @@ Note: prior versions of this workflow ran an equivalent AC text check at the `po
 | `cargo run -- feedback-aggregate` | `acceptance` gate | Aggregates `CHANGES_REQUESTED` feedback to Rowan |
 | `cargo run -- post-merge` | `done` gate | Verifies all PRs merged + post-merge CI green + system spec |
 | `agents/workflows/feature-task/run.py` | dispatcher | One-tick invocation: discovers active feature tasks and runs the Lobster pipeline per task |
+
+### Terminal invocation
+
+Run the normal dispatcher, which discovers active `feature` and `code` tasks and invokes the right Lobster YAML once per task:
+
+```bash
+cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  agents/workflows/feature-task/run.py --dry-run
+```
+
+Run one specific feature-task Lobster pipeline directly. If `lobster` is not on your shell `PATH`, use the OpenClaw-managed binary at `/Users/quinnstoffer/.openclaw/tools/node-v24.15.0/bin/lobster` or temporarily prepend that directory to `PATH`:
+
+```bash
+cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+export PATH="/Users/quinnstoffer/.openclaw/tools/node-v24.15.0/bin:$PATH"
+lobster run --mode tool agents/workflows/feature-task/feature-task.lobster.yaml \
+  --args-json '{"taskId":"TASK_ID_HERE","tasksApiBaseUrl":"http://localhost:4001/api/v1","sindustriesRepo":"/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries","workspaceRoot":"/Users/quinnstoffer/.openclaw/workspace","dryRun":true}'
+```
+
+Swap `feature-task.lobster.yaml` for `code-task.lobster.yaml` when manually targeting a `taskType: code` task. Set `"dryRun":false` only when you want the run to write task status/comments.
+
+Dry runs still return the gate result on stdout. Checklist-style blockers appear in the JSON envelope's `failures` array and `actionTaken` field, but dry runs do **not** post the `[feature-task-progress-checklist]` task comment. Non-dry runs both return the same failure envelope and write the task comment when the failure fingerprint is new.
+
+For a readable terminal checklist across every active feature/code task, use a temporary formatter script rather than a fragile one-line Python command:
+
+```bash
+cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+export PATH="/Users/quinnstoffer/.openclaw/tools/node-v24.15.0/bin:$PATH"
+
+cat > /tmp/feature_factory_format.py <<'PY'
+import json, sys
+
+data = json.load(sys.stdin)
+print(f"Feature factory dry-run: {data.get('count', 0)} task(s)")
+
+for result in data.get('results', []):
+    env = result.get('envelope') or {}
+    outputs = env.get('output') or []
+    final = outputs[-1] if outputs else {}
+    task = final.get('task') or {}
+    failures = final.get('failures') or []
+
+    title = task.get('title') or '(title unavailable)'
+    status = task.get('status') or '?'
+    action = final.get('actionTaken') or '?'
+    icon = '✅' if not failures and final.get('criteriaMet') else '⚠️'
+
+    print(f"\n{icon} {title}")
+    print(f"   {result.get('taskId')} · status={status} · action={action}")
+
+    if failures:
+        print('   Missing / blocked:')
+        for failure in failures:
+            print(f"   - {failure}")
+    else:
+        print('   No checklist blockers.')
+PY
+
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/workflows/feature-task/run.py --dry-run 2>/dev/null \
+  | python3 /tmp/feature_factory_format.py
+```
 
 ---
 
@@ -263,7 +320,7 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 | `PATCH` succeeds despite stale ACs | Other event types (status change, dependency add, tag edit) don't re-check the checksum | Pass the updated `description` through `PATCH /tasks/:id` first so the drift check fires there. |
 | CI green but PR not merged | Reviewer has not approved | Wait for `APPROVED` review state; Lobster will not mark `done` until GitHub merge is recorded |
 | Task bounced to `doing` from `acceptance` | (legacy — the post-merge QA bounce path was removed; AC text mismatches now block at the doing → acceptance gate before merge instead) | n/a |
-| `doing -> acceptance` blocked on AC text | Open PR body is missing an AC, has altered AC text, or lacks a valid evidence annotation `(testID|file|not tested|not code)` | Update the PR body so every task AC appears verbatim with evidence; `[feature-task-progress-checklist]` comment lists the specific failures |
+| `doing -> acceptance` blocked on AC text | Open PR body is missing an AC, has altered AC text, or lacks a valid evidence annotation `(testID|not tested|not code|pr)` | Update the PR body so every task AC appears verbatim with evidence; `[feature-task-progress-checklist]` comment lists the specific failures |
 | `acceptance -> done` blocked with "Missing `[qa-ac-verified] true`" | Tom has not signed off | Tom posts `[qa-ac-verified] true` after verifying ACs on staging |
 
 ---

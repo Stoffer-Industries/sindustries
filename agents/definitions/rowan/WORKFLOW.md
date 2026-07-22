@@ -131,6 +131,8 @@ Before writing any code on a feature task, write the tech design:
 
 ### PR requirements
 - The implementation PR body must include all parent task ACs, with `- [x]` for done and evidence annotation, or `- [ ]` for not yet done
+- Use the canonical PR AC evidence rules in `agents/skills/dev/pr-open/SKILL.md`; do not copy old examples from shipped tech designs. `file:` is **not valid** evidence.
+- Each checked AC must keep the task AC text verbatim and append canonical evidence at the end; do not rewrite the AC text to include files/tests
 - Each PR body must list which parent ACs its sub-ACs contribute to
 - Do not include the AC checklist in tech design docs or any other non-implementation PR body — ACs in a merged PR body are treated by the lobster as "covered"; only include them when the code is actually done
 

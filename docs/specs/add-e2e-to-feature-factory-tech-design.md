@@ -31,28 +31,27 @@ No `.openclaw` runtime change is required. No schema or API surface changes — 
 
 The feature factory v2 spec already states that every AC in a feature-task PR needs at least one E2E test unless explicitly marked not possible with a reason. Until now this was a human convention rather than a machine check. This task makes the lobster enforce it at the `doing → acceptance` gate.
 
-A PR is treated as compliant when each AC line in the PR body provides either:
-
-- A test reference, formatted as either `(testID: <id>)` or `(file: <path>:<test-name>)`, appended to the AC line; or
-- An explicit annotation `not tested: <reason>` justifying why no test exists.
+A PR is treated as compliant when each checked AC line in the PR body provides one of the current evidence annotations documented in `agents/skills/dev/pr-open/SKILL.md`.
 
 If any AC is checked (`- [x]`) and lacks evidence, the lobster blocks acceptance and posts a task comment listing every AC that needs evidence along with the expected formats.
 
 The PR template (in `agents/skills/dev/pr-open/SKILL.md`) prompts Rowan to attach the annotation when opening a feature-task PR so evidence is captured at write time rather than caught later.
 
+> Historical note: this tech design originally allowed `(file: ...)` evidence. That option was later removed because agents used it to cite implementation files rather than tests. Do not copy stale examples from this shipped design; `agents/skills/dev/pr-open/SKILL.md` is canonical.
+
 ## PR Body Evidence Format
 
-Each `- [x] AC<N>: <description>` line may be suffixed with one of:
+Each `- [x] AC<N>: <description>` line may be suffixed with one of the current evidence formats in `agents/skills/dev/pr-open/SKILL.md`, for example:
 
 ```markdown
-- [x] AC1: Title reflects stored value. (testID: 1234)
-- [x] AC2: Board view supports sort by priority. (file: apps/tasks/src/BoardView.jsx:42)
+- [x] AC1: Title reflects stored value. (testID: title-stored-value)
+- [x] AC2: Board view supports sort by priority. (testID: board-sort-priority)
 - [x] AC3: Archived tasks render with reduced opacity. (not tested: visual treatment is a manual review step; design system token supplies the color)
 ```
 
 Recognition rules:
 
-- A single space followed by `(testID: <value>)`, `(file: <path>:<test-name>)`, or `(not tested: <text up to closing paren>)` is treated as evidence.
+- The canonical accepted formats live in `agents/skills/dev/pr-open/SKILL.md`; keep this spec as background, not the process source of truth.
 - A bare `not tested` without a reason is treated as missing evidence — the lobster surfaces it.
 - Multi-PR tasks (where a task is split into workstreams across PRs): each PR's body only needs evidence for the ACs it claims. Uncovered ACs simply don't appear on that PR's Acceptance Criteria list. The lobster validates per-PR, not per-task, so each PR independently needs evidence for what it advertises.
 
@@ -65,7 +64,7 @@ The lobster matches the same `- [ ] AC<N>` style that the product spec / task de
 - New function `parse_pr_evidence(body: &str) -> Vec<AcEvidence>` returning one record per `- [x]` AC line:
   - `ac_label: String` — captured `AC<number>` token
   - `description: String` — the AC body without evidence
-  - `evidence: Option<Evidence>` — `TestId(String)`, `FileRef { path, test_name }`, or `NotTested { reason }`
+  - `evidence: Option<Evidence>` — current accepted variants are defined by the implementation and documented in `agents/skills/dev/pr-open/SKILL.md`
 - New function `verify_pr_acs(body: &str) -> Vec<String>` returning a list of human-readable failure strings (empty on success). It scans only the `## Acceptance Criteria` (or `## ACs`) section header, parses each checked AC line, and emits one failure per AC missing evidence.
 - Helper `extract_ac_section(body: &str) -> &str` returns just the AC section text or the entire body when no header is present (defensive default so PRs without a header still get validated).
 
@@ -89,14 +88,14 @@ Failure messages follow the existing pattern (`"PR {url} — AC{label} ({head}):
 
 ### 3. Update the PR template
 
-In `agents/skills/dev/pr-open/SKILL.md`, expand the body template section to include a reminder that each AC line must end with `(testID: <id>)`, `(file: <path>:<test-name>)`, or `(not tested: <reason>)`. The template already lists ACs; the change is a one-line note explaining the evidence requirement.
+In `agents/skills/dev/pr-open/SKILL.md`, expand the body template section to include a reminder that each AC line must end with one of the canonical evidence annotations. The template already lists ACs; the change is a one-line note explaining the evidence requirement.
 
 ### 4. Tests
 
 New tests in `agents/workflows/feature-task/src/main.rs` `mod tests`:
 
 - `parse_pr_evidence_recognises_test_id` — `- [x] AC1: Foo (testID: 1234)` parses to `Some(TestId("1234"))`.
-- `parse_pr_evidence_recognises_file_ref` — `(file: agents/workflows/feature-task/src/main.rs: test_name)` parses to `FileRef`; numeric line-only file refs are rejected so the implementation matches the task AC.
+- `parse_pr_evidence_rejects_file_annotation` — `(file: agents/workflows/feature-task/src/main.rs: test_name)` is not accepted as evidence.
 - `parse_pr_evidence_recognises_not_tested_reason` — `(not tested: requires manual click flow)` parses to a reason.
 - `parse_pr_evidence_rejects_bare_not_tested` — bare `not tested` without parens or reason is `None`.
 - `verify_pr_acs_passes_when_all_have_evidence` — full body with annotations returns empty failures.
@@ -120,7 +119,7 @@ Fixtures go under `agents/workflows/feature-task/fixtures/pr-bodies/` with one f
 - Manual smoke:
   - open a feature-task PR with one AC missing evidence
   - inspect `verify-delivery` output (via `feature-task.lobster.yaml` step on the task) — should report one failure
-  - amend the PR body to include `(file: ...)` or `(not tested: ...)` for the missing AC
+  - amend the PR body to include a canonical evidence annotation for the missing AC
   - re-run `verify-delivery` — empty failures
 
 Coverage summary:
@@ -134,6 +133,6 @@ Coverage summary:
 ## Open Questions and Risks
 
 - **Multi-PR workstreams:** a parent task with three PRs (workstream A/B/C) will have each PR advertising only the ACs that workstream claims. The validation is per-PR, which matches the existing `body_has_checked_acceptance` per-PR behaviour. If product decides the lobster should additionally verify the union of ACs across all PRs covers every AC in the task description, that becomes a follow-up — out of scope here, flagged for later.
-- **Test ID vs file ref choice:** the spec lets `testID` and `file:line` coexist. The lobster does not need to validate that the file exists on disk — that responsibility stays with Tom/Quinn at review time. Risk is moderate but bounded.
+- **Evidence source of truth:** the exact accepted evidence annotations live in `agents/skills/dev/pr-open/SKILL.md` and the Rust parser. Avoid duplicating the allowed list in shipped tech designs; stale examples caused agents to keep using removed formats.
 - **PR body header drift:** the lobster matches `## Acceptance Criteria` and `## ACs` (case-insensitive). If a PR uses a different heading (e.g. `## ✅ Acceptance Criteria`), the defensive `extract_ac_section` falls back to scanning the whole body, which still works because AC lines are uniquely tagged with `AC<N>`.
 - **No system spec change.** The lobster binary is internal agent tooling, not a user-facing system. No `docs/systems/` update. The PR-side skill change is documentation, not system behaviour. The `no-system-spec-change` rationale will be posted on the PR.
