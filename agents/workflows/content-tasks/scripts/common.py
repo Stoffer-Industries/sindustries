@@ -337,7 +337,7 @@ def gh_pr_ci_state(url: str) -> str:
     if not checks:
         return "UNKNOWN"
     states = [check["state"] for check in checks]
-    if all(state == "SUCCESS" for state in states):
+    if all(state in {"SUCCESS", "SKIPPED"} for state in states):
         return "SUCCESS"
     if any(state in {"FAILURE", "FAILED", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"} for state in states):
         return "FAILURE"
