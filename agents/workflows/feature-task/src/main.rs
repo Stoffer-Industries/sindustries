@@ -1520,7 +1520,7 @@ fn rewrite_spec_line_in_description(
     old_path: &str,
     new_path: &str,
 ) -> Option<String> {
-    // Match the bold-prefixed form documented in TASK_TEMPLATE.md:
+    // Match the bold-prefixed form used in feature-task descriptions:
     //   **Spec:** <path>
     // Case-insensitive on `Spec`. Allow optional trailing whitespace before EOL.
     let re = Regex::new(r"(?m)^(\s*\*\*Spec:\*\*\s+)([^\s].*?)\s*$").ok()?;

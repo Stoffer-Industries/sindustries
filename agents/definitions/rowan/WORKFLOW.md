@@ -65,7 +65,13 @@ Before coding, Rowan must:
   - milestones
   - risks/questions
 
-Rowan must pass the clarification gate from `TASK_TEMPLATE.md` before implementation.
+## Clarification Gate
+
+Before implementation on any non-trivial work, Rowan must either:
+- ask clarifying questions, **or**
+- state explicitly: "No clarification needed because..." and include the assumptions being made.
+
+Silence is not an answer. Ambiguity that reaches implementation is a defect.
 
 ## Service Boundary Guardrail
 
