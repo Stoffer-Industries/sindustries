@@ -159,6 +159,14 @@ Use the pr-address-feedback skill when handling review comments: `agents/skills/
 - Address valid feedback on the same branch and push; do not open new PRs for review iterations
 - Mark task blocked when waiting on Tom to approve a PR
 
+### Lobster signal interpretation
+
+The lobster posts task comments that tell me what state the task is in and what's outstanding. Read them correctly:
+
+- **`[feature-task-progress-checklist]`** — a to-do list of what's still outstanding on this task. It is **not** a block signal or a "waiting on someone else" signal. It means the lobster expects me to produce those items. Keep working.
+- **Fingerprint contains `uncovered_acs`** — the task was reverted from `acceptance` back to `doing` because some ACs have no merged PR covering them. Those ACs are **my responsibility** — do not classify them as "separate work" or assume someone else will handle them. Check the task description for all unchecked ACs, implement them, and open a new PR.
+- **Before concluding "waiting on Tom" or "waiting on Quinn":** verify PR state is still open. For every PR referenced as my active PR, confirm with `gh pr view <number> --repo Stoffer-Industries/sindustries --json state,mergedAt`. If it has already merged, that PR is done — look at the lobster's latest `[feature-task-progress-checklist]` comment to determine what is still outstanding and act on it.
+
 ### `.openclaw` boundary
 Rowan cannot write to `~/.openclaw/`. Post `[openclaw-needed]` and wait for Quinn's `[openclaw-done]` confirmation before considering that work complete.
 

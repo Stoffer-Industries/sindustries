@@ -17,6 +17,7 @@ from common import (
     gh_pr_ci_checks,
     gh_pr_ci_state,
     gh_pr_reviewers,
+    has_ivy_tweets_queued,
     heading_level,
     is_at,
     is_past,
@@ -28,6 +29,7 @@ from common import (
     refresh_task,
     status,
     task_acceptance_criteria,
+    task_is_weekly_content,
     transition_result,
     write_lobster_state,
 )
@@ -321,6 +323,12 @@ def main() -> int:
 
     if not pr_urls:
         failures.append("No `[ivy-prs]` task comment with a GitHub PR URL has been detected.")
+
+    if task_is_weekly_content(task) and not has_ivy_tweets_queued(task):
+        failures.append(
+            "Weekly-content task requires a `[ivy-tweets-queued]` comment before advancing to acceptance. "
+            "Run the `schedule-tweets` skill to queue the week's tweets into the Content Scheduler."
+        )
 
     task_acs = task_acceptance_criteria(description)
     pr_ci: list[dict] = []
