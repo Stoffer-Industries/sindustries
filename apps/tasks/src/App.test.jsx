@@ -253,7 +253,12 @@ describe('tasks ui', () => {
     expect(within(card).getByText('api')).toBeInTheDocument();
     expect(within(card).getByText('backend')).toBeInTheDocument();
     expect(within(card).getByText('urgent')).toBeInTheDocument();
-    expect(within(card).getByLabelText('Assignee Quinn')).toHaveTextContent('Q');
+    const assigneeAvatar = within(card).getByLabelText('Assignee Quinn');
+    expect(assigneeAvatar).toHaveClass('si-avatar');
+    const assigneeImg = assigneeAvatar.querySelector('img');
+    expect(assigneeImg).not.toBeNull();
+    expect(assigneeImg).toHaveAttribute('src', '/avatars/quinn.png');
+    expect(assigneeImg).toHaveAttribute('alt', 'Quinn');
     expect(within(card).getByText('2026-03-07')).toBeInTheDocument();
   });
 
