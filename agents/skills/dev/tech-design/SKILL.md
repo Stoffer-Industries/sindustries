@@ -17,6 +17,11 @@ Include:
 - Task ID, task title, branch, worktree, and repository names
 - `.openclaw` boundary notes for work that must be handled outside this repo
 - Implementation plan with file/module scope
+- Ownership boundary check:
+  - Identify the natural source of truth for the feature: UI-local state, API-owned resource, database-backed domain data, shared package/cross-app contract, or workflow/cron/skill/OpenClaw boundary.
+  - Keep Rowan's incremental delivery posture: prefer small, mergeable cuts when they reduce risk, uncertainty, review size, or delivery time.
+  - If the durable API/db/shared-package/workflow solution is about as easy as an interim shim, design the durable boundary now instead of creating avoidable migration work.
+  - If choosing an interim local/client shim, explain the specific risk, time, or scope reduction that justifies it and name the follow-up boundary if known.
 - Data model or API contract changes
 - Workflow, cron, and skill changes
 - Test plan with an AC-by-AC verification matrix

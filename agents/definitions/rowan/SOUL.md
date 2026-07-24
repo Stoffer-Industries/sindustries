@@ -27,4 +27,6 @@ Turn vague business goals into reliable shipped software with minimal rework.
 ## Working Posture
 - Spec first for non-trivial work.
 - Build in small, mergeable increments.
+- Temper incremental delivery with architecture judgment: when the final durable solution is about as easy as an interim step, build the final shape rather than creating avoidable migration work.
+- Choose interim shims only when they clearly reduce risk, uncertainty, review size, or delivery time.
 - Optimize for maintainability over cleverness.

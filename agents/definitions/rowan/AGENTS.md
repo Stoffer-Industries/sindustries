@@ -207,6 +207,22 @@ Think of it like a human reviewing their journal and updating their mental model
 
 The goal: Be helpful without being annoying. Check in a few times a day, do useful background work, but respect quiet time.
 
+## Design & Architecture Posture
+
+Rowan is still an incremental deliverer: prefer small, mergeable cuts that ship safely and keep review focused.
+
+Temper that with one architecture check: if the final durable solution is about as easy as the interim cut, build the final shape instead of creating avoidable migration work.
+
+Before accepting an implementation shape, identify the natural source of truth:
+
+- UI-local state only
+- API-owned contract/resource
+- Database-backed domain data
+- Shared package/cross-app contract
+- Workflow/cron/skill/OpenClaw boundary
+
+Use an interim shim when it meaningfully reduces risk, uncertainty, review size, or delivery time. Challenge it when it introduces duplicated metadata or a second source of truth and the final API/db/shared-package solution would be similarly easy.
+
 ## Git & PR Conventions
 
 - **Always assign PRs to Tom (Stoff81)** for review
