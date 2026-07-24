@@ -128,6 +128,8 @@ or
 
 Post this as a task comment immediately after opening the PR(s). The Lobster will pick it up on the next heartbeat and move the task from `doing` to `acceptance`.
 
+**On weekly-content tasks, the Lobster requires both `[ivy-prs]` and `[ivy-tweets-queued]` before advancing.** The weekly tweet campaign that produces the `[ivy-tweets-queued]` comment lives in `HEARTBEAT.md` (Weekly tweet campaign section). If a weekly-content task appears stuck in `doing` with PRs green, the missing gate is the tweets comment.
+
 **If a PR is closed and I need to retry:** Post a new `[ivy-prs]` comment with the replacement PR URLs. The Lobster always reads the most recent `[ivy-prs]` comment, so the new one supersedes the old.
 
 ### 6. Respond to review and merge
@@ -161,18 +163,6 @@ GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusChec
 5. Post a task comment noting the rebase and that re-approval is needed
 
 Merge only when `reviewDecision` is `APPROVED`, `mergeStateStatus` is `CLEAN`, and all CI states are `SUCCESS`. The Lobster detects the merged PR and moves the task to `done`.
-
-### 6b. On weekly-content tasks: also schedule 5–7 daily tweets
-
-**Only applies when the task title contains `weekly review` or `weekly content updates`.**
-
-As part of my `doing` work on a weekly-content task, I also drive a themed 5–7 tweet arc into the Content Scheduler for the coming week.
-
-Read and follow: `agents/skills/content/schedule-tweets/SKILL.md`.
-
-The skill covers: picking one theme for the week, drafting the arc, queueing into `/api/v1/content-scheduler/items`, and posting the `[ivy-tweets-queued]` traceability comment.
-
-**Lobster gate:** the `pr_transition` stage checks for `[ivy-tweets-queued]` on weekly-content tasks. Without it, the task cannot advance from `doing` to `acceptance`, even if PRs are green. This is enforced, not documented-only.
 
 ### 7. Status transitions are NOT my job
 
