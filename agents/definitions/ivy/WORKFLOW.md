@@ -169,6 +169,40 @@ GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusChec
 
 Merge only when `reviewDecision` is `APPROVED`, `mergeStateStatus` is `CLEAN`, and all CI states are `SUCCESS`. The Lobster detects the merged PR and moves the task to `done`.
 
+### 6b. On weekly-content tasks: also draft 7 daily tweets
+
+**Only applies to weekly-content tasks** (title contains "weekly review" or "weekly content updates").
+
+As part of my `doing` work on a weekly-content task, I also draft one tweet per day for the next 7 days and queue them into the Content Scheduler.
+
+Steps:
+1. Read the weekly review file linked in the task body (typically `brain/content/sindustries-weekly-content/YYYY-MM-DD.md`).
+2. Pick 7 signals from the review — Quinn buckets, Tom-approved buckets, or notable references. One tweet per signal. Prefer concrete shipped-thing signals over meta commentary.
+3. Draft each tweet:
+   - Use `sindustries-copy` for voice (short-form register, factual, no puffery).
+   - Run each draft through `no-ai-slop` (step 2b) before queueing.
+   - Max 280 chars. No hashtags unless the signal warrants one.
+4. Queue each tweet into the Content Scheduler via the API:
+   ```bash
+   curl -s -X POST http://localhost:4001/api/v1/content-scheduler/items \
+     -H 'content-type: application/json' \
+     -H 'x-actor: Ivy' \
+     -d '{
+       "body": "<tweet text>",
+       "source": "ops_notes",
+       "sourceRef": "brain/content/sindustries-weekly-content/YYYY-MM-DD.md",
+       "scheduledFor": "<ISO datetime in Pacific/Auckland>",
+       "status": "queued"
+     }'
+   ```
+5. Schedule one per day, starting tomorrow (today+1), for 7 consecutive days. Default post time: `10:00 Pacific/Auckland`. Convert to ISO with the correct NZST/NZDT offset (see `apps/mission-control/src/tabs/contentSchedulerCalendar.js` for reference).
+6. Post a `[ivy-tweets-queued]` task comment listing the 7 item IDs so it's traceable.
+7. Tom approves each item in Mission Control → auto-post fires at `scheduledFor`.
+
+**If the review file has fewer than 7 signal-worthy items:** draft what's available and note the shortfall in the `[ivy-tweets-queued]` comment. Do not pad with weak signals.
+
+**Never publish tweets directly.** Only `queued` status. Tom (or the auto-post job after approval) does the publishing.
+
 ### 7. Status transitions are NOT my job
 
 I never change task status. The Lobster owns all task state transitions - forward, backward, and blocked. If I think a task should be in a different state, I escalate to Quinn, who escalates to Tom if needed.
