@@ -2,10 +2,7 @@
  * Apps/tasks-local assignee/user registry.
  *
  * Maps free-form assignee strings (case-insensitive) to a display name and an
- * optional avatar image. v1 ships with all `avatarSrc` values set to `null`
- * (no avatar image files in the repo for this task); a follow-up task is
- * expected to copy source art under `apps/tasks/public/avatars/` and fill the
- * paths here.
+ * optional avatar image. Source art lives under `apps/tasks/public/avatars/`.
  *
  * Keep this isolated behind helper functions so a future shared package,
  * API-backed user service, or agent profile system can replace the in-app
@@ -13,11 +10,11 @@
  */
 
 export const ASSIGNEE_USERS = [
-  { id: 'quinn', displayName: 'Quinn', avatarSrc: null },
-  { id: 'ivy', displayName: 'Ivy', avatarSrc: null },
-  { id: 'lox', displayName: 'Lox', avatarSrc: null },
-  { id: 'rowan', displayName: 'Rowan', avatarSrc: null },
-  { id: 'tom', displayName: 'Tom', avatarSrc: null }
+  { id: 'quinn', displayName: 'Quinn', avatarSrc: '/avatars/quinn.png' },
+  { id: 'ivy', displayName: 'Ivy', avatarSrc: '/avatars/ivy.png' },
+  { id: 'lox', displayName: 'Lox', avatarSrc: '/avatars/lox.png' },
+  { id: 'rowan', displayName: 'Rowan', avatarSrc: '/avatars/rowan.png' },
+  { id: 'tom', displayName: 'Tom', avatarSrc: '/avatars/tom.jpg' }
 ];
 
 /**
