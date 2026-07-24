@@ -30,14 +30,110 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
    ```
 
 2. Classify each returned task and follow `WORKFLOW.md` for the *how* — this file does not restate execution steps:
-   - **`doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks (title contains `weekly review` or `weekly content updates`), also section 6b.
+   - **`doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks, also run the **Weekly tweet campaign** below.
    - **`acceptance`** → follow `WORKFLOW.md` section 6.
    - **`blocked`** → do not attempt to resolve. Post a message to Quinn's session escalating the block. Do not change the `blocked` flag.
 
 3. Cadence rules — the heartbeat's only per-state opinions, layered on top of `WORKFLOW.md`:
    - Do not re-do work on a `doing` task if a valid `[ivy-prs]` comment already exists with at least one open PR. The Lobster handles the move to `acceptance`.
-   - On weekly-content tasks in `doing`, both `[ivy-prs]` **and** `[ivy-tweets-queued]` are required before the Lobster transitions to `acceptance` (see `WORKFLOW.md` §6b and `agents/skills/content/schedule-tweets/SKILL.md`).
+   - On weekly-content tasks in `doing`, both `[ivy-prs]` **and** `[ivy-tweets-queued]` are required before the Lobster transitions to `acceptance` (see the Weekly tweet campaign section below).
    - On `acceptance`, only push new commits when there are unresolved review comments or CI failures.
+
+---
+
+## Weekly tweet campaign (weekly-content tasks in `doing`)
+
+**Only applies when the task title contains `weekly review` or `weekly content updates`.**
+
+Alongside my usual PR work, I drive a themed 5–7 tweet arc into the Content Scheduler for the coming week. One theme per week, one tweet per day. Tom approves each in Mission Control; auto-post fires at `scheduledFor`.
+
+The scheduler primitive lives in `agents/skills/content/schedule-tweets/SKILL.md` — that skill queues one tweet. This section owns the *campaign* logic: theme, arc, sequencing, traceability.
+
+### Idempotence
+
+If a `[ivy-tweets-queued]` comment already exists on this task, the campaign is done for this pass. Skip. Do not re-queue.
+
+### 1. Read the weekly review file
+
+Find the file linked in the task body (typically the most recent under `brain/content/sindustries-weekly-content/`). Read the whole file — Quinn-execute bucket, Tom-approval bucket, defer bucket, and the raw daily notes if present.
+
+### 2. Pick ONE theme for the week
+
+Themed beats scattergun. A narrative arc pulls the reader forward; 7 disconnected wins do not.
+
+Scan the week's signals and pick the single strongest arc — a story with a beginning, middle, and end that can be told across 5–7 tweets. Good arcs look like:
+
+- **A capability shipped:** "what didn't exist last week → how we built it → what it unlocks → the lesson"
+- **A pattern discovery:** "we kept seeing X → we tried Y → Y didn't scale → we landed on Z → now we do it every time"
+- **A system going live:** "we've been building X → here's the first end-to-end run → what it proves → what's next"
+- **A workflow evolution:** "our old process had Y bottleneck → we tried Z → it worked → here's how it changed the team"
+
+**Bad themes to avoid:**
+- "Weekly wrap-up" — that's a format, not a theme
+- Meta-commentary on the studio itself — themes should be about the *work*, not how the studio operates
+- Anything referencing private client work, private team dynamics, or context Tom hasn't publicly established
+
+**Fallback:** if the week genuinely has no single arc (rare — usually a signal the week was low-shipping), draft 3–5 scattergun tweets from the strongest individual signals and note the shortfall in the traceability comment. Do not pad with weak signals.
+
+### 3. Sketch the arc, then draft each tweet
+
+- Sketch first: one bullet per tweet, in order, telling the story. Iterate the arc before writing final copy.
+- For each tweet:
+  1. Apply `agents/skills/content/sindustries-copy/SKILL.md` for voice.
+  2. Run it through `agents/skills/content/no-ai-slop/SKILL.md`.
+  3. Max 280 chars — count precisely; X truncates without warning.
+  4. No hashtags unless the signal warrants one (Tom's audience does not need them).
+  5. One idea per tweet. If a tweet needs a second sentence, split it into a follow-up bullet in the arc.
+  6. Concrete over abstract: "shipped a 10-day calendar view in Mission Control" beats "improved our operating surface."
+
+### 4. Schedule the sequence
+
+- First tweet: **tomorrow** (today + 1) at `10:00 Pacific/Auckland`.
+- Subsequent tweets: one per consecutive day, same time.
+- Aim for 5–7. Prefer 5 tight tweets to 7 padded ones.
+
+### 5. Queue each tweet
+
+For each drafted tweet, call `agents/skills/content/schedule-tweets/SKILL.md` with:
+- `body` = the drafted text
+- `scheduledFor` = the day's 10:00 NZ ISO datetime (with correct NZST/NZDT offset)
+- `source` = `ops_notes`
+- `sourceRef` = the weekly review file path
+- `actor` = `Ivy`
+
+Capture each returned item `id` — needed for the traceability comment.
+
+### 6. Post the traceability comment
+
+Post exactly one task comment in this format:
+
+```
+[ivy-tweets-queued] theme: <one-line theme summary>
+- <id1> — <one-line what this tweet says>
+- <id2> — <one-line what this tweet says>
+...
+```
+
+The theme line lets the reviewer (Tom / Quinn) see the arc at a glance without opening Mission Control.
+
+If you fell back to scattergun (step 2), state that explicitly:
+
+```
+[ivy-tweets-queued] theme: none — no clear arc this week, scattergun of N strongest signals
+- <id1> — ...
+```
+
+### 7. Let the Lobster take it from here
+
+- The `pr_transition` lobster gate detects the comment and no longer blocks `doing → acceptance` on tweets.
+- Tom sees the queued items in Mission Control's Content Scheduler tab, edits any that need work, approves the rest.
+- Auto-post fires at each `scheduledFor`.
+
+### Guardrails
+
+- One theme per week. Do not draft two competing arcs.
+- Never queue with `status=published`. Only `queued`.
+- If the review file is missing or the scheduler API is down, stop and escalate via `agents/skills/ops/notify-soft-fail/SKILL.md`.
 
 ---
 
