@@ -17,6 +17,12 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 
 Always set `--assignee` to the implementation owner/opener and `--reviewer` to the designated reviewer(s). Check the invoking skill, task, or workflow for reviewer routing. If the reviewer is not stated, stop and ask/escalate — do **not** guess a default reviewer.
 
+**Labels are required on every PR.** See `agents/skills/dev/pr-process/SKILL.md` for the full label table. Quick reference:
+- Task-driven PRs: `feature-task`, `content-task`, or `code-task` (match `taskType`)
+- Quinn proactive fix with no task: `workflow-garden`
+- Tom asked in chat: `direct-ask`
+- Labels are not mutually exclusive — apply all that apply.
+
 For feature-task PRs, the opener is the task implementer/assignee. Reviewers are the blocking reviewer plus any visibility-only reviewers defined by the workflow. The reviewer must not open the implementer's PR on their own account.
 
 Use the opener's GitHub identity/token for `gh pr create`. Before creating the PR, verify the active GitHub login matches the intended opener:
@@ -34,6 +40,7 @@ gh pr create \
   --title "<type>(<scope>): <short description>" \
   --assignee <opener-github-username> \
   --reviewer <reviewer-github-username>[,<visibility-reviewer>] \
+  --label <origin-label>[,<task-type-label>] \
   --body "$(cat <<'EOF'
 ## Summary
 - <bullet: what changed and why>
