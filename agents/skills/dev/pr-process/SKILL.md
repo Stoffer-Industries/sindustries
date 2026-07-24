@@ -49,19 +49,18 @@ gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-bra
 
 **Repo merge policy:** sindustries only accepts `rebase` merge (squash and merge-commit are rejected by repo settings). Use `--rebase`.
 
-**Auth gotcha (read-only/default token):** the default `gh` token in agent envs may be read-only or may belong to a service account. Both `gh pr merge` and `gh pr create` can return `Resource not accessible...` even though `gh pr view` works. Before any PR write, verify the active login is the intended opener/assignee:
+**Auth — always use your own token explicitly:** The default `gh` config has no token and will fail. Every agent must use their own config or token for all `gh` commands — reads and writes.
+
+**Rowan:** prefix every `gh` command with `GH_CONFIG_DIR=~/.config/gh-rowan`, or set `GH_TOKEN="$ROWAN_GITHUB_TOKEN"` inline. Verify with:
 
 ```bash
-gh api user --jq '.login'
+GH_CONFIG_DIR=~/.config/gh-rowan gh api user --jq '.login'
+# must return: rowanstoffer
 ```
 
-If auth is wrong, set the opener's own write-capable token/config and verify again. Do **not** switch to another agent's token/account to get past `gh pr create`; that changes the PR author and prevents that agent from reviewing. For `gh pr merge`, the assignee/opener may fall back to the API directly with their own token:
+**Quinn:** use `GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" gh ...`
 
-```bash
-GH_TOKEN="$GITHUB_TOKEN" gh api PUT /repos/Stoffer-Industries/sindustries/pulls/<number>/merge -f merge_method=rebase
-```
-
-Confirmed working 2026-07-06 on PR #182 (W28 weekly audit) for both `gh pr create` and `gh pr merge` when the token belongs to the opener.
+**Never use another agent's token to work around a scope error.** If your token lacks a scope (e.g. `createPullRequest`), fix the token — do not borrow a different agent's credentials. Borrowing changes the PR author, breaks reviewer assignment, and corrupts the audit trail. If you cannot fix the token yourself, escalate to Quinn.
 
 ---
 
