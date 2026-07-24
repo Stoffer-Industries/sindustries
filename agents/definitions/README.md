@@ -14,7 +14,6 @@ Each agent under `agents/definitions/<name>/` uses a consistent set of markdown 
 | `HEARTBEAT.md` | **When** the agent checks for work each pass, and **what triggers action**. Polling cadence + per-pass priority rules. | Cadence changes, new triggers, new per-pass campaigns. |
 | `WORKFLOW.md` | **How** the agent executes work — task-state rules, PR standards, escalation triggers. The execution playbook. | Execution steps change, new task states, new PR conventions. |
 | `DoD.md` | Definition of Done — quality bar for calling a task complete. | Quality bar changes. |
-| `TASK_TEMPLATE.md` | Template for tasks assigned to this agent (when applicable). | Task-body conventions change. |
 
 ## The core split: HEARTBEAT vs WORKFLOW
 
