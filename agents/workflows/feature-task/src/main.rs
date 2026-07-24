@@ -208,8 +208,13 @@ fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
 fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     bootstrap_task_spec_layout(workspace_root(&args))?;
-    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "spec_check")? {
-        return Ok(blocked);
+    if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "spec_check")? {
+        if !drift.criteria_met {
+            return Ok(drift);
+        }
+        // Resync succeeded — propagate fresh task/state so downstream
+        // stages in the same pipeline run see the updated specChecksum.
+        env = drift;
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -271,8 +276,11 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
 
 fn ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "ready_checks")? {
-        return Ok(blocked);
+    if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "ready_checks")? {
+        if !drift.criteria_met {
+            return Ok(drift);
+        }
+        env = drift;
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -491,8 +499,11 @@ fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
 
 fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "verify_delivery")? {
-        return Ok(blocked);
+    if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "verify_delivery")? {
+        if !drift.criteria_met {
+            return Ok(drift);
+        }
+        env = drift;
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -582,8 +593,11 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
 
 fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    if let Some(blocked) = block_on_spec_drift_fluid(&args, env.clone(), "feedback_aggregate")? {
-        return Ok(blocked);
+    if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "feedback_aggregate")? {
+        if !drift.criteria_met {
+            return Ok(drift);
+        }
+        env = drift;
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -2115,15 +2129,12 @@ fn block_on_spec_drift_fluid(
                     &fingerprint,
                     &args.repo,
                 ) {
-                    Ok(env) => {
-                        if env.criteria_met {
-                            Ok(None)
-                        } else {
-                            // Resync surfaced a soft failure — surface as a
-                            // blocked-spec-drift envelope so Tom sees it in
-                            // the next heartbeat.
-                            Ok(Some(env))
-                        }
+                    Ok(resynced) => {
+                        // Return Some in both the success and soft-failure cases so
+                        // the caller can update its in-memory env with the fresh
+                        // task and lobster_state. Callers check criteria_met to
+                        // decide whether to bail out or continue.
+                        Ok(Some(resynced))
                     }
                     Err(err) => Err(err),
                 };
@@ -2806,7 +2817,7 @@ fn spec_checksum_failures(task: &Task) -> Vec<String> {
         vec![]
     } else {
         vec![format!(
-            "ACs modified after spec approval -- write a new spec to change scope. Task {} stored specChecksum `{stored}` but current AC checksum is `{current}`.",
+            "Spec drift detected — AC checksum changed since last approval. Task {} stored specChecksum `{stored}` but current AC checksum is `{current}`.",
             task.id
         )]
     }
@@ -4109,8 +4120,8 @@ Lead-in.
 
         let failures = spec_checksum_failures(&changed_task);
         assert_eq!(failures.len(), 1);
-        assert!(failures[0].contains("ACs modified after spec approval"));
-        assert!(failures[0].contains("write a new spec to change scope"));
+        assert!(failures[0].contains("Spec drift detected"));
+        assert!(failures[0].contains("AC checksum changed since last approval"));
         assert!(failures[0].contains("task-drift"));
     }
 
@@ -4419,7 +4430,7 @@ Lead-in.
             !failures.is_empty(),
             "expected drift for mismatched checksum"
         );
-        assert!(failures[0].contains("ACs modified after spec approval"));
+        assert!(failures[0].contains("Spec drift detected"));
     }
 
     #[test]
@@ -5360,7 +5371,7 @@ Lead-in.
         let blocked = result.expect("should block");
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
-        assert!(blocked.failures[0].contains("write a new spec"));
+        assert!(blocked.failures[0].contains("Spec drift detected"));
     }
 
     #[test]
@@ -5438,12 +5449,9 @@ Lead-in.
         let blocked = result.expect("should block");
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
-        // First failure: the raw checksum drift message — AC4 keeps the
-        // legacy "write a new spec" wording on the first encounter so
-        // external tools can grep on it.
         assert!(
-            blocked.failures[0].contains("write a new spec"),
-            "expected legacy drift message; got {:?}",
+            blocked.failures[0].contains("Spec drift detected"),
+            "expected drift message; got {:?}",
             blocked.failures
         );
     }
@@ -5602,10 +5610,9 @@ Lead-in.
         let blocked = result.expect("open task with drift should block");
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "spec_check_blocked_spec_drift");
-        // Legacy path: failure text mentions the brain-spec route, not the marker.
         assert!(
-            blocked.failures[0].contains("write a new spec"),
-            "open-status drift must surface the legacy 'write a new spec' message; got {:?}",
+            blocked.failures[0].contains("Spec drift detected"),
+            "open-status drift must surface the drift message; got {:?}",
             blocked.failures
         );
         assert!(
@@ -6727,8 +6734,8 @@ keep me
             blocked
                 .failures
                 .iter()
-                .any(|f| f.contains("write a new spec")),
-            "expected legacy drift message, got {:?}",
+                .any(|f| f.contains("Spec drift detected")),
+            "expected drift message, got {:?}",
             blocked.failures
         );
     }
