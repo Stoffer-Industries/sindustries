@@ -49,18 +49,13 @@ gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-bra
 
 **Repo merge policy:** sindustries only accepts `rebase` merge (squash and merge-commit are rejected by repo settings). Use `--rebase`.
 
-**Auth — always use your own token explicitly:** The default `gh` config has no token and will fail. Every agent must use their own config or token for all `gh` commands — reads and writes.
-
-**Rowan:** prefix every `gh` command with `GH_CONFIG_DIR=~/.config/gh-rowan`, or set `GH_TOKEN="$ROWAN_GITHUB_TOKEN"` inline. Verify with:
+**Auth — always use your own token explicitly:** The default `gh` config has no token and will fail. Check your TOOLS.md for the correct config or env var to use. Before any write operation, verify you are authenticated as yourself:
 
 ```bash
-GH_CONFIG_DIR=~/.config/gh-rowan gh api user --jq '.login'
-# must return: rowanstoffer
+gh api user --jq '.login'
 ```
 
-**Quinn:** use `GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" gh ...`
-
-**Never use another agent's token to work around a scope error.** If your token lacks a scope (e.g. `createPullRequest`), fix the token — do not borrow a different agent's credentials. Borrowing changes the PR author, breaks reviewer assignment, and corrupts the audit trail. If you cannot fix the token yourself, escalate to Quinn.
+**Never use another agent's token to work around a scope error.** Borrowing credentials changes the PR author, breaks reviewer assignment, and corrupts the audit trail. If your token lacks a required scope, escalate — do not improvise.
 
 ---
 
