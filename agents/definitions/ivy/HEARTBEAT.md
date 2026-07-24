@@ -29,33 +29,15 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
    TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Ivy --blocked true
    ```
 
-2. For each `doing` task:
-   a. Check whether I have already posted a `[ivy-prs]` comment **with at least one open GitHub PR URL**:
-      - Read the most recent `[ivy-prs]` comment from task comments
-      - Extract any GitHub PR URLs from it
-      - For each URL, check the PR is still open: `GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json state --jq .state`
-      - If the comment has no URLs, or all PRs are closed/merged: treat as not done → go to (b)
-   b. If not done: apply the sindustries-copy skill, open the appropriate PR(s), post a new `[ivy-prs]` comment (supersedes any previous one)
-   c. If done (at least one open PR exists): the Lobster will handle the move to `acceptance`
+2. Classify each returned task and follow `WORKFLOW.md` for the *how* — this file does not restate execution steps:
+   - **`doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks (title contains `weekly review` or `weekly content updates`), also section 6b.
+   - **`acceptance`** → follow `WORKFLOW.md` section 6.
+   - **`blocked`** → do not attempt to resolve. Post a message to Quinn's session escalating the block. Do not change the `blocked` flag.
 
-3. For each `acceptance` task:
-   a. Check the linked PR(s) for new review comments
-   b. Address comments with new commits on the same branch — read and follow the assignee section of `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
-   c. For each PR: check review decision and CI status:
-      ```bash
-      GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusCheckRollup \
-        --jq '{decision: .reviewDecision, ci: [.statusCheckRollup[].state]}'
-      ```
-   d. If `reviewDecision` is `APPROVED` and all CI states are `SUCCESS`: merge the PR
-      ```bash
-      GH_CONFIG_DIR=~/.config/gh-ivy gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-branch
-      ```
-   e. The Lobster moves the task to `done` once all PRs are merged
-
-4. For each `blocked` task:
-   a. Read the blocked reason from the task
-   b. Post a message to Quinn's session escalating the block — do not attempt to resolve it
-   c. Do not change the `blocked` flag
+3. Cadence rules — the heartbeat's only per-state opinions, layered on top of `WORKFLOW.md`:
+   - Do not re-do work on a `doing` task if a valid `[ivy-prs]` comment already exists with at least one open PR. The Lobster handles the move to `acceptance`.
+   - On weekly-content tasks in `doing`, both `[ivy-prs]` **and** `[ivy-tweets-queued]` are required before the Lobster transitions to `acceptance` (see `WORKFLOW.md` §6b and `agents/skills/content/schedule-tweets/SKILL.md`).
+   - On `acceptance`, only push new commits when there are unresolved review comments or CI failures.
 
 ---
 

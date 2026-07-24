@@ -21,6 +21,8 @@ from tasks_api_client import api_request, get_base_url, get_task, list_tasks  # 
 
 STATE_TAG = "[lobster-state]"
 IVY_PRS_TAG = "[ivy-prs]"
+IVY_TWEETS_QUEUED_TAG = "[ivy-tweets-queued]"
+WEEKLY_CONTENT_TITLE_RE = re.compile(r"weekly\s+(review|content\s+updates?)", re.I)
 AUTHOR = "Lobster"
 STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
 PR_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)", re.I)
@@ -269,6 +271,20 @@ def extract_ivy_pr_urls(task: dict[str, Any]) -> list[str]:
     if not latest:
         return []
     return list(dict.fromkeys(extract_pr_urls_from_text(latest)))
+
+
+def task_is_weekly_content(task: dict[str, Any]) -> bool:
+    """True if this content task is a weekly-content task (title match)."""
+    title = task.get("title") or ""
+    return bool(WEEKLY_CONTENT_TITLE_RE.search(title))
+
+
+def has_ivy_tweets_queued(task: dict[str, Any]) -> bool:
+    """True if a `[ivy-tweets-queued]` comment has been posted on this task."""
+    for comment in task_comments(task):
+        if IVY_TWEETS_QUEUED_TAG in comment_text(comment):
+            return True
+    return False
 
 
 def parse_pr_url(url: str) -> tuple[str, str, str] | None:
