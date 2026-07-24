@@ -12,14 +12,15 @@ describe('assignee registry', () => {
       for (const user of ASSIGNEE_USERS) {
         expect(typeof user.id).toBe('string');
         expect(typeof user.displayName).toBe('string');
-        // avatarSrc is optional in the shape; v1 ships with null but the field stays for the follow-up task.
+        // avatarSrc is set for every v1 user — points at apps/tasks/public/avatars/<id>.{png,jpg}.
         expect(Object.prototype.hasOwnProperty.call(user, 'avatarSrc')).toBe(true);
+        expect(typeof user.avatarSrc).toBe('string');
       }
     });
 
     it('findAssigneeUser returns the user for a known id (lowercase, trimmed)', () => {
-      expect(findAssigneeUser('quinn')).toEqual({ id: 'quinn', displayName: 'Quinn', avatarSrc: null });
-      expect(findAssigneeUser('  ivy  ')).toEqual({ id: 'ivy', displayName: 'Ivy', avatarSrc: null });
+      expect(findAssigneeUser('quinn')).toEqual({ id: 'quinn', displayName: 'Quinn', avatarSrc: '/avatars/quinn.png' });
+      expect(findAssigneeUser('  ivy  ')).toEqual({ id: 'ivy', displayName: 'Ivy', avatarSrc: '/avatars/ivy.png' });
     });
 
     it('findAssigneeUser is case-insensitive against display-name capitalization', () => {
@@ -73,10 +74,10 @@ describe('assignee registry', () => {
     });
   });
 
-  describe('AC6 — v1 ships with all avatars unset (no avatar image files in this task)', () => {
-    it('every v1 record has avatarSrc === null', () => {
+  describe('AC6 — v1 ships with avatar image files for every agent', () => {
+    it('every v1 record points avatarSrc at /avatars/<id>.{png,jpg}', () => {
       for (const user of ASSIGNEE_USERS) {
-        expect(user.avatarSrc).toBeNull();
+        expect(user.avatarSrc).toMatch(new RegExp(`/avatars/${user.id}\\.(png|jpg)$`));
       }
     });
   });

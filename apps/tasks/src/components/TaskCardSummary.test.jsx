@@ -40,17 +40,19 @@ describe('TaskCardSummary', () => {
   });
 
   describe('AC2 — fallback to the current first-letter rendering', () => {
-    it('renders the initial for a known user when avatarSrc is null (every v1 user)', () => {
+    it('renders the initial for a known user when avatarSrc is null (override sets it null)', () => {
+      vi.resetModules();
+      const clone = makeRegistryClone({ quinn: { avatarSrc: null } });
       vi.doMock('../users/assignees.js', () => ({
-        ASSIGNEE_USERS: makeRegistryClone(),
-        ASSIGNEE_OPTIONS: ASSIGNEE_USERS.map((user) => user.displayName),
+        ASSIGNEE_USERS: clone,
+        ASSIGNEE_OPTIONS: clone.map((user) => user.displayName),
         findAssigneeUser: (assignee) => {
           const id = typeof assignee === 'string' ? assignee.trim().toLowerCase() : '';
-          return ASSIGNEE_USERS.find((user) => user.id === id) ?? null;
+          return clone.find((user) => user.id === id) ?? null;
         },
         assigneeDisplayName: (assignee) => {
           const id = typeof assignee === 'string' ? assignee.trim().toLowerCase() : '';
-          const user = ASSIGNEE_USERS.find((user) => user.id === id);
+          const user = clone.find((user) => user.id === id);
           if (user) return user.displayName;
           if (typeof assignee === 'string' && assignee.trim()) return assignee.trim();
           return '';
@@ -200,9 +202,9 @@ describe('TaskCardSummary', () => {
       });
     });
 
-    it('the production registry still has avatarSrc === null for every v1 user (fixture does not leak)', () => {
+    it('the production registry ships avatar image paths for every v1 user (fixture does not leak)', () => {
       for (const user of ASSIGNEE_USERS) {
-        expect(user.avatarSrc).toBeNull();
+        expect(user.avatarSrc).toMatch(new RegExp(`/avatars/${user.id}\\.(png|jpg)$`));
       }
     });
   });
