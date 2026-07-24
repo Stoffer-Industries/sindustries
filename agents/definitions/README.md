@@ -6,10 +6,10 @@ Each agent under `agents/definitions/<name>/` uses a consistent set of markdown 
 
 | File | Purpose | Edit when |
 |---|---|---|
+| `AGENTS.md` | The agent's top-level operating manual — session startup, memory rules, safety guardrails, general behavior. Standard AI-agent instruction file. First thing the agent (and any tool that reads agent instructions) loads. | Global behavior rules change: session startup, memory conventions, safety, communication style. |
 | `SOUL.md` | Voice, values, character. Who this agent *is*. | Character or voice shifts. Never for procedural rules. |
 | `IDENTITY.md` | Name, avatar, immutable identity facts. | Rarely — identity is stable. |
 | `USER.md` | Facts about the humans this agent serves. | New context about the user. |
-| `AGENTS.md` | Facts about *other* agents this agent collaborates with (roles, boundaries, hand-offs). | Team composition or hand-off patterns change. |
 | `TOOLS.md` | Local notes about tools, tokens, worktrees, host-specific config. | Environment or credentials change. |
 | `HEARTBEAT.md` | **When** the agent checks for work each pass, and **what triggers action**. Polling cadence + per-pass priority rules. | Cadence changes, new triggers, new per-pass campaigns. |
 | `WORKFLOW.md` | **How** the agent executes work — task-state rules, PR standards, escalation triggers. The execution playbook. | Execution steps change, new task states, new PR conventions. |
