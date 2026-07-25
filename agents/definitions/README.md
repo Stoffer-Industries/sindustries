@@ -6,7 +6,7 @@ Each agent under `agents/definitions/<name>/` uses a consistent set of markdown 
 
 | File | Purpose | Edit when |
 |---|---|---|
-| `AGENTS.md` | Symlink → `codebases/sindustries/AGENTS.md` (canonical, repo-root, Sindustries OpenClaw operations manual: memory, safety, group chats, heartbeat cadence, docs layout, tools, platform formatting). Auto-injected by OpenClaw from each agent's workspace root — every agent sees the same shared content. | **Shared rules** → edit the canonical `codebases/sindustries/AGENTS.md`. Every agent picks it up on next session. **Agent-only rules** → put in SOUL (voice/values), TOOLS (tool conventions), HEARTBEAT (cadence), or WORKFLOW (execution). Do not add agent-specific content to AGENTS.md — it's shared. |
+| `AGENTS.md` | **Not in this repo.** The canonical Sindustries OpenClaw operations manual lives in the workspace repo at `~/.openclaw/workspace/AGENTS.md` (Stoffer-Industries/workspace). Each agent's workspace symlinks their AGENTS.md → workspace-root AGENTS.md, so OpenClaw's per-workspace auto-inject picks up the shared content for every agent. | **Shared rules** → edit `~/.openclaw/workspace/AGENTS.md` (workspace repo, single source of truth). **Agent-only rules** → put in SOUL (voice/values), TOOLS (tool conventions), HEARTBEAT (cadence), or WORKFLOW (execution) in this repo. AGENTS.md is intentionally *not* per-agent — the file's purpose is workspace-wide OpenClaw ops. |
 | `SOUL.md` | Voice, values, character. Who this agent *is*. | Character or voice shifts. Never for procedural rules. |
 | `IDENTITY.md` | Name, avatar, immutable identity facts. | Rarely — identity is stable. |
 | `USER.md` | Facts about the humans this agent serves. | New context about the user. |
