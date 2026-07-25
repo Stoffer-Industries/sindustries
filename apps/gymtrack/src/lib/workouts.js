@@ -6,6 +6,7 @@ import { supabase } from './supabase.js';
  * @property {string} user_id
  * @property {string} performed_at  ISO timestamp
  * @property {string|null} notes
+ * @property {string|null} planned_workout_id  Optional FK to public.planned_workouts.
  *
  * @typedef {Object} WorkoutSet
  * @property {string} id
@@ -15,20 +16,27 @@ import { supabase } from './supabase.js';
  * @property {number} reps
  * @property {number} weight
  * @property {'kg'|'lb'} unit
+ * @property {string|null} planned_set_id  Optional FK to public.planned_workout_sets.
  */
 
 /**
  * Create a workout (without sets).
- * @param {{ performed_at?: string, notes?: string|null }} input
+ * @param {{ performed_at?: string, notes?: string|null, planned_workout_id?: string|null }} input
  * @returns {Promise<{ data: Workout|null, error: Error|null }>}
  */
 export async function createWorkout(input = {}) {
   const { data: { user } = {} } = await supabase.auth.getUser();
   if (!user) return { data: null, error: new Error('Not authenticated') };
   const performed_at = input.performed_at ?? new Date().toISOString();
+  const row = {
+    user_id: user.id,
+    performed_at,
+    notes: input.notes ?? null
+  };
+  if (input.planned_workout_id) row.planned_workout_id = input.planned_workout_id;
   const { data, error } = await supabase
     .from('workouts')
-    .insert({ user_id: user.id, performed_at, notes: input.notes ?? null })
+    .insert(row)
     .select()
     .single();
   return { data, error };
@@ -36,20 +44,22 @@ export async function createWorkout(input = {}) {
 
 /**
  * Attach a single set to a workout.
- * @param {{ workout_id: string, exercise_name: string, set_index: number, reps: number, weight: number, unit?: 'kg'|'lb' }} input
+ * @param {{ workout_id: string, exercise_name: string, set_index: number, reps: number, weight: number, unit?: 'kg'|'lb', planned_set_id?: string|null }} input
  * @returns {Promise<{ data: WorkoutSet|null, error: Error|null }>}
  */
 export async function addSet(input) {
+  const row = {
+    workout_id: input.workout_id,
+    exercise_name: input.exercise_name,
+    set_index: input.set_index,
+    reps: input.reps,
+    weight: input.weight,
+    unit: input.unit ?? 'kg'
+  };
+  if (input.planned_set_id) row.planned_set_id = input.planned_set_id;
   const { data, error } = await supabase
     .from('workout_sets')
-    .insert({
-      workout_id: input.workout_id,
-      exercise_name: input.exercise_name,
-      set_index: input.set_index,
-      reps: input.reps,
-      weight: input.weight,
-      unit: input.unit ?? 'kg'
-    })
+    .insert(row)
     .select()
     .single();
   return { data, error };
@@ -62,14 +72,18 @@ export async function addSet(input) {
  */
 export async function addSets({ workout_id, sets }) {
   if (!sets || sets.length === 0) return { data: [], error: null };
-  const rows = sets.map((s) => ({
-    workout_id,
-    exercise_name: s.exercise_name,
-    set_index: s.set_index,
-    reps: s.reps,
-    weight: s.weight,
-    unit: s.unit ?? 'kg'
-  }));
+  const rows = sets.map((s) => {
+    const row = {
+      workout_id,
+      exercise_name: s.exercise_name,
+      set_index: s.set_index,
+      reps: s.reps,
+      weight: s.weight,
+      unit: s.unit ?? 'kg'
+    };
+    if (s.planned_set_id) row.planned_set_id = s.planned_set_id;
+    return row;
+  });
   const { data, error } = await supabase
     .from('workout_sets')
     .insert(rows)
