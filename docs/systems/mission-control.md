@@ -1,17 +1,19 @@
-# Pulse Shell — iframe embed architecture decision
+# Mission Control — iframe embed architecture decision
 
 **Type:** Architecture decision record (system reference)
 **Status:** Accepted
-**Last updated:** 2026-07-07
+**Last updated:** 2026-07-25
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** `apps/mission-control/`
+
+> **Naming history:** this app was originally called "Pulse Shell". It is now Mission Control. The `apps/mission-control/` directory and the iframe tab name were renamed; internal filenames like `pulseTabs.js` are unchanged for now (a code-only follow-up can rename them later). This ADR describes Mission Control as it exists today.
 
 ---
 
 ## Context
 
-`apps/mission-control` ("Pulse") is the Sindustries desktop shell. It hosts
+`apps/mission-control` is the Sindustries desktop shell. It hosts
 multiple operational apps behind a single URL and a persistent tab bar.
 The MVP tabs are:
 
@@ -31,7 +33,7 @@ For the behavioural spec, see `apps/mission-control/SPEC.md`.
 
 ## Decision
 
-**Pulse embeds the Tasks app via `<iframe>` rather than a route-level
+**Mission Control embeds the Tasks app via `<iframe>` rather than a route-level
 React mount.**
 
 This decision applies to the MVP. It may be revisited if any of the
@@ -40,19 +42,19 @@ triggers in [Revisit triggers](#revisit-triggers) fires.
 ### Why iframe over route-level mount
 
 1. **No duplicated implementation.** The Tasks app already owns its
-   routing, state, and component tree; mounting it inside Pulse would
-   mean either copying the app into the Pulse bundle (duplicates the
+   routing, state, and component tree; mounting it inside Mission Control would
+   mean either copying the app into the Mission Control bundle (duplicates the
    build, the tests, and the bug surface) or reorganising the Tasks app
-   into a library that Pulse composes from. Both options are larger
+   into a library that Mission Control composes from. Both options are larger
    than the iframe embed and were not justified for an MVP shell.
 2. **Independent deploy cadence.** The Tasks app ships at its own pace
    (W22-W27 feature work, e2e suite, ongoing UI refactors). An iframe
-   keeps the two apps loosely coupled — Pulse does not need to bump a
+   keeps the two apps loosely coupled — Mission Control does not need to bump a
    library version or re-run the Tasks app's build pipeline every time
    the Tasks app changes.
 3. **Standalone parity.** The Tasks app continues to be deployable and
    usable on its own. A reader hitting the Tasks app directly sees the
-   same UI a Pulse user sees — Pulse is a tab-bar wrapper, not a
+   same UI a Mission Control user sees — Mission Control is a tab-bar wrapper, not a
    separate product surface.
 
 ### Why iframe over opening in a new tab
@@ -67,7 +69,7 @@ oriented (the W27 SPEC's flow 1 contract).
 
 ### Local development
 
-- The Tasks tab maps the Pulse dev-server port to a Tasks-app URL via
+- The Tasks tab maps the Mission Control dev-server port to a Tasks-app URL via
   `apps/mission-control/src/tabs/TasksTab.jsx:3-14`. The current map is
   a `localhost:517X` neighbour-port lookup with a same-port fallback.
   See [Known gaps](#known-gaps).
@@ -78,15 +80,15 @@ oriented (the W27 SPEC's flow 1 contract).
 
 ### Authentication and authorisation
 
-- Pulse is currently deployed on the Sindustries Tailnet and runs
+- Mission Control is currently deployed on the Sindustries Tailnet and runs
   without a session check of its own.
 - The Tasks app runs the same way it does standalone — when it gains
-  authentication (a stated goal in `docs/systems/task-tracking.md`), the
+  authentication (a stated goal in `docs/systems/tasks.md`), the
   iframe will share the parent's origin and therefore the parent's
   cookies. The mitigation is a reverse proxy in production that
   attaches an authenticated session to the iframe URL (see
   [Production](#production) below).
-- `docs/systems/task-tracking.md` is the source of truth for the
+- `docs/systems/tasks.md` is the source of truth for the
   Tasks app auth contract.
 
 ### Sandbox and CSP
@@ -98,7 +100,7 @@ oriented (the W27 SPEC's flow 1 contract).
 
 ### Unknown paths
 
-- Pulse falls back to the Tasks tab for any URL path not in the tab
+- Mission Control falls back to the Tasks tab for any URL path not in the tab
   registry (`apps/mission-control/src/pulseTabs.js:37-40`). The
   behaviour is asserted by `App.test.jsx`. A `NotFoundTab` component
   in the registry would be a clean alternative; the silent fallback
@@ -119,7 +121,7 @@ URL from `window.location.port` via a `localhost:517X` lookup table
 and falls back to `http://localhost:5173`. There is no `VITE_TASKS_APP_URL`
 override, no discussion of production deploy, and no same-origin /
 frame-ancestor policy. This blocks single-URL production deploy until
-either the Tasks app is built into the Pulse bundle or both apps are
+either the Tasks app is built into the Mission Control bundle or both apps are
 fronted by a reverse proxy. **Quick win Q3 in the W28 task plan** —
 env override + corrected port map — addresses the dev-side ergonomics;
 production deploy remains a separate piece of work.
@@ -128,7 +130,7 @@ production deploy remains a separate piece of work.
 
 `apps/mission-control/src/tabs/TasksTab.jsx:24-31` emits the iframe
 without `sandbox`, `referrerpolicy`, or a CSP header story on the
-Tasks-app side. Once Tasks auth lands, the Tasks app inside Pulse
+Tasks-app side. Once Tasks auth lands, the Tasks app inside Mission Control
 will share the parent origin's cookies. Even in the Tailnet case,
 `sandbox="allow-scripts allow-same-origin allow-forms"` would narrow
 the surface without breaking Tasks. Not urgent today; revisit when
@@ -138,23 +140,23 @@ authentication lands.
 
 ## Production
 
-Pulse is not yet deployed to production. The MVP target is the
+Mission Control is not yet deployed to production. The MVP target is the
 Sindustries Tailnet. Two deployment shapes are under consideration;
 this document records the decision once it lands.
 
-**Option A — reverse proxy.** Pulse and Tasks are deployed as separate
+**Option A — reverse proxy.** Mission Control and Tasks are deployed as separate
 Vite apps behind one URL. The Tasks app is mounted at a path prefix
-(`/tasks` or similar), Pulse is mounted at `/`, and the proxy passes
+(`/tasks` or similar), Mission Control is mounted at `/`, and the proxy passes
 through the iframe `src` unchanged. Authentication and CSP are
 configured at the proxy. This is the cheapest deploy and the most
 likely first production shape.
 
-**Option B — bundle Tasks into Pulse.** Pulse imports `@sindustries/tasks-app`
+**Option B — bundle Tasks into Mission Control.** Mission Control imports `@sindustries/tasks-app`
 as a workspace library and mounts the Tasks React tree directly
 instead of via iframe. Loses the loose-coupling benefit above but
 eliminates the iframe / auth / CSP questions entirely. Reserved for
 if Option A turns out to be unworkable (e.g., Tasks app gains state
-that has to be shared with Pulse siblings).
+that has to be shared with Mission Control siblings).
 
 The option chosen here will be reflected in a follow-up commit and a
 new section below; until then this is the placeholder.
@@ -171,12 +173,12 @@ becomes true:
   CSP `frame-ancestors` directive, a sandbox attribute, or a move to
   Option B.
 - **Production deploy is scheduled.** Tailnet-only is fine; the moment
-  Pulse needs to serve anyone outside the Tailnet, H1 blocks and
+  Mission Control needs to serve anyone outside the Tailnet, H1 blocks and
   either Option A or Option B must be implemented.
 - **Tasks app gains cross-app state.** If Tasks needs to share state
-  with another Pulse tab (e.g., "open in Tasks from Bookmarks"), the
+  with another Mission Control tab (e.g., "open in Tasks from Bookmarks"), the
   iframe contract breaks down and Option B becomes attractive.
-- **Pulse gains a third or fourth tab.** If the shell becomes a
+- **Mission Control gains a third or fourth tab.** If the shell becomes a
   real product surface rather than a wrapper around Tasks, the iframe
   pattern still holds but the unknown-path fallback should become a
   `NotFoundTab`.
@@ -187,7 +189,7 @@ becomes true:
 
 - `apps/mission-control/SPEC.md` — behavioural spec, links here.
 - `apps/mission-control/README.md` — local dev setup.
-- `docs/systems/task-tracking.md` — Tasks app auth and API contract.
+- `docs/systems/tasks.md` — Tasks app auth and API contract.
 - `docs/repo-audits/2026-W28.md` — audit that triggered this ADR.
 - `apps/mission-control/src/tabs/TasksTab.jsx` — current iframe embed.
 - `apps/mission-control/src/tasksApi.js` — Tasks API base URL resolution.

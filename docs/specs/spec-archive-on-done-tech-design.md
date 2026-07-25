@@ -191,7 +191,7 @@ Cron changes:
 Skill changes:
 
 - No skill changes required.
-- If this becomes a documented operator behaviour, update `docs/systems/feature-task-workflow.md` on ship with a short runbook note about spec archival and idempotent retries.
+- If this becomes a documented operator behaviour, update `docs/systems/tasks.md` on ship with a short runbook note about spec archival and idempotent retries.
 
 ## Test Plan
 

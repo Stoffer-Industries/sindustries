@@ -112,7 +112,7 @@ Code tasks follow the same `ready → doing → acceptance → done` state machi
 - `LobsterState.workflow` is persisted as `code-task-workflow` (vs `feature-task-workflow`).
 - `feedback_aggregate` and `post_merge` are reused unchanged.
 
-When working on a code task, treat it like a feature task for all other purposes (PR conventions, system spec gate, `[qa-ac-verified] true` from Tom before close). See `docs/systems/code-task-workflow.md` for the full pipeline diagram.
+When working on a code task, treat it like a feature task for all other purposes (PR conventions, system spec gate, `[qa-ac-verified] true` from Tom before close). See `docs/systems/tasks.md` for the full pipeline diagram.
 
 ### Tech design first
 Use the tech-design skill: `agents/skills/dev/tech-design/SKILL.md`

@@ -164,4 +164,4 @@ The known open code tasks in the 2026-W29 audit cloud-readiness sweep will need 
 
 - `agents/workflows/feature-task/README.md` — add a section documenting the code-task pipeline and the tech-design-optional gate.
 - `agents/definitions/rowan/WORKFLOW.md` — note that code tasks also pass through the lobster and follow the same status transitions.
-- `docs/systems/feature-task-workflow.md` — add code-task pipeline diagram and stage-mapping table.
+- `docs/systems/tasks.md` — add code-task pipeline diagram and stage-mapping table.
