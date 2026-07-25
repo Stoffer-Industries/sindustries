@@ -45,6 +45,7 @@ model Task {
   comments        TaskComment[]
   dependencies    TaskDependency[] @relation("TaskDependsOn")
   dependedOnBy    TaskDependency[] @relation("TaskDependedOnBy")
+  analyticsEvents FeatureTaskAnalyticsEvent[]
 
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
@@ -93,6 +94,50 @@ model TaskTag {
 
   @@id([taskId, tagId])
   @@index([tagId])
+}
+
+/// Feature-task lifecycle analytics events. Append-only except for
+/// idempotent upsert by `eventKey`. Emitted by the Feature Factory Rust
+/// workflow CLI (agents/workflows/feature-task) and read by the Tasks API
+/// routes below, the Mission Control flow dashboard, and the replay CLI.
+/// See docs/specs/post-merge-feature-factory-analytics-tech-design.md.
+model FeatureTaskAnalyticsEvent {
+  id                     String   @id @default(uuid()) @db.Uuid
+  taskId                 String   @db.Uuid
+  /// Stable idempotency key. Gate failure shape:
+  ///   `feature-task:{taskId}:{gate}:{sha256(failureText)}:{failureOrdinal}`
+  /// Terminal summary shape:
+  ///   `feature-task:{taskId}:terminal:{terminalStatus}`
+  eventKey               String   @unique
+  /// `gate_failure` | `terminal_summary`
+  eventType              String
+  /// `spec_check` | `ready_checks` | `verify_delivery` | `feedback_aggregate` | `post_merge`
+  gate                   String?
+  /// `capacity` | `quality`
+  cause                  String?
+  message                String?
+  occurredAt             DateTime @default(now())
+  /// `done` | `accepted`. Null for gate_failure events.
+  terminalStatus         String?
+  /// ISO timestamp of the task's terminal transition. Null for gate_failure events.
+  completionTimestamp    DateTime?
+  /// Terminal summary fields. Null for gate_failure events.
+  totalGateFailureCount  Int?
+  capacityBlockCount     Int?
+  qualityFailureCount    Int?
+  prCycleTimeSeconds     Int?
+  /// Aggregated evidence-type counts from merged PR bodies, e.g.
+  /// `{ "unit": 2, "integration": 1, "e2e": 1, "manual": 1 }`. Null for gate_failure events.
+  evidenceTypeDistribution Json?
+  /// Free-form per-event payload (e.g. PR URLs, failure context).
+  details                Json?
+  createdAt              DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, occurredAt])
+  @@index([occurredAt])
+  @@index([eventType, occurredAt])
 }
 
 enum ContentSchedulerItemStatus {
