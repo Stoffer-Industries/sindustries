@@ -21,7 +21,7 @@ shipped_date: 2026-07-11
 
 Quinn (workflow/pipeline anomalies) and Lox (infra/host reliability) both maintain operational incident state files in the workspace. Before task 75ec1c8c, the two files used divergent shapes — Quinn's `brain/state/quinn-ops-state.json` used an `ops` key and lacked `recurrenceCount`/`nextRetryAt`/`details`; Lox's `brain/state/lox-incident-state.json` already used an `incidents` key but lacked `firstSeen`/`attempts`/`needsTom`/`severity`. Quinn's heartbeat had to branch on the two formats to roll up cross-agent incidents. This system doc is the durable record of the unified schema and the shared parser.
 
-Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/systems/feature-task-workflow.md` (feature-task gates; unrelated but co-located).
+Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/systems/tasks.md` (feature-task gates; unrelated but co-located).
 
 ## Architecture and ownership
 

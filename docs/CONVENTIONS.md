@@ -41,6 +41,14 @@ Tech designs are historical record. Do not delete them. When a feature ships, up
 
 Durable architecture docs. These describe what the system *is* right now — updated when features ship, not per-feature snapshots.
 
+**Consolidation bias: system docs are intentionally high-level and cross-cutting. They are NOT per-feature or per-workflow documents.** If a candidate new doc would overlap with one or more existing `docs/systems/*.md` files in subject matter, it belongs as a section in the existing doc, not a new file. Per-workflow, per-feature, per-channel, per-component, or per-subsystem detail lives inside the matching system doc, not as a new file.
+
+**Self-check before creating a new system doc.** Answer ALL of these with "yes" — if any answer is "no", update an existing doc instead:
+
+1. Does the new doc cover subject matter that no existing `docs/systems/*.md` covers?
+2. Will the new doc remain authoritative for ≥ 2 future changes (not just this one)?
+3. Does the new doc describe a system boundary or operational surface (not a per-feature workflow detail)?
+
 Prefer updating an existing system doc over creating a new one. Only create a new file when a genuinely new cross-cutting system or subsystem is introduced.
 
 **Required sections:**

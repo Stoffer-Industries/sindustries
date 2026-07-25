@@ -79,7 +79,7 @@ Keep the public route contract stable so Mission Control only changes base URL, 
 ### 6. Documentation
 
 - Create `docs/systems/content-scheduler.md` with architecture, API contract, runtime behavior, X credential boundary, runbook notes, and related PRs/tasks.
-- Update `docs/systems/task-tracking.md` / `docs/systems/tasks-api.md` to state that Tasks API does not own Content Scheduler.
+- Update `docs/systems/tasks.md` to state that Tasks API does not own Content Scheduler.
 - Mark this tech design shipped when the extraction PR merges.
 
 ## Acceptance criteria for the code task

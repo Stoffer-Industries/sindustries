@@ -115,7 +115,7 @@ The task's Quinn-owned ACs are:
 - AC4: detect re-check, resync brain spec, reset checksum, post `[spec-resynced]`.
 - AC5: source-of-truth handling between brain spec and task description.
 
-Rowan's branch should document the contract in `docs/systems/feature-task-workflow.md` so Quinn has a stable integration target.
+Rowan's branch should document the contract in `docs/systems/tasks.md` so Quinn has a stable integration target.
 
 ## Data Model / API Contract
 
@@ -133,7 +133,7 @@ New task comment tag:
 
 ## Workflow / Skill Changes
 
-Update `docs/systems/feature-task-workflow.md` with:
+Update `docs/systems/tasks.md` with:
 
 - Drift no longer means "write a new spec immediately."
 - Drift unchecks `Approved by Tom` on non-open tasks.

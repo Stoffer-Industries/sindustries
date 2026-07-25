@@ -403,7 +403,7 @@ Tom's machine
 ## See Also
 
 - `docs/systems/bookmark-workflow.md` — bookmark workflow state machine and script map
-- `docs/systems/task-tracking.md` — Tasks API data model, comment tag protocol, dependency system
+- `docs/systems/tasks.md` — Tasks API data model, comment tag protocol, dependency system, all three workflows
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
 - `agents/rowan/SOUL.md` — Rowan's operating contract

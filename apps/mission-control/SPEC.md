@@ -193,7 +193,7 @@ specimen mount.
   `apps/mission-control/src/tabs/contentSchedulerCalendar.js` and use
   `Intl.DateTimeFormat` to handle the NZST/NZDT offset and DST start
   edge. Auto-publish on `scheduledFor` arrival is a separate subsystem
-  documented in [`docs/systems/content-scheduler-auto-post.md`](../systems/content-scheduler-auto-post.md).
+  documented in [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md) under [Auto-post (event-driven delayed jobs)](../systems/content-scheduler.md#auto-post-event-driven-delayed-jobs).
   See [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
   for the full system contract.
 - **Bookmark state** is read by the Bookmarks tab from

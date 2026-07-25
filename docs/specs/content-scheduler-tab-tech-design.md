@@ -233,7 +233,7 @@ One new table `ContentSchedulerItem` with two new enums. Three indexes support t
 - `apps/mission-control/SPEC.md` — new "Content Scheduler tab" row in the Screens table; new Vitest cases in the E2e coverage table; new "Approval gate" and "Max one X post per day" entries under Data Sources / business rules.
 - `apps/mission-control/README.md` — one paragraph on the new tab in the "Shell features" intro.
 - `services/tasks-api/README.md` — list the new endpoints, the two X-client env vars, and the timezone convention.
-- `docs/systems/feature-task-workflow.md` — **no change.** This task is not a feature-task workflow change.
+- `docs/systems/tasks.md` — **no change.** This task is not a feature-task workflow change.
 - `[no-system-spec-change]` — Mission Control is a static SPA, not a cross-cutting system; the Tasks API change is a new resource on an existing service, not a new system. No `docs/systems/*` update needed.
 
 ## Later todos (parking lot)

@@ -41,7 +41,7 @@ Do not delete or mutate `~/.openclaw`. The feature may remove git worktrees unde
 3. Treat missing directories or absent matching worktrees as success.
 4. Catch cleanup failures, emit a warning with task id/path/branch, and allow the post-merge transition to continue.
 5. Keep cleanup after PR merge confirmation and before/around the existing task `done` transition.
-6. Update `docs/systems/feature-task-workflow.md` or create a system note on ship if no durable workflow doc exists.
+6. Update `docs/systems/tasks.md` or create a system note on ship if no durable workflow doc exists.
 
 ## Data model / API contract changes
 
