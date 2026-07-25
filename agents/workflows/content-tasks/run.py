@@ -12,6 +12,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = SCRIPT_DIR / "scripts"
 PIPELINE = SCRIPT_DIR / "content-task.lobster.yaml"
+CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
+REPO = Path(os.environ.get("SINDUSTRIES_REPO") or CODEBASE_REPO)
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -33,7 +35,9 @@ def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
 
 
 def run_workflow(task_id: str, capacity_limit: int) -> dict:
-    args_json = json.dumps({"taskId": task_id, "ivyCapacityLimit": capacity_limit})
+    args_json = json.dumps(
+        {"taskId": task_id, "ivyCapacityLimit": capacity_limit, "sindustriesRepo": str(REPO)}
+    )
     cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
     log_debug("starting content-task pass for " + task_id)
     env = os.environ.copy()
