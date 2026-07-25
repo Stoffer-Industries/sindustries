@@ -59,6 +59,10 @@ EOF
 
 A short stub like "No change" will be treated as missing and will block acceptance.
 
+**Do not name any other `docs/systems/*.md` file in the no-change reason, even in passing.** The lobster's parser matches the *first* `docs/systems/\S+\.md`-shaped string anywhere in the section — it does not check whether you actually declared that file as updated. If your explanation mentions an existing system doc for context ("this already lives in docs/systems/tasks.md"), the lobster will treat that as your declared spec file and pass the gate even though nothing was touched. Write the no-change reason without naming any `docs/systems/*.md` path at all.
+
+**This section only covers `docs/systems/*.md`. It does not satisfy the app-spec requirement.** Per `docs/CONVENTIONS.md` (DoD item 3) and `agents/definitions/rowan/DoD.md`, if your change alters user-visible behaviour in an app that has an `apps/<app>/SPEC.md`, that file must be updated in this PR too — a system-doc no-change declaration does not exempt you from it. There is currently no automated gate for this, so check it by hand before opening the PR: does `apps/<app>/SPEC.md` exist, and does it describe the flow/screen you just changed? If yes, update it in the same PR and reference it in your AC evidence (`(📄 not code: updated apps/<app>/SPEC.md)`).
+
 Include a `Co-Authored-By` trailer in your commit messages identifying yourself:
 ```
 Co-Authored-By: <Your Name> <your-email>

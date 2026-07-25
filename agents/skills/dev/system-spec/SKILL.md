@@ -43,3 +43,5 @@ Post the task comment:
 For code-only changes that do not alter system behavior, post a specific bypass reason:
 
 `[no-system-spec-change] <reason>`
+
+**Scope boundary — this skill governs `docs/systems/*.md` only.** The consolidation bias above (prefer updating an existing system doc, resist creating new files) applies to system docs specifically. It does not extend to `apps/<app>/SPEC.md`. If your change alters user-visible app behavior, `apps/<app>/SPEC.md` must still be updated in the same PR regardless of whether a system doc changed — see `docs/CONVENTIONS.md` (doc taxonomy #3, DoD item 3). Do not cite "no system doc change needed" as a reason to skip the app spec; they are two separate, independently-required checks.
