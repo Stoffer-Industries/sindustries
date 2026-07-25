@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""List feature tasks that have a [tech-design] comment but no proper
-[tech-design-approved] true comment, so Quinn can review them during
-heartbeat and post approvals on Tom's behalf.
+"""List feature and code tasks that have a [tech-design] comment but no
+proper [tech-design-approved] true comment, so Quinn can review them
+during heartbeat and post approvals on Tom's behalf.
 
 Mirrors the lobster's parser in agents/workflows/feature-task/src/main.rs
 (`tagged_values` + `tech_design_approved`):
@@ -59,9 +59,12 @@ def get_base_url() -> str:
     return base
 
 
-def is_feature_task(task: dict) -> bool:
-    """Mirror agents/workflows/feature-task/src/main.rs list_active_feature_tasks."""
-    if task.get("taskType") == "feature":
+def needs_tech_design_review(task: dict) -> bool:
+    """Feature and code tasks both go through a [tech-design]/[tech-design-approved]
+    gate (see agents/workflows/feature-task/src/main.rs ready_checks and
+    code_task_ready_checks). Code tasks were previously excluded here, which let
+    approved-but-unreviewed code-task designs sit unapproved indefinitely."""
+    if task.get("taskType") in ("feature", "code"):
         return True
     tags = task.get("tags") or []
     return any(t == "feature-factory" for t in tags)
@@ -134,6 +137,18 @@ def list_tasks(base_url: str, statuses: list[str]) -> list[dict]:
     return out
 
 
+def fetch_task_detail(base_url: str, task_id: str) -> dict:
+    """GET /tasks/:id has comments included; GET /tasks (list) does not.
+
+    services/tasks-api/src/routes/tasks.ts only adds `include: { comments }`
+    on the single-task route, so tagged_values() on a list-endpoint task
+    always sees an empty comments array. Any tech-design-approval check must
+    hydrate comments per task via this endpoint before evaluating tags.
+    """
+    response = api_request("GET", base_url, f"/tasks/{task_id}")
+    return response.get("data") or {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -158,7 +173,8 @@ def main() -> int:
     base = (args.base_url or get_base_url()).rstrip("/")
     statuses = args.status or []
 
-    tasks = [t for t in list_tasks(base, statuses) if is_feature_task(t)]
+    candidates = [t for t in list_tasks(base, statuses) if needs_tech_design_review(t)]
+    tasks = [fetch_task_detail(base, t["id"]) for t in candidates]
     pending = []
     for task in tasks:
         url = tech_design_url(task)
@@ -182,10 +198,10 @@ def main() -> int:
         return 0
 
     if not pending:
-        print(f"No feature tasks pending tech-design approval ({len(tasks)} feature tasks checked).")
+        print(f"No feature/code tasks pending tech-design approval ({len(tasks)} checked).")
         return 0
 
-    print(f"{len(pending)} feature task(s) pending tech-design approval:")
+    print(f"{len(pending)} feature/code task(s) pending tech-design approval:")
     for item in pending:
         print(f"  - [{item['status']:11s}] {item['id'][:8]}  {item['title'][:60]}")
         print(f"      design: {item['techDesignUrl']}")
