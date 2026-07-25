@@ -72,6 +72,16 @@ def main() -> None:
         if fpath.exists():
             all_stale.extend(check_file(fpath, threshold))
 
+    # Draft releases are always a signal — releases should always be published.
+    draft_releases: list[str] = []
+    releases_path = CONTENT_ROOT / "releases.json"
+    if releases_path.exists():
+        try:
+            releases = json.loads(releases_path.read_text())
+            draft_releases = [r.get("slug", "?") for r in releases if r.get("visibility") == "draft"]
+        except (json.JSONDecodeError, OSError):
+            pass
+
     if all_stale:
         print(f"STALE_CONTENT: {len(all_stale)} item(s) not updated in >{THRESHOLD_DAYS} days:")
         for item in all_stale:
@@ -79,6 +89,11 @@ def main() -> None:
             print(f"  - {item['file']} / {item['slug']} ({item['status']}, {days} days)")
     else:
         print(f"STALE_CHECK_OK: all active experiments/systems updated within {THRESHOLD_DAYS} days")
+
+    if draft_releases:
+        print(f"DRAFT_RELEASES: {len(draft_releases)} release(s) still visibility:draft — should be published:")
+        for slug in draft_releases:
+            print(f"  - {slug}")
 
 
 if __name__ == "__main__":
