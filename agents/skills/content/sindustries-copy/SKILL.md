@@ -135,7 +135,11 @@ Each output maps to a JSON file in that directory:
 | story | `stories/[slug].json` | title, slug, dek, body, source, visibility |
 | stack | `stacks.json` | title, slug, category, summary, updatedAt, visibility |
 
-All new content starts with `visibility: "draft"` unless Tom explicitly sets it to `"published"`.
+**Visibility defaults by type:**
+- `release` → always `"published"`. A release is an announcement of something already shipped; drafting it defeats the purpose.
+- `experiment`, `system`, `stack`, `story` → `"draft"` by default. These contain narrative and first-person voice that needs approval before going live.
+
+Never set a release to `"draft"` unless Tom explicitly asks.
 
 ---
 
