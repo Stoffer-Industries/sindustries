@@ -15,7 +15,12 @@ import {
   filterTasks,
   isCompleted,
   isArchived,
-  completedInLastDays
+  completedInLastDays,
+  formatFailureRate,
+  formatEvidenceSummary,
+  sumWeeklyField,
+  latestActiveWeek,
+  trendDelta
 } from './flowMetrics.js';
 
 const NOW = new Date('2026-07-04T00:00:00.000Z');
@@ -287,5 +292,110 @@ describe('predicates', () => {
   it('completedInLastDays windowing', () => {
     const tasks = [completedTask(1), completedTask(60), completedTask(5)];
     expect(completedInLastDays(tasks, NOW, 30)).toHaveLength(2);
+  });
+});
+
+// ---- Feature-task analytics helpers (task f170e344) ----
+
+describe('formatFailureRate', () => {
+  it('renders null and NaN as em-dash', () => {
+    expect(formatFailureRate(null)).toBe('—');
+    expect(formatFailureRate(undefined)).toBe('—');
+    expect(formatFailureRate(NaN)).toBe('—');
+  });
+
+  it('formats valid rates as a 1-decimal percentage', () => {
+    expect(formatFailureRate(0)).toBe('0.0%');
+    expect(formatFailureRate(0.123)).toBe('12.3%');
+    expect(formatFailureRate(1)).toBe('100.0%');
+  });
+});
+
+describe('formatEvidenceSummary', () => {
+  it('returns em-dash for empty/missing data', () => {
+    expect(formatEvidenceSummary(null)).toBe('—');
+    expect(formatEvidenceSummary(undefined)).toBe('—');
+    expect(formatEvidenceSummary({})).toBe('—');
+  });
+
+  it('renders the top three labels by count, sorted descending', () => {
+    const summary = formatEvidenceSummary({
+      unit: 3,
+      integration: 1,
+      screenshot: 2,
+      manual: 0
+    });
+    expect(summary).toBe('unit 3 · screenshot 2 · integration 1');
+  });
+
+  it('skips zero-count entries', () => {
+    const summary = formatEvidenceSummary({ unit: 1, manual: 0 });
+    expect(summary).toBe('unit 1');
+  });
+});
+
+describe('sumWeeklyField', () => {
+  it('sums a numeric field across the weekly buckets', () => {
+    const weeks = [
+      { weekStart: '2026-07-06', terminalTaskCount: 2, capacityFailureCount: 1 },
+      { weekStart: '2026-07-13', terminalTaskCount: 3, capacityFailureCount: 4 },
+      { weekStart: '2026-07-20', terminalTaskCount: 0, capacityFailureCount: 0 }
+    ];
+    expect(sumWeeklyField(weeks, 'terminalTaskCount')).toBe(5);
+    expect(sumWeeklyField(weeks, 'capacityFailureCount')).toBe(5);
+  });
+
+  it('returns 0 for empty input', () => {
+    expect(sumWeeklyField([], 'terminalTaskCount')).toBe(0);
+  });
+
+  it('treats missing fields as 0', () => {
+    expect(sumWeeklyField([{ weekStart: '2026-07-06' }], 'terminalTaskCount')).toBe(0);
+  });
+});
+
+describe('latestActiveWeek', () => {
+  it('returns the most recent week with terminalTaskCount > 0', () => {
+    const weeks = [
+      { weekStart: '2026-07-06', terminalTaskCount: 1 },
+      { weekStart: '2026-07-13', terminalTaskCount: 0 },
+      { weekStart: '2026-07-20', terminalTaskCount: 2 }
+    ];
+    expect(latestActiveWeek(weeks)?.weekStart).toBe('2026-07-20');
+  });
+
+  it('returns null when no week has terminal tasks', () => {
+    const weeks = [
+      { weekStart: '2026-07-06', terminalTaskCount: 0 },
+      { weekStart: '2026-07-13', terminalTaskCount: 0 }
+    ];
+    expect(latestActiveWeek(weeks)).toBeNull();
+  });
+
+  it('returns null for empty input', () => {
+    expect(latestActiveWeek([])).toBeNull();
+  });
+});
+
+describe('trendDelta', () => {
+  it('returns the delta between first and last non-zero weeks', () => {
+    const weeks = [
+      { weekStart: '2026-07-06', gateFailureCount: 1 },
+      { weekStart: '2026-07-13', gateFailureCount: 0 },
+      { weekStart: '2026-07-20', gateFailureCount: 4 }
+    ];
+    expect(trendDelta(weeks, 'gateFailureCount')).toBe(3);
+  });
+
+  it('returns null when fewer than two non-zero weeks exist', () => {
+    const weeks = [
+      { weekStart: '2026-07-06', gateFailureCount: 1 },
+      { weekStart: '2026-07-13', gateFailureCount: 0 }
+    ];
+    expect(trendDelta(weeks, 'gateFailureCount')).toBeNull();
+  });
+
+  it('returns null for empty input', () => {
+    expect(trendDelta([], 'gateFailureCount')).toBeNull();
   });
 });

@@ -263,3 +263,72 @@ export function filterTasks(tasks, { assignee, tag } = {}) {
     return true;
   });
 }
+
+// ---- Feature-task analytics helpers (task f170e344) ----
+//
+// Pure helpers for the Feature Factory analytics panel. The API returns
+// weekly buckets with terminalTaskCount, capacityFailureCount,
+// qualityFailureCount, gateFailureRate, evidenceTypeDistribution, etc.
+// These helpers format and summarise that data for the dashboard.
+
+/**
+ * Format a gate failure rate (0..1) as a percentage string with one
+ * decimal. Returns `—` for null so dashboards don't render `NaN%`.
+ */
+export function formatFailureRate(rate) {
+  if (rate == null || !Number.isFinite(rate)) return '—';
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+/**
+ * Format an evidence distribution map as a sorted, abbreviated string.
+ * Returns `—` for empty/missing data so the panel renders cleanly.
+ */
+export function formatEvidenceSummary(distribution) {
+  if (!distribution || typeof distribution !== 'object') return '—';
+  const entries = Object.entries(distribution)
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return '—';
+  return entries
+    .slice(0, 3)
+    .map(([label, count]) => `${label} ${count}`)
+    .join(' · ');
+}
+
+/**
+ * Sum a numeric field across the weekly buckets. Returns 0 for empty input.
+ */
+export function sumWeeklyField(weeks, field) {
+  return weeks.reduce((acc, w) => acc + (Number(w[field]) || 0), 0);
+}
+
+/**
+ * Find the latest week with a non-zero terminalTaskCount. Useful for the
+ * "current week" summary so the panel doesn't summarise an empty week.
+ */
+export function latestActiveWeek(weeks) {
+  for (let i = weeks.length - 1; i >= 0; i -= 1) {
+    if (weeks[i].terminalTaskCount > 0) return weeks[i];
+  }
+  return null;
+}
+
+/**
+ * Stable sort by weekStart ISO date string.
+ */
+export function sortWeeklyBuckets(weeks) {
+  return [...weeks].sort((a, b) => (a.weekStart < b.weekStart ? -1 : 1));
+}
+
+/**
+ * Return the trend slope (delta between last and first non-zero weeks)
+ * for a given numeric field. Positive = getting worse (more failures),
+ * negative = getting better. Returns null if there are fewer than two
+ * non-zero weeks.
+ */
+export function trendDelta(weeks, field) {
+  const nonZero = weeks.filter((w) => Number(w[field]) > 0);
+  if (nonZero.length < 2) return null;
+  return nonZero[nonZero.length - 1][field] - nonZero[0][field];
+}
