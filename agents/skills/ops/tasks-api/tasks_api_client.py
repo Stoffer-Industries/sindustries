@@ -187,6 +187,8 @@ def cmd_create(args):
         "priority": args.priority,
         "status": args.status,
     }
+    if getattr(args, "assignee", None):
+        payload["assignee"] = args.assignee
     description = args.description or ""
     spec_path = getattr(args, "spec", None)
     workstreams_path = getattr(args, "workstreams", None)
