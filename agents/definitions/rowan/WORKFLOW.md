@@ -145,7 +145,7 @@ Before writing any code on a feature task, write the tech design:
 ### AC checkboxes on the task — hands off
 **Never tick or untick AC checkboxes in the task description.** That is Tom/QA's gate, applied only once the task reaches `acceptance`. Rowan's evidence belongs in the PR body only.
 
-### System spec (required in the implementation PR)
+### System spec (documentation convention, not a lobster gate)
 
 Before converting the PR from draft to ready-for-review, write or update the system spec using the system-spec skill:
 `agents/skills/dev/system-spec/SKILL.md`
@@ -154,13 +154,11 @@ The spec must be committed on the implementation branch and included in the **sa
 
 Add a `## System Spec` section to the PR body (before `## Out of scope` or at the end):
 - If a spec was written or updated: `docs/systems/<file>.md` (plain or backtick-quoted)
-- If no spec change: a substantive sentence explaining why (>= 12 non-whitespace characters)
+- If no spec change: a short sentence explaining why
 
-The lobster's verify-delivery gate reads this section from the PR body and blocks until it is present and non-trivial. **No task comment is needed** — the PR body section is the gate.
+The lobster does **not** parse or block on this section — doc content is too varied to check reliably in code, so it's judgment-based. Write it anyway; it's the reviewer's fastest way to see whether behavior-level docs kept up with the change.
 
-**Do not name any other `docs/systems/*.md` file when explaining a no-change.** The lobster's parser grabs the first `docs/systems/*.md`-shaped string it finds in the section, whether or not it's your actual declaration — mentioning an existing doc for context will get parsed as a claimed update and silently pass the gate. Explain the no-change without naming any system-doc path.
-
-**This gate is separate from the app-spec requirement — check both, not just this one.** `agents/definitions/rowan/DoD.md` requires `apps/<app>/SPEC.md` updated whenever user-visible behaviour changes, independent of whether a system doc changed. The system-spec skill's consolidation bias (prefer existing docs, resist new files) is about `docs/systems/*.md` only — it is not a reason to skip an app spec update. Before converting draft → ready-for-review, check: does the app you touched have a `SPEC.md`, and does it describe behaviour you just added or changed? If yes, update it in this PR.
+**This is separate from the app-spec requirement — check both, not just this one.** `agents/definitions/rowan/DoD.md` requires `apps/<app>/SPEC.md` updated whenever user-visible behaviour changes, independent of whether a system doc changed. The system-spec skill's consolidation bias (prefer existing docs, resist new files) is about `docs/systems/*.md` only — it is not a reason to skip an app spec update. Before converting draft → ready-for-review, check: does the app you touched have a `SPEC.md`, and does it describe behaviour you just added or changed? If yes, update it in this PR.
 
 ### Acceptance
 Use the pr-address-feedback skill when handling review comments: `agents/skills/dev/pr-address-feedback/SKILL.md`
