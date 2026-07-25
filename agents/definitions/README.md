@@ -6,7 +6,7 @@ Each agent under `agents/definitions/<name>/` uses a consistent set of markdown 
 
 | File | Purpose | Edit when |
 |---|---|---|
-| `AGENTS.md` | The agent's top-level operating manual — session startup, memory rules, safety guardrails, general behavior. Standard AI-agent instruction file. First thing the agent (and any tool that reads agent instructions) loads. | Global behavior rules change: session startup, memory conventions, safety, communication style. |
+| `AGENTS.md` | Per-agent stub that (a) loads the **shared** `_shared/AGENTS.md` (memory conventions, safety, group chats, heartbeat cadence, tools, platform formatting) at session start, then (b) adds any agent-specific operating additions that don't belong in SOUL/HEARTBEAT/WORKFLOW. Standard AI-agent instruction file — OpenClaw auto-loads it from each workspace root. | **Shared rules** → edit `_shared/AGENTS.md` (one place, all agents benefit). **Agent-only rules** → edit that agent's stub file. If a rule fits SOUL/HEARTBEAT/WORKFLOW, put it there instead. |
 | `SOUL.md` | Voice, values, character. Who this agent *is*. | Character or voice shifts. Never for procedural rules. |
 | `IDENTITY.md` | Name, avatar, immutable identity facts. | Rarely — identity is stable. |
 | `USER.md` | Facts about the humans this agent serves. | New context about the user. |
