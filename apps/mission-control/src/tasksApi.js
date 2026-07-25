@@ -45,3 +45,20 @@ export async function fetchAllTasks() {
   // Best-effort pagination; the API may not support cursors today.
   return all;
 }
+
+/**
+ * Fetch the feature-task analytics weekly buckets for the last `weeks`
+ * weeks. Used by the Feature Factory analytics panel on the Flow
+ * dashboard (AC4 of task f170e344).
+ */
+export async function fetchFeatureTaskAnalyticsWeekly({ weeks = 8 } = {}) {
+  return api(`/feature-task-analytics/weekly?weeks=${weeks}`);
+}
+
+/**
+ * Fetch the raw lifecycle analytics events for a single task. Used by
+ * ad-hoc lifecycle replay (AC5 of task f170e344).
+ */
+export async function fetchFeatureTaskAnalyticsReplay(taskId) {
+  return api(`/feature-task-analytics/tasks/${taskId}/events`);
+}

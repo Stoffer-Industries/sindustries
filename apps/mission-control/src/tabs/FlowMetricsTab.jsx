@@ -5,7 +5,7 @@ import {
   Field,
   Select
 } from '@sindustries/ui/react';
-import { fetchAllTasks } from '../tasksApi.js';
+import { fetchAllTasks, fetchFeatureTaskAnalyticsWeekly } from '../tasksApi.js';
 import {
   cycleTimeSummary,
   weeklyThroughput,
@@ -14,7 +14,12 @@ import {
   wipByStatus,
   availableAssignees,
   availableTags,
-  filterTasks
+  filterTasks,
+  formatFailureRate,
+  formatEvidenceSummary,
+  sumWeeklyField,
+  latestActiveWeek,
+  trendDelta
 } from '../flowMetrics.js';
 
 const CHART_W = 600;
@@ -209,6 +214,8 @@ export function FlowMetricsTab() {
   const [error, setError] = useState(null);
   const [assignee, setAssignee] = useState('All assignees');
   const [tag, setTag] = useState('All tags');
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,6 +227,22 @@ export function FlowMetricsTab() {
       .catch((err) => {
         if (cancelled) return;
         setError(err.message ?? String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchFeatureTaskAnalyticsWeekly({ weeks: 8 })
+      .then((data) => {
+        if (cancelled) return;
+        setAnalytics(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setAnalyticsError(err.message ?? String(err));
       });
     return () => {
       cancelled = true;
@@ -408,6 +431,156 @@ export function FlowMetricsTab() {
           emptyText="Not enough completions to compute P90 (need ≥ 3 per 4-week window)."
         />
       </div>
+
+      <FeatureTaskAnalyticsPanel
+        analytics={analytics}
+        analyticsError={analyticsError}
+      />
     </section>
   );
+}
+
+/**
+ * Feature Factory analytics panel (AC4 of task f170e344).
+ *
+ * Reads weekly analytics buckets from the Tasks API and renders:
+ *   - current-week summary cards (terminal tasks, gate failure rate,
+ *     capacity / quality split, median PR cycle time, evidence summary)
+ *   - weekly trend bars: stacked capacity vs quality failure counts
+ *   - evidence distribution summary for the selected week
+ *
+ * The panel is intentionally read-only and best-effort: an analytics
+ * fetch failure renders a small inline notice without blocking the rest
+ * of the Flow dashboard.
+ */
+function FeatureTaskAnalyticsPanel({ analytics, analyticsError }) {
+  const weeks = useMemo(
+    () => (Array.isArray(analytics) ? [...analytics].sort((a, b) => (a.weekStart < b.weekStart ? -1 : 1)) : []),
+    [analytics]
+  );
+  const current = useMemo(() => (weeks.length > 0 ? latestActiveWeek(weeks) : null), [weeks]);
+  const totalTerminal = useMemo(() => sumWeeklyField(weeks, 'terminalTaskCount'), [weeks]);
+  const totalCapacity = useMemo(() => sumWeeklyField(weeks, 'capacityFailureCount'), [weeks]);
+  const totalQuality = useMemo(() => sumWeeklyField(weeks, 'qualityFailureCount'), [weeks]);
+  const trendDeltaValue = useMemo(() => trendDelta(weeks, 'gateFailureCount'), [weeks]);
+  const weeklyMax = useMemo(
+    () => Math.max(1, ...weeks.map((w) => (w.capacityFailureCount || 0) + (w.qualityFailureCount || 0))),
+    [weeks]
+  );
+
+  return (
+    <div className="flow-metrics__chart" data-testid="flow-metrics-feature-analytics">
+      <div className="flow-metrics__chart-title">Feature Factory analytics (last 8 weeks)</div>
+      {analyticsError && (
+        <div className="flow-metrics__error" role="alert" data-testid="feature-analytics-error">
+          Could not load feature-task analytics: {analyticsError}
+        </div>
+      )}
+      {!analyticsError && weeks.length === 0 && (
+        <div className="flow-metrics__empty" data-testid="feature-analytics-empty">
+          No feature-task lifecycle analytics yet.
+        </div>
+      )}
+      {!analyticsError && weeks.length > 0 && (
+        <>
+          <CardContainer data-testid="feature-analytics-summary">
+            <Card>
+              <div className="flow-metrics__card-label">Terminal tasks (8w)</div>
+              <div className="flow-metrics__card-value" data-testid="feature-analytics-terminal-total">
+                {totalTerminal}
+              </div>
+            </Card>
+            <Card>
+              <div className="flow-metrics__card-label">Capacity failures (8w)</div>
+              <div className="flow-metrics__card-value" data-testid="feature-analytics-capacity-total">
+                {totalCapacity}
+              </div>
+            </Card>
+            <Card>
+              <div className="flow-metrics__card-label">Quality failures (8w)</div>
+              <div className="flow-metrics__card-value" data-testid="feature-analytics-quality-total">
+                {totalQuality}
+              </div>
+            </Card>
+            <Card>
+              <div className="flow-metrics__card-label">Trend (gate failures)</div>
+              <div className="flow-metrics__card-value" data-testid="feature-analytics-trend">
+                {trendDeltaValue == null ? '—' : trendDeltaValue > 0 ? `+${trendDeltaValue}` : trendDeltaValue}
+              </div>
+            </Card>
+          </CardContainer>
+
+          {current && (
+            <CardContainer data-testid="feature-analytics-current">
+              <Card>
+                <div className="flow-metrics__card-label">Latest active week</div>
+                <div className="flow-metrics__card-value">{current.weekStart}</div>
+              </Card>
+              <Card>
+                <div className="flow-metrics__card-label">Gate failure rate</div>
+                <div className="flow-metrics__card-value" data-testid="feature-analytics-current-rate">
+                  {formatFailureRate(current.gateFailureRate)}
+                </div>
+              </Card>
+              <Card>
+                <div className="flow-metrics__card-label">Median PR cycle time</div>
+                <div className="flow-metrics__card-value">
+                  {current.medianPrCycleTimeSeconds == null
+                    ? '—'
+                    : formatSeconds(current.medianPrCycleTimeSeconds)}
+                </div>
+              </Card>
+              <Card>
+                <div className="flow-metrics__card-label">Evidence (latest week)</div>
+                <div className="flow-metrics__card-value" data-testid="feature-analytics-current-evidence">
+                  {formatEvidenceSummary(current.evidenceTypeDistribution)}
+                </div>
+              </Card>
+            </CardContainer>
+          )}
+
+          <div className="flow-metrics__chart" data-testid="feature-analytics-weekly-trend">
+            <div className="flow-metrics__chart-title">Weekly gate failures (capacity vs quality)</div>
+            {weeks.map((w) => {
+              const cap = w.capacityFailureCount || 0;
+              const qual = w.qualityFailureCount || 0;
+              const total = cap + qual;
+              return (
+                <div key={w.weekStart} className="flow-metrics__bar-row">
+                  <div>{w.weekStart}</div>
+                  <div className="flow-metrics__bar-track">
+                    <div
+                      className="flow-metrics__bar-fill flow-metrics__bar-fill--capacity"
+                      style={{ width: total === 0 ? '0%' : `${(cap / weeklyMax) * 100}%` }}
+                      data-testid={`feature-analytics-capacity-${w.weekStart}`}
+                    />
+                    <div
+                      className="flow-metrics__bar-fill flow-metrics__bar-fill--quality"
+                      style={{ width: total === 0 ? '0%' : `${(qual / weeklyMax) * 100}%` }}
+                      data-testid={`feature-analytics-quality-${w.weekStart}`}
+                    />
+                  </div>
+                  <div>{total}</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatSeconds(totalSeconds) {
+  if (totalSeconds == null || !Number.isFinite(totalSeconds)) return '—';
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (totalSeconds < 3600) return `${Math.floor(totalSeconds / 60)}m`;
+  if (totalSeconds < 86400) {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    return `${hours}h${minutes}m`;
+  }
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  return `${days}d${hours}h`;
 }
