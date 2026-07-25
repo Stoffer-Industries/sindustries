@@ -1,7 +1,7 @@
 # Tasks
 
 **Type:** System reference (data plane + workflows)
-**Last updated:** 2026-07-25
+**Last updated:** 2026-07-26
 **Owner:** Rowan (engineering) · Quinn (workflow orchestration) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **App spec:** `apps/tasks/SPEC.md`
@@ -656,6 +656,8 @@ TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
 - Task `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and bookmark/feature lobster sync
 - Task `b2ab54db` — fluid AC lifecycle (drift re-approval flow)
 - Task `f77b7a60-225c-445c-b3d9-042e38a86cde` — initial implementation of the code-task lobster extension (PR #276)
+- Task `f520c396-9664-4210-b149-180371dc8a53` — GymTrack Agent-Powered Workouts (PR #285, PR #296): planned_workouts schema + HMAC-signed agent endpoints for workout history + per-exercise progression. MVP behaviour in `apps/gymtrack/SPEC.md`; agent-specific schema/endpoints in the PR #285 + #296 migrations.
+- Task `f170e344-ea5f-4443-bebb-035948686fc1` — Post-Merge Feature Factory Analytics (tech design approved, impl pending capacity): analytics row writes at post-merge for the factory flow dashboard.
 - PR #145 — first-class `taskType` field on tasks (the foundation of routing)
 - PR #259 — system spec gate moved from `[system-spec]` task comment to `## System Spec` PR body section (shipped 2026-07-19)
 - PR #271 — `400 INVALID_TASK_ID` on malformed path UUIDs (`get`/`patch`/`delete`/`POST /comments`), shipped 2026-07-21
