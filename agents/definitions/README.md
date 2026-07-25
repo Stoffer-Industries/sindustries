@@ -6,7 +6,7 @@ Each agent under `agents/definitions/<name>/` uses a consistent set of markdown 
 
 | File | Purpose | Edit when |
 |---|---|---|
-| `AGENTS.md` | Per-agent stub that (a) loads the **shared** `_shared/AGENTS.md` (memory conventions, safety, group chats, heartbeat cadence, tools, platform formatting) at session start, then (b) adds any agent-specific operating additions that don't belong in SOUL/HEARTBEAT/WORKFLOW. Standard AI-agent instruction file — OpenClaw auto-loads it from each workspace root. | **Shared rules** → edit `_shared/AGENTS.md` (one place, all agents benefit). **Agent-only rules** → edit that agent's stub file. If a rule fits SOUL/HEARTBEAT/WORKFLOW, put it there instead. |
+| `AGENTS.md` | Symlink → `codebases/sindustries/AGENTS.md` (canonical, repo-root, Sindustries OpenClaw operations manual: memory, safety, group chats, heartbeat cadence, docs layout, tools, platform formatting). Auto-injected by OpenClaw from each agent's workspace root — every agent sees the same shared content. | **Shared rules** → edit the canonical `codebases/sindustries/AGENTS.md`. Every agent picks it up on next session. **Agent-only rules** → put in SOUL (voice/values), TOOLS (tool conventions), HEARTBEAT (cadence), or WORKFLOW (execution). Do not add agent-specific content to AGENTS.md — it's shared. |
 | `SOUL.md` | Voice, values, character. Who this agent *is*. | Character or voice shifts. Never for procedural rules. |
 | `IDENTITY.md` | Name, avatar, immutable identity facts. | Rarely — identity is stable. |
 | `USER.md` | Facts about the humans this agent serves. | New context about the user. |

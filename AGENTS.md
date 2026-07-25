@@ -1,10 +1,10 @@
-# AGENTS.md — Shared environment rules
+# AGENTS.md — Sindustries OpenClaw operations manual
 
-This file holds the operating rules that apply to **every agent** in this workspace: memory conventions, safety guardrails, group-chat etiquette, heartbeat proactivity, and platform-formatting rules.
+The operating rules that apply to **every agent** in this Sindustries OpenClaw setup: memory conventions, safety guardrails, group-chat etiquette, heartbeat proactivity, documentation layout, and platform-formatting rules.
 
-**Who loads this:** every per-agent `AGENTS.md` in `agents/definitions/<name>/` instructs its agent to load this file at session start alongside its own AGENTS.md. See `agents/definitions/README.md` for the file-purpose split.
+**Who loads this:** OpenClaw auto-injects this file at session start from each agent's workspace root. Each agent's `AGENTS.md` (Quinn's workspace root, and each of `agents/definitions/{ivy,lox,rowan}/AGENTS.md`) is a symlink to this canonical file at the sindustries repo root.
 
-**Who edits this:** anyone changing rules that apply to more than one agent. Persona-specific rules belong in that agent's SOUL.md (voice/values), HEARTBEAT.md (polling cadence), or WORKFLOW.md (task execution) — not here.
+**Who edits this:** anyone changing rules that apply to more than one agent. Persona-specific rules belong in that agent's SOUL.md (voice/values), TOOLS.md (tool conventions), HEARTBEAT.md (polling cadence), or WORKFLOW.md (task execution) — see `agents/definitions/README.md` for the file-purpose split.
 
 ---
 
@@ -123,6 +123,39 @@ On platforms that support reactions (Discord, Slack), use emoji reactions natura
 Reactions are lightweight social signals. Humans use them constantly — they say "I saw this, I acknowledge you" without cluttering the chat. You should too.
 
 **Don't overdo it:** one reaction per message max. Pick the one that fits best.
+
+## Documentation Structure
+
+When creating, moving, or restoring documentation, use these directories consistently:
+
+- `brain/bookmarks/` — inbound material to review later. Staging area for information we care about (from X, podcasts, links, or our own research) that may lead to action later.
+- `brain/reviews/` — our opinions, analysis, and synthesis about bookmarks as they relate to our world.
+- `brain/tasks/specs/` — implementation-target documents for feature tasks, usually derived from reviews.
+- `brain/posts/` — content we create for the outside world.
+- `docs/infra/` — documentation about the current OpenClaw setup, runtime, incidents, baselines, and operational setup.
+
+If unsure where something belongs:
+
+- raw/inbound idea → `brain/bookmarks/`
+- interpretation/opinion → `brain/reviews/`
+- build-against plan/spec → `brain/tasks/specs/`
+- publishable outward content → `brain/posts/`
+- current system/runbook/setup docs → `docs/infra/`
+
+## Sindustries content signals
+
+Track signals that could become Sindustries public content. This is Sindustries-specific ops that lives here so it's visible to every agent, not just the one running heartbeat.
+
+**What counts as a signal:**
+
+- Experiment or system changes status (building → live → deprecated)
+- Something ships or gets killed
+- Tom shares context about a project in conversation
+- A lesson or decision worth preserving publicly
+
+**What to skip:** routine heartbeat checks, status quo, things that would be obvious to someone watching the website anyway.
+
+**How to add a note:** use the `content-notes` skill.
 
 ## Tools
 
