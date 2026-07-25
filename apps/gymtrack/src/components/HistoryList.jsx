@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSetsForWorkouts, listWorkouts } from '../lib/workouts.js';
+import { supabase } from '../lib/supabase.js';
 
 /**
- * Last 30 days of workouts for the signed-in user, grouped by date.
+ * Last 30 days of workouts for the signed-in user, grouped by date. When a
+ * workout is linked to a planned workout, the planned target reps/weight are
+ * fetched and rendered alongside the actual results so the user can compare.
  */
 export default function HistoryList() {
   const [workouts, setWorkouts] = useState(null);
   const [sets, setSets] = useState([]);
+  const [targetsByPlannedSetId, setTargetsByPlannedSetId] = useState({});
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,11 +34,38 @@ export default function HistoryList() {
         if (cancelled) return;
         if (sErr) {
           setError(sErr.message);
+          setSets([]);
         } else {
           setSets(ss ?? []);
+          // Pull planned-set targets for any set linked back to a plan so the
+          // history view can show target alongside actual.
+          const plannedSetIds = Array.from(
+            new Set((ss ?? []).map((s) => s.planned_set_id).filter(Boolean))
+          );
+          if (plannedSetIds.length > 0) {
+            const { data: pSets, error: psErr } = await supabase
+              .from('planned_workout_sets')
+              .select('id, target_reps, target_weight, unit')
+              .in('id', plannedSetIds);
+            if (cancelled) return;
+            if (!psErr && pSets) {
+              const map = {};
+              pSets.forEach((p) => {
+                map[p.id] = {
+                  target_reps: p.target_reps,
+                  target_weight: Number(p.target_weight),
+                  unit: p.unit
+                };
+              });
+              setTargetsByPlannedSetId(map);
+            }
+          } else {
+            setTargetsByPlannedSetId({});
+          }
         }
       } else {
         setSets([]);
+        setTargetsByPlannedSetId({});
       }
       setLoading(false);
     }
@@ -100,20 +131,47 @@ export default function HistoryList() {
                 const ws = (setsByWorkout.get(w.id) ?? []).sort(
                   (a, b) => a.set_index - b.set_index
                 );
+                const linkedToPlan = !!w.planned_workout_id;
                 return (
-                  <li key={w.id} className="history-workout" data-testid={`workout-${w.id}`}>
+                  <li
+                    key={w.id}
+                    className={`history-workout${linkedToPlan ? ' has-plan' : ''}`}
+                    data-testid={`workout-${w.id}`}
+                  >
                     <div className="history-workout-meta">
                       {ws.length} set{ws.length === 1 ? '' : 's'}
+                      {linkedToPlan ? (
+                        <span
+                          className="plan-badge"
+                          data-testid={`plan-badge-${w.id}`}
+                        >
+                          Planned
+                        </span>
+                      ) : null}
                     </div>
                     <ul className="history-sets">
-                      {ws.map((s) => (
-                        <li key={s.id} className="history-set">
-                          <span className="set-exercise">{s.exercise_name}</span>
-                          <span className="set-detail">
-                            #{s.set_index} · {s.reps} × {s.weight} {s.unit}
-                          </span>
-                        </li>
-                      ))}
+                      {ws.map((s) => {
+                        const target = s.planned_set_id
+                          ? targetsByPlannedSetId[s.planned_set_id] ?? null
+                          : null;
+                        return (
+                          <li key={s.id} className="history-set">
+                            <span className="set-exercise">{s.exercise_name}</span>
+                            <span className="set-detail">
+                              #{s.set_index} · {s.reps} × {s.weight} {s.unit}
+                            </span>
+                            {target ? (
+                              <span
+                                className="set-target"
+                                data-testid={`set-target-${s.id}`}
+                              >
+                                target {target.target_reps} × {target.target_weight}{' '}
+                                {target.unit}
+                              </span>
+                            ) : null}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </li>
                 );

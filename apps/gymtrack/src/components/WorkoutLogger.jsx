@@ -1,12 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { addSets, createWorkout } from '../lib/workouts.js';
+import { fetchPlannedWorkoutForDate, markPlannedWorkoutCompleted } from '../lib/plans.js';
 import { EXERCISES } from '../lib/exercises.js';
 import { useAuth } from '../lib/auth.jsx';
 
 /**
- * Mobile-first workout logger. Local state holds the in-progress sets until
- * Save is tapped; on Save we createWorkout + addSets in sequence.
+ * Mobile-first workout logger. Two modes:
+ *
+ * - **Plan mode** — when the selected date has a non-completed planned
+ *   workout, the logger renders one row per planned set with the target
+ *   reps/weight visible and an actual reps/weight input. Saving creates a
+ *   workout linked to the plan and sets linked to each planned set, then
+ *   marks the plan `completed`. Extra (non-planned) sets can still be added
+ *   via the small freeform form below.
+ * - **Freeform mode** — when no plan exists, the existing single-row form
+ *   is shown for ad-hoc logging. No plan linkage is written.
  */
 export default function WorkoutLogger() {
   const { signOut } = useAuth();
@@ -21,6 +30,42 @@ export default function WorkoutLogger() {
   const [pendingSets, setPendingSets] = useState([]);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null); // { kind: 'success'|'error', text: string }
+
+  // Plan-mode state
+  const [plan, setPlan] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  // actualsByPlannedSetId: { [plannedSetId]: { reps, weight, unit } }
+  const [actualsByPlannedSetId, setActualsByPlannedSetId] = useState({});
+
+  // Load the planned workout for the selected date whenever it changes.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setPlanLoading(true);
+      const { data, error } = await fetchPlannedWorkoutForDate({ date: performedAt });
+      if (cancelled) return;
+      if (error) {
+        setPlan(null);
+        setActualsByPlannedSetId({});
+      } else {
+        setPlan(data);
+        const initial = {};
+        (data?.sets ?? []).forEach((s) => {
+          initial[s.id] = {
+            reps: s.target_reps,
+            weight: s.target_weight,
+            unit: s.unit
+          };
+        });
+        setActualsByPlannedSetId(initial);
+      }
+      setPlanLoading(false);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [performedAt]);
 
   const effectiveExerciseName = useMemo(() => {
     if (exercise === '__custom__') return customExercise.trim();
@@ -43,7 +88,7 @@ export default function WorkoutLogger() {
     setStatus(null);
   }
 
-  function handleRemoveSet(index) {
+  function handleRemovePendingSet(index) {
     setPendingSets((prev) =>
       prev
         .filter((_, i) => i !== index)
@@ -51,31 +96,80 @@ export default function WorkoutLogger() {
     );
   }
 
+  function handleActualChange(plannedSetId, field, value) {
+    setActualsByPlannedSetId((prev) => ({
+      ...prev,
+      [plannedSetId]: {
+        ...(prev[plannedSetId] ?? {}),
+        [field]: field === 'unit' ? value : Number(value)
+      }
+    }));
+  }
+
   async function handleSave() {
-    if (pendingSets.length === 0) {
-      setStatus({ kind: 'error', text: 'Add at least one set before saving.' });
-      return;
-    }
     setSaving(true);
     setStatus(null);
 
-    const performedAtIso = new Date(`${performedAt}T00:00:00`).toISOString();
-    const { data: workout, error: wErr } = await createWorkout({ performed_at: performedAtIso });
-    if (wErr || !workout) {
+    try {
+      const performedAtIso = new Date(`${performedAt}T00:00:00`).toISOString();
+      const { data: workout, error: wErr } = await createWorkout({
+        performed_at: performedAtIso,
+        planned_workout_id: plan?.id ?? null
+      });
+      if (wErr || !workout) {
+        setStatus({ kind: 'error', text: wErr?.message ?? 'Could not save workout.' });
+        return;
+      }
+
+      const plannedSetRows = (plan?.sets ?? []).map((s) => {
+        const actual = actualsByPlannedSetId[s.id] ?? {
+          reps: s.target_reps,
+          weight: s.target_weight,
+          unit: s.unit
+        };
+        return {
+          workout_id: workout.id,
+          exercise_name: s.exercise_name,
+          set_index: s.set_index,
+          reps: actual.reps,
+          weight: actual.weight,
+          unit: actual.unit,
+          planned_set_id: s.id
+        };
+      });
+      const extraRows = pendingSets.map((s) => ({ ...s, workout_id: workout.id }));
+
+      const { error: sErr } = await addSets({
+        workout_id: workout.id,
+        sets: [...plannedSetRows, ...extraRows]
+      });
+      if (sErr) {
+        setStatus({ kind: 'error', text: sErr.message });
+        return;
+      }
+
+      if (plan?.id) {
+        const { error: planErr } = await markPlannedWorkoutCompleted({
+          plannedWorkoutId: plan.id
+        });
+        if (planErr) {
+          // The actual workout saved; just surface the bookkeeping failure.
+          setStatus({
+            kind: 'error',
+            text: `Workout saved, but could not mark plan completed: ${planErr.message}`
+          });
+          setPendingSets([]);
+          return;
+        }
+      }
+
+      setStatus({ kind: 'success', text: 'Workout saved.' });
+      setPendingSets([]);
+      setPlan(null);
+      setActualsByPlannedSetId({});
+    } finally {
       setSaving(false);
-      setStatus({ kind: 'error', text: wErr?.message ?? 'Could not save workout.' });
-      return;
     }
-
-    const { error: sErr } = await addSets({ workout_id: workout.id, sets: pendingSets });
-    setSaving(false);
-    if (sErr) {
-      setStatus({ kind: 'error', text: sErr.message });
-      return;
-    }
-
-    setStatus({ kind: 'success', text: 'Workout saved.' });
-    setPendingSets([]);
   }
 
   async function handleSignOut() {
@@ -83,8 +177,8 @@ export default function WorkoutLogger() {
     navigate('/login', { replace: true });
   }
 
-  // Group pending sets by exercise for the live preview.
-  const grouped = useMemo(() => {
+  // Group pending (freeform) sets by exercise for the live preview.
+  const groupedPending = useMemo(() => {
     const out = new Map();
     pendingSets.forEach((s) => {
       if (!out.has(s.exercise_name)) out.set(s.exercise_name, []);
@@ -92,6 +186,18 @@ export default function WorkoutLogger() {
     });
     return out;
   }, [pendingSets]);
+
+  // Group plan sets by exercise for the plan-mode preview.
+  const planByExercise = useMemo(() => {
+    const out = new Map();
+    (plan?.sets ?? []).forEach((s) => {
+      if (!out.has(s.exercise_name)) out.set(s.exercise_name, []);
+      out.get(s.exercise_name).push(s);
+    });
+    return out;
+  }, [plan]);
+
+  const planMode = !!plan && plan.sets.length > 0;
 
   return (
     <main className="container workout-logger">
@@ -126,7 +232,95 @@ export default function WorkoutLogger() {
         />
       </div>
 
+      {planMode ? (
+        <section className="plan-mode" data-testid="plan-mode">
+          <h2 className="section-title">{plan.title}</h2>
+          {plan.notes ? <p className="plan-notes">{plan.notes}</p> : null}
+
+          {Array.from(planByExercise.entries()).map(([exerciseName, sets]) => (
+            <div
+              key={exerciseName}
+              className="plan-exercise"
+              data-testid={`plan-exercise-${exerciseName}`}
+            >
+              <h3 className="exercise-title">{exerciseName}</h3>
+              <table className="plan-sets-table">
+                <thead>
+                  <tr>
+                    <th scope="col">#</th>
+                    <th scope="col">Target</th>
+                    <th scope="col">Reps</th>
+                    <th scope="col">Weight</th>
+                    <th scope="col">Unit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sets.map((s) => {
+                    const actual = actualsByPlannedSetId[s.id] ?? {};
+                    return (
+                      <tr key={s.id} data-testid={`plan-set-row-${s.set_index}`}>
+                        <td>{s.set_index}</td>
+                        <td>
+                          {s.target_reps} × {s.target_weight} {s.unit}
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            value={actual.reps ?? ''}
+                            onChange={(e) =>
+                              handleActualChange(s.id, 'reps', e.target.value)
+                            }
+                            data-testid={`actual-reps-${s.set_index}`}
+                            aria-label={`Actual reps for ${exerciseName} set ${s.set_index}`}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={actual.weight ?? ''}
+                            onChange={(e) =>
+                              handleActualChange(s.id, 'weight', e.target.value)
+                            }
+                            data-testid={`actual-weight-${s.set_index}`}
+                            aria-label={`Actual weight for ${exerciseName} set ${s.set_index}`}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={actual.unit ?? 'kg'}
+                            onChange={(e) =>
+                              handleActualChange(s.id, 'unit', e.target.value)
+                            }
+                            data-testid={`actual-unit-${s.set_index}`}
+                            aria-label={`Unit for ${exerciseName} set ${s.set_index}`}
+                          >
+                            <option value="kg">kg</option>
+                            <option value="lb">lb</option>
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </section>
+      ) : null}
+
+      {!planMode && planLoading ? (
+        <p data-testid="plan-loading">Checking for planned workout…</p>
+      ) : null}
+
       <form className="set-form" onSubmit={handleAddSet} data-testid="set-form">
+        <p className="form-hint">
+          {planMode
+            ? 'Add an extra (non-planned) set below if needed.'
+            : 'Freeform logging — pick an exercise and add sets.'}
+        </p>
         <label className="form-row">
           <span>Exercise</span>
           <select
@@ -195,18 +389,25 @@ export default function WorkoutLogger() {
       </form>
 
       <section className="pending-sets" data-testid="pending-sets">
-        <h2 className="section-title">In this workout ({pendingSets.length})</h2>
+        <h2 className="section-title">Extra sets ({pendingSets.length})</h2>
         {pendingSets.length === 0 ? (
-          <p className="empty-hint">No sets yet — fill the form above and tap Add set.</p>
+          <p className="empty-hint">No extra sets added.</p>
         ) : (
-          Array.from(grouped.entries()).map(([exerciseName, sets]) => (
-            <div key={exerciseName} className="pending-exercise" data-testid={`group-${exerciseName}`}>
+          Array.from(groupedPending.entries()).map(([exerciseName, sets]) => (
+            <div
+              key={exerciseName}
+              className="pending-exercise"
+              data-testid={`group-${exerciseName}`}
+            >
               <h3 className="exercise-title">{exerciseName}</h3>
               <ol className="pending-list">
                 {sets.map((s) => {
                   const globalIndex = pendingSets.indexOf(s);
                   return (
-                    <li key={`${s.exercise_name}-${s.set_index}-${globalIndex}`} className="pending-item">
+                    <li
+                      key={`${s.exercise_name}-${s.set_index}-${globalIndex}`}
+                      className="pending-item"
+                    >
                       <span className="pending-set-index">#{s.set_index}</span>
                       <span className="pending-set-detail">
                         {s.reps} reps × {s.weight} {s.unit}
@@ -214,7 +415,7 @@ export default function WorkoutLogger() {
                       <button
                         type="button"
                         className="btn-ghost"
-                        onClick={() => handleRemoveSet(globalIndex)}
+                        onClick={() => handleRemovePendingSet(globalIndex)}
                         aria-label={`Remove set ${s.set_index}`}
                       >
                         Remove
@@ -243,7 +444,7 @@ export default function WorkoutLogger() {
           type="button"
           className="btn-primary"
           onClick={handleSave}
-          disabled={saving || pendingSets.length === 0}
+          disabled={saving || (!planMode && pendingSets.length === 0)}
           data-testid="save-workout"
         >
           {saving ? 'Saving…' : 'Save workout'}
