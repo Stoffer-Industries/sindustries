@@ -158,6 +158,10 @@ Add a `## System Spec` section to the PR body (before `## Out of scope` or at th
 
 The lobster's verify-delivery gate reads this section from the PR body and blocks until it is present and non-trivial. **No task comment is needed** — the PR body section is the gate.
 
+**Do not name any other `docs/systems/*.md` file when explaining a no-change.** The lobster's parser grabs the first `docs/systems/*.md`-shaped string it finds in the section, whether or not it's your actual declaration — mentioning an existing doc for context will get parsed as a claimed update and silently pass the gate. Explain the no-change without naming any system-doc path.
+
+**This gate is separate from the app-spec requirement — check both, not just this one.** `agents/definitions/rowan/DoD.md` requires `apps/<app>/SPEC.md` updated whenever user-visible behaviour changes, independent of whether a system doc changed. The system-spec skill's consolidation bias (prefer existing docs, resist new files) is about `docs/systems/*.md` only — it is not a reason to skip an app spec update. Before converting draft → ready-for-review, check: does the app you touched have a `SPEC.md`, and does it describe behaviour you just added or changed? If yes, update it in this PR.
+
 ### Acceptance
 Use the pr-address-feedback skill when handling review comments: `agents/skills/dev/pr-address-feedback/SKILL.md`
 
