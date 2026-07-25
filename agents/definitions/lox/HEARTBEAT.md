@@ -205,3 +205,18 @@ ls -la .../brain/state/lox-incident-state.json || true
 Rule: any existence/optional-path probe in a heartbeat procedure should end with `|| true`. Reserve non-zero exits for checks where "not found" really is a failure (mandatory config files, expected runbook targets, etc.).
 
 Related: see also the Tailscale-wedge false-positive lesson in `MEMORY.md` — the `pgrep <GUI-binary>` check is what distinguishes a genuine wedge from an operator-quit state. Same shape: a partial signature matches the alert, but one extra probe disambiguates.
+
+### `brctl status brain/` error does NOT mean brain is unreadable
+
+`brctl status <path>` returning `BRCloudDocsErrorDomain 30 'Client zone not found'` (or `client:blocked-app-uninstalled`) reports iCloud daemon zone registration state — not whether the files are accessible on disk. After a `brctl download` recovery, files are materialized locally and filesystem reads succeed even if the daemon zone is unhealthy.
+
+**Correct brain health probe:**
+```bash
+# CORRECT — tests what agents actually need: filesystem read access
+python3 -c "import json; json.load(open('brain/state/quinn-ops-state.json'))" && echo "brain: OK"
+
+# WRONG — tests iCloud zone daemon state, which is irrelevant once files are local
+brctl status brain/  # may return error 30 even when brain is fully readable
+```
+
+Tom confirmed brain operational on 2026-07-25 (Telegram msg #3897) while `brctl status` was still returning error 30. The `icloud-client-zone-dead-2026-07-22` incident was reclassified `false_positive` on that basis. Only re-open an iCloud brain incident if the direct read probe itself fails.
