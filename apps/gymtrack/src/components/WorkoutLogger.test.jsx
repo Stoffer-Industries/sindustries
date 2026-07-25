@@ -14,6 +14,18 @@ vi.mock('../lib/workouts.js', () => ({
   addSets: (...args) => mockAddSets(...args)
 }));
 
+// Mock plans.js so the workout-date useEffect doesn't hit Supabase — these
+// tests cover the freeform (no-plan) path. Plan-mode UI is exercised in
+// the screenshot/E2E coverage.
+const mockFetchPlannedWorkoutForDate = vi.fn();
+const mockMarkPlannedWorkoutCompleted = vi.fn();
+vi.mock('../lib/plans.js', () => ({
+  fetchPlannedWorkoutForDate: (...args) => mockFetchPlannedWorkoutForDate(...args),
+  markPlannedWorkoutCompleted: (...args) => mockMarkPlannedWorkoutCompleted(...args),
+  fetchPlannedWorkoutById: vi.fn(),
+  shapePlannedWorkout: (row) => row
+}));
+
 // Mock auth so useAuth() returns a signed-in session.
 const mockSignOut = vi.fn();
 vi.mock('../lib/auth.jsx', () => ({
@@ -43,6 +55,8 @@ function renderLogger() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockFetchPlannedWorkoutForDate.mockResolvedValue({ data: null, error: null });
+  mockMarkPlannedWorkoutCompleted.mockResolvedValue({ error: null });
 });
 
 describe('WorkoutLogger', () => {
@@ -50,7 +64,7 @@ describe('WorkoutLogger', () => {
     renderLogger();
     expect(screen.getByTestId('set-form')).toBeInTheDocument();
     expect(screen.getByTestId('pending-sets')).toBeInTheDocument();
-    expect(screen.getByText(/No sets yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No extra sets added/i)).toBeInTheDocument();
   });
 
   it('adds a set and shows it grouped under the exercise', async () => {
@@ -98,7 +112,7 @@ describe('WorkoutLogger', () => {
     // success status appears
     expect(await screen.findByTestId('save-status')).toHaveTextContent(/Workout saved/i);
     // pending list cleared
-    expect(screen.getByText(/No sets yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No extra sets added/i)).toBeInTheDocument();
   });
 
   it('shows an error banner when save fails', async () => {
