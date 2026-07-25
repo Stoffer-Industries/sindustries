@@ -67,7 +67,7 @@
     "type": "system",
     "links": [],
     "evidence": "Pipeline shipped 2026-06-17 with 110 tests across 53 files. The end-to-end loop — ingest, curate, spec, approve, create task — runs through a single heartbeat-driven workflow, with spec approvals routed via the OpenClaw gateway.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Linked article bookmark ingest",
@@ -77,7 +77,7 @@
     "type": "system",
     "links": [],
     "evidence": "Linked article extraction and quoted X article parsing shipped 2026-06-18. The bookmark summary now contains the original article body or the quoted X article text, giving curation and spec authoring a richer source to work from.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Weekly repo audit automation",
@@ -87,7 +87,7 @@
     "type": "system",
     "links": [],
     "evidence": "Cron, runner, and skill shipped 2026-06-19. The audit prompt is vendored as a skill, the cron writes `codebases/sindustries/docs/repo-audits/<YYYY-Www>.md` and opens a labelled PR per ISO week. Re-runs update the existing branch instead of opening duplicates.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Bookmark pipeline dashboard",
@@ -107,7 +107,7 @@
     "type": "system",
     "links": [],
     "evidence": "Shared @sindustries/ui primitives now serve the website and tasks app; the tasks app also ships a tokens specimen page, and Pencil token sync consolidates into the shared UI artifact.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Morning brief ops escalation",
@@ -117,7 +117,7 @@
     "type": "system",
     "links": [],
     "evidence": "Morning brief workflow now reads persistent incident and ops state and escalates items that need Tom attention into the daily brief.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Budgeting mobile live-data MVP",
@@ -127,7 +127,7 @@
     "type": "product",
     "links": [],
     "evidence": "Budget mobile phases shipped accounts and cards screens, inline balance alert setup, delete confirmation, spending breakdowns, category transactions, recategorisation, transaction detail sheets, and Akahu-backed live bank sync.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Bookmark tagger gateway route",
@@ -137,7 +137,7 @@
     "type": "system",
     "links": [],
     "evidence": "The X bookmark tagger now returns descriptive tags such as agent architecture and token optimisation after moving through the OpenClaw gateway provider route.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Feature Factory v2",
@@ -147,7 +147,7 @@
     "type": "system",
     "links": [],
     "evidence": "Feature task workflow shipped 2026-06-29 (PR #117). The lobster handles spec approval, tech design gates, PR tracking, QA verification, and system spec requirements as a fully automated orchestration loop.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Task dependency UI",
@@ -157,7 +157,7 @@
     "type": "system",
     "links": [],
     "evidence": "Task dependency backend (PR #128) and dependency UI (PR #129) shipped 2026-06-27–29. First capability to run the full spec → factory pipeline end-to-end.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Task type filter and selector",
@@ -167,7 +167,7 @@
     "type": "system",
     "links": [],
     "evidence": "Task type filter and editor shipped 2026-06-30 (PR #145), closing task 5dbf2967.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Fluid spec drift lifecycle",
@@ -177,7 +177,7 @@
     "type": "system",
     "links": [],
     "evidence": "Shipped across PRs #161, #163, #165, and #167 (2026-07-01 to 2026-07-03). Drift detection unchecks the approval marker, posts AC diff comments, and the resync path rewrites the brain spec from the task description after Tom re-approves.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Mission Control shell MVP",
@@ -187,7 +187,7 @@
     "type": "system",
     "links": [],
     "evidence": "Mission Control shell MVP shipped 2026-07-05 with a persistent navigation shell and embedded operating surfaces for tasks, bookmarks, and flow metrics.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Mission Control bookmarks tab",
@@ -197,7 +197,7 @@
     "type": "system",
     "links": [],
     "evidence": "The Mission Control bookmarks tab shipped 2026-07-08, exposing saved-signal pipeline KPIs, topic breakdowns, pending approvals, and recent transitions.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Mission Control shell-owned theme",
@@ -207,7 +207,7 @@
     "type": "system",
     "links": [],
     "evidence": "Shell-owned theme preference shipped 2026-07-10 with cross-tab and embedded task-view synchronisation.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Worktree cleanup after feature delivery",
@@ -217,7 +217,7 @@
     "type": "system",
     "links": [],
     "evidence": "Post-merge feature-task cleanup shipped 2026-07-10 and now removes matching task worktrees idempotently.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Task creation operating standard",
@@ -227,7 +227,7 @@
     "type": "system",
     "links": [],
     "evidence": "Task creation guidance updated 2026-07-07 to use real task types and keep acceptance checkbox state reserved for QA/product approval.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "GymTrack MVP",
@@ -237,7 +237,7 @@
     "type": "product",
     "links": [],
     "evidence": "GymTrack MVP shipped 2026-07-13 with Vite, React, Supabase auth, row-level-secured workout and set records, and iOS Safari support; live deploy is pending Supabase provisioning.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Content Scheduler",
@@ -247,7 +247,7 @@
     "type": "system",
     "links": [],
     "evidence": "Content Scheduler shipped 2026-07-16 with compose, approval, scheduling, and publishing gates inside Mission Control.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "SIndustries tab in Mission Control",
@@ -257,7 +257,7 @@
     "type": "system",
     "links": [],
     "evidence": "SIndustries tab shipped in Mission Control on 2026-07-13, embedding the public brand site in the operating shell.",
-    "visibility": "draft"
+    "visibility": "published"
   },
   {
     "title": "Unified agent incident schema",
@@ -267,6 +267,6 @@
     "type": "system",
     "links": [],
     "evidence": "Unified incident schema shipped 2026-07-12 with a shared JSON-Schema-validated state contract and parser for Quinn and Lox.",
-    "visibility": "draft"
+    "visibility": "published"
   }
 ]
