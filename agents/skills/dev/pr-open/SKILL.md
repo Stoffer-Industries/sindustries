@@ -53,15 +53,9 @@ EOF
 )"
 ```
 
-**`## System Spec` is required on every feature-task PR.** The lobster's `verify_delivery` gate reads this section and blocks if it is absent or empty. Provide either:
-- The path to the spec file that was written or updated (`docs/systems/<file>.md`), plain or backtick-quoted.
-- A substantive no-change reason (at least 12 non-whitespace characters, no spec path) explaining why no spec was touched.
+**`## System Spec` is a documentation convention, not a lobster gate.** Note the path to the spec file you wrote or updated (`docs/systems/<file>.md`), or a short reason why none was touched. Nothing parses or blocks on this section — it's judgment-based, not automated, because doc content is too varied to check reliably in code.
 
-A short stub like "No change" will be treated as missing and will block acceptance.
-
-**Do not name any other `docs/systems/*.md` file in the no-change reason, even in passing.** The lobster's parser matches the *first* `docs/systems/\S+\.md`-shaped string anywhere in the section — it does not check whether you actually declared that file as updated. If your explanation mentions an existing system doc for context ("this already lives in docs/systems/tasks.md"), the lobster will treat that as your declared spec file and pass the gate even though nothing was touched. Write the no-change reason without naming any `docs/systems/*.md` path at all.
-
-**This section only covers `docs/systems/*.md`. It does not satisfy the app-spec requirement.** Per `docs/CONVENTIONS.md` (DoD item 3) and `agents/definitions/rowan/DoD.md`, if your change alters user-visible behaviour in an app that has an `apps/<app>/SPEC.md`, that file must be updated in this PR too — a system-doc no-change declaration does not exempt you from it. There is currently no automated gate for this, so check it by hand before opening the PR: does `apps/<app>/SPEC.md` exist, and does it describe the flow/screen you just changed? If yes, update it in the same PR and reference it in your AC evidence (`(📄 not code: updated apps/<app>/SPEC.md)`).
+**This section only covers `docs/systems/*.md`. It does not satisfy the app-spec requirement.** Per `docs/CONVENTIONS.md` (DoD item 3) and `agents/definitions/rowan/DoD.md`, if your change alters user-visible behaviour in an app that has an `apps/<app>/SPEC.md`, that file must be updated in this PR too — a system-doc no-change declaration does not exempt you from it. There is no automated gate for this either, so check it by hand before opening the PR: does `apps/<app>/SPEC.md` exist, and does it describe the flow/screen you just changed? If yes, update it in the same PR and reference it in your AC evidence (`(📄 not code: updated apps/<app>/SPEC.md)`).
 
 Include a `Co-Authored-By` trailer in your commit messages identifying yourself:
 ```

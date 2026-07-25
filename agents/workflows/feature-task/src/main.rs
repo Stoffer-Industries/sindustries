@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose, Engine as _};
 use clap::{ArgAction, Parser, Subcommand};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -467,17 +466,13 @@ fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
                 for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
                     failures.push(format!("PR {url} — {ac_failure}"));
                 }
-                let decl = body_system_spec_decl(&body);
-                failures.extend(system_spec_pr_body_failures(&decl, url, &env.task));
             }
             Err(err) => {
                 failures.push(format!(
-                    "Could not read PR body for {url}: {err}. Cannot validate AC text or system spec."
+                    "Could not read PR body for {url}: {err}. Cannot validate AC text."
                 ));
             }
         }
-    } else if !pr_urls.is_empty() {
-        failures.push("Could not determine latest PR URL to validate system spec.".to_string());
     }
     if workstreams(&env.task).is_empty() {
         failures.push("Task description must include at least one workstream.".to_string());
@@ -561,17 +556,13 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
                     failures.push(format!("PR {url} — {ac_failure}"));
                 }
-                let decl = body_system_spec_decl(&body);
-                failures.extend(system_spec_pr_body_failures(&decl, url, &env.task));
             }
             Err(err) => {
                 failures.push(format!(
-                    "Could not read PR body for {url}: {err}. Cannot validate AC text or system spec."
+                    "Could not read PR body for {url}: {err}. Cannot validate AC text."
                 ));
             }
         }
-    } else if !pr_urls.is_empty() {
-        failures.push("Could not determine latest PR URL to validate system spec.".to_string());
     }
     if workstreams(&env.task).is_empty() {
         failures.push("Task description must include at least one workstream.".to_string());
@@ -2970,176 +2961,12 @@ where
         .collect()
 }
 
-fn pr_branch_for_system_spec<I, B>(url: &str, inspect: I, branch_for_pr: B) -> Result<String>
-where
-    I: Fn(&str) -> Result<ReviewState> + Copy,
-    B: Fn(&str) -> Result<String> + Copy,
-{
-    match inspect(url) {
-        Ok(ReviewState::Merged) => Ok("main".to_string()),
-        Ok(_) => branch_for_pr(url),
-        Err(err) => Err(err),
-    }
-}
-
 fn openclaw_needed(task: &Task) -> bool {
     !tagged_values(task, "[openclaw-needed]").is_empty()
 }
 
 fn openclaw_done(task: &Task) -> bool {
     !tagged_values(task, "[openclaw-done]").is_empty()
-}
-
-trait SystemSpecFetcher {
-    fn read(&self, owner: &str, repo: &str, path: &str, branch: &str) -> Result<String>;
-}
-
-struct GhSystemSpecFetcher;
-
-impl SystemSpecFetcher for GhSystemSpecFetcher {
-    fn read(&self, owner: &str, repo: &str, path: &str, branch: &str) -> Result<String> {
-        fetch_github_contents(owner, repo, path, branch)
-    }
-}
-
-fn system_spec_pr_body_failures(
-    decl: &SystemSpecBodyDecl,
-    pr_url: &str,
-    task: &Task,
-) -> Vec<String> {
-    system_spec_pr_body_failures_with(decl, pr_url, task, inspect_pr, pr_head_branch, &GhSystemSpecFetcher)
-}
-
-fn system_spec_pr_body_failures_with<I, B>(
-    decl: &SystemSpecBodyDecl,
-    pr_url: &str,
-    task: &Task,
-    inspect: I,
-    branch_for_pr: B,
-    fetcher: &dyn SystemSpecFetcher,
-) -> Vec<String>
-where
-    I: Fn(&str) -> Result<ReviewState> + Copy,
-    B: Fn(&str) -> Result<String> + Copy,
-{
-    match decl {
-        SystemSpecBodyDecl::Missing => {
-            vec!["PR body must include a `## System Spec` section with a spec path or a no-change reason.".to_string()]
-        }
-        SystemSpecBodyDecl::NoChange => vec![],
-        SystemSpecBodyDecl::Path(path) => {
-            let (owner, repo_name) = match parse_pr_repo(pr_url) {
-                Ok(parts) => parts,
-                Err(err) => {
-                    return vec![format!("Could not parse PR URL `{pr_url}`: {err}.")]
-                }
-            };
-            let branch = match pr_branch_for_system_spec(pr_url, inspect, branch_for_pr) {
-                Ok(b) => b,
-                Err(err) => {
-                    return vec![format!(
-                        "Could not determine branch for PR `{pr_url}`: {err}."
-                    )]
-                }
-            };
-            let text = match fetcher.read(&owner, &repo_name, path, &branch) {
-                Ok(t) => t,
-                Err(err) if is_github_404(&err) => {
-                    return vec![format!(
-                        "System spec `{path}` is missing on PR branch `{branch}`."
-                    )]
-                }
-                Err(err) => {
-                    return vec![format!(
-                        "Could not read system spec `{path}` from PR branch `{branch}`: {err}."
-                    )]
-                }
-            };
-            let referenced = implementer_pr_urls(task)
-                .into_iter()
-                .any(|u| text.contains(&u))
-                || text.contains(&task.id);
-            if referenced {
-                vec![]
-            } else {
-                vec![format!(
-                    "System spec `{path}` does not reference this task or PR."
-                )]
-            }
-        }
-    }
-}
-
-fn parse_pr_repo(url: &str) -> Result<(String, String)> {
-    let re = Regex::new(r"^https://github\.com/([^/]+)/([^/]+)/pull/\d+$").unwrap();
-    let caps = re
-        .captures(url)
-        .ok_or_else(|| anyhow!("expected GitHub PR URL"))?;
-    Ok((caps[1].to_string(), caps[2].to_string()))
-}
-
-fn pr_head_branch(url: &str) -> Result<String> {
-    let output = Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            url,
-            "--json",
-            "headRefName",
-            "--jq",
-            ".headRefName",
-        ])
-        .output()
-        .context("run gh pr view for head branch")?;
-    if !output.status.success() {
-        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string()));
-    }
-    let branch = String::from_utf8(output.stdout)?.trim().to_string();
-    if branch.is_empty() {
-        return Err(anyhow!("empty PR head branch"));
-    }
-    Ok(branch)
-}
-
-fn fetch_github_contents(owner: &str, repo: &str, path: &str, branch: &str) -> Result<String> {
-    let endpoint = format!("repos/{owner}/{repo}/contents/{path}?ref={branch}");
-    let output = Command::new("gh")
-        .args(["api", &endpoint])
-        .output()
-        .context("run gh api for contents")?;
-    if !output.status.success() {
-        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string()));
-    }
-    decode_github_contents_response(&String::from_utf8(output.stdout)?)
-}
-
-fn decode_github_contents_response(raw: &str) -> Result<String> {
-    let value: Value = serde_json::from_str(raw)?;
-    let encoding = value
-        .get("encoding")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if encoding != "base64" {
-        return Err(anyhow!("unsupported GitHub contents encoding `{encoding}`"));
-    }
-    let content = value
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("GitHub contents response missing `content`"))?;
-    let compact: String = content.chars().filter(|c| !c.is_whitespace()).collect();
-    let decoded = general_purpose::STANDARD
-        .decode(compact)
-        .context("decode GitHub contents base64")?;
-    String::from_utf8(decoded).context("GitHub contents file is not UTF-8")
-}
-
-fn is_github_404(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("HTTP 404") || message.contains("Not Found")
 }
 
 fn inspect_pr(url: &str) -> Result<ReviewState> {
@@ -3244,46 +3071,6 @@ fn body_has_checked_acceptance(body: &str) -> bool {
     Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+.+")
         .unwrap()
         .is_match(body)
-}
-
-/// What the `## System Spec` section of a PR body declares.
-#[derive(Debug, PartialEq)]
-enum SystemSpecBodyDecl {
-    /// Section is absent or empty.
-    Missing,
-    /// Section contains a substantive no-change reason (>= 12 non-whitespace chars, no spec path).
-    NoChange,
-    /// Section contains a `docs/systems/*.md` path.
-    Path(String),
-}
-
-fn body_system_spec_decl(body: &str) -> SystemSpecBodyDecl {
-    let header_re = Regex::new(r"(?mi)^##\s+System Spec\s*$").unwrap();
-    let Some(header_match) = header_re.find(body) else {
-        return SystemSpecBodyDecl::Missing;
-    };
-    let after = &body[header_match.end()..];
-    let end = Regex::new(r"(?m)^##")
-        .unwrap()
-        .find(after)
-        .map(|m| m.start())
-        .unwrap_or(after.len());
-    let content = after[..end].trim();
-    if content.is_empty() {
-        return SystemSpecBodyDecl::Missing;
-    }
-    if let Some(cap) = Regex::new(r"`?(docs/systems/\S+\.md)`?")
-        .unwrap()
-        .captures(content)
-    {
-        return SystemSpecBodyDecl::Path(cap[1].to_string());
-    }
-    let non_ws: usize = content.chars().filter(|c| !c.is_whitespace()).count();
-    if non_ws >= 12 {
-        SystemSpecBodyDecl::NoChange
-    } else {
-        SystemSpecBodyDecl::Missing
-    }
 }
 
 /// Evidence annotation recognised on a feature-task PR AC line.
@@ -4511,185 +4298,6 @@ Lead-in.
             parse_github_review_state(&fixture("github_required.json")).unwrap(),
             ReviewState::Required
         );
-    }
-
-    // ---- system spec PR body parsing ----
-
-    #[test]
-    fn body_system_spec_decl_missing_when_no_section() {
-        assert_eq!(
-            body_system_spec_decl("## Summary\nSome text.\n\n## Acceptance Criteria\n- [x] AC1"),
-            SystemSpecBodyDecl::Missing
-        );
-    }
-
-    #[test]
-    fn body_system_spec_decl_missing_when_section_empty() {
-        assert_eq!(
-            body_system_spec_decl("## Summary\nFoo.\n\n## System Spec\n\n## Acceptance Criteria"),
-            SystemSpecBodyDecl::Missing
-        );
-    }
-
-    #[test]
-    fn body_system_spec_decl_path_plain() {
-        assert_eq!(
-            body_system_spec_decl("## System Spec\ndocs/systems/content-scheduler.md — updated"),
-            SystemSpecBodyDecl::Path("docs/systems/content-scheduler.md".to_string())
-        );
-    }
-
-    #[test]
-    fn body_system_spec_decl_path_backtick() {
-        assert_eq!(
-            body_system_spec_decl("## System Spec\n`docs/systems/content-scheduler.md`"),
-            SystemSpecBodyDecl::Path("docs/systems/content-scheduler.md".to_string())
-        );
-    }
-
-    #[test]
-    fn body_system_spec_decl_no_change_substantive() {
-        assert_eq!(
-            body_system_spec_decl(
-                "## System Spec\nNo system spec change — CI env-var fix only, no user-facing behaviour."
-            ),
-            SystemSpecBodyDecl::NoChange
-        );
-    }
-
-    #[test]
-    fn body_system_spec_decl_no_change_too_short() {
-        assert_eq!(
-            body_system_spec_decl("## System Spec\nNo change"),
-            SystemSpecBodyDecl::Missing
-        );
-    }
-
-    // ---- system_spec_pr_body_failures_with ----
-
-    fn pr_url() -> &'static str {
-        "https://github.com/Stoffer-Industries/sindustries/pull/128"
-    }
-
-    fn task_with_pr() -> Task {
-        Task {
-            id: "task-1".to_string(),
-            comments: vec![TaskComment {
-                text: Some(
-                    format!("[implementer-prs] {}", pr_url()),
-                ),
-                body: None,
-            }],
-            ..Task::default()
-        }
-    }
-
-    #[test]
-    fn system_spec_body_missing_fails() {
-        assert_eq!(
-            system_spec_pr_body_failures_with(
-                &SystemSpecBodyDecl::Missing,
-                pr_url(),
-                &task_with_pr(),
-                |_| Ok(ReviewState::Approved),
-                |_| Ok("some-branch".to_string()),
-                &StubFetcher { body: String::new(), error: None },
-            ),
-            vec!["PR body must include a `## System Spec` section with a spec path or a no-change reason."]
-        );
-    }
-
-    #[test]
-    fn system_spec_body_no_change_passes() {
-        assert!(system_spec_pr_body_failures_with(
-            &SystemSpecBodyDecl::NoChange,
-            pr_url(),
-            &task_with_pr(),
-            |_| Ok(ReviewState::Approved),
-            |_| Ok("some-branch".to_string()),
-            &StubFetcher { body: String::new(), error: None },
-        )
-        .is_empty());
-    }
-
-    #[test]
-    fn system_spec_body_path_valid_passes() {
-        let task = task_with_pr();
-        assert!(system_spec_pr_body_failures_with(
-            &SystemSpecBodyDecl::Path("docs/systems/feature-task.md".to_string()),
-            pr_url(),
-            &task,
-            |_| Ok(ReviewState::Approved),
-            |_| Ok("task-branch".to_string()),
-            &StubFetcher { body: "References task-1".to_string(), error: None },
-        )
-        .is_empty());
-    }
-
-    #[test]
-    fn system_spec_body_path_missing_on_branch_fails() {
-        let task = task_with_pr();
-        assert_eq!(
-            system_spec_pr_body_failures_with(
-                &SystemSpecBodyDecl::Path("docs/systems/feature-task.md".to_string()),
-                pr_url(),
-                &task,
-                |_| Ok(ReviewState::Approved),
-                |_| Ok("task-branch".to_string()),
-                &StubFetcher { body: String::new(), error: Some("gh: Not Found (HTTP 404)".to_string()) },
-            ),
-            vec!["System spec `docs/systems/feature-task.md` is missing on PR branch `task-branch`."]
-        );
-    }
-
-    #[test]
-    fn system_spec_body_reads_from_main_when_pr_merged() {
-        let task = task_with_pr();
-        assert!(system_spec_pr_body_failures_with(
-            &SystemSpecBodyDecl::Path("docs/systems/feature-task.md".to_string()),
-            pr_url(),
-            &task,
-            |_| Ok(ReviewState::Merged),
-            |_| panic!("merged PR must read from main, not head branch"),
-            &StubFetcher { body: "References task-1".to_string(), error: None },
-        )
-        .is_empty());
-    }
-
-    #[test]
-    fn body_system_spec_decl_path_in_middle_of_section() {
-        let body = "## Summary\nFoo.\n\n## System Spec\nUpdated `docs/systems/content-scheduler.md` to cover the 10-day calendar.\n\n## Test plan\n- [ ] CI green";
-        assert_eq!(
-            body_system_spec_decl(body),
-            SystemSpecBodyDecl::Path("docs/systems/content-scheduler.md".to_string())
-        );
-    }
-
-    #[test]
-    fn decodes_github_contents_response() {
-        let raw = json!({
-            "encoding": "base64",
-            "content": "UmVmZXJlbmNlcyB0YXNrLTE=\n"
-        })
-        .to_string();
-        assert_eq!(
-            decode_github_contents_response(&raw).unwrap(),
-            "References task-1"
-        );
-    }
-
-    struct StubFetcher {
-        body: String,
-        error: Option<String>,
-    }
-
-    impl SystemSpecFetcher for StubFetcher {
-        fn read(&self, _owner: &str, _repo: &str, _path: &str, _branch: &str) -> Result<String> {
-            match &self.error {
-                Some(error) => Err(anyhow!(error.clone())),
-                None => Ok(self.body.clone()),
-            }
-        }
     }
 
     // ---- manual block guard (task 593ee264) ----

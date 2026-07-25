@@ -232,9 +232,9 @@ The Lobster YAML composes the Rust CLI commands into status transitions. The Pyt
 - `[implementer-prs] <url>` task comment lists every open PR (legacy alias `[rowan-prs]` still accepted)
 - `[openclaw-needed]` task comment if any `.openclaw` file edits are required (with proposed diff + rollback note) — Rowan does not touch `.openclaw/` directly
 - PR body lists every parent task AC checked off with evidence annotations
-- PR body includes a `## System Spec` section (see below) — required before the PR is converted from draft to ready-for-review
+- PR body includes a `## System Spec` section (see below) — a documentation convention, not a lobster gate
 - When implementation is complete, post `[implementer-prs] <url>` task comment
-- Rust command: `feature-task verify-delivery` runs after the `[implementer-prs]` signal to confirm PRs, CI state, AC text, and system spec
+- Rust command: `feature-task verify-delivery` runs after the `[implementer-prs]` signal to confirm PRs, CI state, and AC text
 
 **`acceptance` — review and gate enforcement**
 
@@ -243,17 +243,11 @@ The Lobster YAML composes the Rust CLI commands into status transitions. The Pyt
   - All PRs linked from `[implementer-prs]` are merged
   - GitHub review state on every linked PR is `APPROVED` (no `CHANGES_REQUESTED` outstanding)
   - CI on the merged commits is green
-  - PR body `## System Spec` section declared (validated at `verify_delivery` — doing → acceptance gate, not acceptance → done)
   - No `[openclaw-needed]` pending without matching `[openclaw-done]` from Quinn
   - `[qa-ac-verified] true` task comment from Tom
 - Rust commands: `feature-task feedback-aggregate`, then `feature-task post-merge`
 
-**`## System Spec` PR body section (doing → acceptance, pre-merge):** `verify_delivery` reads the `## System Spec` section from the **latest implementer PR body** (highest PR number). The section must contain either:
-
-- A path to the spec file committed on the same branch: `docs/systems/<file>.md` (plain or backtick-quoted). The lobster fetches the file from the PR branch (or `main` when merged) and confirms it references the task ID or PR URL.
-- A substantive no-change reason (≥ 12 non-whitespace characters, no `docs/systems/` path): use when no system-level behaviour changed.
-
-A stub like "No change" (< 12 non-whitespace chars) is treated as missing and blocks acceptance. **The system spec must be committed in the same PR as the feature code** — a separate backfill PR is not acceptable. No task comment is needed; the PR body section is the gate. See `agents/skills/dev/pr-open/SKILL.md` for the canonical PR body template.
+**`## System Spec` PR body section (documentation convention, not enforced):** PR authors note in the PR body whether `docs/systems/<file>.md` was written or updated, or give a short reason why not. The lobster does not parse or validate this section — it was removed (2026-07-26) after repeated regex gaps (the parser couldn't distinguish an actual declaration from an incidental mention of an existing doc, and had no way to validate declaration quality). Doc content is too varied to check reliably in code; system-spec upkeep is now judgment-based, checked by the reviewer, not the lobster. See `agents/skills/dev/pr-open/SKILL.md` for the canonical PR body template.
 
 **AC text check (doing → acceptance, pre-merge):** before the lobster will let the task advance from `doing` to `acceptance`, it compares every task description AC against the **open** PR body. Every AC must appear in the PR body as a `- [x] **AC<N>` line — not a bullet, not `- [ ]`, not plain prose, not a `✅` emoji. The `- [x]` form is required because it is the only signal the lobster can machine-parse to confirm the AC is covered by this PR (or by a referenced merged predecessor PR on the same line, e.g. `PR #285`). The line must also carry an evidence annotation `(testID|not tested|not code|pr)` per `agents/skills/dev/pr-open/SKILL.md`. If an AC is missing, has altered text, lacks the checked-checkbox form, or lacks the evidence annotation, the transition is blocked with a `[feature-task-progress-checklist]` comment listing the specific failures — the task stays in `doing` until Rowan opens a fix PR that lists every AC verbatim with evidence. Tom may edit ACs in the task description during QA — spec drift does not block this gate (it is covered by the resync feature; see task b2ab54db). Rule added per Tom's 2026-07-25 21:12 NZST feedback after PR #296 shipped with ACs as bullets + ✅ emoji.
 
@@ -417,8 +411,8 @@ The three workflows share the same Rust binary (feature + code) and the same tas
 | `[openclaw-needed] <reason>` | Rowan | feature, code | Flag a `.openclaw` change for Quinn |
 | `[openclaw-done] <summary>` | Quinn | feature, code | `.openclaw` change applied |
 | `[qa-ac-verified] true` | Tom | feature, code | Explicit QA sign-off; required before `acceptance → done` |
-| `[system-spec] docs/systems/<file>.md` | Rowan | feature, code | System spec path (older convention; the PR body `## System Spec` section is now the gate) |
-| `[no-system-spec-change] <reason>` | Rowan | feature, code | Declares no system doc change needed (with reason) |
+| `[system-spec] docs/systems/<file>.md` | Rowan | feature, code | System spec path (legacy convention, not parsed by the lobster) |
+| `[no-system-spec-change] <reason>` | Rowan | feature, code | Declares no system doc change needed (legacy convention, not parsed by the lobster) |
 | `[spec-resynced] <summary>` | Lobster | feature | Drift resync: `checksum=<sha256>` + `driftFingerprint=<sha256>` |
 | `[feature-task-progress-checklist] ...` | Lobster | feature | Gate failure fingerprint; pre-merge AC text failures also land here |
 | `[code-task-progress-checklist] ...` | Lobster | code | Gate failure fingerprint |
@@ -520,7 +514,6 @@ The `409 SPEC_CHECKSUM_MISMATCH` response names the task id, the stored `specChe
 |---|---|---|
 | `ready → doing` blocked | Missing `[tech-design-approved]` or `specChecksum` drift | Quinn confirms Tom sign-off and posts `[tech-design-approved] true`; for drift, follow the resync path |
 | `[openclaw-needed]` never resolved | Quinn missed the heartbeat step | Quinn scans active tasks on the next heartbeat tick |
-| `doing → acceptance` blocked on system spec | PR body `## System Spec` section absent, empty, or stub (< 12 non-whitespace chars) | Add `## System Spec` to the PR body with the spec path or a substantive no-change reason; the spec file must be committed on the same branch |
 | Spec checksum mismatch | ACs edited after spec approval | Hits `PATCH /tasks/:id` when the description ACs change. Treat as spec drift: Lobster unchecks `**Approved by Tom**`, waits for Tom to re-check, then performs the resync path. Comments are drift-tolerant and remain usable for progress/checklist/resync signals. |
 | Spec lifecycle layout failure | Unexpected direct subdirectory under `brain/tasks/specs/` | Remove or migrate the unexpected subdir so only `open/`, `in-progress/`, and `done/` remain. The lobster creates missing expected dirs automatically. |
 | Stale `**Spec:**` line after a move | Prior run moved a spec but failed before patching the task description | Re-run the relevant lobster stage; move helpers treat destination-present/source-absent as idempotent and repair the task `**Spec:**` path. |
@@ -658,4 +651,6 @@ TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
 - Task `f77b7a60-225c-445c-b3d9-042e38a86cde` — initial implementation of the code-task lobster extension (PR #276)
 - PR #145 — first-class `taskType` field on tasks (the foundation of routing)
 - PR #259 — system spec gate moved from `[system-spec]` task comment to `## System Spec` PR body section (shipped 2026-07-19)
+- PR #296 — surfaced two gaps in the `## System Spec` gate: the regex matched an incidental doc mention as a declaration, and the gate had no equivalent check for `apps/*/SPEC.md`
+- Removed the `## System Spec` PR-body gate entirely (2026-07-26, Tom: "docs are too vague to enforce with checks/code") rather than patching the regex — `verify_delivery` no longer reads or blocks on this section; it is reviewer-judgment only going forward
 - PR #271 — `400 INVALID_TASK_ID` on malformed path UUIDs (`get`/`patch`/`delete`/`POST /comments`), shipped 2026-07-21

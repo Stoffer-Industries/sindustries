@@ -226,7 +226,6 @@ name = "feature-task"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
  "clap",
  "regex",
  "serde",
