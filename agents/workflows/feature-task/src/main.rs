@@ -40,6 +40,7 @@ enum Commands {
     VerifyDelivery(StageArgs),
     FeedbackAggregate(StageArgs),
     PostMerge(StageArgs),
+    CodeTaskTechDesignCheck(StageArgs),
     CodeTaskReadyChecks(StageArgs),
     CodeTaskVerifyDelivery(StageArgs),
     Analytics(AnalyticsArgs),
@@ -212,6 +213,7 @@ fn main() -> Result<()> {
         Commands::VerifyDelivery(args) => verify_delivery(args)?,
         Commands::FeedbackAggregate(args) => feedback_aggregate(args)?,
         Commands::PostMerge(args) => post_merge(args)?,
+        Commands::CodeTaskTechDesignCheck(args) => code_task_tech_design_check(args)?,
         Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
         Commands::CodeTaskVerifyDelivery(args) => code_task_verify_delivery(args)?,
         Commands::Analytics(args) => analytics_replay(args)?,
@@ -504,21 +506,71 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 
 // ---- Code-task stages (task f77b7a60) ----
 //
-// `code-task-ready-checks` and `code-task-verify-delivery` mirror
-// `ready_checks` and `verify_delivery` for `taskType: code` tasks. They:
+// `code-task-tech-design-check` (task 3ba96b5e), `code-task-ready-checks`,
+// and `code-task-verify-delivery` mirror the feature-task stages for
+// `taskType: code` tasks. They:
 //   * Skip the spec-drift machinery entirely — code tasks have no
 //     `**Spec:**` line and no `specChecksum`.
 //   * Set `LobsterState.workflow` to `"code-task-workflow"` on every state
 //     comment so feature and code task state stay distinguishable.
-//   * Use `[code-task-progress-checklist]` and `[code-task-blocked]` comment
-//     tags instead of the feature-task equivalents.
+//   * Use `[code-task-*]` comment tags instead of the feature-task
+//     equivalents so the comment alone names which gate is open (AC4 of
+//     task 3ba96b5e).
 //   * Replace the strict tech-design gate with an optional gate: either
 //     `[tech-design]` + `[tech-design-approved] true`, or an explicit
-//     `[tech-design-not-required] <reason>` waiver.
+//     `[tech-design-not-required] <reason>` waiver. The tech-design gate
+//     runs in `code-task-tech-design-check` (open → ready); the assignee
+//     + capacity gate runs in `code-task-ready-checks` (ready → doing).
 //
 // `feedback_aggregate` and `post_merge` are reused unchanged: their only
 // task-type-specific behaviour is reading `[implementer-prs]` and reviewing
 // PRs, both of which work identically for feature and code tasks.
+
+fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
+    let mut env = read_envelope()?;
+    env.lobster_state.workflow = workflow_for_task(&env.task);
+    let manual_failures = manual_block_failures(&env.task);
+    if !manual_failures.is_empty() {
+        return block_with_manual_block(
+            &args,
+            env,
+            "code_task_tech_design_check",
+            manual_failures,
+            "[code-task-blocked]",
+        );
+    }
+    if is_past(&env.task, "open") {
+        env.already_past = true;
+        env.criteria_met = true;
+        env.action_taken = "already_past_open".to_string();
+        return Ok(env);
+    }
+    let mut failures = Vec::new();
+    // Tech design gate is optional: either an approved tech design or an
+    // explicit waiver must be present. If both are present, prefer the
+    // approved design (a waiver without an approved design is fine for
+    // small tasks).
+    let has_tech_design = tech_design_url(&env.task).is_some();
+    let has_tech_design_approved = tech_design_approved(&env.task);
+    let has_waiver = tech_design_waived(&env.task);
+    if !has_tech_design && !has_waiver {
+        failures.push(
+            "Missing task comment `[tech-design] <url>` or `[tech-design-not-required] <reason>`."
+                .to_string(),
+        );
+    } else if has_tech_design && !has_tech_design_approved && !has_waiver {
+        failures.push("Missing task comment `[tech-design-approved] true`.".to_string());
+    }
+    transition_or_block(
+        &args,
+        env,
+        "ready",
+        "code_task_tech_design_check",
+        failures,
+        "[code-task-tech-design-checklist]",
+        "Code task workflow moved task to `ready`.",
+    )
+}
 
 fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
@@ -540,21 +592,8 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = Vec::new();
-    // Tech design gate is optional: either an approved tech design or an
-    // explicit waiver must be present. If both are present, prefer the
-    // approved design (a waiver without an approved design is fine for
-    // small tasks).
-    let has_tech_design = tech_design_url(&env.task).is_some();
-    let has_tech_design_approved = tech_design_approved(&env.task);
-    let has_waiver = tech_design_waived(&env.task);
-    if !has_tech_design && !has_waiver {
-        failures.push(
-            "Missing task comment `[tech-design] <url>` or `[tech-design-not-required] <reason>`."
-                .to_string(),
-        );
-    } else if has_tech_design && !has_tech_design_approved && !has_waiver {
-        failures.push("Missing task comment `[tech-design-approved] true`.".to_string());
-    }
+    // The tech-design gate has already moved the task to `ready` in the
+    // previous stage. This stage is purely about assignee + capacity.
     let implementer = task_implementer(&env.task);
     if implementer.is_none() {
         failures

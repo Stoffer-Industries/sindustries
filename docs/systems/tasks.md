@@ -361,22 +361,31 @@ open ──────→ ready ──────→ doing ──────�
 blocked      blocked      in-flight      blocked (PR review)
   ↓             ↓             ↓              ↓
 code-task-   code-task-   code-task-     code-task-
-ready-       ready-       verify-        verify-
-checks       checks       delivery       delivery
+tech-        ready-       verify-        verify-
+design-      checks       delivery       delivery
+check
 ```
 
 The lobster dispatches `taskType: code` tasks through `agents/workflows/feature-task/code-task.lobster.yaml`. The same Rust binary that runs the feature-task pipeline is reused; the YAML selects a smaller set of subcommands.
+
+The `open → ready → doing` jump is split into two stages so the tech-design gate and the assignee/capacity gate are visible separately (task `3ba96b5e`):
+
+- `code-task-tech-design-check` gates `open → ready`. It only checks the tech design (or explicit waiver). A task with no assignee still advances to `ready` once its tech design is approved.
+- `code-task-ready-checks` gates `ready → doing`. After the tech-design stage has moved the task to `ready`, this stage only checks for an assignee and assignee capacity. The tech-design check is no longer performed here.
+
+The comment prefix on each stage is the signal that names which gate is open: `[code-task-tech-design-checklist]` for the tech-design stage, `[code-task-progress-checklist]` for the readiness stage. A blocker comment therefore tells the operator exactly which gate is still open without having to read the task code.
 
 **Stage mapping**
 
 | Code-task stage | Feature-task stage | Difference |
 |---|---|---|
-| `code-task-ready-checks` | `ready_checks` + `spec_check` | Spec machinery removed; tech design gate is optional (`[tech-design]` + `[tech-design-approved] true` **or** `[tech-design-not-required] <reason>`) |
+| `code-task-tech-design-check` | `ready_checks` (tech-design portion) | New stage (task `3ba96b5e`). Splits the old single `open → doing` jump into `open → ready → doing`. Only checks the tech design (or waiver). Transitions to `ready`. |
+| `code-task-ready-checks` | `ready_checks` (assignee + capacity portion) | Tech-design check removed (moved to the preceding stage). Now only checks assignee + capacity. Transitions to `doing`. |
 | `code-task-verify-delivery` | `verify_delivery` | Spec drift check removed; no `specChecksum` writes |
 | `feedback_aggregate` | `feedback_aggregate` | Reused unchanged |
 | `post_merge` | `post_merge` | Reused unchanged; `archive_done_task_spec()` no-ops when no `**Spec:**` is present |
 
-Progress-checklist comments use `[code-task-progress-checklist]` and `[code-task-blocked]` tags (versus `[feature-task-progress-checklist]` and `[feature-task-blocked]`).
+Progress-checklist comments use `[code-task-tech-design-checklist]` (tech-design gate), `[code-task-progress-checklist]` (assignee/capacity gate), and `[code-task-blocked]` tags (versus `[feature-task-progress-checklist]` and `[feature-task-blocked]`).
 
 **When to use a code task**
 
@@ -502,7 +511,8 @@ The three workflows share the same Rust binary (feature + code) and the same tas
 | `[no-system-spec-change] <reason>` | Rowan | feature, code | Declares no system doc change needed (legacy convention, not parsed by the lobster) |
 | `[spec-resynced] <summary>` | Lobster | feature | Drift resync: `checksum=<sha256>` + `driftFingerprint=<sha256>` |
 | `[feature-task-progress-checklist] ...` | Lobster | feature | Gate failure fingerprint; pre-merge AC text failures also land here |
-| `[code-task-progress-checklist] ...` | Lobster | code | Gate failure fingerprint |
+| `[code-task-progress-checklist] ...` | Lobster | code | Gate failure fingerprint (assignee + capacity gate) |
+| `[code-task-tech-design-checklist] ...` | Lobster | code | Gate failure fingerprint (tech-design gate, task `3ba96b5e`) |
 | `[feature-task-blocked] ...` | Lobster | feature | Block reason while in `ready` / `doing` / `acceptance` |
 | `[code-task-blocked] ...` | Lobster | code | Block reason while in `ready` / `doing` / `acceptance` |
 | `[lobster-state] { ... }` | Lobster | all | Reconciler state — `version`, `last_orchestrated_at`, gate outcomes, `workflow` |
