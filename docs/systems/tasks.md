@@ -260,6 +260,93 @@ Note: prior versions of this workflow ran an equivalent AC text check at the `po
 - Lobster writes `done` after `post-merge` checks pass
 - After moving to `done`, the lobster's `post-merge` stage runs a best-effort **worktree cleanup** that removes the Rowan feature worktree (e.g. `~/workspaces/rowan/sindustries-task-<8char-prefix>-<slug>`) registered with the primary `sindustries` worktree. The cleanup is idempotent (missing paths are no-ops) and non-fatal (a failure is logged via `[feature-task-progress-checklist]` but does not block `done`). Tracked as task `ba116063-382a-446c-ab91-c01b60d9a7c3`.
 
+#### Feature-Task Lifecycle Analytics (task f170e344)
+
+Feature-task lifecycle analytics is the durable, queryable record of what
+happened to a feature task from creation to terminal state. Every gate
+failure during the lifecycle emits a `gate_failure` event, and every
+successful transition to `done` (or `accepted`, when added) emits a
+single `terminal_summary` event. Tom and Quinn use the weekly aggregate
+to spot quality vs capacity regressions, and the per-task replay to
+audit a specific task's failure history.
+
+##### Event types
+
+| Event type | Fields (key ones) | Emitted from | Frequency |
+|---|---|---|---|
+| `gate_failure` | `taskId`, `eventKey`, `gate`, `cause` (`capacity` \| `quality`), `message` | `transition_or_block`, `block_with_manual_block` in the Rust CLI | One per failure string per gate run |
+| `terminal_summary` | `taskId`, `eventKey`, `terminalStatus`, `completionTimestamp`, `totalGateFailureCount`, `capacityBlockCount`, `qualityFailureCount`, `prCycleTimeSeconds`, `evidenceTypeDistribution` | `post_merge` (after move to `done`) | One per terminal transition; idempotent on re-run via stable `eventKey` |
+
+##### Failure classification
+
+`classify_failure(gate, failure_text)` in `agents/workflows/feature-task/src/analytics.rs` maps a free-text gate failure string to `capacity` or `quality` using case-insensitive substring heuristics. Capacity covers implementer-capacity messages, dependency blocks, and manual blocks. Quality covers missing spec / approval / assignee / evidence, CI or check failures, review `changes_requested`, drift, malformed PR body, and system-spec regressions. Unknown failures default to `quality` so dashboards never undercount when a new failure mode ships without an update.
+
+##### API surface (Tasks API)
+
+The Tasks API owns the analytics events table and aggregation; the
+feature-task workflow is a thin client.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/feature-task-analytics/events` | Idempotent upsert by `eventKey`. Accepts a single event or a batch (max 500). Validates UUIDs and `eventType` / `cause` enums. |
+| `GET  /api/v1/feature-task-analytics/tasks/:taskId/events` | Raw events in `(occurredAt, createdAt)` order for per-task replay. |
+| `GET  /api/v1/feature-task-analytics/weekly?weeks=N` | Monday-start buckets with `terminalTaskCount`, `gateFailureCount` split into `capacityFailureCount` and `qualityFailureCount`, `gateFailureRate` (null when the denominator is zero), `medianPrCycleTimeSeconds`, `p90PrCycleTimeSeconds`, and `evidenceTypeDistribution`. Reuses the `flowMetrics.isoMonday()` convention from Mission Control. |
+
+Backed by a new Prisma model `FeatureTaskAnalyticsEvent` with
+`eventKey @unique` for idempotent writes, an index on `(taskId,
+occurredAt)` for replay, and a `(weekStart, terminalStatus)` index for
+the weekly aggregation.
+
+##### CLI replay
+
+`feature-task analytics replay --task-id <uuid>` prints a chronological
+human-readable replay of one task's events. Returns a JSON envelope on
+stdout that matches the rest of the CLI so callers can pipe through `jq`.
+Non-zero exit only on invalid task IDs, unreachable API, or malformed
+response; "no events" is a successful empty replay.
+
+##### Dashboard
+
+Mission Control renders a Feature Factory analytics panel under the Flow
+dashboard (`apps/mission-control/src/tabs/FlowMetricsTab.jsx` →
+`FeatureTaskAnalyticsPanel`). The panel shows:
+
+- Summary cards for the last 8 weeks: terminal tasks, capacity failures,
+  quality failures, and the gate-failure trend delta.
+- Latest-active-week detail: gate failure rate, median PR cycle time,
+  evidence-type summary.
+- Weekly stacked bar chart (capacity vs quality failures).
+
+All values are pure derivations of the Tasks API response — no charting
+library, no new backend. Helpers live in `apps/mission-control/src/flowMetrics.js`
+and are unit-tested in `flowMetrics.test.js`.
+
+##### Operational guarantees
+
+- **Fail-open emission.** The Rust workflow POSTs events best-effort. An
+  analytics POST failure is logged to stderr and swallowed; the
+  workflow never blocks on observability.
+- **Idempotent writes.** Every event has a stable `eventKey` derived
+  from `(taskId, gate, failure_hash, ordinal)` for `gate_failure` and
+  `(taskId, "terminal", terminalStatus)` for `terminal_summary`.
+  Re-running a stage or the terminal hook does not duplicate events.
+- **Best-effort terminal summary.** If the GET that gathers the prior
+  gate-failure counts fails, the terminal summary is still emitted with
+  zero counts so downstream consumers always see a record. PR cycle
+  time falls back to `null` when no PRs are merged or `gh` metadata is
+  unavailable.
+
+Lives in:
+- `services/tasks-api/src/routes/featureTaskAnalytics.ts` — routes
+- `services/tasks-api/prisma/schema.prisma` — `FeatureTaskAnalyticsEvent` model
+- `agents/workflows/feature-task/src/analytics.rs` — emission + classification
+- `agents/workflows/feature-task/src/main.rs` — wiring (`emit_gate_failure_events`, `emit_terminal_summary_event`, `analytics replay` subcommand)
+- `apps/mission-control/src/tasksApi.js` — `fetchFeatureTaskAnalyticsWeekly`, `fetchFeatureTaskAnalyticsReplay`
+- `apps/mission-control/src/flowMetrics.js` — pure panel helpers
+- `apps/mission-control/src/tabs/FlowMetricsTab.jsx` — `FeatureTaskAnalyticsPanel`
+
+---
+
 ### Code-task workflow
 
 Code tasks track implementation work that changes existing code without adding a new product capability. They cover bug fixes, security hardening, maintenance, refactors, migrations, dependency work, and architecture/service-boundary corrections.
