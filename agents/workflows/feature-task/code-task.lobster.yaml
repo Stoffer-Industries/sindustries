@@ -1,6 +1,6 @@
 name: code-task
 
-# Code-task pipeline (task f77b7a60).
+# Code-task pipeline (task f77b7a60, refined by task 3ba96b5e).
 #
 # Mirrors feature-task.lobster.yaml but dispatches `taskType: code` tasks
 # through a simplified open → ready → doing → acceptance → done flow that:
@@ -8,6 +8,17 @@ name: code-task
 #     spec-drift guard, no specChecksum);
 #   * makes the tech design gate optional — either an approved tech design
 #     or an explicit `[tech-design-not-required]` waiver satisfies the gate;
+#   * uses TWO sibling stages instead of one to model the two-gate flow
+#     (task 3ba96b5e):
+#       - `code_task_tech_design_check` gates open → ready on the tech design
+#         (or explicit waiver). Idempotent: a task already in `ready` (or
+#         past) skips this stage.
+#       - `code_task_ready_checks` gates ready → doing on assignee +
+#         capacity. The tech-design check is no longer performed here.
+#     The comment prefix on each stage (`[code-task-tech-design-checklist]`
+#     for the first, `[code-task-progress-checklist]` for the second) is
+#     the signal that AC4 reads — the comment alone names which gate is
+#     open.
 #   * reuses `feedback_aggregate` and `post_merge` unchanged.
 #
 # `feedback_aggregate` and `post_merge` are byte-identical to the feature
@@ -33,11 +44,18 @@ steps:
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       load-task --base-url ${tasksApiBaseUrl} --task-id ${taskId}
 
+  - id: code_task_tech_design_check
+    command: >-
+      cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
+      code-task-tech-design-check --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+    stdin: $load_task.stdout
+
   - id: code_task_ready_checks
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       code-task-ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
-    stdin: $load_task.stdout
+    stdin: $code_task_tech_design_check.stdout
+    condition: $code_task_tech_design_check.json.criteriaMet
 
   - id: code_task_verify_delivery
     command: >-
