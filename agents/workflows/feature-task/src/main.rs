@@ -1243,6 +1243,19 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             env.criteria_met = false;
             env.action_taken = "post_merge_reverted_to_acceptance".to_string();
             env.failures = qa_failures;
+            // AC2: every gate failure emits a `gate_failure` event. The non-past
+            // `post_merge` path goes through `transition_or_block` which calls
+            // `emit_gate_failure_events`; this `is_past` early-return path
+            // doesn't, so it must emit here to keep the weekly analytics
+            // dashboard (`qualityFailureCount`) consistent across re-runs.
+            if !args.dry_run && !env.failures.is_empty() {
+                analytics::emit_gate_failure_events(
+                    &args,
+                    &env.task,
+                    "post_merge",
+                    &env.failures,
+                );
+            }
             return Ok(env);
         }
         env.already_past = true;
