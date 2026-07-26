@@ -53,8 +53,32 @@ Impact is the bridge between strategy and delivery. It answers "why does this ma
 - An Initiative can deliver many Impacts.
 - An Impact can be addressed by many Initiatives.
 - When Initiatives change priority, recalculate which Impacts are covered and which customer outcomes are at risk.
+- Every Impact has a **weight** (default 1, higher for impacts that matter more — e.g. Money=3, Users=2). Weight feeds Initiative scoring below.
 
 Features can represent software, marketing, sales, or operational work — any delivery artifact.
+
+### Core Concept: Initiative Priority (WSJF)
+
+Initiatives are scored using Weighted Shortest Job First (SAFe), adapted to our vocabulary:
+
+```
+WSJF = (Value + Time Criticality + Risk/Opportunity Enablement) / Job Size
+```
+
+Each on a 1–5 scale:
+
+- **Value** — derived from impact_pull: the sum of weights across the Impacts this Initiative addresses. Don't hand-guess this one; add up the Impact weights.
+- **Time Criticality** — how much value decays if delayed (market windows, cycle timing, competitive pressure). 1 = no urgency, 5 = window closes soon.
+- **Risk/Opportunity Enablement** — does this reduce existential risk or unblock other Initiatives? 1 = standalone, 5 = critical unlock.
+- **Job Size** — effort estimate. 1 = small, 3 = medium, 5 = large.
+
+Every Initiative also carries a **status**: `active` | `parked` | `blocked`. Only `active` Initiatives are scored and factored into task priority — parked/blocked Initiatives (and everything downstream of them) quietly drop out of the ranking without needing to retag anything.
+
+WSJF favours small-but-valuable work over big-but-valuable work per unit of effort — that's intentional (SAFe's whole point), but it will starve large strategic bets if followed blindly. Use the `urgent` flag on a Task (not WSJF) to force through big-bet work that the formula would otherwise deprioritise.
+
+**How this reaches Tasks:** Tasks tag themselves with one or more Impacts (unchanged — no new tagging behaviour). A Task's derived strategic-fit badge is the score of the highest-WSJF `active` Initiative backing any of its tagged Impacts. This is computed, not stored by hand, and re-derives automatically when Initiative status or WSJF inputs change. `urgent` on the Task always overrides the derived badge.
+
+**Where the live numbers live:** the reasoning framework (this file) defines *how* to score. The actual Impacts, Initiatives, and their current weights/status/WSJF inputs live in `brain/strategy/graph-data.md` — that file is the instance data, this skill is the method.
 
 ---
 
@@ -124,8 +148,8 @@ Sindustries currently has one ART and one Value Stream. Treat these as "the whol
 | **Objective** | A measurable outcome under a theme |
 | **Value Stream** | End-to-end flow of value to a customer segment |
 | **ART** | Cross-functional team aligned to a value stream |
-| **Impact** | A specific customer outcome — the bridge between strategy and delivery |
-| **Initiative** | A bounded body of work contributing to one or more impacts |
+| **Impact** | A specific customer outcome — the bridge between strategy and delivery. Carries a `weight` (default 1). |
+| **Initiative** | A bounded body of work contributing to one or more impacts. Carries `status` (active/parked/blocked) and WSJF inputs (value/time criticality/risk enablement/job size) → derived `score`. |
 | **Feature** | A deliverable (software, marketing, sales, ops) that implements an initiative |
 | **Phase** | A time-boxed slice of feature delivery |
 | **Story** | A granular unit of work within a phase |
