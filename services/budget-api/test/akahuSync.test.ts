@@ -49,6 +49,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe('POST /api/v1/akahu/sync', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.restoreAllMocks();
     vi.setSystemTime(new Date('2026-05-12T00:00:00.000Z'));
     process.env.AKAHU_DEV_USER_ACCESS_TOKEN = '';

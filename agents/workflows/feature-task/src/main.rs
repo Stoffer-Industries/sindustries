@@ -12,6 +12,8 @@ use std::{
     process::Command,
 };
 
+mod analytics;
+
 const AUTHOR: &str = "Lobster";
 const WORKFLOW: &str = "feature-task-workflow";
 const CODE_TASK_WORKFLOW: &str = "code-task-workflow";
@@ -40,6 +42,25 @@ enum Commands {
     PostMerge(StageArgs),
     CodeTaskReadyChecks(StageArgs),
     CodeTaskVerifyDelivery(StageArgs),
+    Analytics(AnalyticsArgs),
+}
+
+#[derive(Parser, Clone)]
+struct AnalyticsArgs {
+    #[arg(long, default_value = "http://localhost:4001/api/v1")]
+    base_url: String,
+    #[command(subcommand)]
+    action: AnalyticsAction,
+}
+
+#[derive(Subcommand, Clone)]
+enum AnalyticsAction {
+    /// Replay a task's lifecycle analytics events in chronological order
+    /// (AC5 of task f170e344).
+    Replay {
+        #[arg(long)]
+        task_id: String,
+    },
 }
 
 #[derive(Parser, Clone)]
@@ -193,9 +214,159 @@ fn main() -> Result<()> {
         Commands::PostMerge(args) => post_merge(args)?,
         Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
         Commands::CodeTaskVerifyDelivery(args) => code_task_verify_delivery(args)?,
+        Commands::Analytics(args) => analytics_replay(args)?,
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
     Ok(())
+}
+
+/// Replay a task's lifecycle analytics events in chronological order
+/// (AC5 of task f170e344). Prints one human-readable line per event and
+/// exits non-zero only for invalid task IDs, unreachable API, or
+/// malformed API response. "No events" is a successful empty replay.
+fn analytics_replay(args: AnalyticsArgs) -> Result<Envelope> {
+    let base_url = args.base_url.trim_end_matches('/').to_string();
+    let task_id = match args.action {
+        AnalyticsAction::Replay { task_id } => task_id,
+    };
+
+    // Match the API's UUID pattern (36-char with 4 dashes). Surface as a
+    // structured error rather than letting the API reject the request.
+    let uuid_re = Regex::new(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    )
+    .expect("constant regex");
+    if !uuid_re.is_match(&task_id) {
+        return Err(anyhow!(
+            "task-id must be a 36-char UUID (got `{}`)",
+            task_id
+        ));
+    }
+
+    let url = format!("{base_url}/feature-task-analytics/tasks/{task_id}/events");
+    let body: Value = handle_api_result(ureq::get(&url).call())?;
+    let events = body
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let envelope = replay_envelope(&task_id, &events);
+    print_replay(&task_id, &events);
+    Ok(envelope)
+}
+
+/// Build the JSON envelope for the replay output. The replay is a
+/// read-only operation, so the envelope's task is empty and the action
+/// reflects the operation that ran.
+fn replay_envelope(task_id: &str, events: &[Value]) -> Envelope {
+    let mut lobster_state = LobsterState::default();
+    lobster_state.last_orchestrated_at = Some(
+        analytics::chrono_like_now_iso(),
+    );
+    Envelope {
+        criteria_met: true,
+        already_past: false,
+        action_taken: format!("analytics_replay_returned_{}_events", events.len()),
+        task: Task {
+            id: task_id.to_string(),
+            ..Task::default()
+        },
+        lobster_state,
+        failures: Vec::new(),
+    }
+}
+
+/// Print the human-readable replay output (separate from the JSON envelope
+/// so callers can `feature-task analytics replay … | jq .` without losing
+/// the prose).
+fn print_replay(task_id: &str, events: &[Value]) {
+    println!("Task {task_id} lifecycle replay");
+    if events.is_empty() {
+        println!("(no events)");
+        return;
+    }
+    for event in events {
+        let event_type = event.get("eventType").and_then(Value::as_str).unwrap_or("?");
+        let occurred_at = event
+            .get("occurredAt")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let gate = event.get("gate").and_then(Value::as_str).unwrap_or("");
+        let cause = event.get("cause").and_then(Value::as_str).unwrap_or("");
+        let message = event.get("message").and_then(Value::as_str).unwrap_or("");
+        match event_type {
+            "gate_failure" => {
+                println!(
+                    "{occurred_at} {gate} {cause} {message}",
+                    gate = if gate.is_empty() { "?" } else { gate },
+                );
+            }
+            "terminal_summary" => {
+                let terminal_status = event
+                    .get("terminalStatus")
+                    .and_then(Value::as_str)
+                    .unwrap_or("done");
+                let total = event
+                    .get("totalGateFailureCount")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let capacity = event
+                    .get("capacityBlockCount")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let quality = event
+                    .get("qualityFailureCount")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let cycle = event
+                    .get("prCycleTimeSeconds")
+                    .and_then(Value::as_i64)
+                    .map(format_seconds)
+                    .unwrap_or_else(|| "n/a".to_string());
+                let evidence = event
+                    .get("evidenceTypeDistribution")
+                    .and_then(Value::as_object)
+                    .map(format_evidence)
+                    .unwrap_or_default();
+                println!(
+                    "{occurred_at} terminal_summary {terminal_status} total={total} capacity={capacity} quality={quality} prCycle={cycle} evidence={evidence}",
+                    evidence = if evidence.is_empty() { "{}".to_string() } else { evidence },
+                );
+            }
+            _ => {
+                println!("{occurred_at} {event_type} {message}");
+            }
+        }
+    }
+}
+
+fn format_seconds(total_seconds: i64) -> String {
+    if total_seconds < 60 {
+        return format!("{total_seconds}s");
+    }
+    if total_seconds < 3600 {
+        let minutes = total_seconds / 60;
+        let seconds = total_seconds % 60;
+        return format!("{minutes}m{seconds}s");
+    }
+    if total_seconds < 86400 {
+        let hours = total_seconds / 3600;
+        let minutes = (total_seconds % 3600) / 60;
+        return format!("{hours}h{minutes}m");
+    }
+    let days = total_seconds / 86400;
+    let hours = (total_seconds % 86400) / 3600;
+    format!("{days}d{hours}h")
+}
+
+fn format_evidence(map: &serde_json::Map<String, Value>) -> String {
+    let mut parts: Vec<String> = map
+        .iter()
+        .map(|(k, v)| format!("{k}:{}", v.as_i64().unwrap_or(0)))
+        .collect();
+    parts.sort();
+    format!("{{{}}}", parts.join(","))
 }
 
 fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
@@ -1072,12 +1243,31 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             env.criteria_met = false;
             env.action_taken = "post_merge_reverted_to_acceptance".to_string();
             env.failures = qa_failures;
+            // AC2: every gate failure emits a `gate_failure` event. The non-past
+            // `post_merge` path goes through `transition_or_block` which calls
+            // `emit_gate_failure_events`; this `is_past` early-return path
+            // doesn't, so it must emit here to keep the weekly analytics
+            // dashboard (`qualityFailureCount`) consistent across re-runs.
+            if !args.dry_run && !env.failures.is_empty() {
+                analytics::emit_gate_failure_events(
+                    &args,
+                    &env.task,
+                    "post_merge",
+                    &env.failures,
+                );
+            }
             return Ok(env);
         }
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_acceptance".to_string();
-        return run_post_merge_worktree_cleanup(&args, env);
+        let env = run_post_merge_worktree_cleanup(&args, env)?;
+        // AC1: best-effort terminal summary emission (idempotent on re-run
+        // via stable eventKey). Never blocks task progression.
+        if !args.dry_run && env.criteria_met && env.task.status == "done" {
+            analytics::emit_terminal_summary_event(&args, &env.task, "done");
+        }
+        return Ok(env);
     }
     let mut failures = qa_failures;
     for url in implementer_pr_urls(&env.task) {
@@ -1100,6 +1290,10 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     // and rewrite the description's Spec line. Idempotent: re-running post_merge
     // on an already-archived task is a no-op.
     if env.criteria_met && env.task.status == "done" {
+        // AC1: best-effort terminal summary emission (idempotent on re-run).
+        if !args.dry_run {
+            analytics::emit_terminal_summary_event(&args, &env.task, "done");
+        }
         let env = archive_done_task_spec(&args, env)?;
         return run_post_merge_worktree_cleanup(&args, env);
     }
@@ -1223,6 +1417,10 @@ fn transition_or_block(
                 return Err(err);
             }
         }
+        // Best-effort analytics emission (AC2): every gate failure emits
+        // a single `gate_failure` event with capacity/quality classification.
+        // Never block the workflow on analytics POST failures.
+        analytics::emit_gate_failure_events(args, &env.task, action, &env.failures);
     }
     Ok(env)
 }
@@ -2263,6 +2461,10 @@ fn block_with_manual_block(
             return Err(err);
         }
     }
+    // Best-effort analytics emission (AC2): manual blocks are also gate
+    // failures from the analytics perspective. Capacity-classified by
+    // `classify_failure` since the body always contains "blocked: true".
+    analytics::emit_gate_failure_events(args, &env.task, action, &env.failures);
     Ok(env)
 }
 
