@@ -30,6 +30,7 @@ import {
   guardPublish,
   getAucklandTodayParts,
   getXClient,
+  checkActorSecret,
   TERMINAL_STATUSES
 } from './contentSchedulerPublish.ts';
 import {
@@ -338,6 +339,23 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/publish', async (req, 
   try {
     const id = parseId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
+
+    // Cloud-readiness gate (task 38d2ee65): when X_ACTOR_SECRET is
+    // configured, require an `x-actor-secret` header that matches before
+    // any X API call is attempted. When unset, dev/local/CI stays usable.
+    const rawHeader = req.headers['x-actor-secret'];
+    const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    const actorGuard = checkActorSecret(headerValue);
+    if (actorGuard.ok === false) {
+      return sendError(
+        res,
+        401,
+        'UNAUTHORIZED',
+        actorGuard.reason === 'MISSING_HEADER'
+          ? 'Missing x-actor-secret header (X_ACTOR_SECRET is configured)'
+          : 'Invalid x-actor-secret header'
+      );
+    }
 
     const result = await publishContentSchedulerItem(id, 'manual');
 
