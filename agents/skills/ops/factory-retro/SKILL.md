@@ -1,111 +1,231 @@
 ---
 name: factory-retro
-description: "Weekly retro scan of completed feature tasks. Checks comments and PRs for quality signals and surfaces recommendations."
+description: "Weekly retro on feature-task gate health. Reads the Post-Merge Feature Factory Analytics events (task f170e344) instead of re-scanning comments/PRs, and surfaces the top 3 suggestions to reduce gate fails."
 ---
 
 # Feature Factory Retro
 
-Scan feature tasks completed in the last 7 days. For each, check task comments and PR bodies for quality signals. Produce a short report with findings and recommendations.
+Summarise feature-task gate health for the last 7 days using the analytics event stream
+(`/api/v1/feature-task-analytics/*`, task f170e344), and produce up to 3 concrete,
+data-backed suggestions to reduce gate fails.
 
-Run this manually when asked, or via a scheduled cron.
+Run this manually when asked. Not currently wired to a cron — run on request until a
+scheduled cadence is explicitly approved.
+
+**Why events, not comments/PRs:** the feature-task lobster (`agents/workflows/feature-task/src/analytics.rs`)
+now emits a `gate_failure` event on every gate block and a `terminal_summary` event on every
+`done`/`accepted` transition. That's a structured, queryable record of the same signal this
+skill used to reconstruct by re-parsing `[feature-task-progress-checklist]` comments and PR
+bodies. Prefer the event stream; only fall back to comment/PR scraping for the two things
+events don't cover (see Step 4).
+
+**Known gap:** there is no global aggregation endpoint yet (that's task 6a5783a7, still in
+`doing` — a Postgres rollup fed by these same events). Until it ships, per-task gate-failure
+breakdown means iterating `GET /feature-task-analytics/tasks/:taskId/events` across the
+in-window task set. The `/weekly` endpoint already gives clean aggregate counts/rates — use
+it for headline numbers, and only pay the per-task iteration cost for the top-3 breakdown.
 
 ---
 
-## Step 1 — Fetch completed tasks
+## Step 1 — Weekly aggregate snapshot
 
 ```bash
-python3 << 'EOF'
+curl -s "http://localhost:4001/api/v1/feature-task-analytics/weekly?weeks=2" | python3 -m json.tool
+```
+
+Take the most recent bucket (current week, Monday-start) as the headline. Keep the prior
+bucket for trend comparison (rate going up/down).
+
+If the current week's bucket has `gateFailureCount == 0` and `terminalTaskCount == 0`:
+output `"✅ No signal this week — no gate failures, no terminal tasks."` and stop. Nothing
+below applies.
+
+---
+
+## Step 2 — Terminal tasks this week (for titles + per-task deep checks)
+
+```python
 import urllib.request, json, datetime
 
 base = 'http://localhost:4001/api/v1'
 cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).isoformat()
-with urllib.request.urlopen(f'{base}/tasks?status=done&limit=50') as r:
-    tasks = [t for t in json.load(r).get('data', []) if t.get('completedAt', '') >= cutoff]
 
-print(f"Tasks completed in last 7 days: {len(tasks)}")
-for t in tasks:
+terminal_tasks = []
+for status in ('done', 'accepted'):
+    try:
+        with urllib.request.urlopen(f'{base}/tasks?status={status}&limit=50') as r:
+            terminal_tasks += [t for t in json.load(r).get('data', []) if t.get('completedAt', '') >= cutoff]
+    except Exception:
+        pass  # some deployments don't support the 'accepted' status filter — skip, not fatal
+
+print(f"Terminal tasks this week: {len(terminal_tasks)}")
+for t in terminal_tasks:
     print(f"  {t['id'][:8]} — {t['title'][:60]}")
-EOF
 ```
 
-If 0 tasks: output "✅ No tasks completed this week." and stop.
+These feed the report's task-title list and Step 4's per-PR deep checks. They are not the
+source of the gate-failure counts — those come from Step 1/Step 3.
 
 ---
 
-## Step 2 — Per-task signals
+## Step 3 — Top gate-failure breakdown (for the suggestions)
 
-For each task, run these checks and record findings.
-
-### Gate failure count
-Count comments where `author == "Lobster"` and text starts with `[feature-task-progress-checklist]`.
+Scope: any task with recent gate-failure activity, not just terminal ones — a task can rack
+up failures while stuck in `doing`/`ready`/`acceptance` without ever reaching `done`. Pull the
+in-window task set (active statuses + this week's terminal tasks from Step 2), fetch each
+task's events, and tally.
 
 ```python
-gate_failures = sum(
-    1 for c in task.get('comments', [])
-    if c.get('author') == 'Lobster'
-    and (c.get('text') or '').startswith('[feature-task-progress-checklist]')
-)
+import urllib.request, json, datetime, collections
+
+base = 'http://localhost:4001/api/v1'
+cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+
+def fetch(path):
+    with urllib.request.urlopen(f'{base}{path}') as r:
+        return json.load(r)
+
+# In-window candidate tasks: active feature-task states, plus this week's terminal tasks.
+task_ids = set()
+for status in ('doing', 'ready', 'acceptance'):
+    for t in fetch(f'/tasks?status={status}&limit=100').get('data', []):
+        if t.get('taskType') == 'feature':
+            task_ids.add(t['id'])
+for t in terminal_tasks:  # from Step 2
+    task_ids.add(t['id'])
+
+gate_counts = collections.Counter()
+message_counts = collections.Counter()
+cause_counts = collections.Counter()
+total = 0
+
+for tid in task_ids:
+    events = fetch(f'/feature-task-analytics/tasks/{tid}/events').get('data', [])
+    for e in events:
+        if e.get('eventType') != 'gate_failure':
+            continue
+        occurred = datetime.datetime.fromisoformat(e['occurredAt'].replace('Z', '+00:00'))
+        if occurred < cutoff:
+            continue
+        total += 1
+        gate_counts[e.get('gate', 'unknown')] += 1
+        cause_counts[e.get('cause', 'unknown')] += 1
+        # Normalize message to a stable bucket: strip the dynamic bits (URLs, PR numbers,
+        # implementer names, task IDs) so recurring failures group together.
+        msg = (e.get('message') or '').strip()
+        message_counts[msg] += 1
+
+print(f"Total gate_failure events in window: {total}")
+print("By gate:", gate_counts.most_common())
+print("By cause:", cause_counts.most_common())
+print("Top messages:")
+for msg, n in message_counts.most_common(10):
+    print(f"  {n:>3} — {msg[:100]}")
 ```
 
-- 0–1: normal — skip
-- 2–3: mild friction — note it
-- 4+: significant — flag it
+If `total == 0`: skip Step 4 (Top 3 suggestions) — there's nothing to suggest against, even
+if the weekly bucket showed non-zero counts from a prior period.
 
-### Evidence quality
-For each PR URL in `[implementer-prs]` comments, fetch the PR body:
+---
 
-```bash
-GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" gh api repos/Stoffer-Industries/sindustries/pulls/<N> --jq '.body'
+## Step 4 — Top 3 suggestions to reduce gate fails
+
+Only run this step if Step 3's `total > 0`. Take the top 3 entries from `message_counts`
+(by count, ties broken by gate severity: `spec_check` > `ready_checks` > `post_merge` >
+`verify_delivery` > `feedback_aggregate`) and turn each into one specific, actionable
+suggestion. Do not write generic advice ("write better specs") — name the actual workflow
+rule, gate, and who owns the fix.
+
+Use this lookup table for known failure patterns. If a top-3 message doesn't match anything
+below, write an ad-hoc suggestion referencing the literal gate + message text instead of
+forcing it into a bucket.
+
+| Failure message (substring match) | Gate | Cause | Suggestion |
+|---|---|---|---|
+| `Product spec not approved by Tom` | spec_check | capacity | Spec approval is the bottleneck. Recommend Quinn/Tom review new specs same-day during heartbeat rather than batching — every day a spec sits unapproved re-fires this failure on every lobster pass for that task. |
+| `Task description must include workstreams` | spec_check / ready_checks | quality | Task creation is skipping the workstreams section. Recommend the task-creation paths (Quinn `tasks-create`, Rowan `feature-task-create`, bookmark pipeline, spec-from-conversation) default a stub `**Workstreams**` block so this never fires on a well-formed task. |
+| `Task description must include acceptance criteria checkboxes` | spec_check | quality | Same root cause as workstreams — task creation producing incomplete descriptions. Recommend a pre-flight lint in the creation skill(s) that refuses to create a feature task without at least one `- [ ] AC` line. |
+| `Missing task comment \`[qa-ac-verified] true\`` | post_merge | capacity | Tom's acceptance-gate backlog. If this is chronic (not just one in-flight task like f170e344 during its own analysis), flag the accumulating count to Tom directly — it's a flow drag, not a quality issue. |
+| `Missing task comment \`[tech-design]\`` | ready_checks | quality | Tech design isn't being posted before `ready`. Recommend Rowan post `[tech-design] <url>` (or `[tech-design-not-required] <reason>`) as part of picking up the task, before starting implementation. |
+| `Missing task comment \`[tech-design-approved] true\`` | ready_checks | capacity | Quinn's tech-design approval queue (delegated per HEARTBEAT.md) is lagging. Recommend Quinn check this queue every heartbeat pass, not just when nudged. |
+| `Task must have an assignee/implementer before moving to \`doing\`` | ready_checks | quality | Tasks are reaching `ready` without an assignee. Recommend the creation flow set `assignee` at creation time when the owner is already known (e.g. Rowan for all feature work). |
+| `Missing \`[implementer-prs]\` task comment` | verify_delivery / post_merge | quality | PR opened but never linked back to the task. Recommend `pr-open` skill's post-PR step (`[implementer-prs] <url>`) get checked in the implementer's own PR checklist, not just documented. |
+| `does not show checked acceptance criteria in its body` | verify_delivery / post_merge | quality | PR body AC formatting drift (unbolded `AC1:`, no nested parens — see MEMORY.md lobster-parser gotchas). Recommend linking `pr-open` SKILL.md's AC-format section directly in the PR template/checklist so implementers hit it before opening, not after a bounce. |
+| `already has an active task in \`doing\`` | ready_checks | capacity | Genuine capacity constraint — implementer already has a task in flight. Not a quality issue; no fix needed beyond scheduling, note it as expected friction. |
+| `Spec drift detected` | ready_checks / post_merge | quality | AC checksum changed after approval. Recommend flagging spec edits post-approval more visibly (e.g. a warning at edit time) so drift is caught before the lobster blocks on it. |
+
+Write the 3 selected suggestions as:
+
+```
+1. [N failures] <specific suggestion, gate + owner named>
+2. [N failures] <specific suggestion, gate + owner named>
+3. [N failures] <specific suggestion, gate + owner named>
 ```
 
-Parse the `## Acceptance Criteria` section. Count:
-- Lines with `testID:` → good
-- Lines with `not tested:` → scrutinise
-- Lines with `not code:` → fine
+If fewer than 3 distinct failure messages exist in the window, output only as many as exist —
+do not pad with generic filler.
 
-Flag if `not tested:` > 50% of checked ACs **and** the task has frontend tags (`mission-control`, `content-scheduler`, `ui`, `pulse`).
+---
 
-Also flag any `not tested:` reason shorter than 20 characters — likely a thin justification.
+## Step 5 — Deep checks (still requires PR/comment scraping — not covered by events)
+
+Two signals aren't in the analytics event schema yet. Only run these against Step 2's
+terminal-task list (small set, don't scale this to all active tasks):
 
 ### Backfill PR detection
 Check if a second PR was opened for the same task within 48 hours of the first. Look for:
 - Multiple URLs in `[implementer-prs]` comments with close timestamps
 - PR titles containing "backfill", "docs", "follow-up" on a task that already has a feature PR
 
+(Requires `GET /tasks/:id` per task for comments — the list endpoint omits them.)
+
 ### System spec quality
-In the latest PR body, read `## System Spec`. Flag if:
-- Section says "No change" or is < 20 non-whitespace chars
-- **And** the PR diff is large: `gh api repos/Stoffer-Industries/sindustries/pulls/<N> --jq '.additions + .deletions'` > 200 lines
+In the latest linked PR body, read `## System Spec`. Flag if the section says "No change" or
+is under 20 non-whitespace characters **and** the PR diff is large:
+
+```bash
+GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" gh api repos/Stoffer-Industries/sindustries/pulls/<N> --jq '.additions + .deletions'
+```
+(threshold: > 200 lines)
+
+Evidence-type mix (testID vs not-tested vs not-code) is already covered by Step 1's
+`evidenceTypeDistribution` field — don't re-derive it from PR bodies.
 
 ---
 
-## Step 3 — Write the report
+## Step 6 — Write the report
 
-Format as plain text for Telegram. Maximum 5 findings. Skip tasks with no signal.
+Plain text for Telegram.
 
 ```
-🏭 Feature Factory Retro — week of <YYYY-MM-DD>
+🏭 Feature Factory Retro — week of <weekStart from Step 1>
 
-Tasks completed: <N>
+Terminal tasks: <terminalTaskCount>  |  Gate failures: <gateFailureCount>  (<gateFailureRate as %>, prior week <prior rate>)
+Quality/Capacity split: <qualityFailureCount>/<capacityFailureCount>
+PR cycle time: median <medianPrCycleTimeSeconds>s, p90 <p90PrCycleTimeSeconds>s
+
+Top 3 suggestions to reduce gate fails:
+1. [N] <suggestion>
+2. [N] <suggestion>
+3. [N] <suggestion>
 
 Findings:
-• [Task title] — <finding in one line>
-• [Task title] — <finding in one line>
+• [Task title] — <backfill-PR or system-spec-quality finding, if any>
 ...
-
-Recommendations:
-• <specific, actionable — reference the workflow rule or gap>
-• <one more if warranted>
 
 ✅ Nothing else flagged.
 ```
 
-If everything looks clean: "🏭 Factory Retro — week of <date>\n✅ Clean week. <N> tasks completed, no quality signals."
+If Step 1 already stopped (no signal): output just `"✅ No signal this week — no gate
+failures, no terminal tasks."` and skip the rest of this template.
+
+If Step 3 found `total == 0` but Step 1 had terminal tasks: omit the "Top 3 suggestions"
+block entirely rather than printing an empty one.
 
 ---
 
-## Step 4 — Deliver
+## Step 7 — Deliver
 
-If run from a session: output the report and let Quinn decide whether to message Tom.
-
-If run from a cron: send directly to Tom via `sessions_send` to `agent:quinn:telegram:direct:6435140143`.
+Output the report and let Quinn decide whether to message Tom. Not scheduled — run on
+request. (If a recurring cadence is wanted later, that's a separate explicit ask; don't
+add one speculatively.)
