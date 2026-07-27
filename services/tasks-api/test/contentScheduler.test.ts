@@ -1,6 +1,12 @@
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { guardPublish, getXClient, FakeXClient, RealXClient } from '../src/routes/contentSchedulerPublish.ts';
+import {
+  guardPublish,
+  getXClient,
+  FakeXClient,
+  RealXClient,
+  checkActorSecret
+} from '../src/routes/contentSchedulerPublish.ts';
 
 // --- Prisma mock ---------------------------------------------------------
 
@@ -189,6 +195,55 @@ describe('getXClient', () => {
 
 // --- HTTP routes ----------------------------------------------------------
 
+describe('checkActorSecret (cloud-readiness x-actor-secret gate)', () => {
+  const originalSecret = process.env.X_ACTOR_SECRET;
+
+  beforeEach(() => {
+    delete process.env.X_ACTOR_SECRET;
+  });
+
+  afterEach(() => {
+    if (originalSecret === undefined) delete process.env.X_ACTOR_SECRET;
+    else process.env.X_ACTOR_SECRET = originalSecret;
+  });
+
+  it('passes through when X_ACTOR_SECRET is unset (dev / local / CI)', () => {
+    delete process.env.X_ACTOR_SECRET;
+    const result = checkActorSecret(undefined);
+    expect(result).toEqual({ ok: true, configured: false });
+  });
+
+  it('passes through when X_ACTOR_SECRET is set to an empty string', () => {
+    process.env.X_ACTOR_SECRET = '';
+    const result = checkActorSecret('any-value');
+    expect(result).toEqual({ ok: true, configured: false });
+  });
+
+  it('refuses with MISSING_HEADER when secret is set and header is absent', () => {
+    process.env.X_ACTOR_SECRET = 's3cret-value';
+    expect(checkActorSecret(undefined)).toEqual({ ok: false, reason: 'MISSING_HEADER' });
+    expect(checkActorSecret(null)).toEqual({ ok: false, reason: 'MISSING_HEADER' });
+    expect(checkActorSecret('')).toEqual({ ok: false, reason: 'MISSING_HEADER' });
+  });
+
+  it('refuses with MISMATCH when secret is set and header is wrong', () => {
+    process.env.X_ACTOR_SECRET = 's3cret-value';
+    expect(checkActorSecret('wrong-value')).toEqual({ ok: false, reason: 'MISMATCH' });
+    // Different length always mismatches (no timingSafeEqual on different-length buffers).
+    expect(checkActorSecret('x')).toEqual({ ok: false, reason: 'MISMATCH' });
+  });
+
+  it('passes when secret is set and header matches exactly', () => {
+    process.env.X_ACTOR_SECRET = 's3cret-value';
+    expect(checkActorSecret('s3cret-value')).toEqual({ ok: true, configured: true });
+  });
+
+  it('passes when secret is set and header matches with non-ASCII (utf-8 normalized)', () => {
+    process.env.X_ACTOR_SECRET = 'π-secret';
+    expect(checkActorSecret('π-secret')).toEqual({ ok: true, configured: true });
+  });
+});
+
 describe('contentScheduler routes', () => {
   it('GET /api/v1/content-scheduler/items lists non-removed items', async () => {
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([itemFixture()]);
@@ -317,6 +372,86 @@ describe('contentScheduler routes', () => {
     const res = await request(app).post('/api/v1/content-scheduler/items/dddd1111-1111-1111-1111-111111111111/publish');
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe('MISSING_CREDENTIALS');
+    delete process.env.X_CLIENT;
+  });
+
+  // --- x-actor-secret gate (cloud-readiness task 38d2ee65) -------------
+
+  it('POST /content-scheduler/items/:id/publish returns 401 when X_ACTOR_SECRET is set and x-actor-secret header is missing', async () => {
+    process.env.X_ACTOR_SECRET = 'deploy-secret';
+    const itemId = 'eeee1111-1111-1111-1111-111111111111';
+    const item = itemFixture({ id: itemId, status: 'approved', approvedAt: new Date() });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    const app = createApp();
+    const res = await request(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.message).toMatch(/Missing x-actor-secret/i);
+    // Gate fires before any DB load — prisma.findUnique is never called.
+    expect(prismaMock.contentSchedulerItem.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+    delete process.env.X_ACTOR_SECRET;
+  });
+
+  it('POST /content-scheduler/items/:id/publish returns 401 when x-actor-secret header is wrong', async () => {
+    process.env.X_ACTOR_SECRET = 'deploy-secret';
+    const itemId = 'ffff1111-1111-1111-1111-111111111111';
+    const item = itemFixture({ id: itemId, status: 'approved', approvedAt: new Date() });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/v1/content-scheduler/items/${itemId}/publish`)
+      .set('x-actor-secret', 'not-the-right-value');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+    expect(res.body.error.message).toMatch(/Invalid x-actor-secret/i);
+    expect(prismaMock.contentSchedulerItem.findUnique).not.toHaveBeenCalled();
+    delete process.env.X_ACTOR_SECRET;
+  });
+
+  it('POST /content-scheduler/items/:id/publish succeeds when x-actor-secret header matches', async () => {
+    process.env.X_ACTOR_SECRET = 'deploy-secret';
+    process.env.X_CLIENT = 'fake';
+    const itemId = 'aaaa2222-1111-1111-1111-111111111111';
+    const item = itemFixture({ id: itemId, status: 'approved', approvedAt: new Date() });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    prismaMock.contentSchedulerItem.update.mockResolvedValue({
+      ...item,
+      status: 'published',
+      publishedUrl: 'https://x.com/sindustries/status/abc',
+      publishedAt: new Date()
+    });
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/v1/content-scheduler/items/${itemId}/publish`)
+      .set('x-actor-secret', 'deploy-secret');
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('published');
+    delete process.env.X_ACTOR_SECRET;
+    delete process.env.X_CLIENT;
+  });
+
+  it('POST /content-scheduler/items/:id/publish gate stays pass-through when X_ACTOR_SECRET is unset (dev/local/CI)', async () => {
+    delete process.env.X_ACTOR_SECRET;
+    process.env.X_CLIENT = 'fake';
+    const itemId = 'bbbb2222-1111-1111-1111-111111111111';
+    const item = itemFixture({ id: itemId, status: 'approved', approvedAt: new Date() });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    prismaMock.contentSchedulerItem.update.mockResolvedValue({
+      ...item,
+      status: 'published',
+      publishedUrl: 'https://x.com/sindustries/status/abc',
+      publishedAt: new Date()
+    });
+    const app = createApp();
+    // No x-actor-secret header sent — should still succeed because the gate is disabled.
+    const res = await request(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('published');
     delete process.env.X_CLIENT;
   });
 

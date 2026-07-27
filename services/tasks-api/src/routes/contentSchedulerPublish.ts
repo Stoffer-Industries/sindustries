@@ -260,3 +260,58 @@ function startOfAucklandDay(now: Date): Date {
   // Fallback: return now (should never hit given bounded loop).
   return now;
 }
+
+/**
+ * Manual publish gate — protects `POST /content-scheduler/items/:id/publish`
+ * (the real-X write path) when `X_ACTOR_SECRET` is configured.
+ *
+ * Behavior matrix:
+ *  - X_ACTOR_SECRET unset → pass-through (dev / local / CI without the secret
+ *    stays usable; behavior documented in services/tasks-api/.env.example).
+ *  - X_ACTOR_SECRET set + header missing → 401 UNAUTHORIZED before any X call.
+ *  - X_ACTOR_SECRET set + header present + match → pass-through.
+ *  - X_ACTOR_SECRET set + header present + mismatch → 401 UNAUTHORIZED.
+ *
+ * Comparison uses `crypto.timingSafeEqual` on equal-length buffers to avoid
+ * leaking the secret via response-time differences. The header value and
+ * the env var are both normalized to UTF-8 before comparison.
+ *
+ * This gate is **only** applied to the manual publish route. The auto-post
+ * worker calls `publishContentSchedulerItem` directly with `actor='auto'`
+ * and is intentionally not gated here — the worker is an in-process queue
+ * consumer that already runs inside a trusted boundary.
+ *
+ * Task: 38d2ee65-a6c0-4952-a8ca-ad03d4856eb1
+ * Tech design: docs/specs/cloud-readiness-x-publish-actor-secret-tech-design.md
+ */
+export type ActorSecretGuard =
+  | { ok: true; configured: false }
+  | { ok: true; configured: true }
+  | { ok: false; reason: 'MISSING_HEADER' | 'MISMATCH' };
+
+/**
+ * Pure check. Reads the expected secret from `process.env.X_ACTOR_SECRET`
+ * and the provided header from the caller. Returns whether the gate should
+ * allow the request through.
+ *
+ * Pure (no Express coupling) so the unit tests can drive it without spinning
+ * up the app. The route wrapper below maps a `false` result to a 401.
+ */
+export function checkActorSecret(providedHeader: string | undefined | null): ActorSecretGuard {
+  const expected = process.env.X_ACTOR_SECRET;
+  if (!expected || expected.length === 0) {
+    // Dev / local / CI mode — gate is disabled by configuration.
+    return { ok: true, configured: false };
+  }
+  if (typeof providedHeader !== 'string' || providedHeader.length === 0) {
+    return { ok: false, reason: 'MISSING_HEADER' };
+  }
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const providedBuf = Buffer.from(providedHeader, 'utf8');
+  if (expectedBuf.length !== providedBuf.length) {
+    return { ok: false, reason: 'MISMATCH' };
+  }
+  const { timingSafeEqual } = require('node:crypto') as typeof import('node:crypto');
+  const equal = timingSafeEqual(expectedBuf, providedBuf);
+  return equal ? { ok: true, configured: true } : { ok: false, reason: 'MISMATCH' };
+}
