@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -180,6 +181,68 @@ def cmd_list(args):
         print(json.dumps(api_request("GET", base, path), indent=2))
 
 
+def _run_dedup_check(args, title: str, description: str, tags: list[str] | None) -> int:
+    """Run the find_similar_tasks.py script as a subprocess. Returns 0 if no
+    candidates or dedup bypassed; 3 if candidates were found and the caller
+    should refuse to create; 2 if the script itself failed.
+
+    Wired via subprocess (not in-process import) so the dedup primitive
+    stays a standalone CLI that other creation paths can also call.
+    """
+    if not getattr(args, "check_dup", False):
+        return 0
+    if getattr(args, "allow_dup", False):
+        return 0
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(here, "scripts", "find_similar_tasks.py")
+    cmd = [
+        sys.executable,
+        script,
+        "--title", title,
+        "--description", description or "",
+        "--base-url", get_base_url(),
+    ]
+    if tags:
+        cmd += ["--tags", *tags]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"warning: dedup check could not run: {e}", file=sys.stderr)
+        return 0  # don't block creation if the check itself is broken
+
+    if result.returncode != 0:
+        print(f"warning: dedup check exited {result.returncode}: {result.stderr.strip()}", file=sys.stderr)
+        return 0
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        print(f"warning: dedup check returned invalid JSON: {e}", file=sys.stderr)
+        return 0
+
+    candidates = data.get("candidates", [])
+    if not candidates:
+        return 0
+
+    print(f"dedup gate: {len(candidates)} similar task(s) found.", file=sys.stderr)
+    for c in candidates:
+        print(
+            f"  - {c.get('id')} [{c.get('status')}] {c.get('title')!r}"
+            f" (score={c.get('score')}, assignee={c.get('assignee')})",
+            file=sys.stderr,
+        )
+        for reason in c.get("reasons", []):
+            print(f"      reason: {reason}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print(
+        "Refusing to create. Re-run with --allow-dup to proceed, or handle the"
+        " existing task first (link / mark-duplicate / close).",
+        file=sys.stderr,
+    )
+    return 3
+
+
 def cmd_create(args):
     base = get_base_url()
     payload = {
@@ -192,6 +255,13 @@ def cmd_create(args):
     description = args.description or ""
     spec_path = getattr(args, "spec", None)
     workstreams_path = getattr(args, "workstreams", None)
+
+    # Dedup gate (spec: docs/specs/task-creation-dedup-gate-2026-07-27.md).
+    # Opt-in via --check-dup so existing flows are not perturbed; bypass via
+    # --allow-dup after the creator has reviewed the candidates.
+    dup_rc = _run_dedup_check(args, args.title, description, getattr(args, "tags", None))
+    if dup_rc != 0:
+        return dup_rc
 
     # If --spec is provided and the description doesn't already have one,
     # prepend the standard '**Spec:** <path>' line so the lobster's
@@ -318,6 +388,13 @@ def build_parser():
     c.add_argument("--tags", nargs="*", help="Tags to apply")
     c.add_argument("--type", help="Task type: feature|content|code|research. See agents/skills/ops/tasks-create/SKILL.md for selection rules.")
     c.add_argument("--assignee", help="Assignee name e.g. Rowan")
+    c.add_argument("--check-dup", action="store_true",
+                   help="Run similarity check against existing open/active tasks before creating. "
+                        "If candidates are found, prints them to stderr and exits 3 (refuse). "
+                        "Re-run with --allow-dup to bypass.")
+    c.add_argument("--allow-dup", action="store_true",
+                   help="Skip the dedup check even when --check-dup is set. Use after reviewing "
+                        "the candidates and deciding to proceed anyway.")
     c.set_defaults(func=cmd_create)
 
     u = sub.add_parser("patch", help="Update fields on an existing task")

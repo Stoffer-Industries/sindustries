@@ -27,6 +27,34 @@ For direct work: hand it to Rowan with a clear instruction and let him open a PR
 
 ---
 
+## Step 1.5 — Run the dedup gate
+
+Before creating a feature task, run the similarity check. Two near-duplicate tasks were already shipped in one week (6a5783a7 and f170e344) because nothing checked for existing similar work — the spec at `docs/specs/task-creation-dedup-gate-2026-07-27.md` is the formalisation. The gate is opt-in via the `--check-dup` flag on `tasks_api_client.py create`; bypass via `--allow-dup` after reviewing candidates.
+
+```bash
+TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
+    --title '<title>' \
+    --spec 'brain/tasks/specs/open/<slug>-YYYY-MM-DD.md' \
+    --workstreams /tmp/task-ws.yaml \
+    --description '<body>' \
+    --priority high \
+    --tags rowan <topic-tag> \
+    --type feature \
+    --assignee Rowan \
+    --check-dup
+```
+
+If candidates are found, the CLI prints them to stderr and exits 3. Three options:
+
+- **Link to existing** — abandon creation, post on the existing task that this work is the same
+- **Mark-duplicate** — abandon creation, post on the existing task that this one is a duplicate
+- **Proceed anyway** — re-run with `--allow-dup` after recording the decision
+
+The dedup primitive lives at `agents/skills/ops/tasks-api/scripts/find_similar_tasks.py` and is callable directly for ad-hoc checks outside the create flow.
+
+---
+
 ## Step 2 — Write or Identify the Spec
 
 **Feature tasks need a spec.** Choose the right location:

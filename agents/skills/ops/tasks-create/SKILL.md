@@ -27,6 +27,31 @@ Use this skill whenever you need to create a task via the Tasks API. It tells yo
 
 ---
 
+## Step 1.5 — Run the dedup gate
+
+Before creating any task, run the similarity check against existing open and active tasks. Two near-duplicate tasks were already shipped in one week (6a5783a7 and f170e344) because the pipeline had no dedup gate — the spec at `docs/specs/task-creation-dedup-gate-2026-07-27.md` is the formalisation. The gate is opt-in via the `--check-dup` flag on `tasks_api_client.py create`; bypass via `--allow-dup` after reviewing candidates.
+
+```bash
+TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
+    --title '<title>' \
+    --description '<description>' \
+    --tags rowan <topic> \
+    --type feature \
+    --assignee Rowan \
+    --check-dup
+```
+
+If candidates are found, the CLI prints them to stderr and exits 3. Three options:
+
+- **Link to existing** — abandon creation, post on the existing task that this work is the same
+- **Mark-duplicate** — abandon creation, post on the existing task that this one is a duplicate
+- **Proceed anyway** — re-run with `--allow-dup` after recording the decision (currently a manual step; the audit trail is the `--allow-dup` flag itself until the recorder is wired in)
+
+Skip the gate only for chore code tasks (typos, renames, dep bumps) where the title is self-evidently unique.
+
+---
+
 ## Step 2 — Pick the task type
 
 The API accepts these `taskType` values (nullable string; leave unset and you lose type-driven routing — see "Blank type" below):
