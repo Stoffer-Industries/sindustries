@@ -64,6 +64,7 @@ If the PR is linked to a task (look for `Task:` or `Linked task:` in the body, o
 
 1. Read the task body in the Tasks API (`tasks_api_client.py get <task-id>`).
 2. For each AC in the task, find the corresponding change in the diff. If any AC is not delivered, request changes — **do not approve until every AC has a matching change**.
+2a. **App-spec check (do this before approving, not after merge).** Independently verify the app-spec requirement, separate from the lobster's `## System Spec` section. If the repo path touched includes `apps/<app>/` and that app has an `apps/<app>/SPEC.md`, check whether the diff also updates `SPEC.md` for any user-visible behaviour change the PR introduces. The lobster's `## System Spec` section is **not** sufficient evidence here — it covers `docs/systems/*.md` only and PR authors have cited it without actually touching the app spec. If the app has a SPEC.md and this PR changes user-visible behaviour without touching it, **request changes** — do not approve, even if all task ACs otherwise have matching code changes.
 3. When every AC is accounted for, mark the AC checkboxes in the task body as done (`- [ ]` → `- [x]`) using your role's check-off script:
    - **Quinn (content reviewer):** runs `check_off_quinn_acs.py`:
      ```bash
