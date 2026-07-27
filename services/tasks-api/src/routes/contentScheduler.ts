@@ -24,6 +24,7 @@
 //              docs/specs/content-scheduler-auto-post-2026-07-16-tech-design.md
 
 import { Router } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
 import {
@@ -53,6 +54,49 @@ function actor(req: any): string {
   return 'unknown';
 }
 
+/**
+ * Cloud-readiness guard for the publish endpoint.
+ *
+ * When X_ACTOR_SECRET is set in the environment, every publish request
+ * must present a matching `x-actor-secret` header. This prevents an
+ * unauthenticated caller from posting to X via the real client
+ * (`X_CLIENT=real`) once the service is exposed past localhost.
+ *
+ * When X_ACTOR_SECRET is unset (local dev/test), the guard is a no-op
+ * so existing single-user MVP flows continue to work without ceremony.
+ *
+ * Uses `crypto.timingSafeEqual` for the comparison so the secret isn't
+ * vulnerable to a timing side-channel attack. Length mismatch is
+ * detected first and short-circuits without invoking timingSafeEqual,
+ * which would otherwise throw on unequal-length buffers.
+ *
+ * Returns true if the request was rejected (and a response was sent),
+ * false if the request should continue to the publish logic.
+ */
+function requireActorSecret(req: any, res: any): boolean {
+  const expected = process.env.X_ACTOR_SECRET;
+  if (!expected) return false;
+  const provided = req.headers['x-actor-secret'];
+  if (typeof provided !== 'string') {
+    sendError(res, 401, 'MISSING_HEADER', 'x-actor-secret header is required when X_ACTOR_SECRET is configured');
+    return true;
+  }
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const providedBuf = Buffer.from(provided, 'utf8');
+  if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
+    sendError(res, 401, 'MISMATCH', 'x-actor-secret header does not match X_ACTOR_SECRET');
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Apply the auto-post schedule decision after a write. Best-effort: if the
+ * adapter throws (e.g. Redis is down), we surface a 503 from the route so
+ * Tom sees the failure rather than silently dropping the schedule. The
+ * database write has already committed at this point, so the item state
+ * is the source of truth.
+ */
 async function applyAutoPostSchedule(
   itemId: string,
   prior: {
@@ -338,6 +382,10 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/publish', async (req, 
   try {
     const id = parseId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
+
+    // Cloud-readiness gate: when X_ACTOR_SECRET is configured, require a
+    // matching x-actor-secret header before any X API call is attempted.
+    if (requireActorSecret(req, res)) return;
 
     const result = await publishContentSchedulerItem(id, 'manual');
 

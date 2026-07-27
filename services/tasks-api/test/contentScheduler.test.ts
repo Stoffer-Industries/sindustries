@@ -320,6 +320,97 @@ describe('contentScheduler routes', () => {
     delete process.env.X_CLIENT;
   });
 
+  // --- Cloud-readiness: X_ACTOR_SECRET gate on /publish ------------------
+
+  it('POST /content-scheduler/items/:id/publish returns 401 when X_ACTOR_SECRET is set and x-actor-secret header is missing', async () => {
+    process.env.X_ACTOR_SECRET = 'cloud-secret-123';
+    const item = itemFixture({
+      id: 'eeee1111-1111-1111-1111-111111111111',
+      status: 'approved',
+      approvedAt: new Date()
+    });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    const app = createApp();
+    const res = await request(app).post('/api/v1/content-scheduler/items/eeee1111-1111-1111-1111-111111111111/publish');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('MISSING_HEADER');
+    // No X API call should have been attempted — findUnique for the publish
+    // service path is mocked but the guard should fire before it gets hit
+    // (we still set up the mock for paranoia; the assertion below is the
+    // proof that no publish side-effects happened).
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+    delete process.env.X_ACTOR_SECRET;
+  });
+
+  it('POST /content-scheduler/items/:id/publish returns 401 when x-actor-secret header is wrong', async () => {
+    process.env.X_ACTOR_SECRET = 'cloud-secret-123';
+    const item = itemFixture({
+      id: 'eeee2222-2222-2222-2222-222222222222',
+      status: 'approved',
+      approvedAt: new Date()
+    });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    const app = createApp();
+    const res = await request(app)
+      .post('/api/v1/content-scheduler/items/eeee2222-2222-2222-2222-222222222222/publish')
+      .set('x-actor-secret', 'wrong-secret');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('MISMATCH');
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+    delete process.env.X_ACTOR_SECRET;
+  });
+
+  it('POST /content-scheduler/items/:id/publish succeeds when x-actor-secret matches X_ACTOR_SECRET', async () => {
+    process.env.X_ACTOR_SECRET = 'cloud-secret-123';
+    process.env.X_CLIENT = 'fake';
+    const item = itemFixture({
+      id: 'eeee3333-3333-3333-3333-333333333333',
+      status: 'approved',
+      approvedAt: new Date()
+    });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    prismaMock.contentSchedulerItem.update.mockResolvedValue({
+      ...item,
+      status: 'published',
+      publishedUrl: 'https://x.com/sindustries/status/abc',
+      publishedAt: new Date()
+    });
+    const app = createApp();
+    const res = await request(app)
+      .post('/api/v1/content-scheduler/items/eeee3333-3333-3333-3333-333333333333/publish')
+      .set('x-actor-secret', 'cloud-secret-123');
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('published');
+    delete process.env.X_ACTOR_SECRET;
+    delete process.env.X_CLIENT;
+  });
+
+  it('POST /content-scheduler/items/:id/publish works without x-actor-secret when X_ACTOR_SECRET is unset (dev/test mode)', async () => {
+    delete process.env.X_ACTOR_SECRET;
+    process.env.X_CLIENT = 'fake';
+    const item = itemFixture({
+      id: 'eeee4444-4444-4444-4444-444444444444',
+      status: 'approved',
+      approvedAt: new Date()
+    });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    prismaMock.contentSchedulerItem.update.mockResolvedValue({
+      ...item,
+      status: 'published',
+      publishedUrl: 'https://x.com/sindustries/status/xyz',
+      publishedAt: new Date()
+    });
+    const app = createApp();
+    const res = await request(app).post('/api/v1/content-scheduler/items/eeee4444-4444-4444-4444-444444444444/publish');
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('published');
+    delete process.env.X_CLIENT;
+  });
+
   it('POST /content-scheduler/reorder writes positions in a transaction', async () => {
     const idA = 'aaaa1111-1111-1111-1111-111111111111';
     const idB = 'bbbb1111-1111-1111-1111-111111111111';
