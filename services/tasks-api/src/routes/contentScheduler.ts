@@ -51,6 +51,29 @@ function actor(req: any): string {
   return 'unknown';
 }
 
+/**
+ * Cloud-readiness guard for the publish endpoint.
+ *
+ * When X_ACTOR_SECRET is set in the environment, every publish request
+ * must present a matching `x-actor-secret` header. This prevents an
+ * unauthenticated caller from posting to X via the real client
+ * (`X_CLIENT=real`) once the service is exposed past localhost.
+ *
+ * When X_ACTOR_SECRET is unset (local dev/test), the guard is a no-op
+ * so existing single-user MVP flows continue to work without ceremony.
+ *
+ * Returns true if the request was rejected (and a response was sent),
+ * false if the request should continue to the publish logic.
+ */
+function requireActorSecret(req: any, res: any): boolean {
+  const expected = process.env.X_ACTOR_SECRET;
+  if (!expected) return false;
+  const provided = req.headers['x-actor-secret'];
+  if (typeof provided === 'string' && provided === expected) return false;
+  sendError(res, 401, 'UNAUTHORIZED', 'x-actor-secret header missing or invalid');
+  return true;
+}
+
 function parseId(raw: string): string | null {
   return uuidPattern.test(raw) ? raw.toLowerCase() : null;
 }
@@ -362,6 +385,10 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/publish', async (req, 
   try {
     const id = parseId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
+
+    // Cloud-readiness gate: when X_ACTOR_SECRET is configured, require a
+    // matching x-actor-secret header before any X API call is attempted.
+    if (requireActorSecret(req, res)) return;
 
     const result = await publishContentSchedulerItem(id, 'manual');
 
