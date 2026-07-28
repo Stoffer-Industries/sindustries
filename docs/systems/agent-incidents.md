@@ -35,7 +35,7 @@ Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/system
 
 1. When an agent detects an incident (failed cron, blocked workflow, stale pipeline item), it upserts a stable slug-keyed entry in its `incidents` map. A logical task/gate failure has at most one active entry; repeated observations increment `attempts` and refresh `lastCheckedAt` rather than creating a new dated key.
 2. Each entry carries enough context (`lastAction`, `details`, `linkedPr`, `linkedRunbook`) for Tom to triage without opening the agent's logs.
-3. On every heartbeat tick, Quinn calls `agents.lib.incident_state.load_all_incidents()` and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`).
+3. On every heartbeat tick, Quinn calls `agents.lib.incident_state.load_all_incidents()`, reports the queue as separate actionable and monitored counts, and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`). Resolved and false-positive entries are excluded from both counts.
 4. Lox's daily-review script is the source of most Lox entries; Lox's heartbeat updates existing entries (increments `attempts`, refreshes `lastCheckedAt`, sets `nextRetryAt`, marks resolved) but does not create new entries outside of the daily review.
 5. Quinn's heartbeat updates existing Quinn entries in place and never mutates Lox entries (read-only on Lox's file).
 6. Quinn escalates to Tom via Telegram the first time a `needsTom` entry has `escalatedAt == null`, then sets `escalatedAt`. Quinn does not re-escalate already-escalated items unless they are updated.
@@ -80,16 +80,10 @@ The top-level object **must** have an `incidents` key (object). An optional `_me
 - `needs_tom(incidents: list[dict]) -> list[dict]` — filter to entries where `needsTom is True` or `severity in {"high", "critical"}`.
 - `validate_with_schema(state, schema_path: Path | None = None) -> None` — validate a state dict against the JSON Schema. Raises `jsonschema.ValidationError`. The `jsonschema` package is imported lazily so the hot `parse_file()` path does not need it installed.
 
-`agents/lib/incident_migrate.py` is a one-shot CLI used by Quinn after this PR merges:
-
-```bash
-python3 agents/lib/incident_migrate.py --dry-run                  # safe inspection
-python3 agents/lib/incident_migrate.py --in-place                 # migrate live state
-python3 agents/lib/incident_migrate.py --in-place --reset         # drop all entries
-python3 agents/lib/incident_migrate.py --in-place --dedupe        # also collapse Quinn's legacy date-suffixed keys
-```
-
-The migration script writes a `.bak.<UTC timestamp>` next to each file before replacing it, validates the migrated result against the JSON Schema, and is idempotent (running twice on the same file produces no further changes).
+The live state was migrated separately before this PR was opened. State files
+remain outside the repository and are not committed; the parser's legacy
+normalizer remains as the compatibility path for any older shape encountered
+at read time.
 
 ## Runbook notes and common failure modes
 
@@ -113,17 +107,12 @@ update that entry's `attempts`, `lastCheckedAt`, and `lastAction`. Use
 - *Schema drift:* if either agent writes a shape that doesn't normalize, the parser logs a warning and emits a best-effort entry. The schema validator catches drift at write-time when `jsonschema` is installed.
 - *Cross-agent correlation:* out of scope for this task. A future task can join entries by slug to detect incidents affecting both agents at once.
 
-## Migration and `.openclaw` boundary
+## State and `.openclaw` boundary
 
-The state files live in `brain/state/` in the workspace, NOT in this repo. The PR that ships this system does NOT commit them and does NOT execute the migration against live state. Quinn (or whoever runs ops migrations) executes the migration script after the PR merges, via the `[openclaw-needed]` task comment workflow:
-
-```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/lib/incident_migrate.py \
-    --workspace /Users/quinnstoffer/.openclaw/workspace \
-    --in-place
-```
-
-The script writes a `.bak.<timestamp>` next to each file before replacing it, so the migration is reversible. To roll back: stop the agents, restore the `.bak` files, restart.
+The state files live in `brain/state/` in the workspace, NOT in this repo. The
+PR does not commit them. The live files were migrated separately with backups
+and schema validation before this PR was opened; rollback remains an
+operator-level restore of those backups if ever required.
 
 The HEARTBEAT.md files (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`) are doc/instruction files in this repo and ARE modified by this PR. They are agent instruction files, not runtime state.
 
@@ -134,7 +123,7 @@ The HEARTBEAT.md files (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definit
 - **Idea doc:** `brain/ideas/unified-agent-incident-schema.md`
 - **JSON Schema:** `agents/schemas/agent-incident-state.schema.json`
 - **Parser:** `agents/lib/incident_state.py` + `agents/lib/test_incident_state.py`
-- **Migration script:** `agents/lib/incident_migrate.py` + `agents/lib/test_incident_migrate.py`
+- **Live migration:** completed separately before this PR; no migration utility is shipped in the repository.
 - **Heartbeat docs:** `agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`
 
 ## Lifecycle / update rules
