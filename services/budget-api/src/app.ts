@@ -7,6 +7,7 @@ import { categorizeRouter } from './routes/categorize';
 import { categoriesRouter } from './routes/categories';
 import { sessionRouter } from './routes/session';
 import { transactionsRouter } from './routes/transactions';
+import { requireSession } from './middleware/requireSession';
 
 function getAllowedOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.split(',')
@@ -45,13 +46,17 @@ export function createApp() {
     res.status(200).json({ status: 'ok', service: 'budget-api' });
   });
 
+  // /session is mounted WITHOUT requireSession — the dev-login endpoint mints
+  // tokens, and /me now requires requireSession internally. All other user-data
+  // routers are gated by requireSession so the userId is sourced from
+  // req.session, never from request body/query.
   app.use('/api/v1', sessionRouter);
-  app.use('/api/v1', akahuRouter);
-  app.use('/api/v1', cardsRouter);
-  app.use('/api/v1', transactionsRouter);
-  app.use('/api/v1', categoriesRouter);
-  app.use('/api/v1', categorizeRouter);
-  app.use('/api/v1', alertsRouter);
+  app.use('/api/v1', requireSession, akahuRouter);
+  app.use('/api/v1', requireSession, cardsRouter);
+  app.use('/api/v1', requireSession, transactionsRouter);
+  app.use('/api/v1', requireSession, categoriesRouter);
+  app.use('/api/v1', requireSession, categorizeRouter);
+  app.use('/api/v1', requireSession, alertsRouter);
 
   app.use((error, _req, res, _next) => {
     console.error(error);
@@ -62,4 +67,3 @@ export function createApp() {
 
   return app;
 }
-

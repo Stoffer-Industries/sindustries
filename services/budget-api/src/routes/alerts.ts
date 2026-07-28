@@ -5,19 +5,19 @@ import { evaluateAlertsForUser } from '../services/alerts';
 
 export const alertsRouter = Router();
 
-alertsRouter.post('/alerts/evaluate', async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-  const month = typeof req.body?.month === 'string' ? req.body.month : currentMonthKey();
+// All routes here run behind requireSession (see app.ts) so userId is read
+// from req.session.userId rather than from a query/body parameter.
 
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
+alertsRouter.post('/alerts/evaluate', async (req, res) => {
+  const userId = req.session!.userId;
+  const month = typeof req.body?.month === 'string' ? req.body.month : currentMonthKey();
 
   const result = await evaluateAlertsForUser({ userId, month });
   res.status(200).json({ ok: true, ...result });
 });
 
 alertsRouter.get('/alerts', async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
+  const userId = req.session!.userId;
 
   const events = await prisma.notificationEvent.findMany({
     where: { userId },
@@ -38,14 +38,27 @@ alertsRouter.get('/alerts', async (req, res) => {
 
 alertsRouter.delete('/alerts/:alertId', async (req, res) => {
   const { alertId } = req.params;
-  const existing = await prisma.notificationEvent.findUnique({ where: { id: alertId } });
+  const existing = await prisma.notificationEvent.findUnique({
+    where: { id: alertId }
+  });
   if (!existing) return jsonError(res, 404, 'NOT_FOUND', 'Alert not found');
+  // Ownership check: only the alert's owner can delete it.
+  if (existing.userId !== req.session!.userId) {
+    return jsonError(res, 404, 'NOT_FOUND', 'Alert not found');
+  }
   await prisma.notificationEvent.delete({ where: { id: alertId } });
   res.status(200).json({ ok: true });
 });
 
 alertsRouter.get('/cards/:cardId/alert-config', async (req, res) => {
   const { cardId } = req.params;
+  const card = await prisma.linkedCard.findUnique({
+    where: { id: cardId },
+    select: { userId: true }
+  });
+  if (!card || card.userId !== req.session!.userId) {
+    return res.status(200).json({ config: null });
+  }
   const config = await prisma.balanceAlertConfig.findUnique({ where: { cardId } });
   if (!config) return res.status(200).json({ config: null });
   res.status(200).json({
@@ -76,6 +89,10 @@ alertsRouter.post('/cards/:cardId/alert-config', async (req, res) => {
 
   const card = await prisma.linkedCard.findUnique({ where: { id: cardId } });
   if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+  // Ownership check: only the card's owner can configure its alert.
+  if (card.userId !== req.session!.userId) {
+    return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+  }
 
   const config = await prisma.balanceAlertConfig.upsert({
     where: { cardId },
@@ -99,6 +116,10 @@ alertsRouter.delete('/cards/:cardId/alert-config', async (req, res) => {
   const { cardId } = req.params;
   const existing = await prisma.balanceAlertConfig.findUnique({ where: { cardId } });
   if (!existing) return jsonError(res, 404, 'NOT_FOUND', 'Alert config not found');
+  // Ownership check: only the card's owner can delete its alert config.
+  if (existing.userId !== req.session!.userId) {
+    return jsonError(res, 404, 'NOT_FOUND', 'Alert config not found');
+  }
   await prisma.balanceAlertConfig.delete({ where: { cardId } });
   res.status(200).json({ ok: true });
 });

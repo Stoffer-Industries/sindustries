@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   prisma: {
     user: { findUnique: vi.fn() },
+    session: { findUnique: vi.fn() },
     akahuConnection: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     linkedCard: { upsert: vi.fn(), findMany: vi.fn() },
     transaction: {
@@ -55,6 +56,11 @@ describe('POST /api/v1/akahu/sync', () => {
     process.env.AKAHU_DEV_USER_ACCESS_TOKEN = '';
 
     mocks.prisma.user.findUnique.mockResolvedValue({ id: 'user_1' });
+    // requireSession middleware: any Bearer token resolves to user_1's session.
+    mocks.prisma.session.findUnique.mockResolvedValue({
+      id: 'session_1',
+      userId: 'user_1'
+    });
     mocks.prisma.akahuConnection.findUnique.mockResolvedValue({
       userId: 'user_1',
       accessToken: 'user_token',
@@ -105,7 +111,8 @@ describe('POST /api/v1/akahu/sync', () => {
   it('force-refreshes Akahu and rebuilds pending transactions', async () => {
     const res = await request(createApp())
       .post('/api/v1/akahu/sync')
-      .send({ userId: 'user_1', force: true })
+      .set('Authorization', 'Bearer test-token-1')
+      .send({ force: true })
       .expect(200);
 
     expect(mocks.akahuRefreshAllAccounts).toHaveBeenCalledWith({ accessToken: 'user_token' });
@@ -153,7 +160,11 @@ describe('POST /api/v1/akahu/sync', () => {
   });
 
   it('uses last sync overlap without refreshing during incremental sync', async () => {
-    await request(createApp()).post('/api/v1/akahu/sync').send({ userId: 'user_1' }).expect(200);
+    await request(createApp())
+      .post('/api/v1/akahu/sync')
+      .set('Authorization', 'Bearer test-token-1')
+      .send({})
+      .expect(200);
 
     expect(mocks.akahuRefreshAllAccounts).not.toHaveBeenCalled();
     expect(mocks.akahuGetTransactions).toHaveBeenCalledWith({
@@ -179,7 +190,8 @@ describe('POST /api/v1/akahu/sync', () => {
 
     const res = await request(createApp())
       .post('/api/v1/akahu/sync')
-      .send({ userId: 'user_1' })
+      .set('Authorization', 'Bearer test-token-1')
+      .send({})
       .expect(200);
 
     expect(mocks.prisma.linkedCard.upsert).toHaveBeenCalledWith(
@@ -253,8 +265,8 @@ describe('POST /api/v1/akahu/sync', () => {
 
     const res = await request(createApp())
       .get('/api/v1/cards/balance-history')
+      .set('Authorization', 'Bearer test-token-1')
       .query({
-        userId: 'user_1',
         from: '2026-05-01T00:00:00.000Z',
         to: '2026-05-12T00:00:00.000Z'
       })
@@ -304,7 +316,7 @@ describe('POST /api/v1/akahu/sync', () => {
 
     const res = await request(createApp())
       .get('/api/v1/transactions')
-      .query({ userId: 'user_1' })
+      .set('Authorization', 'Bearer test-token-1')
       .expect(200);
 
     expect(res.body.transactions[0]).toMatchObject({

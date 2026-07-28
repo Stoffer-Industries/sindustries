@@ -4,12 +4,14 @@ import { jsonError } from '../lib/http';
 
 export const categoriesRouter = Router();
 
+// All routes here run behind requireSession (see app.ts) so userId is read
+// from req.session.userId rather than from a query/body parameter.
+
 categoriesRouter.get('/categories/timeseries', async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+  const userId = req.session!.userId;
   const from = typeof req.query.from === 'string' ? req.query.from : null;
   const to = typeof req.query.to === 'string' ? req.query.to : null;
 
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
   if (!from || !to) return jsonError(res, 400, 'BAD_REQUEST', 'from and to are required');
 
   const fromDate = new Date(from);
@@ -49,4 +51,3 @@ categoriesRouter.get('/categories/timeseries', async (req, res) => {
 
   res.status(200).json({ from, to, series });
 });
-

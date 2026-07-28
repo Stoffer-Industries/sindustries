@@ -10,9 +10,11 @@ import {
 
 export const transactionsRouter = Router();
 
+// All routes here run behind requireSession (see app.ts) so userId is read
+// from req.session.userId rather than from a query/body parameter.
+
 transactionsRouter.get('/transactions', async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
+  const userId = req.session!.userId;
 
   const txns = await listTransactionsForUser(userId);
 
@@ -39,6 +41,10 @@ transactionsRouter.patch('/transactions/:transactionId/category', async (req, re
 
   const txn = await getTransactionById(transactionId);
   if (!txn) return jsonError(res, 404, 'NOT_FOUND', 'Transaction not found');
+  // Ownership check: only the transaction's owner can recategorize it.
+  if (txn.userId !== req.session!.userId) {
+    return jsonError(res, 404, 'NOT_FOUND', 'Transaction not found');
+  }
 
   const updated = await updateTransactionCategory({
     transactionId: txn.id,
@@ -54,4 +60,3 @@ transactionsRouter.patch('/transactions/:transactionId/category', async (req, re
 
   res.status(200).json({ transaction: updated });
 });
-

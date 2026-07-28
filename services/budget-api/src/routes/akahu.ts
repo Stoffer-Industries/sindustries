@@ -23,12 +23,13 @@ const INCREMENTAL_OVERLAP_MS = 7 * 24 * 60 * 60 * 1000;
 const FORCE_SYNC_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 const AKAHU_PENDING_PROVIDER_ID_PREFIX = 'akahu-pending:';
 
-akahuRouter.get('/akahu/authorize-url', async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
+// All routes here run behind requireSession (see app.ts) so userId is read
+// from req.session.userId rather than from a query/body parameter. The user
+// row is guaranteed to exist (the session FK enforces this), so the redundant
+// `prisma.user.findUnique` + 404 dance is removed.
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) return jsonError(res, 404, 'NOT_FOUND', 'User not found');
+akahuRouter.get('/akahu/authorize-url', async (req, res) => {
+  const userId = req.session!.userId;
 
   const clientId = process.env.AKAHU_CLIENT_ID;
   const redirectUri = process.env.AKAHU_REDIRECT_URI;
@@ -49,13 +50,9 @@ akahuRouter.get('/akahu/authorize-url', async (req, res) => {
 });
 
 akahuRouter.post('/akahu/exchange', async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+  const userId = req.session!.userId;
   const code = typeof req.body?.code === 'string' ? req.body.code : null;
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
   if (!code) return jsonError(res, 400, 'BAD_REQUEST', 'code is required');
-
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) return jsonError(res, 404, 'NOT_FOUND', 'User not found');
 
   try {
     const { accessToken, scope } = await exchangeAuthorizationCode({ code });
@@ -67,14 +64,10 @@ akahuRouter.post('/akahu/exchange', async (req, res) => {
 });
 
 akahuRouter.post('/akahu/sync', async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+  const userId = req.session!.userId;
   const startMs = typeof req.body?.startMs === 'number' ? req.body.startMs : undefined;
   const endMs = typeof req.body?.endMs === 'number' ? req.body.endMs : undefined;
   const force = req.body?.force === true;
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
-
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) return jsonError(res, 404, 'NOT_FOUND', 'User not found');
 
   const conn = await getAkahuConnectionForUser(userId);
   if (!conn) {
