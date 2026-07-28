@@ -2,20 +2,19 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '../lib/prisma';
 import { jsonError } from '../lib/http';
+import { hashSessionToken } from '../auth/session';
+import { requireSession } from '../middleware/requireSession';
 
 export const sessionRouter = Router();
 
-function hash(token: string) {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-// Local dev only: create a session and user.
+// Local dev only: create a session and user. NOT gated by requireSession —
+// this is the endpoint that mints the bearer token in the first place.
 sessionRouter.post('/session/dev-login', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email : null;
   if (!email) return jsonError(res, 400, 'BAD_REQUEST', 'email is required');
 
   const token = crypto.randomBytes(24).toString('hex');
-  const tokenHash = hash(token);
+  const tokenHash = hashSessionToken(token);
 
   const user =
     (await prisma.user.findUnique({ where: { email } })) ??
@@ -34,13 +33,12 @@ sessionRouter.post('/session/dev-login', async (req, res) => {
   });
 });
 
-sessionRouter.get('/me', async (req, res) => {
-  const auth = req.header('Authorization');
-  const token = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;
-  if (!token) return jsonError(res, 401, 'UNAUTHORIZED', 'Missing bearer token');
-
+// /me uses requireSession so that the userId is read off req.session (set by
+// the middleware after Bearer-token validation). Response shape is unchanged
+// so the existing mobile app continues to work without client changes.
+sessionRouter.get('/me', requireSession, async (req, res) => {
   const session = await prisma.session.findUnique({
-    where: { tokenHash: hash(token) },
+    where: { id: req.session!.id },
     include: { user: true }
   });
   if (!session) return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
@@ -59,4 +57,3 @@ sessionRouter.get('/me', async (req, res) => {
     }))
   });
 });
-

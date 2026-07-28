@@ -5,9 +5,14 @@ import { getCardById, getMonthlyBudget, upsertMonthlyBudget } from '../repos/car
 
 export const cardsRouter = Router();
 
+// All routes here run behind requireSession (see app.ts) so userId is read
+// from req.session.userId rather than from a query/body parameter.
+function sessionUserId(req: { session?: { userId: string } }): string {
+  return req.session!.userId;
+}
+
 cardsRouter.get('/cards/balance-history', async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-  if (!userId) return jsonError(res, 400, 'BAD_REQUEST', 'userId is required');
+  const userId = sessionUserId(req);
 
   const now = new Date();
   const defaultFrom = new Date(now.valueOf() - 30 * 24 * 60 * 60 * 1000);
@@ -106,6 +111,11 @@ cardsRouter.post('/cards/:cardId/budget', async (req, res) => {
   const card = await getCardById(cardId);
   if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
 
+  // Ownership check: only the card's owner can set its budget.
+  if (card.userId !== req.session!.userId) {
+    return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+  }
+
   const budget = await upsertMonthlyBudget({
     cardId,
     userId: card.userId,
@@ -124,6 +134,13 @@ cardsRouter.get('/cards/:cardId/spend-summary', async (req, res) => {
   const [y, m] = month.split('-').map((s) => Number(s));
   if (!y || !m || m < 1 || m > 12) {
     return jsonError(res, 400, 'BAD_REQUEST', 'month must be YYYY-MM');
+  }
+
+  const card = await getCardById(cardId);
+  if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+  // Ownership check: only the card's owner can read its spend summary.
+  if (card.userId !== req.session!.userId) {
+    return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
   }
 
   const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
@@ -158,4 +175,3 @@ function parseQueryDate(value: unknown, fallback: Date) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
-
