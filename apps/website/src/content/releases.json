@@ -56,7 +56,7 @@
     "summary": "Design-token pipeline and shared UI integration shipped. Colour and sync refinements followed on 2026-06-11.",
     "type": "system",
     "links": [],
-    "evidence": "Pencil design token library and token pipeline shipped 2026-06-09; tasks-app integrates @sindustries/ui; dark theme enabled. Colour refinements and sync consistency checks shipped 2026-06-11. As of 2026-06-19 the token pipeline feeds both production surfaces through shared `@sindustries/ui` primitives — the website and the tasks-app now render buttons, inputs, layouts, and tokens from the same source.",
+    "evidence": "Pencil design token library and token pipeline shipped 2026-06-09; tasks-app integrates @sindustries/ui; dark theme enabled. Colour refinements and sync consistency checks shipped 2026-06-11. As of 2026-06-19 the token pipeline feeds both production surfaces through shared `@sindustries/ui` primitives \u2014 the website and the tasks-app now render buttons, inputs, layouts, and tokens from the same source.",
     "visibility": "published"
   },
   {
@@ -66,7 +66,7 @@
     "summary": "Full X bookmark ingest-to-task pipeline shipped: bookmark review, spec authoring, markdown approval request, and task creation from approved specs.",
     "type": "system",
     "links": [],
-    "evidence": "Pipeline shipped 2026-06-17 with 110 tests across 53 files. The end-to-end loop — ingest, curate, spec, approve, create task — runs through a single heartbeat-driven workflow, with spec approvals routed via the OpenClaw gateway.",
+    "evidence": "Pipeline shipped 2026-06-17 with 110 tests across 53 files. The end-to-end loop \u2014 ingest, curate, spec, approve, create task \u2014 runs through a single heartbeat-driven workflow, with spec approvals routed via the OpenClaw gateway.",
     "visibility": "published"
   },
   {
@@ -143,7 +143,7 @@
     "title": "Feature Factory v2",
     "slug": "feature-factory-v2",
     "releasedAt": "2026-06-29",
-    "summary": "Agents can now take an approved spec and self-orchestrate it through ready → doing → acceptance → done without Tom or Quinn driving transitions by hand.",
+    "summary": "Agents can now take an approved spec and self-orchestrate it through ready \u2192 doing \u2192 acceptance \u2192 done without Tom or Quinn driving transitions by hand.",
     "type": "system",
     "links": [],
     "evidence": "Feature task workflow shipped 2026-06-29 (PR #117). The lobster handles spec approval, tech design gates, PR tracking, QA verification, and system spec requirements as a fully automated orchestration loop.",
@@ -156,7 +156,7 @@
     "summary": "Tasks now express blocking relationships. The UI shows what blocks each task, supports add/remove with title validation, and lets you copy task IDs from cards.",
     "type": "system",
     "links": [],
-    "evidence": "Task dependency backend (PR #128) and dependency UI (PR #129) shipped 2026-06-27–29. First capability to run the full spec → factory pipeline end-to-end.",
+    "evidence": "Task dependency backend (PR #128) and dependency UI (PR #129) shipped 2026-06-27\u201329. First capability to run the full spec \u2192 factory pipeline end-to-end.",
     "visibility": "published"
   },
   {
@@ -267,6 +267,36 @@
     "type": "system",
     "links": [],
     "evidence": "Unified incident schema shipped 2026-07-12 with a shared JSON-Schema-validated state contract and parser for Quinn and Lox.",
+    "visibility": "published"
+  },
+  {
+    "title": "GymTrack agent API",
+    "slug": "gymtrack-agent-api",
+    "releasedAt": "2026-07-24",
+    "summary": "GymTrack now accepts secured planned-workout requests from connected agents, the first consumer-product feature delivered through the full agent factory workflow.",
+    "type": "product",
+    "links": [],
+    "evidence": "The secured planned-workout endpoint shipped to main with its schema, tests, and documentation after moving through specification, technical design, implementation, and review in 48 hours.",
+    "visibility": "published"
+  },
+  {
+    "title": "Ivy full content-PR autonomy",
+    "slug": "ivy-full-content-pr-autonomy",
+    "releasedAt": "2026-07-21",
+    "summary": "Ivy can now self-assign, request review, and merge content changes end to end without a human routing each handoff.",
+    "type": "system",
+    "links": [],
+    "evidence": "The content workflow completed its first full Ivy-owned pull-request lifecycle on 2026-07-21.",
+    "visibility": "published"
+  },
+  {
+    "title": "Schedule-tweets primitive",
+    "slug": "schedule-tweets-primitive",
+    "releasedAt": "2026-07-25",
+    "summary": "A reusable scheduling primitive now lets Ivy turn each weekly content theme into a traceable five-to-seven-post campaign.",
+    "type": "system",
+    "links": [],
+    "evidence": "The scheduling primitive and Ivy's themed weekly campaign workflow shipped together on 2026-07-25.",
     "visibility": "published"
   }
 ]
