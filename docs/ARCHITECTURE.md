@@ -56,6 +56,89 @@ Apps may call multiple services directly when they render multiple domains. Pref
 
 Add an aggregation/orchestration service only when the aggregation itself is a domain with durable behavior, not just because a frontend needs data from more than one place.
 
+## Identity, product membership, and tenant isolation
+
+Sindustries products should share one canonical identity plane rather than each product implementing its own user directory, password lifecycle, and social-login integration. Each product remains a separate OAuth client with its own redirect URLs, scopes, session policy, and revocation boundary.
+
+This is an architectural direction for future work, not a description of a shipped identity system. Until a shared identity plane exists, tech designs must call out any temporary app-owned authentication and its migration path.
+
+### Separate identity from access
+
+Treat these as distinct concepts:
+
+1. **Identity** — one human has one stable Sindustries identity, represented across services by an immutable issuer-and-subject pair. Email is an attribute and login identifier, not a durable cross-product key.
+2. **Product membership** — the identity has joined a product such as GymTrack, Budget, or Roadmap and may have an app-specific profile or onboarding state.
+3. **Organisation membership** — the identity belongs to a Roadmap or other enterprise tenant with an explicit role and permissions.
+
+Signing up for a second product should create a product membership, not a duplicate identity. Product UX should say "Continue with your Sindustries account" and then "Set up <product>" or "Join <organisation>" rather than exposing an identity-provider error such as "user already exists."
+
+Account linking must require proof of control. Do not silently merge identities using an unverified matching email address. Password, social-login, passkey, and enterprise-federation credentials may all resolve to the same identity only through a verified or explicitly authenticated linking flow.
+
+### Shared identity, independent product data
+
+A shared identity provider does not imply a shared application database:
+
+- GymTrack may keep workout data in Supabase and use the canonical identity subject in its RLS policies.
+- Budget may keep finance data in Neon and verify tokens from the same identity issuer in `budget-api`.
+- Future products may use other stores while retaining the same identity contract.
+
+Product databases should store the external identity as an immutable subject, ideally with its issuer when more than one trusted issuer is possible. Do not create cross-database foreign keys to another product's user table. A local product-user/profile row may be created on first authenticated use and keyed uniquely by the external subject.
+
+Shared code should be limited to identity contracts, token verification, client configuration, and test helpers. Do not build a bespoke password or OAuth server inside a product service.
+
+### Shared account is not automatically shared session
+
+Using one identity provider gives users one account, but separate browser origins do not automatically share a login session. Deliver this incrementally:
+
+1. **Shared identity:** every product accepts the same account, although a user may authenticate separately in each product.
+2. **Cross-product SSO:** introduce a central first-party login domain or broker when seamless sessions across Sindustries products are justified.
+
+Tech designs must state which level they implement and must not imply SSO merely because the issuer is shared.
+
+### Marketing identity and consent
+
+Marketing systems such as Klaviyo are consumers of identity and product events, not identity providers or application databases.
+
+- Use the immutable Sindustries identity subject as the marketing profile's external identifier where supported.
+- Keep marketing consent separate from account creation and product terms. Creating an account never implies marketing consent.
+- Record channel, purpose, source, consent version, and timestamp; preserve enough first-party audit state to reconcile failed synchronisation and demonstrate how consent was obtained.
+- Marketing unsubscribe or suppression must not disable authentication or required transactional messages such as verification, password reset, security, billing, or service notices.
+- Product services should emit consent and lifecycle events through an owned integration boundary rather than embedding vendor-specific calls throughout app UI code.
+
+### Enterprise tenant isolation
+
+Enterprise products should model tenancy from their first multi-user schema even when all tenants initially share one database:
+
+- Every tenant-owned aggregate must resolve unambiguously to an `organisation_id`.
+- Access requires both an authenticated identity and an active organisation membership with the required role.
+- Tenant context must come from verified membership, not an untrusted request field alone.
+- PostgreSQL row-level security should enforce tenant isolation as defence in depth where practical; application query filters alone are insufficient for sensitive multi-tenant data.
+- Automated tests must attempt cross-tenant reads and writes and prove that both fail.
+- Caches, object storage paths, queues, logs, exports, search indexes, analytics, and background jobs must carry and enforce tenant context too; database RLS does not protect those surfaces.
+
+Use a tenant directory or equivalent routing abstraction so storage placement is not hard-coded into product identity or URLs:
+
+```text
+organisation_123 -> shared cluster
+organisation_456 -> dedicated database
+organisation_789 -> dedicated regional deployment
+```
+
+The default may be a shared schema with `organisation_id` plus RLS. Larger, regulated, region-bound, or customer-hosted tenants may later move to dedicated databases or deployments without changing their Sindustries identity or organisation ID. If customers federate their own identity provider, map their OIDC/SAML subject to an internal immutable identity and organisation membership rather than using email as the join key.
+
+### Required identity and tenancy questions
+
+A tech design that adds signup, login, user records, marketing subscriptions, organisation membership, or tenant-owned data must answer:
+
+1. Is this creating an identity, a product membership, or an organisation membership?
+2. What immutable issuer/subject identifies the person, and how can credentials be linked safely?
+3. Is the product a distinct OAuth client, and which redirects, scopes, and session boundaries does it own?
+4. Where is app-specific user data stored, and how is it separated from identity-provider state?
+5. Does account creation request marketing consent? If so, how are purpose, evidence, unsubscribe, and sync failure handled independently?
+6. What supplies trusted tenant context, and which database and non-database surfaces enforce it?
+7. Can the tenant later move from shared to dedicated or regional storage without changing identity or public contracts?
+8. Is the implementation shared identity only, or does it genuinely provide cross-product SSO?
+
 ## Persistence and migrations
 
 A service that owns a domain owns that domain's schema and migrations. Do not add tables to another service's Prisma schema for convenience.
