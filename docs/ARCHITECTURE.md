@@ -126,18 +126,27 @@ organisation_789 -> dedicated regional deployment
 
 The default may be a shared schema with `organisation_id` plus RLS. Larger, regulated, region-bound, or customer-hosted tenants may later move to dedicated databases or deployments without changing their Sindustries identity or organisation ID. If customers federate their own identity provider, map their OIDC/SAML subject to an internal immutable identity and organisation membership rather than using email as the join key.
 
+### Converge through feature work
+
+Treat this direction as an incremental design constraint, not a future migration project. Every relevant feature should leave its part of the product closer to the target model while delivering its immediate user value.
+
+Prefer the smallest proportionate step that creates the intended seam now: use an immutable external identity subject instead of email, distinguish product membership from identity, add `organisation_id` when tenant-owned data is first introduced, centralise token verification behind a shared contract, or isolate a marketing integration behind an owned boundary. The feature does not need to build the whole identity platform, but it should avoid introducing app-specific assumptions that a later project must unwind.
+
+Temporary compatibility work is acceptable when required for delivery, but its target contract and removal path must be explicit. Do not defer foundational identifiers, ownership boundaries, or tenant keys on the assumption that a separate migration will add them later; those migrations become riskier once real users and data exist.
+
 ### Required identity and tenancy questions
 
 A tech design that adds signup, login, user records, marketing subscriptions, organisation membership, or tenant-owned data must answer:
 
-1. Is this creating an identity, a product membership, or an organisation membership?
-2. What immutable issuer/subject identifies the person, and how can credentials be linked safely?
-3. Is the product a distinct OAuth client, and which redirects, scopes, and session boundaries does it own?
-4. Where is app-specific user data stored, and how is it separated from identity-provider state?
-5. Does account creation request marketing consent? If so, how are purpose, evidence, unsubscribe, and sync failure handled independently?
-6. What supplies trusted tenant context, and which database and non-database surfaces enforce it?
-7. Can the tenant later move from shared to dedicated or regional storage without changing identity or public contracts?
-8. Is the implementation shared identity only, or does it genuinely provide cross-product SSO?
+1. What concrete, proportionate step can this feature take toward the target identity and tenancy model, and what future migration does that avoid?
+2. Is this creating an identity, a product membership, or an organisation membership?
+3. What immutable issuer/subject identifies the person, and how can credentials be linked safely?
+4. Is the product a distinct OAuth client, and which redirects, scopes, and session boundaries does it own?
+5. Where is app-specific user data stored, and how is it separated from identity-provider state?
+6. Does account creation request marketing consent? If so, how are purpose, evidence, unsubscribe, and sync failure handled independently?
+7. What supplies trusted tenant context, and which database and non-database surfaces enforce it?
+8. Can the tenant later move from shared to dedicated or regional storage without changing identity or public contracts?
+9. Is the implementation shared identity only, or does it genuinely provide cross-product SSO?
 
 ## Persistence and migrations
 
