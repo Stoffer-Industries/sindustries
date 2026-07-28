@@ -101,6 +101,40 @@ class MigrateFileTests(unittest.TestCase):
         self.assertEqual(after["incidents"]["firewall"]["recurrenceCount"], 2)
         self.assertIn("firstSeen", after["incidents"]["firewall"])
 
+    def test_migration_moves_legacy_top_level_fields_into_meta(self):
+        path = self._write_quinn()
+        state = json.loads(path.read_text())
+        state["heartbeatBeat"] = 15
+        state["watching"] = {"feature-task-abc-ready_checks-2026-07-29": {"taskId": "abc"}}
+        path.write_text(json.dumps(state))
+
+        mig.migrate_file(path, owner="quinn", write=True)
+        after = json.loads(path.read_text())
+
+        self.assertEqual(set(after), {"incidents", "_meta"})
+        self.assertEqual(after["_meta"]["legacyTopLevel"]["heartbeatBeat"], 15)
+        self.assertEqual(
+            after["_meta"]["legacyTopLevel"]["watching"]["feature-task-abc-ready_checks-2026-07-29"]["taskId"],
+            "abc",
+        )
+        try:
+            import jsonschema  # noqa: F401
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        mig.validate_with_schema(after)
+
+    def test_migration_preserves_existing_meta_when_cleaning_top_level(self):
+        path = self._write_lox()
+        state = json.loads(path.read_text())
+        state["lastHeartbeatAt"] = "2026-07-29T00:00:00Z"
+        path.write_text(json.dumps(state))
+
+        mig.migrate_file(path, owner="lox", write=True)
+        after = json.loads(path.read_text())
+
+        self.assertEqual(after["_meta"]["v"], 1)
+        self.assertEqual(after["_meta"]["legacyTopLevel"]["lastHeartbeatAt"], "2026-07-29T00:00:00Z")
+
     def test_in_place_idempotent(self):
         path = self._write_quinn()
         first = mig.migrate_file(path, owner="quinn", write=True)
@@ -113,6 +147,68 @@ class MigrateFileTests(unittest.TestCase):
         # Re-migrate (dry-run) and confirm `changed` is now False on next pass.
         third = mig.migrate_file(path, owner="quinn", write=False)
         self.assertFalse(third["changed"])
+
+    def test_dedupe_collapses_date_suffixed_quinn_entries(self):
+        path = self._write_quinn()
+        state = json.loads(path.read_text())
+        state["incidents"] = {
+            "feature-task-abc12345-ready_checks-2026-07-28": {
+                "status": "watching",
+                "severity": "medium",
+                "attempts": 3,
+                "firstSeen": "2026-07-28T01:00:00Z",
+                "lastCheckedAt": "2026-07-28T02:00:00Z",
+                "lastAction": "first observation",
+            },
+            "feature-task-abc12345-ready_checks-2026-07-29": {
+                "status": "escalated",
+                "severity": "high",
+                "needsTom": True,
+                "attempts": 4,
+                "firstSeen": "2026-07-29T01:00:00Z",
+                "lastCheckedAt": "2026-07-29T02:00:00Z",
+                "lastAction": "still blocked",
+            },
+        }
+        path.write_text(json.dumps(state))
+
+        result = mig.migrate_file(path, owner="quinn", dedupe=True, write=True)
+        after = json.loads(path.read_text())
+
+        self.assertEqual(result["entries_removed"], 1)
+        self.assertEqual(list(after["incidents"]), ["feature-task-abc12345-ready_checks"])
+        merged = after["incidents"]["feature-task-abc12345-ready_checks"]
+        self.assertEqual(merged["status"], "escalated")
+        self.assertEqual(merged["severity"], "high")
+        self.assertTrue(merged["needsTom"])
+        self.assertEqual(merged["attempts"], 7)
+        self.assertEqual(merged["lastAction"], "still blocked")
+
+    def test_dedupe_is_noop_for_stable_keys(self):
+        (self.tmpdir / "brain" / "state").mkdir(parents=True, exist_ok=True)
+        path = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
+        path.write_text(json.dumps({
+            "incidents": {
+                "feature-task-abc12345-ready_checks": {
+                    "owner": "quinn",
+                    "status": "watching",
+                    "severity": "medium",
+                    "attempts": 1,
+                    "recurrenceCount": 0,
+                    "needsTom": False,
+                    "escalatedAt": None,
+                    "resolvedAt": None,
+                    "nextRetryAt": None,
+                    "firstSeen": "2026-07-29T01:00:00Z",
+                    "lastCheckedAt": "2026-07-29T02:00:00Z",
+                    "lastAction": "",
+                    "details": {},
+                }
+            }
+        }))
+        result = mig.migrate_file(path, owner="quinn", dedupe=True, write=False)
+        self.assertEqual(result["entries_removed"], 0)
+        self.assertFalse(result["changed"])
 
     def test_reset_drops_entries(self):
         path = self._write_quinn()

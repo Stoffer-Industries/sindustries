@@ -144,6 +144,8 @@ for inc in needs_tom(all_incidents):
 - Routine "no items" / "0 candidates" outcomes
 - Things successfully resolved in this heartbeat pass (mark existing entries resolved instead)
 
+**Incident identity invariant:** one active entry represents one logical task/gate failure. Incident slugs are stable and date-free (for example `feature-task-<task-id-prefix>-ready_checks` or `backlog-untyped-<task-id-prefix>`). Never create `slug-YYYY-MM-DD` copies. When the same finding is observed again, update the existing entry in place and increment `attempts`; use `recurrenceCount` only when a resolved incident reappears.
+
 **Update rules:**
 1. Read `brain/state/quinn-ops-state.json` at the start of heartbeat
 2. After each section: write or update entries for any unresolved findings
@@ -231,5 +233,9 @@ def upsert_op(state, slug, severity, last_action, resolved=False):
             entry["severity"] = severity if severity in ("high", "critical") else "high"
     return state
 ```
+
+Before writing, treat legacy keys ending in `-YYYY-MM-DD` as aliases for the
+date-free slug and merge them into that single entry. The migration helper
+supports this cleanup with `incident_migrate.py --in-place --dedupe`.
 
 **Migration note:** After task 75ec1c8c's PR merges, Quinn runs `python3 agents/lib/incident_migrate.py --in-place` once against live state to convert the legacy `ops` key to `incidents` and add the unified fields. Until that runs, the legacy `ops` key is still readable through the parser's safety-net normalizer, so heartbeats do not block.
