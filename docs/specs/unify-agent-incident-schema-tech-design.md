@@ -24,7 +24,7 @@ shipped_date: "2026-07-11"
 - Primary repo: `Stoffer-Industries/sindustries`
 - Branch: `task-75ec1c8c-unify-agent-incidents`
 - Worktree: `/Users/quinnstoffer/workspaces/rowan/sindustries-task-75ec1c8c-unify-agent-incidents`
-- No secondary repos. The state files live in `brain/state/` in the workspace, not the repo, but the parser/normalizer and JSON Schema live in this repo's `agents/lib/` and `agents/schemas/`. The migration of existing JSON values happens via a one-shot script in `agents/lib/incident_migrate.py` run by Quinn; no automated write to live state from this PR.
+- No secondary repos. The state files live in `brain/state/` in the workspace, not the repo, but the parser/normalizer and JSON Schema live in this repo's `agents/lib/` and `agents/schemas/`. Existing JSON values were migrated separately by Quinn before the implementation PR; no live-state write is part of this PR.
 
 ## Product intent (from approved product spec + idea)
 
@@ -47,12 +47,12 @@ Note: the task description's "Acceptance Criteria" section enumerates seven bull
 - **AC4 — Quinn HEARTBEAT.md OPS STATE section updated** to write the unified schema. The new entries Quinn writes use the unified shape; old entries are rewritten on first write.
 - **AC5 — Lox daily health-check scripts updated** to write unified schema fields. The Lox scripts that append to `lox-incident-state.json` gain the new fields when they record an incident.
 - **AC6 — Quinn heartbeat roll-up reads both files with shared parser.** A new `agents/lib/incident_state.py` module exposes `load_all_incidents()`, `needs_tom()`, and `parse_file()` functions. Quinn's heartbeat calls these and surfaces `needsTom: true` or `severity: high|critical` from either agent.
-- **AC7 — Both state files valid against new schema after migration.** After the migration script runs against the live files, `jsonschema -i <file> agents/schemas/agent-incident-state.schema.json` exits 0 for both files.
+- **AC7 — Both state files valid against new schema after migration.** The separately migrated live files validate against `agents/schemas/agent-incident-state.schema.json`.
 
 ## `.openclaw` boundary
 
 - The state files (`brain/state/quinn-ops-state.json`, `brain/state/lox-incident-state.json`) live in the workspace, not the repo. This PR does **not** commit them.
-- The migration script (`agents/lib/incident_migrate.py`) is **not** executed by this PR. It is shipped as code, with a clear `[openclaw-needed]` task comment instructing Quinn (or whoever runs ops migrations) to invoke it once on the live state files. This keeps live-state mutations in the operator's hands.
+- Existing state was migrated separately before this PR. No migration utility is shipped in the repository, and the live state files remain outside the repo.
 - HEARTBEAT.md files (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`) **are** in the repo and **are** modified by this PR — these are doc/instruction files for the agents, not runtime state.
 - The shared parser (`agents/lib/incident_state.py`) and JSON Schema (`agents/schemas/agent-incident-state.schema.json`) **are** in the repo and committed.
 
@@ -129,16 +129,6 @@ Note: the task description's "Acceptance Criteria" section enumerates seven bull
   - `needs_tom` returns the expected subset.
   - `validate_with_schema` accepts a freshly-migrated file and rejects a clearly malformed one.
   - Round-trip: a fresh legacy Quinn file → `parse_file` → write back → `parse_file` again returns the same list (idempotency).
-- **`agents/lib/incident_migrate.py`** *(new)* — One-shot migration script. Reads both live state files, applies the legacy normalizer, writes back in the unified shape. **Not executed by this PR.** Invoked manually by Quinn via `[openclaw-needed]` after the PR merges:
-  ```bash
-  python3 agents/lib/incident_migrate.py --workspace /Users/quinnstoffer/.openclaw/workspace --in-place
-  ```
-  Flags: `--dry-run` (print changes without writing), `--in-place` (write the migrated file back; default for safety is dry-run), `--schema agents/schemas/agent-incident-state.schema.json` (override default).
-- **`agents/lib/incident_migrate.py`** *(tests)* — `agents/lib/test_incident_migrate.py`:
-  - Dry-run produces a migrated shape without writing.
-  - In-place produces a file that validates against the JSON Schema.
-  - Idempotent: running migrate twice on the same file produces no further changes.
-
 #### HEARTBEAT.md updates
 
 - **`agents/definitions/quinn/HEARTBEAT.md`** *(modified)* — Update the "OPS STATE MANAGEMENT" section to:
@@ -153,7 +143,7 @@ Note: the task description's "Acceptance Criteria" section enumerates seven bull
 
 ### Data model summary
 
-Two existing files, one new schema, one new parser module, one new migration script:
+Two existing files, one new schema, and one new parser module:
 
 | File | Status | Owner |
 |---|---|---|
@@ -162,7 +152,6 @@ Two existing files, one new schema, one new parser module, one new migration scr
 | `docs/systems/agent-incidents.md` | New | Rowan owns |
 | `agents/schemas/agent-incident-state.schema.json` | New | Rowan owns |
 | `agents/lib/incident_state.py` | New | Rowan owns |
-| `agents/lib/incident_migrate.py` | New (not run by this PR) | Rowan ships, Quinn runs |
 
 The unified `incidents` entry shape:
 
@@ -204,25 +193,18 @@ None. This is a backend / Python / docs change.
 
 - **Unit — `agents/lib/test_incident_state.py`:**
   - Each case listed above; covers both legacy and migrated file shapes, malformed-JSON tolerance, schema validation.
-- **Unit — `agents/lib/test_incident_migrate.py`:**
-  - Each case listed above; idempotency, dry-run safety, schema validation post-migration.
 - **Integration (manual):**
-  1. Copy a legacy Quinn file fixture into a scratch workspace.
-  2. Run `python3 agents/lib/incident_migrate.py --in-place` against the scratch workspace.
-  3. Confirm `ops` key is gone, `incidents` key is present, each entry has `owner: "quinn"`.
-  4. Run `jsonschema -i brain/state/quinn-ops-state.json agents/schemas/agent-incident-state.schema.json` → exit 0.
-  5. Repeat for Lox fixture; confirm each entry now has `firstSeen`, `attempts`, `needsTom`, `severity`.
-- **JSON Schema validation (AC7):**
-  - Run the migration script on real fixture copies (NOT live state).
-  - `jsonschema -i <file> agents/schemas/agent-incident-state.schema.json` exits 0 for both files.
+  1. Validate the separately migrated Quinn and Lox files against `agents/schemas/agent-incident-state.schema.json`.
+  2. Confirm `ops` is gone, `incidents` is present, and legacy entries have the unified defaults.
+- **JSON Schema validation (AC7):** The separately migrated live files validate against the schema.
 - **Heartbeat roll-up smoke (manual, optional):**
   - Stand up a Python REPL, call `incident_state.load_all_incidents()` against a scratch workspace, confirm it returns the expected flat list and `needs_tom()` returns the right subset.
 
 ## Open questions / risks
 
 - **Q1 — Schema strictness.** The JSON Schema marks only `owner` and `status` as required. The other fields are optional. This means legacy entries written without all 14 fields still validate, which keeps the migration forgiving. If we want stricter validation later, a follow-up task promotes more fields to required.
-- **Q2 — Migrate vs start fresh.** Per the idea doc, this is an open question. The design migrates (preserves slug-keyed history). If Tom prefers to start fresh, the migration script supports a `--reset` flag (drops existing entries, writes an empty `incidents: {}`). Default is migrate.
-- **Q3 — When does Quinn run the migration.** This PR ships the migration code. Quinn runs it manually after merge, against live state. We add `[openclaw-needed]` on the task once the PR merges so Quinn has the trigger. The migration is reversible (the script writes a `.bak` next to each file before replacing).
+- **Q2 — Migrate vs start fresh.** The existing live state was migrated in place, preserving the current incident records and collapsing recurring task/gate observations into stable keys.
+- **Q3 — When does Quinn run the migration.** The migration was run separately before the implementation PR, with backups and schema validation. Future migrations are an operator concern rather than repository functionality.
 - **Q4 — Live state drift.** If Quinn's heartbeat writes the unified shape but the migration hasn't run yet, Quinn's heartbeat reads the legacy shape via the legacy normalizer. Both shapes work; no crash. The normalizer is the safety net.
 - **Q5 — Cross-agent recurrence detection.** A future task could correlate incidents across agents by slug (e.g. the same webhook failure surfaces in both agents). The unified schema enables this; the implementation is a separate task. Out of scope here.
 - **Q6 — JSON Schema validator dependency.** The shared parser uses the `jsonschema` PyPI package. Need to check whether the existing workspace Python has it available. If not, add to a `requirements.txt` or `pyproject.toml` in `agents/` (whichever is the convention). Documented in the task PR.
@@ -249,7 +231,7 @@ See task 326d4520 — Incident actioning system. Active resolution and cross-age
 - `docs/systems/agent-incidents.md` *(new)* — durable system spec.
 - `agents/definitions/quinn/HEARTBEAT.md` *(modified)* — OPS STATE MANAGEMENT section.
 - `agents/definitions/lox/HEARTBEAT.md` *(modified)* — incident recording guidance.
-- `agents/lib/incident_state.py` and `agents/lib/incident_migrate.py` have inline docstrings; no separate README needed.
+- `agents/lib/incident_state.py` has inline docstrings; no separate README needed.
 - `agents/schemas/agent-incident-state.schema.json` has the schema embedded; no separate README needed.
 
 ## Later todos (parking lot)

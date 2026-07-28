@@ -131,7 +131,7 @@ for inc in needs_tom(all_incidents):
     ...
 ```
 
-**Legacy compatibility:** The parser still accepts Quinn's pre-migration `ops` key. Once the migration script (`agents/lib/incident_migrate.py`) has been run against live state (Quinn does this once after PR merge via `[openclaw-needed]`), all entries are in the unified shape and the legacy normalizer is just a safety net.
+**Legacy compatibility:** The parser still accepts Quinn's pre-migration `ops` key. The live state has already been migrated separately, so the legacy normalizer is now only a safety net for older shapes.
 
 **What to write entries for** (after each heartbeat section above):
 - Guardrail skips on the same item for 2+ consecutive heartbeats
@@ -153,7 +153,7 @@ for inc in needs_tom(all_incidents):
 4. If an entry has `attempts >= 3` and is still unresolved: set `needsTom: true`, `severity` to at least `high`
 5. Always increment `attempts` and update `lastCheckedAt` when re-checking an existing entry
 
-**Escalation — validate before escalating, then surface the top unblock:**
+**Escalation and incident queue reporting — validate before escalating, then surface the top unblock:**
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
 
 **Before escalating any `needsTom` entry, re-validate it is still a real problem:**
@@ -161,14 +161,15 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
 - For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
 - Only escalate if the condition is confirmed present in live state this pass.
 
-1. Collect all entries where `needsTom: true` AND `status` is not `resolved` or `false_positive`. Call this N.
+1. From `read_all_incidents()`, discard entries where `status` is `resolved` or `false_positive`. Call the remainder **active findings**. Count entries where `needsTom` is true OR `severity` is `high`/`critical` as **actionable incidents**; count the rest as **monitored findings**. Do not describe the monitored count as incidents waiting on Tom.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
-3. **Always end the heartbeat with a count + the top unblock:**
-   - If N = 0: output nothing and reply HEARTBEAT_OK instead.
-   - If N > 0: output two lines:
-     - `N incident(s) waiting on you.`
-     - Sort candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first). Pick the top candidate and output: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
-4. Both lines appear every heartbeat while items are open — even if previously escalated. Tom seeing it repeatedly is the point.
+3. **Always report the queue when active findings exist:**
+   - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
+   - If actionable count is 0, output no escalation line and do not reply `HEARTBEAT_OK`; the queue summary is the useful heartbeat output.
+   - If actionable count > 0, also output: `<actionable count> incident(s) waiting on you.`
+   - Sort actionable candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first). Pick the top candidate and output: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
+4. Repeat the compact queue summary while active findings exist, even if the counts are unchanged. Tom should be able to judge whether incident actioning needs prioritisation from the heartbeat alone.
+5. If there are no active findings at all, output nothing and reply `HEARTBEAT_OK` instead.
 
 **State file read/write pattern (unified schema, task 75ec1c8c):**
 ```python
@@ -235,7 +236,9 @@ def upsert_op(state, slug, severity, last_action, resolved=False):
 ```
 
 Before writing, treat legacy keys ending in `-YYYY-MM-DD` as aliases for the
-date-free slug and merge them into that single entry. The migration helper
-supports this cleanup with `incident_migrate.py --in-place --dedupe`.
+date-free slug and merge them into that single entry. Existing live state has
+been migrated separately; do not recreate date-suffixed keys.
 
-**Migration note:** After task 75ec1c8c's PR merges, Quinn runs `python3 agents/lib/incident_migrate.py --in-place` once against live state to convert the legacy `ops` key to `incidents` and add the unified fields. Until that runs, the legacy `ops` key is still readable through the parser's safety-net normalizer, so heartbeats do not block.
+**Migration note:** The live state migration was run separately from this PR
+with backups and schema validation. State files remain outside the repository;
+the parser's legacy normalizer remains as a safety net for any older shape.
