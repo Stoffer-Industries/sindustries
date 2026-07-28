@@ -22,15 +22,22 @@ events don't cover (see Step 4).
 **Known gap:** there is no global aggregation endpoint yet (that's task 6a5783a7, still in
 `doing` — a Postgres rollup fed by these same events). Until it ships, per-task gate-failure
 breakdown means iterating `GET /feature-task-analytics/tasks/:taskId/events` across the
-in-window task set. The `/weekly` endpoint already gives clean aggregate counts/rates — use
-it for headline numbers, and only pay the per-task iteration cost for the top-3 breakdown.
+in-window task set (see `agents/skills/ops/tasks-analytics/SKILL.md` for the supersession
+note). The `/weekly` endpoint already gives clean aggregate counts/rates — use it for
+headline numbers, and only pay the per-task iteration cost for the top-3 breakdown.
+
+All data plumbing below lives in `agents/skills/ops/tasks-analytics/` — see that skill for
+endpoint details, script args, and the supersession note for when task 6a5783a7's
+aggregation endpoint replaces the per-task loop. This skill only owns the report shape and
+the failure-message → suggestion lookup table (domain knowledge, not data plumbing).
 
 ---
 
 ## Step 1 — Weekly aggregate snapshot
 
 ```bash
-curl -s "http://localhost:4001/api/v1/feature-task-analytics/weekly?weeks=2" | python3 -m json.tool
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-analytics/scripts/weekly_summary.py --weeks 2 | jq .
 ```
 
 Take the most recent bucket (current week, Monday-start) as the headline. Keep the prior
@@ -44,26 +51,13 @@ below applies.
 
 ## Step 2 — Terminal tasks this week (for titles + per-task deep checks)
 
-```python
-import urllib.request, json, datetime
-
-base = 'http://localhost:4001/api/v1'
-cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).isoformat()
-
-terminal_tasks = []
-for status in ('done', 'accepted'):
-    try:
-        with urllib.request.urlopen(f'{base}/tasks?status={status}&limit=50') as r:
-            terminal_tasks += [t for t in json.load(r).get('data', []) if t.get('completedAt', '') >= cutoff]
-    except Exception:
-        pass  # some deployments don't support the 'accepted' status filter — skip, not fatal
-
-print(f"Terminal tasks this week: {len(terminal_tasks)}")
-for t in terminal_tasks:
-    print(f"  {t['id'][:8]} — {t['title'][:60]}")
+```bash
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-analytics/scripts/get_terminal_tasks.py --days 7 \
+  | jq -r '.[] | "\(.id[0:8]) — \(.title)"'
 ```
 
-These feed the report's task-title list and Step 4's per-PR deep checks. They are not the
+These feed the report's task-title list and Step 5's per-PR deep checks. They are not the
 source of the gate-failure counts — those come from Step 1/Step 3.
 
 ---
@@ -71,57 +65,17 @@ source of the gate-failure counts — those come from Step 1/Step 3.
 ## Step 3 — Top gate-failure breakdown (for the suggestions)
 
 Scope: any task with recent gate-failure activity, not just terminal ones — a task can rack
-up failures while stuck in `doing`/`ready`/`acceptance` without ever reaching `done`. Pull the
-in-window task set (active statuses + this week's terminal tasks from Step 2), fetch each
-task's events, and tally.
+up failures while stuck in `doing`/`ready`/`acceptance` without ever reaching `done`.
+`tally_events.py` pulls the in-window task set (active statuses + this week's terminal
+tasks), fetches each task's events, and tallies.
 
-```python
-import urllib.request, json, datetime, collections
-
-base = 'http://localhost:4001/api/v1'
-cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
-
-def fetch(path):
-    with urllib.request.urlopen(f'{base}{path}') as r:
-        return json.load(r)
-
-# In-window candidate tasks: active feature-task states, plus this week's terminal tasks.
-task_ids = set()
-for status in ('doing', 'ready', 'acceptance'):
-    for t in fetch(f'/tasks?status={status}&limit=100').get('data', []):
-        if t.get('taskType') == 'feature':
-            task_ids.add(t['id'])
-for t in terminal_tasks:  # from Step 2
-    task_ids.add(t['id'])
-
-gate_counts = collections.Counter()
-message_counts = collections.Counter()
-cause_counts = collections.Counter()
-total = 0
-
-for tid in task_ids:
-    events = fetch(f'/feature-task-analytics/tasks/{tid}/events').get('data', [])
-    for e in events:
-        if e.get('eventType') != 'gate_failure':
-            continue
-        occurred = datetime.datetime.fromisoformat(e['occurredAt'].replace('Z', '+00:00'))
-        if occurred < cutoff:
-            continue
-        total += 1
-        gate_counts[e.get('gate', 'unknown')] += 1
-        cause_counts[e.get('cause', 'unknown')] += 1
-        # Normalize message to a stable bucket: strip the dynamic bits (URLs, PR numbers,
-        # implementer names, task IDs) so recurring failures group together.
-        msg = (e.get('message') or '').strip()
-        message_counts[msg] += 1
-
-print(f"Total gate_failure events in window: {total}")
-print("By gate:", gate_counts.most_common())
-print("By cause:", cause_counts.most_common())
-print("Top messages:")
-for msg, n in message_counts.most_common(10):
-    print(f"  {n:>3} — {msg[:100]}")
+```bash
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-analytics/scripts/tally_events.py --days 7 | jq .
 ```
+
+Returns `{"total": N, "byGate": [...], "byCause": [...], "byMessage": [...]}` — `byMessage` is
+the most-common-first list Step 4 selects its top 3 from.
 
 If `total == 0`: skip Step 4 (Top 3 suggestions) — there's nothing to suggest against, even
 if the weekly bucket showed non-zero counts from a prior period.
