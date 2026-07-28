@@ -484,7 +484,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     }
     if let (Some(implementer), Ok(tasks)) = (
         implementer.as_deref(),
-        list_active_feature_tasks(&args.base_url),
+        list_all_active_tasks(&args.base_url),
     ) {
         let current_id = &env.task.id;
         failures.extend(implementer_doing_capacity_failures(
@@ -601,7 +601,7 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
     }
     if let (Some(implementer), Ok(tasks)) = (
         implementer.as_deref(),
-        list_active_feature_tasks(&args.base_url),
+        list_all_active_tasks(&args.base_url),
     ) {
         let current_id = &env.task.id;
         failures.extend(implementer_doing_capacity_failures(
@@ -2613,7 +2613,15 @@ fn write_state(
     add_comment(base_url, task_id, &body)
 }
 
-fn list_active_feature_tasks(base_url: &str) -> Result<Vec<Task>> {
+/// Fetch every task across the statuses the capacity gate cares about,
+/// regardless of `taskType`. The capacity check is purely about how many
+/// tickets an implementer has in `doing` right now, so it must not filter
+/// by feature-vs-code (or any other task type/tag) — that filtering was
+/// the root cause of the code-task lobster being blind to an
+/// implementer's existing code-task load (Tom: 2026-07-28, "it doesn't
+/// need to use type at all, just check on number of tickets assigned in
+/// doing").
+fn list_all_active_tasks(base_url: &str) -> Result<Vec<Task>> {
     let mut out = Vec::new();
     for status in ["open", "ready", "doing", "acceptance"] {
         let url = format!(
@@ -2628,11 +2636,7 @@ fn list_active_feature_tasks(base_url: &str) -> Result<Vec<Task>> {
             .unwrap_or_default();
         for item in data {
             let task: Task = serde_json::from_value(item)?;
-            if task.task_type.as_deref() == Some("feature")
-                || task.tags.iter().any(|tag| tag == "feature-factory")
-            {
-                out.push(task);
-            }
+            out.push(task);
         }
     }
     Ok(out)
@@ -2646,11 +2650,19 @@ fn task_implementer(task: &Task) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// Maximum number of tasks (of any `taskType`) an implementer may have in
+/// `doing` at once. Tom: 2026-07-28 — "im fine with increasing the limit
+/// to 2 for implementer in doing."
+const IMPLEMENTER_DOING_CAPACITY: usize = 2;
+
 fn implementer_doing_capacity_failures(
     tasks: &[Task],
     current_id: &str,
     implementer: &str,
 ) -> Vec<String> {
+    // Counts every task assigned to `implementer` that is currently in
+    // `doing`, regardless of `taskType` — feature tasks and code tasks
+    // assigned to the same person share one capacity pool.
     let active_doing = tasks
         .iter()
         .filter(|task| {
@@ -2661,9 +2673,9 @@ fn implementer_doing_capacity_failures(
                 && task.assignee.as_deref() == Some(implementer)
         })
         .count();
-    if active_doing >= 1 {
+    if active_doing >= IMPLEMENTER_DOING_CAPACITY {
         vec![format!(
-            "Implementer `{implementer}` already has an active task in `doing`."
+            "Implementer `{implementer}` already has {active_doing} active task(s) in `doing` (limit {IMPLEMENTER_DOING_CAPACITY})."
         )]
     } else {
         Vec::new()
@@ -4219,7 +4231,9 @@ Lead-in.
     }
 
     #[test]
-    fn implementer_capacity_blocks_existing_doing_task() {
+    fn implementer_capacity_allows_single_existing_doing_task() {
+        // Capacity is 2, so one existing `doing` task for the implementer
+        // still leaves room for the current task.
         let tasks = vec![Task {
             id: "other-doing".to_string(),
             status: "doing".to_string(),
@@ -4227,9 +4241,30 @@ Lead-in.
             ..Task::default()
         }];
 
+        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+    }
+
+    #[test]
+    fn implementer_capacity_blocks_at_two_existing_doing_tasks() {
+        let tasks = vec![
+            Task {
+                id: "other-doing-1".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+            Task {
+                id: "other-doing-2".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+        ];
+
         assert_eq!(
             implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
-            vec!["Implementer `Rowan` already has an active task in `doing`.".to_string()]
+            vec!["Implementer `Rowan` already has 2 active task(s) in `doing` (limit 2)."
+                .to_string()]
         );
     }
 
@@ -4252,12 +4287,13 @@ Lead-in.
     }
 
     #[test]
-    fn implementer_capacity_still_blocks_unblocked_doing_when_manual_blocked_present() {
+    fn implementer_capacity_manual_blocked_doing_task_does_not_count() {
         // Sanity: manual block continues to free capacity (existing
-        // behaviour), but a task that is `doing` and neither manually
-        // nor dependency-blocked still blocks. This pins down that the
-        // new `!dependency_blocked` check did not weaken the original
-        // guard.
+        // behaviour). A manually-blocked `doing` task plus one
+        // unblocked `doing` task is only 1 counted task against the
+        // capacity of 2, so it should not block. This pins down that
+        // the `!blocked` / `!dependency_blocked` checks did not weaken
+        // when capacity moved from 1 to 2.
         let tasks = vec![
             Task {
                 id: "manual-blocked".to_string(),
@@ -4274,9 +4310,41 @@ Lead-in.
             },
         ];
 
+        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+    }
+
+    #[test]
+    fn implementer_capacity_manual_blocked_does_not_free_a_slot_past_limit() {
+        // Two unblocked `doing` tasks plus one manually-blocked `doing`
+        // task should still block: the manual-blocked task correctly
+        // does not count, but the two unblocked ones already hit the
+        // capacity of 2.
+        let tasks = vec![
+            Task {
+                id: "manual-blocked".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                blocked: true,
+                ..Task::default()
+            },
+            Task {
+                id: "actually-progressing-1".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+            Task {
+                id: "actually-progressing-2".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                ..Task::default()
+            },
+        ];
+
         assert_eq!(
             implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
-            vec!["Implementer `Rowan` already has an active task in `doing`.".to_string()]
+            vec!["Implementer `Rowan` already has 2 active task(s) in `doing` (limit 2)."
+                .to_string()]
         );
     }
 
