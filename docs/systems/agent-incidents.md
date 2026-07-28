@@ -33,7 +33,7 @@ Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/system
 
 ## Runtime behaviour
 
-1. When an agent detects an incident (failed cron, blocked workflow, stale pipeline item), it appends a slug-keyed entry to its `incidents` map.
+1. When an agent detects an incident (failed cron, blocked workflow, stale pipeline item), it upserts a stable slug-keyed entry in its `incidents` map. A logical task/gate failure has at most one active entry; repeated observations increment `attempts` and refresh `lastCheckedAt` rather than creating a new dated key.
 2. Each entry carries enough context (`lastAction`, `details`, `linkedPr`, `linkedRunbook`) for Tom to triage without opening the agent's logs.
 3. On every heartbeat tick, Quinn calls `agents.lib.incident_state.load_all_incidents()` and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`).
 4. Lox's daily-review script is the source of most Lox entries; Lox's heartbeat updates existing entries (increments `attempts`, refreshes `lastCheckedAt`, sets `nextRetryAt`, marks resolved) but does not create new entries outside of the daily review.
@@ -86,13 +86,18 @@ The top-level object **must** have an `incidents` key (object). An optional `_me
 python3 agents/lib/incident_migrate.py --dry-run                  # safe inspection
 python3 agents/lib/incident_migrate.py --in-place                 # migrate live state
 python3 agents/lib/incident_migrate.py --in-place --reset         # drop all entries
+python3 agents/lib/incident_migrate.py --in-place --dedupe        # also collapse Quinn's legacy date-suffixed keys
 ```
 
 The migration script writes a `.bak.<UTC timestamp>` next to each file before replacing it, validates the migrated result against the JSON Schema, and is idempotent (running twice on the same file produces no further changes).
 
 ## Runbook notes and common failure modes
 
-**Adding a new incident slug:** choose a stable kebab-case identifier derived from the failure pattern (e.g. `tasks-api-prod-down`, `firewall`, `bookmark-acpx-openai-401-no-scopes`). Slugs must be stable — they are how cross-recurrence is detected.
+**Adding a new incident slug:** choose a stable kebab-case identifier derived from the failure pattern (e.g. `tasks-api-prod-down`, `firewall`, `bookmark-acpx-openai-401-no-scopes`). Slugs must be stable — they are how cross-recurrence is detected. Do not append observation dates to incident keys. For task workflow findings, include the task prefix and gate in the stable identity, for example `feature-task-0bda7aa7-ready_checks` or `backlog-spec-missing-87744315`.
+
+There must be one active entry per logical task/gate. Repeated observations
+update that entry's `attempts`, `lastCheckedAt`, and `lastAction`. Use
+`recurrenceCount` only when a previously resolved incident reappears.
 
 **Marking an incident resolved:** set `status: "resolved"` and `resolvedAt: <now>`. Do not delete the entry — keep it for `recurrenceCount` trending. If the same failure reappears, increment `recurrenceCount` rather than creating a new entry.
 

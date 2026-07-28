@@ -13,7 +13,7 @@ The runner discovers active tasks in `open`, `ready`, `doing`, and `acceptance` 
   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status doing --summary`
 - If Rowan is free: read the tech-design skill and spawn Rowan as a background subagent to write the tech design:
   `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/tech-design/SKILL.md`
-- If Rowan is busy: log a watching entry in `brain/state/quinn-ops-state.json` (slug: `feature-task-<task-id-prefix>-ready_checks-<YYYY-MM-DD>`).
+- If Rowan is busy: log or update one watching entry in `brain/state/quinn-ops-state.json` with the stable slug `feature-task-<task-id-prefix>-ready_checks` (**never append a date**). Re-observations increment `attempts` and update `lastCheckedAt`/`lastAction`; they must not create another incident for the same task and gate.
 
 ## 2. Content Task Lobster
 
