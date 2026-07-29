@@ -86,13 +86,13 @@ Labels are not mutually exclusive. A PR can be both `workflow-garden` and `direc
 
 ## Example role mappings
 
-This skill is role-based, not agent-based. Any agent can play any role on a given PR. The split is: one role opens the PR, one or more review it, the opener merges after all approvals + green CI.
+This skill is role-based, not agent-based. Any agent can play any role on a given PR. The split is: one role owns the PR, one or more review it, and the PR owner is responsible for merging once the required approval(s) are given and CI is green.
 
 Concrete patterns in our workflows:
 
-- **Feature tasks:** The task implementer/assignee opens the PR and is the PR assignee. The blocking reviewer is Quinn; Tom may be added as a visibility-only reviewer for GitHub inbox visibility. The opener/assignee merges after Quinn approves and CI is green — do not wait for Tom's PR approval. Tom tests post-merge in main; his sign-off is the `[qa-ac-verified] true` task comment. The feature-task workflow is role-based: implementer opens/merges, reviewer reviews. Do not hardcode a specific agent into the workflow. Apply `--label feature-task` at PR creation.
-- **Content tasks:** opener opens (`--assignee <self>`, `--reviewer quinn,tomstoffer`, `--label content-task`). Quinn and Tom review. Opener merges after both approvals.
-- **Code-garden tasks:** opener opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Opener merges after approval.
-- **Cross-repo PRs (workspace repo, infra scripts):** same pattern — opener opens, reviewer reviews, opener merges.
+- **Feature tasks:** The task implementer/assignee owns the PR and is the PR assignee. The blocking reviewer is Quinn; Tom may be added as a visibility-only reviewer for GitHub inbox visibility. The PR owner merges after the required approval (normally Quinn's) and CI is green — do not wait for Tom's PR approval or ask Tom to merge. Tom tests post-merge in main; his sign-off is the `[qa-ac-verified] true` task comment. The feature-task workflow is role-based: implementer owns/merges, reviewer reviews. Do not hardcode a specific agent into the workflow. Apply `--label feature-task` at PR creation.
+- **Content tasks:** PR owner opens (`--assignee <self>`, `--reviewer quinn,tomstoffer`, `--label content-task`). Quinn and Tom review. PR owner merges after the required approvals.
+- **Code-garden tasks:** PR owner opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). PR owner merges after approval.
+- **Cross-repo PRs (workspace repo, infra scripts):** same pattern — PR owner opens, reviewer reviews, PR owner merges after approval.
 
-The reviewer never merges. The assignee/opener owns getting the PR accepted and merged.
+The reviewer never merges. The PR owner—normally the assignee/opener—owns getting the PR accepted and merged.
