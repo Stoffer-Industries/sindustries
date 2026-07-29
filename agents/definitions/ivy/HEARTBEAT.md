@@ -35,7 +35,6 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
    - **`blocked`** → do not attempt to resolve. Post a message to Quinn's session escalating the block. Do not change the `blocked` flag.
 
 3. Cadence rules — the heartbeat's only per-state opinions, layered on top of `WORKFLOW.md`:
-   - For non-weekly content tasks, do not re-do work if a valid `[ivy-prs]` comment already exists with at least one open PR. The Lobster handles the move to `acceptance`.
    - For weekly-content tasks still in `doing`, an existing `[ivy-prs]` comment suppresses only the PR-authoring work. While `[ivy-tweets-queued]` is missing, continue with the Weekly tweet campaign below; both comments are required before the Lobster transitions to `acceptance`.
    - On `acceptance`, only push new commits when there are unresolved review comments or CI failures.
 
