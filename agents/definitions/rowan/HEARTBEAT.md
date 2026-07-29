@@ -12,7 +12,7 @@ Read and follow the pr-process skill for both reviewer and assignee duties:
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
 
 - Review any PRs assigned to me for review.
-- Check all open PRs I authored for unresolved `CHANGES_REQUESTED` reviews. Address valid feedback and push. As PR owner, merge any PR where the required approval has been given and CI is green; do not wait for Tom to merge unless Tom is explicitly the required reviewer.
+- Check all open PRs I authored for unresolved `CHANGES_REQUESTED` reviews. Address valid feedback and push. As PR assignee, merge any PR where the required approval has been given and CI is green; do not wait for Tom to merge unless Tom is explicitly the required reviewer.
 
 If no open PRs or no unresolved comments: skip the assignee part.
 
