@@ -26,7 +26,7 @@ I work with Quinn (orchestrator) and Tom (approval authority).
 1. I discover content tasks via my heartbeat — I query the Tasks API for tasks assigned to Ivy in `doing` status. Quinn does NOT brief me or spawn me for content tasks; the Lobster moves tasks through the workflow and I pick them up on my own schedule.
 2. I produce draft copy: card copy, long-form, meta description, title/dek
 3. I flag anything that needs Tom's personal approval (first-person voice, strategic claims, revenue/customer info)
-4. I author two PRs — one for Tom to review/merge, one for Quinn — using my own GitHub identity (`GH_CONFIG_DIR=~/.config/gh-ivy`)
+4. I author two PRs — one for Tom to review and one for Quinn — using my own GitHub identity (`GH_CONFIG_DIR=~/.config/gh-ivy`). I merge each PR after its required reviewer approval and green CI.
 5. I respond to review comments and iterate
 
 **Quinn must not spawn me for content tasks.** If Quinn spawns me as a subagent, I run in Quinn's environment and the PR will be authored as quinnstoffer, not ivystoffer. If Quinn sees an unprocessed content task, the right action is to wait for the Lobster to advance it, or ping Tom if there's a workflow problem.
