@@ -506,8 +506,8 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 
 // ---- Code-task stages (task f77b7a60) ----
 //
-// `code-task-tech-design-check` (task 3ba96b5e), `code-task-ready-checks`,
-// and `code-task-verify-delivery` mirror the feature-task stages for
+// `code-task-tech-design-check` (task 3ba96b5e) and `code-task-ready-checks`
+// mirror the feature-task stages for
 // `taskType: code` tasks. They:
 //   * Skip the spec-drift machinery entirely — code tasks have no
 //     `**Spec:**` line and no `specChecksum`.
@@ -522,9 +522,9 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 //     runs in `code-task-tech-design-check` (open → ready); the assignee
 //     + capacity gate runs in `code-task-ready-checks` (ready → doing).
 //
-// `feedback_aggregate` and `post_merge` are reused unchanged: their only
-// task-type-specific behaviour is reading `[implementer-prs]` and reviewing
-// PRs, both of which work identically for feature and code tasks.
+// `verify_delivery`, `feedback_aggregate`, and `post_merge` are shared with
+// feature tasks. Code tasks therefore use the same PR, AC, workstream, and
+// handoff contract once they reach implementation.
 
 fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
@@ -622,84 +622,10 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
 }
 
 fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
-    env.lobster_state.workflow = workflow_for_task(&env.task);
-    let manual_failures = manual_block_failures(&env.task);
-    if !manual_failures.is_empty() {
-        return block_with_manual_block(
-            &args,
-            env,
-            "code_task_verify_delivery",
-            manual_failures,
-            "[code-task-blocked]",
-        );
-    }
-    if is_past(&env.task, "doing") {
-        env.already_past = true;
-        env.criteria_met = true;
-        env.action_taken = "already_past_doing".to_string();
-        return Ok(env);
-    }
-    let mut failures = Vec::new();
-    let pr_urls = implementer_pr_urls(&env.task);
-    if pr_urls.is_empty() {
-        failures
-            .push("Missing `[implementer-prs]` task comment with at least one PR URL.".to_string());
-    }
-    env.lobster_state.pr_urls = pr_urls.clone();
-    let task_acs = task_description_acs(&env.task.description.clone().unwrap_or_default());
-    let latest_pr_url = pr_urls.iter().max_by_key(|url| pr_number(url)).cloned();
-    for url in &pr_urls {
-        let review = inspect_pr(url);
-        match review {
-            Ok(r) => {
-                if let Some(failure) = verify_delivery_review_failure(url, r) {
-                    failures.push(failure);
-                }
-            }
-            Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
-        }
-        if let Ok(body) = pr_body(url) {
-            if !body_has_checked_acceptance(&body) {
-                failures.push(format!(
-                    "PR {url} does not show checked acceptance criteria in its body."
-                ));
-            }
-            for ac_failure in verify_pr_acs_failures(&body) {
-                failures.push(format!("PR {url} — {ac_failure}"));
-            }
-        }
-    }
-    if let Some(url) = &latest_pr_url {
-        match pr_body(url) {
-            Ok(body) => {
-                for ac_failure in task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url) {
-                    failures.push(format!("PR {url} — {ac_failure}"));
-                }
-            }
-            Err(err) => {
-                failures.push(format!(
-                    "Could not read PR body for {url}: {err}. Cannot validate AC text."
-                ));
-            }
-        }
-    }
-    if workstreams(&env.task).is_empty() {
-        failures.push("Task description must include at least one workstream.".to_string());
-    }
-    if openclaw_needed(&env.task) && !openclaw_done(&env.task) {
-        failures
-            .push("`[openclaw-needed]` is present but `[openclaw-done]` is missing.".to_string());
-    }
-    transition_or_block(
-        &args,
-        env,
-        "acceptance",
-        "code_task_verify_delivery",
-        failures,
-        "[code-task-progress-checklist]",
-        "Code task workflow moved task to `acceptance`.",
-    )
+    // Backwards-compatible CLI alias. The code-task pipeline now calls the
+    // canonical feature-task delivery stage directly so both task types share
+    // exactly the same delivery contract.
+    verify_delivery(args)
 }
 
 fn verify_delivery(args: StageArgs) -> Result<Envelope> {

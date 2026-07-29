@@ -368,6 +368,8 @@ check
 
 The lobster dispatches `taskType: code` tasks through `agents/workflows/feature-task/code-task.lobster.yaml`. The same Rust binary that runs the feature-task pipeline is reused; the YAML selects a smaller set of subcommands.
 
+After the code-task lifecycle-specific gates, delivery verification uses the same `verify-delivery` stage as feature tasks. Code and feature tasks therefore share the same PR, acceptance-criteria, workstream, and handoff contract; only the product-spec lifecycle and optional tech-design gate differ.
+
 The `open → ready → doing` jump is split into two stages so the tech-design gate and the assignee/capacity gate are visible separately (task `3ba96b5e`):
 
 - `code-task-tech-design-check` gates `open → ready`. It only checks the tech design (or explicit waiver). A task with no assignee still advances to `ready` once its tech design is approved.
@@ -381,7 +383,7 @@ The comment prefix on each stage is the signal that names which gate is open: `[
 |---|---|---|
 | `code-task-tech-design-check` | `ready_checks` (tech-design portion) | New stage (task `3ba96b5e`). Splits the old single `open → doing` jump into `open → ready → doing`. Only checks the tech design (or waiver). Transitions to `ready`. |
 | `code-task-ready-checks` | `ready_checks` (assignee + capacity portion) | Tech-design check removed (moved to the preceding stage). Now only checks assignee + capacity. Transitions to `doing`. |
-| `code-task-verify-delivery` | `verify_delivery` | Spec drift check removed; no `specChecksum` writes |
+| `verify-delivery` | `verify_delivery` | Shared delivery gate; code tasks have no `specChecksum`, so the spec-drift check is a no-op |
 | `feedback_aggregate` | `feedback_aggregate` | Reused unchanged |
 | `post_merge` | `post_merge` | Reused unchanged; `archive_done_task_spec()` no-ops when no `**Spec:**` is present |
 
@@ -419,6 +421,7 @@ A code task must include:
 - source link if created from an audit finding;
 - why it is not code-garden-safe, when applicable;
 - observable acceptance criteria;
+- the standard `**Workstreams**` section used by feature tasks;
 - assignee and relevant tags.
 
 A product spec is not required.
