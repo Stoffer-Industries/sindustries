@@ -36,14 +36,14 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 
 3. Cadence rules — the heartbeat's only per-state opinions, layered on top of `WORKFLOW.md`:
    - For non-weekly content tasks, do not re-do work if a valid `[ivy-prs]` comment already exists with at least one open PR. The Lobster handles the move to `acceptance`.
-   - For weekly-content tasks, an existing `[ivy-prs]` comment suppresses only the PR-authoring work. If `[ivy-tweets-queued]` is missing, continue with the Weekly tweet campaign below; both comments are required before the Lobster transitions to `acceptance`.
+   - For weekly-content tasks still in `doing`, an existing `[ivy-prs]` comment suppresses only the PR-authoring work. While `[ivy-tweets-queued]` is missing, continue with the Weekly tweet campaign below; both comments are required before the Lobster transitions to `acceptance`.
    - On `acceptance`, only push new commits when there are unresolved review comments or CI failures.
 
 ---
 
 ## Weekly tweet campaign (weekly-content tasks in `doing`)
 
-**Only applies when the task title contains `weekly review` or `weekly content updates`.**
+**Only applies when the task is still `doing`, the title contains `weekly review` or `weekly content updates`, and `[ivy-tweets-queued]` is missing.**
 
 Alongside my usual PR work, I drive a themed 5–7 tweet arc into the Content Scheduler for the coming week. One theme per week, one tweet per day. Tom approves each in Mission Control; auto-post fires at `scheduledFor`.
 
