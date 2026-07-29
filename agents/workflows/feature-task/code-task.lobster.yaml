@@ -60,7 +60,7 @@ steps:
   - id: code_task_verify_delivery
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
-      code-task-verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+      verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $code_task_ready_checks.stdout
     condition: $code_task_ready_checks.json.criteriaMet
 

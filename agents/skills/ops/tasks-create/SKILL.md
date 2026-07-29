@@ -106,12 +106,22 @@ tasks_api_client.py create \
 **Acceptance Criteria**
 
 - [ ] AC1: <observable outcome>
-- [ ] AC2: <observable outcome>"
+- [ ] AC2: <observable outcome>
+
+---
+
+**Workstreams**
+
+- Owner: Rowan
+  ACs: AC1, AC2
+  Branch: (pending)
+  PR: (pending)"
 ```
 
 **Rules:**
 - Product spec is not required for code tasks
 - ACs are still required and observable
+- Use the same `**Workstreams**` section and `Owner` block as feature tasks
 - Attach a `docs/specs/<slug>-tech-design.md` when a code task changes service boundaries, moves data ownership, splits/merges services, adds migrations, touches cross-service API contracts, changes security posture, or is a non-trivial refactor
 - Tech designs for code tasks do not require Tom product sign-off by default; they require review/sign-off only when they introduce security risk, data-loss/migration risk, user-visible behavior changes, new external credentials, or architecture decisions that need Tom/Quinn judgement
 - Do not add prefix emoji manually; the Tasks UI renders type icons in the browser

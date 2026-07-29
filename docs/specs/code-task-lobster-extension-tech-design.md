@@ -42,7 +42,7 @@ Two concrete gaps motivated the task: an incident-action code task and a bookmar
 |---|---|---|
 | `spec_check` | **Skipped** | No product spec; no `specChecksum`; no spec drift |
 | `ready_checks` | `code-task-ready-checks` | Tech design gate optional (waivable); no spec-drift guard |
-| `verify_delivery` | `code-task-verify-delivery` | PR/AC checks reused; spec-drift check removed |
+| `verify_delivery` | `verify-delivery` | Shared PR/AC/workstream/handoff gate; code tasks have no `specChecksum`, so spec drift is a no-op |
 | `feedback_aggregate` | **Reused as-is** | PR review state logic is identical |
 | `post_merge` | **Reused as-is** | `archive_done_task_spec()` already no-ops without `**Spec:**` |
 
@@ -60,21 +60,11 @@ No spec-checksum guard. No spec-drift check. No `move_approved_chat_spec_if_need
 
 **New helper needed:** `tech_design_waived(task: &Task) -> bool` — checks for a comment starting with `[tech-design-not-required]` (same parsing pattern as `tagged_values()`).
 
-### `code-task-verify-delivery` (doing → acceptance)
+### Shared `verify-delivery` (doing → acceptance)
 
-Same checks as feature task `verify_delivery` with spec machinery removed:
+Code tasks use the feature-task `verify_delivery` implementation unchanged. This keeps PR review, checked-AC evidence, task-AC matching, workstream, system-handoff, and `[openclaw-needed]` checks identical across task types. Code tasks have no `specChecksum`, so the shared spec-drift check is a no-op for them.
 
-- `[rowan-prs]` comment with at least one PR URL.
-- PR review state: not `ChangesRequested`, not `ClosedUnmerged`.
-- PR body has at least one checked acceptance criterion.
-- Task ACs match PR body ACs (reuse `task_ac_vs_open_pr_failures()`).
-- At least one workstream in the task description.
-- System spec gate (reuse `system_spec_failures()`).
-- `[openclaw-needed]` without `[openclaw-done]` blocks.
-
-**Removed vs feature task `verify_delivery`:**
-- `block_on_spec_drift_fluid()` call — no spec drift for code tasks.
-- `LobsterState.workflow` is set to `"code-task-workflow"` (was hardcoded to `"feature-task-workflow"`).
+`LobsterState.workflow` remains `"code-task-workflow"` because the earlier code-task lifecycle stages set it before the shared delivery stage runs.
 
 ### `feedback_aggregate` and `post_merge` (reused unchanged)
 
@@ -92,7 +82,7 @@ CodeTaskVerifyDelivery(StageArgs),
 
 Two new top-level functions:
 - `code_task_ready_checks(args: StageArgs) -> Result<Envelope>`
-- `code_task_verify_delivery(args: StageArgs) -> Result<Envelope>`
+- `code_task_verify_delivery(args: StageArgs) -> Result<Envelope>` (retained as a backwards-compatible alias for `verify_delivery`)
 
 One new helper:
 - `tech_design_waived(task: &Task) -> bool`
@@ -101,7 +91,7 @@ Wired into `main()` in the pattern already established for the other subcommands
 
 ### 2. `agents/workflows/feature-task/code-task.lobster.yaml` (new)
 
-Mirrors `feature-task.lobster.yaml` but with `code_task_ready_checks` and `code_task_verify_delivery` instead of `spec_check` / `ready_checks` / `verify_delivery`. Same `feedback_aggregate` and `post_merge` stages, same args (`taskId`, `tasksApiBaseUrl`, `sindustriesRepo`, `workspaceRoot`, `dryRun`).
+Mirrors `feature-task.lobster.yaml` but with the code-task lifecycle stages before the shared `verify-delivery`, `feedback_aggregate`, and `post_merge` stages. Same args (`taskId`, `tasksApiBaseUrl`, `sindustriesRepo`, `workspaceRoot`, `dryRun`).
 
 ### 3. `agents/workflows/feature-task/run.py`
 
@@ -142,7 +132,7 @@ The known open code tasks in the 2026-W29 audit cloud-readiness sweep will need 
 |---|---|---|
 | AC1 | `run.py` discovers `taskType: code` tasks and routes them through `code-task.lobster.yaml`. | `run.py` unit test asserting code-task dispatch; integration test with sample code task in `open` status. |
 | AC2 | `code-task-ready-checks` gates on `[tech-design]`+`[tech-design-approved]` OR `[tech-design-not-required]`, plus assignee + capacity. | Unit test for each gate failure path and the happy path. |
-| AC3 | `code-task-verify-delivery` reuses AC text/evidence checks and system spec gate, removes spec-drift logic. | Unit test asserting spec-drift is not evaluated; same AC evidence checks as feature-task tests. |
+| AC3 | Code tasks use the shared `verify-delivery` AC/evidence/workstream/handoff gate; their absent `specChecksum` makes spec-drift a no-op. | Existing delivery-gate tests plus a dry-run code-task pipeline check. |
 | AC4 | `feedback_aggregate` and `post_merge` unchanged; `archive_done_task_spec()` no-ops without `**Spec:**`. | Unit test asserting `archive_done_task_spec()` returns `post_merge_no_spec_to_archive` for code tasks. |
 | AC5 | Existing open code tasks are picked up on first run; blocked at `code-task-ready-checks` with checklist if missing prerequisites. | Integration test with sample code task missing tech-design → expect `criteriaMet: false` + checklist comment. |
 | AC6 | `LobsterState.workflow` set to `"code-task-workflow"` for code task state comments. | Unit test asserting `lobster_state.workflow == "code-task-workflow"` after `code-task-ready-checks`. |
@@ -158,7 +148,7 @@ The known open code tasks in the 2026-W29 audit cloud-readiness sweep will need 
 
 - **Q1 — Capacity accounting.** Code tasks share Rowan's doing capacity with feature tasks. Should high-priority code tasks be allowed to preempt a lower-priority feature task? Current design: no, single-threaded. If a code task is genuinely urgent (security fix), Tom or Quinn can manually intervene.
 - **Q2 — Spec-required escape hatch.** Some code tasks may eventually grow product-style criteria. The current design treats `[tech-design-not-required]` as the waiving mechanism, but should a `taskType: code` task that needs spec machinery be promoted to a feature task instead? Current recommendation: yes — promotion is cleaner than bolting spec machinery into code tasks.
-- **Q3 — Backwards compatibility.** Existing code tasks with `[openclaw-needed]` but no `[openclaw-done]` will block at `code-task-verify-delivery` exactly like feature tasks. No escape hatch — must complete the handoff before acceptance.
+- **Q3 — Backwards compatibility.** Existing code tasks with `[openclaw-needed]` but no `[openclaw-done]` will block at the shared `verify-delivery` gate exactly like feature tasks. No escape hatch — the handoff must complete before acceptance.
 
 ## Companion doc updates
 
