@@ -39,6 +39,14 @@ Skills are shared. Your setup is yours. Keeping them apart means you can update 
 
 Add whatever helps you do your job. This is your cheat sheet.
 
+## Identities
+
+Ivy has different names in different systems — use the right one per system, not the GitHub login everywhere:
+
+- **GitHub login:** `ivystoffer` (`GH_CONFIG_DIR=~/.config/gh-ivy`)
+- **Tasks API `assignee` value:** `Ivy` (capitalized first name — NOT the GitHub login; e.g. `?assignee=Ivy`, not `?assignee=ivystoffer`)
+- **Telegram account:** not yet a dedicated bot account — if this changes, record it here
+
 ## GitHub
 
 - **Account:** ivystoffer
