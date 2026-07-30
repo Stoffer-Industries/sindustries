@@ -15,6 +15,15 @@ Ground every claim in actual files: cite file paths and line numbers. If you can
 
 **Phase 1 / Discovery & Mapping** (read before judging)
 
+> **Working-directory rule.** This audit runs in an isolated session whose
+> `cwd` is NOT the target repo. Every `exec` / `read` / `list` / `git` call
+> MUST use either absolute paths (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/...`)
+> or be prefixed with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`.
+> Relative paths like `services/...`, `docs/...`, `apps/...` will resolve
+> against the wrong cwd and fail silently with `exit 1`. This is the bug
+> that broke the W31 audit (and may have been silently dropping findings
+> in W28–W30).
+
 Explore the repository systematically before forming any opinions:
 
 - Map the directory structure and identify the project type, language(s), frameworks, and runtime targets.
@@ -109,11 +118,34 @@ When the implementation lands, its PR updates the same audit finding line with `
 
 If a task is created after the audit PR has already merged, open a tiny docs-only audit-ledger PR to add the task link. If the task is created before the audit PR merges, include the task link directly in the audit PR.
 
+## Completion gate (HARD CONSTRAINT)
+
+A successful audit session MUST end with all four of these gates firing, in order, before the session ends:
+
+1. **Write** — `docs/repo-audits/<YYYY-Www>.md` exists on disk (not just
+   planned in the assistant text — actually written via the `write` tool).
+2. **Commit** — `git add docs/repo-audits/<YYYY-Www>.md && git commit -m "..."` (or the matching commit style).
+3. **Push** — `git push -u origin <branch>` lands the branch on the remote.
+4. **PR** — PR opened via the pr-open skill (`cod—audit: ...` title, Executive Summary body, `code-audit` label, `Stoff81` assignee, `tomstoffer` reviewer).
+
+If the session ends without all four landing, the audit is incomplete and
+the cron will record `consecutiveErrors++`. The W31 trajectory showed the
+agent generating the planning text "Now I have everything I need. Let me
+write the audit document:" and then ending the session with no `write` tool
+call — that's exactly the failure mode this gate prevents. **Do not stop
+after planning; do the write, commit, push, and PR.**
+
 ## Runbook
 
 Target repo: `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
 
 **1. Audit** — run the four-phase prompt above against the target repo. Produce the audit document in memory.
+
+**1a. Verify cwd before any execution.** Run `pwd` first; if it does not
+print `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`, then
+prefix every subsequent command with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`
+or use absolute paths. This is a one-time check at the start of each Phase 1
+exploration to surface the cwd-mismatch bug if it ever recurs.
 
 **2. Determine the current ISO week:**
 
