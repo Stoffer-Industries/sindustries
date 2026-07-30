@@ -103,8 +103,8 @@ GH_CONFIG_DIR=~/.config/gh-ivy gh pr create \
 ```
 
 PR description must:
-- Copy every AC from the task body
-- Mark ACs as `- [x]` once I have completed that work in the PR
+- Start from an explicit owner-to-AC manifest: `## Quinn can execute` belongs only in the Quinn PR, and `## Needs Tom approval` belongs only in the Tom PR. Never copy the other owner's ACs into a PR.
+- Copy the complete AC text for that owner into the PR's `## Acceptance criteria` section, and mark only those ACs as `- [x]` once I have completed that work in the PR.
 - Include the task ID in the PR body for traceability
 
 ### 5. Write PR URLs back to the task
@@ -125,6 +125,8 @@ or
 ```
 
 **The label (`tom:` / `quinn:`) is required** — it tells the Lobster which heading to inject the PR URL into. A URL without a label will be ignored.
+
+The labels are mandatory routing data, not presentation. The Lobster rejects unlabelled or positional PR lists rather than guessing which AC section a PR covers.
 
 Post this as a task comment immediately after opening the PR(s). The Lobster will pick it up on the next heartbeat and move the task from `doing` to `acceptance`.
 

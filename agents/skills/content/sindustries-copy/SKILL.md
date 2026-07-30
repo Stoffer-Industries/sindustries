@@ -95,6 +95,22 @@ These are non-negotiable:
 
    Agent names (Ivy, Rowan, Quinn) are fine to use — they add personality. Describe what a system *does for the business*. Reference other published Systems or Stacks by their public names instead.
 
+### Social copy for Tom's account
+
+When this skill is used to draft a tweet or social post for Ivy's weekly
+campaign, the account voice is Tom's:
+
+- Write in first-person singular (`I`, `me`, `my`). Do not use `we`, `us`, or
+  `our` unless quoting source material.
+- Never refer to Tom as an outside subject. The post should sound like Tom is
+  saying it directly.
+- Do not return every tweet as one dense paragraph. For multi-sentence or
+  multi-point posts, use line breaks and plain-text structure such as `•`
+  bullets or numbered steps. Do not depend on Markdown styling that X will
+  not render.
+- Keep one-line posts when the idea is genuinely one line; do not add
+  decorative formatting just to satisfy a template.
+
 ---
 
 ## Images

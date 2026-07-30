@@ -87,6 +87,18 @@ Scan the week's signals and pick the single strongest arc — a story with a beg
   5. One idea per tweet. If a tweet needs a second sentence, split it into a follow-up bullet in the arc.
   6. Concrete over abstract: "shipped a 10-day calendar view in Mission Control" beats "improved our operating surface."
 
+### Tweet voice and formatting
+
+These tweets publish from Tom's X account, so write as Tom:
+
+- Use first-person singular: `I`, `me`, and `my`.
+- Do not use collective first person: never write `we`, `us`, or `our` unless quoting a source.
+- Do not describe Tom from the outside (for example, "Tom built...").
+- Avoid dense paragraph blocks. For any tweet with more than one sentence or idea, use line breaks and a readable structure: a short hook followed by one or two short lines, or `•` bullets / `1/2/3` steps when listing points.
+- Use plain text formatting that survives X; do not rely on Markdown tables, bold, or headings.
+- A one-line tweet is fine when the idea is genuinely one line. Formatting is there for readability, not decoration.
+- Count line breaks, bullets, and spaces in the 280-character limit.
+
 ### 4. Schedule the sequence
 
 - First tweet: **tomorrow** (today + 1) at `10:00 Pacific/Auckland`.

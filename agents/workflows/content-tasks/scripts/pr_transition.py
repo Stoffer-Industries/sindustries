@@ -10,7 +10,6 @@ from common import (
     CHECKBOX_RE,
     OWNER_HEADING_RE,
     dump_json,
-    extract_ivy_pr_urls,
     extract_pr_urls_from_text,
     gh_pr_body,
     gh_pr_assignees,
@@ -21,9 +20,11 @@ from common import (
     heading_level,
     is_at,
     is_past,
+    latest_ivy_pr_comment,
     move_task,
     next_heading_pos,
     owner_heading_block_url_failures,
+    parse_ivy_pr_routes,
     patch_task,
     read_first_json_value,
     refresh_task,
@@ -99,8 +100,15 @@ def checked_pr_acceptance_criteria(pr_body: str) -> set[str]:
 
 def checked_pr_ac_signatures(pr_body: str) -> set[str]:
     """Extract AC slugs from checked PR acceptance criteria."""
+    acceptance_heading = re.search(
+        r"^\s{0,3}#{1,6}\s+acceptance criteria\s*$", pr_body or "", re.I | re.M
+    )
+    if not acceptance_heading:
+        return set()
+    end = next_heading_pos(pr_body, acceptance_heading.end(), heading_level(acceptance_heading.group(0)))
+    acceptance_body = pr_body[acceptance_heading.end():end]
     checked: set[str] = set()
-    for match in re.finditer(r"^\s*-\s*\[[xX]\]\s+(.+\S)\s*$", pr_body or "", re.M):
+    for match in re.finditer(r"^\s*-\s*\[[xX]\]\s+(.+\S)\s*$", acceptance_body, re.M):
         checked.add(ac_signature(match.group(1)))
     return checked
 
@@ -109,125 +117,79 @@ def pr_heading_urls(task: dict) -> list[str]:
     return extract_pr_urls_from_text(task.get("description") or "")
 
 
-QUINN_LOGINS = {"quinnstoffer"}
-TOM_LOGINS = {"stoff81"}
 IVY_LOGINS = {"ivystoffer"}
 
 
-def _heading_index_for_assignees(assignees: list[str]) -> int | None:
-    """Return heading index based on PR assignees. Quinn=0, Tom=1, unknown=None."""
-    logins = {a.lower() for a in assignees if a}
-    if logins & QUINN_LOGINS:
-        return 0
-    if logins & TOM_LOGINS:
-        return 1
-    return None
-
-
-def _heading_index_for_pr(url: str) -> int | None:
-    """Return heading index for a PR.
-
-    Checks assignees first (legacy pattern where Quinn/Tom are assigned).
-    When Ivy self-assigns, falls back to reviewer logins to determine section.
-    Quinn reviewer → 0, Tom reviewer → 1.
-    """
-    try:
-        assignees = gh_pr_assignees(url)
-        idx = _heading_index_for_assignees(assignees)
-        if idx is not None:
+def owner_heading_index(description: str, owner: str) -> int | None:
+    """Return the actual owner-heading index for an explicit route label."""
+    owner = owner.lower()
+    for idx, (block, _) in enumerate(owner_sections(description)):
+        heading = block.splitlines()[0].lower() if block.splitlines() else ""
+        if owner in heading:
             return idx
-    except Exception:
-        pass
-    try:
-        reviewers = gh_pr_reviewers(url)
-        reviewer_logins = {r.lower() for r in reviewers if r}
-        if reviewer_logins & QUINN_LOGINS:
-            return 0
-        if reviewer_logins & TOM_LOGINS:
-            return 1
-    except Exception:
-        pass
     return None
 
 
-def url_to_heading_index(url: str, pr_urls: list[str], description: str = "") -> int | None:
+def url_to_heading_index(
+    url: str,
+    pr_urls: list[str],
+    description: str = "",
+    routes: dict[str, str] | None = None,
+) -> int | None:
     """Map a PR URL to its owner heading index.
 
-    Priority order:
-    1. Scan owner sections in the description (URL already injected).
-    2. Look up PR assignees (legacy) or reviewers (Ivy self-assign flow).
-    3. Fall back to reversed-position formula (fragile, last resort).
+    Explicit `tom:` / `quinn:` routing is authoritative. There is no
+    positional fallback: an unlabeled PR is unsafe to match to an AC set.
     """
     if not url or url not in pr_urls:
         return None
+    if routes:
+        for owner, routed_url in routes.items():
+            if routed_url == url:
+                return owner_heading_index(description, owner)
     if description:
         for idx, (block_text, _) in enumerate(owner_sections(description)):
             if url in block_text:
                 return idx
-    idx = _heading_index_for_pr(url)
-    if idx is not None:
-        return idx
-    pos = pr_urls.index(url)
-    return 1 - pos  # last resort: pr_urls[0] → Tom(1), pr_urls[1] → Quinn(0)
+    return None
 
 
-def inject_pr_urls_into_description(description: str, pr_urls: list[str]) -> str:
+def inject_pr_urls_into_description(description: str, routes: dict[str, str]) -> str:
     """Inject PR URLs as markdown links into the correct owner heading blocks.
 
-    Uses PR assignees to determine the target heading:
-    - quinnstoffer → ## Quinn can execute (idx 0)
-    - Stoff81 → ## Needs Tom approval (idx 1)
-    Falls back to positional ordering only when no assignee is set.
+    Explicit route labels are authoritative. Existing PR links are rewritten
+    so a previous positional guess cannot remain attached to the wrong ACs.
     """
-    if not pr_urls or not description:
+    if not routes or not description:
         return description
-    result = description
-    owner_matches = list(OWNER_HEADING_RE.finditer(result))
-    for url in pr_urls:
-        if url in result:
-            continue
-        pr_num_match = re.search(r"pull/(\d+)", url or "")
-        pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
+    owner_matches = list(OWNER_HEADING_RE.finditer(description))
+    if not owner_matches:
+        return description
 
-        # Determine target heading by assignee/reviewer, fall back to first empty heading.
-        target_idx: int | None = _heading_index_for_pr(url)
-
-        if target_idx is not None:
-            # Inject into the assignee-matched heading if it doesn't already have a PR URL.
-            if target_idx < len(owner_matches):
-                match = owner_matches[target_idx]
-                start = match.end()
-                end = owner_matches[target_idx + 1].start() if target_idx + 1 < len(owner_matches) else next_heading_pos(
-                    result, start, heading_level(match.group(0))
-                )
-                block = result[start:end]
-                if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
-                    result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
-                    owner_matches = list(OWNER_HEADING_RE.finditer(result))
-                    continue
-            # Heading already has a URL or index out of range — append at end.
-            result = result.rstrip() + f"\n\n[{pr_label}]({url})\n"
-        else:
-            # No assignee — fall back to first empty heading walking in reverse.
-            heading_idx = None
-            for h_idx in range(len(owner_matches) - 1, -1, -1):
-                match = owner_matches[h_idx]
-                start = match.end()
-                end = owner_matches[h_idx + 1].start() if h_idx + 1 < len(owner_matches) else next_heading_pos(
-                    result, start, heading_level(match.group(0))
-                )
-                block = result[start:end]
-                if not extract_pr_urls_from_text(match.group(0) + "\n" + block):
-                    heading_idx = h_idx
-                    break
-            if heading_idx is not None:
-                match = owner_matches[heading_idx]
-                start = match.end()
-                result = result[:start] + f"\n[{pr_label}]({url})" + result[start:]
-                owner_matches = list(OWNER_HEADING_RE.finditer(result))
-            else:
-                result = result.rstrip() + f"\n\n[{pr_label}]({url})\n"
-    return result
+    pieces: list[str] = []
+    cursor = 0
+    for idx, match in enumerate(owner_matches):
+        start = match.end()
+        end = owner_matches[idx + 1].start() if idx + 1 < len(owner_matches) else next_heading_pos(
+            description, start, heading_level(match.group(0))
+        )
+        pieces.append(description[cursor:start])
+        block = description[start:end]
+        cleaned = re.sub(
+            r"(?m)^[ \t]*\[[^\n\]]+\]\(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+\)[ \t]*\n?",
+            "",
+            block,
+        )
+        owner = "quinn" if "quinn" in match.group(0).lower() else "tom"
+        url = routes.get(owner)
+        if url:
+            pr_num_match = re.search(r"pull/(\d+)", url)
+            pr_label = f"PR #{pr_num_match.group(1)}" if pr_num_match else url
+            cleaned = f"\n[{pr_label}]({url})\n" + cleaned.lstrip("\n")
+        pieces.append(cleaned)
+        cursor = end
+    pieces.append(description[cursor:])
+    return "".join(pieces)
 
 
 def ci_failures_for_pr(url: str) -> tuple[list[str], list[dict[str, str]]]:
@@ -267,7 +229,8 @@ def ac_failures_for_pr(url: str, heading_idx: int, task_acs: list[str], descript
     section_signatures = {ac_signature(ac) for ac in section_acs}
     checked_sigs = checked_pr_ac_signatures(gh_pr_body(url))
 
-    missing = [sig for sig in section_signatures if sig not in checked_sigs]
+    missing = sorted(sig for sig in section_signatures if sig not in checked_sigs)
+    unexpected = sorted(sig for sig in checked_sigs if sig not in section_signatures)
     checked_normalized = checked_pr_acceptance_criteria(gh_pr_body(url))
 
     details = {
@@ -277,9 +240,12 @@ def ac_failures_for_pr(url: str, heading_idx: int, task_acs: list[str], descript
         "sectionSignatures": sorted(section_signatures),
         "checkedSignatures": sorted(checked_sigs),
         "missingSignatures": missing,
+        "unexpectedSignatures": unexpected,
         "checkedAcceptanceCriteria": sorted(checked_normalized),
     }
-    return [f"{url} PR is missing AC: {sig}" for sig in missing], details
+    failures = [f"{url} PR is missing AC: {sig}" for sig in missing]
+    failures.extend(f"{url} PR contains AC for the wrong owner section: {sig}" for sig in unexpected)
+    return failures, details
 
 
 def main() -> int:
@@ -296,22 +262,23 @@ def main() -> int:
     state = dict(data.get("lobster_state") or {})
     description = task.get("description") or ""
 
-    detected = extract_ivy_pr_urls(task)
+    routes, route_failures = parse_ivy_pr_routes(latest_ivy_pr_comment(task))
     existing = [url for url in state.get("prUrls") or [] if isinstance(url, str)]
-    pr_urls = existing[:]
-    for url in detected:
-        if url not in pr_urls:
-            pr_urls.append(url)
+    # The latest labelled handoff is authoritative. Never merge it with the
+    # prior state or infer missing labels from URL order.
+    pr_urls = list(dict.fromkeys(routes.values()))
     state["prUrls"] = pr_urls
 
-    # Inject Ivy's PR URLs into the task description heading blocks if missing
-    updated_description = inject_pr_urls_into_description(description, pr_urls)
+    failures: list[str] = list(route_failures)
+
+    # Inject Ivy's explicitly routed PR URLs into the task description heading
+    # blocks. The route map, not URL position or PR assignee, decides placement.
+    updated_description = inject_pr_urls_into_description(description, routes)
     if updated_description != description and str(args.dry_run).lower() != "true":
         patch_task(str(task["id"]), {"description": updated_description})
         task = refresh_task(str(task["id"]))
         description = updated_description
 
-    failures: list[str] = []
     pr_heading_failures = owner_heading_block_url_failures(description)
     if pr_heading_failures:
         failures.extend(pr_heading_failures)
@@ -346,7 +313,7 @@ def main() -> int:
             pr_ci.append({"url": url, "error": str(exc)})
         if task_acs:
             try:
-                heading_idx = url_to_heading_index(url, pr_urls, description)
+                heading_idx = url_to_heading_index(url, pr_urls, description, routes)
                 if heading_idx is None:
                     failures.append(f"{url} has no mapped owner heading — cannot determine which ACs to validate.")
                     pr_ac_details.append({"url": url, "error": "no heading index"})
@@ -354,18 +321,19 @@ def main() -> int:
                     ac_fails, ac_details = ac_failures_for_pr(url, heading_idx, task_acs, description)
                     pr_ac_details.append(ac_details)
                     failures.extend(ac_fails)
-                    # Assignee check: heading_idx 0 = Quinn's section, 1 = Tom's section
                     assignees = gh_pr_assignees(url)
-                    # Accept ivy self-assign (new flow) or legacy approver-assign
-                    expected_assignees = {
-                        0: {"quinnstoffer"} | IVY_LOGINS,  # Quinn's PR → Quinn or Ivy
-                        1: {"Stoff81"} | IVY_LOGINS,       # Tom's PR → Tom or Ivy
-                    }
-                    expected = expected_assignees.get(heading_idx, set())
-                    if expected and not expected.intersection(set(assignees)):
+                    assignee_logins = {login.lower() for login in assignees if login}
+                    if assignee_logins != IVY_LOGINS:
                         failures.append(
-                            f"{url} is not assigned to one of {expected} — "
-                            f"PR must be assigned to Ivy (self-merge flow) or the owner ({'Quinn' if heading_idx == 0 else 'Tom'})."
+                            f"{url} must be assigned only to Ivy (`ivystoffer`), not to an approver; "
+                            f"actual assignees: {sorted(assignee_logins) or 'none'}."
+                        )
+                    expected_reviewer = "quinnstoffer" if heading_idx == 0 else "stoff81"
+                    reviewer_logins = {login.lower() for login in gh_pr_reviewers(url) if login}
+                    if expected_reviewer not in reviewer_logins:
+                        failures.append(
+                            f"{url} is routed to the {('Quinn' if heading_idx == 0 else 'Tom')} section but has no "
+                            f"matching reviewer (`{expected_reviewer}`)."
                         )
             except Exception as exc:
                 failures.append(f"Could not inspect PR description for {url}: {exc}")
