@@ -262,15 +262,64 @@ def task_acceptance_criteria(description: str) -> list[str]:
 
 
 def extract_ivy_pr_urls(task: dict[str, Any]) -> list[str]:
-    # Only read the most recent [ivy-prs] comment — newer comment supersedes older ones
-    latest = None
+    return list(extract_ivy_pr_routes(task).values())
+
+
+IVY_PR_ROUTE_RE = re.compile(
+    r"\b(?P<owner>tom|quinn)\s*:\s*(?P<url>https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+)",
+    re.I,
+)
+
+
+def latest_ivy_pr_comment(task: dict[str, Any]) -> str:
+    """Return the latest Ivy PR handoff comment, if any."""
+    latest = ""
     for comment in task_comments(task):
         text = comment_text(comment)
         if IVY_PRS_TAG in text:
             latest = text
-    if not latest:
-        return []
-    return list(dict.fromkeys(extract_pr_urls_from_text(latest)))
+    return latest
+
+
+def parse_ivy_pr_routes(comment: str) -> tuple[dict[str, str], list[str]]:
+    """Parse explicit approver-to-PR routing from an Ivy handoff comment.
+
+    Positional PR inference is deliberately not supported. A missing or
+    malformed owner label must block the task rather than silently attaching
+    a PR to the wrong acceptance-criteria section.
+    """
+    if not comment:
+        return {}, ["No `[ivy-prs]` task comment with a GitHub PR URL has been detected."]
+
+    routes: dict[str, str] = {}
+    errors: list[str] = []
+    labelled_urls: set[str] = set()
+    for match in IVY_PR_ROUTE_RE.finditer(comment):
+        owner = match.group("owner").lower()
+        url = match.group("url")
+        if owner in routes:
+            errors.append(f"`{owner}:` appears more than once in the latest `[ivy-prs]` comment.")
+        if url in labelled_urls:
+            errors.append(f"PR URL `{url}` is mapped to more than one approver.")
+        routes[owner] = url
+        labelled_urls.add(url)
+
+    all_urls = extract_pr_urls_from_text(comment)
+    unlabelled = [url for url in all_urls if url not in labelled_urls]
+    if unlabelled:
+        errors.append(
+            "Every PR URL in the latest `[ivy-prs]` comment must have an explicit `tom:` or `quinn:` label; "
+            f"unlabelled URL(s): {', '.join(unlabelled)}."
+        )
+    if not routes:
+        errors.append("Latest `[ivy-prs]` comment must use `tom: <url>` and/or `quinn: <url>` routing labels.")
+    return routes, errors
+
+
+def extract_ivy_pr_routes(task: dict[str, Any]) -> dict[str, str]:
+    """Return the latest explicit Ivy PR routing map, ignoring invalid entries."""
+    routes, _ = parse_ivy_pr_routes(latest_ivy_pr_comment(task))
+    return routes
 
 
 def task_is_weekly_content(task: dict[str, Any]) -> bool:

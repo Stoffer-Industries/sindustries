@@ -252,7 +252,7 @@ The `content-tasks/run.py` wrapper discovers active `content` tasks in `open`, `
 |---|---|
 | `open → ready` | Task body has a source `brain/...md` file or URL, plus one or more Tom/Quinn owner headings with checkbox ACs. Lobster assigns the task to Ivy. |
 | `ready → doing` | Task is assigned to Ivy and Ivy's current unblocked `doing` content task count is below the capacity limit (default: 1). |
-| `doing → acceptance` | Ivy has posted the latest `[ivy-prs]` comment; Lobster records the PR URLs, injects them under the owner headings if missing, verifies every owner heading has a PR URL, verifies PR CI is successful, verifies each PR body has checked AC signatures for that owner section, and verifies Quinn/Tom PRs are assigned to `quinnstoffer`/`Stoff81`. |
+| `doing → acceptance` | Ivy has posted the latest labelled `[ivy-prs]` comment; Lobster records the explicit `tom:` / `quinn:` route, injects each link under the matching owner heading (repairing misplaced links), rejects positional/unlabelled routing, verifies PR CI, verifies each PR body contains exactly the ACs for its routed owner section, and verifies Ivy is the sole assignee with the matching approver as reviewer. |
 | `acceptance → done` | All recorded PRs are merged to `main`. Before merge, the current implementation treats `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or any returned inline review comments on an unmerged PR as Ivy revision work and routes that feedback back to Ivy. |
 
 If earlier criteria regress, the Lobster moves the task backwards and posts a comment explaining why. While a task is in `acceptance`, the Lobster can also route PR review feedback back to Ivy by posting a task comment.
@@ -305,7 +305,7 @@ Immediately after opening PRs, Ivy posts a task comment:
 
 If both PRs exist, keep the order `tom` then `quinn`. If only one PR was opened, include just that labelled URL.
 
-The Lobster parses the latest `[ivy-prs]` comment on the next pass, records the URLs in Lobster state, injects the links into the task description owner sections when needed, and advances the task to `acceptance` once all `doing → acceptance` criteria pass.
+The Lobster parses the latest labelled `[ivy-prs]` comment on the next pass, records the explicit owner-to-PR mapping in Lobster state, injects links into the matching task-description owner sections, and advances the task to `acceptance` only when routing, PR metadata, CI, and exact per-owner AC coverage all pass. It never infers routing from URL order.
 
 ### Review iteration
 

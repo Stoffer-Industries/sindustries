@@ -106,5 +106,73 @@ class WeeklyContentTweetGateTests(unittest.TestCase):
         self.assertFalse(common_module.has_ivy_tweets_queued(normal))
 
 
+class IvyPrRoutingTests(unittest.TestCase):
+    def test_latest_handoff_requires_explicit_owner_labels(self):
+        common_module = load_common_module()
+        url1 = "https://github.com/Stoffer-Industries/sindustries/pull/319"
+        url2 = "https://github.com/Stoffer-Industries/sindustries/pull/320"
+
+        routes, errors = common_module.parse_ivy_pr_routes(f"[ivy-prs] tom: {url1}, quinn: {url2}")
+        self.assertEqual(routes, {"tom": url1, "quinn": url2})
+        self.assertEqual(errors, [])
+
+        routes, errors = common_module.parse_ivy_pr_routes(f"[ivy-prs] {url1} {url2}")
+        self.assertEqual(routes, {})
+        self.assertTrue(any("explicit `tom:` or `quinn:`" in error for error in errors))
+
+    def test_explicit_routes_repair_reversed_task_links(self):
+        module = load_content_task_modules()
+        url1 = "https://github.com/Stoffer-Industries/sindustries/pull/319"
+        url2 = "https://github.com/Stoffer-Industries/sindustries/pull/320"
+        description = (
+            "## Quinn can execute\n"
+            f"[PR #319]({url1})\n"
+            "- [ ] ADD system/quinn - factual update\n\n"
+            "## Needs Tom approval\n"
+            f"[PR #320]({url2})\n"
+            "- [ ] EDIT story/tom - approval required\n"
+        )
+
+        updated = module.inject_pr_urls_into_description(
+            description, {"quinn": url2, "tom": url1}
+        )
+        quinn_start = updated.index("## Quinn can execute")
+        tom_start = updated.index("## Needs Tom approval")
+        self.assertLess(updated.index(url2), tom_start)
+        self.assertGreater(updated.index(url1), quinn_start)
+        self.assertGreater(updated.index(url1), tom_start)
+
+    def test_pr_ac_signatures_ignore_test_plan_checkboxes(self):
+        module = load_content_task_modules()
+        body = (
+            "## Test plan\n"
+            "- [x] Validate JSON\n\n"
+            "## Acceptance criteria\n"
+            "- [x] ADD system/example - publish the page\n"
+        )
+
+        self.assertEqual(module.checked_pr_ac_signatures(body), {"add system/example"})
+
+    def test_pr_with_other_owner_ac_is_rejected(self):
+        module = load_content_task_modules()
+        url = "https://github.com/Stoffer-Industries/sindustries/pull/1"
+        description = (
+            "## Quinn can execute\n"
+            "- [ ] ADD system/quinn - factual update\n\n"
+            "## Needs Tom approval\n"
+            "- [ ] EDIT story/tom - approval required\n"
+        )
+        module.gh_pr_body = lambda _url: (
+            "## Acceptance criteria\n"
+            "- [x] EDIT story/tom - approval required\n"
+        )
+
+        failures, details = module.ac_failures_for_pr(url, 0, [], description)
+
+        self.assertTrue(any("missing AC: add system/quinn" in failure for failure in failures))
+        self.assertTrue(any("wrong owner section: edit story/tom" in failure for failure in failures))
+        self.assertEqual(details["unexpectedSignatures"], ["edit story/tom"])
+
+
 if __name__ == "__main__":
     unittest.main()

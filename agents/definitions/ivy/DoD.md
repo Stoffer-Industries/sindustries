@@ -24,7 +24,8 @@ A content task is only Done when all are true:
    - Task comments updated with PR URLs
    - Quinn notified of completion
    - A `[ivy-prs]` task comment with the PR URL(s) has been posted, in the exact format the Lobster parses
-   - ACs from the task body appear in the PR description and are marked `- [x]` once satisfied
+   - Only the routed owner's ACs appear in each PR description, copied into `## Acceptance criteria` and marked `- [x]` once satisfied
+   - The `[ivy-prs]` task comment uses explicit `tom:` / `quinn:` labels; an unlabeled PR list is invalid
 
 ---
 
