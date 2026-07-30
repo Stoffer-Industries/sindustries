@@ -21,7 +21,7 @@ If no open PRs or no unresolved comments: skip the assignee part.
 ## Step 2 — Feature task work
 
 Query the Tasks API for active feature tasks assigned to me:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status ready --status doing --status acceptance summary`
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status ready --status doing --status acceptance --summary`
 
 For each returned task, classify by state and follow `WORKFLOW.md` for the execution steps in that state. This file does not restate the workflow.
 
