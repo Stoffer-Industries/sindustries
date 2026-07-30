@@ -31,6 +31,14 @@ Things like:
 - Default speaker: Kitchen HomePod
 ```
 
+## Identities
+
+Lox has different names in different systems — use the right one per system, not the GitHub login everywhere:
+
+- **GitHub login:** not yet configured (no `~/.config/gh-lox` set up) — if this changes, record the login + `GH_CONFIG_DIR` here
+- **Tasks API `assignee` value:** `Lox` (capitalized first name — NOT a GitHub login; e.g. `?assignee=Lox`)
+- **Telegram account:** `lox` (`channels.telegram.accounts.lox`)
+
 ## Why Separate?
 
 Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.

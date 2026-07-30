@@ -13,6 +13,14 @@ Things like:
 - Device nicknames
 - Anything environment-specific
 
+## Identities
+
+Quinn has different names in different systems — use the right one per system, not the GitHub login everywhere:
+
+- **GitHub login:** `quinnstoffer` (`GH_CONFIG_DIR=~/.config/gh-quinn`)
+- **Tasks API `assignee` value:** `Quinn` (capitalized first name — NOT the GitHub login; e.g. `?assignee=Quinn`, not `?assignee=quinnstoffer`)
+- **Telegram account:** `quinn` (default bot account in `channels.telegram.accounts.quinn`)
+
 ## Quinn's Accounts & Devices
 
 ### Identity

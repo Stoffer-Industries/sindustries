@@ -32,6 +32,14 @@ Things like:
 - Default speaker: Kitchen HomePod
 ```
 
+## Identities
+
+Rowan has different names in different systems — use the right one per system, not the GitHub login everywhere:
+
+- **GitHub login:** `rowanstoffer` (`GH_CONFIG_DIR=~/.config/gh-rowan`)
+- **Tasks API `assignee` value:** `Rowan` (capitalized first name — NOT the GitHub login; e.g. `?assignee=Rowan`, not `?assignee=rowanstoffer`)
+- **Telegram account:** `rowan` (`channels.telegram.accounts.rowan`)
+
 ## GitHub
 
 - **Account:** rowanstoffer
