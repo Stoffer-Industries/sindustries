@@ -126,7 +126,7 @@ A successful audit session MUST end with all four of these gates firing, in orde
    planned in the assistant text — actually written via the `write` tool).
 2. **Commit** — `git add docs/repo-audits/<YYYY-Www>.md && git commit -m "..."` (or the matching commit style).
 3. **Push** — `git push -u origin <branch>` lands the branch on the remote.
-4. **PR** — PR opened via the pr-open skill (`cod—audit: ...` title, Executive Summary body, `code-audit` label, `Stoff81` assignee, `tomstoffer` reviewer).
+4. **PR** — PR opened via the pr-open skill (`cod—audit: ...` title, Executive Summary body, `code-audit` label, `Stoff81` assignee, `Stoff81` reviewer).
 
 If the session ends without all four landing, the audit is incomplete and
 the cron will record `consecutiveErrors++`. The W31 trajectory showed the
@@ -172,4 +172,4 @@ git push -u origin code-garden/sindustries/<YYYY-Www> --force-with-lease
 - Body: the `## Executive Summary` section from the audit document, followed by a link to the full audit file (`docs/repo-audits/<YYYY-Www>.md`)
 - Label: `code-audit`
 - Assignee: `Stoff81`
-- Reviewer: `tomstoffer`
+- Reviewer: `Stoff81`
