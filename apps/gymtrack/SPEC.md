@@ -1,21 +1,31 @@
 # GymTrack — Behavioural spec
 
-Task: `18256740` (Shape GymTrack MVP from saved prototype), `f520c396` (Agent-Powered Workouts).
-Tech design: `docs/specs/gymtrack-mvp-tech-design.md`, `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`.
-Product spec: `brain/tasks/specs/gymtrack-mvp-2026-07-07.md`, `brain/tasks/specs/in-progress/gymtrack-agent-powered-workouts.md`.
+Task: `18256740` (Shape GymTrack MVP from saved prototype), `f520c396` (Agent-Powered Workouts), `72d7cc3b` (Public Sign-Up with Social Login).
+Tech design: `docs/specs/gymtrack-mvp-tech-design.md`, `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`, `docs/specs/gymtrack-public-signup-social-login-tech-design.md`.
+Product spec: `brain/tasks/specs/gymtrack-mvp-2026-07-07.md`, `brain/tasks/specs/in-progress/gymtrack-agent-powered-workouts.md`, `brain/tasks/specs/in-progress/gymtrack-signup-social-login-2026-07-27.md`.
 
 ## Overview
 
-GymTrack is a single-user workout tracker for Tom. It is a standalone SPA deployed at a stable URL, accessible from iOS Safari without an app install. Workouts are persisted in Supabase, scoped to Tom's user account via RLS. The MVP replaces the localStorage-based prototype (`apps/gymtrack/` on `feat/gymtrack-prototype`) with a real auth + real database.
+GymTrack is a workout tracker SPA deployed at a stable URL, accessible from iOS Safari without an app install. Workouts are persisted in Supabase, scoped per-user via RLS. As of task `72d7cc3b`, any visitor can create their own account via a public sign-up page — GymTrack is now a real multi-tenant product, not a single-user app. The MVP replaced the localStorage-based prototype (`apps/gymtrack/` on `feat/gymtrack-prototype`) with a real auth + real database.
 
-As of task `f520c396`, an authenticated agent can also submit a **planned workout** on Tom's behalf via a server-side API. The app surfaces the plan (if one exists for the selected date) in place of freeform logging, lets Tom log actuals against each planned set, and stores both target and actual values side by side. Agents can also read back recent history and per-exercise progression to inform the next plan.
+As of task `f520c396`, an authenticated agent can also submit a **planned workout** on a user's behalf via a server-side API. The app surfaces the plan (if one exists for the selected date) in place of freeform logging, lets the user log actuals against each planned set, and stores both target and actual values side by side. Agents can also read back recent history and per-exercise progression to inform the next plan.
 
 ## Users
 
-- **Tom** — sole user in v1. Email + password sign-in. RLS is configured to scope all data to `auth.uid() = user_id` so even if a second user is provisioned in error, they cannot read Tom's data.
+- **Anyone (since `72d7cc3b`)** — can self-sign-up at `/signup` with email + password, Google, or Apple (Apple gated on the Supabase project having Apple configured — currently disabled). The sign-up flow lands them directly on `/workout` with an empty history state. RLS is configured to scope all data to `auth.uid() = user_id` so every account is isolated from every other account from the moment of creation; this is asserted by `apps/gymtrack/supabase/migrations/20260731190000_signup_rls_assertion.sql`.
+- **Tom** — the original seeded account; email + password sign-in at `/login`. Continues to work unchanged. Sign-up from the `/login` page is also available as a fallback if he ever needs to recreate his account.
 - **Agents** — authenticate to the agent-facing API via a bearer token (see [Agent API](#agent-api) below). An agent acts as the `user_id` its token was issued for; it cannot see or write other users' data. **As of this writing there is no self-service key-generation UI in the app** — every issued token today has been created by direct Supabase service-role insert, not through a flow a real external agent/user could complete unassisted. See Non-goals / Known gaps.
 
 ## Flows
+
+### Sign up (task `72d7cc3b`)
+
+1. An unauthenticated visitor can reach `/signup` either directly (e.g. via a shared link) or by tapping the "Create an account" link under the email/password form on `/login`.
+2. The page renders two OAuth CTAs (`Continue with Google`, `Continue with Apple`) as the primary path. Providers that the Supabase project has not been configured for are filtered out of the button list at click time via the `providerDisabled` heuristic in `apps/gymtrack/src/lib/authFlow.js` rather than rendering a raw 500.
+3. A collapsed "Use email + password instead" panel reveals the email + password form when tapped.
+4. Submit → Supabase creates the user (auto-confirm enabled in the dev/staging projects so no email verification is required) and the visitor is redirected to `/workout` (or to the originally intended destination if they were redirected here from a protected route).
+5. The empty `/workout` state is the landing experience — no special "welcome" screen is needed.
+6. Errors render inline; the submit button re-enables for retry.
 
 ### Sign in (AC5)
 
@@ -59,7 +69,8 @@ As of task `f520c396`, an authenticated agent can also submit a **planned workou
 | Route       | Component         | Notes                                                       |
 |-------------|-------------------|-------------------------------------------------------------|
 | `/`         | redirect          | → `/workout` if signed in, else `/login`.                    |
-| `/login`    | `LoginScreen`     | Email + password form.                                      |
+| `/login`    | `LoginScreen`     | Email + password form + "Create an account" link to `/signup`. |
+| `/signup`   | `SignUpPage`      | Public sign-up — OAuth CTAs (Google, Apple) + collapsed email/password panel. (Since `72d7cc3b`.) |
 | `/workout`  | `WorkoutLogger`   | Date picker + exercise picker + reps/weight + pending sets. |
 | `/history`  | `HistoryList`     | Last-30-days grouped by date.                               |
 | `*`         | redirect          | → `/` (which then redirects based on session).              |
@@ -78,10 +89,12 @@ All protected routes (`/workout`, `/history`) are wrapped in `<AuthGate>` which:
 
 ## Auth
 
-- Supabase Auth, email + password only (no magic link in v1).
+- Supabase Auth. Three paths are supported: email + password sign-in (always), email + password sign-up at `/signup`, and OAuth (Google, Apple) at `/signup`. Magic-link auth is not used in v1.
+- Sign-up (`/signup`) is public — no invitation, no manual provisioning. Email auto-confirm is enabled in the dev/staging Supabase projects so a new account is immediately usable; production must enable the same setting before this flow is exposed there.
 - Session persisted in `localStorage` via Supabase's default storage adapter.
 - `autoRefreshToken: true` keeps the session alive across reloads.
-- `detectSessionInUrl: true` handles email-link confirmation redirects if Tom ever resets his password.
+- `detectSessionInUrl: true` handles both email-link confirmation redirects (if a password-reset is ever added) and OAuth callback redirects.
+- Apple provider is not enabled on the current Supabase project (Tom punted on the Apple Developer account wiring); the Apple button is filtered out at click time via the `providerDisabled` heuristic in `apps/gymtrack/src/lib/authFlow.js`. When Apple is later enabled via `.openclaw`, the button re-appears with no code change here.
 
 ## Error handling
 
@@ -118,11 +131,16 @@ All three return `400 invalid_request` on bad input, `401 invalid_api_key` on au
 | Flow                | Spec file                              |
 |---------------------|----------------------------------------|
 | Sign in → land on `/workout` | `test/e2e/log-workout.spec.ts`  |
-| Add 2 sets → save → see in history | `test/e2e/log-workout.spec.ts` |
+| Add 2 sets → save → see in history | `test/e2e/log-workout.spec.ts`  |
+| Sign up at `/signup` with email + password → land on `/workout` | `test/e2e/signup.spec.ts` (task `72d7cc3b`) |
+| `/login` "Create an account" link navigates to `/signup` | `test/e2e/signup.spec.ts` (task `72d7cc3b`) |
+| OAuth (Google) redirect from `/signup` | `test/e2e/signup-google.spec.ts` (task `72d7cc3b`, gated on `SUPABASE_TEST_URL`) |
 
 Playwright runs against the Vite dev server on port 5179 with `iPhone 13` device emulation.
 
 **Agent API and plan-mode flows have unit/component coverage (`src/lib/plannedWorkoutsHandler.test.js`, `src/lib/historyHandler.test.js`, `src/lib/progressionHandler.test.js`, `src/lib/agentAuth.test.js`, `src/lib/plannedWorkouts.test.js`) but no Playwright e2e coverage yet.** Add e2e coverage for: agent creates a plan → plan renders in plan mode → actuals saved → history/progression reflect it.
+
+**Sign-up isolation (AC3 of task `72d7cc3b`) is asserted at the SQL boundary by `apps/gymtrack/supabase/migrations/20260731190000_signup_rls_assertion.sql`, not by a Playwright spec.** The assertion raises an exception if any GymTrack public table is missing `enable row level security`; the documented smoke-test query (manual or in CI) proves that a user cannot read another user's rows.
 
 ## Out of scope (v1)
 
