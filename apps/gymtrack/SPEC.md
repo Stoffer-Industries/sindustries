@@ -12,7 +12,7 @@ As of task `f520c396`, an authenticated agent can also submit a **planned workou
 
 ## Users
 
-- **Anyone (since `72d7cc3b`)** — can self-sign-up at `/signup` with email + password, Google, or Apple (Apple gated on the Supabase project having Apple configured — currently disabled). The sign-up flow lands them directly on `/workout` with an empty history state. RLS is configured to scope all data to `auth.uid() = user_id` so every account is isolated from every other account from the moment of creation; this is asserted by `apps/gymtrack/supabase/migrations/20260731190000_signup_rls_assertion.sql`.
+- **Anyone (since `72d7cc3b`)** — can self-sign-up at `/signup` with email + password or Google. Apple is gated on the Supabase project having Apple configured — currently disabled, so the Apple button is not rendered. The sign-up flow lands them directly on `/workout` with an empty history state. RLS is configured to scope all data to `auth.uid() = user_id` so every account is isolated from every other account from the moment of creation; this is asserted by `apps/gymtrack/supabase/migrations/20260731190000_signup_rls_assertion.sql`.
 - **Tom** — the original seeded account; email + password sign-in at `/login`. Continues to work unchanged. Sign-up from the `/login` page is also available as a fallback if he ever needs to recreate his account.
 - **Agents** — authenticate to the agent-facing API via a bearer token (see [Agent API](#agent-api) below). An agent acts as the `user_id` its token was issued for; it cannot see or write other users' data. **As of this writing there is no self-service key-generation UI in the app** — every issued token today has been created by direct Supabase service-role insert, not through a flow a real external agent/user could complete unassisted. See Non-goals / Known gaps.
 
@@ -21,7 +21,7 @@ As of task `f520c396`, an authenticated agent can also submit a **planned workou
 ### Sign up (task `72d7cc3b`)
 
 1. An unauthenticated visitor can reach `/signup` either directly (e.g. via a shared link) or by tapping the "Create an account" link under the email/password form on `/login`.
-2. The page renders two OAuth CTAs (`Continue with Google`, `Continue with Apple`) as the primary path. Providers that the Supabase project has not been configured for are filtered out of the button list at click time via the `providerDisabled` heuristic in `apps/gymtrack/src/lib/authFlow.js` rather than rendering a raw 500.
+2. The page renders one OAuth CTA (`Continue with Google`) as the primary path. Apple is listed in `DISABLED_OAUTH_PROVIDERS` in `apps/gymtrack/src/lib/authFlow.js` so the Apple button is absent from the first paint (not just hidden after a click). The `providerDisabled` heuristic in the same file remains a safety net for providers that fail at click time despite not being in `DISABLED_OAUTH_PROVIDERS` (e.g. config drift between deploys) — the button is removed from the list after a failed click.
 3. A collapsed "Use email + password instead" panel reveals the email + password form when tapped.
 4. Submit → Supabase creates the user (auto-confirm enabled in the dev/staging projects so no email verification is required) and the visitor is redirected to `/workout` (or to the originally intended destination if they were redirected here from a protected route).
 5. The empty `/workout` state is the landing experience — no special "welcome" screen is needed.
@@ -94,7 +94,7 @@ All protected routes (`/workout`, `/history`) are wrapped in `<AuthGate>` which:
 - Session persisted in `localStorage` via Supabase's default storage adapter.
 - `autoRefreshToken: true` keeps the session alive across reloads.
 - `detectSessionInUrl: true` handles both email-link confirmation redirects (if a password-reset is ever added) and OAuth callback redirects.
-- Apple provider is not enabled on the current Supabase project (Tom punted on the Apple Developer account wiring); the Apple button is filtered out at click time via the `providerDisabled` heuristic in `apps/gymtrack/src/lib/authFlow.js`. When Apple is later enabled via `.openclaw`, the button re-appears with no code change here.
+- Apple provider is not enabled on the current Supabase project (Tom punted on the Apple Developer account wiring); it is listed in `DISABLED_OAUTH_PROVIDERS` in `apps/gymtrack/src/lib/authFlow.js` so the Apple button is not rendered on `/signup`. When Apple is later enabled via `.openclaw`, Quinn removes `'apple'` from that array and the Apple button re-appears on `/signup` with no other code change required.
 
 ## Error handling
 

@@ -1,24 +1,40 @@
 import { supabase } from './supabase.js';
 
 /**
- * OAuth providers wired up on the public sign-up page. Order matters for
- * the UI: Google first (broadest support), Apple second. Providers not yet
- * enabled in the Supabase project are filtered out by `availableProviders`
- * via the `providerDisabled` heuristic so the UI can hide rather than 500.
+ * OAuth providers the public sign-up page knows how to wire up. Order
+ * matters for the UI: Google first (broadest support), Apple second.
  */
 export const SUPPORTED_OAUTH_PROVIDERS = ['google', 'apple'];
 
 /**
+ * Providers that are intentionally excluded from the rendered button list
+ * because the Supabase project has not been configured for them.
+ *
+ * Apple is in this list by default — Tom punted on the Apple Developer
+ * account wiring. The UI directive is: the Apple button MUST NOT render
+ * until Apple is wired up. `SignUpPage` filters `SUPPORTED_OAUTH_PROVIDERS`
+ * against this list at mount so the button is absent from the first paint,
+ * not just hidden after a click.
+ *
+ * When Quinn wires Apple via `.openclaw`, they remove 'apple' from this
+ * array and the Apple button re-appears on `/signup` with no other code
+ * change required.
+ */
+export const DISABLED_OAUTH_PROVIDERS = ['apple'];
+
+/**
  * Heuristically detect "this provider is not enabled on the Supabase project"
- * so the UI can hide the button instead of rendering a raw 500.
+ * so the UI can hide the button instead of rendering a raw 500. This is a
+ * safety net for providers that are NOT in `DISABLED_OAUTH_PROVIDERS` but
+ * still fail at click time (e.g. Supabase-side config drift between
+ * deploys). Providers known to be unconfigured belong in
+ * `DISABLED_OAUTH_PROVIDERS` instead, so the button is absent from first
+ * paint.
  *
  * Supabase returns a 422 with message "Provider <name> is not enabled" when
  * the project has not been configured for that provider. We match on the
  * fragment rather than rely on the status code shape, because the message is
  * the only stable signal across SDK versions.
- *
- * Apple is intentionally disabled by default per Tom's request until an Apple
- * Developer account is wired up — UI must NOT show the Apple button.
  */
 export function isProviderDisabledError(err) {
   if (!err) return false;
