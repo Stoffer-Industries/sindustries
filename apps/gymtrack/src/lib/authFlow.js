@@ -1,0 +1,85 @@
+import { supabase } from './supabase.js';
+
+/**
+ * OAuth providers wired up on the public sign-up page. Order matters for
+ * the UI: Google first (broadest support), Apple second. Providers not yet
+ * enabled in the Supabase project are filtered out by `availableProviders`
+ * via the `providerDisabled` heuristic so the UI can hide rather than 500.
+ */
+export const SUPPORTED_OAUTH_PROVIDERS = ['google', 'apple'];
+
+/**
+ * Heuristically detect "this provider is not enabled on the Supabase project"
+ * so the UI can hide the button instead of rendering a raw 500.
+ *
+ * Supabase returns a 422 with message "Provider <name> is not enabled" when
+ * the project has not been configured for that provider. We match on the
+ * fragment rather than rely on the status code shape, because the message is
+ * the only stable signal across SDK versions.
+ *
+ * Apple is intentionally disabled by default per Tom's request until an Apple
+ * Developer account is wired up — UI must NOT show the Apple button.
+ */
+export function isProviderDisabledError(err) {
+  if (!err) return false;
+  const msg = (err.message ?? '').toLowerCase();
+  return (
+    msg.includes('provider') &&
+    msg.includes('not enabled')
+  ) || msg.includes('unsupported provider');
+}
+
+/**
+ * Start the OAuth redirect for `provider` (one of `SUPPORTED_OAUTH_PROVIDERS`).
+ * Returns `{ data, error, providerDisabled }`:
+ *   - `data` is whatever Supabase returned (usually `{ provider, url }` where
+ *     `url` is the redirect URL the caller should send the browser to).
+ *   - `error` is the raw Supabase error, or null on success.
+ *   - `providerDisabled` is true iff the heuristic detected a "provider not
+ *     enabled" error so the UI can hide the button instead of crashing.
+ *
+ * Callers should branch on `providerDisabled` first, then `error`, then
+ * proceed with `data.url` (window.location.assign or similar).
+ */
+export async function signInWithOAuthRedirect(provider) {
+  if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
+    return {
+      data: null,
+      error: new Error(`Unsupported OAuth provider: ${provider}`),
+      providerDisabled: false
+    };
+  }
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo: `${window.location.origin}/workout`
+    }
+  });
+
+  if (error && isProviderDisabledError(error)) {
+    return { data: null, error: null, providerDisabled: true };
+  }
+
+  return { data, error: error ?? null, providerDisabled: false };
+}
+
+/**
+ * Explicit "wait for auth to settle" call after an OAuth redirect.
+ *
+ * Supabase already handles post-redirect session detection via
+ * `detectSessionInUrl: true` in `lib/supabase.js` + the `onAuthStateChange`
+ * listener in `lib/auth.jsx`, so this is mostly redundant for the UI.
+ * It's useful in Playwright tests where the test must deterministically
+ * observe the session before continuing — calling `getSession()` resolves
+ * once Supabase has finished parsing the URL hash.
+ *
+ * Returns the current `{ session, user }` pair or `{ session: null, user: null }`.
+ */
+export async function getPostOAuthSession() {
+  const { data } = await supabase.auth.getSession();
+  return {
+    session: data.session ?? null,
+    user: data.session?.user ?? null
+  };
+}
