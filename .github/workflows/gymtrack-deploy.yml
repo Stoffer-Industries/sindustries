@@ -1,0 +1,88 @@
+name: GymTrack Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/gymtrack/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/gymtrack-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  deploy:
+    name: Deploy gymtrack (Supabase + Vercel prod)
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.GYMTRACK_VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: johwddosiwcxytfbtdyx
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Ensure Rollup Linux native binary is present
+        run: npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace apps/gymtrack
+
+      - name: Test gymtrack
+        run: npm test --workspace apps/gymtrack
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link Supabase project
+        working-directory: apps/gymtrack
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Push Supabase migrations
+        working-directory: apps/gymtrack
+        run: supabase db push --linked --yes
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@54.2.0
+
+      - name: Pull Vercel environment
+        working-directory: apps/gymtrack
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build Vercel output
+        working-directory: apps/gymtrack
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy to Vercel
+        id: deploy
+        working-directory: apps/gymtrack
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### GymTrack deployment"
+            echo ""
+            echo "- Target: production"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- URL: $DEPLOY_URL"
+            echo "- Production URL: https://gymtrack-sigma-pied.vercel.app"
+          } >> "$GITHUB_STEP_SUMMARY"
