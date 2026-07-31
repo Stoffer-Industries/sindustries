@@ -51,6 +51,15 @@ As of task `f520c396`, an authenticated agent can also submit a **planned workou
 2. Workouts are grouped by date (newest first). Each workout shows its set count and the per-set breakdown (exercise, set index, reps × weight unit).
 3. Empty state: "No workouts in the last 30 days. Log one from the Log tab."
 
+### Browse planned workouts (WS1 — task `2306125e` AC1, AC2, AC5)
+
+1. From `/workout` or `/history`, tap the "Workouts" tab in the screen nav → land on `/workouts`.
+2. The page fetches the signed-in user's pending planned workouts (status `planned` or `started`), ordered soonest-first by `scheduled_for` ascending.
+3. Each workout renders as a card with: title, scheduled date, exercise/set summary ("Bench Press · 5 sets"), and (when present) a "Today" or "Overdue" badge distinguishing workouts scheduled for today or earlier from those further out.
+4. Empty state: "No upcoming workouts. Connect an agent (coming soon) to have your training planned here." This replaces the WS2 "Connect to your agent" CTA banner, which ships in a separate PR once the OAuth flow from sibling task `1474d515` lands.
+5. Tap a workout card → land on `/workout?date=YYYY-MM-DD`; the log screen's date picker is pre-selected with the workout's date, and plan-mode is rendered (because a planned workout exists for that date) so the user can log actuals against the planned sets without manually picking the date.
+6. Error state: render an inline error banner with the Supabase error message; the user can retry by reloading.
+
 ### Log a workout against a plan (AC2, agent-powered)
 
 1. From `/workout`, if a planned workout exists for the selected date (`status` in `planned`/`started`), the screen renders **plan mode** instead of the freeform form.
@@ -71,8 +80,9 @@ As of task `f520c396`, an authenticated agent can also submit a **planned workou
 | `/`         | redirect          | → `/workout` if signed in, else `/login`.                    |
 | `/login`    | `LoginScreen`     | Email + password form + "Create an account" link to `/signup`. |
 | `/signup`   | `SignUpPage`      | Public sign-up — OAuth CTAs (Google, Apple) + collapsed email/password panel. (Since `72d7cc3b`.) |
-| `/workout`  | `WorkoutLogger`   | Date picker + exercise picker + reps/weight + pending sets. |
+| `/workout`  | `WorkoutLogger`   | Date picker + exercise picker + reps/weight + pending sets. Accepts `?date=YYYY-MM-DD` to pre-select the date (used by the Workouts tab tap-into-workout flow). |
 | `/history`  | `HistoryList`     | Last-30-days grouped by date.                               |
+| `/workouts` | `WorkoutsTab`     | Pending planned workouts (planned/started), soonest-first, with Today/Overdue badges. Tapping a card routes to `/workout?date=`. Auth-gated. |
 | `*`         | redirect          | → `/` (which then redirects based on session).              |
 
 All protected routes (`/workout`, `/history`) are wrapped in `<AuthGate>` which:
@@ -131,10 +141,11 @@ All three return `400 invalid_request` on bad input, `401 invalid_api_key` on au
 | Flow                | Spec file                              |
 |---------------------|----------------------------------------|
 | Sign in → land on `/workout` | `test/e2e/log-workout.spec.ts`  |
-| Add 2 sets → save → see in history | `test/e2e/log-workout.spec.ts`  |
+| Add 2 sets → save → see in history | `test/e2e/log-workout.spec.ts` |
 | Sign up at `/signup` with email + password → land on `/workout` | `test/e2e/signup.spec.ts` (task `72d7cc3b`) |
 | `/login` "Create an account" link navigates to `/signup` | `test/e2e/signup.spec.ts` (task `72d7cc3b`) |
 | OAuth (Google) redirect from `/signup` | `test/e2e/signup-google.spec.ts` (task `72d7cc3b`, gated on `SUPABASE_TEST_URL`) |
+| Browse planned workouts (list, badges, tap-to-log) | `test/e2e/workouts-tab.spec.ts` |
 
 Playwright runs against the Vite dev server on port 5179 with `iPhone 13` device emulation.
 
