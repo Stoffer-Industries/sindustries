@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { addSets, createWorkout } from '../lib/workouts.js';
 import { fetchPlannedWorkoutForDate, markPlannedWorkoutCompleted } from '../lib/plans.js';
 import { EXERCISES } from '../lib/exercises.js';
@@ -20,8 +20,18 @@ import { useAuth } from '../lib/auth.jsx';
 export default function WorkoutLogger() {
   const { signOut } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [performedAt, setPerformedAt] = useState(() => toDateInputValue(new Date()));
+  // Initial date: prefer ?date=YYYY-MM-DD (used by the Workouts tab tap-into-
+  // workout flow) and fall back to today. Invalid ?date= values are ignored.
+  const initialDate = (() => {
+    const fromUrl = searchParams.get('date');
+    return fromUrl && /^\d{4}-\d{2}-\d{2}$/.test(fromUrl)
+      ? fromUrl
+      : toDateInputValue(new Date());
+  })();
+
+  const [performedAt, setPerformedAt] = useState(initialDate);
   const [exercise, setExercise] = useState(EXERCISES[0]);
   const [customExercise, setCustomExercise] = useState('');
   const [reps, setReps] = useState(5);
@@ -209,6 +219,9 @@ export default function WorkoutLogger() {
           </Link>
           <Link to="/history" className="tab" data-testid="tab-history">
             History
+          </Link>
+          <Link to="/workouts" className="tab" data-testid="tab-workouts">
+            Workouts
           </Link>
           <button
             type="button"

@@ -106,6 +106,9 @@ export default function HistoryList() {
           <Link to="/history" className="tab active" data-testid="tab-history">
             History
           </Link>
+          <Link to="/workouts" className="tab" data-testid="tab-workouts">
+            Workouts
+          </Link>
         </nav>
       </header>
 
