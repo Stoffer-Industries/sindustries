@@ -4,6 +4,7 @@ import LoginScreen from './components/LoginScreen.jsx';
 import SignUpPage from './components/SignUpPage.jsx';
 import WorkoutLogger from './components/WorkoutLogger.jsx';
 import HistoryList from './components/HistoryList.jsx';
+import WorkoutsTab from './components/WorkoutsTab.jsx';
 import { useAuth } from './lib/auth.jsx';
 
 function Home() {
@@ -31,6 +32,14 @@ export default function App() {
         element={
           <AuthGate>
             <HistoryList />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/workouts"
+        element={
+          <AuthGate>
+            <WorkoutsTab />
           </AuthGate>
         }
       />

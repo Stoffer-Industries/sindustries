@@ -85,6 +85,25 @@ export async function fetchPlannedWorkoutById({ plannedWorkoutId }) {
 }
 
 /**
+ * Fetch the user's pending planned workouts (status `planned` or `started`)
+ * for the Workouts tab listing. Ordered by `scheduled_for` ascending so the
+ * soonest workout is at the top, with the same embedded-sets shape used by
+ * the single-date fetcher.
+ *
+ * @returns {Promise<{ data: PlannedWorkout[], error: Error|null }>}
+ */
+export async function listPendingPlannedWorkouts() {
+  const { data, error } = await supabase
+    .from('planned_workouts')
+    .select(PLAN_WITH_SETS_SELECT)
+    .in('status', ['planned', 'started'])
+    .order('scheduled_for', { ascending: true });
+  if (error) return { data: null, error };
+  if (!data) return { data: [], error: null };
+  return { data: data.map(shapePlannedWorkout), error: null };
+}
+
+/**
  * Normalize a Supabase row from `planned_workouts` (with embedded
  * `planned_workout_sets`) into the PlannedWorkout shape used by the UI.
  * Sets are sorted by set_index.
