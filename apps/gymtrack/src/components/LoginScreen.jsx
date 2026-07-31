@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 
 /**
@@ -80,6 +80,10 @@ export default function LoginScreen() {
           </button>
         </div>
       </form>
+
+      <p className="auth-alt" data-testid="login-create-account">
+        New to GymTrack? <Link to="/signup">Create an account</Link>
+      </p>
     </main>
   );
 }
