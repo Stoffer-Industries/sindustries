@@ -25,7 +25,7 @@ session ends:
    the matching commit style).
 3. `git push -u origin <branch>` — the branch must land on the remote.
 4. PR opened via the pr-open skill (`cod—audit: ...` title, Executive Summary
-   body, `code-audit` label, `Stoff81` assignee, `tomstoffer` reviewer).
+   body, `code-audit` label, `Stoff81` assignee, `Stoff81` reviewer).
 
 If you reach the end of your session without all four landing, the audit
 is incomplete and the cron will record `consecutiveErrors++`. The W31
