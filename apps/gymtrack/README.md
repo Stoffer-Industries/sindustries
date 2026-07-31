@@ -1,6 +1,6 @@
 # GymTrack
 
-A multi-tenant workout tracker SPA. iOS-Safari-friendly; logs workouts to Supabase with per-user RLS isolation. As of task `72d7cc3b`, anyone can self-sign-up at `/signup` via email + password, Google, or Apple (Apple gated on Supabase project configuration) — no manual provisioning required.
+A multi-tenant workout tracker SPA. iOS-Safari-friendly; logs workouts to Supabase with per-user RLS isolation. As of task `72d7cc3b`, anyone can self-sign-up at `/signup` via email + password or Google — no manual provisioning required. Apple is in `DISABLED_OAUTH_PROVIDERS` in `apps/gymtrack/src/lib/authFlow.js` because the current Supabase project does not have Apple configured; the button is not rendered until Quinn removes `'apple'` from that array (no other code change required).
 
 ## Stack
 
@@ -57,7 +57,7 @@ The sign-up path's RLS coverage is asserted by `supabase/migrations/202607311900
 
 Anyone visiting the deployed URL who is not already signed in is shown `/login` with a "Create an account" link below the email + password form. Clicking the link routes to `/signup`, which offers:
 
-- **Google** and **Apple** OAuth CTAs as the primary path. Apple is filtered out of the button list at click time if the Supabase project has not enabled it — this is graceful degradation, not a 500.
+- **Google** OAuth CTA as the primary path. Apple is listed in `DISABLED_OAUTH_PROVIDERS` in `apps/gymtrack/src/lib/authFlow.js` so the button is absent from the first paint until Quinn removes `'apple'` from that array — this is graceful degradation, not a 500.
 - A collapsed "Use email + password instead" panel as a fallback.
 
 Email auto-confirm must be enabled on the Supabase project for the flow to land a new account straight on `/workout`; otherwise the user sees a "check your email" state. The dev/staging projects already have auto-confirm enabled; production must enable it before this flow is exposed.
