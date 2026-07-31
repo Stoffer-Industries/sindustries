@@ -28,6 +28,28 @@ def log_progress(message: str) -> None:
     print(f"[bookmark-review-cron] {message}", flush=True)
 
 
+def is_all_deduped(approval_result: dict) -> bool:
+    """True when request_topic_approval.py delivered no new approvals because
+    a global approval lock is already held (one topic outstanding blocks all
+    others per policy). Healthy/expected state — not an error.
+
+    Not every blocked package will carry this reason: packages beyond the
+    first ready one are blocked by the unrelated "single approval per run
+    policy" cap, so we check for *any* match rather than requiring *all* to
+    match. A prior version required all() to match a reason string
+    ("approval already pending for topic") that request_topic_approval.py
+    never emits (it emits "approval already pending globally"), so this
+    dedup path was unreachable whenever more than one ready package existed
+    — every run fell through to the ambiguous needs_approval branch with an
+    empty approvals list instead. See cron 1d8a3cf1 error streak, 2026-08-01.
+    """
+    new_approvals = approval_result.get("approvals") or []
+    blocked = approval_result.get("blockedPackages") or []
+    return not new_approvals and any(
+        b.get("reason") == "approval already pending globally" for b in blocked
+    )
+
+
 def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
     try:
         for line in iter(pipe.readline, ""):
@@ -188,14 +210,7 @@ def main() -> int:
                 "reason": "approval_pending items exist but one or more are missing approvalResumeToken",
             }))
             return 1
-        # Dedup case: all packages blocked because an approval is already pending
-        # for each topic. No new delivery needed; healthy state, waiting on reply.
-        new_approvals = approval_result.get("approvals") or []
-        blocked = approval_result.get("blockedPackages") or []
-        all_deduped = not new_approvals and all(
-            b.get("reason") == "approval already pending for topic" for b in blocked
-        )
-        if all_deduped:
+        if is_all_deduped(approval_result):
             print(json.dumps({
                 "ok": True,
                 "status": "waiting_on_approval",
