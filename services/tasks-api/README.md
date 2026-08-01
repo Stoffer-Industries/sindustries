@@ -167,3 +167,18 @@ WHERE migration_name = '<old-name>';
 Run this on dev, prodlike, and any cached CI DBs before the next deploy.
 A fresh `prisma migrate deploy` against a clean DB will pick up the new
 name directly.
+
+## HTTP hardening
+
+All responses include baseline Helmet security headers and JSON request bodies are capped.
+Task creation and manual Content Scheduler publishing also use an in-memory rate limiter.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TASKS_API_JSON_LIMIT` | `100kb` | Maximum accepted JSON request body size. |
+| `TASKS_API_RATE_LIMIT_WINDOW_MS` | `900000` | Rate-limit window (15 minutes). |
+| `TASKS_API_RATE_LIMIT_MAX` | `100` | Requests allowed per client IP during the window. |
+
+The default in-memory limiter is appropriate for the current single-instance deployment.
+Use a shared store before scaling the service to multiple instances. Invalid or missing
+numeric rate-limit values fall back to the defaults.
