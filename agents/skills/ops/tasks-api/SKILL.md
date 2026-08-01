@@ -40,7 +40,20 @@ Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `task
 
 ## Common patterns
 
-Agent task view (grouped by status with blockers):
+Agent heartbeat queue (recommended):
+```bash
+python3 scripts/agent_task_queue.py --assignee Rowan --capacity 2
+python3 scripts/agent_task_queue.py --assignee Rowan --capacity 2 --json
+```
+
+This read-only adapter retrieves full active tasks and classifies them as
+`ACTIONABLE`, `WAITING_EXTERNAL`, `DEPENDENCY_BLOCKED`, or `BLOCKED`. Capacity
+counts only unblocked `doing` tasks. For feature and code tasks, a missing
+`[implementer-prs]` is implementer work and therefore `ACTIONABLE`; a posted
+delivery is an external-wait candidate whose PR/review state must still be
+verified.
+
+Raw agent task view (grouped by status):
 ```bash
 python3 tasks_api_client.py list --assignee Rowan --status ready --status doing --status acceptance --summary
 ```
