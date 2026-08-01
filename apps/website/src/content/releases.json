@@ -298,5 +298,35 @@
     "links": [],
     "evidence": "The scheduling primitive and Ivy's themed weekly campaign workflow shipped together on 2026-07-25.",
     "visibility": "published"
+  },
+  {
+    "title": "Feature Factory analytics",
+    "slug": "feature-factory-analytics",
+    "releasedAt": "2026-07-26",
+    "summary": "The delivery pipeline now records gate failures and task lifecycles, with a Mission Control view for failure rates, pull-request cycle times, evidence types, and per-task replay.",
+    "type": "system",
+    "links": [],
+    "evidence": "Every task gate now writes durable lifecycle events, backed by analytics endpoints, a Mission Control panel, and an ad-hoc replay helper.",
+    "visibility": "published"
+  },
+  {
+    "title": "Budget API session-auth hardening",
+    "slug": "budget-api-session-auth-hardening",
+    "releasedAt": "2026-07-29",
+    "summary": "Every user-data route now takes its user identity from a validated session token instead of client-supplied parameters.",
+    "type": "system",
+    "links": [],
+    "evidence": "Session middleware now protects banking, card, alert, transaction, category, and categorisation routes, closing the audit's critical cross-user access finding.",
+    "visibility": "published"
+  },
+  {
+    "title": "Content Scheduler publish gate",
+    "slug": "content-scheduler-publish-gate",
+    "releasedAt": "2026-07-29",
+    "summary": "Content Scheduler now requires an authenticated actor secret before publishing to X.",
+    "type": "system",
+    "links": [],
+    "evidence": "The publish route now rejects unauthenticated requests, closing the cloud-readiness audit finding on the X publishing path.",
+    "visibility": "published"
   }
 ]
