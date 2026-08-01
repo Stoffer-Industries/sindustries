@@ -21,9 +21,9 @@ If no open PRs or no unresolved comments: skip the assignee part.
 ## Step 2 — Task work (feature + code)
 
 Query the Tasks API through the shared agent queue classifier for all active tasks assigned to me, regardless of `taskType`:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Rowan --capacity 2`
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Rowan`
 
-The classifier is blocker-aware: an explicit or dependency-blocked `doing` task does not consume active capacity. It also treats a missing implementation delivery (`[implementer-prs]`) as `ACTIONABLE`, never as a request or wait for Quinn.
+The classifier distinguishes explicit and dependency blocks from actionable work. Capacity and state admission remain entirely owned by Lobster. A missing implementation delivery (`[implementer-prs]`) is `ACTIONABLE`, never a request or wait for Quinn.
 
 For each returned task, follow `WORKFLOW.md` for the execution steps in that state. If the queue contains any `ACTIONABLE` task, the pass must materially progress one before finishing: create/update a branch, commit, PR, validation result, required task comment, or a newly evidenced concrete blocker. A pass with actionable work and no such progress is a failed heartbeat and must follow **Escalate on Failure** below.
 

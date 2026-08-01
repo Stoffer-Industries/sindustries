@@ -95,13 +95,10 @@ def classify_task(task: dict[str, Any]) -> tuple[str, str]:
     return "WAITING_EXTERNAL", f"task state {status or 'unknown'} has no agent action rule"
 
 
-def build_queue(tasks: list[dict[str, Any]], capacity: int) -> dict[str, Any]:
+def build_queue(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     items = []
-    active_doing = 0
     for task in tasks:
         classification, reason = classify_task(task)
-        if task.get("status") == "doing" and classification not in {"BLOCKED", "DEPENDENCY_BLOCKED"}:
-            active_doing += 1
         items.append(
             {
                 "id": task.get("id"),
@@ -117,7 +114,6 @@ def build_queue(tasks: list[dict[str, Any]], capacity: int) -> dict[str, Any]:
     order = {"ACTIONABLE": 0, "WAITING_EXTERNAL": 1, "DEPENDENCY_BLOCKED": 2, "BLOCKED": 3}
     items.sort(key=lambda item: (order.get(item["classification"], 99), item.get("title") or ""))
     return {
-        "capacity": {"activeDoing": active_doing, "limit": capacity, "available": max(0, capacity - active_doing)},
         "actionableCount": sum(item["classification"] == "ACTIONABLE" for item in items),
         "items": items,
     }
@@ -135,11 +131,7 @@ def fetch_agent_tasks(assignee: str, base_url: str | None = None) -> list[dict[s
 
 
 def print_human(queue: dict[str, Any], assignee: str) -> None:
-    capacity = queue["capacity"]
-    print(
-        f"{assignee} active capacity: {capacity['activeDoing']}/{capacity['limit']} "
-        f"({capacity['available']} available); actionable: {queue['actionableCount']}"
-    )
+    print(f"{assignee} actionable tasks: {queue['actionableCount']}")
     for item in queue["items"]:
         print(
             f"{item['classification']:18} [{str(item['id'])[:8]}] "
@@ -150,14 +142,13 @@ def print_human(queue: dict[str, Any], assignee: str) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--assignee", required=True, help="Tasks API assignee name, e.g. Rowan")
-    parser.add_argument("--capacity", type=int, default=2, help="Unblocked doing-task capacity (default: 2)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    queue = build_queue(fetch_agent_tasks(args.assignee), args.capacity)
+    queue = build_queue(fetch_agent_tasks(args.assignee))
     if args.json:
         print(json.dumps(queue, indent=2))
     else:
