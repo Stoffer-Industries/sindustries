@@ -21,20 +21,22 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 
 ## Heartbeat Procedure
 
-1. Query the Tasks API for tasks assigned to Ivy:
+1. **Discovery must run before any silent result.** Query the Tasks API through the shared classifier for every active task assigned to Ivy:
 
    ```
-   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Ivy --status doing
-   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Ivy --status acceptance
-   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Ivy --blocked true
+   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ivy
    ```
 
-2. Classify each returned task and follow `WORKFLOW.md` for the *how* — this file does not restate execution steps:
-   - **`doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks, also run the **Weekly tweet campaign** below.
-   - **`acceptance`** → follow `WORKFLOW.md` section 6.
-   - **`blocked`** → do not attempt to resolve. Post a message to Quinn's session escalating the block. Do not change the `blocked` flag.
+   Do not return `NO_REPLY` or `HEARTBEAT_OK` before this query succeeds and its full result is classified.
 
-3. Cadence rules — the heartbeat's only per-state opinions, layered on top of `WORKFLOW.md`:
+2. Follow `WORKFLOW.md` for the *how* — this file does not restate execution steps:
+   - **`ACTIONABLE` + `doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks, also run the **Weekly tweet campaign** below.
+   - **`acceptance`** → follow `WORKFLOW.md` section 6. It remains an external wait unless review feedback or CI creates new implementer work.
+   - **`BLOCKED` or `DEPENDENCY_BLOCKED`** → do not attempt to resolve. Post a message to Quinn's session when the blocker is new or newly evidenced. Do not change the `blocked` flag or dependency state.
+
+3. **Actionability contract:** if discovery returns any `ACTIONABLE` item, this pass must produce tangible progress on at least one: read the linked source and create/update a draft, commit or PR work, queue the required tweets, post a required task comment, or record a newly evidenced concrete blocker. Existing state summaries and repeated “waiting” notes are not progress. Do not silently return `NO_REPLY` or `HEARTBEAT_OK` while actionable work remains.
+
+4. Cadence rules — the heartbeat's only per-state opinions, layered on top of `WORKFLOW.md`:
    - For weekly-content tasks still in `doing`, an existing `[ivy-prs]` comment suppresses only the PR-authoring work. While `[ivy-tweets-queued]` is missing, continue with the Weekly tweet campaign below; both comments are required before the Lobster transitions to `acceptance`.
    - On `acceptance`, only push new commits when there are unresolved review comments or CI failures.
 
