@@ -133,9 +133,9 @@
       "The first agent-facing feature moved from specification to main in 48 hours with 76 tests passing, providing an end-to-end test of the delivery workflow on a consumer product."
     ],
     "startedAt": "2026-07-13",
-    "updatedAt": "2026-07-25",
+    "updatedAt": "2026-07-31",
     "links": [],
     "image": "/brand/studio/gymtrack-hero.jpg",
-    "visibility": "draft"
+    "visibility": "published"
   }
 ]
