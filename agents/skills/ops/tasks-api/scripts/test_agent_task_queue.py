@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import unittest
+from unittest.mock import patch
 
 MODULE_PATH = pathlib.Path(__file__).with_name("agent_task_queue.py")
 SPEC = importlib.util.spec_from_file_location("agent_task_queue", MODULE_PATH)
@@ -100,6 +101,51 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertEqual(classification, "WAITING_EXTERNAL")
         self.assertIn("Lobster", reason)
+
+    def test_content_task_doing_remains_actionable_with_delivery_comment(self):
+        classification, reason = agent_task_queue.classify_task(
+            task(
+                taskType="content",
+                status="doing",
+                comments=[{"text": "[ivy-prs] https://github.com/acme/repo/pull/1"}],
+            )
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("content task", reason)
+
+    def test_content_task_acceptance_is_external_wait(self):
+        classification, reason = agent_task_queue.classify_task(
+            task(taskType="content", status="acceptance")
+        )
+        self.assertEqual(classification, "WAITING_EXTERNAL")
+        self.assertIn("acceptance", reason)
+
+    def test_untyped_doing_task_is_actionable_for_quinn(self):
+        classification, reason = agent_task_queue.classify_task(
+            task(taskType=None, status="doing")
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("task is in doing", reason)
+
+    def test_untyped_acceptance_task_is_external_wait(self):
+        classification, reason = agent_task_queue.classify_task(
+            task(taskType=None, status="acceptance")
+        )
+        self.assertEqual(classification, "WAITING_EXTERNAL")
+        self.assertIn("acceptance", reason)
+
+    def test_fetch_keeps_open_untyped_ops_tasks_outside_active_classifier(self):
+        with (
+            patch.object(agent_task_queue.tasks_api_client, "list_tasks", return_value=[]) as list_tasks,
+            patch.object(agent_task_queue.tasks_api_client, "get_base_url", return_value="http://test/api/v1"),
+        ):
+            agent_task_queue.fetch_agent_tasks("Quinn")
+
+        self.assertEqual(
+            list_tasks.call_args.kwargs["status"],
+            ["ready", "doing", "acceptance"],
+        )
+        self.assertNotIn("open", list_tasks.call_args.kwargs["status"])
 
 
 if __name__ == "__main__":
