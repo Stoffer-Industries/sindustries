@@ -63,3 +63,17 @@ npm run dev
 > `services/budget-api/src/app.ts` lands (tracked in the repo audit under
 > "Theme 1 — Lock down `budget-api` before any non-Tailnet deployment").
 
+## HTTP hardening
+
+All responses include baseline Helmet security headers and JSON request bodies are capped.
+The OAuth exchange and dev-login endpoints also use an in-memory rate limiter.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BUDGET_API_JSON_LIMIT` | `100kb` | Maximum accepted JSON request body size. |
+| `BUDGET_API_RATE_LIMIT_WINDOW_MS` | `900000` | Rate-limit window (15 minutes). |
+| `BUDGET_API_RATE_LIMIT_MAX` | `100` | Requests allowed per client IP during the window. |
+
+The default in-memory limiter is appropriate for the current single-instance deployment.
+Use a shared store before scaling the service to multiple instances. Invalid or missing
+numeric rate-limit values fall back to the defaults.

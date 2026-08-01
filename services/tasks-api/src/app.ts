@@ -1,4 +1,6 @@
 import express from 'express';
+import { helmetPreset } from './middleware/helmetPreset';
+import { createRateLimit, positiveIntegerEnv } from './middleware/rateLimit';
 import { healthRouter } from './routes/health';
 import { tasksRouter } from './routes/tasks';
 import { tagsRouter } from './routes/tags';
@@ -51,6 +53,10 @@ export function createApp() {
   installDefaultAdapter();
   const app = express();
   const allowedOrigins = getAllowedOrigins();
+  const rateLimitWindowMs = positiveIntegerEnv('TASKS_API_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000);
+  const rateLimitMax = positiveIntegerEnv('TASKS_API_RATE_LIMIT_MAX', 100);
+
+  app.use(helmetPreset());
 
   app.use((req, res, next) => {
     const origin = req.headers.origin;
@@ -70,7 +76,18 @@ export function createApp() {
     next();
   });
 
-  app.use(express.json());
+  // Body parsing must stay ahead of every route handler.
+  app.use(express.json({ limit: process.env.TASKS_API_JSON_LIMIT ?? '100kb' }));
+
+  const writeEndpointRateLimit = createRateLimit({
+    name: 'tasks-api-write-endpoints',
+    windowMs: rateLimitWindowMs,
+    max: rateLimitMax
+  });
+  app.use('/api/v1/tasks', (req, res, next) =>
+    req.method === 'POST' && req.path === '/' ? writeEndpointRateLimit(req, res, next) : next()
+  );
+  app.use('/api/v1/content-scheduler/items/:id/publish', writeEndpointRateLimit);
 
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', service: 'tasks-api' });
@@ -84,6 +101,11 @@ export function createApp() {
   app.use('/api/v1', featureTaskAnalyticsRouter);
 
   app.use((error, _req, res, _next) => {
+    if (error?.type === 'entity.too.large') {
+      return res.status(413).json({
+        error: { code: 'PAYLOAD_TOO_LARGE', message: 'JSON request body is too large' }
+      });
+    }
     console.error(error);
     res.status(500).json({
       error: {

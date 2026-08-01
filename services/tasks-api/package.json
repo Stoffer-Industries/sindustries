@@ -25,19 +25,21 @@
     "seed": "node prisma/seed.js"
   },
   "dependencies": {
-    "@sindustries/otel-node": "file:../../packages/otel-node",
     "@prisma/client": "^5.20.0",
+    "@sindustries/otel-node": "file:../../packages/otel-node",
     "dotenv": "^16.4.5",
-    "express": "^4.21.0"
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.6.1",
+    "helmet": "^8.3.0"
   },
   "devDependencies": {
-    "prisma": "^5.20.0",
-    "supertest": "^7.0.0",
-    "tsx": "^4.19.1",
-    "vitest": "^4.1.8",
     "@types/express": "^4.17.23",
     "@types/node": "^22.13.10",
     "@types/supertest": "^6.0.3",
-    "typescript": "^5.8.2"
+    "prisma": "^5.20.0",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.8"
   }
 }
