@@ -24,10 +24,10 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 1. **Discovery must run before any silent result.** Query the Tasks API through the shared classifier for every active task assigned to Ivy:
 
    ```
-   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ivy
+   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ivy --json
    ```
 
-   Do not return `NO_REPLY` or `HEARTBEAT_OK` before this query succeeds and its full result is classified.
+   Do not return `NO_REPLY` or `HEARTBEAT_OK` before this query succeeds and its full result is classified. Use `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates` for PR discovery, following `agents/skills/dev/pr-process/SKILL.md` for all review, feedback, and merge actions. The queue is read-only and never submits a review or merges automatically.
 
 2. Follow `WORKFLOW.md` for the *how* — this file does not restate execution steps:
    - **`ACTIONABLE` + `doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks, also run the **Weekly tweet campaign** below.

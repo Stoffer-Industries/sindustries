@@ -36,6 +36,24 @@ def implementation_task(**overrides):
     return value
 
 
+def pull_request(**overrides):
+    value = {
+        "number": 42,
+        "title": "feat: example",
+        "html_url": "https://github.com/acme/repo/pull/42",
+        "user": {"login": "rowanstoffer"},
+        "requested_reviewers": [],
+        "reviews": [],
+        "check_runs": [
+            {"status": "completed", "conclusion": "success"},
+            {"status": "completed", "conclusion": "skipped"},
+        ],
+        "mergeable": True,
+    }
+    value.update(overrides)
+    return value
+
+
 class AgentTaskQueueTest(unittest.TestCase):
     def test_dependency_blocked_doing_is_classified(self):
         queue = agent_task_queue.build_queue(
@@ -177,6 +195,119 @@ class AgentTaskQueueTest(unittest.TestCase):
             ["ready", "doing", "acceptance"],
         )
         self.assertNotIn("open", list_tasks.call_args.kwargs["status"])
+
+    def test_work_queue_exposes_all_read_only_queue_keys(self):
+        queue = agent_task_queue.build_work_queue(
+            [implementation_task()],
+            "Rowan",
+            [],
+            [{"id": "approval"}],
+        )
+        self.assertEqual(
+            set(queue),
+            {
+                "tasks",
+                "actionableTaskCount",
+                "techDesignApprovals",
+                "reviewRequests",
+                "authoredPrFeedback",
+                "mergeCandidates",
+            },
+        )
+
+    def test_review_requests_exclude_self_review(self):
+        other = pull_request(
+            user={"login": "ivystoffer"},
+            requested_reviewers=[{"login": "quinnstoffer"}],
+        )
+        own = pull_request(
+            user={"login": "quinnstoffer"},
+            requested_reviewers=[{"login": "quinnstoffer"}],
+        )
+        queue = agent_task_queue.classify_github_prs("Quinn", [other, own])
+        self.assertEqual([42], [item["number"] for item in queue["reviewRequests"]])
+
+    def test_latest_changes_requested_review_drives_authored_feedback(self):
+        pr = pull_request(
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "CHANGES_REQUESTED",
+                    "submitted_at": "2026-01-02T00:00:00Z",
+                },
+            ]
+        )
+        queue = agent_task_queue.classify_github_prs("Rowan", [pr])
+        self.assertEqual(["quinnstoffer"], queue["authoredPrFeedback"][0]["changesRequestedBy"])
+        self.assertEqual([], queue["mergeCandidates"])
+
+    def test_rowan_merge_candidate_requires_quinn_approval_and_green_ci(self):
+        approved = pull_request(
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        queue = agent_task_queue.classify_github_prs("Rowan", [approved])
+        self.assertEqual([42], [item["number"] for item in queue["mergeCandidates"]])
+
+        approved["check_runs"][0]["conclusion"] = "failure"
+        self.assertEqual(
+            [],
+            agent_task_queue.classify_github_prs("Rowan", [approved])["mergeCandidates"],
+        )
+
+    def test_ivy_merge_candidate_uses_pr_specific_blocking_reviewer(self):
+        pr = pull_request(
+            title="content: weekly updates (Tom-approval)",
+            user={"login": "ivystoffer"},
+            reviews=[
+                {
+                    "user": {"login": "Stoff81"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.classify_github_prs("Ivy", [pr])
+        self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["blockingApprovals"])
+
+    def test_quinn_cannot_self_approve_a_merge_candidate(self):
+        pr = pull_request(
+            user={"login": "quinnstoffer"},
+            requested_reviewers=[{"login": "quinnstoffer"}],
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.classify_github_prs("Quinn", [pr])
+        self.assertEqual([], queue["mergeCandidates"])
+
+    def test_quinn_authored_pr_can_merge_after_non_self_approval(self):
+        pr = pull_request(
+            user={"login": "quinnstoffer"},
+            reviews=[
+                {
+                    "user": {"login": "Stoff81"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.classify_github_prs("Quinn", [pr])
+        self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["blockingApprovals"])
 
 
 if __name__ == "__main__":
