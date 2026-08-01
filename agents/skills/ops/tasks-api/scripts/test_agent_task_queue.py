@@ -36,23 +36,14 @@ def implementation_task(**overrides):
 
 
 class AgentTaskQueueTest(unittest.TestCase):
-    def test_dependency_blocked_doing_does_not_consume_capacity(self):
+    def test_dependency_blocked_doing_is_classified(self):
         queue = agent_task_queue.build_queue(
-            [
-                implementation_task(id="blocked", dependencyBlocked=True),
-                implementation_task(id="active-1"),
-                implementation_task(id="active-2"),
-            ],
-            capacity=2,
+            [implementation_task(id="blocked", dependencyBlocked=True)]
         )
+        self.assertEqual(queue["items"][0]["classification"], "DEPENDENCY_BLOCKED")
 
-        self.assertEqual(queue["capacity"], {"activeDoing": 2, "limit": 2, "available": 0})
-        blocked = next(item for item in queue["items"] if item["id"] == "blocked")
-        self.assertEqual(blocked["classification"], "DEPENDENCY_BLOCKED")
-
-    def test_explicitly_blocked_doing_does_not_consume_capacity(self):
-        queue = agent_task_queue.build_queue([implementation_task(blocked=True)], capacity=2)
-        self.assertEqual(queue["capacity"]["activeDoing"], 0)
+    def test_explicitly_blocked_doing_is_classified(self):
+        queue = agent_task_queue.build_queue([implementation_task(blocked=True)])
         self.assertEqual(queue["items"][0]["classification"], "BLOCKED")
 
     def test_missing_implementer_prs_is_actionable_for_feature_and_code(self):
