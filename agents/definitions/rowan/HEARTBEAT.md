@@ -4,6 +4,11 @@
 
 Each heartbeat pass does two things in order: handle all PR work (review assigned PRs and address feedback on my own), then pick code-garden work.
 
+Before Step 1, run the shared read-only work queue once:
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Rowan --json`
+
+Use `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates` for PR discovery, and `tasks` for Step 2. The queue never reviews or merges automatically; every action still follows `pr-process` with Rowan's own GitHub identity.
+
 ---
 
 ## Step 1 — PR work
@@ -20,8 +25,7 @@ If no open PRs or no unresolved comments: skip the assignee part.
 
 ## Step 2 — Task work (feature + code)
 
-Query the Tasks API through the shared agent queue classifier for all active tasks assigned to me, regardless of `taskType`:
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Rowan`
+Use the `tasks` returned by the shared queue for all active tasks assigned to me, regardless of `taskType`.
 
 The classifier distinguishes explicit and dependency blocks from actionable work. Capacity and state admission remain entirely owned by Lobster. A missing implementation delivery (`[implementer-prs]`) is `ACTIONABLE`, never a request or wait for Quinn.
 

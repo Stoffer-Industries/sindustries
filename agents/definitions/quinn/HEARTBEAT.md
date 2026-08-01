@@ -9,9 +9,11 @@ ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 Before any specialised section or silent-success decision, run both mandatory preflight queries:
 
 1. Classify every active task assigned to Quinn:
-   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn`
+   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
 2. Discover the global tech-design approval queue across all feature/code tasks, regardless of assignee:
    `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
+
+The shared queue also returns read-only `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates`; the **PR REVIEW** section owns every action through `pr-process`. It never auto-submits Quinn's reviews or merges. Quinn must never approve her own PR, and a self-authored PR is never a merge candidate based on Quinn's own review.
 
 The assignee classifier covers Quinn's assigned `ready`, `doing`, and `acceptance` tasks and distinguishes actionable work from explicit blockers, dependency blockers, and external waits. **It is not the tech-design approval queue:** Quinn's delegated approval responsibility is global, so only `pending_tech_design_approvals.py` supplies that preflight result. The classifier also does not replace the separate **QUINN OPS TASKS** query for open tasks with no `taskType`; that query must still run in its section because open untyped ops tasks are outside the classifier's active-state query.
 
@@ -80,7 +82,7 @@ Do not apply `.openclaw` changes speculatively. Only act on explicit `[openclaw-
 
 PR REVIEW
 
-Process any PRs that need your attention.
+Process the shared queue's `reviewRequests` and any `authoredPrFeedback`. Treat `mergeCandidates` as assignee-only: Quinn may merge only a PR she authored after a non-Quinn blocking reviewer approved and CI is green; she never self-approves. Rowan and Ivy own merging their own eligible PRs.
 
 Read and follow the reviewer section of:
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
