@@ -95,6 +95,37 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(classification, "WAITING_EXTERNAL")
         self.assertIn("approval", reason)
 
+    def test_tech_design_approval_matches_lobster_exact_token_rule(self):
+        accepted = (
+            "[tech-design-approved] true",
+            "  [tech-design-approved] TRUE rationale follows",
+        )
+        rejected = (
+            "Missing task comment `[tech-design-approved] true`.",
+            "[tech-design-approved] false",
+            "[tech-design-approved] trueish",
+            "[tech-design-approved]",
+        )
+        for text in accepted:
+            with self.subTest(accepted=text):
+                self.assertTrue(agent_task_queue._tech_design_approved([text]))
+        for text in rejected:
+            with self.subTest(rejected=text):
+                self.assertFalse(agent_task_queue._tech_design_approved([text]))
+
+    def test_checklist_approval_substring_does_not_promote_doing_task(self):
+        classification, reason = agent_task_queue.classify_task(
+            task(
+                status="doing",
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {"text": "Missing task comment `[tech-design-approved] true`."},
+                ],
+            )
+        )
+        self.assertEqual(classification, "WAITING_EXTERNAL")
+        self.assertIn("approval", reason)
+
     def test_code_task_waiver_waits_for_lobster_promotion(self):
         classification, reason = agent_task_queue.classify_task(
             task(status="ready", comments=[{"text": "[tech-design-not-required] small fix"}])

@@ -6,13 +6,16 @@
 
 ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 
-Before any specialised section or silent-success decision, classify every active task assigned to Quinn:
+Before any specialised section or silent-success decision, run both mandatory preflight queries:
 
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn`
+1. Classify every active task assigned to Quinn:
+   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn`
+2. Discover the global tech-design approval queue across all feature/code tasks, regardless of assignee:
+   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
 
-This read-only classifier covers assigned `ready`, `doing`, and `acceptance` tasks and distinguishes actionable work from explicit blockers, dependency blockers, and external waits. It does not replace the separate **QUINN OPS TASKS** query for open tasks with no `taskType`; that query must still run in its section because open untyped ops tasks are outside the classifier's active-state query.
+The assignee classifier covers Quinn's assigned `ready`, `doing`, and `acceptance` tasks and distinguishes actionable work from explicit blockers, dependency blockers, and external waits. **It is not the tech-design approval queue:** Quinn's delegated approval responsibility is global, so only `pending_tech_design_approvals.py` supplies that preflight result. The classifier also does not replace the separate **QUINN OPS TASKS** query for open tasks with no `taskType`; that query must still run in its section because open untyped ops tasks are outside the classifier's active-state query.
 
-**Actionability gate:** if this query identifies an `ACTIONABLE` assigned task, or later discovery finds an actionable handoff, tech-design approval, ops task, or PR review, take a concrete action in this pass. Concrete action means implementation or document progress, an approval/review, an applied handoff, a required task comment, or a newly evidenced blocker/escalation. Repeating existing state is not action. Do not return `HEARTBEAT_OK` or otherwise finish silently before required discovery runs, and do not return silent success while an actionable item remains untouched.
+**Actionability gate:** if either preflight query identifies actionable work, or later discovery finds an actionable handoff, ops task, or PR review, take a concrete action in this pass. Concrete action means implementation or document progress, an approval/review, an applied handoff, a required task comment, or a newly evidenced blocker/escalation. Repeating existing state is not action. Do not return `HEARTBEAT_OK` or otherwise finish silently before both preflight queries and the open no-taskType ops query run, and do not return silent success while an actionable item remains untouched.
 
 The top-level silence rule still applies after all required discovery and action: report only the action taken or genuinely new input needed.
 
