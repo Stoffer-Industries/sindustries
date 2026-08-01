@@ -206,6 +206,8 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(
             set(queue),
             {
+                "queue",
+                "topCandidate",
                 "tasks",
                 "actionableTaskCount",
                 "techDesignApprovals",
@@ -214,6 +216,47 @@ class AgentTaskQueueTest(unittest.TestCase):
                 "mergeCandidates",
             },
         )
+
+    def test_unified_queue_selects_one_deterministic_top_candidate(self):
+        feedback_pr = pull_request(
+            reviews=[
+                {
+                    "user": {"login": "quinnstoffer"},
+                    "state": "CHANGES_REQUESTED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+        )
+        queue = agent_task_queue.build_work_queue(
+            [implementation_task(priority="urgent")],
+            "Rowan",
+            [feedback_pr],
+            [{"id": "approval", "title": "Review design", "techDesignUrl": "https://design"}],
+        )
+        self.assertEqual("authoredPrFeedback", queue["topCandidate"]["kind"])
+        self.assertEqual(
+            ["authoredPrFeedback", "techDesignApproval", "task"],
+            [item["kind"] for item in queue["queue"]],
+        )
+
+    def test_unified_queue_keeps_non_actionable_tasks_below_actionable_work(self):
+        queue = agent_task_queue.build_work_queue(
+            [
+                implementation_task(
+                    title="Waiting",
+                    comments=[
+                        {"text": "[tech-design] https://example.test/design"},
+                        {"text": "[tech-design-approved] true"},
+                        {"text": "[implementer-prs] https://example.test/pr"},
+                    ],
+                ),
+                implementation_task(title="Action now"),
+            ],
+            "Rowan",
+        )
+        self.assertEqual("Action now", queue["topCandidate"]["title"])
+        self.assertTrue(queue["queue"][0]["actionable"])
+        self.assertFalse(queue["queue"][-1]["actionable"])
 
     def test_review_requests_exclude_self_review(self):
         other = pull_request(

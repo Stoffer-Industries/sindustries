@@ -7,7 +7,7 @@ Each heartbeat pass does two things in order: handle all PR work (review assigne
 Before Step 1, run the shared read-only work queue once:
 `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Rowan --json`
 
-Use `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates` for PR discovery, and `tasks` for Step 2. The queue never reviews or merges automatically; every action still follows `pr-process` with Rowan's own GitHub identity.
+The queue combines task and PR work and returns one deterministic `topCandidate`. Action that candidate in this pass through the matching workflow or `pr-process` skill with Rowan's own identity. The queue never reviews, comments, changes task state, or merges automatically.
 
 ---
 
@@ -16,8 +16,7 @@ Use `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates` for PR discove
 Read and follow the pr-process skill for both reviewer and assignee duties:
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
 
-- Review any PRs assigned to me for review.
-- Check all open PRs I authored for unresolved `CHANGES_REQUESTED` reviews. Address valid feedback and push. As PR assignee, merge any PR where the required approval has been given and CI is green; do not wait for Tom to merge unless Tom is explicitly the required reviewer.
+When `topCandidate.kind` is `reviewRequest`, `authoredPrFeedback`, or `mergeCandidate`, process that one candidate through the matching reviewer or assignee path. Rowan merges only his own eligible PR after Quinn's blocking approval and green CI; Tom remains visibility-only unless explicitly required.
 
 If no open PRs or no unresolved comments: skip the assignee part.
 
@@ -25,7 +24,7 @@ If no open PRs or no unresolved comments: skip the assignee part.
 
 ## Step 2 — Task work (feature + code)
 
-Use the `tasks` returned by the shared queue for all active tasks assigned to me, regardless of `taskType`.
+When `topCandidate.kind` is `task`, use that task as the active work item. The `tasks` list retains all assigned active tasks for blocker/context checks.
 
 The classifier distinguishes explicit and dependency blocks from actionable work. Capacity and state admission remain entirely owned by Lobster. A missing implementation delivery (`[implementer-prs]`) is `ACTIONABLE`, never a request or wait for Quinn.
 
