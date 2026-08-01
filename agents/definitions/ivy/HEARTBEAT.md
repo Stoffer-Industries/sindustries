@@ -27,7 +27,7 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
    TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ivy --json
    ```
 
-   Do not return `NO_REPLY` or `HEARTBEAT_OK` before this query succeeds and its full result is classified. Use `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates` for PR discovery, following `agents/skills/dev/pr-process/SKILL.md` for all review, feedback, and merge actions. The queue is read-only and never submits a review or merges automatically.
+   Do not return `NO_REPLY` or `HEARTBEAT_OK` before this query succeeds. The unified queue returns one deterministic `topCandidate` across task work, PR review requests, authored-PR feedback, and Ivy's own merge candidates. Action that candidate through `WORKFLOW.md` or `agents/skills/dev/pr-process/SKILL.md`. The queue is read-only and never comments, reviews, changes task state, or merges automatically.
 
 2. Follow `WORKFLOW.md` for the *how* — this file does not restate execution steps:
    - **`ACTIONABLE` + `doing`** → follow `WORKFLOW.md` sections 1–5. On weekly-content tasks, also run the **Weekly tweet campaign** below.

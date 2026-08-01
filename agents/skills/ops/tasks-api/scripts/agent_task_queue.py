@@ -45,6 +45,14 @@ GITHUB_IDENTITIES = {
     "quinn": ("quinnstoffer", "~/.config/gh-quinn", "QUINN_GITHUB_TOKEN"),
 }
 GREEN_CHECK_CONCLUSIONS = {"success", "skipped", "neutral"}
+QUEUE_KIND_ORDER = {
+    "authoredPrFeedback": 0,
+    "mergeCandidate": 1,
+    "reviewRequest": 2,
+    "techDesignApproval": 3,
+    "task": 4,
+}
+TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 
 
 def _comment_texts(task: dict[str, Any]) -> list[str]:
@@ -324,6 +332,55 @@ def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
     return hydrated
 
 
+def build_unified_queue(
+    task_items: list[dict[str, Any]],
+    tech_design_approvals: list[dict[str, Any]],
+    github_queue: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Normalize every read-only heartbeat input into one deterministic queue."""
+    items: list[dict[str, Any]] = []
+    for item in github_queue["authoredPrFeedback"]:
+        items.append({"kind": "authoredPrFeedback", "actionable": True, **item})
+    for item in github_queue["mergeCandidates"]:
+        items.append({"kind": "mergeCandidate", "actionable": True, **item})
+    for item in github_queue["reviewRequests"]:
+        items.append({"kind": "reviewRequest", "actionable": True, **item})
+    for item in tech_design_approvals:
+        items.append(
+            {
+                "kind": "techDesignApproval",
+                "actionable": True,
+                "id": item.get("id"),
+                "title": item.get("title"),
+                "url": item.get("techDesignUrl"),
+                "status": item.get("status"),
+                "assignee": item.get("assignee"),
+            }
+        )
+    for item in task_items:
+        items.append(
+            {
+                "kind": "task",
+                "actionable": item.get("classification") == "ACTIONABLE",
+                **item,
+            }
+        )
+
+    def sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        actionable_rank = 0 if item.get("actionable") else 1
+        kind_rank = QUEUE_KIND_ORDER.get(str(item.get("kind")), 99)
+        task_priority = TASK_PRIORITY_ORDER.get(str(item.get("priority") or "").lower(), 99)
+        return (
+            actionable_rank,
+            kind_rank,
+            task_priority,
+            str(item.get("title") or ""),
+            str(item.get("id") or item.get("number") or ""),
+        )
+
+    return sorted(items, key=sort_key)
+
+
 def build_work_queue(
     tasks: list[dict[str, Any]],
     agent: str,
@@ -331,11 +388,15 @@ def build_work_queue(
     tech_design_approvals: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     task_queue = build_queue(tasks)
+    approvals = tech_design_approvals or []
     github_queue = classify_github_prs(agent, github_prs or [])
+    queue = build_unified_queue(task_queue["items"], approvals, github_queue)
     return {
+        "queue": queue,
+        "topCandidate": next((item for item in queue if item["actionable"]), None),
         "tasks": task_queue["items"],
         "actionableTaskCount": task_queue["actionableCount"],
-        "techDesignApprovals": tech_design_approvals or [],
+        "techDesignApprovals": approvals,
         **github_queue,
     }
 

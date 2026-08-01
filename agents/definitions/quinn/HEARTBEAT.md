@@ -6,18 +6,17 @@
 
 ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 
-Before any specialised section or silent-success decision, run both mandatory preflight queries:
+Before any specialised section or silent-success decision, fetch the unified read-only queue once:
 
-1. Classify every active task assigned to Quinn:
-   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
-2. Discover the global tech-design approval queue across all feature/code tasks, regardless of assignee:
-   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
 
-The shared queue also returns read-only `reviewRequests`, `authoredPrFeedback`, and `mergeCandidates`; the **PR REVIEW** section owns every action through `pr-process`. It never auto-submits Quinn's reviews or merges. Quinn must never approve her own PR, and a self-authored PR is never a merge candidate based on Quinn's own review.
+The queue combines assigned active tasks, Quinn's **global** tech-design approval scan across all feature/code tasks regardless of assignee, review requests, authored-PR feedback, and role-safe merge candidates. It returns one deterministic `topCandidate`. Action that candidate through the matching specialised section and existing workflow/PR skill; the queue itself never mutates tasks or GitHub.
 
-The assignee classifier covers Quinn's assigned `ready`, `doing`, and `acceptance` tasks and distinguishes actionable work from explicit blockers, dependency blockers, and external waits. **It is not the tech-design approval queue:** Quinn's delegated approval responsibility is global, so only `pending_tech_design_approvals.py` supplies that preflight result. The classifier also does not replace the separate **QUINN OPS TASKS** query for open tasks with no `taskType`; that query must still run in its section because open untyped ops tasks are outside the classifier's active-state query.
+Quinn must never approve her own PR, and a self-authored PR is never a merge candidate based on Quinn's own review. The queue's assigned-task classifier is not used as a substitute for global approval discovery: `techDesignApprovals` is populated with the exact parser and global scan from `pending_tech_design_approvals.py`.
 
-**Actionability gate:** if either preflight query identifies actionable work, or later discovery finds an actionable handoff, ops task, or PR review, take a concrete action in this pass. Concrete action means implementation or document progress, an approval/review, an applied handoff, a required task comment, or a newly evidenced blocker/escalation. Repeating existing state is not action. Do not return `HEARTBEAT_OK` or otherwise finish silently before both preflight queries and the open no-taskType ops query run, and do not return silent success while an actionable item remains untouched.
+The queue does not replace the separate **QUINN OPS TASKS** query for open tasks with no `taskType`; that query must still run because open untyped ops tasks are outside the active-task query.
+
+**Actionability gate:** if `topCandidate` exists, take a concrete action on it in this pass. Later specialised discovery may still surface an actionable handoff or open ops task. Concrete action means implementation or document progress, an approval/review, an applied handoff, a required task comment, or a newly evidenced blocker/escalation. Repeating existing state is not action. Do not return `HEARTBEAT_OK` before the unified queue and open no-taskType ops query run, and do not return silent success while an actionable item remains untouched.
 
 The top-level silence rule still applies after all required discovery and action: report only the action taken or genuinely new input needed.
 
@@ -28,9 +27,7 @@ TECH DESIGN APPROVAL
 Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated this.
 
 Each heartbeat:
-1. Find feature tasks with a `[tech-design]` comment but no proper `[tech-design-approved] true` comment:
-   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json`
-   The script mirrors the lobster's parser (`tagged_values` + `tech_design_approved` in `agents/workflows/feature-task/src/main.rs`): a comment counts as approval only if its trimmed text STARTS WITH the tag and the first whitespace-separated token after the tag is `true` (case-insensitive). Substring matches in the lobster's progress-checklist complaints (e.g. `Missing task comment [tech-design-approved] true`) are intentionally NOT counted.
+1. Use `techDesignApprovals` from the unified queue. It is populated by the global `pending_tech_design_approvals.py` scan and mirrors the lobster's parser (`tagged_values` + `tech_design_approved` in `agents/workflows/feature-task/src/main.rs`): a comment counts as approval only if its trimmed text STARTS WITH the tag and the first whitespace-separated token after the tag is `true` (case-insensitive). Substring matches in the lobster's progress-checklist complaints (e.g. `Missing task comment [tech-design-approved] true`) are intentionally NOT counted.
 2. **If 0 pending: skip this section entirely. No output.**
 3. For each pending task:
    - Read the design at the linked path.
