@@ -23,7 +23,7 @@ SPEC.loader.exec_module(tasks_api_client)
 IMPLEMENTATION_TYPES = {"feature", "code"}
 DELIVERY_TAGS = ("[implementer-prs]", "[rowan-prs]")
 TECH_DESIGN_TAG = "[tech-design]"
-TECH_DESIGN_APPROVAL_TAG = "[tech-design-approved] true"
+TECH_DESIGN_APPROVAL_TAG = "[tech-design-approved]"
 TECH_DESIGN_WAIVER_TAG = "[tech-design-not-required]"
 PROGRESS_TAGS = ("[feature-task-progress-checklist]", "[code-task-progress-checklist]")
 
@@ -46,6 +46,19 @@ def _latest_progress_comment(texts: list[str]) -> str:
     return ""
 
 
+def _tech_design_approved(texts: list[str]) -> bool:
+    """Mirror Lobster's starts-with tag and exact first-token approval rule."""
+    for text in texts:
+        stripped = text.strip()
+        if not stripped.startswith(TECH_DESIGN_APPROVAL_TAG):
+            continue
+        value = stripped[len(TECH_DESIGN_APPROVAL_TAG):].strip()
+        token = value.split(maxsplit=1)[0] if value else ""
+        if token.lower() == "true":
+            return True
+    return False
+
+
 def classify_task(task: dict[str, Any]) -> tuple[str, str]:
     """Return (classification, reason) for one full Tasks API task object."""
     if task.get("dependencyBlocked"):
@@ -60,7 +73,7 @@ def classify_task(task: dict[str, Any]) -> tuple[str, str]:
 
     if status == "ready" and task_type in IMPLEMENTATION_TYPES:
         has_design = _has_prefix(texts, (TECH_DESIGN_TAG,))
-        has_approval = any(TECH_DESIGN_APPROVAL_TAG in text.lower() for text in texts)
+        has_approval = _tech_design_approved(texts)
         has_waiver = _has_prefix(texts, (TECH_DESIGN_WAIVER_TAG,))
         if not has_design and not has_waiver:
             return "ACTIONABLE", "tech design or explicit waiver is missing"
@@ -70,7 +83,7 @@ def classify_task(task: dict[str, Any]) -> tuple[str, str]:
 
     if status == "doing" and task_type in IMPLEMENTATION_TYPES:
         has_design = _has_prefix(texts, (TECH_DESIGN_TAG,))
-        has_approval = any(TECH_DESIGN_APPROVAL_TAG in text.lower() for text in texts)
+        has_approval = _tech_design_approved(texts)
         has_waiver = _has_prefix(texts, (TECH_DESIGN_WAIVER_TAG,))
         if not has_design and not has_waiver:
             return "ACTIONABLE", "tech design or explicit waiver is missing"
