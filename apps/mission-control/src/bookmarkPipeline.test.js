@@ -125,9 +125,9 @@ describe('cutoffFromWindow', () => {
 describe('inScopeItem / inScopeTransition', () => {
   it('respects the topic filter', () => {
     const item = makeItem({ topic: 'infra' });
-    expect(inScopeItem(item, { topic: 'all' })).toBe(true);
-    expect(inScopeItem(item, { topic: 'infra' })).toBe(true);
-    expect(inScopeItem(item, { topic: 'brain' })).toBe(false);
+    expect(inScopeItem(item, { topic: 'all', now: NOW })).toBe(true);
+    expect(inScopeItem(item, { topic: 'infra', now: NOW })).toBe(true);
+    expect(inScopeItem(item, { topic: 'brain', now: NOW })).toBe(false);
   });
 
   it('respects the time window', () => {
@@ -140,9 +140,9 @@ describe('inScopeItem / inScopeTransition', () => {
 
   it('inScopeTransition filters by topic of the referenced item', () => {
     const byKey = new Map([['a', makeItem({ topic: 'infra' })]]);
-    expect(inScopeTransition({ key: 'a', at: isoDaysAgo(1) }, byKey, { topic: 'all' })).toBe(true);
-    expect(inScopeTransition({ key: 'a', at: isoDaysAgo(1) }, byKey, { topic: 'brain' })).toBe(false);
-    expect(inScopeTransition({ key: 'unknown', at: isoDaysAgo(1) }, byKey, { topic: 'brain' })).toBe(false);
+    expect(inScopeTransition({ key: 'a', at: isoDaysAgo(1) }, byKey, { topic: 'all', now: NOW })).toBe(true);
+    expect(inScopeTransition({ key: 'a', at: isoDaysAgo(1) }, byKey, { topic: 'brain', now: NOW })).toBe(false);
+    expect(inScopeTransition({ key: 'unknown', at: isoDaysAgo(1) }, byKey, { topic: 'brain', now: NOW })).toBe(false);
   });
 });
 
