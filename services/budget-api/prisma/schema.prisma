@@ -39,7 +39,9 @@ model User {
 model AkahuConnection {
   id          String   @id @default(uuid()) @db.Uuid
   userId      String   @unique @db.Uuid
-  accessToken String
+  // Encrypted at rest via AES-256-GCM. See src/lib/secretBox.ts.
+  // Blob layout: [version:1 | nonce:12 | ciphertext:N | tag:16]
+  accessToken Bytes
   scope       String?
   lastSyncedAt DateTime?
   createdAt   DateTime @default(now())
