@@ -1,5 +1,12 @@
 import request from 'supertest';
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  __resetKeyCacheForTests,
+  __setKeyForTests,
+  decryptToken
+} from '../src/lib/secretBox';
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -93,6 +100,10 @@ describe('requireSession middleware', () => {
         scope: 'ENDURING_CONSENT'
       });
       mocks.prisma.akahuConnection.upsert.mockResolvedValue({});
+      // Inject a deterministic key so upsertAkahuConnection.encryptToken
+      // doesn't reach for BUDGET_API_TOKEN_KEY in the env.
+      __resetKeyCacheForTests();
+      __setKeyForTests(createHash('sha256').update('session-mw-test-key').digest());
 
       const res = await request(createApp())
         .post('/api/v1/akahu/exchange')
@@ -100,20 +111,17 @@ describe('requireSession middleware', () => {
         .send({ code: 'oauth_code_1' });
 
       expect(res.status).toBe(200);
-      expect(mocks.prisma.akahuConnection.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { userId: 'user_1' },
-          create: {
-            userId: 'user_1',
-            accessToken: 'akahu_user_token',
-            scope: 'ENDURING_CONSENT'
-          },
-          update: {
-            accessToken: 'akahu_user_token',
-            scope: 'ENDURING_CONSENT'
-          }
-        })
-      );
+      // The repo encrypts before writing, so the upsert's create/update
+      // branches hold ciphertext Buffers (random nonce per call), not the
+      // OAuth-exchange plaintext. Decrypt what the repo actually wrote and
+      // assert the plaintext round-trips.
+      expect(mocks.prisma.akahuConnection.upsert).toHaveBeenCalledTimes(1);
+      const [upsertArgs] = mocks.prisma.akahuConnection.upsert.mock.calls[0];
+      expect(upsertArgs.where).toEqual({ userId: 'user_1' });
+      expect(upsertArgs.create.scope).toBe('ENDURING_CONSENT');
+      expect(upsertArgs.update.scope).toBe('ENDURING_CONSENT');
+      expect(decryptToken(upsertArgs.create.accessToken)).toBe('akahu_user_token');
+      expect(decryptToken(upsertArgs.update.accessToken)).toBe('akahu_user_token');
     });
 
     it('POST /akahu/exchange with an invalid Bearer token returns 401 and never calls the upstream', async () => {
