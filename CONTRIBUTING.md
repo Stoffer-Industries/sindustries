@@ -46,6 +46,7 @@ Use prodlike for final verification, smoke checks, and automation that should ta
 ## NEVER rules
 
 - **Never do implementation work directly on `main`.** Work on a branch and open a PR.
+- **Never check out a branch in the shared `codebases/sindustries` working tree.** This one checkout (the canonical path every agent's tooling reads from directly, e.g. sync scripts, TOOLS.md references) must always stay on `main`. For branch work, create an isolated worktree instead: `git worktree add ../../workspaces/<agent>/sindustries-<task> -b <branch>`. A `post-checkout` guardrail hook (`scripts/git-hooks/post-checkout`, installed via `scripts/git-hooks/install.sh` / `make bootstrap`) auto-reverts this checkout back to `main` if it drifts, but don't rely on it — use a worktree from the start.
 - **Never treat prodlike as your day-to-day dev environment.** Build and iterate in `dev`; validate in `prodlike`.
 - **Never seed or reset prodlike casually.** `scripts/dev/reset-db.sh` intentionally blocks prodlike seeding to protect the validation dataset.
 - **Never duplicate operational logic in ad-hoc commands when a repo script already exists.** Prefer `scripts/dev/*` and `make` wrappers.

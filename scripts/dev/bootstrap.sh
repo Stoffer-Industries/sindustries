@@ -65,6 +65,9 @@ echo "📦 Installing npm dependencies..."
 (cd "$ROOT_DIR/services/tasks-api" && npm install)
 (cd "$ROOT_DIR/apps/tasks" && npm install)
 
+echo "🪝 Installing repo git hooks..."
+"$ROOT_DIR/scripts/git-hooks/install.sh"
+
 echo "✅ Bootstrap complete."
 echo "Next:"
 echo "  make up"

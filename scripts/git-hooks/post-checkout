@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# post-checkout guardrail: the shared sindustries working tree must stay on main.
+#
+# Why: codebases/sindustries is a single shared checkout that every agent's
+# tooling (paths, sync scripts, etc.) reads from directly — it is not a
+# per-task worktree. Branch work directly in this checkout has repeatedly
+# drifted it off main (see reflog history 2026-08-03), which risks other
+# tooling silently reading stale/WIP content off disk.
+#
+# Scope: this hook only acts on the canonical shared checkout path below.
+# All other worktrees (workspaces/<agent>/sindustries-<task>, worktrees/*,
+# detached PR checkouts, etc.) are untouched — the hook no-ops for them.
+# This is a soft guardrail (auto-revert + warning), not a hard block: git
+# has no true pre-checkout hook that can abort a local checkout.
+set -euo pipefail
+
+CANONICAL_PATH="${OPENCLAW_WORKSPACE_ROOT:-$HOME/.openclaw/workspace}/codebases/sindustries"
+
+prev_head=${1:-}
+new_head=${2:-}
+is_branch_checkout=${3:-0}
+
+# Only branch checkouts matter (arg 3 == 1); file checkouts are unrelated.
+[[ "$is_branch_checkout" == "1" ]] || exit 0
+
+toplevel=$(git rev-parse --show-toplevel 2>/dev/null || true)
+[[ -n "$toplevel" ]] || exit 0
+
+# Resolve symlinks on both sides so path comparison is robust.
+canonical_resolved=$(cd "$CANONICAL_PATH" 2>/dev/null && pwd -P || echo "$CANONICAL_PATH")
+toplevel_resolved=$(cd "$toplevel" 2>/dev/null && pwd -P || echo "$toplevel")
+
+[[ "$toplevel_resolved" == "$canonical_resolved" ]] || exit 0
+
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")
+
+if [[ "$current_branch" != "main" ]]; then
+  echo "" >&2
+  echo "⚠️  agent-defs-sync guardrail: $CANONICAL_PATH is the shared working tree." >&2
+  echo "    It must stay on 'main' — checkout of '$current_branch' detected here." >&2
+  echo "    Auto-reverting to main. For branch work, use an isolated worktree:" >&2
+  echo "      git worktree add ../../workspaces/<agent>/sindustries-<task> -b <branch>" >&2
+  echo "" >&2
+  git checkout main --quiet
+fi
