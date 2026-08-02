@@ -125,9 +125,10 @@ describe('cutoffFromWindow', () => {
 describe('inScopeItem / inScopeTransition', () => {
   it('respects the topic filter', () => {
     const item = makeItem({ topic: 'infra' });
-    expect(inScopeItem(item, { topic: 'all' })).toBe(true);
-    expect(inScopeItem(item, { topic: 'infra' })).toBe(true);
-    expect(inScopeItem(item, { topic: 'brain' })).toBe(false);
+    const scope = { windowValue: 'all' };
+    expect(inScopeItem(item, { ...scope, topic: 'all' })).toBe(true);
+    expect(inScopeItem(item, { ...scope, topic: 'infra' })).toBe(true);
+    expect(inScopeItem(item, { ...scope, topic: 'brain' })).toBe(false);
   });
 
   it('respects the time window', () => {
