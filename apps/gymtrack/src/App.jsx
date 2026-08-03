@@ -5,6 +5,8 @@ import SignUpPage from './components/SignUpPage.jsx';
 import WorkoutLogger from './components/WorkoutLogger.jsx';
 import HistoryList from './components/HistoryList.jsx';
 import WorkoutsTab from './components/WorkoutsTab.jsx';
+import AgentConsent from './components/AgentConsent.jsx';
+import ConnectedAgents from './components/ConnectedAgents.jsx';
 import { useAuth } from './lib/auth.jsx';
 
 function Home() {
@@ -43,6 +45,15 @@ export default function App() {
           </AuthGate>
         }
       />
+      <Route
+        path="/settings/connected-agents"
+        element={
+          <AuthGate>
+            <ConnectedAgents />
+          </AuthGate>
+        }
+      />
+      <Route path="/agent-consent" element={<AgentConsent />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
