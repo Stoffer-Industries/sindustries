@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import subprocess
 from typing import Any
 
@@ -53,6 +54,8 @@ QUEUE_KIND_ORDER = {
     "task": 4,
 }
 TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
+URL_RE = re.compile(r"https?://[^\s)>]+")
+GITHUB_PR_URL_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/(\d+)(?:[/?#].*)?$")
 
 
 def _comment_texts(task: dict[str, Any]) -> list[str]:
@@ -66,11 +69,54 @@ def _has_prefix(texts: list[str], prefixes: tuple[str, ...]) -> bool:
     return any(text.lstrip().startswith(prefix) for text in texts for prefix in prefixes)
 
 
-def _latest_progress_comment(texts: list[str]) -> str:
+def _latest_tagged_comment(texts: list[str], prefixes: tuple[str, ...]) -> str:
     for text in reversed(texts):
-        if any(tag in text for tag in PROGRESS_TAGS):
+        stripped = text.lstrip()
+        if any(stripped.startswith(prefix) for prefix in prefixes):
             return text
     return ""
+
+
+def _latest_progress_comment(texts: list[str]) -> str:
+    return _latest_tagged_comment(texts, PROGRESS_TAGS)
+
+
+def _delivery_urls(texts: list[str]) -> list[str]:
+    comment = _latest_tagged_comment(texts, DELIVERY_TAGS)
+    if not comment:
+        return []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for match in URL_RE.finditer(comment):
+        url = match.group(0).rstrip(".,)")
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def _task_agent(task: dict[str, Any]) -> str:
+    assignee = str(task.get("assignee") or "").strip()
+    return assignee if assignee.lower() in GITHUB_IDENTITIES else "Rowan"
+
+
+def _checks_pending(checks: list[dict[str, Any]]) -> bool:
+    return any(str(check.get("status") or "").lower() != "completed" for check in checks)
+
+
+def _checks_failing(checks: list[dict[str, Any]]) -> bool:
+    return any(
+        str(check.get("status") or "").lower() == "completed"
+        and str(check.get("conclusion") or "").lower() not in GREEN_CHECK_CONCLUSIONS
+        for check in checks
+    )
+
+
+def _pull_number_from_url(url: str) -> int | None:
+    match = GITHUB_PR_URL_RE.match(url)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def _tech_design_approved(texts: list[str]) -> bool:
@@ -86,7 +132,94 @@ def _tech_design_approved(texts: list[str]) -> bool:
     return False
 
 
-def classify_task(task: dict[str, Any]) -> tuple[str, str]:
+def _latest_reviews(reviews: list[dict[str, Any]]) -> dict[str, str]:
+    latest: dict[str, str] = {}
+    for review in sorted(reviews, key=lambda item: item.get("submitted_at") or ""):
+        login = str((review.get("user") or {}).get("login") or "").lower()
+        state = str(review.get("state") or "").upper()
+        if login and state not in {"COMMENTED", "PENDING"}:
+            latest[login] = state
+    return latest
+
+
+def _blocking_reviewers(agent: str, pr: dict[str, Any], latest: dict[str, str]) -> list[str]:
+    agent = agent.lower()
+    title = str(pr.get("title") or "").lower()
+    requested = {
+        str(item.get("login") or "").lower()
+        for item in pr.get("requested_reviewers") or []
+    }
+    if agent == "rowan":
+        return ["quinnstoffer"]
+    if agent == "ivy":
+        if "tom-approval" in title:
+            return ["stoff81"]
+        if "quinn-approval" in title:
+            return ["quinnstoffer"]
+        known = (requested | set(latest)) & {"quinnstoffer", "stoff81"}
+        return sorted(known)
+    own_login = GITHUB_IDENTITIES[agent][0]
+    non_self_requested = {login for login in requested if login != own_login}
+    if non_self_requested:
+        return sorted(non_self_requested)
+    # GitHub clears requested_reviewers after a review is submitted. Retain the
+    # non-self reviewer from latest review state so an approved Quinn-authored
+    # PR can become merge-eligible without ever accepting Quinn's own review.
+    return sorted(login for login in latest if login != own_login)
+
+
+def _classify_delivery_pr(agent: str, pr: dict[str, Any]) -> tuple[str, str]:
+    state = str(pr.get("state") or "").lower()
+    if state != "open":
+        if pr.get("merged_at") or pr.get("mergedAt"):
+            return (
+                "ACTIONABLE",
+                "linked implementation PR is already merged; waiting for promotion is not a verified blocker",
+            )
+        return "ACTIONABLE", "linked implementation PR is closed without merge; replacement PR required"
+
+    if pr.get("draft"):
+        return "ACTIONABLE", "linked implementation PR is still draft"
+
+    latest = _latest_reviews(pr.get("reviews") or [])
+    changes_requested_by = sorted(
+        reviewer for reviewer, state in latest.items() if state == "CHANGES_REQUESTED"
+    )
+    if changes_requested_by:
+        return "ACTIONABLE", "linked implementation PR has requested changes"
+
+    if pr.get("mergeable") is False:
+        return "ACTIONABLE", "linked implementation PR has merge conflicts"
+
+    checks = pr.get("check_runs") or []
+    if _checks_failing(checks):
+        return "ACTIONABLE", "linked implementation PR has failing CI"
+    if _checks_pending(checks):
+        return "WAITING_EXTERNAL", "linked implementation PR is waiting on CI"
+
+    requested = {
+        str(item.get("login") or "").lower()
+        for item in pr.get("requested_reviewers") or []
+    }
+    blocking = _blocking_reviewers(agent, pr, latest)
+    approvals_present = bool(blocking) and all(latest.get(reviewer) == "APPROVED" for reviewer in blocking)
+    waiting_on_review = any(reviewer in requested for reviewer in blocking)
+
+    if approvals_present and pr.get("mergeable") is True:
+        return "ACTIONABLE", "linked implementation PR is approved and ready to merge"
+    if waiting_on_review:
+        return "WAITING_EXTERNAL", "linked implementation PR is waiting on review"
+
+    return (
+        "ACTIONABLE",
+        "implementer delivery is posted but no verified current external blocker remains",
+    )
+
+
+def classify_task(
+    task: dict[str, Any],
+    delivery_prs: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, str]:
     """Return (classification, reason) for one full Tasks API task object."""
     if task.get("dependencyBlocked"):
         return "DEPENDENCY_BLOCKED", "one or more task dependencies are incomplete"
@@ -116,10 +249,28 @@ def classify_task(task: dict[str, Any]) -> tuple[str, str]:
             return "ACTIONABLE", "tech design or explicit waiver is missing"
         if not has_approval and not has_waiver:
             return "WAITING_EXTERNAL", "tech design is waiting for approval"
-        if _has_prefix(texts, DELIVERY_TAGS):
-            return "WAITING_EXTERNAL", "implementer delivery posted; verify PR review and CI state"
         if "missing `[implementer-prs]`" in latest_progress.lower():
             return "ACTIONABLE", "progress checklist says implementer delivery is missing"
+        delivery_urls = _delivery_urls(texts)
+        if delivery_urls:
+            actionable_reasons: list[str] = []
+            waiting_reasons: list[str] = []
+            for url in delivery_urls:
+                pr = (delivery_prs or {}).get(url)
+                if pr is None:
+                    actionable_reasons.append(
+                        "implementer delivery is posted but live PR state is unavailable"
+                    )
+                    continue
+                classification, reason = _classify_delivery_pr(_task_agent(task), pr)
+                if classification == "WAITING_EXTERNAL":
+                    waiting_reasons.append(reason)
+                else:
+                    actionable_reasons.append(reason)
+            if actionable_reasons:
+                return "ACTIONABLE", actionable_reasons[0]
+            if waiting_reasons:
+                return "WAITING_EXTERNAL", waiting_reasons[0]
         return "ACTIONABLE", "implementation PR delivery has not been posted"
 
     if status == "acceptance":
@@ -135,10 +286,13 @@ def classify_task(task: dict[str, Any]) -> tuple[str, str]:
     return "WAITING_EXTERNAL", f"task state {status or 'unknown'} has no agent action rule"
 
 
-def build_queue(tasks: list[dict[str, Any]]) -> dict[str, Any]:
+def build_queue(
+    tasks: list[dict[str, Any]],
+    delivery_prs: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     items = []
     for task in tasks:
-        classification, reason = classify_task(task)
+        classification, reason = classify_task(task, delivery_prs)
         items.append(
             {
                 "id": task.get("id"),
@@ -184,42 +338,6 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
         env=env,
     )
     return json.loads(result.stdout)
-
-
-def _latest_reviews(reviews: list[dict[str, Any]]) -> dict[str, str]:
-    latest: dict[str, str] = {}
-    for review in sorted(reviews, key=lambda item: item.get("submitted_at") or ""):
-        login = str((review.get("user") or {}).get("login") or "").lower()
-        state = str(review.get("state") or "").upper()
-        if login and state not in {"COMMENTED", "PENDING"}:
-            latest[login] = state
-    return latest
-
-
-def _blocking_reviewers(agent: str, pr: dict[str, Any], latest: dict[str, str]) -> list[str]:
-    agent = agent.lower()
-    title = str(pr.get("title") or "").lower()
-    requested = {
-        str(item.get("login") or "").lower()
-        for item in pr.get("requested_reviewers") or []
-    }
-    if agent == "rowan":
-        return ["quinnstoffer"]
-    if agent == "ivy":
-        if "tom-approval" in title:
-            return ["stoff81"]
-        if "quinn-approval" in title:
-            return ["quinnstoffer"]
-        known = (requested | set(latest)) & {"quinnstoffer", "stoff81"}
-        return sorted(known)
-    own_login = GITHUB_IDENTITIES[agent][0]
-    non_self_requested = {login for login in requested if login != own_login}
-    if non_self_requested:
-        return sorted(non_self_requested)
-    # GitHub clears requested_reviewers after a review is submitted. Retain the
-    # non-self reviewer from latest review state so an approved Quinn-authored
-    # PR can become merge-eligible without ever accepting Quinn's own review.
-    return sorted(login for login in latest if login != own_login)
 
 
 def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -332,6 +450,41 @@ def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
     return hydrated
 
 
+def fetch_linked_delivery_prs(
+    agent: str,
+    tasks: list[dict[str, Any]],
+    github_prs: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
+    prs_by_url = {
+        str(pr.get("html_url")): pr for pr in (github_prs or []) if pr.get("html_url")
+    }
+    linked_urls = {
+        url
+        for task in tasks
+        for url in _delivery_urls(_comment_texts(task))
+    }
+    for url in sorted(linked_urls):
+        if url in prs_by_url:
+            continue
+        pr_number = _pull_number_from_url(url)
+        if pr_number is None:
+            continue
+        detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{pr_number}")
+        detail["reviews"] = _gh_api(
+            config_dir, token_env, f"repos/{REPO}/pulls/{pr_number}/reviews?per_page=100"
+        )
+        checks = _gh_api(
+            config_dir,
+            token_env,
+            f"repos/{REPO}/commits/{detail['head']['sha']}/check-runs?per_page=100",
+        )
+        detail["check_runs"] = checks.get("check_runs") or []
+        if detail.get("html_url"):
+            prs_by_url[str(detail["html_url"])] = detail
+    return prs_by_url
+
+
 def build_unified_queue(
     task_items: list[dict[str, Any]],
     tech_design_approvals: list[dict[str, Any]],
@@ -386,8 +539,12 @@ def build_work_queue(
     agent: str,
     github_prs: list[dict[str, Any]] | None = None,
     tech_design_approvals: list[dict[str, Any]] | None = None,
+    delivery_prs: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    task_queue = build_queue(tasks)
+    task_queue = build_queue(
+        tasks,
+        delivery_prs or {str(pr.get("html_url")): pr for pr in (github_prs or []) if pr.get("html_url")},
+    )
     approvals = tech_design_approvals or []
     github_queue = classify_github_prs(agent, github_prs or [])
     queue = build_unified_queue(task_queue["items"], approvals, github_queue)
@@ -424,16 +581,25 @@ def main() -> None:
         raise SystemExit(f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, or Quinn")
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
+    github_prs = fetch_github_prs(args.assignee)
+    delivery_prs = fetch_linked_delivery_prs(args.assignee, tasks, github_prs)
     queue = build_work_queue(
         tasks,
         args.assignee,
-        fetch_github_prs(args.assignee),
+        github_prs,
         approvals,
+        delivery_prs,
     )
     if args.json:
         print(json.dumps(queue, indent=2))
     else:
-        print_human(build_queue(tasks), args.assignee)
+        print_human(
+            {
+                "actionableCount": queue["actionableTaskCount"],
+                "items": queue["tasks"],
+            },
+            args.assignee,
+        )
         print(f"Tech-design approvals: {len(queue['techDesignApprovals'])}")
         print(f"Review requests: {len(queue['reviewRequests'])}")
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")

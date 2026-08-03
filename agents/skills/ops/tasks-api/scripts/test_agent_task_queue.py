@@ -17,6 +17,7 @@ def task(**overrides):
         "taskType": "code",
         "status": "doing",
         "priority": "high",
+        "assignee": "Rowan",
         "blocked": False,
         "dependencyBlocked": False,
         "comments": [],
@@ -49,6 +50,9 @@ def pull_request(**overrides):
             {"status": "completed", "conclusion": "skipped"},
         ],
         "mergeable": True,
+        "state": "open",
+        "draft": False,
+        "merged_at": None,
     }
     value.update(overrides)
     return value
@@ -68,9 +72,16 @@ class AgentTaskQueueTest(unittest.TestCase):
     def test_missing_implementer_prs_is_actionable_for_feature_and_code(self):
         for task_type in ("feature", "code"):
             with self.subTest(task_type=task_type):
-                classification, reason = agent_task_queue.classify_task(implementation_task(taskType=task_type))
+                classification, reason = agent_task_queue.classify_task(
+                    implementation_task(taskType=task_type)
+                )
                 self.assertEqual(classification, "ACTIONABLE")
                 self.assertIn("delivery", reason)
+
+    def test_doing_task_missing_delivery_is_actionable(self):
+        classification, reason = agent_task_queue.classify_task(implementation_task(taskType="feature"))
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("delivery", reason)
 
     def test_progress_checklist_missing_implementer_prs_is_not_external_wait(self):
         classification, _ = agent_task_queue.classify_task(
@@ -87,19 +98,42 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertEqual(classification, "ACTIONABLE")
 
-    def test_posted_implementer_prs_is_external_wait_candidate(self):
+    def test_closed_unmerged_implementer_pr_is_actionable(self):
+        pr_url = "https://github.com/acme/repo/pull/1"
         classification, reason = agent_task_queue.classify_task(
             implementation_task(
+                taskType="feature",
                 comments=[
                     {"text": "[tech-design] https://example.test/design"},
                     {"text": "[tech-design-approved] true"},
-                    {"text": "[code-task-progress-checklist]\nMissing `[implementer-prs]` task comment."},
-                    {"text": "[implementer-prs] https://github.com/acme/repo/pull/1"},
-                ]
-            )
+                    {"text": f"[implementer-prs] {pr_url}"},
+                ],
+            ),
+            {pr_url: pull_request(html_url=pr_url, state="closed", merged_at=None)},
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("closed without merge", reason)
+
+    def test_open_review_requested_implementer_pr_is_waiting_external(self):
+        pr_url = "https://github.com/acme/repo/pull/1"
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                taskType="feature",
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {"text": "[tech-design-approved] true"},
+                    {"text": f"[implementer-prs] {pr_url}"},
+                ],
+            ),
+            {
+                pr_url: pull_request(
+                    html_url=pr_url,
+                    requested_reviewers=[{"login": "quinnstoffer"}],
+                )
+            },
         )
         self.assertEqual(classification, "WAITING_EXTERNAL")
-        self.assertIn("verify PR", reason)
+        self.assertIn("waiting on review", reason)
 
     def test_ready_without_tech_design_is_actionable(self):
         classification, reason = agent_task_queue.classify_task(task(status="ready"))
@@ -240,6 +274,7 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
 
     def test_unified_queue_keeps_non_actionable_tasks_below_actionable_work(self):
+        waiting_pr_url = "https://github.com/acme/repo/pull/99"
         queue = agent_task_queue.build_work_queue(
             [
                 implementation_task(
@@ -247,12 +282,19 @@ class AgentTaskQueueTest(unittest.TestCase):
                     comments=[
                         {"text": "[tech-design] https://example.test/design"},
                         {"text": "[tech-design-approved] true"},
-                        {"text": "[implementer-prs] https://example.test/pr"},
+                        {"text": f"[implementer-prs] {waiting_pr_url}"},
                     ],
                 ),
                 implementation_task(title="Action now"),
             ],
             "Rowan",
+            [
+                pull_request(
+                    number=99,
+                    html_url=waiting_pr_url,
+                    requested_reviewers=[{"login": "quinnstoffer"}],
+                )
+            ],
         )
         self.assertEqual("Action now", queue["topCandidate"]["title"])
         self.assertTrue(queue["queue"][0]["actionable"])
