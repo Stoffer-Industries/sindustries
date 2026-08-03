@@ -1,5 +1,12 @@
 import request from 'supertest';
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  __resetKeyCacheForTests,
+  __setKeyForTests,
+  encryptToken
+} from '../src/lib/secretBox';
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -61,9 +68,15 @@ describe('POST /api/v1/akahu/sync', () => {
       id: 'session_1',
       userId: 'user_1'
     });
+    // Inject a deterministic key so encryptToken/decryptToken round-trip
+    // without touching BUDGET_API_TOKEN_KEY in the env.
+    __resetKeyCacheForTests();
+    __setKeyForTests(createHash('sha256').update('akahuSync-test-key').digest());
+    // The mock row matches what prisma would return: accessToken is the
+    // encrypted Blob, not the plaintext. The route decrypts via the repo.
     mocks.prisma.akahuConnection.findUnique.mockResolvedValue({
       userId: 'user_1',
-      accessToken: 'user_token',
+      accessToken: encryptToken('user_token'),
       lastSyncedAt: new Date('2026-05-10T00:00:00.000Z')
     });
     mocks.prisma.akahuConnection.update.mockResolvedValue({});
