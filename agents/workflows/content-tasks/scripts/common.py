@@ -26,9 +26,12 @@ WEEKLY_CONTENT_TITLE_RE = re.compile(r"weekly\s+(review|content\s+updates?)", re
 AUTHOR = "Lobster"
 STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
 PR_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)", re.I)
-PR_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\bPR\b.*$", re.I | re.M)
-OWNER_HEADING_RE = re.compile(r"^\s{0,3}#{1,4}\s+.*\b(Tom|Quinn)\b.*$", re.I | re.M)
-ANY_HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+", re.M)
+# Use horizontal whitespace for indentation. `\s` also matches newlines, so
+# with MULTILINE it can consume the line break before a heading and make the
+# match's first line appear empty to callers that inspect the heading text.
+PR_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,4}[ \t]+.*\bPR\b.*$", re.I | re.M)
+OWNER_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,4}[ \t]+.*\b(Tom|Quinn)\b.*$", re.I | re.M)
+ANY_HEADING_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]+", re.M)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[([ xX])\]\s+(.+\S)\s*$", re.M)
 
 
@@ -364,7 +367,14 @@ def gh_pr_view(url: str, fields: list[str]) -> dict[str, Any]:
 
 def gh_pr_assignees(url: str) -> list[str]:
     """Return list of GitHub login names assigned to the PR."""
-    data = gh_pr_view(url, ["assignees"])
+    # Use REST here rather than `gh pr view --json assignees`. The GraphQL
+    # representation resolves organisation-backed user fields and can require
+    # `read:org`, while the workflow only needs the public login names.
+    parsed = parse_pr_url(url)
+    if parsed is None:
+        raise RuntimeError(f"Invalid GitHub PR URL: {url}")
+    owner, repo, number = parsed
+    data = gh_api(f"repos/{owner}/{repo}/pulls/{number}")
     assignees = data.get("assignees") or []
     return [a.get("login") for a in assignees if a.get("login")]
 
@@ -448,14 +458,19 @@ def gh_pr_review_decision(url: str) -> str:
 
 def gh_pr_reviewers(url: str) -> list[str]:
     """Return login names of all reviewers (requested + completed) for a PR."""
-    pr = gh_pr_view(url, ["reviewRequests", "reviews"])
+    parsed = parse_pr_url(url)
+    if parsed is None:
+        raise RuntimeError(f"Invalid GitHub PR URL: {url}")
+    owner, repo, number = parsed
+    requested = gh_api(f"repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
+    reviews = gh_api(f"repos/{owner}/{repo}/pulls/{number}/reviews")
     logins: list[str] = []
-    for entry in pr.get("reviewRequests") or []:
-        login = entry.get("login")
+    for entry in (requested.get("users") if isinstance(requested, dict) else []) or []:
+        login = entry.get("login") if isinstance(entry, dict) else None
         if login and login not in logins:
             logins.append(login)
-    for review in pr.get("reviews") or []:
-        author = review.get("author")
+    for review in reviews if isinstance(reviews, list) else []:
+        author = review.get("user") if isinstance(review, dict) else None
         login = author.get("login") if isinstance(author, dict) else None
         if login and login not in logins:
             logins.append(login)
