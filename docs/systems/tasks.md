@@ -1,7 +1,7 @@
 # Tasks
 
 **Type:** System reference (data plane + workflows)
-**Last updated:** 2026-07-26
+**Last updated:** 2026-08-04
 **Owner:** Rowan (engineering) · Quinn (workflow orchestration) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **App spec:** `apps/tasks/SPEC.md`
@@ -189,6 +189,7 @@ Agent tooling always targets **prodlike** (`4001`). The dev stack (`4000`) is fo
 - **Dependency appears blocked but `blocked` is false:** check `dependencyBlocked` — this is expected when an unfinished dependency exists. The two signals are independent.
 - **PATCH rejects a dependency update:** inspect error code for self-reference, archived dependency, missing task ID, invalid UUID, or direct circular dependency.
 - **Stale task comments mention an old PR:** read the latest task comments; lobster state may retain old `prUrls`. Current task comments and workstream fields are the source of truth.
+- **Rowan queue says a `doing` implementation task is waiting externally:** that should only happen when the latest `[implementer-prs]` delivery still points exclusively at live open PRs that are genuinely waiting on review or CI. Closed-unmerged delivery comments remain `ACTIONABLE` until Rowan opens a replacement PR.
 - **Malformed UUID on any path parameter:** `GET` / `PATCH` / `DELETE /tasks/:id` and `POST /tasks/:id/comments` now return `400 INVALID_TASK_ID` (PR #271). Pass full 36-char UUIDs; the 8-char lobster prefix is display-only.
 
 ---
