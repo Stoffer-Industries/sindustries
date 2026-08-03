@@ -46,121 +46,37 @@ fi
 
 This self-check should run on every heartbeat cycle, not just when something looks wrong. It's a **silent-failure detector** — a class of check that catches the cases where the absence of activity is itself the bug.
 
-### Active probes (always-on services — run before the procedure)
+### Active probes (always-on services)
 
 Some services are pure external infrastructure with no internal cron that would
-surface a failure into the daily review. For these, the daily-review-driven
-procedure below never fires — Lox must probe proactively. Run the active-probe
-block **before step 1**, on every heartbeat.
+surface a failure into the daily review (OpenClaw Edge, the Sindustries canonical
+checkout, the agent-definition sync script, agent-instruction drift, and the
+shared-worktree protection hook). For these, the daily-review-driven
+procedure below never fires — Lox must probe proactively.
 
-```bash
-# Active probe: OpenClaw Edge uptime
-# Run on every heartbeat. Healthy = exit 0 with HEALTHY: ... line.
-# On failure: create/update brain/state/lox-incident-state.json entry under key
-# `openclaw-edge-down` and escalate per step 11. See infra/runbooks/openclaw-edge-up.md
-# and infra/runbooks/probe-openclaw-edge.sh (the canonical probe script).
-out=$(/Users/quinnstoffer/.openclaw/workspace/infra/runbooks/probe-openclaw-edge.sh 2>&1) || true
-
-if echo "$out" | grep -q '^HEALTHY:'; then
-    # Healthy: if there's a prior openclaw-edge-down incident, mark it resolved.
-    echo "openclaw-edge: $out"
-else
-    # Unhealthy: surface for the procedure to handle (creates incident state in step 4/10).
-    echo "openclaw-edge: $out"
-    # Tag the daily-review path lookup so the procedure picks this up as an active failure.
-    echo "openclaw-edge-down" >> "${TMPDIR:-/tmp}/lox-heartbeat-active-failures.$$" 2>/dev/null || true
-fi
-```
-
-
-```bash
-# Active probe: shared-worktree state (Sindustries canonical checkout)
-# Run on every heartbeat. Healthy = exit 0 with HEALTHY: ... line.
-# On failure: create/update brain/state/lox-incident-state.json entry under key
-# `shared-worktree-branch-or-dirty` and escalate per step 11. See
-# infra/runbooks/shared-worktree-state.md.
-out=$(/Users/quinnstoffer/.openclaw/workspace/infra/runbooks/probe-shared-worktree-state.sh 2>&1) || true
-
-if echo "$out" | grep -q '^HEALTHY:'; then
-    echo "shared-worktree: $out"
-else
-    echo "shared-worktree: $out"
-    echo "shared-worktree-branch-or-dirty" >> "${TMPDIR:-/tmp}/lox-heartbeat-active-failures.$$" 2>/dev/null || true
-fi
-```
-
-```bash
-# Active probe: agent-definition sync script integrity
-# Run on every heartbeat. Healthy = exit 0 with HEALTHY: ... line.
-# On failure: create/update brain/state/lox-incident-state.json entry under key
-# `agent-definition-sync-failed` and escalate per step 11. See
-# infra/runbooks/agent-definition-sync-script.md.
-out=$(/Users/quinnstoffer/.openclaw/workspace/infra/runbooks/probe-agent-definition-sync-script.sh 2>&1) || true
-
-if echo "$out" | grep -q '^HEALTHY:'; then
-    echo "sync-script: $out"
-else
-    echo "sync-script: $out"
-    echo "agent-definition-sync-failed" >> "${TMPDIR:-/tmp}/lox-heartbeat-active-failures.$$" 2>/dev/null || true
-fi
-```
-
-```bash
-# Active probe: agent-instruction drift (SHA-256 compare vs origin/main)
-# Run on every heartbeat. Healthy = exit 0 with HEALTHY: ... line.
-# On failure: create/update brain/state/lox-incident-state.json entry under key
-# `agent-instruction-drift` and escalate per step 11. See
-# infra/runbooks/agent-instruction-drift.md. Drift is a HINT, not necessarily
-# a bug — single-file drift is often transient lead-time before a PR lands;
-# multi-file drift cross-references `agent-definition-sync-failed`.
-out=$(/Users/quinnstoffer/.openclaw/workspace/infra/runbooks/probe-agent-instruction-drift.sh 2>&1) || true
-
-if echo "$out" | grep -q '^HEALTHY:'; then
-    echo "instruction-drift: $out"
-else
-    echo "instruction-drift: $out"
-    echo "agent-instruction-drift" >> "${TMPDIR:-/tmp}/lox-heartbeat-active-failures.$$" 2>/dev/null || true
-fi
-```
-
-
-```bash
-# Active probe: shared-worktree protection hook (post-checkout guardrail)
-# Run on every heartbeat. Healthy = exit 0 with HEALTHY: ... line.
-# On failure: create/update brain/state/lox-incident-state.json entry under key
-# `shared-worktree-protection-missing` and escalate per step 11. See
-# infra/runbooks/shared-worktree-protection-missing.md. The probe classifies
-# the failure cause (PR not merged / install not run / never designed) and the
-# runbook routes accordingly. HIGH severity — reflog shows the canonical
-# checkout drifts onto feature branches even with CONTRIBUTING.md policy.
-out=$(/Users/quinnstoffer/.openclaw/workspace/infra/runbooks/probe-shared-worktree-protection.sh 2>&1) || true
-
-if echo "$out" | grep -q '^HEALTHY:'; then
-    echo "worktree-protection: $out"
-else
-    echo "worktree-protection: $out"
-    echo "shared-worktree-protection-missing" >> "${TMPDIR:-/tmp}/lox-heartbeat-active-failures.$$" 2>/dev/null || true
-fi
-```
-
-The probe script's exit-on-failure is intentional: each FAIL line classifies a
-different failure mode and tells the procedure (and Tom) which repair class
-applies — match the failure line to the right sub-recipe in
-`infra/runbooks/openclaw-edge-up.md`. Don't collapse the 7 separate FAIL lines
-into one generic `Edge unhealthy`; that destroys the differential that lets
-the runbook route to `launchctl kickstart` (Edge) vs. `sudo` (cloudflared).
+**These probes run from the Lox daily infra review (`scripts/infra/lox_daily_health.sh`,
+cron `baa5ba77`, daily at 08:40 NZST) — not from this heartbeat.** The
+heartbeat cadence (2h) is too frequent for slow-moving drift detection
+(estimated ≈7 min/day on heartbeat vs. ≈9 s on daily cadence). Each probe
+calls a script in `infra/runbooks/probe-*.sh` and exits with `HEALTHY: ...` on
+success or a FAIL-classified line on failure. See
+`infra/runbooks/daily-review-active-probes.md` for the canonical step the
+daily review invokes; the individual runbooks (`openclaw-edge-up.md`,
+`shared-worktree-state.md`, `shared-worktree-protection-missing.md`,
+`agent-definition-sync-script.md`, `agent-instruction-drift.md`) describe each
+probe's behavior, FAIL-line taxonomy, and routing.
 
 When new always-on services get added, drop a new `<service>.sh` probe script
-in `infra/runbooks/` and append a parallel block here that calls it. Each
-probe should be cheap (≤1s locally + ≤2s for any network call, with short
-timeouts) so the cumulative probe budget stays under 10s per heartbeat.
+in `infra/runbooks/` and reference it from
+`infra/runbooks/daily-review-active-probes.md`. Each probe should be cheap
+(≤1s locally + ≤2s for any network call, with short timeouts) so the
+cumulative probe budget stays under 10s per daily review run.
 
-There are now five active probes wired in (Edge + four Sindustries-protection probes
+There are five active probes wired in (Edge + four Sindustries-protection probes,
 added 2026-08-03). Total budget ≈9s worst case, still under the 10s ceiling:
 Edge ~1s, shared-worktree ~500ms, sync-script ~100ms, instruction-drift
-~1s cold / ~200ms warm, worktree-protection ~500ms. The cumulative probe budget
-is now within ~1s of the ceiling — a sixth probe would need parallelization via
-`&`+`wait` or a budget re-evaluation.
+~1s cold / ~200ms warm, worktree-protection ~500ms. A sixth probe would need
+parallelization via `&`+`wait` or a budget re-evaluation.
 
 On every heartbeat:
 
