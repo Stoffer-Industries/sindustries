@@ -55,6 +55,9 @@ function validateAuthorizeRequest(query) {
   if (query.response_type !== 'code') {
     return 'response_type must be code.';
   }
+  if (!String(query.state ?? '').trim()) {
+    return 'state is required.';
+  }
   if (!query.code_challenge) {
     return 'code_challenge is required.';
   }
@@ -274,12 +277,6 @@ export function createApp({
         });
 
         if (!codeRow) return oauthJsonError(res, 400, 'invalid_grant', 'Authorization code is not valid.');
-        if (codeRow.revoked_at || codeRow.consumed_at) {
-          return oauthJsonError(res, 400, 'invalid_grant', 'Authorization code has already been used.');
-        }
-        if (new Date(codeRow.expires_at).getTime() <= now().getTime()) {
-          return oauthJsonError(res, 400, 'invalid_grant', 'Authorization code has expired.');
-        }
         if (codeRow.code_challenge_method !== 'S256') {
           return oauthJsonError(res, 400, 'invalid_grant', 'Unsupported PKCE challenge method.');
         }
@@ -321,53 +318,44 @@ export function createApp({
           return oauthJsonError(res, 400, 'invalid_request', 'refresh_token is required.');
         }
 
-        const tokenRow = await repo.findTokenByRefreshHash(sha256Hex(refreshToken));
-        if (!tokenRow || tokenRow.client_id !== clientId) {
+        const accessToken = randomToken(32);
+        const nextRefreshToken = randomToken(32);
+        const rotation = await repo.rotateRefreshToken({
+          refreshTokenHash: sha256Hex(refreshToken),
+          clientId,
+          rotatedAt: now(),
+          nextAccessTokenHash: sha256Hex(accessToken),
+          nextRefreshTokenHash: sha256Hex(nextRefreshToken),
+          nextAccessTokenExpiresAt: new Date(now().getTime() + config.accessTokenTtlSeconds * 1000),
+          nextRefreshTokenExpiresAt: new Date(now().getTime() + config.refreshTokenTtlSeconds * 1000)
+        });
+
+        if (rotation.status === 'invalid') {
           return oauthJsonError(res, 400, 'invalid_grant', 'Refresh token is not valid.');
         }
 
-        const consent = await repo.getConsent(tokenRow.consent_id);
-        if (!consent || consent.revoked_at) {
+        if (rotation.status === 'consent_revoked') {
           return oauthJsonError(res, 400, 'invalid_grant', 'Consent has been revoked.');
         }
-        if (tokenRow.revoked_at || tokenRow.rotated_at) {
-          await repo.revokeConsentFamily({
-            consentId: tokenRow.consent_id,
-            revokedAt: now(),
-            reason: 'refresh_replay_detected'
-          });
+
+        if (rotation.status === 'replayed') {
           return oauthJsonError(res, 400, 'invalid_grant', 'Refresh token has already been used.');
         }
-        if (new Date(tokenRow.refresh_token_expires_at).getTime() <= now().getTime()) {
+
+        if (rotation.status === 'expired') {
           return oauthJsonError(res, 400, 'invalid_grant', 'Refresh token has expired.');
         }
 
-        const accessToken = randomToken(32);
-        const nextRefreshToken = randomToken(32);
-        const nextRow = await repo.createToken({
-          consentId: consent.id,
-          userId: consent.user_id,
-          clientId: consent.client_id,
-          scope: consent.scope,
-          familyId: tokenRow.family_id,
-          parentTokenId: tokenRow.id,
-          accessTokenHash: sha256Hex(accessToken),
-          refreshTokenHash: sha256Hex(nextRefreshToken),
-          accessTokenExpiresAt: new Date(now().getTime() + config.accessTokenTtlSeconds * 1000),
-          refreshTokenExpiresAt: new Date(now().getTime() + config.refreshTokenTtlSeconds * 1000)
-        });
-        await repo.markTokenRotated({
-          tokenId: tokenRow.id,
-          replacedByTokenId: nextRow.id,
-          rotatedAt: now()
-        });
+        if (rotation.status !== 'rotated') {
+          return oauthJsonError(res, 500, 'server_error', `Unexpected refresh rotation status: ${rotation.status}`);
+        }
 
         return res.status(200).json({
           token_type: 'Bearer',
           access_token: accessToken,
           expires_in: config.accessTokenTtlSeconds,
           refresh_token: nextRefreshToken,
-          scope: consent.scope
+          scope: rotation.consent.scope
         });
       }
 
