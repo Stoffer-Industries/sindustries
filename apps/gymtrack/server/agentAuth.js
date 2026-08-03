@@ -99,6 +99,68 @@ export async function resolveAgentIdentity(req) {
 }
 
 /**
+ * Resolve the OAuth identity behind a request. Parallel to
+ * `resolveAgentIdentity` but for tokens minted by the MCP OAuth flow
+ * (gymtrack_oauth_tokens, type=access).
+ *
+ * Returns `{ user_id, client_id, scopes, token_family_id }` on success,
+ * or `null` on any auth failure (missing header, malformed token, no
+ * matching access row, revoked row, expired row).
+ *
+ * Throws on database errors so the caller can distinguish a server problem
+ * from a client auth failure.
+ *
+ * The scopes array is the canonical list granted to the agent — callers
+ * should enforce scope checks against this array, NOT the row's client
+ * allowed_scopes (which is broader and includes things the user did not
+ * actually approve).
+ */
+export async function resolveOAuthIdentity(req) {
+  const token = parseBearerToken(req);
+  if (!token) return null;
+
+  const client = adminClient();
+  const { data, error } = await client
+    .from('gymtrack_oauth_tokens')
+    .select('user_id, client_id, scopes, token_family_id, expires_at, revoked_at, token_type')
+    .eq('token_hash', hashToken(token))
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  if (data.token_type !== 'access') return null;
+  if (data.revoked_at) return null;
+  if (new Date(data.expires_at).getTime() < Date.now()) return null;
+
+  return {
+    user_id: data.user_id,
+    client_id: data.client_id,
+    scopes: data.scopes ?? [],
+    token_family_id: data.token_family_id
+  };
+}
+
+/**
+ * Assert that the resolved OAuth identity carries all required scopes.
+ * Returns `null` if every required scope is present; returns a 403 payload
+ * `{ error: 'insufficient_scope', message, required_scopes }` otherwise.
+ *
+ * Callers should `return res.status(403).json(payload)` directly so the
+ * WWW-Authenticate challenge header can be set in one place.
+ */
+export function requireOAuthScope(identity, requiredScopes) {
+  if (!Array.isArray(requiredScopes) || requiredScopes.length === 0) return null;
+  const granted = new Set(identity?.scopes ?? []);
+  const missing = requiredScopes.filter((s) => !granted.has(s));
+  if (missing.length === 0) return null;
+  return {
+    error: 'insufficient_scope',
+    message: `This tool requires scope(s): ${missing.join(', ')}.`,
+    required_scopes: missing
+  };
+}
+
+/**
  * Reject non-matching HTTP methods. Returns true if a 405 was already sent and
  * the caller should bail out.
  */
@@ -111,9 +173,15 @@ export function rejectIfWrongMethod(req, res, allowed) {
 }
 
 /**
- * Send a 401 with the canonical agent API error shape.
+ * Send a 401 with the canonical agent API error shape. Sets the
+ * WWW-Authenticate header to RFC 6750 §3 form so MCP clients see a
+ * well-formed Bearer challenge on the wire.
  */
-export function unauthorized(res, message = 'invalid_api_key') {
+export function unauthorized(res, message = 'invalid_api_key', realm = 'gymtrack-mcp') {
+  res.setHeader(
+    'WWW-Authenticate',
+    `Bearer realm="${realm}", error="${message}"`
+  );
   res.status(401).json({ error: message });
 }
 
