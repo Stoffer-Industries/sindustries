@@ -88,9 +88,15 @@ class FakeRepo {
       (item) => item.code_hash === codeHash && item.client_id === clientId && item.redirect_uri === redirectUri
     );
     if (!row) return null;
-    const before = structuredClone(row);
-    if (row.consumed_at == null) row.consumed_at = consumedAt.toISOString();
-    return before;
+    if (
+      row.consumed_at != null ||
+      row.revoked_at != null ||
+      new Date(row.expires_at).getTime() <= consumedAt.getTime()
+    ) {
+      return null;
+    }
+    row.consumed_at = consumedAt.toISOString();
+    return structuredClone(row);
   }
 
   async createToken(record) {
@@ -122,6 +128,83 @@ class FakeRepo {
     row.revoked_at = rotatedAt.toISOString();
     row.revocation_reason = 'refresh_rotated';
     row.replaced_by_token_id = replacedByTokenId;
+  }
+
+  async rotateRefreshToken({
+    refreshTokenHash,
+    clientId,
+    rotatedAt,
+    nextAccessTokenHash,
+    nextRefreshTokenHash,
+    nextAccessTokenExpiresAt,
+    nextRefreshTokenExpiresAt
+  }) {
+    const source = this.tokens.find(
+      (item) => item.refresh_token_hash === refreshTokenHash && item.client_id === clientId
+    );
+    if (!source) return { status: 'invalid' };
+
+    const consent = this.consents.find((item) => item.id === source.consent_id) ?? null;
+    if (!consent || consent.revoked_at) {
+      await this.revokeConsentFamily({
+        consentId: source.consent_id,
+        revokedAt: rotatedAt,
+        reason: 'consent_revoked'
+      });
+      return {
+        status: 'consent_revoked',
+        source_token: structuredClone(source),
+        consent: consent ? structuredClone(consent) : null
+      };
+    }
+
+    if (source.revoked_at || source.rotated_at) {
+      await this.revokeConsentFamily({
+        consentId: source.consent_id,
+        revokedAt: rotatedAt,
+        reason: 'refresh_replay_detected'
+      });
+      return {
+        status: 'replayed',
+        source_token: structuredClone(source),
+        consent: structuredClone(consent)
+      };
+    }
+
+    if (new Date(source.refresh_token_expires_at).getTime() <= rotatedAt.getTime()) {
+      return {
+        status: 'expired',
+        source_token: structuredClone(source),
+        consent: structuredClone(consent)
+      };
+    }
+
+    const nextRow = await this.createToken({
+      consentId: consent.id,
+      userId: consent.user_id,
+      clientId: consent.client_id,
+      scope: consent.scope,
+      familyId: source.family_id,
+      parentTokenId: source.id,
+      accessTokenHash: nextAccessTokenHash,
+      refreshTokenHash: nextRefreshTokenHash,
+      accessTokenExpiresAt: nextAccessTokenExpiresAt,
+      refreshTokenExpiresAt: nextRefreshTokenExpiresAt
+    });
+
+    source.rotated_at = rotatedAt.toISOString();
+    source.revoked_at = rotatedAt.toISOString();
+    source.revocation_reason = 'refresh_rotated';
+    source.replaced_by_token_id = nextRow.id;
+    source.last_used_at = rotatedAt.toISOString();
+    consent.last_used_at = rotatedAt.toISOString();
+
+    return {
+      status: 'rotated',
+      source_token: structuredClone(source),
+      next_token: structuredClone(nextRow),
+      consent: structuredClone(consent)
+    };
   }
 
   async findTokenByAccessHash(hash) {
@@ -211,6 +294,26 @@ describe('GymTrack MCP OAuth server', () => {
     expect(response.headers.location).toContain('state=opaque-state');
   });
 
+  it('rejects authorize requests without a non-empty state value', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .get('/oauth/authorize')
+      .query({
+        response_type: 'code',
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        scope: 'history:read progression:read workouts:write',
+        state: '   ',
+        code_challenge: 'pkce-challenge',
+        code_challenge_method: 'S256'
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_request');
+    expect(response.body.error_description).toMatch(/state is required/i);
+  });
+
   it('issues hashed access+refresh tokens and rotates refresh tokens', async () => {
     const fixedNow = new Date('2026-08-03T00:00:00.000Z');
     const { app, repo } = makeApp({ now: () => fixedNow });
@@ -257,6 +360,20 @@ describe('GymTrack MCP OAuth server', () => {
     expect(repo.tokens[0].access_token_hash).not.toBe(exchange.body.access_token);
     expect(repo.tokens[0].refresh_token_hash).not.toBe(exchange.body.refresh_token);
 
+    const reusedCode = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        code,
+        code_verifier: verifier
+      });
+
+    expect(reusedCode.status).toBe(400);
+    expect(reusedCode.body.error).toBe('invalid_grant');
+
     const refresh = await request(app)
       .post('/oauth/token')
       .type('form')
@@ -283,6 +400,64 @@ describe('GymTrack MCP OAuth server', () => {
     expect(replay.status).toBe(400);
     expect(replay.body.error).toBe('invalid_grant');
     expect(repo.consents[0].revoked_at).toBe(fixedNow.toISOString());
+  });
+
+  it('revocation disables both MCP access and refresh-token exchange', async () => {
+    const { app, repo } = makeApp();
+
+    const decision = await request(app)
+      .post('/oauth/authorize/decision')
+      .set('Authorization', 'Bearer supabase-user-token')
+      .send({
+        approve: true,
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        scope: 'history:read progression:read workouts:write',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    const verifier = 'verifier-123';
+    repo.codes[0].code_challenge = pkceChallengeForVerifier(verifier);
+    const code = new URL(decision.body.redirectTo).searchParams.get('code');
+
+    const exchange = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        code,
+        code_verifier: verifier
+      });
+
+    const revoke = await request(app)
+      .post('/oauth/revoke')
+      .type('form')
+      .send({ token: exchange.body.refresh_token });
+
+    expect(revoke.status).toBe(200);
+
+    const refresh = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'refresh_token',
+        client_id: 'claude-desktop',
+        refresh_token: exchange.body.refresh_token
+      });
+
+    expect(refresh.status).toBe(400);
+    expect(refresh.body.error).toBe('invalid_grant');
+
+    const mcp = await request(app)
+      .post('/mcp')
+      .set('Authorization', `Bearer ${exchange.body.access_token}`)
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+
+    expect(mcp.status).toBe(401);
   });
 
   it('lists tools and enforces user isolation from the token identity', async () => {

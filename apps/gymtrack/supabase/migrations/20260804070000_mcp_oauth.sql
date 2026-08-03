@@ -97,22 +97,207 @@ create policy gymtrack_oauth_clients_authenticated_read on public.gymtrack_oauth
   using (auth.role() = 'authenticated');
 
 drop policy if exists gymtrack_oauth_consents_user_isolation on public.gymtrack_oauth_consents;
-create policy gymtrack_oauth_consents_user_isolation on public.gymtrack_oauth_consents
-  for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+drop policy if exists gymtrack_oauth_consents_user_read on public.gymtrack_oauth_consents;
+create policy gymtrack_oauth_consents_user_read on public.gymtrack_oauth_consents
+  for select
+  using (auth.uid() = user_id);
 
 drop policy if exists gymtrack_oauth_authorization_codes_user_isolation on public.gymtrack_oauth_authorization_codes;
-create policy gymtrack_oauth_authorization_codes_user_isolation on public.gymtrack_oauth_authorization_codes
-  for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
 
 drop policy if exists gymtrack_oauth_tokens_user_isolation on public.gymtrack_oauth_tokens;
-create policy gymtrack_oauth_tokens_user_isolation on public.gymtrack_oauth_tokens
-  for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+
+create or replace function public.gymtrack_consume_oauth_authorization_code(
+  p_code_hash text,
+  p_client_id text,
+  p_redirect_uri text,
+  p_consumed_at timestamptz
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_code public.gymtrack_oauth_authorization_codes%rowtype;
+begin
+  update public.gymtrack_oauth_authorization_codes
+     set consumed_at = p_consumed_at
+   where code_hash = p_code_hash
+     and client_id = p_client_id
+     and redirect_uri = p_redirect_uri
+     and consumed_at is null
+     and revoked_at is null
+     and expires_at > p_consumed_at
+   returning * into v_code;
+
+  if not found then
+    return null;
+  end if;
+
+  return to_jsonb(v_code);
+end;
+$$;
+
+revoke all on function public.gymtrack_consume_oauth_authorization_code(text, text, text, timestamptz) from public, anon, authenticated;
+grant execute on function public.gymtrack_consume_oauth_authorization_code(text, text, text, timestamptz) to service_role;
+
+create or replace function public.gymtrack_rotate_oauth_refresh_token(
+  p_refresh_token_hash text,
+  p_client_id text,
+  p_rotated_at timestamptz,
+  p_next_access_token_hash text,
+  p_next_refresh_token_hash text,
+  p_next_access_token_expires_at timestamptz,
+  p_next_refresh_token_expires_at timestamptz
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_source public.gymtrack_oauth_tokens%rowtype;
+  v_consent public.gymtrack_oauth_consents%rowtype;
+  v_next public.gymtrack_oauth_tokens%rowtype;
+begin
+  select *
+    into v_source
+    from public.gymtrack_oauth_tokens
+   where refresh_token_hash = p_refresh_token_hash
+     and client_id = p_client_id
+   limit 1
+   for update;
+
+  if not found then
+    return jsonb_build_object('status', 'invalid');
+  end if;
+
+  select *
+    into v_consent
+    from public.gymtrack_oauth_consents
+   where id = v_source.consent_id
+   limit 1
+   for update;
+
+  if not found or v_consent.revoked_at is not null then
+    update public.gymtrack_oauth_tokens
+       set revoked_at = coalesce(revoked_at, p_rotated_at),
+           revocation_reason = coalesce(revocation_reason, 'consent_revoked')
+     where consent_id = v_source.consent_id
+       and revoked_at is null;
+
+    update public.gymtrack_oauth_authorization_codes
+       set revoked_at = coalesce(revoked_at, p_rotated_at)
+     where consent_id = v_source.consent_id
+       and revoked_at is null;
+
+    return jsonb_build_object(
+      'status',
+      'consent_revoked',
+      'source_token',
+      to_jsonb(v_source),
+      'consent',
+      coalesce(to_jsonb(v_consent), 'null'::jsonb)
+    );
+  end if;
+
+  if v_source.revoked_at is not null or v_source.rotated_at is not null then
+    update public.gymtrack_oauth_consents
+       set revoked_at = coalesce(revoked_at, p_rotated_at)
+     where id = v_source.consent_id
+       and revoked_at is null;
+
+    update public.gymtrack_oauth_tokens
+       set revoked_at = coalesce(revoked_at, p_rotated_at),
+           revocation_reason = coalesce(revocation_reason, 'refresh_replay_detected')
+     where family_id = v_source.family_id
+       and revoked_at is null;
+
+    update public.gymtrack_oauth_authorization_codes
+       set revoked_at = coalesce(revoked_at, p_rotated_at)
+     where consent_id = v_source.consent_id
+       and revoked_at is null;
+
+    select *
+      into v_consent
+      from public.gymtrack_oauth_consents
+     where id = v_source.consent_id
+     limit 1;
+
+    return jsonb_build_object(
+      'status',
+      'replayed',
+      'source_token',
+      to_jsonb(v_source),
+      'consent',
+      to_jsonb(v_consent)
+    );
+  end if;
+
+  if v_source.refresh_token_expires_at <= p_rotated_at then
+    return jsonb_build_object(
+      'status',
+      'expired',
+      'source_token',
+      to_jsonb(v_source),
+      'consent',
+      to_jsonb(v_consent)
+    );
+  end if;
+
+  insert into public.gymtrack_oauth_tokens (
+    consent_id,
+    user_id,
+    client_id,
+    scope,
+    family_id,
+    parent_token_id,
+    access_token_hash,
+    refresh_token_hash,
+    access_token_expires_at,
+    refresh_token_expires_at
+  )
+  values (
+    v_source.consent_id,
+    v_source.user_id,
+    v_source.client_id,
+    v_source.scope,
+    v_source.family_id,
+    v_source.id,
+    p_next_access_token_hash,
+    p_next_refresh_token_hash,
+    p_next_access_token_expires_at,
+    p_next_refresh_token_expires_at
+  )
+  returning * into v_next;
+
+  update public.gymtrack_oauth_tokens
+     set rotated_at = p_rotated_at,
+         revoked_at = p_rotated_at,
+         revocation_reason = 'refresh_rotated',
+         replaced_by_token_id = v_next.id,
+         last_used_at = p_rotated_at
+   where id = v_source.id
+   returning * into v_source;
+
+  update public.gymtrack_oauth_consents
+     set last_used_at = p_rotated_at
+   where id = v_source.consent_id
+   returning * into v_consent;
+
+  return jsonb_build_object(
+    'status',
+    'rotated',
+    'source_token',
+    to_jsonb(v_source),
+    'next_token',
+    to_jsonb(v_next),
+    'consent',
+    to_jsonb(v_consent)
+  );
+end;
+$$;
+
+revoke all on function public.gymtrack_rotate_oauth_refresh_token(text, text, timestamptz, text, text, timestamptz, timestamptz) from public, anon, authenticated;
+grant execute on function public.gymtrack_rotate_oauth_refresh_token(text, text, timestamptz, text, text, timestamptz, timestamptz) to service_role;
 
 insert into public.gymtrack_oauth_clients (client_id, client_name, redirect_uris)
 values

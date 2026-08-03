@@ -33,13 +33,31 @@ export async function listConnectedAgents() {
 }
 
 export async function revokeConnectedAgent(consentId) {
-  const { error } = await supabase
-    .from('gymtrack_oauth_consents')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('id', consentId)
-    .is('revoked_at', null);
+  const {
+    data: { session }
+  } = await supabase.auth.getSession();
 
-  return { error: error ?? null };
+  if (!session?.access_token) {
+    return { error: new Error('You are no longer signed in. Please refresh and try again.') };
+  }
+
+  const response = await fetch('/api/connected-agents/revoke', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`
+    },
+    body: JSON.stringify({ consentId })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      error: new Error(data.message ?? data.error ?? 'Failed to revoke connected agent.')
+    };
+  }
+
+  return { error: null };
 }
 
 export async function fetchOAuthClient(clientId) {

@@ -85,23 +85,14 @@ export function createSupabaseRepo({ client = supabaseAdminClient() } = {}) {
     },
 
     async consumeAuthorizationCode({ codeHash, clientId, redirectUri, consumedAt }) {
-      const { data, error } = await client
-        .from('gymtrack_oauth_authorization_codes')
-        .select('*')
-        .eq('code_hash', codeHash)
-        .eq('client_id', clientId)
-        .eq('redirect_uri', redirectUri)
-        .maybeSingle();
+      const { data, error } = await client.rpc('gymtrack_consume_oauth_authorization_code', {
+        p_code_hash: codeHash,
+        p_client_id: clientId,
+        p_redirect_uri: redirectUri,
+        p_consumed_at: iso(consumedAt)
+      });
       if (error) throw error;
-      if (!data) return null;
-
-      const { error: updateError } = await client
-        .from('gymtrack_oauth_authorization_codes')
-        .update({ consumed_at: iso(consumedAt) })
-        .eq('id', data.id)
-        .is('consumed_at', null);
-      if (updateError) throw updateError;
-      return data;
+      return data ?? null;
     },
 
     async createToken(record) {
@@ -136,6 +127,28 @@ export function createSupabaseRepo({ client = supabaseAdminClient() } = {}) {
         })
         .eq('id', tokenId);
       if (error) throw error;
+    },
+
+    async rotateRefreshToken({
+      refreshTokenHash,
+      clientId,
+      rotatedAt,
+      nextAccessTokenHash,
+      nextRefreshTokenHash,
+      nextAccessTokenExpiresAt,
+      nextRefreshTokenExpiresAt
+    }) {
+      const { data, error } = await client.rpc('gymtrack_rotate_oauth_refresh_token', {
+        p_refresh_token_hash: refreshTokenHash,
+        p_client_id: clientId,
+        p_rotated_at: iso(rotatedAt),
+        p_next_access_token_hash: nextAccessTokenHash,
+        p_next_refresh_token_hash: nextRefreshTokenHash,
+        p_next_access_token_expires_at: iso(nextAccessTokenExpiresAt),
+        p_next_refresh_token_expires_at: iso(nextRefreshTokenExpiresAt)
+      });
+      if (error) throw error;
+      return data ?? { status: 'invalid' };
     },
 
     async findTokenByAccessHash(accessTokenHash) {
