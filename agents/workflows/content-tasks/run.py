@@ -42,7 +42,7 @@ def run_workflow(task_id: str, capacity_limit: int) -> dict:
     log_debug("starting content-task pass for " + task_id)
     env = os.environ.copy()
     if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
-        dotenv = Path(__file__).parents[4] / ".openclaw" / ".env"
+        dotenv = Path.home() / ".openclaw" / ".env"
         try:
             for line in dotenv.read_text().splitlines():
                 if line.startswith("QUINN_GITHUB_TOKEN="):
