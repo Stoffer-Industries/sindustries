@@ -38,7 +38,10 @@ export default function SignUpPage() {
   const { session, signUp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname ?? '/workout';
+  const fromState = location.state?.from;
+  const from = fromState
+    ? `${fromState.pathname ?? '/workout'}${fromState.search ?? ''}`
+    : '/workout';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -56,7 +59,7 @@ export default function SignUpPage() {
   async function handleOAuth(provider) {
     setError(null);
     const { data, error: oauthError, providerDisabled } =
-      await signInWithOAuthRedirect(provider);
+      await signInWithOAuthRedirect(provider, from);
     if (providerDisabled) {
       // Mark this provider as disabled in the UI by removing it from the
       // available list so the button disappears on re-render.
@@ -176,7 +179,7 @@ export default function SignUpPage() {
       )}
 
       <p className="auth-alt" data-testid="signup-signin-link">
-        Already have an account? <Link to="/login">Sign in</Link>
+        Already have an account? <Link to="/login" state={{ from: fromState }}>Sign in</Link>
       </p>
     </main>
   );

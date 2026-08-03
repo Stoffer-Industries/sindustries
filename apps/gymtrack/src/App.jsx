@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import AgentConsentPage from './components/AgentConsentPage.jsx';
 import AuthGate from './components/AuthGate.jsx';
+import ConnectedAgentsPage from './components/ConnectedAgentsPage.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 import SignUpPage from './components/SignUpPage.jsx';
 import WorkoutLogger from './components/WorkoutLogger.jsx';
@@ -40,6 +42,22 @@ export default function App() {
         element={
           <AuthGate>
             <WorkoutsTab />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/agent-consent"
+        element={
+          <AuthGate>
+            <AgentConsentPage />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/settings/agents"
+        element={
+          <AuthGate>
+            <ConnectedAgentsPage />
           </AuthGate>
         }
       />

@@ -60,6 +60,9 @@ export default function WorkoutsTab() {
           <Link to="/workouts" className="tab active" data-testid="tab-workouts">
             Workouts
           </Link>
+          <Link to="/settings/agents" className="tab" data-testid="tab-agents">
+            Agents
+          </Link>
           <button
             type="button"
             className="btn-ghost"
@@ -83,8 +86,8 @@ export default function WorkoutsTab() {
 
       {!loading && !error && workouts && workouts.length === 0 ? (
         <p className="empty-hint" data-testid="workouts-empty">
-          No upcoming workouts. Connect an agent (coming soon) to have your training
-          planned here.
+          No upcoming workouts yet. Connect Claude or ChatGPT from their MCP client,
+          then manage access in the Agents tab.
         </p>
       ) : null}
 

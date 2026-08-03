@@ -57,7 +57,7 @@ export function isProviderDisabledError(err) {
  * Callers should branch on `providerDisabled` first, then `error`, then
  * proceed with `data.url` (window.location.assign or similar).
  */
-export async function signInWithOAuthRedirect(provider) {
+export async function signInWithOAuthRedirect(provider, redirectPath = '/workout') {
   if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
     return {
       data: null,
@@ -69,7 +69,7 @@ export async function signInWithOAuthRedirect(provider) {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
-      redirectTo: `${window.location.origin}/workout`
+      redirectTo: new URL(redirectPath, window.location.origin).toString()
     }
   });
 
