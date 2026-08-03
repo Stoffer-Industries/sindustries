@@ -45,50 +45,16 @@ import {
   resolveAgentIdentity,
   unauthorized
 } from '../../server/agentAuth.js';
+import {
+  fetchWorkoutHistory,
+  formatHistoryResponse,
+  HISTORY_DEFAULT_LIMIT as DEFAULT_LIMIT,
+  HISTORY_MAX_LIMIT as MAX_LIMIT,
+  HISTORY_MIN_LIMIT as MIN_LIMIT,
+  parseHistoryLimit as parseLimit
+} from '../../server/agentData.js';
 
-export const DEFAULT_LIMIT = 10;
-export const MIN_LIMIT = 1;
-export const MAX_LIMIT = 50;
-
-/**
- * Parse and validate the `limit` query param. Returns the parsed integer, or a
- * human-readable error string describing the first violation.
- */
-export function parseLimit(rawLimit) {
-  if (rawLimit == null || rawLimit === '') return DEFAULT_LIMIT;
-  if (typeof rawLimit === 'object') return `limit must be a string, not an object.`;
-  const n = Number(rawLimit);
-  if (!Number.isInteger(n) || n < MIN_LIMIT || n > MAX_LIMIT) {
-    return `limit must be an integer between ${MIN_LIMIT} and ${MAX_LIMIT}.`;
-  }
-  return n;
-}
-
-/**
- * Format a database workout row + nested sets into the agent API response shape.
- * Exported so tests can verify the mapping without re-implementing it.
- */
-export function formatHistoryResponse(workouts) {
-  return {
-    workouts: (workouts ?? []).map((w) => ({
-      id: w.id,
-      performedAt: w.performed_at,
-      notes: w.notes ?? null,
-      plannedWorkoutId: w.planned_workout_id ?? null,
-      sets: (w.workout_sets ?? []).map((s) => ({
-        id: s.id,
-        exerciseName: s.exercise_name,
-        setIndex: s.set_index,
-        reps: s.reps,
-        weight: s.weight,
-        unit: s.unit,
-        plannedSetId: s.planned_set_id ?? null,
-        plannedReps: s.planned_workout_sets?.target_reps ?? null,
-        plannedWeight: s.planned_workout_sets?.target_weight ?? null
-      }))
-    }))
-  };
-}
+export { DEFAULT_LIMIT, MAX_LIMIT, MIN_LIMIT, formatHistoryResponse, parseLimit };
 
 export default async function handler(req, res) {
   if (rejectIfWrongMethod(req, res, ['GET'])) return;
@@ -105,31 +71,14 @@ export default async function handler(req, res) {
   if (typeof limit === 'string') return badRequest(res, limit);
 
   const client = adminClient();
-  const { data, error } = await client
-    .from('workouts')
-    .select(`
-      id,
-      performed_at,
-      notes,
-      planned_workout_id,
-      workout_sets(
-        id,
-        exercise_name,
-        set_index,
-        reps,
-        weight,
-        unit,
-        planned_set_id,
-        planned_workout_sets(target_reps, target_weight)
-      )
-    `)
-    .eq('user_id', identity.user_id)
-    .order('performed_at', { ascending: false })
-    .limit(limit);
 
-  if (error) {
-    return res.status(500).json({ error: 'server_error', message: error.message });
+  try {
+    const result = await fetchWorkoutHistory(client, {
+      userId: identity.user_id,
+      limit
+    });
+    return res.status(200).json(result);
+  } catch (err) {
+    return res.status(500).json({ error: 'server_error', message: err?.message ?? 'History lookup failed.' });
   }
-
-  return res.status(200).json(formatHistoryResponse(data ?? []));
 }

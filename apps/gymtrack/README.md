@@ -1,74 +1,79 @@
 # GymTrack
 
-A multi-tenant workout tracker SPA. iOS-Safari-friendly; logs workouts to Supabase with per-user RLS isolation. As of task `72d7cc3b`, anyone can self-sign-up at `/signup` via email + password or Google — no manual provisioning required. Apple is in `DISABLED_OAUTH_PROVIDERS` in `apps/gymtrack/src/lib/authFlow.js` because the current Supabase project does not have Apple configured; the button is not rendered until Quinn removes `'apple'` from that array (no other code change required).
+A multi-tenant workout tracker SPA backed by Supabase. Users can sign up with email/password or Google, log workouts, browse planned workouts, and now review/revoke connected MCP clients from the in-app **Agents** settings screen.
+
+GymTrack also exposes two agent surfaces:
+
+- **Legacy REST endpoints** under `/api/agent/*` for already-issued static bearer keys.
+- **A dedicated MCP OAuth server** in `services/gymtrack-mcp` for discoverable tool access via OAuth Code + PKCE.
 
 ## Stack
 
 - Vite + React 18 + React Router
 - Supabase (Auth + Postgres)
-- Vitest + React Testing Library (unit + component)
-- Playwright (e2e on iPhone 13 emulation)
+- Vitest + React Testing Library
+- Playwright (mobile emulation)
 
 ## Development
 
 ```bash
-# From the repo root, or with workspaces enabled:
 npm install
 npm --workspace gymtrack run dev
 # → http://localhost:5179
 ```
 
-You'll need `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` for the app to boot. See `.env.example`.
+Required app env vars (`apps/gymtrack/.env`):
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_GYMTRACK_MCP_BASE_URL` when the MCP service is on a different origin than the SPA
+
+See `.env.example`.
 
 ## Test
 
 ```bash
-npm --workspace gymtrack test        # unit + component (Vitest)
-npm --workspace gymtrack run test:e2e # Playwright (requires dev server + Supabase)
+npm --workspace gymtrack test
+npm --workspace gymtrack run test:e2e
+npm --workspace @sindustries/gymtrack-mcp test
 ```
 
 ## Build
 
 ```bash
 npm --workspace gymtrack run build
-npm --workspace gymtrack run preview  # serves the built bundle
+npm --workspace gymtrack run preview
 ```
-
-## Deploy
-
-The `vercel.json` at the repo root of this app configures Vercel:
-
-- Build command: `npm run build`
-- Output: `dist/`
-- SPA rewrite: `/(.*)` → `/index.html`
-
-Environment variables are set in the Vercel project (NOT in the repo):
-
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
 
 ## Supabase
 
-See `supabase/README.md` for the migration apply + RLS smoke-test steps.
+See `supabase/README.md` for migration apply steps.
 
-The sign-up path's RLS coverage is asserted by `supabase/migrations/20260731190000_signup_rls_assertion.sql`, which raises an exception if any GymTrack public table is missing `enable row level security`. Apply that migration alongside the existing schema migrations.
+New schema for task `1474d515` lives in:
 
-## Sign up
+- `supabase/migrations/20260804070000_mcp_oauth.sql`
 
-Anyone visiting the deployed URL who is not already signed in is shown `/login` with a "Create an account" link below the email + password form. Clicking the link routes to `/signup`, which offers:
+That migration adds:
 
-- **Google** OAuth CTA as the primary path. Apple is listed in `DISABLED_OAUTH_PROVIDERS` in `apps/gymtrack/src/lib/authFlow.js` so the button is absent from the first paint until Quinn removes `'apple'` from that array — this is graceful degradation, not a 500.
-- A collapsed "Use email + password instead" panel as a fallback.
+- `gymtrack_oauth_clients`
+- `gymtrack_oauth_consents`
+- `gymtrack_oauth_authorization_codes`
+- `gymtrack_oauth_tokens`
 
-Email auto-confirm must be enabled on the Supabase project for the flow to land a new account straight on `/workout`; otherwise the user sees a "check your email" state. The dev/staging projects already have auto-confirm enabled; production must enable it before this flow is exposed.
+All user-owned tables are RLS-protected.
 
-The OAuth flow uses `redirectTo: ${origin}/workout`; Supabase's `detectSessionInUrl: true` (configured in `src/lib/supabase.js`) handles the post-callback session detection automatically.
+## Browser auth UX
 
-## Agent API
+- `/login` supports email/password and Google sign-in.
+- `/signup` supports Google sign-up plus a collapsed email/password fallback.
+- `/agent-consent` is the protected approval page used by external MCP clients.
+- `/settings/agents` lists active MCP connections and lets the user revoke them.
 
-Agents (external tools, LLM assistants) can plan and read workouts on a user's behalf via bearer-token-authenticated serverless endpoints under `/api/agent/`. Full contract, request/response shapes, and known gaps are documented in `SPEC.md` ("Agent API" section) — read that before integrating.
+Apple remains hidden until Quinn removes `'apple'` from `src/lib/authFlow.js` after the Supabase provider is wired.
 
-Quick reference:
+## Legacy REST agent API
+
+These routes still work unchanged for existing static bearer keys:
 
 ```bash
 curl -X POST https://<deployment>/api/agent/planned-workouts \
@@ -89,27 +94,30 @@ curl https://<deployment>/api/agent/exercises/Bench%20Press/progression?limit=20
   -H "Authorization: Bearer gym_sk_example..."
 ```
 
-**There is no self-service key-generation UI yet** — a user cannot currently obtain a bearer token without direct Supabase access. See `SPEC.md` Known gaps and follow-up tasks tracking an MCP server + OAuth/social-login flow for this.
+## MCP OAuth server
 
-Server-only env var required for these endpoints (do not expose to the browser bundle): `SUPABASE_SERVICE_ROLE_KEY`.
+See `services/gymtrack-mcp/README.md` for runtime details. At a high level it exposes:
+
+- `GET /.well-known/oauth-authorization-server`
+- `GET /.well-known/oauth-protected-resource`
+- `GET /oauth/authorize`
+- `POST /oauth/token`
+- `POST /oauth/revoke`
+- `POST /mcp`
+
+Available MCP tools:
+
+- `plan_workout`
+- `read_history`
+- `read_exercise_progression`
 
 ## Files of interest
 
-- `src/main.jsx` — entry; wires `<AuthProvider>` + `<BrowserRouter>`.
-- `src/App.jsx` — top-level routes.
-- `src/lib/supabase.js` — singleton Supabase client; fails fast if env vars are missing.
-- `src/lib/auth.jsx` — `useAuth()` hook (session, signIn, signOut, …).
-- `src/lib/workouts.js` — `createWorkout`, `addSets`, `listWorkouts`, `listSetsForWorkouts`, `deleteWorkout`.
-- `src/lib/plans.js` — `fetchPlannedWorkoutForDate`, `fetchPlannedWorkoutById`, `markPlannedWorkoutCompleted` — browser-side plan-mode helpers.
-- `src/components/WorkoutLogger.jsx` — log-workout screen (freeform + plan mode).
-- `src/components/HistoryList.jsx` — last-30-days history view.
-- `src/components/LoginScreen.jsx` — sign-in screen (email + password + "Create an account" link).
-- `src/components/SignUpPage.jsx` — public sign-up screen (OAuth CTAs + collapsed email/password panel). (Task `72d7cc3b`.)
-- `src/lib/authFlow.js` — `signInWithOAuthRedirect`, `providerDisabled` heuristic, `getPostOAuthSession`, `SUPPORTED_OAUTH_PROVIDERS`. (Task `72d7cc3b`.)
-- `test/e2e/signup.spec.ts` — Playwright e2e for `/signup` (AC1, AC2-email+pw, AC4, AC5 of task `72d7cc3b`).
-- `test/e2e/signup-google.spec.ts` — Playwright e2e for the OAuth redirect path; gated on `SUPABASE_TEST_URL`.
-- `server/agentAuth.js` — shared agent bearer-token auth + Supabase admin client (server-only, outside `api/` so it is never itself a public route).
-- `api/agent/planned-workouts.js`, `api/agent/history.js`, `api/agent/exercises/[exerciseName]/progression.js` — agent API route handlers.
-- `supabase/migrations/20260708120000_init_workouts.sql` — schema + RLS.
-- `supabase/migrations/20260723170000_agent_powered_workouts.sql` — agent API keys + planned workouts schema + RLS.
-- `supabase/migrations/20260731190000_signup_rls_assertion.sql` — defensive assertion that RLS is enabled on every GymTrack public table + documented isolation smoke-test. (Task `72d7cc3b`.)
+- `src/App.jsx` — routes, including `/agent-consent` and `/settings/agents`
+- `src/components/LoginScreen.jsx` — email/password + Google sign-in
+- `src/components/AgentConsentPage.jsx` — MCP approval screen
+- `src/components/ConnectedAgentsPage.jsx` — connected-agent management UI
+- `src/lib/connectedAgents.js` — consent listing/revocation + approval POST helper
+- `server/agentData.js` — shared query/validation logic for legacy REST + MCP
+- `api/agent/*` — legacy static-key handlers
+- `services/gymtrack-mcp/` — standalone MCP OAuth service
