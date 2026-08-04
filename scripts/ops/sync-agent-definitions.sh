@@ -41,14 +41,20 @@ for agent in "${AGENTS[@]}"; do
     staged=$(mktemp "${TMPDIR:-/tmp}/agent-definition.XXXXXX")
     git -C "$REPO_ROOT" show "origin/main:$source_path" > "$staged"
 
-    if [[ -f "$destination" ]] && cmp -s "$staged" "$destination"; then
+    # A symlink is never an acceptable runtime destination. OpenClaw's
+    # bootstrap security boundary can reject a definition that resolves
+    # outside the agent workspace, even when its contents match origin/main.
+    # Materialise symlinks as regular files instead of treating cmp as a
+    # no-op.
+    if [[ ! -L "$destination" && -f "$destination" ]] && cmp -s "$staged" "$destination"; then
       rm -f "$staged"
       continue
     fi
 
-    if [[ -e "$destination" ]]; then
+    if [[ -e "$destination" || -L "$destination" ]]; then
       mkdir -p "$backup_dir/$agent"
-      cp -p "$destination" "$backup_dir/$agent/$filename"
+      cp -pL "$destination" "$backup_dir/$agent/$filename"
+      rm -f "$destination"
     fi
     install -m 0644 "$staged" "$destination"
     rm -f "$staged"
