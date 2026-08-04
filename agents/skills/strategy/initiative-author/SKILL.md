@@ -52,6 +52,16 @@ If <action/approach>, then <expected customer or business outcome>, because <rea
 
 <What this initiative is intended to produce. Keep it outcome-oriented, not an implementation plan.>
 
+## Success metrics
+
+This is a living section. Define what success looks like at initiative level and update it as evidence changes. Link a dashboard when one exists; do not invent current values or dashboard URLs.
+
+| Metric | Success looks like | Current | Target | Status | Last updated | Dashboard |
+|---|---|---:|---:|---|---|---|
+| <metric> | <observable proof> | <value or `TBD`> | <target or `TBD`> | not-started / tracking / hit / missed / not-instrumented | YYYY-MM-DD | <link or `—`> |
+
+Campaign-specific targets and scores belong in `campaign.md`; link them from this section rather than duplicating them.
+
 ## Why now
 
 <Current reason this deserves attention; include time sensitivity only as narrative. Do not add a WSJF score.>
@@ -78,12 +88,14 @@ If <action/approach>, then <expected customer or business outcome>, because <rea
 2. **Use the graph's wording as the starting point.** Expand it only enough to make the expected proof and decision boundary explicit.
 3. **Do not invent evidence.** If proof, owner, timing, or task links are unknown, say `TBD` or leave an explicit open question.
 4. **Keep the output bounded.** Name what this initiative will produce and what it will not attempt.
-5. **Keep strategy and execution separate.** Initiative index = why/what; market research and campaigns = working documents; task specs = implementation requirements.
-6. **No WSJF duplication.** Scores live only in `strategy-graph.md`.
-7. **Status mirrors the graph.** Do not change status in `index.md` independently.
-8. **Links should be real.** Do not add links to files that do not exist unless the line is explicitly labelled `planned`.
-9. **Tasks are references, not a second task system.** Use task IDs/titles and links where available; do not copy acceptance criteria into the index.
-10. **Keep it current.** When a hypothesis is disproven, update the hypothesis/output/open questions and link the evidence rather than appending an unstructured diary.
+5. **Make success observable.** Define one or more outcome metrics, a target where known, current value/status, and last-updated date. Use `TBD` or `not-instrumented` rather than guessing.
+6. **Link evidence.** Add dashboard links when they exist. A missing dashboard is acceptable; a fabricated link is not.
+7. **Keep strategy and execution separate.** Initiative index = why/what; market research and campaigns = working documents; task specs = implementation requirements.
+8. **No WSJF duplication.** Scores live only in `strategy-graph.md`.
+9. **Status mirrors the graph.** Do not change status in `index.md` independently.
+10. **Links should be real.** Do not add links to files that do not exist unless the line is explicitly labelled `planned`.
+11. **Tasks are references, not a second task system.** Use task IDs/titles and links where available; do not copy acceptance criteria into the index.
+12. **Keep it current.** When a hypothesis is disproven, update the hypothesis/output/open questions and link the evidence rather than appending an unstructured diary.
 
 ## Creating a new index
 
@@ -91,9 +103,10 @@ If <action/approach>, then <expected customer or business outcome>, because <rea
 2. Copy the graph's hypothesis, output, Impact tags, and status into the index.
 3. Expand the hypothesis to include observable proof without adding unsupported claims.
 4. Add only artifacts that exist or are explicitly planned.
-5. Populate open questions from the graph's unresolved decisions, existing research, and Tom's stated concerns.
-6. Populate Tasks from the task board only when verified; otherwise write `No linked tasks recorded yet.`
-7. Check that no WSJF number appears in the file and that status/Impacts match the graph.
+5. Define the first version of `Success metrics`, even if current/target are `TBD` or status is `not-instrumented`.
+6. Populate open questions from the graph's unresolved decisions, existing research, and Tom's stated concerns.
+7. Populate Tasks from the task board only when verified; otherwise write `No linked tasks recorded yet.`
+8. Check that no WSJF number appears in the file and that status/Impacts match the graph.
 
 ## Updating an existing index
 
@@ -111,6 +124,8 @@ Before considering an index complete:
 - [ ] Every graph Impact is represented; no new Impact was invented.
 - [ ] Hypothesis states an expected outcome and observable proof.
 - [ ] Output is bounded and not just a theme.
+- [ ] Success metrics state what success looks like and include current/target/status/date.
+- [ ] Dashboard links are real, or shown as `—`.
 - [ ] No WSJF score or copied scoring inputs appear.
 - [ ] Open questions are explicit where uncertainty remains.
 - [ ] Artifact links are real or marked planned.
