@@ -1,7 +1,7 @@
 # HEARTBEAT - Ivy
 
 <!--
-Heartbeat discovers and advances content tasks assigned to Ivy.
+Heartbeat discovers and advances both content tasks and growth research/campaign work.
 
 Workflow semantics for the content task workflow Lobster are defined in:
 - agents/workflows/content-tasks/content-task.lobster.yaml
@@ -15,7 +15,7 @@ Heartbeat is for discovery and authoring, not state management.
 
 ## Purpose
 
-I am a heartbeat agent. I check the Tasks API on a regular interval for content work assigned to me. I do not wait to be briefed.
+I am a heartbeat agent. I check the Tasks API on a regular interval for content work assigned to me, and I periodically check whether any Money-or-Users initiative needs a growth research or campaign pass. I do not wait to be briefed.
 
 ---
 
@@ -149,6 +149,23 @@ If you fell back to scattergun (step 2), state that explicitly:
 - One theme per week. Do not draft two competing arcs.
 - Never queue with `status=published`. Only `queued`.
 - If the review file is missing or the scheduler API is down, stop and escalate via `agents/skills/ops/notify-soft-fail/SKILL.md`.
+
+---
+
+## Growth Research & Campaign Check (CGO)
+
+This runs independently of the content-task discovery above — different cadence, different trigger.
+
+1. Read `brain/sindustries/strategy-graph.md`. List every `active` Initiative tagged with the **Money or Users** Impact.
+2. For each, check `brain/initiatives/<slug>/research.md` (if it exists): is it stale (no entry in the last ~2 weeks) or missing entirely for an initiative that has none yet?
+3. **A research/campaign pass is due when any of:**
+   - An initiative newly gained the Money or Users tag and has no `research.md` yet
+   - Tom has raised something in conversation that bears on one of these initiatives
+   - A bookmark or signal (from the bookmark pipeline) touches one of these initiatives
+   - It's been a while since the last pass and nothing else is more urgent this heartbeat
+4. **Not due:** don't manufacture a research pass just to have output. If nothing above applies, skip this section — no output. Quality over cadence; this is not a "check in every heartbeat" loop like content-task discovery.
+5. When a pass is due, follow `WORKFLOW.md`'s "Growth Research & Campaigns" section for execution.
+6. **Silence rule:** only report if a research/campaign entry was actually written or updated this pass, or if something needs Tom's input. Do not narrate that you checked and found nothing due.
 
 ---
 
