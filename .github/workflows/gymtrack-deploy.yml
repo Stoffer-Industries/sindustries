@@ -68,15 +68,11 @@ jobs:
         working-directory: apps/gymtrack
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
-      - name: Build Vercel output
-        working-directory: apps/gymtrack
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
       - name: Deploy to Vercel
         id: deploy
         working-directory: apps/gymtrack
         run: |
-          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          DEPLOY_URL=$(vercel deploy --prod --yes --token="$VERCEL_TOKEN")
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           {
             echo "### GymTrack deployment"
