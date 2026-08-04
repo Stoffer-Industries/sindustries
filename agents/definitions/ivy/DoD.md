@@ -37,7 +37,7 @@ A content task is only Done when all are true:
 
 ---
 
-## Growth Research (`research.md` entries)
+## Market Research (`market-research.md` entries)
 
 A research entry is only Done when all are true:
 
@@ -51,7 +51,8 @@ A research entry is only Done when all are true:
 
 A campaign section is only Done when all are true:
 
-1. **Grounded in research** — traces back to a specific `research.md` finding or an explicit Tom directive, not a vibe.
+1. **Grounded in market research** — traces back to a specific `market-research.md` finding or an explicit Tom directive, not a vibe.
 2. **Risk-classified** — every claim or outreach angle is tagged for the right approver per the GTM risk tiers in `WORKFLOW.md`.
 3. **No commitments made** — pricing, partnership terms, or spend are proposed, never executed, without Tom's explicit sign-off.
-4. **Peels off cleanly** — once a section is concrete enough to execute, it becomes a real task (`content` for Ivy-execution or `feature` for Rowan), tied back to the initiative, per `brain/README.md`.
+4. **Has a measurable score** — the campaign defines a target and records its current score/status against that target, with a date.
+5. **Peels off cleanly** — once a section is concrete enough to execute, it becomes a real task (`content` for Ivy-execution or `feature` for Rowan), tied back to the initiative, per `brain/README.md`.
