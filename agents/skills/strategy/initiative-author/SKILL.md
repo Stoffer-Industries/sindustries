@@ -86,18 +86,19 @@ Campaign-specific targets and scores belong in `campaign.md`; link them from thi
 ## Authoring rules
 
 1. **Exec Owner is one name, not a list.** This is the single accountable person driving the initiative forward at the executive level — currently Tom, Quinn, or Ivy given the org structure. Rowan and Lox are contributors/executors, not exec owners; list them under Contributors instead. If it's unclear who should own an initiative, ask rather than guessing — ownership is a real accountability decision.
-2. **Hypothesis first.** Use an if/then/because/proof shape. Do not write a theme label or vague aspiration.
-3. **Use the graph's wording as the starting point.** Expand it only enough to make the expected proof and decision boundary explicit.
-4. **Do not invent evidence.** If proof, timing, or task links are unknown, say `TBD` or leave an explicit open question.
-5. **Keep the output bounded.** Name what this initiative will produce and what it will not attempt.
-6. **Make success observable.** Define one or more outcome metrics, a target where known, current value/status, and last-updated date. Use `TBD` or `not-instrumented` rather than guessing.
-7. **Link evidence.** Add dashboard links when they exist. A missing dashboard is acceptable; a fabricated link is not.
-8. **Keep strategy and execution separate.** Initiative index = why/what; market research and campaigns = working documents; task specs = implementation requirements.
-9. **No WSJF duplication.** Scores live only in `strategy-graph.md`.
-10. **Status mirrors the graph.** Do not change status in `index.md` independently.
-11. **Links should be real.** Do not add links to files that do not exist unless the line is explicitly labelled `planned`.
-12. **Tasks are references, not a second task system.** Use task IDs/titles and links where available; do not copy acceptance criteria into the index.
-13. **Keep it current.** When a hypothesis is disproven, update the hypothesis/output/open questions and link the evidence rather than appending an unstructured diary.
+2. **Exec Owner is stable through the initiative's lifecycle.** Do not reassign ownership because the initiative moves phase (e.g. build → growth, validation → scale). The owner set at initiative creation carries it end-to-end and is accountable for the full arc of their analysis and outcomes — like a PnL owner. Pick the owner who should carry it from the start with this in mind, not the owner best suited to the current phase. Only change Exec Owner via an explicit, deliberate decision from Tom/Quinn — never as a side effect of updating status, artifacts, or success metrics.
+3. **Hypothesis first.** Use an if/then/because/proof shape. Do not write a theme label or vague aspiration.
+4. **Use the graph's wording as the starting point.** Expand it only enough to make the expected proof and decision boundary explicit.
+5. **Do not invent evidence.** If proof, timing, or task links are unknown, say `TBD` or leave an explicit open question.
+6. **Keep the output bounded.** Name what this initiative will produce and what it will not attempt.
+7. **Make success observable.** Define one or more outcome metrics, a target where known, current value/status, and last-updated date. Use `TBD` or `not-instrumented` rather than guessing.
+8. **Link evidence.** Add dashboard links when they exist. A missing dashboard is acceptable; a fabricated link is not.
+9. **Keep strategy and execution separate.** Initiative index = why/what; market research and campaigns = working documents; task specs = implementation requirements.
+10. **No WSJF duplication.** Scores live only in `strategy-graph.md`.
+11. **Status mirrors the graph.** Do not change status in `index.md` independently.
+12. **Links should be real.** Do not add links to files that do not exist unless the line is explicitly labelled `planned`.
+13. **Tasks are references, not a second task system.** Use task IDs/titles and links where available; do not copy acceptance criteria into the index.
+14. **Keep it current.** When a hypothesis is disproven, update the hypothesis/output/open questions and link the evidence rather than appending an unstructured diary.
 
 ## Creating a new index
 
