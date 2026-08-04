@@ -41,7 +41,8 @@ Create `brain/initiatives/<slug>/index.md` with this structure:
 
 **Status:** active | parked | blocked
 **Impacts:** <Impact name(s)>
-**Owner:** <agent/person/role>
+**Exec Owner:** <single named person accountable for driving this initiative — Tom, Quinn, or Ivy>
+**Contributors:** <agents/people doing the work — may be a list>
 **Strategy graph:** [`strategy-graph.md`](../../sindustries/strategy-graph.md)
 
 ## Hypothesis
@@ -84,29 +85,31 @@ Campaign-specific targets and scores belong in `campaign.md`; link them from thi
 
 ## Authoring rules
 
-1. **Hypothesis first.** Use an if/then/because/proof shape. Do not write a theme label or vague aspiration.
-2. **Use the graph's wording as the starting point.** Expand it only enough to make the expected proof and decision boundary explicit.
-3. **Do not invent evidence.** If proof, owner, timing, or task links are unknown, say `TBD` or leave an explicit open question.
-4. **Keep the output bounded.** Name what this initiative will produce and what it will not attempt.
-5. **Make success observable.** Define one or more outcome metrics, a target where known, current value/status, and last-updated date. Use `TBD` or `not-instrumented` rather than guessing.
-6. **Link evidence.** Add dashboard links when they exist. A missing dashboard is acceptable; a fabricated link is not.
-7. **Keep strategy and execution separate.** Initiative index = why/what; market research and campaigns = working documents; task specs = implementation requirements.
-8. **No WSJF duplication.** Scores live only in `strategy-graph.md`.
-9. **Status mirrors the graph.** Do not change status in `index.md` independently.
-10. **Links should be real.** Do not add links to files that do not exist unless the line is explicitly labelled `planned`.
-11. **Tasks are references, not a second task system.** Use task IDs/titles and links where available; do not copy acceptance criteria into the index.
-12. **Keep it current.** When a hypothesis is disproven, update the hypothesis/output/open questions and link the evidence rather than appending an unstructured diary.
+1. **Exec Owner is one name, not a list.** This is the single accountable person driving the initiative forward at the executive level — currently Tom, Quinn, or Ivy given the org structure. Rowan and Lox are contributors/executors, not exec owners; list them under Contributors instead. If it's unclear who should own an initiative, ask rather than guessing — ownership is a real accountability decision.
+2. **Hypothesis first.** Use an if/then/because/proof shape. Do not write a theme label or vague aspiration.
+3. **Use the graph's wording as the starting point.** Expand it only enough to make the expected proof and decision boundary explicit.
+4. **Do not invent evidence.** If proof, timing, or task links are unknown, say `TBD` or leave an explicit open question.
+5. **Keep the output bounded.** Name what this initiative will produce and what it will not attempt.
+6. **Make success observable.** Define one or more outcome metrics, a target where known, current value/status, and last-updated date. Use `TBD` or `not-instrumented` rather than guessing.
+7. **Link evidence.** Add dashboard links when they exist. A missing dashboard is acceptable; a fabricated link is not.
+8. **Keep strategy and execution separate.** Initiative index = why/what; market research and campaigns = working documents; task specs = implementation requirements.
+9. **No WSJF duplication.** Scores live only in `strategy-graph.md`.
+10. **Status mirrors the graph.** Do not change status in `index.md` independently.
+11. **Links should be real.** Do not add links to files that do not exist unless the line is explicitly labelled `planned`.
+12. **Tasks are references, not a second task system.** Use task IDs/titles and links where available; do not copy acceptance criteria into the index.
+13. **Keep it current.** When a hypothesis is disproven, update the hypothesis/output/open questions and link the evidence rather than appending an unstructured diary.
 
 ## Creating a new index
 
 1. Derive the canonical slug from the graph and create the initiative directory if needed.
-2. Copy the graph's hypothesis, output, Impact tags, and status into the index.
-3. Expand the hypothesis to include observable proof without adding unsupported claims.
-4. Add only artifacts that exist or are explicitly planned.
-5. Define the first version of `Success metrics`, even if current/target are `TBD` or status is `not-instrumented`.
-6. Populate open questions from the graph's unresolved decisions, existing research, and Tom's stated concerns.
-7. Populate Tasks from the task board only when verified; otherwise write `No linked tasks recorded yet.`
-8. Check that no WSJF number appears in the file and that status/Impacts match the graph.
+2. Set the Exec Owner (single name) and Contributors before anything else — if it's not obvious, ask Quinn/Tom rather than defaulting.
+3. Copy the graph's hypothesis, output, Impact tags, and status into the index.
+4. Expand the hypothesis to include observable proof without adding unsupported claims.
+5. Add only artifacts that exist or are explicitly planned.
+6. Define the first version of `Success metrics`, even if current/target are `TBD` or status is `not-instrumented`.
+7. Populate open questions from the graph's unresolved decisions, existing research, and Tom's stated concerns.
+8. Populate Tasks from the task board only when verified; otherwise write `No linked tasks recorded yet.`
+9. Check that no WSJF number appears in the file and that status/Impacts match the graph.
 
 ## Updating an existing index
 
@@ -119,6 +122,7 @@ Campaign-specific targets and scores belong in `campaign.md`; link them from thi
 
 Before considering an index complete:
 
+- [ ] Exec Owner is a single named person (Tom, Quinn, or Ivy given current org), not a list or a role label.
 - [ ] Canonical initiative name and slug match the strategy graph.
 - [ ] Status matches the graph.
 - [ ] Every graph Impact is represented; no new Impact was invented.
