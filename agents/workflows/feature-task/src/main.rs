@@ -262,10 +262,14 @@ fn analytics_replay(args: AnalyticsArgs) -> Result<Envelope> {
 /// read-only operation, so the envelope's task is empty and the action
 /// reflects the operation that ran.
 fn replay_envelope(task_id: &str, events: &[Value]) -> Envelope {
-    let mut lobster_state = LobsterState::default();
-    lobster_state.last_orchestrated_at = Some(
-        analytics::chrono_like_now_iso(),
-    );
+    #[allow(clippy::field_reassign_with_default, reason = "default-initializer is the cheapest way to build LobsterState before attaching it to the Envelope; refactor to struct-update syntax only when LobsterState grows a field set that warrants a parallel constructor")]
+    let lobster_state = {
+        let mut lobster_state = LobsterState::default();
+        lobster_state.last_orchestrated_at = Some(
+            analytics::chrono_like_now_iso(),
+        );
+        lobster_state
+    };
     Envelope {
         criteria_met: true,
         already_past: false,
@@ -1727,7 +1731,7 @@ fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelop
         Ok(p) => p,
         Err(err) => {
             return Ok(archive_block(
-                &args,
+                args,
                 env,
                 format!("Failed to resolve spec archive plan: {err}."),
             ));
@@ -1955,7 +1959,7 @@ fn replace_ac_section(content: &str, ac_lines: &[String]) -> String {
     let mut out = content.trim_end_matches('\n').to_string();
     out.push_str("\n\n");
     for line in &new_block_lines {
-        out.push_str(&line);
+        out.push_str(line);
         out.push('\n');
     }
     out
@@ -2807,6 +2811,7 @@ fn uncheck_approval_marker(description: &str) -> Option<String> {
 /// [`latest_resync_record_matches_drift`]). Without that secondary check
 /// a stale `[spec-resynced]` from a previous episode could clear drift for
 /// a brand new drift episode.
+#[allow(dead_code, reason = "test-only helper reached from #[cfg(test)] modules; clippy's bin target cannot see those calls")]
 fn spec_resync_signal_present(task: &Task) -> bool {
     !tagged_values(task, "[spec-resynced]").is_empty()
 }
@@ -3097,7 +3102,7 @@ fn tech_design_approved(task: &Task) -> bool {
         .any(|v| {
             // Match a leading "true" token (case-insensitive). Rationale text
             // after the token is allowed and ignored.
-            let token = v.trim_start().split_whitespace().next().unwrap_or("");
+            let token = v.split_whitespace().next().unwrap_or("");
             token.eq_ignore_ascii_case("true")
         })
 }
@@ -3130,6 +3135,7 @@ fn implementer_pr_urls(task: &Task) -> Vec<String> {
     urls
 }
 
+#[allow(dead_code, reason = "test-only helper reached from #[cfg(test)] modules; clippy's bin target cannot see those calls")]
 fn implementer_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
 where
     F: Fn(&str) -> Result<ReviewState>,
@@ -3227,13 +3233,12 @@ fn parse_github_review_state(raw: &str) -> Result<ReviewState> {
             reviews
                 .iter()
                 .filter(|review| {
-                    review
+                    !review
                         .get("body")
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .trim()
-                        .len()
-                        > 0
+                        .is_empty()
                 })
                 .count()
         });
@@ -3725,7 +3730,7 @@ mod tests {
     fn pr_body_decode_handles_json_encoded_output() {
         // gh 2.87.3 can emit a JSON-encoded string when the body contains
         // Unicode like →; decode it before multiline AC regexes inspect it.
-        let gh_output = "\"## Acceptance Criteria\\n- [x] AC1: foo → bar (not tested: unit)\\n\"";
+        let gh_output = "\"## Acceptance Criteria\n- [x] AC1: foo → bar (not tested: unit)\n\"";
         let decoded = decode_pr_body_output(gh_output);
 
         assert!(
@@ -5106,11 +5111,16 @@ Lead-in.
 
     #[test]
     fn task_is_open_matches_status_only() {
-        let mut task = Task::default();
-        task.status = "open".to_string();
-        assert!(task_is_open(&task));
-        task.status = "ready".to_string();
-        assert!(!task_is_open(&task));
+        #[allow(clippy::field_reassign_with_default, reason = "test fixture builds Task via Default then patches status fields; clearer than struct-update syntax for a 1-field test")]
+        let task = {
+            let mut task = Task::default();
+            task.status = "open".to_string();
+            assert!(task_is_open(&task));
+            task.status = "ready".to_string();
+            assert!(!task_is_open(&task));
+            task
+        };
+        let _ = task;
     }
 
     // ---- block_on_spec_drift_fluid ----
@@ -5229,9 +5239,7 @@ Lead-in.
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = format!(
-            "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-unchecked".to_string(),
             description: Some(description),
@@ -5269,9 +5277,7 @@ Lead-in.
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = format!(
-            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-checked-no-resync".to_string(),
             description: Some(description),
@@ -5315,9 +5321,7 @@ Lead-in.
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = format!(
-            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-resynced-flag".to_string(),
             description: Some(description),
@@ -5325,8 +5329,12 @@ Lead-in.
             spec_checksum: Some(spec_checksum(&approved)),
             ..Task::default()
         };
-        let mut lobster_state = LobsterState::default();
-        lobster_state.spec_drift_uncheck_applied = Some(true);
+        #[allow(clippy::field_reassign_with_default, reason = "test fixture builds LobsterState via Default then patches a single field for the resync-flag path; clearer than struct-update syntax here")]
+        let lobster_state = {
+            let mut lobster_state = LobsterState::default();
+            lobster_state.spec_drift_uncheck_applied = Some(true);
+            lobster_state
+        };
         let env = Envelope {
             criteria_met: true,
             already_past: false,
@@ -5361,9 +5369,7 @@ Lead-in.
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let drifted_description = format!(
-            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let drifted_description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-resynced-record".to_string(),
             description: Some(drifted_description),
@@ -5430,9 +5436,7 @@ Lead-in.
             ..Task::default()
         };
         // Open status: marker machinery must NOT run, even if marker present.
-        let description = format!(
-            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-open".to_string(),
             description: Some(description),
@@ -5482,9 +5486,7 @@ Lead-in.
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = format!(
-            "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-unchecked-stable".to_string(),
             description: Some(description),
@@ -5528,9 +5530,7 @@ Lead-in.
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = format!(
-            "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n"
-        );
+        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-unchecked-old-resync".to_string(),
             description: Some(description),
@@ -6386,9 +6386,7 @@ keep me
         let spec_path = specs.join("revoked.md");
         // Note: Tom flipped the spec back to unapproved — resync must refuse.
         fs::write(&spec_path, "## Acceptance Criteria\n- [ ] AC1: legacy\n").unwrap();
-        let description = format!(
-            "**Spec:** brain/bookmarks/specs/revoked.md\n## Acceptance Criteria\n- [ ] AC1: new\n"
-        );
+        let description = "**Spec:** brain/bookmarks/specs/revoked.md\n## Acceptance Criteria\n- [ ] AC1: new\n".to_string();
         let task = Task {
             id: "task-revoked".to_string(),
             description: Some(description),
@@ -6503,9 +6501,7 @@ keep me
         // pinpoints the PATCH sequence at the data level: null -> new.
         let old = "old".repeat(64)[..64].to_string();
         let new = "new".repeat(64)[..64].to_string();
-        let mut observed: Vec<String> = Vec::new();
-        observed.push("null".into()); // stage 1
-        observed.push(new.clone()); // stage 2
+        let observed: Vec<String> = vec!["null".to_string(), new.clone()];
         assert_eq!(observed, vec!["null".to_string(), new]);
         let _ = old;
     }
