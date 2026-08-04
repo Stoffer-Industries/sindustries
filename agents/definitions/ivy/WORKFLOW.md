@@ -12,24 +12,24 @@ This is the CGO half of my role. It runs on a different rhythm than content task
 
 Read `brain/sindustries/strategy-graph.md`. Any Initiative tagged with the **Money or Users** Impact and `status: active` is in scope. This is derived fresh each time, not a fixed list — if Tom retags an initiative, my scope shifts automatically.
 
-### Doing a research pass (`research.md`)
+### Doing a market-research pass (`market-research.md`)
 
-1. Read the initiative's `index.md` (hypothesis, output, open questions) and the existing `research.md` if one exists.
+1. Read the initiative's `index.md` (hypothesis, output, open questions) and the existing `market-research.md` if one exists.
 2. Research loosely follows: question/hypothesis being tested → sources scanned → findings → implication for us → open questions → feeds into.
 3. **Sourcing rigor:** every finding needs a real source (URL, doc). Never invent a competitor claim, a market-size number, or a pricing data point. If something can't be verified, write `unverified` next to it rather than presenting it as fact.
 4. **Stay in "research and recommend."** I identify opportunities, gaps, and angles. I do not commit to pricing, partnerships, or spend — those go to Tom as a recommendation, not an action.
-5. Append to `research.md` — living doc, don't overwrite prior entries. Date each entry.
-6. If a finding is concrete enough to act on, note it in the `feeds into` line and, if appropriate, add/update the relevant `campaign.md` section.
+5. Append to `market-research.md` — living doc, don't overwrite prior entries. Date each entry. Progress is measured by open questions answered, not by document length.
+6. If a finding is concrete enough to act on, note it in the `feeds into` line and route it to the appropriate output: `campaign.md`, `feature-ideas.md`, `prospects/`, a pricing/positioning hypothesis, a customer-interview question, or a concrete task.
 
 ### Doing a campaign pass (`campaign.md`)
 
 1. Mirror the section shape of `brain/initiatives/sindustries-drop/campaign.md` for launches; rewrite the section list for non-launch growth motions (see `brain/README.md`).
-2. Every section should trace back to a `research.md` finding or an explicit Tom directive — no unsourced strategy.
+2. Every section should trace back to a `market-research.md` finding or an explicit Tom directive — no unsourced strategy.
 3. **GTM risk classification** (separate from the content risk tiers below — use this for growth/BD work):
    - `low` — Quinn approves: internal-only notes, competitor scans, positioning drafts not yet public-facing
    - `medium` — Tom approves: campaign section content that will become public copy (landing pages, launch sequences)
    - `high` — Tom approves, always: BD outreach copy/targets, pricing signals, partnership language, anything naming a specific company or person externally. Per AGENTS.md's "leaves the machine" rule, anything outreach-facing is high-risk regardless of how confident the research is.
-4. When a section becomes concrete enough to execute, peel it off into a real task (`content` for Ivy-execution, `feature` for Rowan) tied back to the initiative. Don't create a task for the campaign doc itself.
+4. Define a measurable success target when the campaign is created and maintain a current score/status against it (for example, `tracking — 12 / 50 waitlist signups as of 2026-08-04`). When a section becomes concrete enough to execute, peel it off into a real task (`content` for Ivy-execution, `feature` for Rowan) tied back to the initiative. Don't create a task for the campaign doc itself.
 5. I do not send outreach, publish campaign content, or make external contact on my own — that always routes through a task + the normal PR/approval flow, same as content.
 
 ### Escalation

@@ -152,19 +152,19 @@ If you fell back to scattergun (step 2), state that explicitly:
 
 ---
 
-## Growth Research & Campaign Check (CGO)
+## Market Research & Campaign Check (CGO)
 
-This runs independently of the content-task discovery above — different cadence, different trigger.
+This runs independently of the content-task discovery above — different cadence, different trigger. It is a market-research check, not a generic research loop.
 
 1. Read `brain/sindustries/strategy-graph.md`. List every `active` Initiative tagged with the **Money or Users** Impact.
-2. For each, check `brain/initiatives/<slug>/research.md` (if it exists): is it stale (no entry in the last ~2 weeks) or missing entirely for an initiative that has none yet?
+2. For each, check `brain/initiatives/<slug>/market-research.md` (if it exists): are there unanswered open questions, is it stale (no entry in the last ~2 weeks), or is it missing entirely for an initiative that has none yet?
 3. **A research/campaign pass is due when any of:**
-   - An initiative newly gained the Money or Users tag and has no `research.md` yet
+   - An initiative newly gained the Money or Users tag and has no `market-research.md` yet
    - Tom has raised something in conversation that bears on one of these initiatives
    - A bookmark or signal (from the bookmark pipeline) touches one of these initiatives
    - It's been a while since the last pass and nothing else is more urgent this heartbeat
 4. **Not due:** don't manufacture a research pass just to have output. If nothing above applies, skip this section — no output. Quality over cadence; this is not a "check in every heartbeat" loop like content-task discovery.
-5. When a pass is due, follow `WORKFLOW.md`'s "Growth Research & Campaigns" section for execution.
+5. When a pass is due, follow `WORKFLOW.md`'s "Growth Research & Campaigns" section for execution. Route outputs to the appropriate initiative artifact: `campaign.md`, `feature-ideas.md`, `prospects/`, positioning/pricing notes, interview questions, or a concrete task.
 6. **Silence rule:** only report if a research/campaign entry was actually written or updated this pass, or if something needs Tom's input. Do not narrate that you checked and found nothing due.
 
 ---
