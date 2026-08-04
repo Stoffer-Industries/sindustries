@@ -286,11 +286,11 @@ fn fetch_pr_cycle_time_seconds(prs: &[String]) -> Option<u64> {
         let created = value
             .get("createdAt")
             .and_then(Value::as_str)
-            .and_then(|s| chrono_like_parse_to_unix(s));
+            .and_then(chrono_like_parse_to_unix);
         let merged = value
             .get("mergedAt")
             .and_then(Value::as_str)
-            .and_then(|s| chrono_like_parse_to_unix(s));
+            .and_then(chrono_like_parse_to_unix);
         if let (Some(c), Some(m)) = (created, merged) {
             earliest_created = Some(earliest_created.map_or(c, |v| v.min(c)));
             latest_merged = Some(latest_merged.map_or(m, |v| v.max(m)));
@@ -327,9 +327,9 @@ fn chrono_like_parse_to_unix(s: &str) -> Option<i64> {
     // Days from civil (Howard Hinnant's algorithm) — UTC, no leap seconds.
     let (year, month) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
     let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = (year - era * 400) as i64;
-    let m = month as i64;
-    let d = day as i64;
+    let yoe = year - era * 400;
+    let m = month;
+    let d = day;
     let doy = (153 * m + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
@@ -452,14 +452,14 @@ fn unix_to_civil(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
     let second = time_of_day % 60;
     let z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as i64;
+    let doe = z - era * 146097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
-    let y = (if m <= 2 { y + 1 } else { y }) as i64;
+    let y = if m <= 2 { y + 1 } else { y };
     (y, m, d, hour, minute, second)
 }
 
