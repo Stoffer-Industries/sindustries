@@ -1,0 +1,8 @@
+.git
+node_modules
+agents
+brain
+worktrees
+.git-worktrees
+.env
+*.env
