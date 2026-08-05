@@ -4,6 +4,7 @@ task_id: 536e04fc-784c-4c23-8e36-bf1caa05436c
 product_spec: brain/tasks/specs/in-progress/bookmark-task-type-classification-2026-07-25.md
 shipped_pr: null
 shipped_date: null
+revision_note: 2026-08-06 NZST — Tom reversed the implementation approach. Classification is LLM-driven (part of Ivy's existing spec-generation call), not a separate deterministic helper. PR #359's classify_spec helper is the wrong foundation; it is removed in WS2.
 ---
 
 # Bookmark specs get a task type, only feature-typed ones need Tom's approval
@@ -11,84 +12,135 @@ shipped_date: null
 ## Links
 
 - Product spec: `brain/tasks/specs/in-progress/bookmark-task-type-classification-2026-07-25.md`
-- Tech design: `docs/specs/bookmark-specs-task-type-classification-tech-design.md`
+- Tech design: `docs/specs/bookmark-specs-task-type-classification-tech-design.md` (this file)
 - Task: `536e04fc-784c-4c23-8e36-bf1caa05436c`
-- Tasks API record: `http://localhost:4001/api/v1/tasks/536e04fc-784c-4c23-8e36-bf1caa05436c`
+- Superseded PR (deterministic helper — to be deleted in WS2): https://github.com/Stoffer-Industries/sindustries/pull/359
 
 ## Repositories
 
 - Primary repo: `Stoffer-Industries/sindustries`
-- Branch: `task-536e04fc-bookmark-specs-task-type-classification`
-- Worktree: `~/workspaces/rowan/sindustries`
-- Expected `.openclaw` follow-up: `[openclaw-needed]` Quinn must update Ivy's bookmark classification prompt and the related cron config so the classifier actually runs (boundary lives outside this repo).
+- Branch: `task-536e04fc-bookmark-specs-task-type-classification-llm-redesign` (WS2 tech-design branch)
+- Worktree: `~/workspaces/rowan/sindustries-task-536e04fc-bookmark-specs-task-type-classification`
+- Expected `.openclaw` follow-up: `[openclaw-needed]` Quinn must update Ivy's bookmark-spec prompt to return the structured `{spec_markdown, classification, classification_rationale}` payload (boundary lives outside this repo), and must register the recurring untyped-bookmark-task check as a cron.
 
-## Scope
+## Revision history
 
-Today, every bookmark-generated spec waits for Tom's product approval before any task is created. Most bookmark specs are small code/research fixes that don't need Tom's sign-off. This task:
+- **2026-07-27 NZST (Quinn-approved)**: original design — separate `classifySpec(spec)` helper with LLM rubric + deterministic fallback. PR #359 merged the deterministic helper on 2026-08-05.
+- **2026-08-06 NZST (this revision)**: Tom's correction — classification is **part of Ivy's existing LLM spec-generation call**, returning a structured `{spec_markdown, classification, classification_rationale}` payload. No separate helper, no deterministic fallback. PR #359's `classify_spec.py` and its tests are removed in WS2.
 
-1. Classifies every bookmark spec as `feature`, `code`, or `research`.
-2. Keeps today's flow for `feature`: Tom approves → task created.
-3. Skips approval for `code` / `research`: task created directly with the matching type.
-4. When classification is ambiguous, **no type is set** and **no task is auto-created**; the spec is surfaced for manual triage.
-5. Bookmark-origin tasks without a type are visible in a recurring check.
-6. Every task created through this flow has its type set at creation (no post-hoc patch).
+## Revised approach
 
-## Ownership boundary
+The original design called for a separate `classifySpec(spec)` helper that wrapped a constrained LLM rubric, with a deterministic fallback for parse failures. Tom's correction simplifies this: the classification is **part of the existing LLM spec-generation call** (Ivy's bookmark prompt), not a separate function.
 
-- The classifier and the approval-routing logic live in the bookmark pipeline (`apps/` or `agents/` depending on current structure). The task is **primarily about the bookmark pipeline** plus a small recurring check in `services/tasks-api` or a cron-driven report.
-- Tasks API: `task.type` already exists per existing schema; we ensure the bookmark creator sets it. No schema change required.
-- The recurring visibility check is a cron-friendly query against the Tasks API plus a Telegram message. Implementation lives in the OpenClaw boundary — flagged for Quinn.
-- `.openclaw` follow-up: Ivy's bookmark-prompt must call the classifier; the cron must wire the recurring check. Quinn handles.
+Concretely: Ivy's LLM call is extended to return a structured payload alongside the spec markdown. The pipeline reads both fields from the same call. There is no second classification pass, no keyword scoring, and no deterministic helper. This avoids a second source of truth and lets the LLM exercise judgment over the spec it is already reading.
 
-## Implementation plan
+### LLM output schema (the contract)
 
-File/module scope:
+```json
+{
+  "spec_markdown": "<full spec body>",
+  "classification": "feature" | "code" | "research" | "ambiguous",
+  "classification_rationale": "<short prose; helps triage and debug>"
+}
+```
 
-- `agents/workflows/bookmark-pipeline/...` (or current location) — add a `classifySpec(spec)` step. Output is one of `feature | code | research | null` (null = ambiguous). Implementation:
-  - Prompt the model with the spec body and a constrained rubric: feature = user-visible product change; code = infra/test/refactor; research = spike/one-pager; otherwise null.
-  - Deterministic fallback: if the model's `type` field is empty, missing, or not in the allowed set, return `null`.
-  - Unit tests with 6 fixture specs (2 feature, 2 code, 1 research, 1 ambiguous) assert the right output.
-- `agents/workflows/bookmark-pipeline/...` — branch on classification:
-  - `feature` → existing approval flow (unchanged).
-  - `code` or `research` → skip approval message, call Tasks API `create` with `type: code|research`.
-  - `null` → do not call Tasks API `create`; instead emit a `bookmark-triage-needed` event (Telegram + dashboard list) and stop.
-- `services/tasks-api/src/routes/tasks.ts` — confirm `type` is accepted on POST. (Already exists per AC6, but verify in code.)
-- `agents/cron/bookmark-triage-report.py` (or similar) — new recurring check:
-  - Query `GET /tasks?source=bookmark&type=null&status=open&createdBefore=now-7d` (the actual filter shape is whatever the API supports; pseudocode here).
-  - Emit a Telegram message listing any untyped bookmark tasks older than 7 days.
-  - Wired into the existing daily cron.
-- `agents/skills/bookmarks/x-ingest/SKILL.md` (or equivalent skill file) — document the new classifier and the routing rules so future agents understand the flow.
-- `docs/systems/bookmark-pipeline.md` (or current system doc) — add a section "Spec classification and task typing" describing the rules.
+- `classification` is a 4-value enum. `ambiguous` is a **first-class outcome**, not a parse-error fallback.
+- The schema lives in-repo as a documented constant (e.g. `agents/workflows/bookmarks/classification_schema.py`) so the prompt template, the validator, and the tests share one source of truth.
+- Ivy's prompt is told: when in doubt, return `"ambiguous"`. Bias to ambiguous over guessing.
+
+### Safety / invalid-output handling
+
+The pipeline **never crashes** on bad LLM output, **never coerces** an out-of-enum value, and **never silently skips** the triage surface. Specific rules:
+
+- Malformed JSON (parse error) → `ambiguous`. Do not raise.
+- `classification` outside the enum (typo, hallucinated value) → `ambiguous`. Do not coerce.
+- Missing `classification` field → `ambiguous`. Do not default.
+- Empty `spec_markdown` → `ambiguous` (no useful spec to act on).
+- LLM call timeout, transport error, or model refusal → `ambiguous`, with the error captured in the triage event payload so manual triage has full context.
+
+Validation lives at the pipeline boundary (a thin wrapper around the LLM call) so all downstream branches see only the validated enum.
+
+### Pipeline behavior by classification
+
+| Classification | Today's flow | New flow |
+|---|---|---|
+| `feature` | Tom approves → task created (type=feature) | unchanged: Tom approval message, then Tasks API create with `type=feature` |
+| `code` | (today: would have been feature-approved → task created) | skip approval, Tasks API create with `type=code` |
+| `research` | (today: would have been feature-approved → task created) | skip approval, Tasks API create with `type=research` |
+| `ambiguous` | n/a | do **not** call Tasks API create; emit `bookmark-triage-needed` event |
+
+Every task created through this flow has its type set at creation (AC6) — no post-hoc patch. The `bookmark-triage-needed` event is the only place where a task is intentionally **not** created from the spec.
+
+## Treatment of PR #359 (already merged)
+
+PR #359 added two files on top of the unrelated `docs/systems/gymtrack.md` cleanup:
+
+- `agents/workflows/bookmarks/scripts/classify_spec.py` — the deterministic classifier.
+- `agents/workflows/bookmarks/tests/test_classify_spec.py` — 10 unit tests.
+
+Tom's direction makes that implementation the wrong foundation. Cleanest treatment: **delete both files in WS2**, no fallback, no keep-as-utility. Concretely:
+
+- WS2 removes `classify_spec.py` and `test_classify_spec.py` from main.
+- PR #359 itself stays merged — it is a historical artifact. The new AC1 evidence lives in WS2's PR body (LLM-call wrapper tests + schema-validator tests).
+- The `docs/systems/gymtrack.md` 8-line cleanup from PR #359 is unrelated and stays.
+- No second source of truth (deterministic helper vs LLM call). No dead-code rot.
+
+If PR #359's merged AC1 evidence (🧪 testID: `test_classify_spec.py::ClassifySpecTests`) later becomes inaccurate, that is acceptable: the lobster's `verify_delivery` is syntactic — it parses the PR body and accepts the evidence annotation as-is — it does not re-run deleted tests against main. WS2 re-claims AC1 with new evidence; the two PRs overlap on AC1 coverage, which is fine.
+
+## Decomposition
+
+- **WS1 (merged, historical)** — PR #359 deterministic helper. Deleted in WS2.
+- **WS2 — LLM-driven classification + Ivy schema** (Rowan code + Quinn Ivy prompt)
+  - Delete `classify_spec.py` + `test_classify_spec.py` from main.
+  - Add `agents/workflows/bookmarks/classification_schema.py` — the documented 4-value enum + JSON validator. Treats parse/enum/missing-field errors as `ambiguous`.
+  - Update Ivy's bookmark-spec prompt template to require `{spec_markdown, classification, classification_rationale}` structured output. Quinn commits the actual prompt text in `.openclaw`.
+  - Add unit tests on the schema validator: 4 happy paths (one per classification) + 4 invalid-output paths (malformed JSON, wrong enum, missing field, empty spec).
+  - Add integration tests on the LLM-call wrapper using recorded LLM responses for the 4 happy + 4 invalid cases. No live LLM in CI.
+  - Quinn `[openclaw-needed]` for the Ivy prompt update.
+- **WS3 — pipeline routing + ambiguous event** (Rowan)
+  - Branch on the validated classification:
+    - `feature` → existing approval flow (unchanged).
+    - `code` / `research` → skip approval, call Tasks API `create` with matching type.
+    - `ambiguous` → no `create` call, emit `bookmark-triage-needed` event.
+  - Confirm Tasks API `create` accepts `type` (AC6).
+  - Integration tests for each branch using recorded LLM responses.
+  - Update the bookmark pipeline's existing skill / system doc to describe the routing rules.
+- **WS4 — recurring untyped-task check** (Rowan script + Quinn cron registration)
+  - `agents/cron/bookmark-triage-report.py` (or equivalent) queries bookmark-origin tasks without a type and emits a Telegram report when any are older than 7 days.
+  - Dry-run tests + a one-shot smoke run.
+  - Quinn `[openclaw-needed]` for cron registration.
 
 ## Data model / API contract
 
-- Tasks API `create` body: ensure `type` field is persisted. Existing schema likely already supports it; if not, add an enum column via Prisma migration. No public API shape change.
-- New event type `bookmark-triage-needed` for the Telegram/dashboard surface.
-- Classifier output is intentionally narrow: `feature | code | research | null`. We do **not** allow custom types in v1.
+- Tasks API: `task.type` already exists per existing schema. WS3 verifies the bookmark creator sets it. **No schema change.**
+- New event type `bookmark-triage-needed` for the Telegram/dashboard surface. Payload: `{spec_id, source_url, classification_rationale, error_if_any}` so triage has full context.
+- LLM-output schema (4-value enum + rationale field) is the contract between Ivy's prompt and the pipeline. Lives in-repo as a documented constant; Quinn mirrors it in Ivy's prompt template in `.openclaw`.
 
 ## Workflow / cron / skill changes
 
-- **Inside repo**: bookmark-pipeline classifier + branch, recurring check script, skill and system doc updates.
-- **Outside repo (`.openclaw`)**: Ivy prompt update + cron registration. Quinn owns.
+- **Inside repo (Rowan)**: delete PR #359 helper; add classification_schema.py + validator + unit/integration tests; pipeline routing; `bookmark-triage-needed` event; recurring check script; system doc update.
+- **Outside repo `.openclaw` (Quinn)**: Ivy bookmark-prompt update; cron registration for the recurring check.
 
 ## Test plan (AC verification matrix)
 
 | AC | Verification |
 |---|---|
-| AC1 — bookmark spec is classified as feature/code/research | Unit tests on `classifySpec` with 6 fixtures; integration test that runs the full bookmark-pipeline end-to-end on a fixture and asserts the task's `type`. |
-| AC2 — `feature` keeps today's approval flow | Integration test: feed a feature-classified spec, assert an approval message was emitted AND no task was created. |
-| AC3 — `code` / `research` skip approval, create task with matching type | Integration tests: feed a code-classified spec, assert no approval message was emitted AND a task was created with `type: code`. Repeat for research. |
-| AC4 — ambiguous classification sets no type, creates no task, surfaces for manual triage | Integration test: feed a fixture the classifier returns `null` for. Assert no `create` call AND a `bookmark-triage-needed` event was emitted. |
-| AC5 — bookmark-origin tasks without a type are visible in a recurring check | The cron script is wired and tested via a dry-run that asserts it queries the right slice and would emit a message when untyped tasks exist. Manual smoke run after deploy. |
-| AC6 — every task created through this flow has its type set at creation | Integration tests in AC3 + a query test that asserts zero `source=bookmark` tasks exist with `type=null` after the pipeline runs. |
+| AC1 — bookmark spec is classified as feature/code/research/ambiguous | Unit tests on `classification_schema.py` validator (4 happy + 4 invalid → ambiguous). Integration tests on the LLM-call wrapper using recorded responses for all 4 valid classifications. |
+| AC2 — `feature` keeps today's approval flow | Integration test: feed a feature-classified LLM output, assert approval message emitted AND no task created. |
+| AC3 — `code` / `research` skip approval, create task with matching type | Integration tests for code and research: assert no approval message AND a task created with the matching `type`. |
+| AC4 — ambiguous sets no type, creates no task, surfaces for triage | Integration test: feed an `ambiguous` LLM output, assert no `create` call AND `bookmark-triage-needed` event emitted with full payload. |
+| AC5 — untyped bookmark tasks are visible in a recurring check | The cron script is wired and dry-run-tested; manual smoke run after deploy. |
+| AC6 — every task created through this flow has its type set at creation | Integration tests in AC3 + a query test that asserts zero `source=bookmark` tasks exist with `type=null` after the pipeline runs (modulo the deliberate ambiguous branch, which emits a triage event instead). |
 
-User-visible ACs: AC2 (Tom sees approval messages only for feature-typed specs). E2E: not directly applicable; the visible surface is Telegram. Coverage is at unit + integration + a one-off Telegram manual check.
+User-visible ACs: AC2 (Tom sees approval messages only for feature-typed specs). E2E coverage: not directly applicable; the visible surface is Telegram. Coverage is unit + integration + a one-off Telegram manual check.
 
 ## Open questions and risks
 
-- **Classifier consistency**: a small model may flip between feature/code on the same spec. We accept non-determinism — the rubric is the contract, not specific tokens. If Quinn wants determinism, we can switch to a regex/keyword pre-check before the LLM.
-- **Triage surface ownership**: `bookmark-triage-needed` events currently flow to Telegram via Lox. Confirm with Quinn that Lox is still the channel owner.
-- **Backfill**: existing untyped bookmark tasks in the DB. The recurring check (AC5) covers them; we explicitly do **not** auto-classify them in this PR.
+- **LLM determinism**: classification may not be deterministic across runs. Acceptable — the schema is the contract, not specific tokens. Downstream routing is deterministic because it operates on the validated enum.
+- **Ivy prompt template content**: Quinn owns the actual Ivy prompt template text in `.openclaw`. Rowan proposes the schema + prompt-fragment shape here; Quinn commits it.
+- **`bookmark-triage-needed` event channel**: same surface as today's `bookmark-approval` message — Telegram via Lox. Confirm with Quinn that Lox is still the channel owner for the new event type.
+- **Backfill**: existing untyped bookmark tasks. WS4's recurring check covers them; we explicitly do **not** auto-classify them in this PR.
+- **PR #359 AC1 evidence**: after WS2 deletes the tests, PR #359's `🧪 testID: test_classify_spec.py::ClassifySpecTests` evidence becomes historical. The lobster's verifier is syntactic (does not re-run deleted tests) so the merged PR still validates, but the human reader should know the tests no longer exist on main. WS2 re-claims AC1 with new evidence.
 
 ## Linked spec
 
