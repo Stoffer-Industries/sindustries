@@ -162,6 +162,14 @@ MCP service (`services/gymtrack-mcp`):
 
 ---
 
+## Future extraction: generic MCP OAuth server
+
+The OAuth 2.1 Authorization Code + PKCE server in `services/gymtrack-mcp/src/app.js` (authorize/token/refresh/revoke, PKCE validation, hashed code/token storage, refresh-token rotation) is protocol-generic — nothing in that logic is GymTrack-specific. What *is* GymTrack-specific today is the persistence layer: `src/repo.js` reads/writes GymTrack's own Supabase tables (`gymtrack_oauth_clients`, `gymtrack_oauth_consents`, `gymtrack_oauth_authorization_codes`, `gymtrack_oauth_tokens`), and the seeded OAuth clients (`claude-desktop`, `chatgpt`, `local-dev`) are GymTrack-only rows.
+
+This is a deliberate one-consumer build, consistent with `docs/ARCHITECTURE.md`'s guidance not to build speculative shared infrastructure before a second consumer exists. It does brush against that same doc's "do not build a bespoke OAuth server inside a product service" principle — acceptable for now because Sindustries has no canonical cross-product identity plane yet (per `docs/ARCHITECTURE.md`, that's explicitly future work, not a shipped system).
+
+**When a second product needs "let an external agent connect via OAuth":** don't copy-paste this server. Extract the OAuth 2.1 authorize/token/refresh/revoke mechanics from `services/gymtrack-mcp/src/app.js` into a shared package or standalone `services/oauth-server`-style domain service, with the client/consent/code/token persistence parameterized per product (or migrated onto the shared identity plane if that exists by then). GymTrack's `src/repo.js` is the template for what a product-specific adapter into that shared server would look like.
+
 ## Related specs, tasks, and PRs
 
 - Tasks: `18256740`, `f520c396`, `72d7cc3b`, `1474d515`
