@@ -12,6 +12,11 @@ vi.mock('../lib/plans.js', () => ({
   markPlannedWorkoutCompleted: vi.fn()
 }));
 
+const mockListConnectedAgents = vi.fn();
+vi.mock('../lib/connectedAgents.js', () => ({
+  listConnectedAgents: (...args) => mockListConnectedAgents(...args)
+}));
+
 // Mock auth so useAuth() returns a signed-in session.
 const mockSignOut = vi.fn();
 vi.mock('../lib/auth.jsx', () => ({
@@ -76,11 +81,13 @@ function makeWorkout({ id, scheduled_for, title = 'Push day', sets = [] }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockListConnectedAgents.mockResolvedValue({ data: [], error: null });
 });
 
 describe('WorkoutsTab', () => {
   it('renders a loading state on first render', () => {
     mockListPendingPlannedWorkouts.mockReturnValue(new Promise(() => {})); // never resolves
+    mockListConnectedAgents.mockReturnValue(new Promise(() => {}));
     renderWorkoutsTab();
     expect(screen.getByTestId('workouts-loading')).toBeInTheDocument();
     expect(screen.queryByTestId('workout-cards')).not.toBeInTheDocument();
@@ -91,6 +98,56 @@ describe('WorkoutsTab', () => {
     renderWorkoutsTab();
     expect(await screen.findByTestId('workouts-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('workout-cards')).not.toBeInTheDocument();
+  });
+
+  it('shows real Claude and ChatGPT connector links when no agent is connected', async () => {
+    mockListPendingPlannedWorkouts.mockResolvedValueOnce({ data: [], error: null });
+    mockListConnectedAgents.mockResolvedValueOnce({ data: [], error: null });
+    renderWorkoutsTab();
+
+    expect(await screen.findByText('Connect to your agent')).toBeInTheDocument();
+    expect(screen.getByTestId('connect-agent-cta')).toBeInTheDocument();
+    expect(screen.getByTestId('connect-claude')).toHaveAttribute(
+      'href',
+      'https://claude.ai/settings/connectors'
+    );
+    expect(screen.getByTestId('connect-chatgpt')).toHaveAttribute(
+      'href',
+      'https://chatgpt.com/admin/ca'
+    );
+    expect(screen.getByTestId('connect-claude')).toHaveAttribute('target', '_blank');
+    expect(screen.getByTestId('connect-chatgpt')).toHaveAttribute('target', '_blank');
+    expect(screen.getByTestId('connect-agent-mcp-url')).toHaveTextContent(
+      'http://localhost:8787/mcp'
+    );
+    expect(screen.getByText('claude-desktop')).toBeInTheDocument();
+    expect(screen.getByText('chatgpt')).toBeInTheDocument();
+  });
+
+  it('hides the connect CTA when an active agent consent exists', async () => {
+    mockListPendingPlannedWorkouts.mockResolvedValueOnce({ data: [], error: null });
+    mockListConnectedAgents.mockResolvedValueOnce({
+      data: [{ id: 'consent-1', clientId: 'claude-desktop' }],
+      error: null
+    });
+    renderWorkoutsTab();
+
+    expect(await screen.findByTestId('workouts-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('connect-agent-cta')).not.toBeInTheDocument();
+  });
+
+  it('does not claim the user is disconnected when the consent lookup fails', async () => {
+    mockListPendingPlannedWorkouts.mockResolvedValueOnce({ data: [], error: null });
+    mockListConnectedAgents.mockResolvedValueOnce({
+      data: null,
+      error: new Error('consent lookup failed')
+    });
+    renderWorkoutsTab();
+
+    expect(await screen.findByTestId('agents-status-error')).toHaveTextContent(
+      /consent lookup failed/i
+    );
+    expect(screen.queryByTestId('connect-agent-cta')).not.toBeInTheDocument();
   });
 
   it('renders one card per workout, in the order returned by the fetch', async () => {

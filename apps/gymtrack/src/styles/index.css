@@ -372,6 +372,90 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* Agent connection CTA */
+.connect-agent-cta {
+  margin: 1.25rem 0 1.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(232, 197, 71, 0.45);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(232, 197, 71, 0.1), var(--card) 55%);
+}
+
+.connect-agent-cta h2 {
+  margin-top: 0.2rem;
+  font-size: 1.25rem;
+}
+
+.connect-agent-eyebrow {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.connect-agent-copy,
+.connect-agent-option p,
+.connect-agent-footnote {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.connect-agent-endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1rem 0;
+  padding: 0.75rem;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(15, 15, 15, 0.65);
+}
+
+.connect-agent-endpoint span,
+.connect-agent-client-id {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.connect-agent-endpoint code,
+.connect-agent-client-id code {
+  color: var(--text);
+}
+
+.connect-agent-options {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.connect-agent-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.connect-agent-option h3 {
+  margin: 0;
+}
+
+.connect-agent-link {
+  display: block;
+  margin-top: auto;
+  text-align: center;
+  text-decoration: none;
+}
+
+.connect-agent-footnote {
+  margin-top: 0.85rem;
+  font-size: 0.75rem;
+}
+
 /* Auth gate placeholder */
 .auth-gate-loading {
   text-align: center;

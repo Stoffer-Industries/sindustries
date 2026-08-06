@@ -78,6 +78,12 @@ The SPA owns:
 5. `POST /oauth/revoke` revokes the full consent family for the presented token.
 6. Browser-side revocation from `/settings/agents` sets `consent.revoked_at`; every MCP access-token validation and refresh exchange checks that field, so revoked connections stop working immediately.
 
+### Agent connection entry point
+
+When a signed-in user has no active row in `gymtrack_oauth_consents`, `/workouts` renders explicit Claude and ChatGPT connection options. Each option links to that provider's real MCP connector setup and displays GymTrack's remote MCP URL plus the seeded public client ID. The provider—not the SPA—must generate OAuth state and the PKCE challenge before calling `/oauth/authorize`.
+
+Production URLs, redirect allowlists, provider steps, and remaining operator checks are in [`docs/runbooks/gymtrack-agent-connect.md`](../runbooks/gymtrack-agent-connect.md).
+
 ### MCP tool flow
 
 1. The external client calls `POST /mcp` with `Authorization: Bearer <oauth access token>`.
@@ -178,4 +184,4 @@ This is a deliberate one-consumer build, consistent with `docs/ARCHITECTURE.md`'
   - `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`
   - `docs/specs/gymtrack-public-signup-social-login-tech-design.md`
   - `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`
-- Current implementation branch: `task-1474d515-gymtrack-mcp-server-oauth-redo`
+- Agent connection rollout runbook: `docs/runbooks/gymtrack-agent-connect.md`

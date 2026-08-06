@@ -66,8 +66,11 @@ All user-owned tables are RLS-protected.
 
 - `/login` supports email/password and Google sign-in.
 - `/signup` supports Google sign-up plus a collapsed email/password fallback.
+- `/workouts` shows a **Connect to your agent** CTA when the signed-in user has no active MCP consent. Claude and ChatGPT links open the provider's real connector setup, where that client creates the OAuth state + PKCE request.
 - `/agent-consent` is the protected approval page used by external MCP clients.
 - `/settings/agents` lists active MCP connections and lets the user revoke them.
+
+Production provider setup and exact URLs/client IDs are documented in [`docs/runbooks/gymtrack-agent-connect.md`](../../docs/runbooks/gymtrack-agent-connect.md).
 
 Apple remains hidden until Quinn removes `'apple'` from `src/lib/authFlow.js` after the Supabase provider is wired.
 

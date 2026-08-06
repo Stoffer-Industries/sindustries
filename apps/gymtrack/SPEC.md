@@ -1,8 +1,8 @@
 # GymTrack — Behavioural spec
 
-Task: `18256740` (Shape GymTrack MVP from saved prototype), `f520c396` (Agent-Powered Workouts), `72d7cc3b` (Public Sign-Up with Social Login), `1474d515` (GymTrack MCP Server with OAuth Auth).
-Tech design: `docs/specs/gymtrack-mvp-tech-design.md`, `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`, `docs/specs/gymtrack-public-signup-social-login-tech-design.md`, `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`.
-Product spec: `brain/tasks/specs/gymtrack-mvp-2026-07-07.md`, `brain/tasks/specs/in-progress/gymtrack-agent-powered-workouts.md`, `brain/tasks/specs/in-progress/gymtrack-signup-social-login-2026-07-27.md`, `brain/tasks/specs/in-progress/gymtrack-mcp-server-oauth-2026-07-27.md`.
+Task: `18256740` (Shape GymTrack MVP from saved prototype), `f520c396` (Agent-Powered Workouts), `72d7cc3b` (Public Sign-Up with Social Login), `1474d515` (GymTrack MCP Server with OAuth Auth), `2306125e` (Workouts Tab with Connect to Your Agent CTA).
+Tech design: `docs/specs/gymtrack-mvp-tech-design.md`, `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`, `docs/specs/gymtrack-public-signup-social-login-tech-design.md`, `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`, `docs/specs/gymtrack-workouts-tab-connect-agent-cta-tech-design.md`.
+Product spec: `brain/tasks/specs/gymtrack-mvp-2026-07-07.md`, `brain/tasks/specs/in-progress/gymtrack-agent-powered-workouts.md`, `brain/tasks/specs/in-progress/gymtrack-signup-social-login-2026-07-27.md`, `brain/tasks/specs/in-progress/gymtrack-mcp-server-oauth-2026-07-27.md`, `brain/tasks/specs/in-progress/gymtrack-workouts-tab-connect-agent-2026-07-27.md`.
 
 ## Overview
 
@@ -39,15 +39,16 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 3. On success → redirect to `/workout` or back to the protected destination that triggered the redirect.
 4. On error → inline error banner; controls re-enable.
 
-### Authorize an external MCP client
+### Connect and authorize an external MCP client
 
-1. An external client starts OAuth against `GET /oauth/authorize` on the GymTrack MCP server.
-2. The MCP server validates `client_id`, `redirect_uri`, requested `scope`, and PKCE (`code_challenge`, `code_challenge_method=S256`), then redirects the browser into GymTrack at `/agent-consent?...`.
-3. If the user is not signed in, `<AuthGate>` redirects them to `/login`, preserving the full consent URL. The user can continue with Google or email/password and lands back on `/agent-consent`.
-4. `/agent-consent` shows the client name, redirect URI, and requested scopes.
-5. Approve → GymTrack POSTs the decision to the MCP server with the signed-in Supabase access token; the MCP server verifies the user session, creates/updates the consent row, stores a hashed authorization code, and returns the client redirect URL with `code` and `state`.
-6. Cancel → the user is redirected back with `error=access_denied`.
-7. The external client exchanges the code at `POST /oauth/token` with a PKCE verifier. GymTrack returns a short-lived bearer access token plus a rotated refresh token. Plaintext tokens are never stored in Supabase.
+1. When `/workouts` finds no active OAuth consent, it shows **Connect to your agent** with explicit Claude and ChatGPT options, the remote MCP URL, and each seeded public client ID.
+2. Selecting a provider opens its real MCP connector configuration. The user adds `https://gymtrack-mcp.fly.dev/mcp`; the external client generates OAuth state + a PKCE challenge and starts OAuth against `GET /oauth/authorize` on the GymTrack MCP server.
+3. The MCP server validates `client_id`, `redirect_uri`, requested `scope`, and PKCE (`code_challenge`, `code_challenge_method=S256`), then redirects the browser into GymTrack at `/agent-consent?...`.
+4. If the user is not signed in, `<AuthGate>` redirects them to `/login`, preserving the full consent URL. The user can continue with Google or email/password and lands back on `/agent-consent`.
+5. `/agent-consent` shows the client name, redirect URI, and requested scopes.
+6. Approve → GymTrack POSTs the decision to the MCP server with the signed-in Supabase access token; the MCP server verifies the user session, creates/updates the consent row, stores a hashed authorization code, and returns the client redirect URL with `code` and `state`.
+7. Cancel → the user is redirected back with `error=access_denied`.
+8. The external client exchanges the code at `POST /oauth/token` with a PKCE verifier. GymTrack returns a short-lived bearer access token plus a rotated refresh token. Plaintext tokens are never stored in Supabase.
 
 ### Manage connected agents
 
@@ -78,9 +79,10 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 1. From `/workout` or `/history`, tap the "Workouts" tab → land on `/workouts`.
 2. The page fetches the signed-in user's pending planned workouts (`planned` or `started`), ordered soonest-first by `scheduled_for` ascending.
 3. Each workout renders as a card with title, scheduled date, exercise/set summary, and Today/Overdue badge when relevant.
-4. Empty state: "No upcoming workouts yet. Connect Claude or ChatGPT from their MCP client, then manage access in the Agents tab."
-5. Tap a workout card → land on `/workout?date=YYYY-MM-DD`; if a plan exists for that date, plan mode is rendered.
-6. Error state: inline error banner with retry by reload.
+4. If there is no active agent consent, the provider-specific connection CTA appears independently of whether pending workouts exist.
+5. Empty state: "No upcoming workouts yet. Once connected, your agent can plan one for you."
+6. Tap a workout card → land on `/workout?date=YYYY-MM-DD`; if a plan exists for that date, plan mode is rendered.
+7. Error state: inline error banner with retry by reload.
 
 ### Log a workout against a plan
 
@@ -105,7 +107,7 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 | `/agent-consent` | `AgentConsentPage` | Protected consent review screen for external MCP clients. |
 | `/workout` | `WorkoutLogger` | Date picker + exercise picker + pending sets; accepts `?date=YYYY-MM-DD`. |
 | `/history` | `HistoryList` | Last-30-days grouped history. |
-| `/workouts` | `WorkoutsTab` | Pending planned workouts, soonest-first, with Today/Overdue badges and Agents tab link. |
+| `/workouts` | `WorkoutsTab` | Pending planned workouts, soonest-first, with Today/Overdue badges; users with no active consent also see real Claude/ChatGPT connector links. |
 | `/settings/agents` | `ConnectedAgentsPage` | Lists and revokes active MCP consents. |
 | `*` | redirect | → `/`. |
 
@@ -174,7 +176,7 @@ The MCP server always derives the acting `user_id` from the validated OAuth acce
 |---|---|
 | Email/password login + sign-up | Existing GymTrack unit/component tests + `test/e2e/signup.spec.ts` |
 | Google social login wiring | `test/e2e/signup-google.spec.ts` |
-| Planned workouts browse flow | `test/e2e/workouts-tab.spec.ts` + `src/components/WorkoutsTab.test.jsx` |
+| Planned workouts browse + connect-agent CTA visibility/provider links | `test/e2e/workouts-tab.spec.ts` + `src/components/WorkoutsTab.test.jsx` |
 | Connected agents list + revoke UI | `src/components/ConnectedAgentsPage.test.jsx` |
 | Legacy REST handlers | `src/lib/agentAuth.test.js`, `src/lib/plannedWorkoutsHandler.test.js`, `src/lib/historyHandler.test.js`, `src/lib/progressionHandler.test.js` |
 | MCP OAuth flow, PKCE exchange, refresh rotation, tool discovery | `services/gymtrack-mcp/test/app.test.js` |

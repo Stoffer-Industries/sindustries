@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listPendingPlannedWorkouts } from '../lib/plans.js';
+import { listConnectedAgents } from '../lib/connectedAgents.js';
 import { useAuth } from '../lib/auth.jsx';
+import ConnectAgentCta from './ConnectAgentCta.jsx';
 import WorkoutCard from './WorkoutCard.jsx';
 
 /**
  * `/workouts` tab — lists the signed-in user's pending planned workouts
  * (status `planned` or `started`), soonest-first, with a Today/Overdue
  * visual distinction. Tapping a card lands on the log screen with the
- * workout's date pre-selected via `?date=`. The "Connect to your agent"
- * CTA (AC3/AC4) ships in a separate WS2 PR — it depends on the OAuth flow
- * from sibling task `1474d515`.
+ * workout's date pre-selected via `?date=`. Users without an active OAuth
+ * consent also get provider-specific links into Claude or ChatGPT's real MCP
+ * connector setup, where the agent initiates the PKCE authorization flow.
  */
 export default function WorkoutsTab() {
   const { signOut } = useAuth();
@@ -19,6 +21,9 @@ export default function WorkoutsTab() {
   const [workouts, setWorkouts] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [connectedAgents, setConnectedAgents] = useState(null);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [agentsError, setAgentsError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +41,27 @@ export default function WorkoutsTab() {
       setLoading(false);
     }
     load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAgents() {
+      setAgentsLoading(true);
+      setAgentsError(null);
+      const { data, error: fetchErr } = await listConnectedAgents();
+      if (cancelled) return;
+      if (fetchErr) {
+        setAgentsError(fetchErr.message);
+        setConnectedAgents(null);
+      } else {
+        setConnectedAgents(data ?? []);
+      }
+      setAgentsLoading(false);
+    }
+    loadAgents();
     return () => {
       cancelled = true;
     };
@@ -74,6 +100,16 @@ export default function WorkoutsTab() {
         </nav>
       </header>
 
+      {!agentsLoading && !agentsError && connectedAgents?.length === 0 ? (
+        <ConnectAgentCta />
+      ) : null}
+
+      {agentsError ? (
+        <div className="status show error" role="alert" data-testid="agents-status-error">
+          Could not check agent connections: {agentsError}
+        </div>
+      ) : null}
+
       <h2 className="section-title">Pending workouts</h2>
 
       {loading ? <p data-testid="workouts-loading">Loading planned workouts…</p> : null}
@@ -86,8 +122,7 @@ export default function WorkoutsTab() {
 
       {!loading && !error && workouts && workouts.length === 0 ? (
         <p className="empty-hint" data-testid="workouts-empty">
-          No upcoming workouts yet. Connect Claude or ChatGPT from their MCP client,
-          then manage access in the Agents tab.
+          No upcoming workouts yet. Once connected, your agent can plan one for you.
         </p>
       ) : null}
 
