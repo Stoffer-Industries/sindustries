@@ -9,6 +9,8 @@ Before Step 1, run the shared read-only work queue once:
 
 The queue combines task and PR work and returns one deterministic `topCandidate`. Action that candidate in this pass through the matching workflow or `pr-process` skill with Rowan's own identity. The queue never reviews, comments, changes task state, or merges automatically.
 
+**Always use this script — never a raw `curl .../tasks?assignee=...` call.** The tasks-api `assignee` field is the human display name `Rowan`, not the GitHub login `rowanstoffer`; a raw query with the wrong casing silently returns `[]` and has repeatedly masked the entire 4-doing workload, leading to false "nothing assigned" conclusions that skipped straight past Step 3 into `NO_REPLY`. If a raw sanity-check query is ever needed, use `assignee=Rowan` and treat `assignee=rowanstoffer` returning `[]` as expected, not as evidence of an empty queue.
+
 ---
 
 ## Step 1 — PR work
@@ -44,6 +46,8 @@ Read and follow:
 **Limit:** Open at most 1 code-garden PR at a time. Check for open PRs first — if one exists, skip this step.
 
 **Skip code gardening entirely** if any assigned feature task in `ready` is waiting for a tech design, or any `doing`/`acceptance` task can be materially progressed this pass (implementation, review feedback, merge/post-merge work, required comments/specs, or validation). Code garden is only on the table when all active feature tasks are waiting on someone else's action and any needed nudge has already been sent.
+
+**Only those three bullets are valid reasons to skip code garden.** `DEPENDENCY_BLOCKED` and `WAITING_EXTERNAL` classifications from the queue are explicitly NOT skip reasons on their own — they mean Step 2 has nothing to progress, which is exactly the signal to move to Step 3. Do not invent additional judgment calls this file doesn't list (e.g. "don't compete for review attention," "hold until the dependency chain clears," "avoid opening a PR while other tasks are mid-flight") as reasons to skip. If the three bullets don't apply, open code gardening — that is the required action, not a fallback to consider.
 
 ---
 
