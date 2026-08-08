@@ -10,6 +10,13 @@ export const validAssignees = new Set(['Tom', 'Quinn', 'Rowan', 'Lox', 'Ivy']);
 export const validSorts = new Set(['priority', 'createdAt', 'updatedAt', 'dueAt', 'statusChangedAt']);
 export const validTaskTypes = new Set(['content', 'code', 'research', 'feature']);
 
+// Approval type and state vocabularies. Mirrored in the Prisma `ApprovalType`
+// and `ApprovalState` enums. Kept here as plain string sets so route-layer
+// validation stays a synchronous lookup against the same vocabulary that
+// the database enforces.
+export const validApprovalTypes = new Set(['spec', 'tech_design', 'qa']);
+export const validApprovalStates = new Set(['approved', 'revoked']);
+
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const taskTypeTitlePrefixes = {

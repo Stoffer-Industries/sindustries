@@ -13,6 +13,20 @@ function mapComment(comment) {
   };
 }
 
+export function mapTaskApproval(approval) {
+  return {
+    id: approval.id,
+    type: approval.type,
+    owner: approval.owner,
+    state: approval.state,
+    approvedAt: approval.approvedAt,
+    revokedAt: approval.revokedAt ?? null,
+    note: approval.note ?? null,
+    createdAt: approval.createdAt,
+    updatedAt: approval.updatedAt
+  };
+}
+
 export function mapTask(task) {
   const dependsOn = task.dependencies
     ?.map((dependency) => dependency.dependsOn)
@@ -42,6 +56,7 @@ export function mapTask(task) {
     specChecksum: task.specChecksum ?? null,
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
     comments: task.comments?.map(mapComment) ?? [],
+    approvals: task.approvals?.map(mapTaskApproval) ?? [],
     dependsOn,
     dependsOnIds: dependsOn.map((dependency) => dependency.id),
     dependencyBlocked: dependsOn.some((dependency) => dependency.status !== 'done')
