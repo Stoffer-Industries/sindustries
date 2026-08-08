@@ -394,3 +394,28 @@ jobs:
 
       - name: Run ui package tests
         run: npm test --workspace @sindustries/ui
+
+  no-absolute-paths-lint:
+    name: no-absolute-paths lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Run no-absolute-paths lint
+        # W28 audit M0.2: Theme 4 guardrail. Fails CI if any tracked source
+        # file under apps/, services/, packages/, or agents/workflows/
+        # contains a hard-coded `/Users/<name>/`, `~/workspaces|repos|
+        # code|dev|projects|src/`, or `/home/<name>/` path. Operates on the
+        # checked-out working tree; no `npm ci` required.
+        run: node scripts/check-no-absolute-paths.mjs
+
+      - name: Run no-absolute-paths lint unit tests
+        run: node --test scripts/test/check-no-absolute-paths.test.mjs

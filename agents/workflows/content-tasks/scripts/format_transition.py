@@ -8,12 +8,11 @@ import sys
 import uuid
 from typing import Any
 
-from common import OWNER_HEADING_RE, add_comment, dump_json, is_at, is_past, move_task, now_iso, owner_heading_blocks, patch_task, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
+from common import OWNER_HEADING_RE, WORKSPACE, add_comment, dump_json, is_at, is_past, move_task, now_iso, owner_heading_blocks, patch_task, read_first_json_value, refresh_task, status, transition_result, write_lobster_state
 
-REVIEW_FILE_RE = re.compile(r"(?:/Users/quinnstoffer/\.openclaw/workspace/)?(brain/[^\s)\]]+\.md)", re.I)
+REVIEW_FILE_RE = re.compile(r"(brain/[^\s)\]]+\.md)", re.I)
 REVIEW_URL_RE = re.compile(r"https?://[^\s)\]]+", re.I)
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+\S+", re.M)
-WORKSPACE = "/Users/quinnstoffer/.openclaw/workspace"
 
 
 def find_source_file(description: str) -> str | None:
