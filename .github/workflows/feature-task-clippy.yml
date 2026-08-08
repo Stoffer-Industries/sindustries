@@ -1,0 +1,45 @@
+name: feature-task clippy
+
+on:
+  pull_request:
+    paths:
+      - 'agents/workflows/feature-task/**'
+  push:
+    branches: [main]
+    paths:
+      - 'agents/workflows/feature-task/**'
+
+permissions:
+  contents: read
+
+# Clippy quality gate for the `feature-task` Rust crate. Triggers only when
+# files under `agents/workflows/feature-task/**` change, so unrelated PRs
+# (content, docs, other services) don't pay the clippy cost.
+#
+# Pair this with `cargo test` from `.github/workflows/ci.yml`'s
+# `feature-task-workflow-tests` job — both must stay green.
+#
+# Local mirror (run from repo root):
+#   cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
+#
+# See `agents/workflows/feature-task/WORKFLOW.md` for the full local-run guide.
+jobs:
+  clippy:
+    name: feature-task clippy (-D warnings)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry + build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agents/workflows/feature-task -> target
+
+      - name: Run clippy (-D warnings)
+        run: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings --color always
