@@ -13,6 +13,26 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 - All tests must pass locally
 - Commits must follow the project convention: `<type>(<scope>): <what>`
 
+### Validation — Rust workflow PRs
+
+If the PR touches Rust code under `agents/workflows/feature-task/**`, both of these commands must exit zero locally **before** the PR is opened (or moved from draft → ready-for-review):
+
+```bash
+cargo test  --manifest-path agents/workflows/feature-task/Cargo.toml
+cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
+```
+
+For these PRs, include the matching conditional checklist in the PR body (under `## Test plan` or as a separate `## Validation` section) so reviewers see the gate evidence at a glance:
+
+```markdown
+- [ ] `cargo test --manifest-path agents/workflows/feature-task/Cargo.toml` (Rust changes only)
+- [ ] `cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings` (Rust changes only)
+```
+
+Clippy failures must be fixed before review; the only acceptable unfixed-clippy state is a PR description that explicitly documents an accepted temporary exception plus a follow-up issue.
+
+This block applies **only** to PRs that touch `agents/workflows/feature-task/**`. Content-only, doc-only, and other non-Rust PRs are explicitly exempt — omit the checklist entirely. Full rationale lives in `agents/definitions/rowan/WORKFLOW.md`.
+
 ## The gh pr create Command
 
 Always set `--assignee` to the implementation owner/opener and `--reviewer` to the designated reviewer(s). Check the invoking skill, task, or workflow for reviewer routing. If the reviewer is not stated, stop and ask/escalate — do **not** guess a default reviewer.
