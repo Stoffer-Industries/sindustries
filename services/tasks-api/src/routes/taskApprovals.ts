@@ -40,18 +40,23 @@ taskApprovalsRouter.get('/tasks/:id/approvals', async (req, res, next) => {
     const id = parseTaskId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
 
+    // Single round-trip: load the task with its approvals relation. The 404
+    // path is preserved by checking the task presence; the listing path
+    // returns the same shape (sorted, mapped) as the previous two-query
+    // implementation. Functionally equivalent — see repo audit 2026-W32
+    // "[Low] Backfill is chatty at scale".
     const task = await prisma.task.findFirst({
       where: { id, archivedAt: null },
-      select: { id: true }
+      select: {
+        id: true,
+        approvals: {
+          orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }]
+        }
+      }
     });
     if (!task) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
-    const approvals = await prisma.taskApproval.findMany({
-      where: { taskId: id },
-      orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }]
-    });
-
-    return res.status(200).json({ data: approvals.map(mapTaskApproval) });
+    return res.status(200).json({ data: task.approvals.map(mapTaskApproval) });
   } catch (error) {
     return next(error);
   }
