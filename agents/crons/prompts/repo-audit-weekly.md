@@ -1,18 +1,28 @@
-Read and execute the skill at:
-/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/repo-audit/SKILL.md
+## FIRST ACTION — cwd verification (non-negotiable)
+
+Before doing anything else (including reading the skill), your very first tool
+call MUST be a single `exec`:
+
+- `workdir`: `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
+- `command`: `pwd && git rev-parse --show-toplevel`
+
+If the `pwd` line does NOT equal `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`,
+STOP. Use notify-soft-fail to escalate to Lox with the actual cwd, then exit.
+
+If it matches, you are confirmed in the repo. Continue to read the skill.
 
 ## Working directory rule (HARD CONSTRAINT)
 
 This cron runs in an isolated session whose `cwd` is **NOT** the sindustries
-repo. Every shell command (Phase 1 exploration, Phase 4 git ops, anything
-that touches the repo) MUST either:
+repo by default. For every `exec` call after the verification:
 
-1. Use absolute paths (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/...`), OR
-2. Be prefixed with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`
+1. Pass `workdir: "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries"` on the `exec` parameter, OR
+2. Use absolute paths for `read` / `write` / `apply_patch` calls (these take paths, not cwd), OR
+3. Prefix shell commands with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`
 
-Do NOT rely on relative paths like `services/...`, `docs/...`, `apps/...`. They
-will resolve against the wrong cwd and fail with `exit 1` — this is the bug
-that broke the W31 audit (and probably W28–W30 silently).
+Do NOT rely on relative paths like `services/...`, `docs/...`, `apps/...`,
+`agents/...`. They will resolve against the wrong cwd and fail with `exit 1` —
+this is the bug that broke the W31 audit (and probably W28–W30 silently).
 
 ## Completion gate (HARD CONSTRAINT)
 
