@@ -522,3 +522,82 @@
 .comment-composer .actions {
   justify-content: flex-start;
 }
+
+/* Approvals section (read-only checkboxes + avatars) */
+.approvals-section {
+  align-self: stretch;
+  min-width: 0;
+  padding-top: 4px;
+  width: 100%;
+}
+
+.approvals-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.approvals-header h4 {
+  color: var(--si-color-text-muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.approvals-empty {
+  color: var(--si-color-text-muted);
+  margin: 0;
+}
+
+.approvals-error {
+  color: var(--si-color-danger);
+}
+
+.approvals-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.approvals-row {
+  align-items: center;
+  display: flex;
+  list-style: none;
+}
+
+.approvals-row-label {
+  align-items: center;
+  cursor: default;
+  display: inline-flex;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.approvals-row-label input[type="checkbox"] {
+  accent-color: var(--si-color-accent);
+  cursor: not-allowed;
+}
+
+.approvals-row-type {
+  color: var(--si-color-text);
+  font-size: 0.92rem;
+}
+
+.approvals-avatar.is-approved {
+  opacity: 1;
+}
+
+.approvals-avatar.is-pending {
+  opacity: 0.4;
+}
+
+.approvals-avatar.is-revoked {
+  opacity: 0.5;
+  text-decoration: line-through;
+}

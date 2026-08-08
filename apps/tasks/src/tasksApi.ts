@@ -41,6 +41,7 @@ export interface Task {
   createdAt?: string | null;
   statusChangedAt?: string | null;
   comments?: Comment[];
+  approvals?: TaskApproval[];
   dependsOn?: DependencyReference[];
   dependsOnIds?: Array<string | number>;
   dependencyBlocked?: boolean;
@@ -76,6 +77,28 @@ export interface UpdateTaskPayload {
 export interface CreateCommentPayload {
   author: string;
   text: string;
+}
+
+export type ApprovalType = 'spec' | 'tech_design' | 'qa';
+export type ApprovalState = 'approved' | 'revoked';
+
+export interface TaskApproval {
+  id: string;
+  type: ApprovalType;
+  owner: string;
+  state: ApprovalState;
+  approvedAt: string;
+  revokedAt: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RequiredApprovals {
+  taskType: TaskType;
+  requiredApprovals: ApprovalType[];
+  version: number;
+  source: 'config-file' | 'builtin-default';
 }
 
 // API Response wrapper
@@ -165,4 +188,14 @@ export async function createTaskComment(id: string | number, payload: CreateComm
     method: 'POST',
     body: JSON.stringify(payload)
   });
+}
+
+/**
+ * Fetch the required approvals for a given task type.
+ * Used by the editor's Approvals section to resolve which `<ApprovalType>`
+ * rows to render for a task. The Tasks API reads a configurable YAML file
+ * plus a built-in default; this endpoint exposes the resolved list.
+ */
+export async function fetchRequiredApprovals(taskType: TaskType): Promise<RequiredApprovals> {
+  return api<RequiredApprovals>(`/task-types/${taskType}/required-approvals`);
 }
