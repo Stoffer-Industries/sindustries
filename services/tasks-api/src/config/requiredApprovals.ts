@@ -156,11 +156,40 @@ export function parseRequiredApprovalsYaml(content: string): RequiredApprovalsCo
   return { version, mappings, source: 'config-file' };
 }
 
+// Emit the resolved policy once per process so operators can detect drift
+// between environments on the same commit (see 2026-W32 audit, [Medium]
+// Approval-policy-depends-on-mutable-host-local-configuration). The first
+// caller (typically the lobster on startup) writes the snapshot; subsequent
+// calls reuse the already-loaded path. The flag is module-private to keep
+// the "fire once" semantics outside the public API; tests reset it via the
+// `_resetStartupLogForTesting` helper.
+let _startupLogEmitted = false;
+
+/** @internal Exposed for tests so the memoized flag can be cleared between
+ *  `it` blocks. Not part of the public API. */
+export function _resetStartupLogForTesting(): void {
+  _startupLogEmitted = false;
+}
+
+function emitResolvedPolicyStartupLog(config: RequiredApprovalsConfig): void {
+  if (_startupLogEmitted) return;
+  _startupLogEmitted = true;
+  // Hash is 64 hex chars; show the first 12 so logs stay readable while
+  // still surfacing enough entropy to spot drift between environments.
+  const shortHash = config.hash.slice(0, 12);
+  const pathLabel = config.path ?? '<built-in default>';
+  console.info(
+    `[required-approvals] resolved policy: source=${config.source} version=${config.version} hash=${shortHash}… path=${pathLabel}`
+  );
+}
+
 export function loadRequiredApprovalsConfig(
   configPath: string = resolveDefaultConfigPath()
 ): RequiredApprovalsConfig {
   if (!existsSync(configPath)) {
-    return DEFAULT_REQUIRED_APPROVALS;
+    const resolved = DEFAULT_REQUIRED_APPROVALS;
+    emitResolvedPolicyStartupLog(resolved);
+    return resolved;
   }
 
   try {
@@ -173,19 +202,23 @@ export function loadRequiredApprovalsConfig(
       ...DEFAULT_REQUIRED_APPROVALS.mappings,
       ...parsed.mappings
     };
-    return {
+    const resolved: RequiredApprovalsConfig = {
       version: parsed.version,
       mappings: mergedMappings,
       source: 'config-file',
       path: configPath,
       hash: canonicalConfigFingerprint(parsed.version, 'config-file', mergedMappings)
     };
+    emitResolvedPolicyStartupLog(resolved);
+    return resolved;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(
       `[required-approvals] failed to parse ${configPath}: ${message}. Falling back to built-in default.`
     );
-    return DEFAULT_REQUIRED_APPROVALS;
+    const resolved = DEFAULT_REQUIRED_APPROVALS;
+    emitResolvedPolicyStartupLog(resolved);
+    return resolved;
   }
 }
 
