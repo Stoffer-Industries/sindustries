@@ -4,6 +4,7 @@ import { createRateLimit, positiveIntegerEnv } from './middleware/rateLimit';
 import { healthRouter } from './routes/health';
 import { tasksRouter } from './routes/tasks';
 import { taskApprovalsRouter } from './routes/taskApprovals';
+import { requiredApprovalsRouter } from './routes/requiredApprovals';
 import { tagsRouter } from './routes/tags';
 import { contentSchedulerRouter } from './routes/contentScheduler.ts';
 import { xTweetRouter } from './routes/xTweet.ts';
@@ -97,6 +98,7 @@ export function createApp() {
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', tasksRouter);
   app.use('/api/v1', taskApprovalsRouter);
+  app.use('/api/v1', requiredApprovalsRouter);
   app.use('/api/v1', tagsRouter);
   app.use('/api/v1', contentSchedulerRouter);
   app.use('/api/v1', xTweetRouter());

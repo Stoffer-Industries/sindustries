@@ -5,6 +5,7 @@ import { normalizeComments, formatCommentTimestamp } from '../utils/helpers.js';
 import { MarkdownContent } from './MarkdownContent.jsx';
 import { toggleMarkdownTaskCheckbox } from '../utils/markdown.js';
 import { TaskCardSummary } from './TaskCardSummary.jsx';
+import { ApprovalsSection } from './ApprovalsSection.jsx';
 
 /**
  * TaskEditor - Inline editor for task details
@@ -525,6 +526,8 @@ export function TaskEditor({
         </div>
 
         <Divider variant="dashed" />
+
+        <ApprovalsSection task={task} />
 
         <div className="comments-section">
           <div className="comments-header">
