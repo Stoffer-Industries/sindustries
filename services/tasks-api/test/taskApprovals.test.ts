@@ -65,11 +65,13 @@ describe('task approval routes', () => {
   });
 
   it('GET /api/v1/tasks/:id/approvals lists approvals for a task', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.findMany.mockResolvedValueOnce([
-      approvalFixture({ type: 'spec' }),
-      approvalFixture({ id: 'approval-2', type: 'tech_design', owner: 'Quinn' })
-    ]);
+    prismaMock.task.findFirst.mockResolvedValueOnce({
+      id: TASK_ID,
+      approvals: [
+        approvalFixture({ type: 'spec' }),
+        approvalFixture({ id: 'approval-2', type: 'tech_design', owner: 'Quinn' })
+      ]
+    });
 
     const app = createApp();
     const response = await request(app).get(`/api/v1/tasks/${TASK_ID}/approvals`);
@@ -85,15 +87,19 @@ describe('task approval routes', () => {
       note: null
     });
     expect(response.body.data[1]).toMatchObject({ type: 'tech_design', owner: 'Quinn' });
-    expect(prismaMock.taskApproval.findMany).toHaveBeenCalledWith({
-      where: { taskId: TASK_ID },
-      orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }]
+    expect(prismaMock.task.findFirst).toHaveBeenCalledWith({
+      where: { id: TASK_ID, archivedAt: null },
+      select: {
+        id: true,
+        approvals: {
+          orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }]
+        }
+      }
     });
   });
 
   it('GET /api/v1/tasks/:id/approvals returns empty list when task has no approvals', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.findMany.mockResolvedValueOnce([]);
+    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID, approvals: [] });
 
     const app = createApp();
     const response = await request(app).get(`/api/v1/tasks/${TASK_ID}/approvals`);
