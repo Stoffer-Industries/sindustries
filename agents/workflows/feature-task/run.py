@@ -21,8 +21,10 @@ CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
 _ff_env = os.environ.get("FEATURE_FACTORY_REPO")
 FEATURE_FACTORY_REPO = Path(_ff_env) if _ff_env else None
 REPO = FEATURE_FACTORY_REPO if (FEATURE_FACTORY_REPO and FEATURE_FACTORY_REPO.exists()) else CODEBASE_REPO
-WORKSPACE_ROOT = Path("/Users/quinnstoffer/.openclaw/workspace")
-if not WORKSPACE_ROOT.exists():
+_workspace_env = os.environ.get("OPENCLAW_WORKSPACE_ROOT")
+if _workspace_env:
+    WORKSPACE_ROOT = Path(_workspace_env)
+else:
     WORKSPACE_ROOT = CODEBASE_REPO.parents[1] if len(CODEBASE_REPO.parents) > 1 else CODEBASE_REPO.parent
 DEFAULT_BASE_URL = "http://localhost:4001/api/v1"
 PATH_PREFIXES = [
