@@ -36,7 +36,9 @@ requiredApprovalsRouter.get('/task-types/:taskType/required-approvals', (req, re
         taskType,
         requiredApprovals: required,
         version: config.version,
-        source: config.source
+        source: config.source,
+        path: config.path,
+        hash: config.hash
       }
     });
   } catch (error) {

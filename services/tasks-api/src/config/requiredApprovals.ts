@@ -15,6 +15,7 @@
 //
 // See docs/specs/tasks-api-native-approvals-tech-design.md WS2.
 
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validApprovalTypes } from '../routes/tasks/_constants.ts';
@@ -23,18 +24,52 @@ export interface RequiredApprovalsConfig {
   version: number;
   mappings: Record<string, string[]>;
   source: 'config-file' | 'builtin-default';
+  /**
+   * Absolute path of the config file that produced this snapshot, or `null`
+   * when no file was loaded (missing file or parse failure → built-in default).
+   * Exposed so operators can see which file the API is reading and detect
+   * drift between environments on the same commit.
+   */
+  path: string | null;
+  /**
+   * Non-secret SHA-256 fingerprint of the resolved policy
+   * (`{ version, source, mappings }` with keys sorted). Stable across
+   * processes so two environments on the same commit should produce the
+   * same hash for their respective loaded configs; mismatches indicate
+   * drift between `~/.openclaw/tasks-api/required-approvals.yaml` instances.
+   */
+  hash: string;
 }
 
-export const DEFAULT_REQUIRED_APPROVALS: RequiredApprovalsConfig = {
-  version: 1,
-  mappings: {
+function canonicalConfigFingerprint(
+  version: number,
+  source: RequiredApprovalsConfig['source'],
+  mappings: Record<string, string[]>
+): string {
+  const sortedMappings: Record<string, string[]> = {};
+  for (const key of Object.keys(mappings).sort()) {
+    sortedMappings[key] = [...mappings[key]];
+  }
+  const canonical = JSON.stringify({ version, source, mappings: sortedMappings });
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+export const DEFAULT_REQUIRED_APPROVALS: RequiredApprovalsConfig = (() => {
+  const version = 1;
+  const mappings = {
     feature: ['spec', 'tech_design', 'qa'],
     code: ['tech_design', 'qa'],
     content: ['spec', 'qa'],
     research: []
-  },
-  source: 'builtin-default'
-};
+  };
+  return {
+    version,
+    mappings,
+    source: 'builtin-default',
+    path: null,
+    hash: canonicalConfigFingerprint(version, 'builtin-default', mappings)
+  };
+})();
 
 function resolveDefaultConfigPath(): string {
   const fromEnv = process.env.REQUIRED_APPROVALS_CONFIG_PATH;
@@ -131,7 +166,13 @@ export function loadRequiredApprovalsConfig(
       ...DEFAULT_REQUIRED_APPROVALS.mappings,
       ...parsed.mappings
     };
-    return { version: parsed.version, mappings: mergedMappings, source: 'config-file' };
+    return {
+      version: parsed.version,
+      mappings: mergedMappings,
+      source: 'config-file',
+      path: configPath,
+      hash: canonicalConfigFingerprint(parsed.version, 'config-file', mergedMappings)
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(

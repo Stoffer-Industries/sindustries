@@ -126,6 +126,8 @@ describe('loadRequiredApprovalsConfig', () => {
     expect(config.mappings.code).toEqual(['tech_design', 'qa']);
     expect(config.mappings.content).toEqual(['spec', 'qa']);
     expect(config.mappings.research).toEqual([]);
+    expect(config.path).toBe(path);
+    expect(config.hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('falls back to default when file is malformed', () => {
@@ -136,6 +138,34 @@ describe('loadRequiredApprovalsConfig', () => {
 
     expect(config.source).toBe('builtin-default');
     expect(config.mappings).toEqual(DEFAULT_REQUIRED_APPROVALS.mappings);
+    expect(config.path).toBeNull();
+    expect(config.hash).toBe(DEFAULT_REQUIRED_APPROVALS.hash);
+  });
+
+  it('returns a stable hash for the builtin default', () => {
+    expect(DEFAULT_REQUIRED_APPROVALS.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(DEFAULT_REQUIRED_APPROVALS.hash).toBe(DEFAULT_REQUIRED_APPROVALS.hash);
+  });
+
+  it('produces a different hash when the merged mappings change', () => {
+    const basePath = join(tmpDir, 'base.yaml');
+    writeFileSync(
+      basePath,
+      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      'utf8'
+    );
+    const baseConfig = loadRequiredApprovalsConfig(basePath);
+
+    const overridePath = join(tmpDir, 'override.yaml');
+    writeFileSync(
+      overridePath,
+      ['version: 1', 'mappings:', '  feature: [spec, qa]'].join('\n'),
+      'utf8'
+    );
+    const overrideConfig = loadRequiredApprovalsConfig(overridePath);
+
+    expect(overrideConfig.hash).not.toBe(baseConfig.hash);
+    expect(overrideConfig.hash).not.toBe(DEFAULT_REQUIRED_APPROVALS.hash);
   });
 });
 
@@ -167,7 +197,9 @@ describe('GET /api/v1/task-types/:taskType/required-approvals', () => {
         taskType: 'feature',
         requiredApprovals: ['spec', 'tech_design', 'qa'],
         version: 1,
-        source: 'builtin-default'
+        source: 'builtin-default',
+        path: null,
+        hash: expect.stringMatching(/^[0-9a-f]{64}$/)
       }
     });
   });
