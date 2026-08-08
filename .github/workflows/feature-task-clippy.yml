@@ -42,4 +42,8 @@ jobs:
           workspaces: agents/workflows/feature-task -> target
 
       - name: Run clippy (-D warnings)
-        run: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings --color always
+        # NOTE: do NOT pass `--color always` here — `Swatinem/rust-cache@v2`
+        # appends `--message-format=json` for cache hashing, which conflicts
+        # with `--color` ("cannot specify the --color option with --json").
+        # GitHub Actions log rendering doesn't need ANSI codes anyway.
+        run: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
