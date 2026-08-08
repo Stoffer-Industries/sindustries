@@ -74,6 +74,19 @@ struct StageArgs {
     repo: PathBuf,
     #[arg(long)]
     workspace_root: Option<PathBuf>,
+    /// Source for approval-state reads. `legacy` parses description text and
+    /// `[tech-design-approved]` / `[qa-ac-verified]` comments (the pre-PR #370
+    /// behavior). `api` reads structured `TaskApproval` rows from the Tasks API
+    /// response and fails closed on API errors. `auto` reads the API rows and
+    /// falls back to `legacy` text matching when the API has no row, the row
+    /// is revoked, or the API call fails — useful during the migration window
+    /// when in-flight tasks still carry only the legacy form.
+    ///
+    /// Default is `legacy` so the lobster cron behaves identically until
+    /// Quinn smoke-tests pass on at least one ready and one doing feature task
+    /// with `--approval-source=auto`, then promotes the cron to `auto`.
+    #[arg(long, default_value = "legacy", value_parser = ["legacy", "api", "auto"])]
+    approval_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -109,6 +122,12 @@ struct Task {
     tags: Vec<String>,
     #[serde(default)]
     comments: Vec<TaskComment>,
+    /// Structured approvals embedded in the task payload by the Tasks API
+    /// after PR #370. Empty when the task has no rows yet or the API
+    /// response predates PR #370. The lobster reads from this collection
+    /// when `--approval-source=api` or `--approval-source=auto`.
+    #[serde(default)]
+    approvals: Vec<TaskApproval>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -117,6 +136,32 @@ struct TaskComment {
     text: Option<String>,
     #[serde(default)]
     body: Option<String>,
+}
+
+/// Structured approval row embedded in the Tasks API task payload after
+/// PR #370 (task `ffa30da7` WS1). Mirrors `TaskApproval` in
+/// `services/tasks-api/prisma/schema.prisma`. The `type` field is named
+/// `approval_type` in Rust because `type` is a reserved keyword; serde
+/// uses `rename` so the JSON field stays `type`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct TaskApproval {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(rename = "type", default)]
+    approval_type: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    approved_at: Option<String>,
+    #[serde(default)]
+    revoked_at: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -406,7 +451,12 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env = move_approved_chat_spec_if_needed(&args, env)?;
     }
     if is_past(&env.task, "open") {
-        let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
+        let failures = missing_spec_checksum_failures(
+            &env.task,
+            &args.repo,
+            workspace_root(&args),
+            &args.approval_source,
+        );
         if !failures.is_empty() {
             if !args.dry_run {
                 api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "open"}))?;
@@ -435,7 +485,12 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_open".to_string();
         return Ok(env);
     }
-    let failures = spec_failures(&env.task, &args.repo, workspace_root(&args));
+    let failures = spec_failures(
+        &env.task,
+        &args.repo,
+        workspace_root(&args),
+        &args.approval_source,
+    );
     if failures.is_empty() && !args.dry_run {
         mirror_task_approval_to_brain_spec_if_needed(&env.task, &args.repo, workspace_root(&args))?;
     }
@@ -478,7 +533,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     if tech_design_url(&env.task).is_none() {
         failures.push("Missing task comment `[tech-design] <url>`.".to_string());
     }
-    if !tech_design_approved(&env.task) {
+    if !tech_design_approved_with_source(&env.task, &args.approval_source) {
         failures.push("Missing task comment `[tech-design-approved] true`.".to_string());
     }
     let implementer = task_implementer(&env.task);
@@ -555,7 +610,8 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
     // approved design (a waiver without an approved design is fine for
     // small tasks).
     let has_tech_design = tech_design_url(&env.task).is_some();
-    let has_tech_design_approved = tech_design_approved(&env.task);
+    let has_tech_design_approved =
+        tech_design_approved_with_source(&env.task, &args.approval_source);
     let has_waiver = tech_design_waived(&env.task);
     if !has_tech_design && !has_waiver {
         failures.push(
@@ -808,8 +864,67 @@ fn qa_ac_verified(task: &Task) -> bool {
         .any(|v| v.eq_ignore_ascii_case("true"))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn qa_ac_verified_failures(task: &Task) -> Vec<String> {
     if qa_ac_verified(task) {
+        vec![]
+    } else {
+        vec!["Missing task comment `[qa-ac-verified] true` -- Tom must verify all task ACs are met before closing.".to_string()]
+    }
+}
+
+/// Look up the state of a structured approval row by type on the embedded
+/// `task.approvals` collection (PR #370). Returns `None` if the task has no
+/// row for that approval type, or if the type doesn't match an approval we
+/// know about (`spec`, `tech_design`, `qa`).
+///
+/// The legacy helpers (`qa_ac_verified`, `tech_design_approved`,
+/// `product_spec_approved_by_tom`) only see the description text and
+/// tagged comments. This helper sees only the structured rows. The
+/// source-aware wrappers below combine the two with the
+/// `--approval-source` semantics (`legacy` | `api` | `auto`).
+fn task_approval_state(task: &Task, approval_type: &str) -> Option<String> {
+    task.approvals
+        .iter()
+        .find(|a| a.approval_type == approval_type)
+        .map(|a| a.state.clone())
+}
+
+/// Combine a structured-approval lookup with a legacy text-matching check
+/// according to the `--approval-source` flag.
+///
+/// - `legacy` — always returns `legacy_check(task)` (cron default; pre-PR #370
+///   behavior).
+/// - `api` — returns `true` iff the structured row exists and has
+///   `state == "approved"`. Fails closed on missing/revoked rows. Use this
+///   when the task has migrated and you trust the API row.
+/// - `auto` — returns `true` if the structured row exists and is approved;
+///   otherwise falls back to `legacy_check(task)`. Use this during the
+///   migration window when in-flight tasks still carry only the legacy form.
+fn is_approval_granted_via_source<F>(task: &Task, approval_type: &str, source: &str, legacy_check: F) -> bool
+where
+    F: Fn(&Task) -> bool,
+{
+    match source {
+        "api" => task_approval_state(task, approval_type) == Some("approved".to_string()),
+        "auto" => match task_approval_state(task, approval_type) {
+            Some(s) if s == "approved" => true,
+            _ => legacy_check(task),
+        },
+        _ => legacy_check(task),
+    }
+}
+
+/// Source-aware wrapper around `qa_ac_verified`. Reads the structured `qa`
+/// approval row when `--approval-source=auto|api`; falls back to the
+/// `[qa-ac-verified] true` comment tag when `legacy` or when `auto` has no
+/// approved row.
+fn qa_ac_verified_with_source(task: &Task, source: &str) -> bool {
+    is_approval_granted_via_source(task, "qa", source, qa_ac_verified)
+}
+
+fn qa_ac_verified_failures_with_source(task: &Task, source: &str) -> Vec<String> {
+    if qa_ac_verified_with_source(task, source) {
         vec![]
     } else {
         vec!["Missing task comment `[qa-ac-verified] true` -- Tom must verify all task ACs are met before closing.".to_string()]
@@ -1185,7 +1300,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
 
     // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
     // Require Tom's explicit sign-off before closing.
-    let qa_failures = qa_ac_verified_failures(&env.task);
+    let qa_failures = qa_ac_verified_failures_with_source(&env.task, &args.approval_source);
     if is_past(&env.task, "acceptance") {
         if !qa_failures.is_empty() {
             if !args.dry_run {
@@ -2667,7 +2782,7 @@ fn is_past(task: &Task, stage: &str) -> bool {
     status_rank(&task.status) > status_rank(stage)
 }
 
-fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
+fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path, source: &str) -> Vec<String> {
     let mut failures = Vec::new();
     match product_spec(task) {
         Some(spec) => {
@@ -2675,11 +2790,7 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
             if !path.exists() {
                 failures.push(format!("Product spec not found at {}", spec.path));
             } else if let Ok(text) = fs::read_to_string(&path) {
-                let task_description = task.description.clone().unwrap_or_default();
-                let approved_in_spec = product_spec_approved_by_tom(&text);
-                let approved_in_task =
-                    approval_marker_state(&task_description) == ApprovalMarker::Checked;
-                if !approved_in_spec && !approved_in_task {
+                if !spec_is_approved(task, repo, workspace_root, source, &text) {
                     failures.push("Product spec not approved by Tom".to_string());
                 }
             }
@@ -2695,7 +2806,7 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
     failures
 }
 
-fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
+fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Path, source: &str) -> Vec<String> {
     if task.spec_checksum.is_some() {
         return vec![];
     }
@@ -2703,8 +2814,41 @@ fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Pat
         "Task is past `open` but has no stored `specChecksum`; the spec gate was bypassed."
             .to_string(),
     ];
-    failures.extend(spec_failures(task, repo, workspace_root));
+    failures.extend(spec_failures(task, repo, workspace_root, source));
     failures
+}
+
+
+
+/// Source-aware spec approval check. The `spec_text` is the spec file's
+/// contents (already loaded by the caller); this avoids re-reading the
+/// file. Used inside `spec_failures` to evaluate the
+/// "Product spec not approved by Tom" condition.
+fn spec_is_approved(
+    task: &Task,
+    repo: &Path,
+    workspace_root: &Path,
+    source: &str,
+    spec_text: &str,
+) -> bool {
+    let legacy = || -> bool {
+        let task_description = task.description.clone().unwrap_or_default();
+        let approved_in_spec = product_spec_approved_by_tom(spec_text);
+        let approved_in_task =
+            approval_marker_state(&task_description) == ApprovalMarker::Checked;
+        approved_in_spec || approved_in_task
+    };
+    match source {
+        "api" => task_approval_state(task, "spec") == Some("approved".to_string()),
+        "auto" => match task_approval_state(task, "spec") {
+            Some(s) if s == "approved" => true,
+            _ => {
+                let _ = (repo, workspace_root);
+                legacy()
+            }
+        },
+        _ => legacy(),
+    }
 }
 
 fn product_spec(task: &Task) -> Option<ProductSpecRef> {
@@ -3105,6 +3249,14 @@ fn tech_design_approved(task: &Task) -> bool {
             let token = v.split_whitespace().next().unwrap_or("");
             token.eq_ignore_ascii_case("true")
         })
+}
+
+/// Source-aware wrapper around `tech_design_approved`. Reads the structured
+/// `tech_design` approval row when `--approval-source=auto|api`; falls back
+/// to the `[tech-design-approved] true` comment tag when `legacy` or when
+/// `auto` has no approved row.
+fn tech_design_approved_with_source(task: &Task, source: &str) -> bool {
+    is_approval_granted_via_source(task, "tech_design", source, tech_design_approved)
 }
 
 /// True if any task comment starts with `[tech-design-not-required]` followed
@@ -3937,7 +4089,7 @@ Lead-in.
             ..Task::default()
         };
 
-        assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(spec_failures(&task, repo.path(), workspace.path(), "legacy").is_empty());
     }
 
     #[test]
@@ -4037,7 +4189,7 @@ Lead-in.
             ..Task::default()
         };
 
-        assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(spec_failures(&task, repo.path(), workspace.path(), "legacy").is_empty());
         assert!(!repo.path().join("brain/tasks/specs/example.md").exists());
     }
 
@@ -4331,7 +4483,7 @@ Lead-in.
             ),
             ..Task::default()
         };
-        let failures = spec_failures(&task, repo.path(), workspace.path());
+        let failures = spec_failures(&task, repo.path(), workspace.path(), "legacy");
         assert!(failures.contains(&"Task description must include a **Spec:** line".to_string()));
         assert!(
             !failures
@@ -4413,6 +4565,176 @@ Lead-in.
         assert!(!qa_ac_verified(&task_false));
     }
 
+    // --- approval-source wrappers (WS3, lobster rewire for PR #370) ---
+
+    fn approved_row(approval_type: &str) -> TaskApproval {
+        TaskApproval {
+            id: None,
+            approval_type: approval_type.to_string(),
+            state: "approved".to_string(),
+            owner: None,
+            approved_at: None,
+            revoked_at: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    fn revoked_row(approval_type: &str) -> TaskApproval {
+        TaskApproval {
+            id: None,
+            approval_type: approval_type.to_string(),
+            state: "revoked".to_string(),
+            owner: None,
+            approved_at: None,
+            revoked_at: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn qa_source_legacy_reads_comment_tag_only() {
+        let task = Task {
+            comments: vec![TaskComment {
+                text: Some("[qa-ac-verified] true".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        assert!(qa_ac_verified_with_source(&task, "legacy"));
+        // No approvals row: api source fails closed even when comment tag is present.
+        assert!(!qa_ac_verified_with_source(&task, "api"));
+        // auto: missing row falls back to legacy comment tag.
+        assert!(qa_ac_verified_with_source(&task, "auto"));
+    }
+
+    #[test]
+    fn qa_source_api_reads_structured_approval_row() {
+        let task = Task {
+            approvals: vec![approved_row("qa")],
+            ..Task::default()
+        };
+        assert!(qa_ac_verified_with_source(&task, "api"));
+        // legacy source ignores the structured row and requires the comment tag.
+        assert!(!qa_ac_verified_with_source(&task, "legacy"));
+        // auto: present approved row short-circuits to true.
+        assert!(qa_ac_verified_with_source(&task, "auto"));
+    }
+
+    #[test]
+    fn qa_source_api_fails_closed_on_revoked_row() {
+        let task = Task {
+            comments: vec![TaskComment {
+                text: Some("[qa-ac-verified] true".to_string()),
+                body: None,
+            }],
+            approvals: vec![revoked_row("qa")],
+            ..Task::default()
+        };
+        // api: revoked row fails closed even when legacy comment says approved.
+        assert!(!qa_ac_verified_with_source(&task, "api"));
+        // auto: revoked row falls back to legacy comment tag (granted).
+        assert!(qa_ac_verified_with_source(&task, "auto"));
+    }
+
+    #[test]
+    fn tech_design_source_api_reads_structured_approval_row() {
+        let task = Task {
+            approvals: vec![approved_row("tech_design")],
+            ..Task::default()
+        };
+        assert!(tech_design_approved_with_source(&task, "api"));
+        assert!(tech_design_approved_with_source(&task, "auto"));
+        // legacy: no comment tag -> not approved.
+        assert!(!tech_design_approved_with_source(&task, "legacy"));
+    }
+
+    #[test]
+    fn tech_design_source_legacy_reads_comment_tag_only() {
+        let task = Task {
+            comments: vec![TaskComment {
+                text: Some("[tech-design-approved] true".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        assert!(tech_design_approved_with_source(&task, "legacy"));
+        assert!(!tech_design_approved_with_source(&task, "api"));
+        assert!(tech_design_approved_with_source(&task, "auto"));
+    }
+
+    #[test]
+    fn spec_source_api_reads_structured_approval_row_only() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        // No spec file written; spec_text is empty so the spec-file path returns false.
+        // The task description carries a checked approval marker, which the legacy
+        // helper ALSO checks, so legacy still returns true. This test exercises the
+        // api-only short-circuit (structured row wins, file content irrelevant).
+        let task = Task {
+            description: Some(
+                "**Spec:** brain/tasks/specs/example.md\n\n- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1"
+                    .to_string(),
+            ),
+            approvals: vec![approved_row("spec")],
+            ..Task::default()
+        };
+        let spec_text = "";
+        assert!(spec_is_approved(&task, repo.path(), workspace.path(), "api", spec_text));
+        // auto with approved row short-circuits to true regardless of spec_text.
+        assert!(spec_is_approved(&task, repo.path(), workspace.path(), "auto", spec_text));
+        // legacy: spec_text is empty but task-description marker is checked -> true.
+        assert!(spec_is_approved(&task, repo.path(), workspace.path(), "legacy", spec_text));
+    }
+
+    #[test]
+    fn spec_source_api_fails_closed_when_no_approvals_row_and_no_marker() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        // Task description has the unchecked spec approval marker and no
+        // structured approvals row. api must fail closed.
+        let task = Task {
+            description: Some(
+                "**Spec:** brain/tasks/specs/example.md\n\n- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1"
+                    .to_string(),
+            ),
+            ..Task::default()
+        };
+        let spec_text = "";
+        assert!(!spec_is_approved(&task, repo.path(), workspace.path(), "api", spec_text));
+        // legacy: marker is unchecked -> not approved.
+        assert!(!spec_is_approved(&task, repo.path(), workspace.path(), "legacy", spec_text));
+        // auto: missing row falls back to legacy (also not approved).
+        assert!(!spec_is_approved(&task, repo.path(), workspace.path(), "auto", spec_text));
+    }
+
+    #[test]
+    fn spec_source_legacy_reads_spec_file_approved_marker() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
+        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        fs::write(
+            &spec_path,
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1\n",
+        )
+        .unwrap();
+        let task = Task {
+            description: Some(format!(
+                "**Spec:** {}\n\n## Acceptance Criteria\n- [ ] AC1",
+                spec_path.display()
+            )),
+            ..Task::default()
+        };
+        let spec_text = fs::read_to_string(&spec_path).unwrap();
+        assert!(spec_is_approved(&task, repo.path(), workspace.path(), "legacy", &spec_text));
+        // auto with no approvals row falls back to legacy.
+        assert!(spec_is_approved(&task, repo.path(), workspace.path(), "auto", &spec_text));
+        // api with no approvals row fails closed.
+        assert!(!spec_is_approved(&task, repo.path(), workspace.path(), "api", &spec_text));
+    }
+
     #[test]
     fn spec_check_detects_manually_advanced_task_without_checksum() {
         let task = Task {
@@ -4424,7 +4746,7 @@ Lead-in.
         };
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        let failures = missing_spec_checksum_failures(&task, repo.path(), workspace.path());
+        let failures = missing_spec_checksum_failures(&task, repo.path(), workspace.path(), "legacy");
         assert!(
             !failures.is_empty(),
             "expected failures for manually-advanced task without checksum"
@@ -4446,7 +4768,7 @@ Lead-in.
         };
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        assert!(missing_spec_checksum_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(missing_spec_checksum_failures(&task, repo.path(), workspace.path(), "legacy").is_empty());
 
         // A task with a stored checksum is already past "open" legitimately — spec_checksum_failures
         // (not spec_failures) is the gate from here on, so we just confirm no spec drift.
@@ -4610,6 +4932,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let env = Envelope {
@@ -4641,6 +4964,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let env = Envelope {
@@ -5131,6 +5455,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let task = Task::default();
@@ -5153,6 +5478,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5194,6 +5520,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5233,6 +5560,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5271,6 +5599,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5315,6 +5644,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5363,6 +5693,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5429,6 +5760,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5480,6 +5812,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -5524,6 +5857,7 @@ Lead-in.
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let approved = Task {
@@ -6293,6 +6627,7 @@ keep me
             base_url: "http://example.invalid".to_string(),
             repo: workspace_root.clone(),
             workspace_root: Some(workspace_root.clone()),
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let env = Envelope {
@@ -6348,7 +6683,8 @@ keep me
             base_url: "http://example.invalid".to_string(),
             repo: workspace_path.clone(),
             workspace_root: Some(workspace_path),
-            dry_run: false,
+            approval_source: "legacy".to_string(),
+            dry_run: true,
         };
         let env = Envelope {
             criteria_met: true,
@@ -6398,6 +6734,7 @@ keep me
             base_url: "http://example.invalid".to_string(),
             repo: workspace_path.clone(),
             workspace_root: Some(workspace_path),
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let env = Envelope {
@@ -6467,6 +6804,7 @@ keep me
             base_url: "http://example.invalid".to_string(),
             repo: workspace_path.clone(),
             workspace_root: Some(workspace_path),
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let env = Envelope {
@@ -6517,6 +6855,7 @@ keep me
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
             workspace_root: None,
+            approval_source: "legacy".to_string(),
             dry_run: true,
         };
         let original = Task {
