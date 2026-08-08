@@ -17,13 +17,14 @@ import { useTasks } from './useTasks.js';
 import { useTaskDrafts } from './useTaskDrafts.js';
 import { fetchTask } from './tasksApi';
 import { useDebounce } from './hooks/useDebounce.js';
+import { usePulseCelebration } from './hooks/usePulseCelebration.js';
 import { useToast } from './hooks/useToast.js';
 import { ConfettiLayer } from './components/ConfettiLayer.jsx';
 import { TaskCardSummary } from './components/TaskCardSummary.jsx';
 import { TaskEditor } from './components/TaskEditor.jsx';
 import { ToastStack } from './components/ToastStack.jsx';
 import { STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_SCORE, ASSIGNEE_OPTIONS, TASK_TYPES, TASK_TYPE_LABELS } from './utils/constants.js';
-import { createConfettiPieces, normalizeTaskForEditor, taskCardTilt } from './utils/helpers.js';
+import { normalizeTaskForEditor, taskCardTilt } from './utils/helpers.js';
 import { getStoredView, setStoredView } from './utils/storage.js';
 
 function isReadyTask(task) {
@@ -109,11 +110,9 @@ export function App() {
   const { toasts, showToast } = useToast();
 
   const [newTask, setNewTask] = useState({ title: '', expanded: false, description: '', priority: 'medium', assignee: '', dueAt: '', tagsText: '', blocked: false, taskType: '' });
-  const [confettiBursts, setConfettiBursts] = useState([]);
   const [submittingCommentForTaskId, setSubmittingCommentForTaskId] = useState(null);
-  const confettiTimeoutsRef = useRef(new Map());
-  const audioContextRef = useRef(null);
   const taskCardRefs = useRef({});
+  const { confettiBursts, triggerCelebration, hoverProps: pulseHoverProps } = usePulseCelebration();
 
   // Scroll to task card after save/close if needed
   // AC9: When closing a task that has a long card (top above window), scroll should reset accounting for header
@@ -175,18 +174,6 @@ export function App() {
     });
     return Array.from(tagSet).sort();
   }, [tasks]);
-
-  useEffect(() => {
-    return () => {
-      for (const timeoutId of confettiTimeoutsRef.current.values()) {
-        window.clearTimeout(timeoutId);
-      }
-      confettiTimeoutsRef.current.clear();
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(() => {});
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!hasUnsavedDrafts) return undefined;
@@ -287,56 +274,6 @@ export function App() {
     }
   }
 
-  async function playSalesBell() {
-    try {
-      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextCtor) return;
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContextCtor();
-      }
-
-      const context = audioContextRef.current;
-      if (context.state === 'suspended') {
-        await context.resume();
-      }
-
-      const now = context.currentTime + 0.02;
-      const notes = [523.25, 659.25, 783.99, 1046.5];
-
-      notes.forEach((frequency, index) => {
-        const start = now + index * 0.09;
-        const duration = 0.24;
-
-        const lead = context.createOscillator();
-        const leadGain = context.createGain();
-        lead.type = 'square';
-        lead.frequency.setValueAtTime(frequency, start);
-        leadGain.gain.setValueAtTime(0.001, start);
-        leadGain.gain.exponentialRampToValueAtTime(0.17, start + 0.02);
-        leadGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-        lead.connect(leadGain);
-        leadGain.connect(context.destination);
-        lead.start(start);
-        lead.stop(start + duration + 0.03);
-
-        const shimmer = context.createOscillator();
-        const shimmerGain = context.createGain();
-        shimmer.type = 'triangle';
-        shimmer.frequency.setValueAtTime(frequency * 2, start);
-        shimmerGain.gain.setValueAtTime(0.001, start);
-        shimmerGain.gain.exponentialRampToValueAtTime(0.06, start + 0.02);
-        shimmerGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-        shimmer.connect(shimmerGain);
-        shimmerGain.connect(context.destination);
-        shimmer.start(start);
-        shimmer.stop(start + duration + 0.03);
-      });
-    } catch {
-      // No-op on browsers that block or lack Web Audio.
-    }
-  }
-
   function openTask(taskId) {
     setSelectedId(taskId);
     void refreshTask(taskId).catch(() => {});
@@ -350,56 +287,6 @@ export function App() {
     openTask(taskId);
   }
 
-  function launchPulseCelebration() {
-    void playSalesBell();
-
-    const id = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-    const pieces = createConfettiPieces();
-    setConfettiBursts((current) => [...current, { id, pieces }]);
-
-    const timeoutId = window.setTimeout(() => {
-      setConfettiBursts((current) => current.filter((burst) => burst.id !== id));
-      confettiTimeoutsRef.current.delete(id);
-    }, 2800);
-
-    confettiTimeoutsRef.current.set(id, timeoutId);
-  }
-
-  function updatePulseHoverMotion(event) {
-    const element = event.currentTarget;
-    const bounds = element.getBoundingClientRect();
-    if (!bounds.width || !bounds.height) return;
-
-    const x = Math.min(Math.max((event.clientX - bounds.left) / bounds.width, 0), 1);
-    const y = Math.min(Math.max((event.clientY - bounds.top) / bounds.height, 0), 1);
-    const centerX = x - 0.5;
-    const centerY = y - 0.5;
-    const distance = Math.min(Math.hypot(centerX, centerY), 0.75);
-
-    const sway = centerX * 11;
-    const lift = 3 + Math.abs(centerY) * 7;
-    const speed = 460 + Math.round(distance * 360);
-
-    element.style.setProperty('--pulse-tilt', `${(centerX * 5.5).toFixed(2)}deg`);
-    element.style.setProperty('--pulse-sway-a', `${sway.toFixed(2)}px`);
-    element.style.setProperty('--pulse-sway-b', `${(-sway * 0.72).toFixed(2)}px`);
-    element.style.setProperty('--pulse-up-a', `-${lift.toFixed(2)}px`);
-    element.style.setProperty('--pulse-up-b', `-${(lift + 1.8).toFixed(2)}px`);
-    element.style.setProperty('--pulse-down', `${(centerY * 1.6).toFixed(2)}px`);
-    element.style.setProperty('--pulse-speed', `${speed}ms`);
-  }
-
-  function resetPulseHoverMotion(event) {
-    const element = event.currentTarget;
-    element.style.removeProperty('--pulse-tilt');
-    element.style.removeProperty('--pulse-sway-a');
-    element.style.removeProperty('--pulse-sway-b');
-    element.style.removeProperty('--pulse-up-a');
-    element.style.removeProperty('--pulse-up-b');
-    element.style.removeProperty('--pulse-down');
-    element.style.removeProperty('--pulse-speed');
-  }
-
   return (
     <main className="app-shell">
       <header className="hero-header">
@@ -409,11 +296,9 @@ export function App() {
             <button
               type="button"
               className="brand brand-btn si-font-display"
-              onClick={launchPulseCelebration}
-              onPointerEnter={updatePulseHoverMotion}
-              onPointerMove={updatePulseHoverMotion}
-              onPointerLeave={resetPulseHoverMotion}
+              onClick={triggerCelebration}
               aria-label="Ring Pulse sales bell"
+              {...pulseHoverProps}
             >
               Pulse
             </button>
