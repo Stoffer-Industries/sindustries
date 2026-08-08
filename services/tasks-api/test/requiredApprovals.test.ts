@@ -142,6 +142,53 @@ describe('loadRequiredApprovalsConfig', () => {
     expect(config.hash).toBe(DEFAULT_REQUIRED_APPROVALS.hash);
   });
 
+  it('emits a console.warn naming the file when parse fails', () => {
+    const path = join(tmpDir, 'required-approvals.yaml');
+    writeFileSync(path, 'this is not the right shape', 'utf8');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadRequiredApprovalsConfig(path);
+      expect(config.source).toBe('builtin-default');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const message = String(warnSpy.mock.calls[0]?.[0] ?? '');
+      expect(message).toMatch(/\[required-approvals\]/);
+      expect(message).toContain(path);
+      expect(message).toMatch(/Falling back to built-in default/);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('does not warn when the config file is missing', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadRequiredApprovalsConfig(join(tmpDir, 'does-not-exist.yaml'));
+      expect(config.source).toBe('builtin-default');
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('does not warn when the config file parses cleanly', () => {
+    const path = join(tmpDir, 'required-approvals.yaml');
+    writeFileSync(
+      path,
+      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      'utf8'
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = loadRequiredApprovalsConfig(path);
+      expect(config.source).toBe('config-file');
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('returns a stable hash for the builtin default', () => {
     expect(DEFAULT_REQUIRED_APPROVALS.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(DEFAULT_REQUIRED_APPROVALS.hash).toBe(DEFAULT_REQUIRED_APPROVALS.hash);
