@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { requireAuthenticatedUser } from './workouts-auth.js';
 
 /**
  * @typedef {Object} Workout
@@ -25,8 +26,8 @@ import { supabase } from './supabase.js';
  * @returns {Promise<{ data: Workout|null, error: Error|null }>}
  */
 export async function createWorkout(input = {}) {
-  const { data: { user } = {} } = await supabase.auth.getUser();
-  if (!user) return { data: null, error: new Error('Not authenticated') };
+  const { user, error: authError } = await requireAuthenticatedUser();
+  if (authError) return { data: null, error: authError };
   const performed_at = input.performed_at ?? new Date().toISOString();
   const row = {
     user_id: user.id,
