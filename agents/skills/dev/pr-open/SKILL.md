@@ -13,6 +13,31 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 - All tests must pass locally
 - Commits must follow the project convention: `<type>(<scope>): <what>`
 
+### Validation — Rust workflow PRs
+
+For PRs that change Rust source under `agents/workflows/feature-task/**`, the following must exit zero locally before the PR is opened or marked ready:
+
+```bash
+cargo test --manifest-path agents/workflows/feature-task/Cargo.toml
+
+cargo clippy \
+  --manifest-path agents/workflows/feature-task/Cargo.toml \
+  --all-targets \
+  -- -D warnings
+```
+
+PR body checklist (include the relevant lines; copy verbatim from below):
+
+```
+## Validation
+- [ ] `cargo test --manifest-path agents/workflows/feature-task/Cargo.toml` (Rust changes only)
+- [ ] `cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings` (Rust changes only)
+```
+
+Skip the checklist entirely for non-Rust / content-only PRs. When in doubt, mirror the scope rule in `agents/workflows/feature-task/WORKFLOW.md` — diff not touching `.rs` under `agents/workflows/feature-task/src/` means skip.
+
+Clippy failures must be fixed before review unless the PR explicitly documents an accepted temporary exception (for example: a `#[allow(...)]` annotation with rationale, or a deferred-cleanup note linked to a tracked task). An unannotated clippy failure blocks review.
+
 ## The gh pr create Command
 
 Always set `--assignee` to the implementation owner/opener and `--reviewer` to the designated reviewer(s). Check the invoking skill, task, or workflow for reviewer routing. If the reviewer is not stated, stop and ask/escalate — do **not** guess a default reviewer.
