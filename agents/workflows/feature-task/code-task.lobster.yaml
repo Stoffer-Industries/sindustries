@@ -37,6 +37,8 @@ args:
     default: ${WORKSPACE_ROOT}
   dryRun:
     default: false
+  approvalSource:
+    default: legacy
 
 steps:
   - id: load_task
@@ -47,33 +49,33 @@ steps:
   - id: code_task_tech_design_check
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
-      code-task-tech-design-check --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+      code-task-tech-design-check --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot} --approval-source ${approvalSource}
     stdin: $load_task.stdout
 
   - id: code_task_ready_checks
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
-      code-task-ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+      code-task-ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot} --approval-source ${approvalSource}
     stdin: $code_task_tech_design_check.stdout
     condition: $code_task_tech_design_check.json.criteriaMet
 
   - id: code_task_verify_delivery
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
-      verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+      verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot} --approval-source ${approvalSource}
     stdin: $code_task_ready_checks.stdout
     condition: $code_task_ready_checks.json.criteriaMet
 
   - id: feedback_aggregate
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
-      feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+      feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot} --approval-source ${approvalSource}
     stdin: $code_task_verify_delivery.stdout
     condition: $code_task_verify_delivery.json.criteriaMet
 
   - id: post_merge
     command: >-
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
-      post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
+      post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot} --approval-source ${approvalSource}
     stdin: $feedback_aggregate.stdout
     condition: $feedback_aggregate.json.criteriaMet
