@@ -7,6 +7,12 @@ BACKUP_ROOT=${OPENCLAW_AGENT_DEFS_BACKUP_ROOT:-"$HOME/.openclaw/backups/agent-de
 LOCK_DIR=${OPENCLAW_AGENT_DEFS_LOCK_DIR:-"${TMPDIR:-/tmp}/openclaw-agent-definitions-sync.lock"}
 SOURCE_ROOT=agents/definitions
 AGENTS=(quinn rowan lox ivy)
+# Non-quinn agents also need the canonical AGENTS.md copied from the
+# workspace root into their own workspace dir. It is not sourced from
+# agents/definitions/<agent>/ (it is shared, not per-agent) and previously
+# relied on a workspace-repo-tracked symlink, which is fragile (see
+# workspace PR #60 — symlinks get reasserted by any git restore/checkout).
+WORKSPACE_AGENTS_MD="$WORKSPACE_ROOT/AGENTS.md"
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "agent-definitions sync already running; skipping"
@@ -61,6 +67,27 @@ for agent in "${AGENTS[@]}"; do
     echo "synced $source_path -> $destination"
     changed=$((changed + 1))
   done < <(git -C "$REPO_ROOT" ls-tree -r --name-only origin/main -- "$source_dir" | grep -E '\.md$')
+
+  # AGENTS.md: canonical copy lives at the workspace root and is shared
+  # across all agents (not agent-specific, so it is not part of
+  # agents/definitions/<agent>/ on origin/main). Copy it into every
+  # non-quinn agent's workspace dir here so it can never silently go
+  # missing or drift to a stale copy.
+  if [[ "$agent" != quinn && -f "$WORKSPACE_AGENTS_MD" ]]; then
+    agents_destination="$destination_dir/AGENTS.md"
+    if [[ ! -L "$agents_destination" && -f "$agents_destination" ]] && cmp -s "$WORKSPACE_AGENTS_MD" "$agents_destination"; then
+      :
+    else
+      if [[ -e "$agents_destination" || -L "$agents_destination" ]]; then
+        mkdir -p "$backup_dir/$agent"
+        cp -pL "$agents_destination" "$backup_dir/$agent/AGENTS.md"
+        rm -f "$agents_destination"
+      fi
+      install -m 0644 "$WORKSPACE_AGENTS_MD" "$agents_destination"
+      echo "synced $WORKSPACE_AGENTS_MD -> $agents_destination"
+      changed=$((changed + 1))
+    fi
+  fi
 done
 
 echo "agent-definitions sync complete: $changed file(s) changed"
