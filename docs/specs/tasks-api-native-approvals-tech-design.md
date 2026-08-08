@@ -181,16 +181,23 @@ A `--rollback <snapshot-path>` option restores from the snapshot if a follow-up 
 
 **WS4b — Tasks UI (AC6):**
 
-**`apps/tasks/src/tabs/TaskDetail.jsx`** — extend the task detail view to render an `Approvals` section:
+**`apps/tasks/src/components/TaskEditor.jsx`** — extend the task editor view with an `Approvals` section that renders as a checkbox list, one row per required approval type. Each row's checkbox is a `<input type="checkbox" disabled checked={...}>` whose visual state mirrors the approval:
+
+- **Checked** — `state: approved`
+- **Unchecked** — `state: revoked` OR no row exists for the required type (Pending)
+- **Strike-through row text** when `state: revoked`
+
+Visual mock:
 
 ```
-Approvals
-  Spec          Approved by Tom on 2026-07-15
-  Tech Design   Approved by Quinn on 2026-07-20
-  QA            Pending
+☑ Spec          — Approved by Tom on 2026-07-15
+☐ Tech Design   — Pending
+☑ QA            — Approved by Quinn on 2026-07-20
 ```
 
-Each approval renders: type label, state (Approved / Revoked / Pending), owner, timestamp, optional note. The list is sourced from `task.approvals` (always present on `GET /tasks/:id`) and resolved against `requiredApprovalsFor(task.taskType)` so a Pending state is shown for any required type that has no row.
+The checkbox is the primary visual anchor (replacing the "Approved by ..." text label); per-row metadata (type label, owner, timestamp, optional note) is rendered as small text beside it. The list is sourced from `task.approvals` (always present on `GET /tasks/:id`) and resolved against `requiredApprovalsFor(task.taskType)` so a Pending state is shown for any required type that has no row.
+
+The checkbox is `disabled` — approval writes still flow through the lobster (AC4) and `POST /tasks/:id/approvals` endpoint (AC1), not the UI. The Tasks UI is read-only for approvals in this design; the only way to land an approval is the existing comment-tag path (until/unless Quinn opens a follow-up to enable direct UI submission).
 
 No kanban-card changes. No task-list changes. Just the detail view.
 
