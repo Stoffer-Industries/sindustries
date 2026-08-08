@@ -35,55 +35,17 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { argv, env, exit } from 'node:process';
+import type { DetectedApproval } from '../src/lib/legacyApprovals.ts';
 import {
-  detectLegacyApprovals,
-  existingApprovalKeys,
-  type DetectedApproval,
-  type MigrationBreakdown
-} from '../src/lib/legacyApprovals.ts';
+  runDryRun,
+  runRollback,
+  runWrite,
+  type ApprovalType,
+  type MigrationDeps,
+  type MigrationTask
+} from '../src/lib/migrateLegacyApprovals.ts';
 
 const BASE_URL = (env.TASKS_API_BASE_URL ?? 'http://localhost:4001').replace(/\/$/, '');
-
-interface TaskApproval {
-  id: string;
-  taskId: string;
-  type: 'spec' | 'tech_design' | 'qa';
-  owner: string;
-  state: 'approved' | 'revoked';
-  approvedAt: string;
-  revokedAt: string | null;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface TaskComment {
-  id: string;
-  author: string;
-  text: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  taskType: string | null;
-  approvals: TaskApproval[];
-  comments: TaskComment[];
-}
-
-interface MigrationSummary {
-  totalTasks: number;
-  createdApprovals: number;
-  skippedExisting: number;
-  breakdownByType: MigrationBreakdown[];
-  snapshotPath: string | null;
-  dryRun: boolean;
-  rolledBack: number;
-}
 
 function parseArgs() {
   const args = argv.slice(2);
@@ -134,8 +96,8 @@ function printHelp() {
   );
 }
 
-async function fetchAllTasks(): Promise<Task[]> {
-  const tasks: Task[] = [];
+async function fetchAllTasks(): Promise<MigrationTask[]> {
+  const tasks: MigrationTask[] = [];
   let cursor: string | null = null;
 
   while (true) {
@@ -149,7 +111,7 @@ async function fetchAllTasks(): Promise<Task[]> {
     if (!response.ok) {
       throw new Error(`GET /tasks ${response.status}: ${await response.text()}`);
     }
-    const body = (await response.json()) as { data: Task[]; page: { nextCursor: string | null } };
+    const body = (await response.json()) as { data: MigrationTask[]; page: { nextCursor: string | null } };
     tasks.push(...body.data);
     if (!body.page.nextCursor) break;
     cursor = body.page.nextCursor;
@@ -158,18 +120,7 @@ async function fetchAllTasks(): Promise<Task[]> {
   return tasks;
 }
 
-function detectApprovals(task: Task): DetectedApproval[] {
-  return detectLegacyApprovals(task);
-}
-
-function existingApprovalSet(task: Task): Set<string> {
-  return existingApprovalKeys(task);
-}
-
-async function postApproval(
-  taskId: string,
-  approval: DetectedApproval
-): Promise<void> {
+async function postApproval(taskId: string, approval: DetectedApproval): Promise<void> {
   const response = await fetch(`${BASE_URL}/api/v1/tasks/${taskId}/approvals`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -180,7 +131,7 @@ async function postApproval(
   }
 }
 
-async function deleteApproval(taskId: string, type: string): Promise<void> {
+async function deleteApproval(taskId: string, type: ApprovalType): Promise<void> {
   const response = await fetch(`${BASE_URL}/api/v1/tasks/${taskId}/approvals/${type}`, {
     method: 'DELETE',
     headers: { Accept: 'application/json' }
@@ -202,127 +153,25 @@ function ensureSnapshotDir(path: string): void {
   mkdirSync(dir, { recursive: true });
 }
 
-async function runDryRun(): Promise<MigrationSummary> {
-  const tasks = await fetchAllTasks();
-  const breakdownByType: MigrationBreakdown[] = [];
-  let createdApprovals = 0;
-  let skippedExisting = 0;
-
-  for (const task of tasks) {
-    const detected = detectApprovals(task);
-    const existing = existingApprovalSet(task);
-    for (const approval of detected) {
-      const key = `${task.id}:${approval.type}`;
-      if (existing.has(key)) {
-        skippedExisting += 1;
-      } else {
-        createdApprovals += 1;
-      }
-      let bucket = breakdownByType.find((b) => b.type === approval.type);
-      if (!bucket) {
-        bucket = { type: approval.type, created: 0, skippedExisting: 0 };
-        breakdownByType.push(bucket);
-      }
-      if (existing.has(key)) bucket.skippedExisting += 1;
-      else bucket.created += 1;
-    }
-  }
-
-  return {
-    totalTasks: tasks.length,
-    createdApprovals,
-    skippedExisting,
-    breakdownByType,
-    snapshotPath: null,
-    dryRun: true,
-    rolledBack: 0
-  };
-}
-
-async function runWrite(): Promise<MigrationSummary> {
-  const tasks = await fetchAllTasks();
-  const snapshotRows: Array<{ taskId: string; type: string }> = [];
-  const breakdownByType: MigrationBreakdown[] = [];
-  let createdApprovals = 0;
-  let skippedExisting = 0;
-
-  for (const task of tasks) {
-    const detected = detectApprovals(task);
-    const existing = existingApprovalSet(task);
-    for (const approval of detected) {
-      const key = `${task.id}:${approval.type}`;
-      if (existing.has(key)) {
-        skippedExisting += 1;
-      } else {
-        await postApproval(task.id, approval);
-        snapshotRows.push({ taskId: task.id, type: approval.type });
-        createdApprovals += 1;
-      }
-      let bucket = breakdownByType.find((b) => b.type === approval.type);
-      if (!bucket) {
-        bucket = { type: approval.type, created: 0, skippedExisting: 0 };
-        breakdownByType.push(bucket);
-      }
-      if (existing.has(key)) bucket.skippedExisting += 1;
-      else bucket.created += 1;
-    }
-  }
-
-  const snapshotPath = snapshotPath();
-  ensureSnapshotDir(snapshotPath);
-  writeFileSync(
-    snapshotPath,
-    JSON.stringify(
-      {
-        savedAt: new Date().toISOString(),
-        rolledBack: false,
-        rows: snapshotRows
-      },
-      null,
-      2
-    )
-  );
-
-  return {
-    totalTasks: tasks.length,
-    createdApprovals,
-    skippedExisting,
-    breakdownByType,
-    snapshotPath,
-    dryRun: false,
-    rolledBack: 0
-  };
-}
-
-async function runRollback(snapshotPath: string): Promise<MigrationSummary> {
-  const raw = readFileSync(snapshotPath, 'utf8');
-  const parsed = JSON.parse(raw) as { rows: Array<{ taskId: string; type: string }> };
-
-  for (const row of parsed.rows) {
-    await deleteApproval(row.taskId, row.type);
-  }
-
-  return {
-    totalTasks: 0,
-    createdApprovals: 0,
-    skippedExisting: 0,
-    breakdownByType: [],
-    snapshotPath,
-    dryRun: false,
-    rolledBack: parsed.rows.length
-  };
-}
+const defaultDeps: MigrationDeps = {
+  fetchAllTasks,
+  postApproval,
+  deleteApproval,
+  writeFile: (path, content) => writeFileSync(path, content),
+  readFile: (path) => readFileSync(path, 'utf8'),
+  ensureDir: ensureSnapshotDir
+};
 
 async function main() {
   const flags = parseArgs();
-  let summary: MigrationSummary;
+  let summary;
 
   if (flags.rollback) {
-    summary = await runRollback(flags.rollback);
+    summary = await runRollback(defaultDeps, flags.rollback);
   } else if (flags.dryRun) {
-    summary = await runDryRun();
+    summary = await runDryRun(defaultDeps);
   } else {
-    summary = await runWrite();
+    summary = await runWrite(defaultDeps, snapshotPath);
   }
 
   console.log(JSON.stringify(summary, null, 2));
