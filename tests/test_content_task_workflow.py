@@ -12,6 +12,7 @@ loaded_path = sys.path[:]
 sys.path.insert(0, content_scripts)
 try:
     import common as content_common  # noqa: E402
+    import format_transition as content_format_transition  # noqa: E402
     from common import ANY_HEADING_RE, OWNER_HEADING_RE, PR_HEADING_RE  # noqa: E402
     from pr_transition import owner_heading_index, owner_sections  # noqa: E402
 finally:
@@ -36,6 +37,13 @@ DESCRIPTION = """**Source:** brain/content/sindustries-weekly-content/2026-07-31
 
 
 class ContentTaskHeadingTests(unittest.TestCase):
+    def test_format_transition_imports_workspace_from_common(self):
+        self.assertEqual(content_format_transition.WORKSPACE, content_common.WORKSPACE)
+        self.assertEqual(
+            content_common.TASKS_CLIENT_DIR,
+            content_common._SINDUSTRIES_ROOT / "agents" / "skills" / "ops" / "tasks-api",
+        )
+
     def test_owner_sections_preserve_heading_text_after_a_preceding_newline(self):
         sections = owner_sections(DESCRIPTION)
 
