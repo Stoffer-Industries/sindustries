@@ -12,8 +12,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-WORKSPACE = Path(os.environ.get("OPENCLAW_WORKSPACE_ROOT") or Path(__file__).resolve().parents[5])
-TASKS_CLIENT_DIR = WORKSPACE / "agents" / "skills" / "ops" / "tasks-api"
+# Compute the tasks-api client directory relative to this file. The client lives inside the
+# sindustries repo at <sindustries>/agents/skills/ops/tasks-api/. Resolving from __file__
+# avoids the OPENCLAW_WORKSPACE_ROOT convention entirely and survives cron contexts where the
+# env var is unset (which previously broke — see task-lobster-runner-flag-and-path-drift runbook).
+_SCRIPT_DIR = Path(__file__).resolve().parent  # .../content-tasks/scripts
+_SINDUSTRIES_ROOT = _SCRIPT_DIR.parents[3]  # .../sindustries (parents[3] from scripts/)
+TASKS_CLIENT_DIR = _SINDUSTRIES_ROOT / "agents" / "skills" / "ops" / "tasks-api"
 if str(TASKS_CLIENT_DIR) not in sys.path:
     sys.path.insert(0, str(TASKS_CLIENT_DIR))
 
