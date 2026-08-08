@@ -726,6 +726,18 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // that will be merged at this gate, so it's the only one that needs to match.
     let latest_pr_url = pr_urls.iter().max_by_key(|url| pr_number(url)).cloned();
     for url in &pr_urls {
+        // Only the latest PR (highest PR number) is the one that will be merged
+        // at this gate. Earlier PRs that were intentionally superseded (e.g.
+        // v1 → v2 branch replace, or stacked predecessors) should not
+        // contribute failures here — the AC text match below already targets
+        // the latest PR explicitly, so we extend the same principle to the
+        // review-state and body checks. Without this, a closed-without-merge
+        // superseded PR leaves a persistent "PR X is closed without merge."
+        // failure that blocks every sweep (fingerprint dedup), even after the
+        // task has been re-delivered on a fresh branch.
+        if !is_latest_pr_url(url, &pr_urls) {
+            continue;
+        }
         let review = inspect_pr(url);
         match review {
             Ok(r) => {
@@ -848,6 +860,24 @@ fn pr_number(url: &str) -> u64 {
         .next()
         .and_then(|n| n.parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+/// True when `candidate` is the PR URL in `all_pr_urls` with the highest
+/// PR number. Used by `verify_delivery` to skip review-state and body checks
+/// against superseded PRs (e.g. a v1 branch that was closed-without-merge and
+/// replaced by a v2 branch). Returns false for an unparseable candidate URL
+/// or an empty `all_pr_urls`.
+fn is_latest_pr_url(candidate: &str, all_pr_urls: &[String]) -> bool {
+    let candidate_num = pr_number(candidate);
+    if candidate_num == 0 {
+        return false;
+    }
+    let max_num = all_pr_urls
+        .iter()
+        .map(|url| pr_number(url))
+        .max()
+        .unwrap_or(0);
+    max_num == candidate_num
 }
 
 fn feedback_review_failure(url: &str, review: ReviewState) -> Option<String> {
@@ -4805,6 +4835,67 @@ Lead-in.
             142
         );
         assert_eq!(pr_number("not-a-url"), 0);
+    }
+
+    #[test]
+    fn is_latest_pr_url_returns_true_only_for_highest_pr_number() {
+        let urls = vec![
+            "https://github.com/Stoffer-Industries/sindustries/pull/365".to_string(),
+            "https://github.com/Stoffer-Industries/sindustries/pull/368".to_string(),
+        ];
+        assert!(!is_latest_pr_url(
+            "https://github.com/Stoffer-Industries/sindustries/pull/365",
+            &urls
+        ));
+        assert!(is_latest_pr_url(
+            "https://github.com/Stoffer-Industries/sindustries/pull/368",
+            &urls
+        ));
+    }
+
+    #[test]
+    fn is_latest_pr_url_handles_single_url() {
+        let urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/365".to_string()];
+        assert!(is_latest_pr_url(
+            "https://github.com/Stoffer-Industries/sindustries/pull/365",
+            &urls
+        ));
+    }
+
+    #[test]
+    fn is_latest_pr_url_returns_false_for_empty_list() {
+        let urls: Vec<String> = vec![];
+        assert!(!is_latest_pr_url(
+            "https://github.com/Stoffer-Industries/sindustries/pull/365",
+            &urls
+        ));
+    }
+
+    #[test]
+    fn is_latest_pr_url_returns_false_for_unparseable_candidate() {
+        let urls = vec![
+            "https://github.com/Stoffer-Industries/sindustries/pull/365".to_string(),
+            "not-a-url".to_string(),
+        ];
+        assert!(!is_latest_pr_url("not-a-url", &urls));
+        // The parseable URL is still the latest when the only other URL is unparseable.
+        assert!(is_latest_pr_url(
+            "https://github.com/Stoffer-Industries/sindustries/pull/365",
+            &urls
+        ));
+    }
+
+    #[test]
+    fn is_latest_pr_url_ties_on_equal_pr_number() {
+        // Two URLs with the same PR number are an edge case (shouldn't happen in
+        // practice since each PR has a unique number), but the helper must be
+        // deterministic: every candidate with the max PR number is "latest".
+        let urls = vec![
+            "https://github.com/foo/bar/pull/10".to_string(),
+            "https://github.com/baz/qux/pull/10".to_string(),
+        ];
+        assert!(is_latest_pr_url("https://github.com/foo/bar/pull/10", &urls));
+        assert!(is_latest_pr_url("https://github.com/baz/qux/pull/10", &urls));
     }
 
     #[test]
