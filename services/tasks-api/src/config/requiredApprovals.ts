@@ -89,7 +89,9 @@ function resolveDefaultConfigPath(): string {
  * Throws on malformed input (e.g. missing `version:`); the loader catches
  * and falls back to the built-in default.
  */
-export function parseRequiredApprovalsYaml(content: string): RequiredApprovalsConfig {
+export function parseRequiredApprovalsYaml(
+  content: string
+): Omit<RequiredApprovalsConfig, 'path' | 'hash'> {
   const lines = content.split(/\r?\n/);
   let version: number | null = null;
   const mappings: Record<string, string[]> = {};
