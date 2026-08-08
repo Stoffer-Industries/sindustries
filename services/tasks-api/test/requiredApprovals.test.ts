@@ -37,7 +37,8 @@ const {
   DEFAULT_REQUIRED_APPROVALS,
   loadRequiredApprovalsConfig,
   parseRequiredApprovalsYaml,
-  requiredApprovalsFor
+  requiredApprovalsFor,
+  _resetStartupLogForTesting
 } = await import('../src/config/requiredApprovals.ts');
 
 describe('parseRequiredApprovalsYaml', () => {
@@ -155,6 +156,10 @@ describe('loadRequiredApprovalsConfig', () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'req-approvals-'));
+    // Each `it` block exercises the resolved-policy startup log in isolation.
+    // The memoization flag is module-private; reset it before every test so
+    // ordering cannot leak state between cases.
+    _resetStartupLogForTesting();
   });
 
   afterEach(() => {
@@ -270,6 +275,62 @@ describe('loadRequiredApprovalsConfig', () => {
 
     expect(overrideConfig.hash).not.toBe(baseConfig.hash);
     expect(overrideConfig.hash).not.toBe(DEFAULT_REQUIRED_APPROVALS.hash);
+  });
+
+  it('emits a console.info with the resolved policy on first call (audit drift signal)', () => {
+    const path = join(tmpDir, 'required-approvals.yaml');
+    writeFileSync(
+      path,
+      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      'utf8'
+    );
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      loadRequiredApprovalsConfig(path);
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      const message = String(infoSpy.mock.calls[0]?.[0] ?? '');
+      expect(message).toMatch(/\[required-approvals\] resolved policy/);
+      expect(message).toMatch(/source=config-file/);
+      expect(message).toMatch(/version=1/);
+      // Hash prefix is the first 12 chars of a 64-char SHA-256 hex digest.
+      expect(message).toMatch(/hash=[0-9a-f]{12}…/);
+      expect(message).toContain(`path=${path}`);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('emits a console.info on first call even when the config file is missing (built-in default path)', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      loadRequiredApprovalsConfig(join(tmpDir, 'does-not-exist.yaml'));
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      const message = String(infoSpy.mock.calls[0]?.[0] ?? '');
+      expect(message).toMatch(/source=builtin-default/);
+      expect(message).toMatch(/path=<built-in default>/);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('does not re-emit the resolved-policy log on subsequent calls in the same process', () => {
+    const path = join(tmpDir, 'required-approvals.yaml');
+    writeFileSync(
+      path,
+      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      'utf8'
+    );
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      loadRequiredApprovalsConfig(path);
+      loadRequiredApprovalsConfig(path);
+      loadRequiredApprovalsConfig(path);
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 });
 
