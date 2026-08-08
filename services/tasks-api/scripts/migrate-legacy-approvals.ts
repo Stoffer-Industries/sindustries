@@ -34,6 +34,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { argv, env, exit } from 'node:process';
 import type { DetectedApproval } from '../src/lib/legacyApprovals.ts';
 import {
@@ -96,8 +97,8 @@ function printHelp() {
   );
 }
 
-async function fetchAllTasks(): Promise<MigrationTask[]> {
-  const tasks: MigrationTask[] = [];
+export async function fetchTaskListIds(): Promise<string[]> {
+  const ids: string[] = [];
   let cursor: string | null = null;
 
   while (true) {
@@ -111,12 +112,46 @@ async function fetchAllTasks(): Promise<MigrationTask[]> {
     if (!response.ok) {
       throw new Error(`GET /tasks ${response.status}: ${await response.text()}`);
     }
-    const body = (await response.json()) as { data: MigrationTask[]; page: { nextCursor: string | null } };
-    tasks.push(...body.data);
+    const body = (await response.json()) as {
+      data: Array<{ id: string }>;
+      page: { nextCursor: string | null };
+    };
+    ids.push(...body.data.map((task) => task.id));
     if (!body.page.nextCursor) break;
     cursor = body.page.nextCursor;
   }
 
+  return ids;
+}
+
+export async function fetchTaskById(id: string): Promise<MigrationTask> {
+  const response = await fetch(`${BASE_URL}/api/v1/tasks/${id}`, {
+    headers: { Accept: 'application/json' }
+  });
+  if (!response.ok) {
+    throw new Error(`GET /tasks/${id} ${response.status}: ${await response.text()}`);
+  }
+  const body = (await response.json()) as { data: MigrationTask };
+  return body.data;
+}
+
+// GET /api/v1/tasks (list) never populates `comments` on each row — only
+// GET /api/v1/tasks/:id returns the full task including comments. The
+// migration script's legacy-detection logic reads `task.comments` to find
+// `[tech-design-approved] true` / `[qa-ac-verified] true`, so a naive list
+// fetch silently misses every legacy tech_design/qa approval (spec
+// approvals still get detected because `description` IS present on the
+// list response). Fetch the id list first, then hydrate each task
+// individually so detection sees real comment bodies.
+//
+// See docs/systems/... list-endpoint comment gap, also hit previously in
+// the tech-design-approval heartbeat check (sindustries PR #295).
+export async function fetchAllTasks(): Promise<MigrationTask[]> {
+  const ids = await fetchTaskListIds();
+  const tasks: MigrationTask[] = [];
+  for (const id of ids) {
+    tasks.push(await fetchTaskById(id));
+  }
   return tasks;
 }
 
@@ -177,7 +212,16 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main().catch((err) => {
-  console.error('[migrate-legacy-approvals] failed:', err);
-  exit(1);
-});
+// Only auto-run when executed directly (`tsx scripts/migrate-legacy-approvals.ts ...`),
+// not when imported as a module (e.g. from tests importing `fetchAllTasks` /
+// `fetchTaskListIds` / `fetchTaskById` directly). Without this guard, importing
+// the module runs `main()` with the importer's argv, hits the "one of --dry-run,
+// --write, or --rollback is required" error, and calls `exit(1)`, killing the
+// process that imported it (e.g. a test worker).
+const isMain = argv[1] && resolve(argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((err) => {
+    console.error('[migrate-legacy-approvals] failed:', err);
+    exit(1);
+  });
+}
