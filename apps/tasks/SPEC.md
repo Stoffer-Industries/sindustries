@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-07-22
+**Last updated:** 2026-08-08
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** n/a (tasks app is a standalone surface, no cross-cutting system doc)
 
@@ -29,6 +29,13 @@ A focused task management surface for Tom and the agent team. Supports capturing
 4. Rendered markdown description content wraps within the task card instead of overflowing horizontally
 5. User can navigate to a full-screen detail view via explicit action
 6. Changes persist on save
+7. An **Approvals** sub-section renders one row per required approval type for the task's type (`spec`, `tech_design`, `qa`):
+   - Each row is a read-only checkbox + avatar pair (the Tasks UI never writes approvals — the lobster and agents do via `POST /tasks/:id/approvals`).
+   - Checkbox checked = `approved`; unchecked = `pending` or `revoked` (state is distinguished by avatar opacity / strike-through rather than inline text).
+   - Owner display name and timestamp move to the `aria-label` / hover tooltip so the visual stays uncluttered.
+   - The required-approvals list is fetched from `GET /task-types/:type/required-approvals` when a `taskType` is set; if none are required the section shows a friendly empty state.
+   - When the task has no `taskType` set yet, the section shows a placeholder asking the user to select one.
+   - Fetch errors render an inline error message and do not crash the editor.
 
 ### 3. Move a task through the board
 1. User drags a task card between Kanban columns (desktop)
@@ -75,6 +82,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
 | Task dependencies UI | `test/e2e/dependency-ui.spec.js` |
 | Markdown checkbox toggle + description wrapping | `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/src/utils/markdown.test.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
+| Approvals sub-section (read-only checkbox + avatar, empty + missing-type placeholders, fetch error) | `apps/tasks/src/components/ApprovalsSection.test.jsx` |
 
 ---
 
@@ -96,3 +104,4 @@ The list of reserved assignees and their display metadata (id → display name, 
 | archivedAt | Timestamp | Soft delete |
 | tags | String[] | Ad-hoc, case-insensitive unique |
 | blockedBy | UUID[] | Dependency references |
+| approvals | TaskApproval[] | Native approvals owned by the tasks-api (see `services/tasks-api/SPEC.md` for the authoritative schema). The Tasks UI only reads this collection to render the Approvals sub-section — the UI never writes approvals. |
