@@ -181,23 +181,30 @@ A `--rollback <snapshot-path>` option restores from the snapshot if a follow-up 
 
 **WS4b — Tasks UI (AC6):**
 
-**`apps/tasks/src/components/TaskEditor.jsx`** — extend the task editor view with an `Approvals` section that renders as a checkbox list, one row per required approval type. Each row's checkbox is a `<input type="checkbox" disabled checked={...}>` whose visual state mirrors the approval:
+**`apps/tasks/src/components/TaskEditor.jsx`** — extend the task editor view with an `Approvals` section that renders as a checkbox + avatar list, one row per required approval type. Per Tom's preference: **no "Pending" or "Approved by [name]" text labels** — pending is implied by the unchecked checkbox, and the owner's avatar replaces the approver name.
 
-- **Checked** — `state: approved`
-- **Unchecked** — `state: revoked` OR no row exists for the required type (Pending)
-- **Strike-through row text** when `state: revoked`
+Each row has two pieces:
+
+- **Checkbox** — `<input type="checkbox" disabled checked={...}>`, the primary visual anchor.
+- **Avatar** — owner's avatar via `<Avatar>` from `@sindustries/ui/react` (same lookup path as `TaskCardSummary.jsx`). For Pending (no row), the avatar is the *expected* approver from `requiredApprovalsFor(task.taskType)`.
+
+State mapping:
+
+- **Checked + full-color avatar** → `state: approved`
+- **Unchecked + faded / muted avatar** → Pending (no row)
+- **Unchecked + strike-through avatar** → `state: revoked`
 
 Visual mock:
 
 ```
-☑ Spec          — Approved by Tom on 2026-07-15
-☐ Tech Design   — Pending
-☑ QA            — Approved by Quinn on 2026-07-20
+☑ [Tom]    Spec
+☐ [Quinn·] Tech Design     ← faded = Pending
+☑ [Quinn]  QA
 ```
 
-The checkbox is the primary visual anchor (replacing the "Approved by ..." text label); per-row metadata (type label, owner, timestamp, optional note) is rendered as small text beside it. The list is sourced from `task.approvals` (always present on `GET /tasks/:id`) and resolved against `requiredApprovalsFor(task.taskType)` so a Pending state is shown for any required type that has no row.
+Owner name + timestamp move to `aria-label` / hover tooltip only — not inline text. Fallback: if the owner isn't in the user registry, render the avatar with initials (same fallback as `TaskCardSummary.jsx`).
 
-The checkbox is `disabled` — approval writes still flow through the lobster (AC4) and `POST /tasks/:id/approvals` endpoint (AC1), not the UI. The Tasks UI is read-only for approvals in this design; the only way to land an approval is the existing comment-tag path (until/unless Quinn opens a follow-up to enable direct UI submission).
+List sourced from `task.approvals` (always present on `GET /tasks/:id`), resolved against `requiredApprovalsFor(task.taskType)`. Checkbox is `disabled` — approval writes still flow through the lobster (AC4) and `POST /tasks/:id/approvals` (AC1). The Tasks UI is read-only for approvals in this design.
 
 No kanban-card changes. No task-list changes. Just the detail view.
 
