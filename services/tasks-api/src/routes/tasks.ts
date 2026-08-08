@@ -156,6 +156,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
             tag: true
           }
         },
+        approvals: true,
         ...dependencyInclude
       },
       take: limit + 1
@@ -220,6 +221,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
         comments: {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
         },
+        approvals: true,
         ...dependencyInclude
       }
     });
@@ -290,6 +292,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
             tag: true
           }
         },
+        approvals: true,
         ...dependencyInclude
       }
     });
@@ -429,6 +432,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         where: { id },
         include: {
           tags: { include: { tag: true } },
+          approvals: true,
           ...dependencyInclude
         }
       });

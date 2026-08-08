@@ -46,6 +46,7 @@ model Task {
   dependencies    TaskDependency[] @relation("TaskDependsOn")
   dependedOnBy    TaskDependency[] @relation("TaskDependedOnBy")
   analyticsEvents FeatureTaskAnalyticsEvent[]
+  approvals       TaskApproval[]
 
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
@@ -138,6 +139,45 @@ model FeatureTaskAnalyticsEvent {
   @@index([taskId, occurredAt])
   @@index([occurredAt])
   @@index([eventType, occurredAt])
+}
+
+enum ApprovalType {
+  spec
+  tech_design
+  qa
+}
+
+enum ApprovalState {
+  approved
+  revoked
+}
+
+/// First-class approval state for a task. Each row represents one approval
+/// type (spec / tech_design / qa) for one task. A revoked approval is
+/// represented by `state=revoked` with `revokedAt` set; the row is kept so
+/// the audit trail of who approved and revoked when is preserved.
+///
+/// `owner` is a free-text field (matches `Task.assignee`) — humans and
+/// agents both post approvals, and the field is informational, not a
+/// foreign key. See the Tasks API Native Approvals tech design for the
+/// rationale.
+model TaskApproval {
+  id          String        @id @default(uuid()) @db.Uuid
+  taskId      String        @db.Uuid
+  type        ApprovalType
+  owner       String
+  state       ApprovalState @default(approved)
+  approvedAt  DateTime      @default(now())
+  revokedAt   DateTime?
+  /// Optional note from the approver — why this was approved or revoked.
+  note        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, type])
+  @@index([taskId, state])
 }
 
 enum ContentSchedulerItemStatus {
