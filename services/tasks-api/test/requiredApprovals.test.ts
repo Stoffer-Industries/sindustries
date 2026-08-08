@@ -91,6 +91,63 @@ describe('parseRequiredApprovalsYaml', () => {
     const yaml = ['version: 1', 'mappings:', '  feature: [spec, not_a_real_type]'].join('\n');
     expect(() => parseRequiredApprovalsYaml(yaml)).toThrow(/unknown approval type/);
   });
+
+  it('silently ignores unknown top-level keys (permissive schema by design)', () => {
+    // The loader is intentionally lenient about unknown top-level keys so a
+    // partial future-proofed config file (e.g. an `audience:` header that a
+    // newer release understands) still parses. Unknown keys must not throw;
+    // they just exit the mappings block.
+    const yaml = [
+      'version: 1',
+      'extra_header: anything',
+      'mappings:',
+      '  feature: [spec, tech_design, qa]'
+    ].join('\n');
+
+    const parsed = parseRequiredApprovalsYaml(yaml);
+
+    expect(parsed.version).toBe(1);
+    expect(parsed.mappings).toEqual({ feature: ['spec', 'tech_design', 'qa'] });
+  });
+
+  it('silently skips mapping entries whose shape does not match `<taskType>: [...]`', () => {
+    // Lines inside the mappings block that are not `<taskType>: [list]` must
+    // not throw — only entries that look right but contain an unknown
+    // approval type are rejected. Stray prose or scalar entries are skipped
+    // so a partial config file remains usable.
+    const yaml = [
+      'version: 1',
+      'mappings:',
+      '  feature: [spec, tech_design, qa]',
+      '  not_an_entry: oops',
+      '  free_text: should be skipped'
+    ].join('\n');
+
+    const parsed = parseRequiredApprovalsYaml(yaml);
+
+    expect(parsed.version).toBe(1);
+    expect(parsed.mappings).toEqual({ feature: ['spec', 'tech_design', 'qa'] });
+  });
+
+  it('lets the last duplicate task-type entry win without throwing', () => {
+    // A duplicated task-type key silently overrides the earlier entry. This
+    // is documented permissive behaviour: the parser does not surface a
+    // duplicate-key error, but downstream `requiredApprovalsFor` returns the
+    // last-seen list. Operators rely on the merged-over-defaults behaviour in
+    // `loadRequiredApprovalsConfig` for deltas; a literal duplicate inside a
+    // single file is the operator\'s last write winning.
+    const yaml = [
+      'version: 1',
+      'mappings:',
+      '  feature: [qa]',
+      '  feature: [spec, tech_design, qa]'
+    ].join('\n');
+
+    const parsed = parseRequiredApprovalsYaml(yaml);
+
+    expect(parsed.version).toBe(1);
+    expect(parsed.mappings.feature).toEqual(['spec', 'tech_design', 'qa']);
+  });
 });
 
 describe('loadRequiredApprovalsConfig', () => {

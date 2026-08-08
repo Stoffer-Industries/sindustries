@@ -121,6 +121,13 @@ export function parseRequiredApprovalsYaml(content: string): RequiredApprovalsCo
 
     if (!inMappings) continue;
 
+    // Mapping entries must be `<taskType>: [<approval>, ...]`. Lines that do
+    // not match this shape are silently skipped: the loader is intentionally
+    // lenient about individual entries (so a partial config file remains
+    // usable) while still rejecting the entire file when `version:` is missing.
+    // Approval-type typos inside the list are still rejected via
+    // `validApprovalTypes` below; the silent skip only applies to entries
+    // whose shape does not match at all (e.g. `feature: oops` or stray prose).
     const entryMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9_-]*):\s*\[(.*?)\]\s*$/);
     if (!entryMatch) continue;
 
