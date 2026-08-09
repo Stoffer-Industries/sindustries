@@ -1,8 +1,8 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-08-08
+**Last updated:** 2026-08-10
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
-**System doc:** n/a (tasks app is a standalone surface, no cross-cutting system doc)
+**System doc:** `docs/systems/tasks.md`
 
 This spec describes what the tasks app does and what behaviour is expected. Update it when a feature changes user-visible flows. Each flow should have corresponding e2e coverage in `test/e2e/`.
 
@@ -76,7 +76,35 @@ A focused task management surface for Tom and the agent team. Supports capturing
 2. Blocked tasks are visually flagged in list and board views
 3. Dependency links open the blocking task
 
----
+### 9. Workflow-gate ownership and attention owners (data surface — WS1)
+WS1 introduces the data shape only; the stacked avatar rendering and
+detail-view composer land in WS3.
+
+1. Task responses include `workflowGates` (derived view of outstanding /
+   approved structured gates), `attentionOwners` (insertion-ordered
+   distinct owner strings), and `attentionOwnerDetails` (full audit
+   rows). The existing `Blocked` indicator, `dependencyBlocked`, and
+   `blockedBy` dependency references remain unchanged.
+2. The detail view surfaces each plane in its own labelled section:
+   delivery assignee, outstanding workflow gates with their configured
+   owner and state, dependencies, the existing `Blocked` indicator, and
+   exceptional attention requests with the per-row `note` and `addedBy`.
+   Each section has its own heading and accessibility label so the
+   planes stay distinguishable for screen readers.
+3. The backlog filter affordances expose two new filter chips:
+   "My outstanding gates" (issues `?workflowGateOwner=<self>`) and
+   "Needs my attention" (issues `?attentionOwner=<self>`). Both filters
+   combine via AND with the existing status/priority/assignee filters
+   and persist in the URL query string.
+4. PATCH affordances for attention owners expose a clearly named
+   "Attention needed from" editor (not "Blocked by"). Replacing the
+   list replaces the full set; clearing all rows leaves every other
+   task field untouched. Removing one row only removes that row.
+5. No UI affordance should generate an attention request when an
+   explicit workflow gate already represents the action. When a user
+   opens a structured approval (spec / tech_design / qa), the
+   approval-row UX is the only path; the attention-editor UX never
+   surfaces for the same action.
 
 ## E2e coverage
 
@@ -111,3 +139,6 @@ The list of reserved assignees and their display metadata (id → display name, 
 | tags | String[] | Ad-hoc, case-insensitive unique |
 | blockedBy | UUID[] | Dependency references |
 | approvals | TaskApproval[] | Native approvals owned by the tasks-api (see `services/tasks-api/SPEC.md` for the authoritative schema). The Tasks UI mutates this collection only through the structured authenticated approval endpoints and then refreshes the task. |
+| workflowGates | `{ type, owner, state }[]` | Derived view: each required approval type for the task's `taskType`, with `state: "outstanding"` or `state: "approved"`. Computed server-side from `approvals` + the resolved required-approvals policy. Empty for tasks whose `taskType` requires no approvals. |
+| attentionOwners | `string[]` | Distinct owner strings (insertion order, case-insensitive dedup) for exceptional / unmodelled attention requests. Empty array means no requests. |
+| attentionOwnerDetails | `{ id, owner, addedBy, note, createdAt }[]` | Full audit rows for `attentionOwners`. Preserves order and per-row context for detail UI. |
