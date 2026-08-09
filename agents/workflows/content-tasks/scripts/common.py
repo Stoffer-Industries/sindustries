@@ -27,6 +27,7 @@ from tasks_api_client import api_request, get_base_url, get_task, list_tasks  # 
 STATE_TAG = "[lobster-state]"
 IVY_PRS_TAG = "[ivy-prs]"
 IVY_TWEETS_QUEUED_TAG = "[ivy-tweets-queued]"
+IVY_TWEETS_QUEUED_RE = re.compile(r"^\[ivy-tweets-queued\]\s+theme:\s+\S")
 WEEKLY_CONTENT_TITLE_RE = re.compile(r"weekly\s+(review|content\s+updates?)", re.I)
 AUTHOR = "Lobster"
 STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
@@ -337,11 +338,11 @@ def task_is_weekly_content(task: dict[str, Any]) -> bool:
 
 
 def has_ivy_tweets_queued(task: dict[str, Any]) -> bool:
-    """True if a `[ivy-tweets-queued]` comment has been posted on this task."""
-    for comment in task_comments(task):
-        if IVY_TWEETS_QUEUED_TAG in comment_text(comment):
-            return True
-    return False
+    """True if a valid `[ivy-tweets-queued] theme: ...` traceability comment exists."""
+    return any(
+        IVY_TWEETS_QUEUED_RE.match(comment_text(comment))
+        for comment in task_comments(task)
+    )
 
 
 def parse_pr_url(url: str) -> tuple[str, str, str] | None:
