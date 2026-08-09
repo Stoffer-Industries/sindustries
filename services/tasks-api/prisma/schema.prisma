@@ -47,10 +47,38 @@ model Task {
   dependedOnBy    TaskDependency[] @relation("TaskDependedOnBy")
   analyticsEvents FeatureTaskAnalyticsEvent[]
   approvals       TaskApproval[]
+  blockedBy       TaskBlockedBy[]
 
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
   @@index([dueAt])
+}
+
+/// First-class "blocked-by escalation" owners. Each row says "this owner
+/// has an outstanding blocker action on this task." Sits parallel to
+/// `TaskApproval` (workflow gates) and `TaskDependency` (task-to-task
+/// dependency edges); none of the three replaces another. The legacy
+/// `Task.blocked` boolean survives untouched so existing tasks remain
+/// visibly blocked during the transition; `genericBlocked` is derived in
+/// the mapper (`blocked === true && blockedBy.length === 0`).
+///
+/// `owner` is a free-text field, same policy as `Task.assignee`. The route
+/// layer normalises and dedupes before the upsert. See
+/// `docs/specs/blocked-by-escalation-owners-and-stacked-avatars-tech-design.md`.
+model TaskBlockedBy {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  owner     String
+  addedBy   String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // One row per (task, owner). Upserts target this unique index.
+  @@unique([taskId, owner])
+  @@index([owner])
+  @@index([taskId, createdAt])
 }
 
 model TaskDependency {
