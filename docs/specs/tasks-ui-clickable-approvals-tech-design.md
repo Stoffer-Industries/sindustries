@@ -33,7 +33,7 @@ AC1/AC2 say the click does not post a task comment, while AC7 requires every app
 | Required approval types | Existing Tasks API config contract | Continue using `GET /task-types/:taskType/required-approvals`; no mapping changes. |
 | Workflow approval writes | Tasks API client/agent workflow boundary | Agents call structured POST/DELETE directly. They do not emit approval tags. |
 | Gate reads | Feature-task lobster | Structured `task.approvals` only. Legacy source selection/fallback is removed or rejected. |
-| Human/agent identity | **Decision required** | The current UI and approval routes have no authenticated actor. The API must not claim strong attribution from forgeable body text without an explicit product decision. |
+| Human/agent identity | Authenticated actor boundary | **Tom selected Option A:** browser users authenticate with durable real login sessions; agents use scoped service credentials. The API derives actor and permissions server-side and rejects forgeable caller-supplied ownership. |
 | Human-readable history | `TaskComment` audit projection | API-generated ordinary comments record actor, action, approval type, and server timestamp; comments never grant approval. |
 
 This is one cross-surface implementation PR because UI mutation, API audit semantics, workflow migration, and fallback removal must ship atomically. Shipping any subset would leave either two sources of truth or a client that writes a gate the lobster may interpret differently.
@@ -189,39 +189,25 @@ The final authentication headers/cookies depend on the authorization decision. T
 
 Audit comment creation is part of the mutation contract but does not require a second client call. API documentation must state that a successful real state transition creates exactly one comment; idempotent no-ops create none.
 
-## Authorization decision required
+## Authorization decision — Option A selected
 
-The current API is unauthenticated and trusts `owner`, while the Tasks UI has no current-user/session model. Therefore “attributed to the acting user” cannot be implemented honestly without choosing an identity boundary.
+**Decision:** Tom selected the durable boundary: real browser login sessions plus scoped service credentials for agents. The local-only credential shortcut and caller-supplied actor approaches are rejected.
 
-### Option A — authenticated session for UI + scoped service credentials for agents (**recommended durable design**)
+Implementation contract:
 
-- Browser uses an HttpOnly session; API derives the human actor.
-- Agents use scoped internal credentials mapped server-side to `Quinn`, `Tom`, etc.
-- Approval type authorization can be enforced server-side (for example spec/qa → Tom; tech_design → Quinn) without exposing secrets to browser JavaScript.
-- Reject/ignore caller-supplied `owner`.
+- Browser users authenticate through a durable server-side session represented by an `HttpOnly`, `Secure`, `SameSite` cookie. The Tasks API derives the human actor from the session; browser JavaScript never supplies or stores an approval credential.
+- Agents authenticate with separate scoped service credentials. The server maps each credential to a stable actor (`Quinn`, `Tom`, `Rowan`, etc.) and an allowed approval-type/action set.
+- Approval routes reject unauthenticated requests and reject/ignore body `owner`; persisted `TaskApproval.owner` and audit-comment author come only from the authenticated principal.
+- Session and service-principal authorization is enforced in shared Tasks API middleware so future privileged task actions can reuse the boundary rather than adding endpoint-local secrets.
+- Credentials are revocable and fail closed. Logs and API responses never expose tokens or cookie contents.
 
-This is the strongest and cleanest source-of-truth boundary, but it introduces auth infrastructure beyond the current Tasks UI.
-
-### Option B — local-only signed actor credentials (**recommended bounded fast path if full sessions are out of scope**)
-
-- Keep deployment loopback/internal-only.
-- Map separate server-side secrets/tokens to actors and permitted approval types.
-- Agents send their scoped credential.
-- The browser must obtain a credential through a trusted local server/session bridge; do not embed a shared secret in the Vite bundle.
-
-This is smaller than full account sessions but must remain explicitly local/internal.
-
-### Option C — body `owner` or bare `x-actor` (**not recommended**)
-
-This is forgeable and does not provide authorization. It may preserve the current trust model, but it cannot substantiate “authorized user” or reliable attribution and would perpetuate the known approval-write security gap.
-
-**Decision gate:** Tom/Quinn must choose A or B (or explicitly accept C’s trust limitation) before implementation of AC1/AC2/AC5/AC7. The rest of the design is independent of that choice.
+Initial per-type policy remains a separate product confirmation: recommended defaults are `spec` and `qa` for Tom, `tech_design` for Quinn, with explicitly scoped automation credentials only where an agent acts on that human's delegated authority.
 
 ## `.openclaw` boundary
 
 This feature changes agent operating instructions that are symlinked/shared through the repo (`agents/definitions/*`, skills, and cron prompt), so those updates ship in the implementation PR.
 
-If Option A/B requires credentials or secret mappings, secret values and runtime Gateway/environment configuration live outside this repo. The PR documents required variable names and fail-closed behavior only; no secret is committed. Any cron or live OpenClaw config edit must be separately applied and verified after merge.
+Option A requires session-signing material and agent service credentials. Secret values and runtime Gateway/environment configuration live outside this repo. The PR documents required variable names, rotation, and fail-closed behavior only; no secret is committed. Any live OpenClaw/config credential provisioning must be separately applied and verified after merge.
 
 ## Test plan and AC verification matrix
 
@@ -256,15 +242,14 @@ Required local gates before PR:
 
 ## Open questions / decisions needed
 
-1. **Authorization:** choose Option A, B, or explicitly accept C’s limitation. Recommendation: A for durable cloud readiness; B only if today’s urgent delivery must remain local-only.
-2. **Per-type permissions:** should the initial mapping enforce `spec` and `qa` as Tom-only and `tech_design` as Quinn-only, or may any authenticated actor change any required type? Recommendation: enforce a server-side map matching current ownership, configurable without client changes.
-3. **AC1/AC2 vs AC7:** confirm the interpretation that the UI makes no separate comment request while the API atomically generates the audit comment.
-4. **Idempotent re-approval:** confirm identical POST creates no new audit comment; a changed actor/note is treated as a new audited approval event.
-5. **Completed tasks:** should approval controls be disabled after `done`? Recommendation: disable mutations for archived tasks and allow explicit revoke on `done` only if the product wants post-hoc audit correction; otherwise make `done` immutable.
+1. **Per-type permissions:** should the initial mapping enforce `spec` and `qa` as Tom-only and `tech_design` as Quinn-only, or may any authenticated actor change any required type? Recommendation: enforce a server-side map matching current ownership, configurable without client changes.
+2. **AC1/AC2 vs AC7:** confirm the interpretation that the UI makes no separate comment request while the API atomically generates the audit comment.
+3. **Idempotent re-approval:** confirm identical POST creates no new audit comment; a changed actor/note is treated as a new audited approval event.
+4. **Completed tasks:** should approval controls be disabled after `done`? Recommendation: disable mutations for archived tasks and allow explicit revoke on `done` only if the product wants post-hoc audit correction; otherwise make `done` immutable.
 
 ## Delivery sequence
 
-1. Resolve authorization and AC-comment interpretation in tech-design approval.
+1. Confirm per-type authorization and AC-comment interpretation in tech-design approval; Option A actor architecture is already selected.
 2. Implement API actor/transaction/audit semantics and tests.
 3. Implement UI mutations/optimistic rollback and E2E coverage.
 4. Migrate agent writers/queues to structured API.
