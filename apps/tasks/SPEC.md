@@ -37,6 +37,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
    - Each row updates optimistically and only the mutating row is disabled. A failed mutation rolls that row back and exposes an accessible row-level error; success refreshes the parent task to reconcile approvals and audit comments.
    - Archived and done tasks have immutable approval controls.
    - Checkbox checked = `approved`; unchecked = `pending` or `revoked` (state is distinguished by avatar opacity / strike-through rather than inline text).
+   - Editing acceptance criteria automatically revokes the structured `spec` approval and records the change in task history; the approval must be granted again after the revised scope is reviewed.
    - Owner display name and timestamp remain in the `aria-label` / hover tooltip so the visual stays uncluttered.
    - The required-approvals list is fetched from `GET /task-types/:type/required-approvals` when a `taskType` is set; if none are required the section shows a friendly empty state.
    - When the task has no `taskType` set yet, the section shows a placeholder asking the user to select one.

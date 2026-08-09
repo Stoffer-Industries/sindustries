@@ -52,8 +52,7 @@ export function uncheckApprovalMarker(description) {
 export function descriptionWithSpecDriftApprovalState(task, description) {
   const nextDescription = description ?? task.description;
   if (!task.specChecksum) return nextDescription;
-  const current = specChecksumForDescription(nextDescription);
-  if (current === task.specChecksum) return nextDescription;
+  if (!descriptionHasSpecDrift(task, nextDescription)) return nextDescription;
   // Allow Tom to check the approval marker even during spec drift — it's his
   // signal to the lobster that he's reviewed the new ACs and authorises resync.
   // Only auto-uncheck when the edit contains actual AC content changes too.
@@ -63,3 +62,12 @@ export function descriptionWithSpecDriftApprovalState(task, description) {
   return uncheckApprovalMarker(nextDescription);
 }
 
+/**
+ * Return whether a proposed description changes the AC checksum already stored
+ * on the task. Marker-only approval changes are intentionally not drift.
+ */
+export function descriptionHasSpecDrift(task, description) {
+  if (!task.specChecksum) return false;
+  if (descriptionsDifferOnlyByApprovalMarker(task.description ?? '', description ?? '')) return false;
+  return specChecksumForDescription(description) !== task.specChecksum;
+}
