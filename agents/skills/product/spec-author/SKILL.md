@@ -131,7 +131,6 @@ For manual task specs in `brain/tasks/specs/open/`:
 - **Created:** <YYYY-MM-DD>
 
 **Status:** Draft
-- [ ] **Approved by Tom**
 
 ---
 

@@ -21,6 +21,7 @@ def task(**overrides):
         "blocked": False,
         "dependencyBlocked": False,
         "comments": [],
+        "approvals": [],
     }
     value.update(overrides)
     return value
@@ -28,10 +29,8 @@ def task(**overrides):
 
 def implementation_task(**overrides):
     value = task(
-        comments=[
-            {"text": "[tech-design] https://example.test/design"},
-            {"text": "[tech-design-approved] true"},
-        ]
+        comments=[{"text": "[tech-design] https://example.test/design"}],
+        approvals=[{"type": "tech_design", "state": "approved", "owner": "Quinn"}],
     )
     value.update(overrides)
     return value
@@ -147,23 +146,20 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(classification, "WAITING_EXTERNAL")
         self.assertIn("approval", reason)
 
-    def test_tech_design_approval_matches_lobster_exact_token_rule(self):
-        accepted = (
-            "[tech-design-approved] true",
-            "  [tech-design-approved] TRUE rationale follows",
+    def test_tech_design_approval_uses_structured_rows_only(self):
+        self.assertTrue(
+            agent_task_queue._tech_design_approved(
+                {"approvals": [{"type": "tech_design", "state": "approved"}]}
+            )
         )
-        rejected = (
-            "Missing task comment `[tech-design-approved] true`.",
-            "[tech-design-approved] false",
-            "[tech-design-approved] trueish",
-            "[tech-design-approved]",
+        self.assertFalse(
+            agent_task_queue._tech_design_approved(
+                {
+                    "comments": [{"text": "[tech-design-approved] true"}],
+                    "approvals": [{"type": "tech_design", "state": "revoked"}],
+                }
+            )
         )
-        for text in accepted:
-            with self.subTest(accepted=text):
-                self.assertTrue(agent_task_queue._tech_design_approved([text]))
-        for text in rejected:
-            with self.subTest(rejected=text):
-                self.assertFalse(agent_task_queue._tech_design_approved([text]))
 
     def test_checklist_approval_substring_does_not_promote_doing_task(self):
         classification, reason = agent_task_queue.classify_task(

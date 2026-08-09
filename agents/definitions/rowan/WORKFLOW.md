@@ -108,11 +108,11 @@ Rowan breaks large work into milestones that are:
 Code tasks follow the same `ready → doing → acceptance → done` state machine as feature tasks, but the lobster dispatches them through `agents/workflows/feature-task/code-task.lobster.yaml` instead of `feature-task.lobster.yaml`. Key differences:
 
 - No product spec is required. The `**Spec:**` line in the task description is optional.
-- The tech design gate is optional: either `[tech-design] <url>` + `[tech-design-approved] true`, or `[tech-design-not-required] <reason>` satisfies it.
+- The tech design gate is optional: either `[tech-design] <url>` plus an approved structured `tech_design` row, or `[tech-design-not-required] <reason>` satisfies it.
 - `LobsterState.workflow` is persisted as `code-task-workflow` (vs `feature-task-workflow`).
 - `feedback_aggregate` and `post_merge` are reused unchanged.
 
-When working on a code task, treat it like a feature task for all other purposes (PR conventions, system spec gate, `[qa-ac-verified] true` from Tom before close). See `docs/systems/tasks.md` for the full pipeline diagram.
+When working on a code task, treat it like a feature task for all other purposes (PR conventions, system spec gate, an approved structured `qa` row from Tom before close). See `docs/systems/tasks.md` for the full pipeline diagram.
 
 ### Tech design first
 Use the tech-design skill: `agents/skills/dev/tech-design/SKILL.md`
@@ -125,7 +125,7 @@ Before writing any code on a feature task, write the tech design:
 - For every user-visible/app-flow AC, plan an E2E test where possible; if not possible or disproportionate, record the reason and the lower-level fallback test
 - Post `[tech-design] <GitHub blob URL on the branch>` as a task comment — e.g. `https://github.com/Stoffer-Industries/sindustries/blob/<branch>/docs/specs/<slug>-tech-design.md`
 - No separate tech design PR is needed; Quinn reads the design from the branch blob URL
-- Wait for Quinn to set `[tech-design-approved] true` before starting implementation
+- Wait for Quinn to grant the structured `tech_design` approval before starting implementation
 
 ### Implementation
 - Work on the same branch as the tech design; all changes come via PRs — no direct pushes to main
@@ -217,7 +217,7 @@ When all ACs are implemented and the PR is ready for review:
 - set yourself (`rowanstoffer`) as PR assignee; add **Quinn** (`quinnstoffer`) and **Tom** (`Stoff81`) as reviewers — Quinn is the blocking code reviewer, Tom is non-blocking (visibility only)
 - post `[implementer-prs] <url>` as a task comment
 - as the PR assignee, merge after the required approval has been given and CI is green — do not wait for Tom to merge or for Tom's PR approval unless Tom is the required reviewer for that PR
-- Tom tests post-merge in main; his sign-off is `[qa-ac-verified] true` on the task, not a PR review
+- Tom tests post-merge in main; his sign-off is the structured `qa` approval on the task, not a PR review
 
 ---
 

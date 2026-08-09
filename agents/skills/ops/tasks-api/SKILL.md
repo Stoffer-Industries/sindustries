@@ -73,7 +73,17 @@ python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py
 python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py --json
 ```
 
-Mirrors the lobster's `tagged_values` + `tech_design_approved` parser so substring matches in checklist complaints (`Missing task comment [tech-design-approved] true`) are correctly NOT counted as approvals.
+Reads the structured `tech_design` TaskApproval state used by the Lobster. Comments provide the design URL only and never count as approval.
+
+Grant or revoke an approval with the caller's scoped service credential:
+
+```bash
+export TASKS_API_APPROVAL_TOKEN="$QUINN_TASKS_API_APPROVAL_TOKEN" # actor-specific; never share tokens
+python3 tasks_api_client.py approve --id <full-task-uuid> --type tech_design
+python3 tasks_api_client.py revoke-approval --id <full-task-uuid> --type tech_design
+```
+
+The client sends the token as `Authorization: Bearer`; the server derives actor and permitted approval types. Never pass `owner`, post legacy approval tags, or borrow another actor's credential.
 
 ## Content task creation
 

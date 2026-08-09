@@ -97,7 +97,7 @@ Co-Authored-By: <Your Name> <your-email>
 
 **Test plan:** concrete, checkable steps. Not "tests pass" — what specifically should a reviewer verify? For non-functional changes, it's fine to write "No logic changes — diff is purely structural."
 
-**Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. **Every task AC must appear in the PR body as a `- [x]` checkbox** — not a bullet, not `- [ ]`, not plain prose, not a `✅` emoji. The `- [x]` form is the only signal the lobster can machine-parse to confirm the AC is covered by this PR (or by a merged predecessor PR referenced on the line). Unchecked ACs and bullet-style ACs are both treated as missing and block the transition. The actual QA verdict is a separate gate (`[qa-ac-verified] true` from Tom); the `- [x]` checkbox is "work is in this PR", not "work is verified".
+**Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. **Every task AC must appear in the PR body as a `- [x]` checkbox** — not a bullet, not `- [ ]`, not plain prose, not a `✅` emoji. The `- [x]` form is the only signal the lobster can machine-parse to confirm the AC is covered by this PR (or by a merged predecessor PR referenced on the line). Unchecked ACs and bullet-style ACs are both treated as missing and block the transition. The actual QA verdict is a separate gate (the structured `qa` TaskApproval from Tom); the `- [x]` checkbox is "work is in this PR", not "work is verified".
 
 Every `- [x]` AC line must end with one of the following annotations, in priority order:
 

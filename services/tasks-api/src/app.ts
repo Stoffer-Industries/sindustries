@@ -4,6 +4,7 @@ import { createRateLimit, positiveIntegerEnv } from './middleware/rateLimit';
 import { healthRouter } from './routes/health';
 import { tasksRouter } from './routes/tasks';
 import { taskApprovalsRouter } from './routes/taskApprovals';
+import { approvalSessionsRouter } from './routes/approvalSessions.ts';
 import { requiredApprovalsRouter } from './routes/requiredApprovals';
 import { tagsRouter } from './routes/tags';
 import { contentSchedulerRouter } from './routes/contentScheduler.ts';
@@ -65,6 +66,7 @@ export function createApp() {
 
     if (origin && allowedOrigins.has(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Vary', 'Origin');
     }
 
@@ -90,6 +92,9 @@ export function createApp() {
     req.method === 'POST' && req.path === '/' ? writeEndpointRateLimit(req, res, next) : next()
   );
   app.use('/api/v1/content-scheduler/items/:id/publish', writeEndpointRateLimit);
+  app.use('/api/v1/auth/session', (req, res, next) =>
+    req.method === 'POST' ? writeEndpointRateLimit(req, res, next) : next()
+  );
 
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', service: 'tasks-api' });
@@ -98,6 +103,7 @@ export function createApp() {
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', tasksRouter);
   app.use('/api/v1', taskApprovalsRouter);
+  app.use('/api/v1', approvalSessionsRouter);
   app.use('/api/v1', requiredApprovalsRouter);
   app.use('/api/v1', tagsRouter);
   app.use('/api/v1', contentSchedulerRouter);
