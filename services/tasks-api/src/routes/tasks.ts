@@ -21,7 +21,7 @@ import {
 } from './tasks/_validation.ts';
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
-import { descriptionWithSpecDriftApprovalState } from './tasks/_spec.ts';
+import { descriptionHasSpecDrift, descriptionWithSpecDriftApprovalState } from './tasks/_spec.ts';
 import { connectTags, validateDependsOnIds } from './tasks/_deps.ts';
 
 export const tasksRouter = Router();
@@ -326,9 +326,12 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       return badRequest(res, 'INVALID_DEPENDS_ON_IDS', 'dependsOnIds must be an array of UUID strings');
     }
 
-    if (description !== undefined) {
-      updates.description = descriptionWithSpecDriftApprovalState(existing, description || null);
-    }
+    const nextDescription = description === undefined
+      ? undefined
+      : descriptionWithSpecDriftApprovalState(existing, description || null);
+    const specApprovalRevocationRequired = description !== undefined
+      && descriptionHasSpecDrift(existing, nextDescription);
+    if (nextDescription !== undefined) updates.description = nextDescription;
     if (assignee !== undefined) {
       if (assignee && !validAssignees.has(assignee)) {
         return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox, Ivy');
@@ -407,6 +410,25 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         where: { id },
         data: updates
       });
+
+      if (specApprovalRevocationRequired) {
+        const specApproval = await tx.taskApproval.findUnique({
+          where: { taskId_type: { taskId: id, type: 'spec' } }
+        });
+        if (specApproval?.state === 'approved') {
+          await tx.taskApproval.update({
+            where: { taskId_type: { taskId: id, type: 'spec' } },
+            data: { state: 'revoked', revokedAt: new Date() }
+          });
+          await tx.taskComment.create({
+            data: {
+              taskId: id,
+              author: 'Tasks API',
+              body: 'Approval spec revoked by Tasks API after acceptance criteria changed.'
+            }
+          });
+        }
+      }
 
       if (hasTagUpdate) {
         await tx.taskTag.deleteMany({ where: { taskId: id } });

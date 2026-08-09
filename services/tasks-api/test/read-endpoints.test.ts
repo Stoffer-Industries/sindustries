@@ -17,6 +17,10 @@ const prismaMock = {
   taskComment: {
     create: vi.fn()
   },
+  taskApproval: {
+    findUnique: vi.fn(),
+    update: vi.fn()
+  },
   taskTag: {
     deleteMany: vi.fn(),
     createMany: vi.fn()
@@ -456,6 +460,111 @@ describe('tasks api endpoints', () => {
     expect(response.body.data.description).toBe(expectedDescription);
     expect(prismaMock.task.update).toHaveBeenCalledTimes(1);
     expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(expectedDescription);
+  });
+
+  it('PATCH /api/v1/tasks/:id revokes structured spec approval when ACs drift', async () => {
+    const approvedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
+    const driftedDescription = `${approvedDescription}\n- [ ] AC2: Drift`;
+    const expectedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift';
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(
+        task({
+          id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          description: approvedDescription,
+          specChecksum: checksum
+        })
+      )
+      .mockResolvedValueOnce(
+        task({
+          id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          description: expectedDescription,
+          specChecksum: checksum,
+          approvals: [{
+            id: 'approval-1',
+            type: 'spec',
+            owner: 'Tom',
+            state: 'revoked',
+            approvedAt: new Date('2026-07-01T00:00:00.000Z'),
+            revokedAt: new Date('2026-07-02T00:00:00.000Z')
+          }]
+        })
+      );
+    prismaMock.task.update.mockResolvedValue(
+      task({
+        id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+        description: expectedDescription,
+        specChecksum: checksum
+      })
+    );
+    prismaMock.taskApproval.findUnique.mockResolvedValue({
+      id: 'approval-1',
+      taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+      type: 'spec',
+      owner: 'Tom',
+      state: 'approved',
+      approvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      revokedAt: null
+    });
+    prismaMock.taskApproval.update.mockResolvedValue({
+      id: 'approval-1',
+      taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+      type: 'spec',
+      owner: 'Tasks API',
+      state: 'revoked',
+      approvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      revokedAt: new Date('2026-07-02T00:00:00.000Z')
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
+      .send({ description: driftedDescription });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskApproval.findUnique).toHaveBeenCalledWith({
+      where: {
+        taskId_type: {
+          taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          type: 'spec'
+        }
+      }
+    });
+    expect(prismaMock.taskApproval.update).toHaveBeenCalledWith({
+      where: {
+        taskId_type: {
+          taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          type: 'spec'
+        }
+      },
+      data: { state: 'revoked', revokedAt: expect.any(Date) }
+    });
+    expect(prismaMock.taskComment.create).toHaveBeenCalledWith({
+      data: {
+        taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+        author: 'Tasks API',
+        body: 'Approval spec revoked by Tasks API after acceptance criteria changed.'
+      }
+    });
+  });
+
+  it('PATCH /api/v1/tasks/:id does not revoke spec approval for marker-only edits', async () => {
+    const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
+    const updatedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task({ description: storedDescription, specChecksum: checksum }))
+      .mockResolvedValueOnce(task({ description: updatedDescription, specChecksum: checksum }));
+    prismaMock.task.update.mockResolvedValue(task({ description: updatedDescription, specChecksum: checksum }));
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .send({ description: updatedDescription });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskApproval.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
   });
 
   it('POST /api/v1/tasks/:id/comments succeeds even when current ACs drifted after spec approval', async () => {
