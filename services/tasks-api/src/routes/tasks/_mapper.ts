@@ -27,13 +27,13 @@ export function mapTaskApproval(approval) {
   };
 }
 
-export function mapTaskBlockedBy(blockedBy) {
+export function mapTaskAttentionOwner(attentionOwners) {
   return {
-    id: blockedBy.id,
-    owner: blockedBy.owner,
-    addedBy: blockedBy.addedBy ?? null,
-    note: blockedBy.note ?? null,
-    createdAt: blockedBy.createdAt
+    id: attentionOwners.id,
+    owner: attentionOwners.owner,
+    addedBy: attentionOwners.addedBy ?? null,
+    note: attentionOwners.note ?? null,
+    createdAt: attentionOwners.createdAt
   };
 }
 
@@ -48,15 +48,11 @@ export function mapTask(task) {
       completedAt: dependency.completedAt
     })) ?? [];
 
-  const blockedByRows = task.blockedBy ?? [];
-  // Insertion-ordered list of distinct owner strings. Stable order matters
-  // so the discovery queue filter and the stacked-avatar group render
-  // the same sequence.
-  const blockedBy = blockedByRows.map((row) => row.owner);
-  const hasBlockedBy = blockedBy.length > 0;
-  // Legacy `Task.blocked === true && no owners assigned` — kept visibly
-  // blocked during the transition so no task silently loses its badge.
-  const genericBlocked = task.blocked === true && !hasBlockedBy;
+  const attentionOwnerRows = task.attentionOwners ?? [];
+  // Stable insertion order is used for the attention layer of the avatar
+  // stack. Attention ownership is deliberately not interpreted as blocked
+  // state; `task.blocked` and `dependencyBlocked` retain their own semantics.
+  const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
   return {
     id: task.id,
@@ -77,10 +73,8 @@ export function mapTask(task) {
     tags: task.tags?.map((taskTag) => taskTag.tag?.name).filter(Boolean) ?? [],
     comments: task.comments?.map(mapComment) ?? [],
     approvals: task.approvals?.map(mapTaskApproval) ?? [],
-    blockedBy,
-    blockedByIds: blockedByRows.map(mapTaskBlockedBy),
-    hasBlockedBy,
-    genericBlocked,
+    attentionOwners,
+    attentionOwnerDetails: attentionOwnerRows.map(mapTaskAttentionOwner),
     dependsOn,
     dependsOnIds: dependsOn.map((dependency) => dependency.id),
     dependencyBlocked: dependsOn.some((dependency) => dependency.status !== 'done')
