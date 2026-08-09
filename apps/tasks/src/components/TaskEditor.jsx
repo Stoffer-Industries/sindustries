@@ -22,6 +22,7 @@ import { ApprovalsSection } from './ApprovalsSection.jsx';
  * @param {Function} props.onFetchDependency - Callback to validate and fetch dependency task
  * @param {Function} props.onUpdateDependencies - Callback to replace dependsOnIds
  * @param {Function} props.onOpenTask - Callback to navigate to a dependency task
+ * @param {Function} props.onTaskRefresh - Callback to reconcile a task after an approval mutation
  * @param {boolean} props.isSubmittingComment - Whether comment is being submitted
  */
 export function TaskEditor({
@@ -37,6 +38,7 @@ export function TaskEditor({
   onFetchDependency,
   onUpdateDependencies,
   onOpenTask,
+  onTaskRefresh,
   isSubmittingComment
 }) {
   const descriptionRef = useRef(null);
@@ -527,7 +529,7 @@ export function TaskEditor({
 
         <Divider variant="dashed" />
 
-        <ApprovalsSection task={task} />
+        <ApprovalsSection task={task} onTaskRefresh={onTaskRefresh} />
 
         <div className="comments-section">
           <div className="comments-header">

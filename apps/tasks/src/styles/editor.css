@@ -548,6 +548,42 @@
   text-transform: uppercase;
 }
 
+.approvals-session {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.approvals-session-action {
+  background: none;
+  border: 0;
+  color: var(--si-color-accent);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.approvals-login {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approvals-login label {
+  display: grid;
+  gap: 3px;
+}
+
+.approvals-login input {
+  max-width: 180px;
+}
+
+.approvals-login-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .approvals-empty {
   color: var(--si-color-text-muted);
   margin: 0;
@@ -566,22 +602,27 @@
 }
 
 .approvals-row {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
+  flex-direction: column;
   list-style: none;
 }
 
 .approvals-row-label {
   align-items: center;
-  cursor: default;
+  cursor: pointer;
   display: inline-flex;
   gap: 10px;
   padding: 4px 0;
 }
 
+.approvals-row-label:has(input:disabled) {
+  cursor: not-allowed;
+}
+
 .approvals-row-label input[type="checkbox"] {
   accent-color: var(--si-color-accent);
-  cursor: not-allowed;
+  cursor: inherit;
 }
 
 .approvals-row-type {

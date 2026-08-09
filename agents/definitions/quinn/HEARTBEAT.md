@@ -27,12 +27,12 @@ TECH DESIGN APPROVAL
 Quinn approves tech designs on behalf of Tom during heartbeat. Tom has delegated this.
 
 Each heartbeat:
-1. Use `techDesignApprovals` from the unified queue. It is populated by the global `pending_tech_design_approvals.py` scan and mirrors the lobster's parser (`tagged_values` + `tech_design_approved` in `agents/workflows/feature-task/src/main.rs`): a comment counts as approval only if its trimmed text STARTS WITH the tag and the first whitespace-separated token after the tag is `true` (case-insensitive). Substring matches in the lobster's progress-checklist complaints (e.g. `Missing task comment [tech-design-approved] true`) are intentionally NOT counted.
+1. Use `techDesignApprovals` from the unified queue. It is populated by `pending_tech_design_approvals.py`, which reads the structured `task.approvals` collection; comments provide the `[tech-design]` document link but never grant approval.
 2. **If 0 pending: skip this section entirely. No output.**
 3. For each pending task:
    - Read the design at the linked path.
    - Check: all required sections present, aligned with spec, no unbounded scope, `.openclaw` boundary notes where relevant.
-   - If it looks good: post task comment `[tech-design-approved] true`
+   - If it looks good: call `tasks_api_client.py approve --id <task-id> --type tech_design` with Quinn's scoped `TASKS_API_APPROVAL_TOKEN`. The API derives Quinn's identity and writes the audit comment atomically.
    - If something looks wrong or risky: flag to Tom via Telegram instead of approving.
 4. Do not approve a design that was written in the same heartbeat pass (let Rowan write it, Quinn approves next pass).
 

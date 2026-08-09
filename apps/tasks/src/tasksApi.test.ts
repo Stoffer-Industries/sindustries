@@ -5,7 +5,12 @@ import {
   updateTask,
   fetchTask,
   archiveTask,
-  createTaskComment
+  createTaskComment,
+  createTaskApproval,
+  deleteTaskApproval,
+  fetchAuthSession,
+  login,
+  logout
 } from './tasksApi.ts';
 
 // Mock fetch globally
@@ -186,6 +191,70 @@ describe('tasksApi', () => {
         expect.objectContaining({ method: 'DELETE' })
       );
       expect(result).toBeNull();
+    });
+  });
+
+  describe('browser authentication', () => {
+    it('loads the current actor with browser credentials', async () => {
+      const actor = { username: 'tom', displayName: 'Tom' };
+      mockFetch.mockResolvedValueOnce(mockResponse(actor));
+      await expect(fetchAuthSession()).resolves.toEqual(actor);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4001/api/v1/auth/session',
+        expect.objectContaining({ credentials: 'include' })
+      );
+    });
+
+    it('logs in with credentials without client-side token handling', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse({ username: 'tom' }));
+      await login({ username: 'tom', password: 'secret' });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4001/api/v1/auth/session',
+        expect.objectContaining({
+          method: 'POST', credentials: 'include',
+          body: JSON.stringify({ username: 'tom', password: 'secret' })
+        })
+      );
+    });
+
+    it('logs out through the browser session endpoint, including an empty 204 response', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204, json: vi.fn() });
+      await expect(logout()).resolves.toBeNull();
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4001/api/v1/auth/session',
+        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+      );
+    });
+  });
+
+  describe('task approvals', () => {
+    it('posts a structured type with browser session credentials and no owner', async () => {
+      const approval = { id: 'approval-1', type: 'spec', owner: 'Tom', state: 'approved' };
+      mockFetch.mockResolvedValueOnce(mockResponse(approval));
+
+      const result = await createTaskApproval('task-1', { type: 'spec' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4001/api/v1/tasks/task-1/approvals',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          body: JSON.stringify({ type: 'spec' })
+        })
+      );
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).not.toHaveProperty('owner');
+      expect(result).toEqual(approval);
+    });
+
+    it('deletes a structured approval with browser session credentials', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse(null));
+
+      await expect(deleteTaskApproval('task-1', 'qa')).resolves.toBeNull();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4001/api/v1/tasks/task-1/approvals/qa',
+        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+      );
     });
   });
 

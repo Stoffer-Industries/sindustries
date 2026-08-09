@@ -101,6 +101,24 @@ export interface RequiredApprovals {
   source: 'config-file' | 'builtin-default';
 }
 
+export interface CreateTaskApprovalPayload {
+  type: ApprovalType;
+  note?: string;
+}
+
+export interface AuthActor {
+  actor?: string;
+  username?: string;
+  displayName?: string | null;
+  approvalTypes: ApprovalType[];
+  expiresAt?: string;
+}
+
+export interface LoginPayload {
+  username: string;
+  password: string;
+}
+
 // API Response wrapper
 interface ApiResponse<T> {
   data: T;
@@ -125,7 +143,9 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     ...options
   });
 
-  const body = await response.json() as ApiResponse<T>;
+  const body = response.status === 204
+    ? ({ data: null } as ApiResponse<T>)
+    : await response.json() as ApiResponse<T>;
   if (!response.ok) throw new Error(body?.error?.message ?? 'Request failed');
   return body.data;
 }
@@ -198,4 +218,52 @@ export async function createTaskComment(id: string | number, payload: CreateComm
  */
 export async function fetchRequiredApprovals(taskType: TaskType): Promise<RequiredApprovals> {
   return api<RequiredApprovals>(`/task-types/${taskType}/required-approvals`);
+}
+
+/** Resolve the current browser session. */
+export async function fetchAuthSession(): Promise<AuthActor> {
+  return api<AuthActor>('/auth/session', { credentials: 'include' });
+}
+
+/** Establish an HttpOnly-cookie browser session. */
+export async function login(payload: LoginPayload): Promise<AuthActor> {
+  return api<AuthActor>('/auth/session', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify(payload)
+  });
+}
+
+/** End the current browser session. */
+export async function logout(): Promise<null> {
+  return api<null>('/auth/session', {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+}
+
+/**
+ * Approve a task as the authenticated browser user. Ownership is derived from
+ * the session by the API and must never be supplied by the UI.
+ */
+export async function createTaskApproval(
+  id: string | number,
+  payload: CreateTaskApprovalPayload
+): Promise<TaskApproval> {
+  return api<TaskApproval>(`/tasks/${id}/approvals`, {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify(payload)
+  });
+}
+
+/** Revoke an approval as the authenticated browser user. */
+export async function deleteTaskApproval(
+  id: string | number,
+  type: ApprovalType
+): Promise<TaskApproval | null> {
+  return api<TaskApproval | null>(`/tasks/${id}/approvals/${type}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
 }

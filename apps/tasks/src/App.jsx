@@ -729,6 +729,7 @@ export function App() {
                           onFetchDependency={fetchTask}
                           onUpdateDependencies={(dependsOnIds) => patchTask(task.id, { dependsOnIds })}
                           onOpenTask={openTask}
+                          onTaskRefresh={refreshTask}
                           isSubmittingComment={submittingCommentForTaskId === task.id}
                         />
                       )}
@@ -822,6 +823,7 @@ export function App() {
                                   onFetchDependency={fetchTask}
                                   onUpdateDependencies={(dependsOnIds) => patchTask(task.id, { dependsOnIds })}
                                   onOpenTask={openTask}
+                                  onTaskRefresh={refreshTask}
                                   isSubmittingComment={submittingCommentForTaskId === task.id}
                                 />
                               )}

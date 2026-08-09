@@ -1,23 +1,10 @@
 #!/usr/bin/env python3
-"""List feature and code tasks that have a [tech-design] comment but no
-proper [tech-design-approved] true comment, so Quinn can review them
-during heartbeat and post approvals on Tom's behalf.
+"""List feature and code tasks that have a [tech-design] document link but
+no approved structured ``tech_design`` TaskApproval row.
 
-Mirrors the lobster's parser in agents/workflows/feature-task/src/main.rs
-(`tagged_values` + `tech_design_approved`):
-
-  - [tech-design] tag: any comment whose TRIMMED TEXT STARTS WITH the tag
-    contributes the rest (after the tag, trimmed). First non-empty value
-    wins.
-  - [tech-design-approved] tag: same prefix rule; a comment counts as
-    approval only if the first whitespace-separated token after the tag
-    is "true" (case-insensitive). Rationale text after "true" is allowed
-    and ignored.
-
-This is the parser heartbeat should use. The previous ad-hoc substring
-check (`'[tech-design-approved]' in comment_text`) was a false positive
-on the lobster's own progress-checklist complaints
-(`Missing task comment [tech-design-approved] true`).
+The design link remains a durable task comment. Approval state does not:
+comments are audit/context only, while ``task.approvals`` is the sole gate
+source shared by this queue and the feature-task Lobster.
 
 Usage:
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 \\
@@ -96,12 +83,11 @@ def tech_design_url(task: dict) -> str | None:
 
 
 def tech_design_approved(task: dict) -> bool:
-    """Mirror agents/workflows/feature-task/src/main.rs tech_design_approved."""
-    for value in tagged_values(task.get("comments") or [], "[tech-design-approved]"):
-        token = value.strip().split(maxsplit=1)[0] if value.strip() else ""
-        if token.lower() == "true":
-            return True
-    return False
+    """Return true only for an approved structured tech-design row."""
+    return any(
+        approval.get("type") == "tech_design" and approval.get("state") == "approved"
+        for approval in (task.get("approvals") or [])
+    )
 
 
 def list_tasks(base_url: str, statuses: list[str]) -> list[dict]:
@@ -138,13 +124,7 @@ def list_tasks(base_url: str, statuses: list[str]) -> list[dict]:
 
 
 def fetch_task_detail(base_url: str, task_id: str) -> dict:
-    """GET /tasks/:id has comments included; GET /tasks (list) does not.
-
-    services/tasks-api/src/routes/tasks.ts only adds `include: { comments }`
-    on the single-task route, so tagged_values() on a list-endpoint task
-    always sees an empty comments array. Any tech-design-approval check must
-    hydrate comments per task via this endpoint before evaluating tags.
-    """
+    """Hydrate comments (design link) and structured approvals per task."""
     response = api_request("GET", base_url, f"/tasks/{task_id}")
     return response.get("data") or {}
 

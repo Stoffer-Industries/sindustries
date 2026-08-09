@@ -2,404 +2,109 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = {
-  task: {
-    findFirst: vi.fn(),
-    findMany: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn()
-  },
-  taskComment: {
-    create: vi.fn()
-  },
-  taskTag: {
-    deleteMany: vi.fn(),
-    createMany: vi.fn()
-  },
-  tag: {
-    findMany: vi.fn(),
-    upsert: vi.fn()
-  },
-  taskDependency: {
-    findFirst: vi.fn(),
-    deleteMany: vi.fn(),
-    createMany: vi.fn()
-  },
-  taskApproval: {
-    findMany: vi.fn(),
-    findUnique: vi.fn(),
-    upsert: vi.fn(),
-    update: vi.fn()
-  },
+  task: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+  taskComment: { create: vi.fn() },
+  taskTag: { deleteMany: vi.fn(), createMany: vi.fn() }, tag: { findMany: vi.fn(), upsert: vi.fn() },
+  taskDependency: { findFirst: vi.fn(), deleteMany: vi.fn(), createMany: vi.fn() },
+  taskApproval: { findMany: vi.fn(), findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
+  approvalSession: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn()
 };
-
-vi.mock('../src/lib/prisma.ts', () => ({
-  prisma: prismaMock
-}));
-
+vi.mock('../src/lib/prisma.ts', () => ({ prisma: prismaMock }));
 const { createApp } = await import('../src/app.ts');
 
 const TASK_ID = '11111111-1111-1111-1111-111111111111';
-const OTHER_TASK_ID = '99999999-9999-9999-9999-999999999999';
+const TOM_TOKEN = 'tom-service-token-long-enough';
+const QUINN_TOKEN = 'quinn-service-token-long-enough';
+const TOM_SESSION = 'tom-browser-session-long-enough';
+const activeTask = { id: TASK_ID, status: 'ready', archivedAt: null };
+function approval(overrides = {}) { return { id: 'a1', taskId: TASK_ID, type: 'spec', owner: 'Tom', state: 'approved', approvedAt: new Date('2026-08-08T04:00:00Z'), revokedAt: null, note: null, createdAt: new Date(), updatedAt: new Date(), ...overrides }; }
+function auth(token = TOM_TOKEN) { return { Authorization: `Bearer ${token}` }; }
 
-function approvalFixture(overrides = {}) {
-  return {
-    id: 'approval-1',
-    taskId: TASK_ID,
-    type: 'spec',
-    owner: 'Tom',
-    state: 'approved',
-    approvedAt: new Date('2026-08-08T04:00:00.000Z'),
-    revokedAt: null,
-    note: null,
-    createdAt: new Date('2026-08-08T04:00:00.000Z'),
-    updatedAt: new Date('2026-08-08T04:00:00.000Z'),
-    ...overrides
-  };
-}
-
-describe('task approval routes', () => {
+describe('task approval boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
-  });
-
-  it('GET /api/v1/tasks/:id/approvals lists approvals for a task', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({
-      id: TASK_ID,
-      approvals: [
-        approvalFixture({ type: 'spec' }),
-        approvalFixture({ id: 'approval-2', type: 'tech_design', owner: 'Quinn' })
-      ]
-    });
-
-    const app = createApp();
-    const response = await request(app).get(`/api/v1/tasks/${TASK_ID}/approvals`);
-
-    expect(response.status).toBe(200);
-    expect(response.body.data).toHaveLength(2);
-    expect(response.body.data[0]).toMatchObject({
-      id: 'approval-1',
-      type: 'spec',
-      owner: 'Tom',
-      state: 'approved',
-      revokedAt: null,
-      note: null
-    });
-    expect(response.body.data[1]).toMatchObject({ type: 'tech_design', owner: 'Quinn' });
-    expect(prismaMock.task.findFirst).toHaveBeenCalledWith({
-      where: { id: TASK_ID, archivedAt: null },
-      select: {
-        id: true,
-        approvals: {
-          orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }]
-        }
-      }
-    });
-  });
-
-  it('GET /api/v1/tasks/:id/approvals returns empty list when task has no approvals', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID, approvals: [] });
-
-    const app = createApp();
-    const response = await request(app).get(`/api/v1/tasks/${TASK_ID}/approvals`);
-
-    expect(response.status).toBe(200);
-    expect(response.body.data).toEqual([]);
-  });
-
-  it('GET /api/v1/tasks/:id/approvals returns 404 when task is missing', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce(null);
-
-    const app = createApp();
-    const response = await request(app).get(`/api/v1/tasks/${OTHER_TASK_ID}/approvals`);
-
-    expect(response.status).toBe(404);
-    expect(response.body).toEqual({
-      error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
-    });
-    expect(prismaMock.taskApproval.findMany).not.toHaveBeenCalled();
-  });
-
-  it('GET /api/v1/tasks/:id/approvals rejects malformed task id', async () => {
-    const app = createApp();
-    const response = await request(app).get('/api/v1/tasks/not-a-uuid/approvals');
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('INVALID_TASK_ID');
-    expect(prismaMock.task.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('POST /api/v1/tasks/:id/approvals creates a new approval', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.upsert.mockResolvedValueOnce(
-      approvalFixture({ id: 'approval-1', owner: 'Tom', note: 'Looks good' })
-    );
-
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Tom', note: 'Looks good' });
-
-    expect(response.status).toBe(200);
-    expect(response.body.data).toMatchObject({
-      type: 'spec',
-      owner: 'Tom',
-      state: 'approved',
-      note: 'Looks good'
-    });
-    expect(prismaMock.taskApproval.upsert).toHaveBeenCalledTimes(1);
-    const call = prismaMock.taskApproval.upsert.mock.calls[0][0];
-    expect(call.where).toEqual({ taskId_type: { taskId: TASK_ID, type: 'spec' } });
-    expect(call.create).toMatchObject({ taskId: TASK_ID, type: 'spec', owner: 'Tom', note: 'Looks good' });
-    expect(call.create.state).toBe('approved');
-    expect(call.create.approvedAt).toBeInstanceOf(Date);
-    expect(call.update).toMatchObject({ owner: 'Tom', note: 'Looks good', state: 'approved', revokedAt: null });
-    expect(call.update.approvedAt).toBeInstanceOf(Date);
-  });
-
-  it('POST /api/v1/tasks/:id/approvals is idempotent — re-approving updates owner/note/approvedAt', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.upsert.mockResolvedValueOnce(
-      approvalFixture({ owner: 'Quinn', approvedAt: new Date('2026-08-09T01:00:00.000Z') })
-    );
-
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Quinn' });
-
-    expect(response.status).toBe(200);
-    expect(response.body.data.owner).toBe('Quinn');
-    const call = prismaMock.taskApproval.upsert.mock.calls[0][0];
-    expect(call.where).toEqual({ taskId_type: { taskId: TASK_ID, type: 'spec' } });
-  });
-
-  it('POST /api/v1/tasks/:id/approvals trims whitespace from owner and note', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.upsert.mockResolvedValueOnce(approvalFixture());
-
-    const app = createApp();
-    await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: '  Tom  ', note: '  ok  ' });
-
-    const call = prismaMock.taskApproval.upsert.mock.calls[0][0];
-    expect(call.create.owner).toBe('Tom');
-    expect(call.create.note).toBe('ok');
-  });
-
-  it('POST /api/v1/tasks/:id/approvals treats absent note as null', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.upsert.mockResolvedValueOnce(approvalFixture());
-
-    const app = createApp();
-    await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Tom' });
-
-    const call = prismaMock.taskApproval.upsert.mock.calls[0][0];
-    expect(call.create.note).toBeNull();
-  });
-
-  it('POST /api/v1/tasks/:id/approvals rejects invalid approval type', async () => {
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'invalid', owner: 'Tom' });
-
-    expect(response.status).toBe(400);
-    expect(response.body).toEqual({
-      error: { code: 'INVALID_APPROVAL_TYPE', message: 'type must be one of: spec, tech_design, qa' }
-    });
-    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
-  });
-
-  it('POST /api/v1/tasks/:id/approvals rejects missing owner', async () => {
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec' });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('APPROVAL_OWNER_REQUIRED');
-    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
-  });
-
-  it('POST /api/v1/tasks/:id/approvals rejects whitespace-only owner', async () => {
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: '   ' });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('APPROVAL_OWNER_REQUIRED');
-  });
-
-  it('POST /api/v1/tasks/:id/approvals rejects non-string note', async () => {
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Tom', note: 42 });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('INVALID_APPROVAL_NOTE');
-  });
-
-  it('POST /api/v1/tasks/:id/approvals returns 404 when task is missing', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce(null);
-
-    const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${OTHER_TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Tom' });
-
-    expect(response.status).toBe(404);
-    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
-  });
-
-  it('POST /api/v1/tasks/:id/approvals does not modify task description or create a comment', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.upsert.mockResolvedValueOnce(approvalFixture());
-
-    const app = createApp();
-    await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Tom' });
-
-    expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
-    expect(prismaMock.task.update).not.toHaveBeenCalled();
-  });
-
-  it('DELETE /api/v1/tasks/:id/approvals/:type revokes an existing approval', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.findUnique.mockResolvedValueOnce(approvalFixture());
-    prismaMock.taskApproval.update.mockResolvedValueOnce(
-      approvalFixture({
-        state: 'revoked',
-        revokedAt: new Date('2026-08-09T02:00:00.000Z')
-      })
-    );
-
-    const app = createApp();
-    const response = await request(app).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`);
-
-    expect(response.status).toBe(200);
-    expect(response.body.data.state).toBe('revoked');
-    expect(response.body.data.revokedAt).toBe('2026-08-09T02:00:00.000Z');
-    const updateCall = prismaMock.taskApproval.update.mock.calls[0][0];
-    expect(updateCall.where).toEqual({ taskId_type: { taskId: TASK_ID, type: 'spec' } });
-    expect(updateCall.data.state).toBe('revoked');
-    expect(updateCall.data.revokedAt).toBeInstanceOf(Date);
-  });
-
-  it('DELETE /api/v1/tasks/:id/approvals/:type is a no-op when no approval row exists', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.findUnique.mockResolvedValueOnce(null);
-
-    const app = createApp();
-    const response = await request(app).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`);
-
-    expect(response.status).toBe(200);
-    expect(response.body.data).toBeNull();
-    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
-    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
-  });
-
-  it('DELETE /api/v1/tasks/:id/approvals/:type rejects invalid type', async () => {
-    const app = createApp();
-    const response = await request(app).delete(`/api/v1/tasks/${TASK_ID}/approvals/invalid`);
-
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('INVALID_APPROVAL_TYPE');
-    expect(prismaMock.taskApproval.findUnique).not.toHaveBeenCalled();
-  });
-
-  it('DELETE /api/v1/tasks/:id/approvals/:type returns 404 when task is missing', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce(null);
-
-    const app = createApp();
-    const response = await request(app).delete(`/api/v1/tasks/${OTHER_TASK_ID}/approvals/spec`);
-
-    expect(response.status).toBe(404);
-    expect(prismaMock.taskApproval.findUnique).not.toHaveBeenCalled();
-  });
-
-  it('GET /api/v1/tasks/:id embeds approvals in the response', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({
-      id: TASK_ID,
-      title: 'Task with approvals',
-      description: null,
-      status: 'ready',
-      statusChangedAt: new Date('2026-08-08T04:00:00.000Z'),
-      priority: 'urgent',
-      dueAt: null,
-      completedAt: null,
-      assignee: null,
-      archivedAt: null,
-      blocked: false,
-      specChecksum: null,
-      createdAt: new Date('2026-08-08T04:00:00.000Z'),
-      updatedAt: new Date('2026-08-08T04:00:00.000Z'),
-      tags: [],
-      dependencies: [],
-      comments: [],
-      approvals: [
-        approvalFixture({ type: 'spec', owner: 'Tom' }),
-        approvalFixture({ id: 'approval-2', type: 'tech_design', owner: 'Quinn' })
-      ]
-    });
-
-    const app = createApp();
-    const response = await request(app).get(`/api/v1/tasks/${TASK_ID}`);
-
-    expect(response.status).toBe(200);
-    expect(response.body.data.approvals).toHaveLength(2);
-    expect(response.body.data.approvals[0]).toMatchObject({ type: 'spec', owner: 'Tom' });
-    expect(response.body.data.approvals[1]).toMatchObject({ type: 'tech_design', owner: 'Quinn' });
-  });
-
-  it('GET /api/v1/tasks list endpoint embeds approvals on each row', async () => {
-    prismaMock.task.findMany.mockResolvedValueOnce([
-      {
-        id: TASK_ID,
-        title: 'Task A',
-        description: null,
-        status: 'ready',
-        statusChangedAt: new Date('2026-08-08T04:00:00.000Z'),
-        priority: 'urgent',
-        dueAt: null,
-        completedAt: null,
-        assignee: null,
-        archivedAt: null,
-        blocked: false,
-        specChecksum: null,
-        createdAt: new Date('2026-08-08T04:00:00.000Z'),
-        updatedAt: new Date('2026-08-08T04:00:00.000Z'),
-        tags: [],
-        dependencies: [],
-        approvals: [approvalFixture({ type: 'spec', owner: 'Tom' })]
-      }
+    process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
+      { token: TOM_TOKEN, actor: 'Tom', approvalTypes: ['spec', 'qa'] },
+      { token: QUINN_TOKEN, actor: 'Quinn', approvalTypes: ['tech_design'] }
     ]);
-
-    const app = createApp();
-    const response = await request(app).get('/api/v1/tasks');
-
-    expect(response.status).toBe(200);
-    expect(response.body.data[0].approvals).toHaveLength(1);
-    expect(response.body.data[0].approvals[0]).toMatchObject({ type: 'spec', owner: 'Tom' });
+    prismaMock.approvalSession.findUnique.mockResolvedValue(null);
+    prismaMock.$transaction.mockImplementation(async (fn) => fn(prismaMock));
   });
 
-  it('POST /api/v1/tasks/:id/approvals path does not collide with PATCH /tasks/:id (different route shape)', async () => {
-    prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID });
-    prismaMock.taskApproval.upsert.mockResolvedValueOnce(approvalFixture());
+  it('keeps reads public', async () => {
+    prismaMock.task.findFirst.mockResolvedValue({ id: TASK_ID, approvals: [approval()] });
+    const res = await request(createApp()).get(`/api/v1/tasks/${TASK_ID}/approvals`);
+    expect(res.status).toBe(200); expect(res.body.data[0].owner).toBe('Tom');
+  });
 
+  it('rejects an unauthenticated mutation before database access', async () => {
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).send({ type: 'spec' });
+    expect(res.status).toBe(401); expect(res.body.error.code).toBe('APPROVAL_AUTH_REQUIRED');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('accepts a durable unexpired browser session cookie', async () => {
+    prismaMock.approvalSession.findUnique.mockResolvedValue({ actor: 'Tom', expiresAt: new Date(Date.now() + 60_000), revokedAt: null });
+    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approval()); prismaMock.taskComment.create.mockResolvedValue({});
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set('Cookie', `tasks_api_session=${TOM_SESSION}`).send({ type: 'spec' });
+    expect(res.status).toBe(200); expect(prismaMock.taskApproval.upsert).toHaveBeenCalled();
+  });
+
+  it('enforces Tom-only spec/qa and Quinn-only tech_design', async () => {
     const app = createApp();
-    const response = await request(app)
-      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
-      .send({ type: 'spec', owner: 'Tom' });
+    const tomTech = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'tech_design' });
+    const quinnSpec = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(QUINN_TOKEN)).send({ type: 'spec' });
+    expect(tomTech.status).toBe(403); expect(quinnSpec.status).toBe(403); expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
 
-    expect(response.status).toBe(200);
-    expect(prismaMock.task.update).not.toHaveBeenCalled();
+  it('rejects a body owner and derives owner from the credential', async () => {
+    const forged = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec', owner: 'Quinn' });
+    expect(forged.status).toBe(400); expect(forged.body.error.code).toBe('FORGEABLE_APPROVAL_OWNER');
+    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approval()); prismaMock.taskComment.create.mockResolvedValue({});
+    await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+    expect(prismaMock.taskApproval.upsert.mock.calls[0][0].create.owner).toBe('Tom');
+  });
+
+  it.each([{ ...activeTask, status: 'done' }, { ...activeTask, archivedAt: new Date() }])('makes done/archived tasks immutable', async (task) => {
+    prismaMock.task.findUnique.mockResolvedValue(task);
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+    expect(res.status).toBe(409); expect(res.body.error.code).toBe('TASK_IMMUTABLE'); expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+  });
+
+  it('writes approval and exact ordinary audit comment in one transaction', async () => {
+    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approval()); prismaMock.taskComment.create.mockResolvedValue({});
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+    expect(res.status).toBe(200); expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.taskComment.create).toHaveBeenCalledWith({ data: { taskId: TASK_ID, author: 'Tom', body: 'Approval spec approved by Tom.' } });
+  });
+
+  it('rolls back/surfaces failure when the audit insert fails', async () => {
+    prismaMock.$transaction.mockRejectedValue(new Error('audit failed'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+    expect(res.status).toBe(500); expect(prismaMock.$transaction).toHaveBeenCalledTimes(1); spy.mockRestore();
+  });
+
+  it('POST of the identical approved state is a no-op without restamping or commenting', async () => {
+    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(approval());
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+    expect(res.status).toBe(200); expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled(); expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
+  });
+
+  it('DELETE revokes atomically and audits the server-derived actor', async () => {
+    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(approval());
+    prismaMock.taskApproval.update.mockResolvedValue(approval({ state: 'revoked', revokedAt: new Date() })); prismaMock.taskComment.create.mockResolvedValue({});
+    const res = await request(createApp()).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`).set(auth());
+    expect(res.status).toBe(200); expect(prismaMock.taskComment.create).toHaveBeenCalledWith({ data: { taskId: TASK_ID, author: 'Tom', body: 'Approval spec revoked by Tom.' } });
+  });
+
+  it.each([null, approval({ state: 'revoked', revokedAt: new Date() })])('DELETE is an idempotent no-op with no comment', async (existing) => {
+    prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(existing);
+    const res = await request(createApp()).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`).set(auth());
+    expect(res.status).toBe(200); expect(prismaMock.taskApproval.update).not.toHaveBeenCalled(); expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
   });
 });

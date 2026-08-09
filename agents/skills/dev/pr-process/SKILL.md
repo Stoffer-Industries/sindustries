@@ -90,7 +90,7 @@ This skill is role-based, not agent-based. Any agent can play any role on a give
 
 Concrete patterns in our workflows:
 
-- **Feature tasks:** The task implementer is the PR assignee. The blocking reviewer is Quinn; Tom may be added as a visibility-only reviewer for GitHub inbox visibility. The assignee merges after the required approval (normally Quinn's) and CI is green — do not wait for Tom's PR approval or ask Tom to merge. Tom tests post-merge in main; his sign-off is the `[qa-ac-verified] true` task comment. The feature-task workflow is role-based: implementer is assignee/merger, reviewer reviews. Do not hardcode a specific agent into the workflow. Apply `--label feature-task` at PR creation.
+- **Feature tasks:** The task implementer is the PR assignee. The blocking reviewer is Quinn; Tom may be added as a visibility-only reviewer for GitHub inbox visibility. The assignee merges after the required approval (normally Quinn's) and CI is green — do not wait for Tom's PR approval or ask Tom to merge. Tom tests post-merge in main; his sign-off is the structured `qa` TaskApproval. The feature-task workflow is role-based: implementer is assignee/merger, reviewer reviews. Do not hardcode a specific agent into the workflow. Apply `--label feature-task` at PR creation.
 - **Content tasks:** Assignee opens (`--assignee <self>`, `--reviewer quinn,Stoff81`, `--label content-task`). Quinn and Tom review. Assignee merges after the required approvals.
 - **Code-garden tasks:** Assignee opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Assignee merges after approval.
 - **Cross-repo PRs (workspace repo, infra scripts):** same pattern — assignee opens, reviewer reviews, assignee merges after approval.

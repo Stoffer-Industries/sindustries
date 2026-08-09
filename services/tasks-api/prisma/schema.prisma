@@ -180,6 +180,18 @@ model TaskApproval {
   @@index([taskId, state])
 }
 
+model ApprovalSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  tokenHash String    @unique
+  actor     String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([actor, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
 enum ContentSchedulerItemStatus {
   draft
   queued

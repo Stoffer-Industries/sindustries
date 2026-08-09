@@ -3,12 +3,11 @@ Run the Feature Factory and Content Task workflow lobsters once each.
 ## 1. Feature Task Lobster
 
 ```
-TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py --approval-source=auto
+TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py
 ```
 
 The runner discovers active tasks in `open`, `ready`, `doing`, and `acceptance` where `taskType == "feature"` (or `feature-factory` tag), then invokes Lobster for each task.
 
-`--approval-source=auto` was promoted from `legacy` after Quinn's PR #371 smoke tests confirmed gate verdicts match between `--approval-source=legacy` and `--approval-source=auto` paths (PR #371 review, 2026-08-08T07:53:20Z). `auto` reads structured `TaskApproval` rows from the API when present and falls back to legacy text-matching otherwise — no behavior change for tasks without API rows, structured path active for tasks approved via the new endpoints.
 
 **If the lobster reports `ready_checks_blocked` due to missing `[tech-design]`:**
 - Check if Rowan is free (no tasks in `doing` assigned to Rowan):

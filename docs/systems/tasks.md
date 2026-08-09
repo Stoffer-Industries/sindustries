@@ -498,19 +498,17 @@ Capacity-gate behaviour: while one content task is in `doing`, additional `ready
 
 ## Shared workflow contract
 
-The three workflows share the same Rust binary (feature + code) and the same task-comment vocabulary. Tags are read off task comments until first-class Tasks API fields exist (`taskType`, `tech_design_url`, `tech_design_approved`, `system_spec_path`, `no_system_spec_change_reason`, `specChecksum`); missing fields fall back to comment tags.
+The three workflows share the same Rust binary (feature + code). Gate approvals are first-class `TaskApproval` resources and never fall back to comments or description markers. Comments remain durable links, workflow signals, and human-readable audit history only.
 
 ### Tag vocabulary (consolidated)
 
 | Tag | Owner | Workflow | Purpose |
 |---|---|---|---|
 | `[tech-design] <url>` | Rowan | feature, code | Tech design URL |
-| `[tech-design-approved] true` | Quinn | feature, code | Tom signed off on the tech design |
 | `[tech-design-not-required] <reason>` | Rowan | code | Code task with no tech design |
 | `[implementer-prs] <url>` | Rowan | feature, code | PRs implementing this task (`[rowan-prs]` legacy alias still accepted) |
 | `[openclaw-needed] <reason>` | Rowan | feature, code | Flag a `.openclaw` change for Quinn |
 | `[openclaw-done] <summary>` | Quinn | feature, code | `.openclaw` change applied |
-| `[qa-ac-verified] true` | Tom | feature, code | Explicit QA sign-off; required before `acceptance → done` |
 | `[system-spec] docs/systems/<file>.md` | Rowan | feature, code | System spec path (legacy convention, not parsed by the lobster) |
 | `[no-system-spec-change] <reason>` | Rowan | feature, code | Declares no system doc change needed (legacy convention, not parsed by the lobster) |
 | `[spec-resynced] <summary>` | Lobster | feature | Drift resync: `checksum=<sha256>` + `driftFingerprint=<sha256>` |
@@ -524,6 +522,20 @@ The three workflows share the same Rust binary (feature + code) and the same tas
 
 `blocked` is not a separate workflow status — it is an annotation in the lobster state comment that explains why the transition is being held. The task record `status` remains `ready` / `doing` / `acceptance`; only the lobster state carries the blocking reason.
 
+### Structured approval and authentication contract
+
+`TaskApproval` is the only source of truth for `spec`, `tech_design`, and `qa` gates. Missing or revoked rows fail closed. Legacy `[tech-design-approved] true`, `[qa-ac-verified] true`, and checked `Approved by Tom` text remain historical data only and cannot grant a runtime gate.
+
+Browser approval writes require a durable login session:
+
+- `POST /api/v1/auth/session` verifies a configured scrypt password hash, creates a database-backed session, and sets the opaque `tasks_api_session` cookie (`HttpOnly`, `SameSite=Lax`, `Secure` in production).
+- `GET /api/v1/auth/session` resolves the current actor.
+- `DELETE /api/v1/auth/session` revokes the session and clears the cookie.
+
+Agent writes use `Authorization: Bearer <service-token>` with a separately scoped credential. The server derives actor and authorization; clients cannot submit `owner`. Initial policy is Tom → `spec`/`qa`, Quinn → `tech_design`. Session tokens are stored only as SHA-256 hashes and expire according to `TASKS_API_APPROVAL_SESSION_TTL_SECONDS`.
+
+Approval POST/DELETE and their ordinary audit comment execute in one Prisma transaction. A real transition creates exactly one comment (`Approval <type> approved|revoked by <actor>.`); identical POST and absent/already-revoked DELETE are no-ops with no duplicate history. Archived and `done` tasks are immutable.
+
 ---
 
 ## `.openclaw` boundary
@@ -534,7 +546,7 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 
 ## Spec Checksum Safeguards (factory-v2 last grandfathered edit)
 
-After a spec is approved, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The fluid AC lifecycle (shipped via task `b2ab54db`) replaces the old hard-block on drift with a Tom-gated re-approval flow. The brain spec remains the AC source of truth in `open`, but Tom may approve the spec in either the brain spec or the task description while the task is still `open`; Lobster mirrors task-side approval back to the brain spec before moving to `ready`. The task description is the source of truth in every later status.
+After a structured `spec` approval is granted, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The brain spec remains the AC source of truth in `open`; the task description is the source of truth in every later status. Legacy markdown markers may still be manipulated by the drift-resync compatibility machinery, but they do not grant the spec gate—the `TaskApproval` row does.
 
 ### Fluid AC lifecycle state machine
 
@@ -549,7 +561,7 @@ The lobster (`agents/workflows/feature-task/src/main.rs`) recognises three state
 | `[ ]` (unchecked) | (drift recorded earlier) | Block waiting on Tom to re-check `**Approved by Tom**` on the new spec |
 | Absent (legacy tasks) | Yes | Legacy hard block with `write a new spec` message |
 
-`open` status always uses the brain spec ACs as source of truth. The open → ready approval gate accepts `- [x] **Approved by Tom**` in either the brain spec or the task description; if approval was only in the task description, Lobster mirrors the checked marker into the brain spec before transition. Drift marker machinery still only kicks in for `ready`, `doing`, `acceptance`, `done`.
+`open` status always uses the brain spec ACs as source of truth. The open → ready approval gate requires an approved structured `spec` row. Checked markdown in the brain spec or task description cannot satisfy it. Drift marker compatibility machinery only runs for later-state resync bookkeeping.
 
 ### Tasks API writes under the fluid lifecycle
 
@@ -573,14 +585,14 @@ A `[spec-resynced]` comment is trusted only when both bindings match the current
 
 ### Source-of-truth handling
 
-- `open` status: brain spec ACs win. Approval may be checked in either brain spec or task description; task-side approval is mirrored into the brain spec before transition. Drift against the stored checksum is treated as a blocker.
+- `open` status: brain spec ACs win. Structured `spec` approval is required; legacy marker state is ignored by the gate. Drift against the stored checksum is treated as a blocker.
 - `ready`, `doing`, `acceptance`, `done`: task description wins. Lobster reflects drift via the marker, then resyncs the brain spec to match after Tom re-checks approval.
 
 ### Spec folder lifecycle
 
 Feature specs use a forward-only file lifecycle under `brain/tasks/specs/`:
 
-- `brain/tasks/specs/open/` — new chat-created feature specs awaiting Tom approval. `feature-task-create` and `tasks-create` must create new chat specs here with an unchecked `- [ ] **Approved by Tom**` marker.
+- `brain/tasks/specs/open/` — new chat-created feature specs awaiting Tom's structured `spec` approval. New templates do not add an approval marker.
 - `brain/tasks/specs/in-progress/` — approved specs attached to active feature work. On each `spec-check` run, the Rust lobster bootstraps `open/`, `in-progress/`, and `done/`, then fails loudly if any other direct subdirectory exists under `brain/tasks/specs/`. When a chat spec in `open/` is checked as approved, the lobster moves it to `in-progress/` and patches the task `**Spec:**` line. The move is idempotent; unchecked specs already in `in-progress/` are never moved back.
 - `brain/tasks/specs/done/` — specs for completed feature tasks. After `post-merge` transitions a task to `done`, the lobster moves its spec from `in-progress/` to `done/` and patches the task `**Spec:**` line. Specs already in `done/` stay there even if a task later reopens.
 
@@ -613,7 +625,7 @@ The `409 SPEC_CHECKSUM_MISMATCH` response names the task id, the stored `specChe
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ready → doing` blocked | Missing `[tech-design-approved]` or `specChecksum` drift | Quinn confirms Tom sign-off and posts `[tech-design-approved] true`; for drift, follow the resync path |
+| `ready → doing` blocked | Missing structured `tech_design` approval or `specChecksum` drift | Quinn grants `tech_design` through the authenticated API; for drift, follow the resync path |
 | `[openclaw-needed]` never resolved | Quinn missed the heartbeat step | Quinn scans active tasks on the next heartbeat tick |
 | Spec checksum mismatch | ACs edited after spec approval | Hits `PATCH /tasks/:id` when the description ACs change. Treat as spec drift: Lobster unchecks `**Approved by Tom**`, waits for Tom to re-check, then performs the resync path. Comments are drift-tolerant and remain usable for progress/checklist/resync signals. |
 | Spec lifecycle layout failure | Unexpected direct subdirectory under `brain/tasks/specs/` | Remove or migrate the unexpected subdir so only `open/`, `in-progress/`, and `done/` remain. The lobster creates missing expected dirs automatically. |
@@ -622,7 +634,7 @@ The `409 SPEC_CHECKSUM_MISMATCH` response names the task id, the stored `specChe
 | CI green but PR not merged | Reviewer has not approved | Wait for `APPROVED` review state; Lobster will not mark `done` until GitHub merge is recorded |
 | Task bounced to `doing` from `acceptance` | (legacy — the post-merge QA bounce path was removed; AC text mismatches now block at the doing → acceptance gate before merge instead) | n/a |
 | `doing → acceptance` blocked on AC text | Open PR body is missing an AC, has altered AC text, or lacks a valid evidence annotation `(testID|not tested|not code|pr)` | Update the PR body so every task AC appears verbatim with evidence; `[feature-task-progress-checklist]` comment lists the specific failures |
-| `acceptance → done` blocked with "Missing `[qa-ac-verified] true`" | Tom has not signed off | Tom posts `[qa-ac-verified] true` after verifying ACs on staging |
+| `acceptance → done` blocked on structured QA approval | Tom has not signed off | Tom grants `qa` in the Tasks UI after verifying ACs on staging |
 | `400 INVALID_TASK_ID` on `GET` / `PATCH` / `DELETE /tasks/:id` or `POST /tasks/:id/comments` | Path id is not a full 36-char UUID | Pass full UUIDs from `data[].id` in `/api/v1/tasks?…` responses; the 8-char lobster prefix is display-only |
 
 ---

@@ -117,7 +117,7 @@ def stream_reader(pipe, prefix: str, sink: list[str]) -> None:
         pipe.close()
 
 
-def run_workflow(task_id: str, base_url: str, dry_run: bool, approval_source: str, pipeline: Path) -> dict[str, Any]:
+def run_workflow(task_id: str, base_url: str, dry_run: bool, pipeline: Path) -> dict[str, Any]:
     args_json = json.dumps(
         {
             "taskId": task_id,
@@ -125,14 +125,8 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool, approval_source: st
             "sindustriesRepo": str(REPO),
             "workspaceRoot": str(WORKSPACE_ROOT),
             "dryRun": dry_run,
-            "approvalSource": approval_source,
         }
     )
-    # NOTE: --approval-source is NOT passed as a top-level flag to the lobster CLI
-    # (the Node.js lobster CLI does not accept that flag; see the PR #371 / #372
-    # history and the abandoned ff14d56 plumbing). It travels through the
-    # --args-json payload → YAML `approvalSource` arg → ${approvalSource}
-    # expansion in each cargo run subcommand.
     cmd = ["lobster", "run", "--mode", "tool", str(pipeline), "--args-json", args_json]
     proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=workflow_env())
     stdout_lines: list[str] = []
@@ -164,12 +158,6 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.environ.get("TASKS_API_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument(
-        "--approval-source",
-        default=os.environ.get("LOBSTER_APPROVAL_SOURCE", "legacy"),
-        choices=["legacy", "api", "auto"],
-        help="Approval source mode for lobster gates. Mirrors the lobster CLI flag added in PR #371 (commit 062985d). Default 'legacy' preserves the pre-#372 cron behaviour; the Task Lobsters cron promotes to 'auto'.",
-    )
     args = parser.parse_args()
 
     tasks = discover_tasks(args.base_url, args.limit)
@@ -178,7 +166,6 @@ def main() -> int:
             str(task["id"]),
             args.base_url,
             args.dry_run,
-            args.approval_source,
             Path(task["_pipeline"]),
         )
         for task in tasks

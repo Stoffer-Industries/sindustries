@@ -30,9 +30,14 @@ A focused task management surface for Tom and the agent team. Supports capturing
 5. User can navigate to a full-screen detail view via explicit action
 6. Changes persist on save
 7. An **Approvals** sub-section renders one row per required approval type for the task's type (`spec`, `tech_design`, `qa`):
-   - Each row is a read-only checkbox + avatar pair (the Tasks UI never writes approvals — the lobster and agents do via `POST /tasks/:id/approvals`).
+   - An unchecked checkbox approves through structured `POST /tasks/:id/approvals` with `{ type }`; a checked checkbox revokes through `DELETE /tasks/:id/approvals/:type`.
+   - The browser includes an HttpOnly-cookie session and never supplies an approval owner; the API derives ownership from the authenticated principal.
+   - Tasks remain readable while signed out. On load the UI checks `GET /auth/session`; changing an approval while signed out opens a minimal username/password login gate backed by `POST /auth/session`. The password is held only in the form state, cleared after submission/cancel, and never stored in JavaScript storage.
+   - The current actor is shown beside Approvals and can end the session through `DELETE /auth/session`.
+   - Each row updates optimistically and only the mutating row is disabled. A failed mutation rolls that row back and exposes an accessible row-level error; success refreshes the parent task to reconcile approvals and audit comments.
+   - Archived and done tasks have immutable approval controls.
    - Checkbox checked = `approved`; unchecked = `pending` or `revoked` (state is distinguished by avatar opacity / strike-through rather than inline text).
-   - Owner display name and timestamp move to the `aria-label` / hover tooltip so the visual stays uncluttered.
+   - Owner display name and timestamp remain in the `aria-label` / hover tooltip so the visual stays uncluttered.
    - The required-approvals list is fetched from `GET /task-types/:type/required-approvals` when a `taskType` is set; if none are required the section shows a friendly empty state.
    - When the task has no `taskType` set yet, the section shows a placeholder asking the user to select one.
    - Fetch errors render an inline error message and do not crash the editor.
@@ -82,7 +87,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
 | Task dependencies UI | `test/e2e/dependency-ui.spec.js` |
 | Markdown checkbox toggle + description wrapping | `apps/tasks/src/components/TaskEditor.test.jsx`, `apps/tasks/src/utils/markdown.test.js` |
 | Filter by priority | `test/e2e/priority-filter.spec.js` |
-| Approvals sub-section (read-only checkbox + avatar, empty + missing-type placeholders, fetch error) | `apps/tasks/src/components/ApprovalsSection.test.jsx` |
+| Approvals sub-section (session login/logout and current actor, optimistic approve/revoke, per-row pending + rollback errors, immutable states, avatars/tooltips, empty states) | `apps/tasks/src/components/ApprovalsSection.test.jsx`, `apps/tasks/src/tasksApi.test.ts`, `apps/tasks/test/e2e/approval-checkboxes.spec.js` |
 
 ---
 
@@ -104,4 +109,4 @@ The list of reserved assignees and their display metadata (id → display name, 
 | archivedAt | Timestamp | Soft delete |
 | tags | String[] | Ad-hoc, case-insensitive unique |
 | blockedBy | UUID[] | Dependency references |
-| approvals | TaskApproval[] | Native approvals owned by the tasks-api (see `services/tasks-api/SPEC.md` for the authoritative schema). The Tasks UI only reads this collection to render the Approvals sub-section — the UI never writes approvals. |
+| approvals | TaskApproval[] | Native approvals owned by the tasks-api (see `services/tasks-api/SPEC.md` for the authoritative schema). The Tasks UI mutates this collection only through the structured authenticated approval endpoints and then refreshes the task. |

@@ -49,39 +49,24 @@ class TaggedValuesTest(unittest.TestCase):
 
 
 class TechDesignApprovedTest(unittest.TestCase):
-    def test_lobster_complaint_is_not_approval(self):
-        comments = [
-            {
-                "text": "[feature-task-progress-checklist]\n"
-                "Missing task comment `[tech-design-approved] true`."
-            },
-        ]
-        self.assertFalse(p.tech_design_approved({"comments": comments}))
+    def test_approved_structured_row_is_approval(self):
+        task = {"approvals": [{"type": "tech_design", "state": "approved"}]}
+        self.assertTrue(p.tech_design_approved(task))
 
-    def test_bare_true_is_approval(self):
-        comments = [{"text": "[tech-design-approved] true"}]
-        self.assertTrue(p.tech_design_approved({"comments": comments}))
+    def test_revoked_structured_row_is_not_approval(self):
+        task = {"approvals": [{"type": "tech_design", "state": "revoked"}]}
+        self.assertFalse(p.tech_design_approved(task))
 
-    def test_true_with_rationale_is_approval(self):
-        comments = [
-            {
-                "text": "[tech-design-approved] true — Approved by Quinn on behalf of Tom 2026-06-30"
-            }
-        ]
-        self.assertTrue(p.tech_design_approved({"comments": comments}))
+    def test_legacy_comment_never_grants_approval(self):
+        task = {"comments": [{"text": "[tech-design-approved] true"}], "approvals": []}
+        self.assertFalse(p.tech_design_approved(task))
 
-    def test_uppercase_true_is_approval(self):
-        comments = [{"text": "[tech-design-approved] TRUE"}]
-        self.assertTrue(p.tech_design_approved({"comments": comments}))
+    def test_other_approval_type_is_not_approval(self):
+        task = {"approvals": [{"type": "qa", "state": "approved"}]}
+        self.assertFalse(p.tech_design_approved(task))
 
-    def test_explicit_false_is_not_approval(self):
-        comments = [
-            {"text": "[tech-design-approved] false — pending review"}
-        ]
-        self.assertFalse(p.tech_design_approved({"comments": comments}))
-
-    def test_no_comments_is_not_approval(self):
-        self.assertFalse(p.tech_design_approved({"comments": []}))
+    def test_no_approvals_is_not_approval(self):
+        self.assertFalse(p.tech_design_approved({"approvals": []}))
 
 
 class TechDesignUrlTest(unittest.TestCase):
@@ -99,20 +84,20 @@ class TechDesignUrlTest(unittest.TestCase):
         self.assertIsNone(p.tech_design_url({"comments": []}))
 
 
-class IsFeatureTaskTest(unittest.TestCase):
+class NeedsTechDesignReviewTest(unittest.TestCase):
     def test_task_type_feature(self):
-        self.assertTrue(p.is_feature_task({"taskType": "feature", "tags": []}))
+        self.assertTrue(p.needs_tech_design_review({"taskType": "feature", "tags": []}))
 
     def test_feature_factory_tag(self):
         self.assertTrue(
-            p.is_feature_task({"taskType": None, "tags": ["feature-factory"]})
+            p.needs_tech_design_review({"taskType": None, "tags": ["feature-factory"]})
         )
 
     def test_unrelated_task(self):
-        self.assertFalse(p.is_feature_task({"taskType": "content", "tags": []}))
+        self.assertFalse(p.needs_tech_design_review({"taskType": "content", "tags": []}))
 
     def test_empty(self):
-        self.assertFalse(p.is_feature_task({}))
+        self.assertFalse(p.needs_tech_design_review({}))
 
 
 if __name__ == "__main__":

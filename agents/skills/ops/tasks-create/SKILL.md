@@ -50,7 +50,7 @@ The API accepts these `taskType` values (nullable string; leave unset and you lo
 
 ### Feature task
 
-Feature tasks go through the feature factory. Rowan cannot start until Tom has approved the spec (added `- [x] **Approved by Tom**` to the task description). For the full feature-task workflow (spec format, AC text fidelity, workstreams YAML, exact CLI invocation), see `agents/skills/product/feature-task-create/SKILL.md`.
+Feature tasks go through the feature factory. Rowan cannot start until Tom has granted the structured `spec` TaskApproval through the Tasks UI or authenticated API. For the full feature-task workflow (spec format, AC text fidelity, workstreams YAML, exact CLI invocation), see `agents/skills/product/feature-task-create/SKILL.md`.
 
 ```
 tasks_api_client.py create \
@@ -60,8 +60,6 @@ tasks_api_client.py create \
   --assignee Rowan \
   --tags feature-factory rowan <topic> \
   --description "**Spec:** brain/tasks/specs/open/<slug>-YYYY-MM-DD.md
-
-- [ ] **Approved by Tom**
 
 <One sentence description of what ships.>
 
@@ -84,7 +82,7 @@ tasks_api_client.py create \
 
 **Rules:**
 - The `**Spec:**` line for new chat-created feature specs must point to a real file in `brain/tasks/specs/open/` (write it first)
-- The `- [ ] **Approved by Tom**` line must be unchecked — never pre-tick it
+- Do not add an `Approved by Tom` markdown marker; Tom grants structured `spec` approval after task creation
 - ACs must be unchecked — never pre-tick them; Tom/QA ticks after testing
 - Workstreams section must be present with `Branch: (pending)` and `PR: (pending)` placeholders
 
@@ -169,7 +167,7 @@ tasks_api_client.py create \
 ## AC checkbox rules (all types)
 
 - **Never pre-tick `- [x]` AC checkboxes** in the task description — not even if you know the work is done
-- **Never pre-tick `- [x] **Approved by Tom**`** — Tom adds that marker himself
+- **Never represent spec approval with markdown** — use the authenticated structured approval control
 - AC checkboxes in the task description belong to Tom/QA, ticked after testing
 - Rowan ticks ACs in the **PR body** (with evidence) — not in the task description
 

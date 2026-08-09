@@ -5,7 +5,8 @@ Usage examples:
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --limit 50
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py create --title "Test" --priority high
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --status doing
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --depends-on <dependency-id>
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py approve --id <task-id> --type tech_design
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py revoke-approval --id <task-id> --type tech_design
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py archive --id <task-id>
 """
 
@@ -24,6 +25,9 @@ def api_request(method: str, base_url: str, path: str, payload=None):
     url = f"{base_url.rstrip('/')}{path}"
     data = None
     headers = {"content-type": "application/json"}
+    service_token = (os.getenv("TASKS_API_APPROVAL_TOKEN") or "").strip()
+    if service_token:
+        headers["authorization"] = f"Bearer {service_token}"
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
 
@@ -274,6 +278,19 @@ def cmd_patch(args):
     print(json.dumps(api_request("PATCH", base, f"/tasks/{args.id}", payload), indent=2))
 
 
+def cmd_approve(args):
+    base = get_base_url()
+    payload = {"type": args.type}
+    if args.note is not None:
+        payload["note"] = args.note
+    print(json.dumps(api_request("POST", base, f"/tasks/{args.id}/approvals", payload), indent=2))
+
+
+def cmd_revoke_approval(args):
+    base = get_base_url()
+    print(json.dumps(api_request("DELETE", base, f"/tasks/{args.id}/approvals/{args.type}"), indent=2))
+
+
 def cmd_archive(args):
     base = get_base_url()
     print(json.dumps(api_request("DELETE", base, f"/tasks/{args.id}"), indent=2))
@@ -335,6 +352,17 @@ def build_parser():
     u.add_argument("--blocked", choices=["true", "false"], help="Set blocked flag")
     u.add_argument("--ready", choices=["true", "false"], help="Set ready flag")
     u.set_defaults(func=cmd_patch)
+
+    approve = sub.add_parser("approve", help="Grant a structured task approval as the authenticated service actor")
+    approve.add_argument("--id", required=True, help="Full task UUID")
+    approve.add_argument("--type", required=True, choices=["spec", "tech_design", "qa"])
+    approve.add_argument("--note", help="Optional approval rationale")
+    approve.set_defaults(func=cmd_approve)
+
+    revoke = sub.add_parser("revoke-approval", help="Revoke a structured task approval as the authenticated service actor")
+    revoke.add_argument("--id", required=True, help="Full task UUID")
+    revoke.add_argument("--type", required=True, choices=["spec", "tech_design", "qa"])
+    revoke.set_defaults(func=cmd_revoke_approval)
 
     a = sub.add_parser("archive", help="Archive (soft-delete) a task")
     a.add_argument("--id", required=True, help="Full task UUID")

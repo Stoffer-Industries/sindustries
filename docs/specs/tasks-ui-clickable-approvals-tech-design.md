@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: b03aa6a2-f303-4f03-a479-bd85b962982f
 product_spec: brain/tasks/specs/open/tasks-ui-clickable-approvals-2026-08-09.md
 shipped_pr: null

@@ -35,8 +35,10 @@ After committing the design to the branch, post the durable task comment pointin
 
 `[tech-design] https://github.com/Stoffer-Industries/sindustries/blob/<branch>/docs/specs/<slug>-tech-design.md`
 
-Quinn approves tech designs as part of heartbeat. After reading the design at the linked path, post the durable task comment:
+Quinn approves tech designs as part of heartbeat. After reading the design at the linked path, grant the structured approval with Quinn's scoped service credential:
 
-`[tech-design-approved] true`
+`TASKS_API_APPROVAL_TOKEN="$QUINN_TASKS_API_APPROVAL_TOKEN" TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 agents/skills/ops/tasks-api/tasks_api_client.py approve --id <task-id> --type tech_design`
+
+The API derives Quinn's identity and creates the ordinary audit comment atomically. Never post `[tech-design-approved] true`; approval comments are retired and cannot satisfy the gate.
 
 Quinn should review the design for: completeness (all required sections present), alignment with the product spec, no unbounded scope, `.openclaw` boundary notes where relevant. If anything looks wrong or risky, flag to Tom instead of approving.
