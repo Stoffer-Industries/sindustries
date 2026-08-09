@@ -19,7 +19,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 
-const DEFAULT_ROOTS = ['apps', 'services', 'packages', 'agents/workflows'];
+const DEFAULT_ROOTS = ['apps', 'services', 'packages', 'agents/workflows', 'agents/lib'];
 
 // Directories we never descend into. These are build outputs, vendored
 // deps, or generated artefacts where absolute paths are expected and
