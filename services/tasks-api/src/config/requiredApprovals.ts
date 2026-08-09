@@ -9,11 +9,21 @@
 //   content: [spec, qa]
 //   research: []
 //
-// The file format is intentionally narrow — a top-level `version:` line and
-// an indented `mappings:` block. The loader is hand-rolled to avoid pulling
-// in a YAML dependency for a structure that fits in ~30 lines of parsing.
+// Each approval type also has a configured owner used by the workflow-gate
+// ownership surface (task 66054ab4 WS1). The owner is global per approval
+// type — `spec` is always Tom's gate regardless of the task type it gates.
+// Defaults: spec → Tom, tech_design → Quinn, qa → Tom. A free-form override
+// is allowed in the YAML `owners:` block; unknown approval types are skipped
+// so a typo doesn't take down the loader.
 //
-// See docs/specs/tasks-api-native-approvals-tech-design.md WS2.
+// The file format is intentionally narrow — a top-level `version:` line, an
+// indented `mappings:` block, and an indented `owners:` block. The loader is
+// hand-rolled to avoid pulling in a YAML dependency for a structure that
+// fits in ~30 lines of parsing.
+//
+// See docs/specs/tasks-api-native-approvals-tech-design.md WS2 and
+// docs/specs/blocked-by-escalation-owners-and-stacked-avatars-tech-design.md
+// for the workflow-gate ownership surface (WS1 of task 66054ab4).
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -23,6 +33,13 @@ import { validApprovalTypes } from '../routes/tasks/_constants.ts';
 export interface RequiredApprovalsConfig {
   version: number;
   mappings: Record<string, string[]>;
+  /**
+   * Configured owner per approval type. Used to surface outstanding
+   * workflow-gate ownership on a task (`mapTask.workflowGates`) and to
+   * scope discovery queues (`?workflowGateOwner=Quinn`). Approval types not
+   * listed fall back to the built-in default (`DEFAULT_APPROVAL_OWNERS`).
+   */
+  owners: Record<string, string>;
   source: 'config-file' | 'builtin-default';
   /**
    * Absolute path of the config file that produced this snapshot, or `null`
@@ -33,24 +50,42 @@ export interface RequiredApprovalsConfig {
   path: string | null;
   /**
    * Non-secret SHA-256 fingerprint of the resolved policy
-   * (`{ version, source, mappings }` with keys sorted). Stable across
-   * processes so two environments on the same commit should produce the
-   * same hash for their respective loaded configs; mismatches indicate
+   * (`{ version, source, mappings, owners }` with keys sorted). Stable
+   * across processes so two environments on the same commit should produce
+   * the same hash for their respective loaded configs; mismatches indicate
    * drift between `~/.openclaw/tasks-api/required-approvals.yaml` instances.
    */
   hash: string;
 }
 
+/**
+ * Built-in default owner per approval type. Used both as the fallback when
+ * the loaded config does not override a type and as the seed for the
+ * `DEFAULT_REQUIRED_APPROVALS.owners` snapshot. Approval-type → owner
+ * mappings are global (not per-task-type) because the same gate is owned
+ * by the same person regardless of the work it gates.
+ */
+export const DEFAULT_APPROVAL_OWNERS: Record<string, string> = {
+  spec: 'Tom',
+  tech_design: 'Quinn',
+  qa: 'Tom'
+};
+
 function canonicalConfigFingerprint(
   version: number,
   source: RequiredApprovalsConfig['source'],
-  mappings: Record<string, string[]>
+  mappings: Record<string, string[]>,
+  owners: Record<string, string>
 ): string {
   const sortedMappings: Record<string, string[]> = {};
   for (const key of Object.keys(mappings).sort()) {
     sortedMappings[key] = [...mappings[key]];
   }
-  const canonical = JSON.stringify({ version, source, mappings: sortedMappings });
+  const sortedOwners: Record<string, string> = {};
+  for (const key of Object.keys(owners).sort()) {
+    sortedOwners[key] = owners[key];
+  }
+  const canonical = JSON.stringify({ version, source, mappings: sortedMappings, owners: sortedOwners });
   return createHash('sha256').update(canonical).digest('hex');
 }
 
@@ -62,12 +97,14 @@ export const DEFAULT_REQUIRED_APPROVALS: RequiredApprovalsConfig = (() => {
     content: ['spec', 'qa'],
     research: []
   };
+  const owners = { ...DEFAULT_APPROVAL_OWNERS };
   return {
     version,
     mappings,
+    owners,
     source: 'builtin-default',
     path: null,
-    hash: canonicalConfigFingerprint(version, 'builtin-default', mappings)
+    hash: canonicalConfigFingerprint(version, 'builtin-default', mappings, owners)
   };
 })();
 
@@ -84,16 +121,21 @@ function resolveDefaultConfigPath(): string {
  *   - top-level `version: <number>`
  *   - top-level `mappings:` header followed by indented lines of
  *     `<taskType>: [<type>, <type>, ...]`
+ *   - top-level `owners:` header followed by indented lines of
+ *     `<approvalType>: <owner>` (a single string, not a list)
  *   - `#` end-of-line comments and blank lines
  *
  * Throws on malformed input (e.g. missing `version:`); the loader catches
- * and falls back to the built-in default.
+ * and falls back to the built-in default. Unknown approval types inside the
+ * `owners:` block are silently dropped — a typo there should not take the
+ * loader down, and the merge layer falls back to the default owner.
  */
 export function parseRequiredApprovalsYaml(content: string): RequiredApprovalsConfig {
   const lines = content.split(/\r?\n/);
   let version: number | null = null;
   const mappings: Record<string, string[]> = {};
-  let inMappings = false;
+  const owners: Record<string, string> = {};
+  let section: 'none' | 'mappings' | 'owners' = 'none';
 
   for (const rawLine of lines) {
     // Strip end-of-line comments and trim trailing whitespace.
@@ -107,53 +149,75 @@ export function parseRequiredApprovalsYaml(content: string): RequiredApprovalsCo
       const versionMatch = trimmed.match(/^version:\s*(\d+)\s*$/);
       if (versionMatch) {
         version = parseInt(versionMatch[1], 10);
-        inMappings = false;
+        section = 'none';
         continue;
       }
       if (trimmed === 'mappings:') {
-        inMappings = true;
+        section = 'mappings';
         continue;
       }
-      // Unknown top-level key — ignore and exit mappings block.
-      inMappings = false;
+      if (trimmed === 'owners:') {
+        section = 'owners';
+        continue;
+      }
+      // Unknown top-level key — ignore and exit the current section.
+      section = 'none';
       continue;
     }
 
-    if (!inMappings) continue;
+    if (section === 'mappings') {
+      // Mapping entries must be `<taskType>: [<approval>, ...]`. Lines that
+      // do not match this shape are silently skipped: the loader is
+      // intentionally lenient about individual entries (so a partial config
+      // file remains usable) while still rejecting the entire file when
+      // `version:` is missing. Approval-type typos inside the list are still
+      // rejected via `validApprovalTypes` below; the silent skip only
+      // applies to entries whose shape does not match at all (e.g.
+      // `feature: oops` or stray prose).
+      const entryMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9_-]*):\s*\[(.*?)\]\s*$/);
+      if (!entryMatch) continue;
 
-    // Mapping entries must be `<taskType>: [<approval>, ...]`. Lines that do
-    // not match this shape are silently skipped: the loader is intentionally
-    // lenient about individual entries (so a partial config file remains
-    // usable) while still rejecting the entire file when `version:` is missing.
-    // Approval-type typos inside the list are still rejected via
-    // `validApprovalTypes` below; the silent skip only applies to entries
-    // whose shape does not match at all (e.g. `feature: oops` or stray prose).
-    const entryMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9_-]*):\s*\[(.*?)\]\s*$/);
-    if (!entryMatch) continue;
+      const taskType = entryMatch[1];
+      const rawList = entryMatch[2];
+      const list = rawList
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
 
-    const taskType = entryMatch[1];
-    const rawList = entryMatch[2];
-    const list = rawList
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
-
-    for (const approvalType of list) {
-      if (!validApprovalTypes.has(approvalType)) {
-        throw new Error(
-          `task type "${taskType}" lists unknown approval type "${approvalType}"`
-        );
+      for (const approvalType of list) {
+        if (!validApprovalTypes.has(approvalType)) {
+          throw new Error(
+            `task type "${taskType}" lists unknown approval type "${approvalType}"`
+          );
+        }
       }
+
+      mappings[taskType] = list;
+      continue;
     }
 
-    mappings[taskType] = list;
+    if (section === 'owners') {
+      // Owner entries are `<approvalType>: <owner-name>` (single string).
+      // The owner name is intentionally not validated against
+      // `validAssignees` so operators can experiment with free-form names
+      // (mirroring `Task.assignee`) without taking the loader down. Unknown
+      // approval-type keys are silently skipped — the merge layer falls
+      // back to `DEFAULT_APPROVAL_OWNERS` for any approval type without a
+      // configured owner, so a typo there can't gate a task incorrectly.
+      const entryMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9_-]*):\s*([^\s#].*?)\s*$/);
+      if (!entryMatch) continue;
+      const approvalType = entryMatch[1];
+      if (!validApprovalTypes.has(approvalType)) continue;
+      owners[approvalType] = entryMatch[2];
+      continue;
+    }
   }
 
   if (version === null) {
     throw new Error('missing top-level `version: <number>` directive');
   }
 
-  return { version, mappings, source: 'config-file' };
+  return { version, mappings, owners, source: 'config-file' };
 }
 
 // Emit the resolved policy once per process so operators can detect drift
@@ -202,12 +266,19 @@ export function loadRequiredApprovalsConfig(
       ...DEFAULT_REQUIRED_APPROVALS.mappings,
       ...parsed.mappings
     };
+    // Same delta-merge semantics for owners: an approval type without a
+    // configured owner in the file falls back to `DEFAULT_APPROVAL_OWNERS`.
+    const mergedOwners: Record<string, string> = {
+      ...DEFAULT_APPROVAL_OWNERS,
+      ...parsed.owners
+    };
     const resolved: RequiredApprovalsConfig = {
       version: parsed.version,
       mappings: mergedMappings,
+      owners: mergedOwners,
       source: 'config-file',
       path: configPath,
-      hash: canonicalConfigFingerprint(parsed.version, 'config-file', mergedMappings)
+      hash: canonicalConfigFingerprint(parsed.version, 'config-file', mergedMappings, mergedOwners)
     };
     emitResolvedPolicyStartupLog(resolved);
     return resolved;
@@ -228,4 +299,20 @@ export function requiredApprovalsFor(
 ): string[] {
   if (!taskType) return [];
   return config.mappings[taskType] ?? [];
+}
+
+/**
+ * Resolved owner for a required approval type. Returns the configured owner
+ * for the given approval type, or `null` when the type is not a known
+ * approval type (free-form strings cannot gate a task). Used by the
+ * `workflowGates` derivation to surface who owns an outstanding gate when
+ * no `TaskApproval` row exists yet — the natural source of truth, since
+ * hard-coding `spec → Tom` in the UI duplicates policy state in two places.
+ */
+export function gateOwnerFor(
+  config: RequiredApprovalsConfig,
+  approvalType: string | null | undefined
+): string | null {
+  if (!approvalType || !validApprovalTypes.has(approvalType)) return null;
+  return config.owners[approvalType] ?? null;
 }

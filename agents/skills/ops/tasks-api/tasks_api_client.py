@@ -5,6 +5,10 @@ Usage examples:
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --limit 50
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py create --title "Test" --priority high
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --status doing
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --attention-owners Tom --attention-owners Quinn
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --clear-attention-owners
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --workflow-gate-owner Quinn
+  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --attention-owner Tom
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py approve --id <task-id> --type tech_design
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py revoke-approval --id <task-id> --type tech_design
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py archive --id <task-id>
@@ -65,6 +69,8 @@ def list_tasks(
     ready: bool | None = None,
     priority: str | None = None,
     q: str | None = None,
+    workflow_gate_owner: str | None = None,
+    attention_owner: str | None = None,
     base_url: str | None = None,
     **extra_params,
 ) -> list:
@@ -76,7 +82,9 @@ def list_tasks(
         for s in status:
             results.extend(list_tasks(limit=limit, status=s, assignee=assignee,
                                        blocked=blocked, ready=ready, priority=priority,
-                                       q=q, base_url=base_url, **extra_params))
+                                       q=q, workflow_gate_owner=workflow_gate_owner,
+                                       attention_owner=attention_owner,
+                                       base_url=base_url, **extra_params))
         return results
     params = {"limit": str(limit)}
     if status is not None:
@@ -91,6 +99,18 @@ def list_tasks(
         params["priority"] = priority
     if q is not None:
         params["q"] = q
+    if workflow_gate_owner is not None:
+        # Discovery filter for outstanding explicit workflow gates whose
+        # configured owner matches. Empty/whitespace values are dropped so a
+        # stray --workflow-gate-owner "" from a UI flow doesn't surface as a
+        # zero-result filter call.
+        wgo = workflow_gate_owner.strip()
+        if wgo:
+            params["workflowGateOwner"] = wgo
+    if attention_owner is not None:
+        ao = attention_owner.strip()
+        if ao:
+            params["attentionOwner"] = ao
     params.update(extra_params)
     path = "/tasks?" + urllib.parse.urlencode(params)
     resp = api_request("GET", base, path)
@@ -150,6 +170,11 @@ def cmd_list(args):
         extra_q["ready"] = args.ready
 
     statuses: list[str] = args.status or []
+
+    if getattr(args, "workflow_gate_owner", None):
+        extra_q["workflowGateOwner"] = args.workflow_gate_owner
+    if getattr(args, "attention_owner", None):
+        extra_q["attentionOwner"] = args.attention_owner
 
     if len(statuses) > 1:
         # Multi-status: group output by status, include blocking comment per task
@@ -275,6 +300,21 @@ def cmd_patch(args):
     if args.description is not None:
         payload["description"] = args.description
 
+    # Attention-owner replacement (full-replacement semantics on the API side).
+    # `--attention-owners` accepts one or more names; `--clear-attention-owners`
+    # replaces with `[]` to clear all rows. The two flags are mutually
+    # exclusive — setting both in one call would be ambiguous.
+    ao_set = bool(getattr(args, "attention_owners", None))
+    ao_clear = bool(getattr(args, "clear_attention_owners", False))
+    if ao_set and ao_clear:
+        raise SystemExit(
+            "--attention-owners and --clear-attention-owners are mutually exclusive"
+        )
+    if ao_clear:
+        payload["attentionOwners"] = []
+    elif ao_set:
+        payload["attentionOwners"] = list(args.attention_owners)
+
     print(json.dumps(api_request("PATCH", base, f"/tasks/{args.id}", payload), indent=2))
 
 
@@ -319,6 +359,10 @@ def build_parser():
     l.add_argument("--assignee", help="Filter by assignee name e.g. Rowan")
     l.add_argument("--blocked", choices=["true", "false"], help="Filter by blocked flag")
     l.add_argument("--ready", choices=["true", "false"], help="Filter by ready flag")
+    l.add_argument("--workflow-gate-owner", dest="workflow_gate_owner",
+                   help="Filter to tasks with an outstanding workflow gate owned by this person (e.g. Quinn for tech_design)")
+    l.add_argument("--attention-owner", dest="attention_owner",
+                   help="Filter to tasks with at least one attention-owner row for this person (exceptional / unmodelled blockers)")
     l.add_argument("--heartbeat", action="store_true",
                    help="All acceptance/doing/ready tasks + 10 open — useful for agent heartbeat passes")
     l.add_argument("--summary", action="store_true",
@@ -351,6 +395,10 @@ def build_parser():
     u.add_argument("--clear-dependencies", action="store_true", help="Remove all dependencies")
     u.add_argument("--blocked", choices=["true", "false"], help="Set blocked flag")
     u.add_argument("--ready", choices=["true", "false"], help="Set ready flag")
+    u.add_argument("--attention-owners", dest="attention_owners", nargs="+", default=None,
+                   help="Replace the full attention-owner set with the given names (repeatable); cannot be combined with --clear-attention-owners")
+    u.add_argument("--clear-attention-owners", dest="clear_attention_owners", action="store_true",
+                   help="Clear all attention-owner rows; does NOT touch task.blocked, dependencies, or approvals")
     u.set_defaults(func=cmd_patch)
 
     approve = sub.add_parser("approve", help="Grant a structured task approval as the authenticated service actor")
