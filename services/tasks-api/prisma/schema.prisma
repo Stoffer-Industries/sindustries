@@ -47,25 +47,22 @@ model Task {
   dependedOnBy    TaskDependency[] @relation("TaskDependedOnBy")
   analyticsEvents FeatureTaskAnalyticsEvent[]
   approvals       TaskApproval[]
-  blockedBy       TaskBlockedBy[]
+  attentionOwners TaskAttentionOwner[]
 
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
   @@index([dueAt])
 }
 
-/// First-class "blocked-by escalation" owners. Each row says "this owner
-/// has an outstanding blocker action on this task." Sits parallel to
-/// `TaskApproval` (workflow gates) and `TaskDependency` (task-to-task
-/// dependency edges); none of the three replaces another. The legacy
-/// `Task.blocked` boolean survives untouched so existing tasks remain
-/// visibly blocked during the transition; `genericBlocked` is derived in
-/// the mapper (`blocked === true && blockedBy.length === 0`).
+/// Exceptional or otherwise unmodelled requests for a person's attention.
+/// This sits parallel to `TaskApproval` (workflow gates), `TaskDependency`
+/// (task-to-task edges), `Task.assignee` (delivery), and `Task.blocked` (the
+/// existing generic Blocked indicator). None derives from or clears another.
 ///
-/// `owner` is a free-text field, same policy as `Task.assignee`. The route
-/// layer normalises and dedupes before the upsert. See
-/// `docs/specs/blocked-by-escalation-owners-and-stacked-avatars-tech-design.md`.
-model TaskBlockedBy {
+/// `owner` is free text, matching `Task.assignee`. `note` explains why the
+/// exceptional attention is needed. The route layer normalises and dedupes
+/// owners before replacement.
+model TaskAttentionOwner {
   id        String   @id @default(uuid()) @db.Uuid
   taskId    String   @db.Uuid
   owner     String
