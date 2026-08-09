@@ -90,6 +90,8 @@ It must not become the default backend for Mission Control or other apps. New pr
 | `tags` | `TaskTag[]` | Ad-hoc, case-insensitive unique |
 | `comments` | `TaskComment[]` | Agent durable comments + human notes |
 | `dependencies` | `TaskDependency[]` | Blocking relationships |
+| `approvals` | `TaskApproval[]` | Structured workflow-gate rows (see [Task ownership planes](#task-ownership-planes)) |
+| `attentionOwners` | `TaskAttentionOwner[]` | Exceptional / unmodelled attention requests (see [Task ownership planes](#task-ownership-planes)) |
 
 `taskType` is the routing key: which workflow lobster picks the task up, which gates apply, which task-comment tags the workflow reads. Supported first-class values are `content`, `code`, `research`, `feature`. The Tasks app treats the same set as its shared type options for create, edit, and filtering surfaces. `feature` tasks are used by the feature-task workflow and must remain available through normal task create, read, update, and list paths.
 
@@ -120,6 +122,107 @@ Task responses include:
 Validation rejects: non-UUID values, self-references, missing task IDs, archived dependencies, direct circular dependencies (A→B, B→A). Deep cycle detection is out of scope.
 
 **CLI:** `tasks_api_client.py` exposes `--depends-on <id>` (repeatable) and `--clear-dependencies` (mutually exclusive) for automation.
+
+### TaskApproval
+
+Structured workflow-gate row. Each row is `(taskId, type, owner, state, approvedAt, revokedAt, note)`. `state` is `approved` or `revoked`. A task may have one row per approval type (`spec`, `tech_design`, `qa`). Approved rows satisfy their gate; revoked or missing rows leave the gate outstanding. Rows are owned by the gate policy (see [Required approvals policy](#required-approvals-policy)) — clients do not pass `owner` for approvals; the server derives it from the credential and policy.
+
+See [Structured approval and authentication contract](#structured-approval-and-authentication-contract) for the write endpoints, auth surface, and audit-comment contract.
+
+### TaskAttentionOwner
+
+Join table for **exceptional or otherwise unmodelled** attention requests on a task. One row per `(taskId, owner)` pair (case-insensitive uniqueness enforced at the database level via a `@@unique([taskId, owner])` constraint). Free-form `owner` strings mirror `Task.assignee`. `note` explains what needs attention and is preserved across PATCHes that re-include the same owner.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `taskId` | UUID | FK → Task, cascade delete |
+| `owner` | String | Required, case-insensitive unique per task, max 64 chars |
+| `addedBy` | String | Nullable, free-form |
+| `note` | String | Nullable, free-form |
+| `createdAt` | Timestamp | Insertion order, surfaced for stable UI ordering |
+
+Task responses include:
+
+- `attentionOwners` — insertion-ordered distinct owner strings
+- `attentionOwnerDetails` — full audit rows (`{ id, owner, addedBy, note, createdAt }`)
+
+**Persistence rules:**
+
+- `PATCH /tasks/:id` accepts `attentionOwners` as a full-replacement array. Omission = no change. `[]` clears all rows. The server normalises (trim, case-insensitive dedup) and validates (max 16 entries, max 64 chars per name) before persisting.
+- Clearing attention owners never touches `task.blocked`, `dependencies`, `assignee`, or `approvals`.
+- Surviving rows keep their `note` and `addedBy` only when their `(taskId, owner)` pair reappears in the new array; the detail-level add/update endpoint (future work, not in WS1) is the right place to preserve per-row metadata across owner churn.
+
+**CLI:** `tasks_api_client.py` exposes `--attention-owners <name>` (repeatable, full-replacement) and `--clear-attention-owners` (mutually exclusive) for automation.
+
+**What this is NOT:**
+
+- Not blocked state. Attention ownership does not set or clear `task.blocked`.
+- Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
+- Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
+
+### Required approvals policy
+
+The Tasks API reads `.openclaw/tasks-api/required-approvals.yaml` on startup to resolve which approval types each `taskType` requires and who owns each type. The file format is intentionally narrow:
+
+```yaml
+version: 1
+mappings:
+  feature: [spec, tech_design, qa]
+  code:    [tech_design, qa]
+  content: [spec, qa]
+  research: []
+owners:
+  spec: Tom
+  tech_design: Quinn
+  qa: Tom
+```
+
+- `mappings:` — `taskType` → ordered list of required approval types.
+- `owners:` — `approvalType` → configured owner (global per type, not per task type).
+- Both blocks are deltas over the built-in defaults (`feature: [spec, tech_design, qa]`, etc.; `spec: Tom`, `tech_design: Quinn`, `qa: Tom`). A partial config still resolves unknown `taskType`s to the default list and unknown approval types to the default owner.
+- Missing or malformed files log a WARN and fall back to the built-in default. The resolved policy is hashed (`hash` field on the snapshot) and emitted to the startup log so operators can spot drift between environments on the same commit.
+
+API helpers:
+
+- `requiredApprovalsFor(config, taskType)` — ordered approval types for a task type (empty for unknown types).
+- `gateOwnerFor(config, approvalType)` — configured owner for a given approval type, or `null` when the type is unknown.
+
+---
+
+## Task ownership planes
+
+Task ownership is split into five **independent** planes. No plane silently derives from, replaces, or clears another. The split exists so the discovery queue can find normal handoffs through explicit workflow gates, while exceptional or unmodelled attention requests stay visible without inflating the gate system.
+
+| Plane | Storage | Semantics | Replaces |
+|---|---|---|---|
+| Delivery | `Task.assignee` | The person shipping the work. | — |
+| Task-to-task dependencies | `TaskDependency` (join) | Hard prerequisites between tasks. `dependencyBlocked` is computed, not stored. | — |
+| `Blocked` indicator | `Task.blocked` (stored bool) | Existing generic Blocked flag. Manual + lobster-managed. | — |
+| Outstanding workflow gates | `TaskApproval` rows + required-approvals policy (`~/.openclaw/tasks-api/required-approvals.yaml`) | Structured gates (`spec`, `tech_design`, `qa`) with a configured owner. A gate is **outstanding** when no `approved` row exists; an `approved` row satisfies the gate; a `revoked` row leaves it outstanding again. | — |
+| Exceptional attention | `TaskAttentionOwner` rows | Free-form "needs attention from" requests for situations the workflow does not yet model. | — |
+
+The API surfaces each plane independently:
+
+- `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
+- `approvals` (raw rows) and `workflowGates` (derived view: `[{ type, owner, state }]`, only `state: "outstanding"` entries drive the discovery queue and the workflow-gate avatar layer).
+- `attentionOwners` / `attentionOwnerDetails` (exceptional attention).
+
+Discovery filters on `GET /tasks`:
+
+- `?workflowGateOwner=<name>` — tasks with an outstanding gate whose configured owner is `<name>`. Scopes by `taskType`s that require an approval type owned by the requester, and requires no approved row for any of those types.
+- `?attentionOwner=<name>` — tasks with at least one `TaskAttentionOwner` row whose owner matches (case-insensitive).
+
+The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
+
+**Non-replacement guarantees** (enforced by the API and asserted by tests):
+
+- `attentionOwners` is fully independent of `task.blocked` and `dependencyBlocked`. Clearing attention owners does not declare the task unblocked.
+- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue surfaces gate-owned handoffs through `workflowGateOwner`; it does not also create duplicate attention requests for the same action.
+- Resolving one attention owner (PATCH replacement) does not affect other attention owners, workflow-gate ownership, dependencies, or `task.blocked`.
+- Changing `taskType` does not retroactively create or remove attention-owner rows; attention is decoupled from task-type policy.
+
+**CLI:** `tasks_api_client.py` exposes `--workflow-gate-owner <name>` and `--attention-owner <name>` for `list`, plus `--attention-owners <name...>` and `--clear-attention-owners` for `patch`.
 
 ---
 
@@ -152,10 +255,10 @@ Base path: `/api/v1`
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/tasks` | List with filters: status, priority, assignee, tag, q, blocked, taskType, cursor |
+| `GET` | `/tasks` | List with filters: status, priority, assignee, tag, q, blocked, taskType, cursor, workflowGateOwner, attentionOwner |
 | `POST` | `/tasks` | Create task |
-| `GET` | `/tasks/:id` | Get task with comments, tags, dependencies |
-| `PATCH` | `/tasks/:id` | Partial update — status, priority, assignee, tags, specChecksum, description, dependsOnIds |
+| `GET` | `/tasks/:id` | Get task with comments, tags, dependencies, approvals, attention owners, derived workflowGates |
+| `PATCH` | `/tasks/:id` | Partial update — status, priority, assignee, tags, specChecksum, description, dependsOnIds, attentionOwners |
 | `DELETE` | `/tasks/:id` | Soft archive (sets archivedAt) |
 | `GET` | `/tasks/:id/comments` | List comments |
 | `POST` | `/tasks/:id/comments` | Add comment (drift-tolerant) |
