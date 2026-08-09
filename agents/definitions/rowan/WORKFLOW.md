@@ -9,11 +9,22 @@
 
 ## Worktrees
 
-Rowan's worktrees:
-- `~/workspaces/rowan/workspace` — workspace repo (agents, docs, configs)
-- `~/workspaces/rowan/sindustries/` — sindustries repo
-- Create feature branches from `main`
+**Canonical checkout is out of bounds.**
+`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries` is Edge-managed
+and must stay on a clean `main`. Never `git switch`, edit, commit, or push there.
+A pre-commit hook blocks commits; a 5-min guard resets stray branches.
+
+For every Sindustries code change, create (or reuse) your own worktree:
+
+```bash
+/Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh <name>
+cd /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>
+```
+
+- Create feature branches from `origin/main` **inside that worktree**
 - Open PRs from your branch
+- Never `git worktree add … main` (bare `main` may only live in the canonical checkout)
+- After merge: `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries worktree remove /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>`
 
 ---
 

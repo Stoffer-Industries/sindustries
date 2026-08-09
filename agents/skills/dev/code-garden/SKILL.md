@@ -45,14 +45,21 @@ Pick one finding that:
 
 Skip any finding that requires understanding product/business intent. If unsure, skip.
 
-### 3. Implement on a chore branch off main
+### 3. Implement in a worktree on a chore branch off main
+
+**Never** branch or commit in the canonical Edge-managed checkout
+(`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`). Create a
+worktree first:
 
 ```bash
-git fetch origin
-git checkout -b chore/code-garden-<audit-week>-<short-slug> origin/main
+SLUG="<audit-week>-<short-slug>"   # e.g. 2026-W26-stale-triage-comment
+BRANCH="chore/code-garden-${SLUG}"
+/Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh \
+  "code-garden-${SLUG}" origin/main "$BRANCH"
+cd "/Users/quinnstoffer/.openclaw/workspace/worktrees/code-garden-${SLUG}"
 ```
 
-e.g. `chore/code-garden-2026-W26-stale-triage-comment`
+e.g. branch `chore/code-garden-2026-W26-stale-triage-comment`
 
 Make the minimal change to address the finding. Do not bundle unrelated changes.
 

@@ -16,13 +16,21 @@ Ground every claim in actual files: cite file paths and line numbers. If you can
 **Phase 1 / Discovery & Mapping** (read before judging)
 
 > **Working-directory rule.** This audit runs in an isolated session whose
-> `cwd` is NOT the target repo. Every `exec` / `read` / `list` / `git` call
-> MUST use either absolute paths (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/...`)
-> or be prefixed with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`.
-> Relative paths like `services/...`, `docs/...`, `apps/...` will resolve
-> against the wrong cwd and fail silently with `exit 1`. This is the bug
-> that broke the W31 audit (and may have been silently dropping findings
-> in W28–W30).
+> `cwd` is NOT the sindustries repo. **Never mutate the canonical Edge-managed
+> checkout** at `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
+> (it must stay on clean `main`). For **read-only** discovery you may use
+> absolute paths into that checkout. For **any write / branch / commit / push**,
+> first create a worktree and operate only there:
+>
+> ```bash
+> /Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh \
+>   repo-audit-<YYYY-Www> origin/main code-garden/sindustries/<YYYY-Www>
+> WT=/Users/quinnstoffer/.openclaw/workspace/worktrees/repo-audit-<YYYY-Www>
+> ```
+>
+> Then use `$WT/...` paths or `cd "$WT" && ...`. Relative paths like
+> `services/...` without that prefix resolve against the wrong cwd and fail
+> silently (`exit 1`) — that broke the W31 audit.
 
 Explore the repository systematically before forming any opinions:
 
@@ -137,15 +145,24 @@ after planning; do the write, commit, push, and PR.**
 
 ## Runbook
 
-Target repo: `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
+Canonical checkout (read-only): `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
 
-**1. Audit** — run the four-phase prompt above against the target repo. Produce the audit document in memory.
+**0. Create a worktree for all writes** (before writing the audit file or any git ops):
 
-**1a. Verify cwd before any execution.** Run `pwd` first; if it does not
-print `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`, then
-prefix every subsequent command with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`
-or use absolute paths. This is a one-time check at the start of each Phase 1
-exploration to surface the cwd-mismatch bug if it ever recurs.
+```bash
+WEEK=$(python3 -c "import datetime; y,w,_=datetime.date.today().isocalendar(); print(f'{y}-W{w:02d}')")
+/Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh \
+  "repo-audit-${WEEK}" origin/main "code-garden/sindustries/${WEEK}"
+WT="/Users/quinnstoffer/.openclaw/workspace/worktrees/repo-audit-${WEEK}"
+```
+
+Never `cd` into the canonical checkout for branch/commit/push — that breaks Edge.
+
+**1. Audit** — run the four-phase prompt above. Read-only discovery may use
+absolute paths under the canonical checkout; write the document into `$WT`.
+
+**1a. Verify write cwd.** `pwd` / write targets must be under `$WT`, not under
+`codebases/sindustries`. Relative paths without `$WT` will hit the wrong cwd.
 
 **2. Determine the current ISO week:**
 
@@ -153,17 +170,15 @@ exploration to surface the cwd-mismatch bug if it ever recurs.
 python3 -c "import datetime; y,w,_=datetime.date.today().isocalendar(); print(f'{y}-W{w:02d}')"
 ```
 
-**3. Write the audit document** to `docs/repo-audits/<YYYY-Www>.md` in the sindustries repo.
+**3. Write the audit document** to `$WT/docs/repo-audits/<YYYY-Www>.md`.
 
-**4. Create a branch, commit, and push:**
+**4. Commit and push from the worktree:**
 
 ```bash
-cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
-git fetch origin
-git switch -C code-garden/sindustries/<YYYY-Www> origin/main
-git add docs/repo-audits/<YYYY-Www>.md
-git commit -m "docs: add repo audit <YYYY-Www>"
-git push -u origin code-garden/sindustries/<YYYY-Www> --force-with-lease
+cd "$WT"
+git add "docs/repo-audits/${WEEK}.md"
+git commit -m "docs: add repo audit ${WEEK}"
+git push -u origin "code-garden/sindustries/${WEEK}" --force-with-lease
 ```
 
 **5. Open the PR** using the pr-open skill:

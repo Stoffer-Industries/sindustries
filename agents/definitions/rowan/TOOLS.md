@@ -51,12 +51,17 @@ Rowan has different names in different systems — use the right one per system,
 
 ### Git commits and pushes (sindustries repo)
 
+**Work only inside your own worktree** (see `WORKFLOW.md` → Worktrees). Never
+commit in `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries` — that
+checkout is Edge-managed and a pre-commit hook will block you.
+
 The sindustries repo local git config is set to Quinn's identity. Always
 override the author when committing, and push using an explicit URL with your
 PAT so you never touch the stored remote:
 
 ```bash
 source ~/.openclaw/.env
+# From your worktree (e.g. workspace/worktrees/<name>):
 # Commit as Rowan (override local config inline)
 git -c user.name="rowanstoffer" -c user.email="rowanstoffer@gmail.com" commit -m "..."
 # Push as Rowan (explicit URL, does not change stored origin)

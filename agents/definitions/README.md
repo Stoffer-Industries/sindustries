@@ -10,7 +10,7 @@ Each agent under `agents/definitions/<name>/` uses a consistent set of markdown 
 | `SOUL.md` | Voice, values, character. Who this agent *is*. | Character or voice shifts. Never for procedural rules. |
 | `IDENTITY.md` | Name, avatar, immutable identity facts. | Rarely — identity is stable. |
 | `USER.md` | Facts about the humans this agent serves. | New context about the user. |
-| `TOOLS.md` | Local notes about tools, tokens, worktrees, host-specific config. | Environment or credentials change. |
+| `TOOLS.md` | Local notes about tools, tokens, worktrees, host-specific config. | Environment or credentials change. **Sindustries git work always happens in a personal worktree** — never in the Edge-managed `codebases/sindustries` checkout (see each agent's WORKFLOW.md Worktrees section and workspace `AGENTS.md`). |
 | `HEARTBEAT.md` | **When** the agent checks for work each pass, and **what triggers action**. Polling cadence + per-pass priority rules. | Cadence changes, new triggers, new per-pass campaigns. |
 | `WORKFLOW.md` | **How** the agent executes work — task-state rules, PR standards, escalation triggers. The execution playbook. | Execution steps change, new task states, new PR conventions. |
 | `DoD.md` | Definition of Done — quality bar for calling a task complete. | Quality bar changes. |

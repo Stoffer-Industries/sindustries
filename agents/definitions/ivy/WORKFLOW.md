@@ -92,7 +92,18 @@ When in doubt, escalate to Tom (medium/high), not Quinn (low).
 
 **Always work in my dedicated worktree: `~/workspaces/ivy/sindustries`**
 
-Never touch the main sindustries worktree (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`). That is for Rowan. All my git work — branching, committing, pushing — happens in my worktree only.
+Never touch the canonical Edge-managed checkout
+(`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`). It must stay
+on a clean `main` for openclaw-edge + agent-definition sync — it is not a
+working tree for anyone (including Rowan). All my git work — branching,
+committing, pushing — happens in my worktree only.
+
+If that dedicated worktree is missing, create a fresh one with the paved path
+(never check out bare `main` elsewhere):
+
+```bash
+/Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh ivy-<slug>
+```
 
 Before starting any new task, ensure my worktree is on a clean `main`:
 ```bash

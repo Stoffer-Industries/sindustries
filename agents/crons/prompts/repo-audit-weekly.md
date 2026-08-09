@@ -4,25 +4,28 @@ Read and execute the skill at:
 ## Working directory rule (HARD CONSTRAINT)
 
 This cron runs in an isolated session whose `cwd` is **NOT** the sindustries
-repo. Every shell command (Phase 1 exploration, Phase 4 git ops, anything
-that touches the repo) MUST either:
+repo.
 
-1. Use absolute paths (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/...`), OR
-2. Be prefixed with `cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries && ...`
+**Never mutate the canonical Edge-managed checkout**
+(`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`) — it must stay
+on a clean `main`. Read-only absolute paths into that checkout are fine for
+discovery. For **any write / branch / commit / push**, create a worktree first
+(see the skill runbook step 0) and operate only under
+`/Users/quinnstoffer/.openclaw/workspace/worktrees/repo-audit-<YYYY-Www>/`.
 
-Do NOT rely on relative paths like `services/...`, `docs/...`, `apps/...`. They
-will resolve against the wrong cwd and fail with `exit 1` — this is the bug
-that broke the W31 audit (and probably W28–W30 silently).
+Do NOT `cd` into `codebases/sindustries` for git ops. Do NOT rely on relative
+paths like `services/...`, `docs/...`, `apps/...` without the worktree prefix —
+they resolve against the wrong cwd and fail with `exit 1` (the W31 audit bug).
 
 ## Completion gate (HARD CONSTRAINT)
 
 A successful session MUST end with all four of these, in order, before the
 session ends:
 
-1. `docs/repo-audits/<YYYY-Www>.md` written to disk (not just planned in
-   the assistant text — actually written via `write` tool).
-2. `git add docs/repo-audits/<YYYY-Www>.md && git commit -m "..."` (or
-   the matching commit style).
+1. `docs/repo-audits/<YYYY-Www>.md` written to disk **inside the audit worktree**
+   (not just planned in the assistant text — actually written via `write` tool).
+2. `git add docs/repo-audits/<YYYY-Www>.md && git commit -m "..."` **from that
+   worktree** (or the matching commit style).
 3. `git push -u origin <branch>` — the branch must land on the remote.
 4. PR opened via the pr-open skill (`cod—audit: ...` title, Executive Summary
    body, `code-audit` label, `Stoff81` assignee, `Stoff81` reviewer).
