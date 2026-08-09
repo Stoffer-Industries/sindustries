@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import codecs
 import datetime as dt
 import io
 import json
@@ -54,8 +55,19 @@ def dump_json(data: Any) -> None:
 
 
 def read_first_json_value(stream: Any, timeout_seconds: float = 5.0) -> Any:
+    """Read the first JSON value from `stream`, decoding UTF-8 incrementally.
+
+    Multi-byte UTF-8 sequences (e.g. emoji) can straddle the 4096-byte read
+    boundary. Decoding each chunk independently with ``chunk.decode("utf-8")``
+    raises ``UnicodeDecodeError`` on the partial trailing sequence, which is
+    exactly the failure mode that bit the content-task workflow when a task
+    title contained ``✍️`` (U+270D, encoded as ``E2 9C 8D``). Using
+    ``codecs.getincrementaldecoder`` lets the decoder buffer the trailing
+    partial sequence until the next chunk completes it.
+    """
     decoder = json.JSONDecoder()
     buffer = ""
+    byte_decoder = codecs.getincrementaldecoder("utf-8")("strict")
     try:
         fd = stream.fileno()
     except (AttributeError, io.UnsupportedOperation):
@@ -69,7 +81,7 @@ def read_first_json_value(stream: Any, timeout_seconds: float = 5.0) -> Any:
         chunk = os.read(fd, 4096)
         if not chunk:
             break
-        buffer += chunk.decode("utf-8")
+        buffer += byte_decoder.decode(chunk, final=False)
         stripped = buffer.lstrip()
         if not stripped:
             continue
@@ -79,6 +91,7 @@ def read_first_json_value(stream: Any, timeout_seconds: float = 5.0) -> Any:
             continue
     if not buffer.strip():
         raise json.JSONDecodeError("Expecting value", buffer, 0)
+    buffer += byte_decoder.decode(b"", final=True)
     return decoder.raw_decode(buffer.lstrip())[0]
 
 
