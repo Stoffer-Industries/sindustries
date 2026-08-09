@@ -187,21 +187,10 @@ Use the pr-process skill for the full PR lifecycle (reviewer duties, merging): `
 
 ### Rust quality gates (feature-task workflow only)
 
-When a PR touches Rust code under `agents/workflows/feature-task/**`, the following commands must pass locally **before** the PR is opened (or converted from draft → ready-for-review):
-
-```bash
-cargo test  --manifest-path agents/workflows/feature-task/Cargo.toml
-cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
-```
-
-These mirror the CI jobs:
-
-- `feature-task-workflow-tests` (in `.github/workflows/ci.yml`) — runs `cargo test`.
-- `feature-task clippy (-D warnings)` (in `.github/workflows/feature-task-clippy.yml`) — runs the clippy command above.
-
-Clippy failures must be fixed before review unless the PR description explicitly documents an accepted temporary exception (and a follow-up issue to track the fix). Do not open a PR with unresolved clippy warnings and rely on the reviewer to approve the exception — exceptions are rare and must be called out.
-
-These gates apply **only** to Rust changes in `agents/workflows/feature-task/**`. Content-only, doc-only, and other non-Rust PRs are explicitly exempt — do not run or report on clippy for those. The matching PR-body checklist in `agents/skills/dev/pr-open/SKILL.md` is conditional for the same reason.
+PRs that touch `agents/workflows/feature-task/**` must satisfy that crate's
+quality gates (local + CI) before ready-for-review. Commands, exception policy,
+and scope live in `agents/workflows/feature-task/WORKFLOW.md` — do not
+duplicate them here. Content/doc/non-Rust PRs are exempt.
 
 When Rowan opens a PR:
 - open as **draft** with **no assignee** — this signals the PR is not yet ready for Tom's attention
