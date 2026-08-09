@@ -35,6 +35,25 @@ Both commands must exit zero locally before pushing. If clippy fails, fix the
 warning before requesting review — temporary exceptions must be called out in
 the PR description with a documented rationale.
 
+## Lobster PR-body evidence gate (opt-in)
+
+Set `CLIPPY_ENFORCE=true` to make the lobster's `verify_delivery` stage
+require a PR-body line containing the canonical clippy command for any PR
+that touches `agents/workflows/feature-task/**`:
+
+```
+cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
+```
+
+The gate is **off by default** — it ships disabled so the rollout can be
+flipped on once the CI gate has been green for ≥1 week. When the gate is
+enabled and a Rust workflow PR omits the evidence line, the lobster emits
+`[feature-task-progress-checklist] missing clippy evidence for Rust workflow PR. Run: <command>`.
+
+PR-body matching is anchored on the exact command string (not on markdown
+structure), so the matching line can live anywhere in the PR body — inside
+or outside a code fence. Non-Rust / content-only PRs are skipped outright.
+
 ## When the gate was added
 
 See task `cbe3333a-4982-456a-85c6-54a0844fb3f5` (Add feature-task clippy CI

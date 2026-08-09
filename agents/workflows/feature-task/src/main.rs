@@ -754,6 +754,13 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             }
         }
     }
+    // Clippy evidence gate (opt-in via CLIPPY_ENFORCE env). When the gate
+    // is enabled, only the latest PR is checked (matches the
+    // `latest_pr_url` principle used above for AC text). Non-Rust /
+    // content-only PRs are skipped outright.
+    if let Some(url) = &latest_pr_url {
+        failures.extend(clippy_evidence_failures(url));
+    }
     if workstreams(&env.task).is_empty() {
         failures.push("Task description must include at least one workstream.".to_string());
     }
@@ -3150,6 +3157,93 @@ fn pr_body(url: &str) -> Result<String> {
     }
     let raw = String::from_utf8(output.stdout)?;
     Ok(decode_pr_body_output(&raw))
+}
+
+/// Fetch the list of files changed in a PR.
+///
+/// Returns an empty Vec if the PR has no diff or the `gh` call fails for a
+/// non-fatal reason (e.g. merged PR with no accessible diff). Callers that
+/// need an authoritative empty result should consult the surrounding
+/// workflow gate state separately.
+fn pr_changed_files(url: &str) -> Vec<String> {
+    let output = Command::new("gh")
+        .args(["pr", "view", url, "--json", "files", "--jq", ".files[].path"])
+        .output();
+    let output = match output {
+        Ok(out) if out.status.success() => out,
+        _ => return Vec::new(),
+    };
+    let raw = String::from_utf8(output.stdout).unwrap_or_default();
+    raw.lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// Sentinel substring identifying the canonical clippy command for the
+/// feature-task workflow. Anchoring on this exact string (rather than parsing
+/// markdown structure) keeps the matching stable across PR body template
+/// changes — if the canonical command changes, the matching string is
+/// updated in lockstep.
+const CLIPPY_EVIDENCE_COMMAND: &str =
+    "cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings";
+
+/// Path prefix identifying a PR that touches the Rust feature-task workflow.
+const FEATURE_TASK_RUST_PREFIX: &str = "agents/workflows/feature-task/";
+
+/// True iff the PR body contains the canonical clippy command. Matches the
+/// exact command string on any line (inside or outside a code fence) so
+/// authors can place the evidence anywhere in the PR body.
+fn body_has_clippy_evidence(body: &str) -> bool {
+    body.lines()
+        .any(|line| line.contains(CLIPPY_EVIDENCE_COMMAND))
+}
+
+/// True iff the PR's changed files touch the Rust feature-task workflow.
+fn touches_rust_feature_workflow(files: &[String]) -> bool {
+    files
+        .iter()
+        .any(|path| path.starts_with(FEATURE_TASK_RUST_PREFIX))
+}
+
+/// Build the clippy-evidence blocker failure string. Kept centralised so the
+/// message stays consistent across the lobster's checks and tests.
+fn clippy_evidence_missing_failure() -> String {
+    format!(
+        "[feature-task-progress-checklist] missing clippy evidence for Rust workflow PR. \
+         Run: {CLIPPY_EVIDENCE_COMMAND}"
+    )
+}
+
+/// Returns true when the clippy-evidence gate is enabled.
+///
+/// The gate ships disabled by default; flip `CLIPPY_ENFORCE=true` once the
+/// feature-task clippy CI gate (`cbe3333a`) has been green for ≥1 week.
+fn clippy_enforce_enabled() -> bool {
+    std::env::var("CLIPPY_ENFORCE")
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+/// Check a PR for clippy evidence and append a failure if the PR touches
+/// the Rust feature-task workflow but the PR body lacks the canonical
+/// clippy command. Returns the failure list for the caller to push into
+/// the gate's `failures` vec.
+fn clippy_evidence_failures(url: &str) -> Vec<String> {
+    if !clippy_enforce_enabled() {
+        return Vec::new();
+    }
+    let files = pr_changed_files(url);
+    if !touches_rust_feature_workflow(&files) {
+        return Vec::new();
+    }
+    match pr_body(url) {
+        Ok(body) if body_has_clippy_evidence(&body) => Vec::new(),
+        Ok(_) => vec![clippy_evidence_missing_failure()],
+        Err(err) => vec![format!(
+            "Could not read PR body for clippy evidence check ({url}): {err}."
+        )],
+    }
 }
 
 /// Decode the raw stdout of `gh pr view --jq .body` into a PR body string.
@@ -6024,5 +6118,91 @@ detached
             results[0].outcome,
             WorktreeCleanupOutcome::AlreadyAbsent
         ));
+    }
+
+    // ---- clippy evidence gate helpers (task 55c98158) ----
+
+    #[test]
+    fn clippy_evidence_matches_canonical_command() {
+        let body = "## Test plan\n\
+                    - [x] run `cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings`\n";
+        assert!(body_has_clippy_evidence(body));
+    }
+
+    #[test]
+    fn clippy_evidence_matches_command_outside_fence() {
+        let body = "Verified locally with: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings\n";
+        assert!(body_has_clippy_evidence(body));
+    }
+
+    #[test]
+    fn clippy_evidence_rejects_unrelated_clippy_command() {
+        // Different manifest path — should not match the feature-task gate.
+        let body = "cargo clippy --manifest-path services/budget-api/Cargo.toml --all-targets -- -D warnings\n";
+        assert!(!body_has_clippy_evidence(body));
+    }
+
+    #[test]
+    fn clippy_evidence_rejects_missing_command() {
+        let body = "## Test plan\n- [x] AC1: ran unit tests\n";
+        assert!(!body_has_clippy_evidence(body));
+    }
+
+    #[test]
+    fn touches_rust_feature_workflow_matches_prefix() {
+        let files = vec![
+            "agents/workflows/feature-task/src/main.rs".to_string(),
+            "agents/workflows/feature-task/Cargo.toml".to_string(),
+        ];
+        assert!(touches_rust_feature_workflow(&files));
+    }
+
+    #[test]
+    fn touches_rust_feature_workflow_rejects_other_paths() {
+        let files = vec![
+            "agents/workflows/code-task/src/main.rs".to_string(),
+            "docs/specs/feature-task.md".to_string(),
+        ];
+        assert!(!touches_rust_feature_workflow(&files));
+    }
+
+    #[test]
+    fn touches_rust_feature_workflow_rejects_empty_list() {
+        let files: Vec<String> = vec![];
+        assert!(!touches_rust_feature_workflow(&files));
+    }
+
+    #[test]
+    fn clippy_evidence_failure_includes_canonical_command() {
+        let failure = clippy_evidence_missing_failure();
+        assert!(failure.contains(CLIPPY_EVIDENCE_COMMAND));
+        assert!(failure.contains("missing clippy evidence"));
+    }
+
+    #[test]
+    fn clippy_enforce_enabled_respects_env_flag() {
+        // Default is disabled
+        std::env::remove_var("CLIPPY_ENFORCE");
+        assert!(!clippy_enforce_enabled());
+
+        // Explicit truthy values
+        for v in ["1", "true", "TRUE", "yes", "YES", "on", "On"] {
+            std::env::set_var("CLIPPY_ENFORCE", v);
+            assert!(
+                clippy_enforce_enabled(),
+                "CLIPPY_ENFORCE={v} should enable gate"
+            );
+        }
+
+        // Falsy values stay disabled
+        for v in ["0", "false", "no", "off", "", "anything-else"] {
+            std::env::set_var("CLIPPY_ENFORCE", v);
+            assert!(
+                !clippy_enforce_enabled(),
+                "CLIPPY_ENFORCE={v} should leave gate disabled"
+            );
+        }
+
+        std::env::remove_var("CLIPPY_ENFORCE");
     }
 }
