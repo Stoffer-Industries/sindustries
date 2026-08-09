@@ -63,6 +63,30 @@ class ContentTaskHeadingTests(unittest.TestCase):
             self.assertIsNotNone(match)
             self.assertFalse(match.group(0).startswith("\n"))
 
+    def test_tweets_queued_accepts_traceability_comment(self):
+        task = {
+            "comments": [
+                {
+                    "text": "[ivy-tweets-queued] theme: Agents as first-class users\n"
+                    "- tweet-id — launch context"
+                }
+            ]
+        }
+
+        self.assertTrue(content_common.has_ivy_tweets_queued(task))
+
+    def test_tweets_queued_rejects_blocker_text_that_mentions_tag(self):
+        task = {
+            "comments": [
+                {
+                    "text": "Tweet campaign is blocked; "
+                    "`[ivy-tweets-queued]` remains pending."
+                }
+            ]
+        }
+
+        self.assertFalse(content_common.has_ivy_tweets_queued(task))
+
     @patch.object(content_common, "gh_api")
     def test_pr_routing_uses_rest_user_endpoints(self, gh_api):
         gh_api.side_effect = [
