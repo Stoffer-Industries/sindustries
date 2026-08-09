@@ -15,23 +15,11 @@ Use this skill whenever you need to open a pull request in the Sindustries repos
 
 ### Validation — Rust workflow PRs
 
-If the PR touches Rust code under `agents/workflows/feature-task/**`, both of these commands must exit zero locally **before** the PR is opened (or moved from draft → ready-for-review):
-
-```bash
-cargo test  --manifest-path agents/workflows/feature-task/Cargo.toml
-cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
-```
-
-For these PRs, include the matching conditional checklist in the PR body (under `## Test plan` or as a separate `## Validation` section) so reviewers see the gate evidence at a glance:
-
-```markdown
-- [ ] `cargo test --manifest-path agents/workflows/feature-task/Cargo.toml` (Rust changes only)
-- [ ] `cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings` (Rust changes only)
-```
-
-Clippy failures must be fixed before review; the only acceptable unfixed-clippy state is a PR description that explicitly documents an accepted temporary exception plus a follow-up issue.
-
-This block applies **only** to PRs that touch `agents/workflows/feature-task/**`. Content-only, doc-only, and other non-Rust PRs are explicitly exempt — omit the checklist entirely. Full rationale lives in `agents/definitions/rowan/WORKFLOW.md`.
+If the PR touches `agents/workflows/feature-task/**`, follow the quality gates
+in `agents/workflows/feature-task/WORKFLOW.md` before opening or marking
+ready-for-review (CI enforces the same gates). Note in the PR test plan that
+tests/clippy are green — do not paste the full `cargo` command lines into
+every PR body. Content/doc/non-Rust PRs skip this entirely.
 
 ## The gh pr create Command
 
