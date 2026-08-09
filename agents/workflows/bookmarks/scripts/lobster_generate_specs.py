@@ -28,6 +28,11 @@ from common import (
     slugify,
     transition_log_path,
 )
+from bookmark_state_machine import (
+    effective_review_status,
+    is_task_linked,
+    reconcile_tasked_item,
+)
 
 def to_wiki_link(path: str) -> str:
     """Convert file path to Obsidian-style wiki link [[filename]].
@@ -554,6 +559,21 @@ def main() -> int:
         state_item = items.get(item["bookmarkKey"], {})
         analysis = state_item.get("analysis") or item.get("analysis")
         hydrated_item = merge_bookmark_context({**state_item, **item})
+
+        # Task-linked guard (task 0089f4f9): items with non-empty taskIds
+        # are authoritatively `tasked` and must not enter spec generation,
+        # spec re-sync, or spec queueing. If a stale pipeline pass put
+        # them into the `implement` bucket, reconcile to `tasked` and skip.
+        if is_task_linked(state_item) or is_task_linked(item):
+            repaired = reconcile_tasked_item(
+                state_item,
+                item["bookmarkKey"],
+                "generate-specs: task-linked item refused spec dispatch",
+                transitions_path=transition_log_path(Path(STATE_PATH)),
+            )
+            if repaired:
+                items[item["bookmarkKey"]] = state_item
+            continue
 
         # Reuse existing spec artifacts when they already exist and approval/tasking hasn't happened.
         existing_spec_docs = state_item.get("specDocs") or item.get("specDocs") or []

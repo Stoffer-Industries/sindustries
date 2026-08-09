@@ -49,6 +49,7 @@ from common import (
     save_state,
     transition_log_path,
 )
+from bookmark_state_machine import effective_review_status, is_task_linked
 
 DEFAULT_THRESHOLD = 7
 
@@ -81,21 +82,35 @@ def route(item: dict[str, Any], state_item: dict[str, Any]) -> str:
     """Decide which bucket this item falls into. Pure function, no I/O.
 
     Order of checks matters:
-      1. Terminal status wins (even with high-score curation).
-      2. spec_created wins (curation ignored — spec already exists).
-      3. Recovery branch (specProposals + no taskIds + not terminal).
-      4. Curation verdict: high score broad references → needs_research;
+      1. Task-linked wins (non-empty taskIds ⇒ effective `tasked`,
+         regardless of persisted reviewStatus). This is the durability
+         guard from task 0089f4f9 — a task-linked bookmark cannot be
+         re-routed to `implement` or `monitoring` by a later pipeline pass.
+      2. Terminal status wins (even with high-score curation).
+      3. spec_created wins (curation ignored — spec already exists).
+      4. Recovery branch (specProposals + no taskIds + not terminal).
+      5. Curation verdict: high score broad references → needs_research;
          other high scores → implement; low score → monitoring.
-      5. No curation → monitoring (heartbeat will create one).
+      6. No curation → monitoring (heartbeat will create one).
     """
-    status = item.get("reviewStatus") or state_item.get("reviewStatus")
+    # Build the merged view: caller-provided `item` overrides the persisted
+    # state, but the routing decisions consult both via effective_review_status.
+    merged: dict[str, Any] = {**state_item, **item}
+    effective_status = effective_review_status(merged) or str(
+        item.get("reviewStatus") or state_item.get("reviewStatus") or ""
+    )
 
-    # 1. Terminal: skip regardless of curation
-    if status in TERMINAL_STATUSES:
+    # 1. Task-linked: taskIds is the authoritative terminal-state signal.
+    #    A task-linked bookmark cannot be re-routed into implement/spec flow.
+    if is_task_linked(merged):
+        return "reviewed"
+
+    # 2. Terminal: skip regardless of curation
+    if effective_status in TERMINAL_STATUSES:
         return "reviewed"
 
     # 2. Spec already exists and is awaiting approval
-    if status == "spec_created":
+    if effective_status == "spec_created":
         return "implement"
 
     # 3. Recovery: spec work exists but never became tasks.

@@ -17,6 +17,11 @@ from common import (
     transition_log_path,
     get_approval_topic,
 )
+from bookmark_state_machine import (
+    effective_review_status,
+    is_task_linked,
+    reconcile_tasked_item,
+)
 
 # Compact preview helpers — keeps payload under lobster's 2000-char preview cap.
 _ITEM_KEEP = {"bookmarkKey", "specDocs", "topic", "approvalTopic", "title"}
@@ -153,7 +158,34 @@ def main() -> int:
 
     for review in data.get("reviewed", []):
         bookmark_key = review.get("bookmarkKey")
-        if bookmark_key and _update_item(state_items, bookmark_key, "finalized reviewed item", state_path, reviewStatus="reviewed"):
+        if not bookmark_key:
+            continue
+        item = state_items.get(bookmark_key)
+        if not item:
+            continue
+        # Task-linked items must NOT be downgraded to literal `reviewed`.
+        # The `reviewed` output bucket is a routing decision, not a license
+        # to overwrite the terminal state. Non-empty taskIds is the
+        # authoritative signal for `tasked` (task 0089f4f9).
+        if is_task_linked(item):
+            previous_status = item.get("reviewStatus")
+            repaired = reconcile_tasked_item(
+                item,
+                bookmark_key,
+                "finalize-cycle: task-linked item refused literal reviewed downgrade",
+                transitions_path=transition_log_path(state_path),
+            )
+            if repaired:
+                finalized["reviewed"].append(bookmark_key)
+            elif previous_status != "tasked":
+                # Item is task-linked but persisted status was something else
+                # (e.g. reviewed, spec_requested from a stale pass). We refuse
+                # the downgrade but still record the routing decision; the
+                # terminal status surfaces to the dashboard via the merged
+                # `tasked` view even if the persisted field is stale.
+                finalized["reviewed"].append(bookmark_key)
+            continue
+        if _update_item(state_items, bookmark_key, "finalized reviewed item", state_path, reviewStatus="reviewed"):
             finalized["reviewed"].append(bookmark_key)
 
     for review in data.get("monitoring", []):
