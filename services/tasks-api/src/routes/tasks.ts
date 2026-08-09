@@ -12,6 +12,7 @@ import {
   validTaskTypes
 } from './tasks/_constants.ts';
 import {
+  normalizeAttentionOwners,
   normalizeDependsOnIds,
   normalizeString,
   normalizeTags,
@@ -22,7 +23,12 @@ import {
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
 import { descriptionHasSpecDrift, descriptionWithSpecDriftApprovalState } from './tasks/_spec.ts';
-import { connectTags, validateDependsOnIds } from './tasks/_deps.ts';
+import {
+  buildWorkflowGateOwnerWhere,
+  connectTags,
+  resolveGateContext,
+  validateDependsOnIds
+} from './tasks/_deps.ts';
 
 export const tasksRouter = Router();
 
@@ -41,7 +47,9 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       includeArchived,
       limit: rawLimit,
       cursor,
-      sort = 'priority'
+      sort = 'priority',
+      workflowGateOwner,
+      attentionOwner
     } = req.query;
 
     // Support multi-select status filter (comma-separated)
@@ -90,6 +98,27 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       statusFilter = { status: statusValues[0] };
     }
 
+    // Discovery filters for workflow-gate ownership and attention ownership.
+    // These are independent (AC4): `workflowGateOwner` scopes to explicit
+    // gate handoffs whose configured owner matches; `attentionOwner` scopes
+    // to generic attention rows. Combining them via AND lets a user view
+    // e.g. "Quinn's outstanding gates AND the attention requests Quinn
+    // raised" without conflating the two planes.
+    const workflowGateOwnerFilter =
+      typeof workflowGateOwner === 'string' && workflowGateOwner.trim().length > 0
+        ? buildWorkflowGateOwnerWhere(workflowGateOwner.trim())
+        : [];
+    const attentionOwnerFilter =
+      typeof attentionOwner === 'string' && attentionOwner.trim().length > 0
+        ? {
+            attentionOwners: {
+              some: {
+                owner: { equals: attentionOwner.trim(), mode: 'insensitive' as const }
+              }
+            }
+          }
+        : {};
+
     const where = {
       ...(includeArchived === 'true' ? {} : { archivedAt: null }),
       ...statusFilter,
@@ -127,7 +156,9 @@ tasksRouter.get('/tasks', async (req, res, next) => {
             }
           }
         : {}),
-      ...(blocked !== undefined ? { blocked: blocked === 'true' } : {})
+      ...(blocked !== undefined ? { blocked: blocked === 'true' } : {}),
+      ...attentionOwnerFilter,
+      ...(workflowGateOwnerFilter.length > 0 ? { AND: workflowGateOwnerFilter } : {})
     };
 
     const queryWhere = decodedCursor
@@ -157,6 +188,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
           }
         },
         approvals: true,
+        attentionOwners: true,
         ...dependencyInclude
       },
       take: limit + 1
@@ -193,7 +225,10 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     const lastTask = pageTasks.at(-1);
 
     return res.status(200).json({
-      data: pageTasks.map(mapTask),
+      data: pageTasks.map((task) => {
+        const gateContext = resolveGateContext(task.taskType);
+        return mapTask(task, gateContext);
+      }),
       page: {
         limit,
         nextCursor: hasNextPage && lastTask ? encodeCursor(lastTask.createdAt, lastTask.id) : null,
@@ -222,6 +257,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
         },
         approvals: true,
+        attentionOwners: true,
         ...dependencyInclude
       }
     });
@@ -230,7 +266,8 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
       return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
     }
 
-    return res.status(200).json({ data: mapTask(task) });
+    const gateContext = resolveGateContext(task.taskType);
+    return res.status(200).json({ data: mapTask(task, gateContext) });
   } catch (error) {
     return next(error);
   }
@@ -293,11 +330,13 @@ tasksRouter.post('/tasks', async (req, res, next) => {
           }
         },
         approvals: true,
+        attentionOwners: true,
         ...dependencyInclude
       }
     });
 
-    return res.status(201).json({ data: mapTask(created) });
+    const gateContext = resolveGateContext(created.taskType);
+    return res.status(201).json({ data: mapTask(created, gateContext) });
   } catch (error) {
     return next(error);
   }
@@ -405,6 +444,28 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       tagRecords = await connectTags(tags);
     }
 
+    // Attention-owner replacement. `attentionOwners` is a full-replacement
+    // array: omission = no change, `[]` = clear all rows. `null` is also
+    // accepted as a no-op so a UI that serializes empty fields as `null`
+    // (e.g. after the user clears a form input) doesn't surface as 400.
+    // Clearing does NOT touch `task.blocked`, dependencies, assignee, or
+    // approvals — the persistence step below only operates on the
+    // `TaskAttentionOwner` rows. See task 66054ab4 AC2 + AC7 + AC8.
+    const hasAttentionUpdate = req.body?.attentionOwners !== undefined
+      && req.body?.attentionOwners !== null;
+    let attentionOwnersUpdate: string[] | null = null;
+    if (hasAttentionUpdate) {
+      const normalized = normalizeAttentionOwners(req.body.attentionOwners);
+      if (!normalized) {
+        return badRequest(
+          res,
+          'INVALID_ATTENTION_OWNERS',
+          'attentionOwners must be an array of non-empty strings (max 16 entries, 64 chars each)'
+        );
+      }
+      attentionOwnersUpdate = normalized.owners;
+    }
+
     const task = await prisma.$transaction(async (tx) => {
       await tx.task.update({
         where: { id },
@@ -450,17 +511,36 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         }
       }
 
+      if (hasAttentionUpdate) {
+        // Full-replacement semantics: delete-then-create within the same
+        // transaction. Surviving rows keep their `note` and `addedBy` only
+        // when their (taskId, owner) pair appears in the new array; the
+        // detail-level add/update endpoint (future work, not in WS1) will
+        // be the right place to preserve per-row metadata. We delete by
+        // `taskId` because the unique constraint on (taskId, owner) is the
+        // source of truth; clearing by `taskId` is correct regardless of
+        // how many rows survive.
+        await tx.taskAttentionOwner.deleteMany({ where: { taskId: id } });
+        if (attentionOwnersUpdate.length > 0) {
+          await tx.taskAttentionOwner.createMany({
+            data: attentionOwnersUpdate.map((owner) => ({ taskId: id, owner }))
+          });
+        }
+      }
+
       return tx.task.findFirst({
         where: { id },
         include: {
           tags: { include: { tag: true } },
           approvals: true,
+          attentionOwners: true,
           ...dependencyInclude
         }
       });
     });
 
-    return res.status(200).json({ data: mapTask(task) });
+    const gateContext = resolveGateContext(task.taskType);
+    return res.status(200).json({ data: mapTask(task, gateContext) });
   } catch (error) {
     return next(error);
   }
