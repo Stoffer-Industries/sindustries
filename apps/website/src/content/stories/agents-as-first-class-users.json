@@ -1,0 +1,18 @@
+{
+  "title": "Onboarding agents as first-class users",
+  "slug": "agents-as-first-class-users",
+  "dek": "GymTrack now gives AI agents a real OAuth onboarding path, from an in-product connect action to a live MCP server.",
+  "body": "GymTrack started as a workout logger for people. It now has a second kind of user: an AI agent.\n\nThe latest release puts a Connect to your agent action inside the Workouts tab. It opens a real OAuth flow against GymTrack's live MCP server, so an agent can connect through the product instead of relying on copied tokens or manual setup.\n\n## Why the onboarding path matters\n\nAn API can technically support agents without treating them as users. The difference is onboarding. Human users expect a sign-up screen, clear permissions, and a route into the product. Agents need the same product thinking, expressed through OAuth discovery, scoped access, and an interface that tells the person what they are connecting.\n\nGymTrack now connects those pieces end to end. Public sign-up creates isolated human accounts with Google or Apple. The in-product action starts the agent connection. The MCP server handles OAuth on a live endpoint. Once connected, an agent can work with the secured planned-workout capability that shipped earlier.\n\n## What shipped\n\nThe server is deployed on Fly with live health and OAuth discovery checks. The product action is wired to that server rather than a placeholder. The release passed 138 tests and a live smoke test against the deployed service.\n\nThose details matter because agent integrations often stop at a local demo. A local tool call proves the interface can work. A discoverable OAuth server and an in-product onboarding route prove that another account can reach it through the product.\n\n## The next evidence gate\n\nThe plumbing is live, but shipping it does not prove people want it. The next question is whether real users connect agents repeatedly and whether those agents create planned workouts worth returning to. That usage will decide whether GymTrack invests further in agent-assisted workflows or keeps the integration narrow.\n\nFor now, GymTrack has a complete path for two user types: a person can create an isolated account, and that person can connect an agent through a real OAuth flow.",
+  "source": "internal",
+  "topics": [
+    "SIndustries",
+    "GymTrack",
+    "agents",
+    "MCP",
+    "OAuth"
+  ],
+  "draftedAt": "2026-08-09",
+  "publishedAt": null,
+  "displayOrder": 0,
+  "visibility": "draft"
+}
