@@ -12,6 +12,7 @@ dedicated test that gracefully skips if jsonschema is not installed.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -220,6 +221,30 @@ class LoadAllIncidentsTests(unittest.TestCase):
         out = ist.load_all_incidents(workspace=self.tmpdir)
         self.assertEqual(len(out), 2)
         self.assertTrue(all(e["owner"] == "quinn" for e in out))
+
+
+class WorkspaceDefaultTests(unittest.TestCase):
+    """W29 audit [Low]: WORKSPACE_DEFAULT must not hard-code a laptop path."""
+
+    def test_openclaw_workspace_env_override_is_used(self):
+        sentinel = "/tmp/incident_state_env_override_test"
+        with mock.patch.dict(os.environ, {"OPENCLAW_WORKSPACE": sentinel}, clear=False):
+            # Reload the module so the module-level constant re-evaluates with
+            # the patched env var. Patching os.environ alone does not refresh
+            # already-bound names.
+            import importlib
+            reloaded = importlib.reload(ist)
+            self.assertEqual(
+                Path(reloaded.WORKSPACE_DEFAULT), Path(sentinel)
+            )
+
+    def test_home_fallback_when_env_unset(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENCLAW_WORKSPACE", None)
+            import importlib
+            reloaded = importlib.reload(ist)
+            expected = Path.home() / ".openclaw" / "workspace"
+            self.assertEqual(Path(reloaded.WORKSPACE_DEFAULT), expected)
 
 
 class NeedsTomTests(unittest.TestCase):

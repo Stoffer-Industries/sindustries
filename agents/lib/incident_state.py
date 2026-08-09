@@ -64,7 +64,9 @@ SCHEMA_PATH_DEFAULT = (
 QUINN_STATE_RELATIVE = Path("brain/state/quinn-ops-state.json")
 LOX_STATE_RELATIVE = Path("brain/state/lox-incident-state.json")
 
-WORKSPACE_DEFAULT = Path(os.environ.get("OPENCLAW_WORKSPACE", "/Users/quinnstoffer/.openclaw/workspace"))
+WORKSPACE_DEFAULT = Path(
+    os.environ.get("OPENCLAW_WORKSPACE") or (Path.home() / ".openclaw" / "workspace")
+)
 
 VALID_OWNERS = {"lox", "quinn"}
 VALID_STATUSES = {"watching", "escalated", "resolved", "false_positive"}
