@@ -74,7 +74,12 @@ test('approval checkboxes approve, revoke, reconcile, and roll back failures', a
 
   await expect(checkbox).not.toBeChecked();
   await expect(checkbox).toBeEnabled();
-  await checkbox.check();
+  // Initial click while unauthenticated — opens the login modal and rolls back
+  // the optimistic check. Use .click() instead of .check() because the rollback
+  // intentionally leaves the box unchecked between the click and the re-attempt
+  // triggered by the login flow; the strict .check() helper would time out
+  // waiting for the box to settle as checked during that interim state.
+  await checkbox.click();
   await page.getByLabel('Username').fill('tom');
   await page.getByLabel('Password').fill('test-password');
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -86,7 +91,10 @@ test('approval checkboxes approve, revoke, reconcile, and roll back failures', a
   await expect(checkbox).not.toBeChecked();
 
   failNextApproval = true;
-  await checkbox.check();
+  // Same swap for the forced-403 rollback path: .click() lets the optimistic
+  // state advance briefly and then roll back to unchecked when the server
+  // denies; the strict .check() helper would not tolerate that interim state.
+  await checkbox.click();
   await expect(page.getByRole('alert')).toContainText('Approval denied');
   await expect(checkbox).not.toBeChecked();
 
