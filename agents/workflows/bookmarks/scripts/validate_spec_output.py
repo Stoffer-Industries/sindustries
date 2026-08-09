@@ -44,6 +44,11 @@ from common import (
     save_state,
     transition_log_path,
 )
+from bookmark_state_machine import (
+    effective_review_status,
+    is_task_linked,
+    reconcile_tasked_item,
+)
 
 DEFAULT_OUTPUT = STATE_ROOT / "spec-output.json"
 REQUIRED_SPEC_KEYS = {"title", "specDoc"}
@@ -162,6 +167,27 @@ def main() -> int:
                     "bookmark reviewStatus must be spec_requested or revision_requested, "
                     f"got {current!r}"
                 ],
+            })
+            continue
+
+        # Task-linked guard (task 0089f4f9): items with non-empty taskIds
+        # are authoritatively `tasked`. A heartbeat spec dispatch that
+        # arrives for an already-tasked item (e.g. stale Quinn re-dispatch
+        # after a late spec_output.json write) must not overwrite the
+        # terminal state. Reconcile and skip instead.
+        if is_task_linked(item):
+            repaired = reconcile_tasked_item(
+                item,
+                bookmark_key,
+                "spec-validate: task-linked item refused spec_created transition",
+                transitions_path=transitions_path,
+            )
+            if repaired:
+                items[bookmark_key] = item
+            skipped.append({
+                "bookmarkKey": bookmark_key,
+                "reason": "task-linked: effective reviewStatus is tasked; refusing spec_created",
+                "effectiveStatus": effective_review_status(item),
             })
             continue
 

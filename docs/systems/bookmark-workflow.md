@@ -1,7 +1,7 @@
 # Bookmark Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-07-14
+**Last updated:** 2026-08-09
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmarks/`
 
 ---
@@ -92,6 +92,100 @@ For X-sourced bookmarks that land in `tasked` with at least one task ID created,
 - **Operational notes:** the tweet step is fire-and-forget; no retry, no rate-limit cache, no human-in-the-loop. If `tasks-api` is unreachable, the helper records `tasks_api_unreachable:<reason>` and the approval still completes. The route trusts `localhost` — see the file header for the auth caveat if the lobster and `tasks-api` ever stop sharing a host.
 - **Where it does NOT run:** non-X sources, `next_status == "approved"` (no tasks created), and `next_status == "declined"`. These branches never invoke `try_post_author_tweet()`.
 - **Out of scope (parking lot):** reply-to-quoted-tweet threading, engagement tracking, draft-then-approve UX, `tweetAttempts[]` append-only history, `analytics.bookmark_transitions` payload column, rate-limit-aware retry/backoff, auth header on `POST /x/tweets`. See the tech design (`docs/specs/bookmark-approval-author-tweet-tech-design.md`) for the full parking lot and the open questions log.
+
+---
+
+## Tasked State Invariant (task 0089f4f9)
+
+A bookmark with a non-empty `taskIds` array is authoritative-`tasked`. The
+persisted `reviewStatus` field is a hint, not the contract. Every workflow
+boundary that mutates or routes bookmark state must derive the routing
+status from `taskIds` first, and refuse to downgrade a task-linked item to
+`reviewed` / `spec_requested` / `spec_created`.
+
+### Why this matters
+
+Before the invariant, a late `lobster_request_spec_approval` finalize pass
+could overwrite a terminal `tasked` status with `reviewed` simply because
+the item fell into the routing bucket for lack of anything else to do. A
+later `lobster_generate_specs` / `validate_spec_output` pass could then
+re-route it to `spec_requested` / `spec_created` even though the Tasks API
+had already reused or created a task for it. The author-tweet hook is only
+triggered inline at the original `approval_pending → tasked` transition,
+so the regression caused a silent missed tweet.
+
+### The helper
+
+`agents/workflows/bookmarks/scripts/bookmark_state_machine.py` exports:
+
+- `is_task_linked(item)` — `True` when `taskIds` is non-empty.
+- `effective_review_status(item)` — returns `"tasked"` when task-linked,
+  otherwise the persisted status. Every routing boundary uses this instead
+  of reading `item.get("reviewStatus")` directly.
+- `reconcile_tasked_item(item, key, reason, transitions_path)` — repairs
+  the persisted status to `tasked` and writes a transition log entry.
+  Idempotent.
+
+### Mutation boundaries that enforce the invariant
+
+- `lobster_list_curations.py` — `route()` checks `is_task_linked` first
+  and routes task-linked items to `reviewed` regardless of curation score.
+- `lobster_request_spec_approval.py` — Phase 3 (finalize review cycle)
+  refuses the literal `reviewed` downgrade for task-linked items and
+  reconciles if the persisted status has drifted.
+- `lobster_generate_specs.py` — the loop entry skips task-linked items
+  with a transition log entry, refusing spec re-sync / spec re-queue.
+- `validate_spec_output.py` — heartbeat spec dispatch entries for
+  already-tasked items are reconciled to `tasked` and skipped, never
+  promoted to `spec_created`.
+
+### Routing bucket vs lifecycle status
+
+The `reviewed` bucket in `lobster_list_curations` output is a *routing*
+decision ("nothing for the lobster to do this pass"), not a license to
+persist a literal `reviewStatus: "reviewed"` on an item that should be
+terminal-tasked. The natural source of truth is the task-link invariant;
+the bucket is only the routing signal.
+
+### Tweet outcome persistence
+
+For every newly tasked X bookmark, `tweetLog` must exist with one of:
+
+- `status: "posted"` — tweet URL + postedAt recorded.
+- `status: "skipped"` — explicit stable reason (e.g. `missing_credentials`,
+  `backfill_not_posted:late_and_author_unresolved`).
+- `status: "error"` — LLM or X API failure with a stable error string.
+
+Silent skips are only allowed for non-X sources (the spec is explicit that
+those paths must not write `tweetLog`). A task-linked X bookmark with no
+`tweetLog` is a defect — the helper considers it and either posts or
+records an explicit skip.
+
+### Reconciliation runbook
+
+For an item that has drifted out of `tasked` because of a stale pipeline
+pass (e.g. the `d8311c3e5fc50b94` reproduction):
+
+1. Verify the item has non-empty `taskIds` in `brain/state/bookmark-review-state.json`.
+2. Run the reconciliation CLI:
+
+   ```bash
+   python3 agents/workflows/bookmarks/scripts/reconcile_tasked_state.py \
+     --key <bookmarkKey> \
+     --backfill-skip-reason "backfill_not_posted:late_and_author_unresolved" \
+     --json
+   ```
+
+   The CLI refuses to promote any item with empty `taskIds` (invariants
+   are the whole point).
+3. Inspect the transition log (`brain/state/bookmark-transitions.jsonl`)
+   to confirm the repair was recorded.
+4. The CLI never posts externally. If a deliberate `posted` tweet is
+   warranted, that is a separate, explicitly approved operation that
+   goes through `x_author_tweet.py` with operator oversight.
+
+The CLI is idempotent — re-running on an already-consistent item is a no-op
+and does not emit a duplicate transition entry.
 
 ---
 
