@@ -47,7 +47,10 @@ Standard set to check for (extend per job as needed):
 - `failed`
 - `exception`
 - `traceback`
-- `no bookmarks` / `no items` / `nothing to process` (job-specific)
+
+**Avoid "no X" / "nothing to process" / "empty queue" style job-specific keywords** unless you can confirm they ONLY appear on a failure path and never on a healthy no-op stdout. Substring matching fires before any LLM-level disambiguation, so any keyword that overlaps with the steady-state "nothing to do" message will escalate every healthy idle run. The 2026-08-10 regression (cron `92efaff7`, bookmark ingestion) was caused by the keyword `no bookmarks` matching the success-path stdout `No pending bookmarks.` from `process.cjs:459` — the substring trigger fires regardless of context, and the keyword was redundant anyway (the real fetch-failure path emits `Failed to fetch bookmarks:` which is caught by `failed`). See `infra/runbooks/notify-soft-fail-keyword-false-positive.md` for the diagnosis + fix pattern.
+
+If you need a job-specific keyword for a *failure* mode that the standard set doesn't cover, prefer a distinctive phrase tied to the failure (e.g. `insufficient balance`, `401 unauthorized`, `permission denied`, `migration failed`) over a generic "no X" phrase that overlaps with idle stdout.
 
 ## Notes
 
