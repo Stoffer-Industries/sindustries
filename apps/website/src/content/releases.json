@@ -328,5 +328,45 @@
     "links": [],
     "evidence": "The publish route now rejects unauthenticated requests, closing the cloud-readiness audit finding on the X publishing path.",
     "visibility": "published"
+  },
+  {
+    "title": "GymTrack public sign-up",
+    "slug": "gymtrack-public-sign-up",
+    "releasedAt": "2026-08-01",
+    "summary": "GymTrack now supports public sign-up with Google and Apple, letting new users create isolated accounts without manual provisioning.",
+    "type": "product",
+    "links": [],
+    "evidence": "Public sign-up shipped with Google and Apple OAuth, row-level isolation for new users, and end-to-end coverage including the first account created outside the original single-user setup.",
+    "visibility": "published"
+  },
+  {
+    "title": "GymTrack MCP server on Fly",
+    "slug": "gymtrack-mcp-server-on-fly",
+    "releasedAt": "2026-08-05",
+    "summary": "GymTrack's agent-facing OAuth server is live, giving connected agents a production endpoint with verified health and discovery routes.",
+    "type": "system",
+    "links": [],
+    "evidence": "The MCP OAuth server shipped to Fly with live health and OAuth discovery checks.",
+    "visibility": "published"
+  },
+  {
+    "title": "GymTrack agent-connect onboarding",
+    "slug": "gymtrack-agent-connect-onboarding",
+    "releasedAt": "2026-08-06",
+    "summary": "GymTrack now includes a Connect to your agent action in the Workouts tab, wired to the live MCP OAuth flow.",
+    "type": "product",
+    "links": [],
+    "evidence": "The in-product onboarding action shipped with 138 passing tests and a successful live Fly smoke test.",
+    "visibility": "published"
+  },
+  {
+    "title": "Budget API token encryption at rest",
+    "slug": "budget-api-token-encryption-at-rest",
+    "releasedAt": "2026-08-04",
+    "summary": "Akahu bank-feed access tokens are now encrypted at rest, backed by a rotation runbook and tests that enforce user ownership.",
+    "type": "system",
+    "links": [],
+    "evidence": "Encryption at rest shipped with key-rotation documentation and ownership-contract tests covering same-user access and cross-user denial.",
+    "visibility": "published"
   }
 ]

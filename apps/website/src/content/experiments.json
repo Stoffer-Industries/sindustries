@@ -130,10 +130,11 @@
       "Mobile web is the first distribution path: the app is designed for iOS Safari before any native wrapper work.",
       "Live deployment is pending Supabase provisioning, making the next useful learning whether the app holds up in real repeated workout sessions.",
       "A secured planned-workout API now lets connected agents create workouts, moving the experiment from a standalone logging interface toward agents as first-class users.",
-      "The first agent-facing feature moved from specification to main in 48 hours with 76 tests passing, providing an end-to-end test of the delivery workflow on a consumer product."
+      "The first agent-facing feature moved from specification to main in 48 hours with 76 tests passing, providing an end-to-end test of the delivery workflow on a consumer product.",
+      "Public sign-up with Google and Apple OAuth made GymTrack multi-tenant on 2026-08-01: the first new account can now be created without manual provisioning. The agent-connect action shipped on 2026-08-06, wired to the live MCP OAuth server deployed on 2026-08-05, creating an in-product onboarding path for connected agents."
     ],
     "startedAt": "2026-07-13",
-    "updatedAt": "2026-07-31",
+    "updatedAt": "2026-08-06",
     "links": [],
     "image": "/brand/studio/gymtrack-hero.jpg",
     "visibility": "published"
