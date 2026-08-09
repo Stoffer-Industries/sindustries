@@ -836,6 +836,23 @@ fn verify_delivery_review_failure(url: &str, review: ReviewState) -> Option<Stri
     }
 }
 
+/// Merge gate for `acceptance → done`. Merged PRs pass. Closed-without-merge
+/// PRs that are *not* the latest listed implementer PR are treated as
+/// superseded (same principle as `verify_delivery`'s latest-only filter) and
+/// do not block. The latest ClosedUnmerged still fails, as do open / review /
+/// unknown states on any listed PR.
+fn post_merge_pr_failure(
+    url: &str,
+    state: ReviewState,
+    all_pr_urls: &[String],
+) -> Option<String> {
+    match state {
+        ReviewState::Merged => None,
+        ReviewState::ClosedUnmerged if !is_latest_pr_url(url, all_pr_urls) => None,
+        other => Some(format!("PR {url} is not merged: {other:?}.")),
+    }
+}
+
 /// Extract the PR number from a GitHub PR URL for ordering.
 fn pr_number(url: &str) -> u64 {
     url.rsplit('/')
@@ -1185,10 +1202,14 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = qa_failures;
-    for url in implementer_pr_urls(&env.task) {
-        match inspect_pr(&url) {
-            Ok(ReviewState::Merged) => {}
-            Ok(state) => failures.push(format!("PR {url} is not merged: {state:?}.")),
+    let pr_urls = implementer_pr_urls(&env.task);
+    for url in &pr_urls {
+        match inspect_pr(url) {
+            Ok(state) => {
+                if let Some(failure) = post_merge_pr_failure(url, state, &pr_urls) {
+                    failures.push(failure);
+                }
+            }
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
     }
@@ -3965,6 +3986,45 @@ mod tests {
             verify_delivery_review_failure(url, ReviewState::ClosedUnmerged),
             Some(format!("PR {url} is closed without merge."))
         );
+    }
+
+    #[test]
+    fn post_merge_skips_superseded_closed_unmerged_prs() {
+        // Task e9c06d01: PR #365 closed-without-merge, replaced by merged #368.
+        let closed = "https://github.com/Stoffer-Industries/sindustries/pull/365";
+        let merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
+        let urls = vec![closed.to_string(), merged.to_string()];
+        assert!(
+            post_merge_pr_failure(closed, ReviewState::ClosedUnmerged, &urls).is_none(),
+            "superseded closed PR must not block acceptance → done"
+        );
+        assert!(post_merge_pr_failure(merged, ReviewState::Merged, &urls).is_none());
+    }
+
+    #[test]
+    fn post_merge_still_fails_latest_closed_unmerged_pr() {
+        let closed = "https://github.com/Stoffer-Industries/sindustries/pull/365";
+        let later_closed = "https://github.com/Stoffer-Industries/sindustries/pull/368";
+        let urls = vec![closed.to_string(), later_closed.to_string()];
+        assert_eq!(
+            post_merge_pr_failure(later_closed, ReviewState::ClosedUnmerged, &urls),
+            Some(format!(
+                "PR {later_closed} is not merged: ClosedUnmerged."
+            ))
+        );
+    }
+
+    #[test]
+    fn post_merge_still_fails_open_earlier_pr() {
+        // Stacked delivery: an earlier still-open PR must keep blocking done.
+        let earlier_open = "https://github.com/Stoffer-Industries/sindustries/pull/365";
+        let later_merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
+        let urls = vec![earlier_open.to_string(), later_merged.to_string()];
+        assert_eq!(
+            post_merge_pr_failure(earlier_open, ReviewState::Approved, &urls),
+            Some(format!("PR {earlier_open} is not merged: Approved."))
+        );
+        assert!(post_merge_pr_failure(later_merged, ReviewState::Merged, &urls).is_none());
     }
 
     #[test]
