@@ -419,3 +419,23 @@ jobs:
 
       - name: Run no-absolute-paths lint unit tests
         run: node --test scripts/test/check-no-absolute-paths.test.mjs
+
+  gitleaks:
+    name: gitleaks secret scan
+    runs-on: ubuntu-latest
+    # AC2 of task 206927ed: server-side guard for secrets reaching source
+    # control. Companion to the local pre-commit hook installed by
+    # scripts/install-hooks.sh. Uses the official gitleaks action with
+    # the repo-local .gitleaks.toml allowlist (empty .env.example lines,
+    # test fixtures).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

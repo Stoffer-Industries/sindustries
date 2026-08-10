@@ -20,9 +20,17 @@
 //
 // Run: `npm run content-scheduler:worker` (in services/tasks-api).
 
-import { dotenvConfig } from 'dotenv';
-dotenvConfig();
+// ESM hoists static imports above any code in the module body, so we use
+// the side-effect import (`import 'dotenv/config'`) to guarantee that
+// dotenv.config() runs and populates process.env BEFORE the config module
+// validates it. The previous pattern (`import { dotenvConfig } from 'dotenv';
+// dotenvConfig();`) ran dotenvConfig() AFTER env.ts already threw on a
+// missing DATABASE_URL — the worker would crash with a confusing
+// config_validation_failed log line, not a missing .env hint.
+import 'dotenv/config';
 
+import { resolveRedisUrl } from './config/index.ts';
+import { config } from './config/index.ts';
 import { createInProcessJobSchedulerAdapter } from './routes/contentSchedulerJobs.inProcess.ts';
 import { createBullMqJobSchedulerAdapter } from './routes/contentSchedulerJobs.bullmq.ts';
 import { setJobSchedulerAdapter } from './routes/contentSchedulerJobs.ts';
@@ -32,12 +40,7 @@ import { reconcileAutoPostItems } from './routes/autoPostReconciliation.ts';
 type AdapterKind = 'in-process' | 'bullmq';
 
 function resolveAdapterKind(): AdapterKind {
-  const raw = (process.env.CONTENT_SCHEDULER_JOB_ADAPTER ?? 'in-process').toLowerCase();
-  if (raw === 'bullmq') return 'bullmq';
-  if (raw === 'in-process') return 'in-process';
-  // eslint-disable-next-line no-console
-  console.warn(`[content-scheduler-worker] unknown CONTENT_SCHEDULER_JOB_ADAPTER=${raw}, defaulting to in-process`);
-  return 'in-process';
+  return config.CONTENT_SCHEDULER_JOB_ADAPTER;
 }
 
 async function main() {
@@ -110,7 +113,7 @@ async function bootstrapBullMqWorker(adapter: ReturnType<typeof createBullMqJobS
   const bullmq = (await import('bullmq')).default ?? (await import('bullmq'));
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const IORedis = (await import('ioredis')).default ?? (await import('ioredis'));
-  const url = process.env.CONTENT_SCHEDULER_REDIS_URL ?? process.env.REDIS_URL ?? 'redis://localhost:6379';
+  const url = resolveRedisUrl();
   const connection = new IORedis(url, { maxRetriesPerRequest: null });
   const worker = new bullmq.Worker(
     'content-scheduler-auto-post',
