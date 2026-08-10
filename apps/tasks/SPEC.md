@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-08-10
+**Last updated:** 2026-08-10 (WS3 stacked avatar group)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -138,6 +138,64 @@ composer for the new planes land in WS3.
    state with a "Sign in to use this filter" tooltip. The existing
    Status / Priority / Assignee / TaskType / Tag filters remain
    available regardless of session state.
+
+### 11. Stacked avatar group on task cards (WS3)
+WS3 wires the WS1 data surface into a stacked avatar group on every
+task card. The stacked group replaces the previous single-assignee
+view *for ownership signals* while preserving the single-assignee
+`Avatar` for backward compatibility. The detail-view composer for the
+new planes is scoped separately.
+
+1. Each task card renders a `StackedAvatarGroup` next to the existing
+   single-assignee `Avatar` in `TaskCardSummary`. The single-assignee
+   `Avatar` is preserved for backward compatibility — removing it is
+   a separate follow-up. The stacked group is informational only and
+   never owns focus or click behaviour; clicks continue to route to
+   the task title.
+2. Layer order on the card is fixed and stable:
+   * **Layer 1 — delivery assignee** (the `task.assignee` field).
+     Always first when present. Empty `assignee` is allowed; the
+     remaining layers still render so a task waiting on a gate owner
+     surfaces that ownership immediately.
+   * **Layer 2 — outstanding workflow-gate owners.** Only gates with
+     `state: "outstanding"` are included. Approved gates are excluded
+     so the stack never re-shows a gate that has already been
+     satisfied. Gate order matches the mapper's policy-defined order.
+   * **Layer 3 — attention owners.** Insertion order matches the
+     mapper output (oldest-first per `createdAt`).
+3. Visual dedupe uses a **case-insensitive trimmed string** as the
+   owner key. The first layer a person appears in wins visually;
+   duplicates in later layers are collapsed to that same avatar. The
+   `findAssigneeUser` lookup uses the original (un-normalised)
+   `owner` string so display name and avatar asset still resolve
+   correctly for the visible entry.
+4. Accessibility labels per role are stable wording:
+   * `delivery assignee <DisplayName>`
+   * `workflow-gate owner <DisplayName>`
+   * `attention owner <DisplayName>`
+   When a person wears multiple hats, the visible entry's label
+   appends `(also has other roles on this task)` so screen readers and
+   hover tooltips see the full responsibility breakdown without the
+   label becoming unbounded. The container wraps the stack in
+   `role="group"` with an `aria-label` that lists every visible
+   owner using the same wording, comma-separated.
+5. Stable data attributes on each visible avatar span:
+   * `data-role` — one of `delivery` / `workflow-gate` / `attention`.
+   * `data-owner-key` — the normalised owner key (case-insensitive
+     trimmed string). The task-details surface and any future
+     analytics rely on these attributes as the contract; parsing the
+     `aria-label` to recover the role is explicitly not supported.
+6. Overflow rendering: when the visible layer count exceeds
+   `maxVisible` (default **4**), the trailing avatars are replaced by
+   a single `+N` chip whose `aria-label` is `N more owner` (singular)
+   or `N more owners` (plural). `+1` always renders; the chip never
+   appears when the visible count is already at or below `maxVisible`.
+7. Empty case: a task with no delivery assignee, no outstanding
+   workflow gates, and no attention owners renders **no** stacked
+   avatar group (the component returns `null`). The single-assignee
+   `Avatar` in `TaskCardSummary` still renders when only
+   `task.assignee` is set but the other layers are empty — those are
+   the cases the WS3 change is deliberately a no-op for.
 
 ## E2e coverage
 
