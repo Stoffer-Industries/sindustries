@@ -13,11 +13,11 @@ const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
   Tom: new Set(['spec', 'qa']), Quinn: new Set(['tech_design'])
 };
 
-function parseServiceCredentials(): ServiceCredential[] {
+function loadServiceCredentials(): ServiceCredential[] {
   const raw = process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
   if (!raw) return [];
   let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { throw new Error('TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be valid JSON'); }
+  try { parsed = JSON.parse(raw); } catch (e) { throw new Error(`TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be valid JSON: ${(e as Error).message}`); }
   if (!Array.isArray(parsed)) throw new Error('TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be a JSON array');
   return parsed.map((value, index) => {
     const item = value as Partial<ServiceCredential>;
@@ -27,6 +27,14 @@ function parseServiceCredentials(): ServiceCredential[] {
     }
     return item as ServiceCredential;
   });
+}
+
+// Parse once at module load so malformed config fails process boot (not the
+// first authenticated request) and we don't re-parse JSON per request.
+const SERVICE_CREDENTIALS: ReadonlyArray<ServiceCredential> = loadServiceCredentials();
+
+function parseServiceCredentials(): ReadonlyArray<ServiceCredential> {
+  return SERVICE_CREDENTIALS;
 }
 
 function cookie(req: Request, name: string): string | null {
