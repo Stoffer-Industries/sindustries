@@ -153,27 +153,59 @@ export class ConfigValidationError extends Error {
   }
 }
 
-const parsed = schema.safeParse(process.env);
-if (!parsed.success) {
-  const issues = parsed.error.issues.map((i) => ({
-    path: i.path.join('.') || '(root)',
-    message: i.message
-  }));
-  // Structured log, NEVER includes values. Operator-facing.
-  // eslint-disable-next-line no-console
-  console.error(JSON.stringify({
-    level: 'fatal',
-    event: 'config_validation_failed',
-    service: 'tasks-api',
-    issues
-  }));
-  // Throw instead of calling process.exit so tests can assert on the
-  // error and entry points (server.ts, autoPostWorkerMain.ts) can decide
-  // whether to exit or surface the error to the user.
-  throw new ConfigValidationError(issues);
+function parseConfig(): Readonly<z.infer<typeof schema>> {
+  const parsed = schema.safeParse(process.env);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => ({
+      path: i.path.join('.') || '(root)',
+      message: i.message
+    }));
+    // Structured log, NEVER includes values. Operator-facing.
+    // eslint-disable-next-line no-console
+    console.error(JSON.stringify({
+      level: 'fatal',
+      event: 'config_validation_failed',
+      service: 'tasks-api',
+      issues
+    }));
+    // Throw instead of calling process.exit so tests can assert on the
+    // error and entry points (server.ts, autoPostWorkerMain.ts) can decide
+    // whether to exit or surface the error to the user.
+    throw new ConfigValidationError(issues);
+  }
+  return Object.freeze(parsed.data) as Readonly<z.infer<typeof schema>>;
 }
 
-export const config: Readonly<z.infer<typeof schema>> = Object.freeze(parsed.data);
+// Boot-time snapshot. Stable reference for callers that read config
+// per-request (middleware, routes) and want the values parsed at startup
+// even if env is later mutated by tests or operational tooling. The
+// frozen shape documents the contract: nothing mutates config in place.
+export const config: Readonly<z.infer<typeof schema>> = parseConfig();
+
+/**
+ * Re-read `process.env` and return a fresh, validated config snapshot.
+ *
+ * Tests that mutate env vars after module load can use this in two
+ * ways:
+ *  - **Direct:** call `loadConfig()` to assert that the schema parses
+ *    a mutated env the way you expect (e.g. config.test.ts).
+ *  - **Indirect via `vi.resetModules()`:** tests that need the mutated
+ *    env to flow into a downstream consumer (e.g. `createApp()` reading
+ *    `TASKS_API_JSON_LIMIT` for the body parser, or
+ *    `TASKS_API_RATE_LIMIT_MAX` for the write-endpoint limiter) call
+ *    `vi.resetModules()` and re-import the consumer. The next import
+ *    re-runs `parseConfig()` against the mutated env, so the boot-time
+ *    `config` export gets re-bound with the mutated values.
+ *
+ * Production callers generally prefer the `config` export for the
+ * stable boot-time snapshot — there is no production path that needs
+ * `loadConfig()` today. Each call re-parses env (bounded cost: zod
+ * schema of ~30 fields), so memoization isn't worth the cognitive
+ * overhead of invalidating the cache in tests.
+ */
+export function loadConfig(): Readonly<z.infer<typeof schema>> {
+  return parseConfig();
+}
 
 /**
  * Resolve the Redis URL in CONTENT_SCHEDULER_REDIS_URL → REDIS_URL → dev
