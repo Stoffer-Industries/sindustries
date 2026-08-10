@@ -106,6 +106,39 @@ detail-view composer land in WS3.
    approval-row UX is the only path; the attention-editor UX never
    surfaces for the same action.
 
+### 10. Discovery queue: ownership filters and default landing view (WS2)
+WS2 wires the WS1 data surface into the backlog view so normal handoffs
+are routed through explicit workflow gates rather than the generic
+`Blocked` indicator. The stacked avatar rendering and detail-view
+composer for the new planes land in WS3.
+
+1. The backlog exposes two ownership filter chips:
+   * "My outstanding gates" — toggles `?workflowGateOwner=<self>` to
+     surface tasks where the signed-in user owns an outstanding
+     structured gate (spec / tech_design / qa).
+   * "Needs my attention" — toggles `?attentionOwner=<self>` to surface
+     tasks with an exceptional / unmodelled attention request for the
+     signed-in user, visually labelled as exceptional so it never
+     masquerades as a normal handoff.
+   Both chips are disabled for anonymous sessions (no `<self>` to
+   resolve) and combine via AND with the existing filters. Toggling
+   either chip off clears its respective filter value.
+2. Default landing view shifts from "Status: Open" to
+   `?workflowGateOwner=<self>` for signed-in users on first mount of
+   the backlog view. This is the normal handoff surface; explicit
+   `Blocked` and `dependencyBlocked` indicators remain visible and
+   backward compatible. Once applied, the user's explicit filter
+   choices persist — toggling the chip off or clearing the filter is
+   sticky for the session.
+3. The chips do not create or imply a `TaskAttentionOwner` row for a
+   gate-owned action. When an outstanding workflow gate already names
+   the signed-in user, the gate is surfaced through the "My outstanding
+   gates" chip; the attention-editor UX never duplicates that signal.
+4. Anonymous users see no default and the chips render in a disabled
+   state with a "Sign in to use this filter" tooltip. The existing
+   Status / Priority / Assignee / TaskType / Tag filters remain
+   available regardless of session state.
+
 ## E2e coverage
 
 | Flow | Spec file |
