@@ -89,11 +89,13 @@ describe('tasks-api config schema', () => {
     await expect(loadEnvFresh()).rejects.toThrow(/ConfigValidationError/);
     const payload = JSON.parse(capturedExit.payload ?? '{}');
     const names = payload.issues.map((i: { path: string }) => i.path);
+    // X_ACTOR_SECRET is intentionally NOT in this list: it is an opt-in
+    // x-actor-secret header gate, not a hard X integration requirement.
+    // See env.ts superRefine.
     expect(names).toContain('X_API_KEY');
     expect(names).toContain('X_API_SECRET');
     expect(names).toContain('X_ACCESS_TOKEN');
     expect(names).toContain('X_ACCESS_TOKEN_SECRET');
-    expect(names).toContain('X_ACTOR_SECRET');
   });
 
   it('accepts X_CLIENT=real when all OAuth credentials are present', async () => {
@@ -166,8 +168,8 @@ describe('tasks-api config schema', () => {
     process.env.X_API_KEY = 'TOP-SECRET-do-not-log';
     process.env.X_API_SECRET = 'SHOULD-NOT-APPEAR';
     process.env.X_ACCESS_TOKEN = 'ALSO-SECRET';
-    process.env.X_ACCESS_TOKEN_SECRET = 'ALSO-SECRET';
-    // Intentionally omit X_ACTOR_SECRET to trigger validation failure.
+    // Intentionally omit X_ACCESS_TOKEN_SECRET to trigger validation failure
+    // (X_ACTOR_SECRET is opt-in and intentionally not required at boot).
     await expect(loadEnvFresh()).rejects.toThrow(/ConfigValidationError/);
     const payload = JSON.stringify(capturedExit.payload ?? '');
     expect(payload).not.toContain('TOP-SECRET-do-not-log');
