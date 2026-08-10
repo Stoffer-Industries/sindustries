@@ -2,6 +2,15 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.jsx';
 
+// Mock the auth-session call so App mount doesn't drain a tasks-fetch mock
+// in tests that rely on `vi.fn().mockResolvedValueOnce(...)` chains. The
+// default returns an unauthenticated session; individual tests can override
+// via `fetchAuthSession.mockResolvedValueOnce(...)` if needed.
+vi.mock('./tasksApi.ts', async (importOriginal) => ({
+  ...(await importOriginal()),
+  fetchAuthSession: vi.fn().mockResolvedValue({ displayName: null })
+}));
+
 function mockTask(overrides = {}) {
   return {
     id: 'task-1',
