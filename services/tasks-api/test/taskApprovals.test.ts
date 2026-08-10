@@ -1,6 +1,14 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Set service credentials BEFORE the dynamic import of app.ts (which
+// transitively imports approvalAuth.ts) so the module-load-time parse
+// in approvalAuth captures the test credentials instead of an empty value.
+process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
+  { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'qa'] },
+  { token: 'quinn-service-token-long-enough', actor: 'Quinn', approvalTypes: ['tech_design'] }
+]);
+
 const prismaMock = {
   task: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   taskComment: { create: vi.fn() },
@@ -24,10 +32,6 @@ function auth(token = TOM_TOKEN) { return { Authorization: `Bearer ${token}` }; 
 describe('task approval boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
-      { token: TOM_TOKEN, actor: 'Tom', approvalTypes: ['spec', 'qa'] },
-      { token: QUINN_TOKEN, actor: 'Quinn', approvalTypes: ['tech_design'] }
-    ]);
     prismaMock.approvalSession.findUnique.mockResolvedValue(null);
     prismaMock.$transaction.mockImplementation(async (fn) => fn(prismaMock));
   });
@@ -106,5 +110,44 @@ describe('task approval boundary', () => {
     prismaMock.task.findUnique.mockResolvedValue(activeTask); prismaMock.taskApproval.findUnique.mockResolvedValue(existing);
     const res = await request(createApp()).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`).set(auth());
     expect(res.status).toBe(200); expect(prismaMock.taskApproval.update).not.toHaveBeenCalled(); expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('TASKS_API_APPROVAL_SERVICE_CREDENTIALS module-load validation', () => {
+  // Re-import approvalAuth.ts with a controlled env value, capturing any
+  // thrown error from the module-load-time IIFE. Restores the previous env
+  // and resets the module cache so subsequent tests reuse the original
+  // (good) module captured at file load.
+  async function importApprovalAuthWith(envValue: string | undefined) {
+    vi.resetModules();
+    const prev = process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
+    if (envValue === undefined) delete process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
+    else process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = envValue;
+    try {
+      return await import('../src/middleware/approvalAuth.ts');
+    } finally {
+      if (prev === undefined) delete process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
+      else process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = prev;
+      vi.resetModules();
+    }
+  }
+
+  it('throws at module load when credentials env is not valid JSON', async () => {
+    await expect(importApprovalAuthWith('{not-json')).rejects.toThrow(/must be valid JSON/);
+  });
+
+  it('throws at module load when credentials env is not a JSON array', async () => {
+    const object = JSON.stringify({ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec'] });
+    await expect(importApprovalAuthWith(object)).rejects.toThrow(/must be a JSON array/);
+  });
+
+  it('throws at module load when an entry is invalid', async () => {
+    const badEntry = JSON.stringify([{ token: 'short', actor: 'Tom', approvalTypes: ['spec'] }]);
+    await expect(importApprovalAuthWith(badEntry)).rejects.toThrow(/TASKS_API_APPROVAL_SERVICE_CREDENTIALS\[0\] is invalid/);
+  });
+
+  it('loads cleanly when credentials env is a valid array', async () => {
+    const valid = JSON.stringify([{ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec', 'qa'] }]);
+    await expect(importApprovalAuthWith(valid)).resolves.toBeDefined();
   });
 });
