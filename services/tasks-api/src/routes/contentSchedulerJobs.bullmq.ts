@@ -134,7 +134,13 @@ export function createBullMqJobSchedulerAdapter(
     const bullmq = await loadBullmq();
     const IORedis = await loadIoredis();
     const url = deps.redisUrl ?? resolveRedisUrl();
-    connectionInstance = new IORedis(url, {
+    // Build the IORedis connection first, then the Queue against it. If
+    // the Queue constructor throws (e.g. invalid queue name, internal
+    // BullMQ validation), the IORedis connection would otherwise leak
+    // because the next `getQueue()` call sees `queueInstance === null`
+    // and would create another IORedis without disposing the previous
+    // one. Wrap in try/catch so a partial init failure cleans up.
+    const conn = new IORedis(url, {
       // BullMQ recommends a long-lived blocking connection and a short
       // maximumRetriesPerRequest for the worker side. The queue side
       // (the API process) is not blocking, so we leave the user defaults
@@ -142,7 +148,20 @@ export function createBullMqJobSchedulerAdapter(
       maxRetriesPerRequest: null,
       enableReadyCheck: true
     });
-    queueInstance = new bullmq.Queue(queueName, { connection: connectionInstance });
+    try {
+      queueInstance = new bullmq.Queue(queueName, { connection: conn });
+    } catch (err) {
+      // Best-effort cleanup of the just-created IORedis so we don't leak
+      // a connection per failed init. We swallow the cleanup error — the
+      // original error is the one the caller needs to see.
+      try {
+        await conn.quit();
+      } catch {
+        /* ignore — the original constructor error is what matters */
+      }
+      throw err;
+    }
+    connectionInstance = conn;
     return queueInstance;
   }
 
