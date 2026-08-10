@@ -47,12 +47,16 @@ Skip any finding that requires understanding product/business intent. If unsure,
 
 ### 3. Implement on a chore branch off main
 
+**Never edit the canonical sindustries checkout directly.** Use the worktree helper to get an isolated working copy on a fresh branch:
+
 ```bash
-git fetch origin
-git checkout -b chore/code-garden-<audit-week>-<short-slug> origin/main
+infra/guards/sindustries-worktree.sh code-garden-<audit-week>-<short-slug> origin/main chore/code-garden-<audit-week>-<short-slug>
+cd /Users/quinnstoffer/.openclaw/workspace/worktrees/code-garden-<audit-week>-<short-slug>
 ```
 
-e.g. `chore/code-garden-2026-W26-stale-triage-comment`
+e.g. `infra/guards/sindustries-worktree.sh code-garden-2026-W26-stale-triage-comment origin/main chore/code-garden-2026-W26-stale-triage-comment`
+
+The helper always places worktrees at `/Users/quinnstoffer/.openclaw/workspace/worktrees/<name>` — never inside `codebases/sindustries/` itself. Do not run `git worktree add` or `git checkout -b` by hand; both can land you inside the canonical checkout if `cwd` is wrong when the command runs, which trips the `sindustries-main-guard` alert.
 
 Make the minimal change to address the finding. Do not bundle unrelated changes.
 
