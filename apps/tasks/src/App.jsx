@@ -17,6 +17,7 @@ import { useTasks } from './useTasks.js';
 import { useTaskDrafts } from './useTaskDrafts.js';
 import { fetchTask } from './tasksApi';
 import { useDebounce } from './hooks/useDebounce.js';
+import { useCurrentUser } from './hooks/useCurrentUser.js';
 import { usePulseCelebration } from './hooks/usePulseCelebration.js';
 import { useToast } from './hooks/useToast.js';
 import { ConfettiLayer } from './components/ConfettiLayer.jsx';
@@ -43,7 +44,12 @@ export function App() {
   const [view, setView] = useState(getStoredView);
   const [selectedId, setSelectedId] = useState(null);
   const initialStatusSelection = ['open', 'ready', 'doing', 'acceptance'];
-  const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', taskType: '', includeArchived: false });
+  const [filters, setFilters] = useState({ q: '', status: initialStatusSelection.join(','), priority: '', tag: '', assignee: '', taskType: '', workflowGateOwner: '', attentionOwner: '', includeArchived: false });
+  const { actor: currentUser } = useCurrentUser();
+  // Tracks whether the discovery-queue default landing view has been applied
+  // for this session. Once applied (or explicitly cleared), the user owns the
+  // filter and we never re-apply the default. See the default-effect below.
+  const [defaultWorkflowGateApplied, setDefaultWorkflowGateApplied] = useState(false);
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set(initialStatusSelection));
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
   const statusMenuRef = useRef(null);
@@ -97,6 +103,22 @@ export function App() {
     if (view !== 'backlog') return;
     setSelectedStatuses((current) => (current.size === 0 ? new Set(['open']) : current));
   }, [view]);
+
+  // Default landing view: surface the signed-in user's outstanding workflow
+  // gates on first mount of the backlog view. Replaces the prior "default
+  // open" behaviour for signed-in users — normal handoffs are routed through
+  // explicit workflow gates, not the generic `Blocked` indicator. Anonymous
+  // visitors see no default. Once applied, the user's explicit choices take
+  // over (toggling the chip off or clearing the filter persists).
+  useEffect(() => {
+    if (view !== 'backlog') return;
+    if (defaultWorkflowGateApplied) return;
+    if (!currentUser) return;
+    setFilters((current) => (current.workflowGateOwner
+      ? current
+      : { ...current, workflowGateOwner: currentUser }));
+    setDefaultWorkflowGateApplied(true);
+  }, [view, currentUser, defaultWorkflowGateApplied]);
 
   // Persist view to localStorage
   useEffect(() => {
@@ -578,6 +600,48 @@ export function App() {
                 ) : null}
               </div>
             ) : null}
+
+            <div className="status-filter">
+              <Button
+                type="button"
+                variant="filter"
+                active={Boolean(filters.workflowGateOwner)}
+                className="filter-trigger"
+                aria-label="My outstanding workflow gates"
+                aria-pressed={Boolean(filters.workflowGateOwner)}
+                disabled={!currentUser}
+                onClick={() => {
+                  setFilters((current) => ({
+                    ...current,
+                    workflowGateOwner: current.workflowGateOwner ? '' : (currentUser ?? '')
+                  }));
+                }}
+                title={currentUser ? `Show tasks with outstanding workflow gates owned by ${currentUser}` : 'Sign in to filter by your workflow gates'}
+              >
+                {`MY GATES: ${(filters.workflowGateOwner || 'Anyone').toUpperCase()}`}
+              </Button>
+            </div>
+
+            <div className="status-filter">
+              <Button
+                type="button"
+                variant="filter"
+                active={Boolean(filters.attentionOwner)}
+                className="filter-trigger"
+                aria-label="Tasks that need my attention"
+                aria-pressed={Boolean(filters.attentionOwner)}
+                disabled={!currentUser}
+                onClick={() => {
+                  setFilters((current) => ({
+                    ...current,
+                    attentionOwner: current.attentionOwner ? '' : (currentUser ?? '')
+                  }));
+                }}
+                title={currentUser ? `Show tasks with exceptional attention requests for ${currentUser}` : 'Sign in to filter by your attention requests'}
+              >
+                {`NEEDS MY ATTENTION: ${(filters.attentionOwner || 'Anyone').toUpperCase()}`}
+              </Button>
+            </div>
           </div>
           <div className="filter-actions">
             <Button

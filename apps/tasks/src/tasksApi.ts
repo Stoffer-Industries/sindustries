@@ -7,6 +7,12 @@ export interface TaskFilters {
   assignee?: string;
   taskType?: TaskType | '';
   includeArchived?: boolean;
+  // Discovery-queue ownership filters. Both query the API for tasks where the
+  // named owner has an outstanding handoff (`workflowGateOwner`) or an
+  // exceptional / unmodelled attention request (`attentionOwner`). They are
+  // independent surfaces — see `apps/tasks/SPEC.md` Flow 9.
+  workflowGateOwner?: string;
+  attentionOwner?: string;
   // Note: 'ready' boolean filter is deprecated; use status='ready' instead
 }
 
@@ -161,6 +167,8 @@ export async function fetchTasks(filters: TaskFilters): Promise<Task[]> {
   if (filters.tag) query.set('tag', filters.tag);
   if (filters.assignee) query.set('assignee', filters.assignee);
   if (filters.taskType) query.set('taskType', filters.taskType);
+  if (filters.workflowGateOwner) query.set('workflowGateOwner', filters.workflowGateOwner);
+  if (filters.attentionOwner) query.set('attentionOwner', filters.attentionOwner);
   if (filters.includeArchived) query.set('includeArchived', 'true');
   // Note: 'ready' boolean filter is deprecated; use status='ready' instead
   return api<Task[]>('/tasks?' + query.toString());

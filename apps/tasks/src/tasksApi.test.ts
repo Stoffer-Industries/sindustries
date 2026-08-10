@@ -83,6 +83,38 @@ describe('tasksApi', () => {
       );
     });
 
+    it('adds workflowGateOwner filter when set', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse([]));
+
+      await fetchTasks({ workflowGateOwner: 'Quinn' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('workflowGateOwner=Quinn'),
+        expect.any(Object)
+      );
+    });
+
+    it('adds attentionOwner filter when set', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse([]));
+
+      await fetchTasks({ attentionOwner: 'Tom' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('attentionOwner=Tom'),
+        expect.any(Object)
+      );
+    });
+
+    it('omits ownership filters when unset', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse([]));
+
+      await fetchTasks({ status: 'open' });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).not.toContain('workflowGateOwner=');
+      expect(url).not.toContain('attentionOwner=');
+    });
+
     it('throws error on failed request', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
