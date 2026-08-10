@@ -222,6 +222,13 @@ The two filters combine via AND: a UI can show "Quinn's outstanding gates AND th
 - Resolving one attention owner (PATCH replacement) does not affect other attention owners, workflow-gate ownership, dependencies, or `task.blocked`.
 - Changing `taskType` does not retroactively create or remove attention-owner rows; attention is decoupled from task-type policy.
 
+**Cross-row validation contract for `PATCH /tasks/:id` with `attentionOwners`** (AC7, AC8 of task `66054ab4`):
+
+- The PATCH handler never writes to the `TaskDependency` table. `prisma.taskDependency.deleteMany` and `prisma.taskDependency.createMany` are not invoked as a side effect of an attention-owner PATCH — either full-replacement or `[]` clear.
+- `dependencyBlocked` (computed from `dependsOn.some(d => d.status !== 'done')`) survives unchanged across attention-owner PATCHes because the dependency rows themselves are untouched. A task blocked only via a dependency stays blocked when attention owners are added or cleared.
+- `task.update` accepts only the attention-owner write path for this PATCH; passing `dependencies` as part of its `data` argument would be a regression and is asserted not to happen.
+- Covered by `services/tasks-api/test/workflowGatesRouteLayer.test.ts` — `"does not touch task.blocked or dependencies when clearing attention owners (AC7, AC8)"` and `"preserves dependencyBlocked across attention-owner PATCHes (AC7 cross-row)"`.
+
 **CLI:** `tasks_api_client.py` exposes `--workflow-gate-owner <name>` and `--attention-owner <name>` for `list`, plus `--attention-owners <name...>` and `--clear-attention-owners` for `patch`.
 
 ---

@@ -598,6 +598,58 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
     expect(prismaMock.taskDependency.deleteMany).not.toHaveBeenCalled();
     expect(prismaMock.taskDependency.createMany).not.toHaveBeenCalled();
   });
+
+  it('preserves dependencyBlocked across attention-owner PATCHes (AC7 cross-row)', async () => {
+    // The task is blocked *via a non-done dependency* (`dependencyBlocked` is
+    // derived from `dependsOn.some(d => d.status !== 'done')`), not via
+    // `task.blocked`. Clearing or replacing attention owners must not clear
+    // or re-derive that signal; the existing `Blocked` indicator stays
+    // backward-compatible.
+    const existing = { id: TASK_ID, taskType: 'feature', archivedAt: null };
+    const blockedDep = {
+      id: 'dep-other',
+      taskId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      dependsOnId: TASK_ID,
+      dependsOn: {
+        id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        title: 'Prereq task',
+        status: 'doing',
+        completedAt: null
+      }
+    };
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce({
+        ...baseTaskFixture({
+          blocked: false,
+          dependencies: [blockedDep],
+          attentionOwners: [
+            { id: 'ao-1', taskId: TASK_ID, owner: 'Tom', addedBy: null, note: null, createdAt: new Date() }
+          ]
+        })
+      });
+
+    const app = createApp();
+    const response = await request(app)
+      .patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ attentionOwners: [] });
+
+    expect(response.status).toBe(200);
+    // The mapper derives dependencyBlocked from the dependency plane; the
+    // PATCH must leave the dependency row untouched so the signal survives.
+    expect(response.body.data.dependencyBlocked).toBe(true);
+    expect(response.body.data.dependsOn).toEqual([
+      expect.objectContaining({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', status: 'doing' })
+    ]);
+    expect(response.body.data.attentionOwners).toEqual([]);
+    expect(prismaMock.taskDependency.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.taskDependency.createMany).not.toHaveBeenCalled();
+    // task.update was called, but only to write attention-owner rows; the
+    // dependency plane is never its argument.
+    expect(prismaMock.task.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ dependencies: expect.anything() }) })
+    );
+  });
 });
 
 describe('GET /api/v1/tasks — discovery filters', () => {
