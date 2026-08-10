@@ -130,7 +130,7 @@ Before writing any code on a feature task, write the tech design:
 ### Implementation
 - Work on the same branch as the tech design; all changes come via PRs — no direct pushes to main
 - Open a **DRAFT PR** after the tech design is approved and implementation begins; this keeps the branch reviewable but signals work is in progress
-- Capacity: 1 unblocked feature task per implementation state at a time. `ready` tech design work is the exception: if an assigned `ready` task lacks a posted/approved tech design, write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task.
+- Capacity: 1 unblocked implementation task per implementation state at a time. `open` tech-design work is the exception: if an assigned `open` feature or code task lacks a posted/approved tech design (or an explicit `[tech-design-not-required]` waiver), write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task. Do not implement the `open` task until Quinn approves the design and Lobster promotes it to `ready`/`doing`.
 - When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
 - **Do not post `[implementer-prs]`** until all task ACs are implemented and the PR is converted from draft to ready-for-review
 - When the PR is ready: convert draft → ready-for-review, then post `[implementer-prs] <url>` as a task comment

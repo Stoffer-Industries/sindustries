@@ -34,7 +34,7 @@ For each returned task, follow `WORKFLOW.md` for the execution steps in that sta
 
 **Heartbeat cadence rule — the only per-pass opinion layered on top of `WORKFLOW.md`:**
 
-If any assigned task is in `ready` and lacks a posted `[tech-design]` comment, prioritise writing and posting that tech design before continuing implementation on any `doing`/`acceptance` task. After posting `[tech-design]`, return to the active implementation work — do not start implementing the `ready` task.
+If any assigned implementation task is in `open` and lacks a posted `[tech-design]` comment or `[tech-design-not-required]` waiver, prioritise writing and posting that tech design before continuing implementation on any `doing`/`acceptance` task. After posting `[tech-design]`, return to the active implementation work — do not start implementing the `open` task until Quinn approves the design.
 
 ---
 
@@ -45,7 +45,7 @@ Read and follow:
 
 **Limit:** Open at most 1 code-garden PR at a time. Check for open PRs first — if one exists, skip this step.
 
-**Skip code gardening entirely** if any assigned feature task in `ready` is waiting for a tech design, or any `doing`/`acceptance` task can be materially progressed this pass (implementation, review feedback, merge/post-merge work, required comments/specs, or validation). Code garden is only on the table when all active feature tasks are waiting on someone else's action and any needed nudge has already been sent.
+**Skip code gardening entirely** if any assigned implementation task in `open` is waiting for its tech design, or any `doing`/`acceptance` task can be materially progressed this pass (implementation, review feedback, merge/post-merge work, required comments/specs, or validation). Code garden is only on the table when all active implementation tasks are waiting on someone else's action and any needed nudge has already been sent.
 
 **Only those three bullets are valid reasons to skip code garden.** `DEPENDENCY_BLOCKED` and `WAITING_EXTERNAL` classifications from the queue are explicitly NOT skip reasons on their own — they mean Step 2 has nothing to progress, which is exactly the signal to move to Step 3. Do not invent additional judgment calls this file doesn't list (e.g. "don't compete for review attention," "hold until the dependency chain clears," "avoid opening a PR while other tasks are mid-flight") as reasons to skip. If the three bullets don't apply, open code gardening — that is the required action, not a fallback to consider.
 

@@ -134,7 +134,12 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(classification, "WAITING_EXTERNAL")
         self.assertIn("waiting on review", reason)
 
-    def test_ready_without_tech_design_is_actionable(self):
+    def test_open_without_tech_design_is_actionable(self):
+        classification, reason = agent_task_queue.classify_task(task(status="open"))
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("tech design", reason)
+
+    def test_ready_without_tech_design_remains_defensive(self):
         classification, reason = agent_task_queue.classify_task(task(status="ready"))
         self.assertEqual(classification, "ACTIONABLE")
         self.assertIn("tech design", reason)
@@ -222,9 +227,9 @@ class AgentTaskQueueTest(unittest.TestCase):
 
         self.assertEqual(
             list_tasks.call_args.kwargs["status"],
-            ["ready", "doing", "acceptance"],
+            ["open", "ready", "doing", "acceptance"],
         )
-        self.assertNotIn("open", list_tasks.call_args.kwargs["status"])
+        self.assertIn("open", list_tasks.call_args.kwargs["status"])
 
     def test_work_queue_exposes_all_read_only_queue_keys(self):
         queue = agent_task_queue.build_work_queue(

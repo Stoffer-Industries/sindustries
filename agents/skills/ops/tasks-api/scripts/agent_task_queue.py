@@ -225,6 +225,22 @@ def classify_task(
     texts = _comment_texts(task)
     latest_progress = _latest_progress_comment(texts)
 
+    if status == "open" and task_type in IMPLEMENTATION_TYPES:
+        # Since task 3ba96b5e split the bundled ready gate, a task can only
+        # reach `ready` once its tech design (or an explicit waiver) is
+        # already approved. That means "tech design missing" is an `open`
+        # task condition, not a `ready` one — see the mirrored check below,
+        # which is now unreachable in practice but left in place as a
+        # harmless no-op in case pipeline behavior changes again.
+        has_design = _has_prefix(texts, (TECH_DESIGN_TAG,))
+        has_approval = _tech_design_approved(task)
+        has_waiver = _has_prefix(texts, (TECH_DESIGN_WAIVER_TAG,))
+        if not has_design and not has_waiver:
+            return "ACTIONABLE", "tech design or explicit waiver is missing"
+        if has_approval or has_waiver:
+            return "WAITING_EXTERNAL", "tech design is ready for Lobster promotion to ready"
+        return "WAITING_EXTERNAL", "tech design is waiting for approval"
+
     if status == "ready" and task_type in IMPLEMENTATION_TYPES:
         has_design = _has_prefix(texts, (TECH_DESIGN_TAG,))
         has_approval = _tech_design_approved(task)
@@ -311,7 +327,7 @@ def fetch_agent_tasks(assignee: str, base_url: str | None = None) -> list[dict[s
     base = base_url or tasks_api_client.get_base_url()
     summaries = tasks_api_client.list_tasks(
         limit=50,
-        status=["ready", "doing", "acceptance"],
+        status=["open", "ready", "doing", "acceptance"],
         assignee=assignee,
         base_url=base,
     )
