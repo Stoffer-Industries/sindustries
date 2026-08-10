@@ -3,12 +3,17 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, sendError } from '../lib/http.ts';
 import { approvalSessionTokenHash, approvalTypesForActor } from '../middleware/approvalAuth.ts';
+import { config } from '../config/index.ts';
 
 type User = { username: string; actor: string; passwordHash: string };
 const COOKIE = 'tasks_api_session';
+// TASKS_API_APPROVAL_USERS is read from process.env at call time rather
+// than the parsed config snapshot so test setup can swap the user list
+// between tests without resetting modules. The config schema validates
+// the JSON shape at boot when the env var is present.
 function users(): User[] {
   const raw = process.env.TASKS_API_APPROVAL_USERS;
-  if (!raw) return [];
+  if (!raw || raw === '[]') return [];
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error('TASKS_API_APPROVAL_USERS must be valid JSON'); }
   if (!Array.isArray(value)) throw new Error('TASKS_API_APPROVAL_USERS must be a JSON array');
@@ -22,11 +27,10 @@ function verify(password: string, encoded: string): boolean {
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 function maxAgeMs() {
-  const parsed = Number(process.env.TASKS_API_APPROVAL_SESSION_TTL_SECONDS ?? 28800);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed * 1000 : 28_800_000;
+  return config.TASKS_API_APPROVAL_SESSION_TTL_SECONDS * 1000;
 }
 function cookieOptions(req) {
-  const secure = process.env.NODE_ENV === 'production' || req.secure;
+  const secure = config.NODE_ENV === 'production' || req.secure;
   return { httpOnly: true, secure, sameSite: 'lax' as const, path: '/', maxAge: maxAgeMs() };
 }
 function rawCookie(req): string | null {

@@ -202,6 +202,12 @@ export class RealXClient implements XClient {
  *    X_ACCESS_TOKEN_SECRET; returns null if any are missing
  *  - X_CLIENT unset: defaults to fake
  */
+// getXClient reads X_CLIENT/X_API_KEY/etc. from process.env at call time
+// rather than the parsed config snapshot. Tests toggle these values per
+// case to exercise both branches; in production they are set once at
+// boot and the config schema (src/config/env.ts) validates the X_CLIENT=real
+// contract — missing OAuth credentials at boot are a ConfigValidationError,
+// not a silent null from this function.
 export function getXClient(): XClient | null {
   const kind = (process.env.X_CLIENT ?? 'fake').toLowerCase();
   if (kind === 'real') {
@@ -296,6 +302,19 @@ export type ActorSecretGuard =
  *
  * Pure (no Express coupling) so the unit tests can drive it without spinning
  * up the app. The route wrapper below maps a `false` result to a 401.
+ */
+/**
+ * Pure check. Reads the expected secret from `process.env.X_ACTOR_SECRET`
+ * and the provided header from the caller. Returns whether the gate should
+ * allow the request through.
+ *
+ * Pure (no Express coupling) so the unit tests can drive it without spinning
+ * up the app. The route wrapper below maps a `false` result to a 401.
+ *
+ * Reads `process.env` at call time rather than from the parsed `config`
+ * snapshot so the gate reflects the current environment. The config
+ * validation in `src/config/env.ts` shapes the contract (X_ACTOR_SECRET
+ * must be at least 32 chars when set); this function is the runtime check.
  */
 export function checkActorSecret(providedHeader: string | undefined | null): ActorSecretGuard {
   const expected = process.env.X_ACTOR_SECRET;

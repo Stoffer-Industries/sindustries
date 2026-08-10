@@ -1,0 +1,65 @@
+# gitleaks config for the sindustries repo.
+#
+# Purpose: catch real secrets before they reach `git push`. AC2 of task
+# 206927ed calls out a source-control guard; this file plus
+# scripts/install-hooks.sh (local pre-commit) and the gitleaks CI job
+# in .github/workflows/ci.yml (server-side) cover that AC.
+#
+# The default ruleset already catches X_API_KEY=..., AKAHU_CLIENT_SECRET=...,
+# BUDET_API_TOKEN_KEY=... etc. when assigned a non-empty value. The
+# `allowlist` block below covers the noise we KNOW is fine:
+#   - .env.example empty-value lines (KEY=) used to document the contract.
+#   - test fixtures that intentionally include fake values (CI test names).
+#
+# The allowlist is intentionally narrow — every entry here has a reason.
+# Do NOT add broad allowlists; the value of this scan is its strictness.
+
+title = "sindustries gitleaks config"
+
+[extend]
+# Use the bundled default ruleset; the [extend] keys above are the
+# upstream-compatible way to set config-level metadata. Anything not
+# listed here falls through to gitleaks' built-in rules.
+
+[allowlist]
+description = "Noise we know is fine: empty .env.example lines + test fixtures."
+paths = [
+  '''\.env\.example$''',         # .env.example empty-value lines (KEY=)
+  '''\.env\.example\.template$''', # ditto for any *.template variants
+  '''tests/.*/fixtures/.*''',     # test fixtures with fake secret values
+  '''services/.*/test/.*\.test\.[jt]sx?$''' # test files referencing secret-name strings
+]
+stopwords = [
+  # Common placeholder phrases that appear in docs/comments; not secrets.
+  "example",
+  "placeholder",
+  "your-value-here",
+  "replace-me",
+  "REPLACE_ME",
+  "change-me",
+  "CHANGEME",
+]
+
+# Regex allowlist: empty-value lines in .env.example look like `KEY=`
+# (no value, just an equals sign). The default ruleset flags the line
+# itself because the regex pattern matches `KEY=...`. Allowlist the
+# specific shape `^[A-Z][A-Z0-9_]*\s*=\s*$` on .env.example files.
+regexes = [
+  '''^\s*[A-Z][A-Z0-9_]*\s*=\s*$''',
+]
+
+# Per-rule overrides: any rule can be relaxed for specific file paths
+# via the rules section. Keep these to a minimum.
+[[rules]]
+id = "generic-api-key"
+description = "Allow empty API_KEY placeholders in .env.example"
+path = '''\.env\.example$'''
+regexes = ['''^\s*[A-Z][A-Z0-9_]*_API_KEY\s*=\s*$''']
+keywords = []
+# tags + entropy checks are skipped when allowlists match.
+
+[[rules]]
+id = "AKAHU_CLIENT_SECRET"
+description = "Allow empty AKAHU_CLIENT_SECRET placeholder in .env.example"
+path = '''\.env\.example$'''
+regexes = ['''^\s*AKAHU_CLIENT_SECRET\s*=\s*$''']

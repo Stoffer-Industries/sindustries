@@ -1,7 +1,8 @@
 import express from 'express';
 import { helmetPreset } from './middleware/helmetPreset';
-import { createRateLimit, positiveIntegerEnv } from './middleware/rateLimit';
+import { createRateLimit } from './middleware/rateLimit';
 import { healthRouter } from './routes/health';
+import { config } from './config/index.ts';
 import { tasksRouter } from './routes/tasks';
 import { taskApprovalsRouter } from './routes/taskApprovals';
 import { approvalSessionsRouter } from './routes/approvalSessions.ts';
@@ -30,8 +31,8 @@ let _adapterInstalled = false;
 function installDefaultAdapter() {
   if (_adapterInstalled) return;
   if (getJobSchedulerAdapterKind()) return;
-  const raw = (process.env.CONTENT_SCHEDULER_JOB_ADAPTER ?? 'in-process').toLowerCase();
-  if (raw === 'bullmq') {
+  const adapterKind = config.CONTENT_SCHEDULER_JOB_ADAPTER;
+  if (adapterKind === 'bullmq') {
     const adapter = createBullMqJobSchedulerAdapter();
     setJobSchedulerAdapter(adapter, 'bullmq');
     // eslint-disable-next-line no-console
@@ -49,12 +50,8 @@ function installDefaultAdapter() {
 }
 
 function getAllowedOrigins() {
-  const configured = process.env.CORS_ALLOWED_ORIGINS?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  if (configured && configured.length > 0) {
-    return new Set(configured);
+  if (config.CORS_ALLOWED_ORIGINS.length > 0) {
+    return new Set(config.CORS_ALLOWED_ORIGINS);
   }
 
   return new Set([
@@ -70,8 +67,8 @@ export function createApp() {
   installDefaultAdapter();
   const app = express();
   const allowedOrigins = getAllowedOrigins();
-  const rateLimitWindowMs = positiveIntegerEnv('TASKS_API_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000);
-  const rateLimitMax = positiveIntegerEnv('TASKS_API_RATE_LIMIT_MAX', 100);
+  const rateLimitWindowMs = config.TASKS_API_RATE_LIMIT_WINDOW_MS;
+  const rateLimitMax = config.TASKS_API_RATE_LIMIT_MAX;
 
   app.use(helmetPreset());
 
@@ -95,7 +92,7 @@ export function createApp() {
   });
 
   // Body parsing must stay ahead of every route handler.
-  app.use(express.json({ limit: process.env.TASKS_API_JSON_LIMIT ?? '100kb' }));
+  app.use(express.json({ limit: config.TASKS_API_JSON_LIMIT }));
 
   const writeEndpointRateLimit = createRateLimit({
     name: 'tasks-api-write-endpoints',

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { sendError } from '../lib/http.ts';
+import { config } from '../config/index.ts';
 
 export type ApprovalType = 'spec' | 'tech_design' | 'qa';
 type ServiceCredential = { token: string; actor: string; approvalTypes: ApprovalType[] };
@@ -14,15 +15,15 @@ const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
 };
 
 function loadServiceCredentials(): ServiceCredential[] {
-  const raw = process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
-  if (!raw) return [];
+  const raw = config.TASKS_API_APPROVAL_SERVICE_CREDENTIALS;
+  if (!raw || raw === '[]') return [];
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch (e) { throw new Error(`TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be valid JSON: ${(e as Error).message}`); }
   if (!Array.isArray(parsed)) throw new Error('TASKS_API_APPROVAL_SERVICE_CREDENTIALS must be a JSON array');
   return parsed.map((value, index) => {
     const item = value as Partial<ServiceCredential>;
     if (typeof item?.token !== 'string' || item.token.length < 16 || typeof item.actor !== 'string' ||
-      !Array.isArray(item.approvalTypes) || item.approvalTypes.some((t) => !['spec', 'tech_design', 'qa'].includes(t))) {
+      !Array.isArray(item.approvalTypes) || item.approvalTypes.some((t) => !['spec', 'tech_design', 'qa'].includes(t as ApprovalType))) {
       throw new Error(`TASKS_API_APPROVAL_SERVICE_CREDENTIALS[${index}] is invalid`);
     }
     return item as ServiceCredential;

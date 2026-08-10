@@ -26,6 +26,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
+import { config } from '../config/index.ts';
 import {
   guardPublish,
   getAucklandTodayParts,

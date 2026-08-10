@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['test/**/*.test.ts'],
-    exclude: ['test/db-integration.test.ts']
+    exclude: ['test/db-integration.test.ts'],
+    setupFiles: ['./test/setup.ts']
   }
 });
