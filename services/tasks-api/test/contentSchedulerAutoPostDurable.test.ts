@@ -20,6 +20,7 @@ import {
 } from '../src/routes/contentSchedulerJobs.bullmq.ts';
 import {
   describeItemForReconcile,
+  hasJob,
   reconcileAutoPostItems
 } from '../src/routes/autoPostReconciliation.ts';
 import { setJobSchedulerAdapter } from '../src/routes/contentSchedulerJobs.ts';
@@ -278,6 +279,55 @@ describe('createBullMqJobSchedulerAdapter', () => {
     expect(queue.close).toHaveBeenCalled();
     expect(connQuit).toBe(true);
   });
+
+  it('disposes the IORedis connection when the Queue constructor throws', async () => {
+    // ThrowingQueue simulates BullMQ rejecting the queue (e.g. invalid
+    // queue name, internal validation). Without the try/catch the
+    // IORedis created just before would leak because the next
+    // `getQueue()` call would not see a cached queue and would create
+    // another IORedis without quitting the previous one.
+    let quitCount = 0;
+    const fakeRedis = {
+      ping: vi.fn(async () => 'PONG'),
+      quit: vi.fn(async () => {
+        quitCount += 1;
+      })
+    };
+    const adapter = createBullMqJobSchedulerAdapter({
+      bullmq: {
+        Queue: class {
+          constructor() {
+            throw new Error('simulated queue init failure');
+          }
+        }
+      },
+      ioredis: class { constructor() { return fakeRedis; } }
+    });
+    await expect(
+      adapter.scheduleAutoPost({
+        itemId: 'i1',
+        scheduledFor: new Date(Date.now() + 60_000),
+        scheduleVersion: 1
+      })
+    ).rejects.toThrow('simulated queue init failure');
+    expect(quitCount).toBe(1);
+
+    // The next call (after a fresh queue) should also not throw and
+    // should not leak another connection on success.
+    const { queue } = makeBullMqFake();
+    const adapter2 = createBullMqJobSchedulerAdapter({
+      bullmq: { Queue: class { constructor() { return queue; } } },
+      ioredis: class { constructor() { return fakeRedis; } }
+    });
+    await expect(
+      adapter2.scheduleAutoPost({
+        itemId: 'i2',
+        scheduledFor: new Date(Date.now() + 60_000),
+        scheduleVersion: 1
+      })
+    ).resolves.toEqual({ jobId: 'content-scheduler-auto-post:i2:1' });
+    expect(quitCount).toBe(1);
+  });
 });
 
 // --- Reconciliation -------------------------------------------------------
@@ -468,5 +518,93 @@ describe('reconcileAutoPostItems', () => {
     const report = await reconcileAutoPostItems({ limit: 2 });
     expect(report.scanned).toBe(2);
     expect(report.reEnqueued).toBe(2);
+  });
+
+  it('paginates with a composite (scheduledFor, id) cursor so duplicate scheduledFor is not skipped', async () => {
+    // Regression test for the cursor-pagination bug: a bare `gt: scheduledFor`
+    // cursor would skip items sharing the same scheduledFor as the last row of
+    // the previous batch. With a composite (scheduledFor, id) cursor, both
+    // items sharing the same scheduledFor must be picked up across batches.
+    const sharedDate = new Date(Date.now() + 60_000);
+    const baseItem = {
+      status: 'approved',
+      autoPostJobId: null,
+      autoPostScheduleVersion: 0,
+      autoPostScheduledAt: null,
+      autoPostLastEnqueuedAt: null,
+      publishError: null
+    };
+    const allItems = [
+      { id: 'a', scheduledFor: sharedDate },
+      { id: 'b', scheduledFor: sharedDate },
+      { id: 'c', scheduledFor: sharedDate },
+      { id: 'd', scheduledFor: sharedDate }
+    ].map((b) => ({ ...baseItem, ...b }));
+
+    // First call returns the first batch (matching the take=batchSize),
+    // second call returns the next batch sharing the same scheduledFor,
+    // third call returns nothing.
+    prismaMock.contentSchedulerItem.findMany
+      .mockResolvedValueOnce(allItems.slice(0, 2))
+      .mockResolvedValueOnce(allItems.slice(2, 4))
+      .mockResolvedValueOnce([]);
+    prismaMock.contentSchedulerItem.findUnique.mockImplementation(async ({ where }: any) => ({
+      ...baseItem,
+      id: where.id,
+      scheduledFor: sharedDate
+    }));
+
+    const { queue } = makeBullMqFake();
+    const adapter = createBullMqJobSchedulerAdapter({
+      bullmq: { Queue: class { constructor() { return queue; } } },
+      ioredis: class { constructor() { return pingOk(); } }
+    });
+    setJobSchedulerAdapter(adapter, 'bullmq');
+
+    const report = await reconcileAutoPostItems({ batchSize: 2 });
+    expect(report.scanned).toBe(4);
+
+    // Verify the second findMany call used the composite cursor — the
+    // OR clause plus the id tiebreaker is what makes the next page pick
+    // up rows sharing the same scheduledFor that the bare `gt: scheduledFor`
+    // cursor would have skipped.
+    const secondCall = prismaMock.contentSchedulerItem.findMany.mock.calls[1];
+    const secondWhere = secondCall[0].where;
+    expect(secondWhere.OR).toBeDefined();
+    expect(secondWhere.OR).toEqual([
+      { scheduledFor: { gt: sharedDate } },
+      {
+        scheduledFor: sharedDate,
+        id: { gt: 'b' }
+      }
+    ]);
+    expect(secondCall[0].orderBy).toEqual([{ scheduledFor: 'asc' }, { id: 'asc' }]);
+  });
+});
+
+// --- hasJob exact match (in-process) -------------------------------------
+
+describe('hasJob exact match (in-process adapter fallback)', () => {
+  it('only matches the exact in-process:<itemId>:<version> jobId', async () => {
+    // The in-process adapter lists jobs via `pendingJobs()`. The previous
+    // substring match returned true for `itemId='abc'` against the jobId
+    // `in-process:abc-def:1` because `'abc-def:1'.includes('abc')` is true.
+    // The fix is exact match on the full deterministic id.
+    const anyAdapter = {
+      pendingJobs: () => [
+        { itemId: 'abc', scheduleVersion: 1 },
+        { itemId: 'xyz', scheduleVersion: 2 }
+      ]
+    };
+    // Cast: we exercise the fallback path by registering a fake adapter
+    // without hasJob. The real in-process adapter has hasJob, so the
+    // fallback only triggers when the adapter exposes pendingJobs but
+    // not hasJob.
+    setJobSchedulerAdapter(anyAdapter as any, 'in-process');
+    expect(await hasJob(anyAdapter as any, 'in-process:abc:1')).toBe(true);
+    expect(await hasJob(anyAdapter as any, 'in-process:xyz:2')).toBe(true);
+    // Substring match would have returned true here — exact match must not.
+    expect(await hasJob(anyAdapter as any, 'in-process:abc-def:1')).toBe(false);
+    expect(await hasJob(anyAdapter as any, 'in-process:abc:2')).toBe(false);
   });
 });

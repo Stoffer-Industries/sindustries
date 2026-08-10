@@ -67,11 +67,14 @@ contentSchedulerAutoPostRouter.get('/content-scheduler/auto-post/health', async 
       };
     }
 
-    // Redis health: only meaningful for the BullMQ adapter.
-    let redis: { ok: boolean; latencyMs?: number; error?: string } = {
-      ok: adapterKind === 'in-process'
-    };
-    if (typeof (adapter as any).ping === 'function') {
+    // Redis health: only meaningful for the BullMQ adapter. The in-process
+    // adapter never touches Redis, so reporting `ok: true` is misleading
+    // — the operator has no Redis to health-check. Return `null` so the
+    // UI / curl consumer can distinguish "no Redis is configured" from
+    // "Redis is configured and reachable".
+    let redis: { ok: true; latencyMs: number } | { ok: false; error: string } | null =
+      adapterKind === 'in-process' ? null : null;
+    if (adapterKind !== 'in-process' && typeof (adapter as any).ping === 'function') {
       try {
         const pingResult = await (adapter as any).ping();
         if (pingResult.ok) {
@@ -113,7 +116,7 @@ contentSchedulerAutoPostRouter.get('/content-scheduler/auto-post/health', async 
     let recommended: string | null = null;
     if (adapterKind === 'in-process') {
       recommended = 'Set CONTENT_SCHEDULER_JOB_ADAPTER=bullmq and provide CONTENT_SCHEDULER_REDIS_URL to make auto-post durable across restarts.';
-    } else if (redis.ok === false) {
+    } else if (redis && redis.ok === false) {
       recommended = `Redis ping failed: ${redis.error}. Auto-post will not run until Redis is reachable.`;
     } else if (overdueCount > 0) {
       recommended = 'Restart the worker or POST /content-scheduler/auto-post/reconcile to drain overdue approved items.';

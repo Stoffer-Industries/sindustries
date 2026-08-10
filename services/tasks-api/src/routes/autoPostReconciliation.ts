@@ -128,7 +128,14 @@ export async function reconcileAutoPostItems(
   // We only care about approved items that have a scheduledFor. The
   // queue itself does not need to track unscheduled items; the
   // approve/patch/remove routes manage that explicitly.
-  let cursor: Date | null = null;
+  //
+  // Cursor is a composite (scheduledFor, id) pair. A bare `scheduledFor`
+  // cursor with `gt: cursor` skips items that share `scheduledFor` with
+  // the last row of the previous batch — because reconciliation only
+  // runs on worker boot, a missed item stays missed until the next boot.
+  // Adding `id` as a tiebreaker makes the ordering deterministic so the
+  // next page picks up exactly where the previous one left off.
+  let cursor: { scheduledFor: Date; id: string } | null = null;
   let processed = 0;
   // Treat the sweep as a snapshot loop. We stop when either the page
   // returns 0 rows or we hit the caller-supplied limit.
@@ -138,9 +145,19 @@ export async function reconcileAutoPostItems(
       where: {
         status: 'approved',
         scheduledFor: { not: null },
-        ...(cursor ? { scheduledFor: { gt: cursor } } : {})
+        ...(cursor
+          ? {
+              OR: [
+                { scheduledFor: { gt: cursor.scheduledFor } },
+                {
+                  scheduledFor: cursor.scheduledFor,
+                  id: { gt: cursor.id }
+                }
+              ]
+            }
+          : {})
       },
-      orderBy: { scheduledFor: 'asc' },
+      orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
       take: Math.min(batchSize, limit - processed)
     });
     if (items.length === 0) break;
@@ -149,7 +166,7 @@ export async function reconcileAutoPostItems(
       if (processed >= limit) break;
       processed += 1;
       report.scanned += 1;
-      cursor = item.scheduledFor;
+      cursor = { scheduledFor: item.scheduledFor as Date, id: item.id };
 
       const outcome = await reconcileOne(item, adapter, startedAt);
       report.perItem.push({
@@ -275,19 +292,23 @@ async function scheduleApprovedItem(
   return scheduled;
 }
 
-async function hasJob(adapter: JobSchedulerAdapter, jobId: string): Promise<boolean> {
+export async function hasJob(adapter: JobSchedulerAdapter, jobId: string): Promise<boolean> {
   const anyAdapter = adapter as JobSchedulerAdapter & { hasJob?: (id: string) => Promise<boolean> };
   if (typeof anyAdapter.hasJob === 'function') {
     return anyAdapter.hasJob(jobId);
   }
-  // Fallback: the in-process adapter exposes `pendingJobs()`. For
-  // adapters without a direct lookup, we assume the job exists and
-  // rely on the worker's stale-version check to catch drift.
+  // Fallback: the in-process adapter exposes `pendingJobs()`. Match the
+  // full deterministic jobId (`in-process:<itemId>:<scheduleVersion>`)
+  // exactly. Substring matching on `itemId` is wrong because an itemId
+  // like `abc` would match `in-process:abc-def:1` even though that
+  // refers to a different item.
   const anyAdapterWithPending = adapter as JobSchedulerAdapter & {
     pendingJobs?: () => Array<{ itemId: string; scheduleVersion: number }>;
   };
   if (typeof anyAdapterWithPending.pendingJobs === 'function') {
-    return anyAdapterWithPending.pendingJobs().some((j) => j.itemId && jobId.includes(String(j.itemId)));
+    return anyAdapterWithPending.pendingJobs().some(
+      (j) => j.itemId && jobId === `in-process:${j.itemId}:${j.scheduleVersion}`
+    );
   }
   return true;
 }
