@@ -1,5 +1,6 @@
 export {
   config,
+  loadConfig,
   redact,
   resolveRedisUrl,
   ConfigValidationError,
