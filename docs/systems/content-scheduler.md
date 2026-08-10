@@ -39,7 +39,9 @@ Manual publish is still available. Auto-publish of approved items whose `schedul
 - `services/tasks-api/src/routes/contentSchedulerPublishService.ts` — `publishContentSchedulerItem` shared between manual and auto-post paths so guard semantics cannot drift.
 - `services/tasks-api/src/routes/contentSchedulerJobs.ts` — `JobSchedulerAdapter` interface + `decideAutoPostAction` pure helper. The single point of contact between route/publish code and any queue provider.
 - `services/tasks-api/src/routes/contentSchedulerJobs.inProcess.ts` — default adapter. One `setTimeout` per job, deterministic `in-process:<itemId>:<version>` ids. Survives for the lifetime of the API process. No Redis required. **See limitations below.**
-- `services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts` — BullMQ placeholder. Throws on use until `bullmq` + `ioredis` are wired in production.
+- `services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts` — BullMQ-backed `JobSchedulerAdapter` (production). Uses deterministic `content-scheduler-auto-post:<itemId>:<scheduleVersion>` job ids, `attempts: 1`, and `removeOnComplete` / `removeOnFail` policies so domain failures are not retried. Exposes `ping()` and `queueStats()` for the diagnostic endpoint and `hasJob()` for the reconciliation sweep.
+- `services/tasks-api/src/routes/autoPostReconciliation.ts` — startup reconciliation. On every worker boot the database is the source of truth: approved items with a future `scheduledFor` whose queue job is missing are re-enqueued; overdue approved items are published deterministically through the shared service. The sweep is idempotent and bounded by `limit` / `batchSize` so a huge backlog does not stall boot.
+- `services/tasks-api/src/routes/contentSchedulerAutoPost.ts` — diagnostic endpoints. `GET /content-scheduler/auto-post/health` reports adapter kind, queue stats, overdue approved items, Redis liveness, and a recommended next action. `POST /content-scheduler/auto-post/reconcile` runs the reconciliation sweep on demand for ops. `GET /content-scheduler/auto-post/items` lists per-item status for the auto-post panel.
 - `services/tasks-api/src/routes/autoPostWorker.ts` — `processAutoPostJob` worker function. Reconciles against current item state, handles clock skew via reschedule, returns structured outcomes.
 - `services/tasks-api/src/autoPostWorkerMain.ts` — worker entrypoint. `npm run content-scheduler:worker` from `services/tasks-api`.
 - `services/tasks-api/prisma/schema.prisma` — `ContentSchedulerItem` model + `ContentSchedulerItemStatus` / `ContentSchedulerSource` enums + `autoPost*` fields.
@@ -161,7 +163,7 @@ The route maps each guard code to a structured `4xx`/`5xx` response with a stabl
 
 ### Auto-post (event-driven delayed jobs)
 
-The auto-post flow is a delayed-job trigger that fires **once** at each item's `scheduledFor`. It is event-driven through a provider-neutral `JobSchedulerAdapter` — no polling loop, no in-process sleep timer. Swapping the in-process adapter for a managed queue service (BullMQ + Redis locally; Fly.io delayed tasks or similar in production) is a single-class change.
+The auto-post flow is a delayed-job trigger that fires **once** at each item's `scheduledFor`. It is event-driven through a provider-neutral `JobSchedulerAdapter` — no polling loop, no in-process sleep timer. The local durable implementation is BullMQ + Redis (`contentSchedulerJobs.bullmq.ts`); the in-process adapter is documented in the **In-process adapter** section below and is intentionally limited to tests and ephemeral dev.
 
 **Trigger path:**
 
@@ -221,30 +223,14 @@ The auto-post flow is a delayed-job trigger that fires **once** at each item's `
 
 ---
 
-## In-process adapter: durability and isolation limitations
+## Adapters: in-process vs BullMQ
 
-The default `JobSchedulerAdapter` is the in-process implementation (`services/tasks-api/src/routes/contentSchedulerJobs.inProcess.ts`). It is correct for local development but has two failure modes every operator must understand before relying on auto-post in any non-local environment.
+The auto-post layer has two adapter implementations that share the same `JobSchedulerAdapter` interface. The choice is made at process boot via `CONTENT_SCHEDULER_JOB_ADAPTER`:
 
-### Durability: pending jobs are lost on process restart
+- `in-process` (default) — the in-process implementation in `services/tasks-api/src/routes/contentSchedulerJobs.inProcess.ts`. One `setTimeout` per job, deterministic `in-process:<itemId>:<version>` ids. Survives for the lifetime of the API process. **No Redis required.**
+- `bullmq` — the BullMQ-backed implementation in `services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts`. Uses `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`). Deterministic `content-scheduler-auto-post:<itemId>:<scheduleVersion>` job ids, `attempts: 1`, `removeOnComplete` / `removeOnFail` policies.
 
-The in-process adapter stores every pending job in a single `Map<string, Entry>` (line 46) keyed by an internal job id and fires each one with `setTimeout` + `unref()` (lines 97–112). There is no disk persistence, no replay log, and no recovery path on boot. Any pending job is silently lost on:
-
-- a clean API restart (deploy, signal-triggered shutdown, container scale-in);
-- an API crash (out-of-memory, unhandled rejection, host reboot);
-- `setTimeout` reaching its unref'd tail in a busy event loop — the timer is intentionally not ref'd so it never blocks process exit, but this also means it can be dropped before firing.
-
-Recovery for lost jobs is manual: Tom clicks the existing Publish button on each affected item (the route calls `publishContentSchedulerItem`, the same code path the worker would have used). Bulk re-hydration from the DB is not wired into the in-process adapter.
-
-### Isolation: the worker entrypoint's Map is a separate, empty instance
-
-`npm run content-scheduler:worker` boots `services/tasks-api/src/autoPostWorkerMain.ts`, which calls `createInProcessJobSchedulerAdapter()` (line 21) and `setJobSchedulerAdapter(adapter, 'in-process')`. That adapter instantiates its OWN local `Map<string, Entry>` inside the worker process — a different map from the one in the API process. Consequence:
-
-- The worker process never receives delayed jobs enqueued by the API.
-- The worker process only fires jobs its own boot path enqueued — and the worker has no enqueue path. It only attaches a handler to the in-process adapter via `adapter.setHandler(...)`.
-- Result: the worker runs, accepts `SIGINT` cleanly, and processes zero jobs against API-enqueued work.
-- The auto-post worker is therefore a **silent no-op** against API-enqueued jobs while `CONTENT_SCHEDULER_JOB_ADAPTER=in-process`. Running `npm run content-scheduler:worker` does not pick up any in-flight jobs the API scheduled, even though both processes are healthy and reachable.
-
-### When the in-process adapter is appropriate
+### When to use the in-process adapter
 
 The in-process adapter is fine for local development and short-lived single-process deploys where losing a handful of scheduled posts to a restart is acceptable. It is **not** appropriate for any environment where:
 
@@ -252,7 +238,17 @@ The in-process adapter is fine for local development and short-lived single-proc
 - the API and the worker run as separate processes (all current candidate deploy topologies);
 - automatic recovery of `approved` items with `scheduledFor > now` after boot is required.
 
-The production fix is to switch to the BullMQ adapter (`services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts`) by setting `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq` plus a Redis URL; both processes then enqueue and consume against the same Redis-backed queue, so jobs survive restarts and the worker entrypoint becomes a real consumer. The BullMQ adapter is currently a throw-stub and requires wiring before the swap.
+### Why BullMQ is the durable default
+
+When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker process register against the same Redis-backed queue. A delayed job enqueued by the API is consumed by the worker even across restarts; the worker process is a real consumer (not a silent no-op). The startup reconciliation sweep (`reconcileAutoPostItems` in `autoPostReconciliation.ts`) re-enqueues any approved item whose queue job is missing and publishes overdue approved items deterministically through the shared service. The sweep is idempotent and runs on every worker boot, so a Redis restart, a clean redeploy, or a worker crash never leaves approved items silently unscheduled.
+
+### Switching adapters
+
+- Set `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq` and `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`) in the API and worker environments.
+- The API and the worker entrypoint pick the adapter at register-time and log the active kind on startup. No code change is required.
+- Run the API and the worker against the same Redis. Multiple worker replicas are safe — BullMQ's deterministic `jobId` collapses duplicate enqueues.
+- `npm run content-scheduler:worker` (services/tasks-api) boots the worker. The worker dynamically imports BullMQ so the in-process dev path does not pay the load cost.
+- For local dev without Redis, leave `CONTENT_SCHEDULER_JOB_ADAPTER` unset and the in-process adapter is used. The diagnostic endpoint will report `adapter: "in-process"` and recommend switching to BullMQ for any non-local use.
 
 ---
 
@@ -303,11 +299,11 @@ The production fix is to switch to the BullMQ adapter (`services/tasks-api/src/r
 
 ### Production swap to BullMQ
 
-- Add `bullmq` and `ioredis` to `services/tasks-api` dependencies.
-- Replace the throw-stub in `contentSchedulerJobs.bullmq.ts` with the real adapter (the comment in that file lists the steps).
+- The BullMQ adapter is wired by default; `bullmq` and `ioredis` are listed in `services/tasks-api/package.json` dependencies.
 - Set `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq` and `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`) in the API and worker environments.
-- Run the API process and the worker process against the same Redis. Multiple worker replicas are safe — BullMQ's `jobId` is the deterministic `in-process:<itemId>:<version>` string so duplicate enqueues collapse.
-- The route, publish service, and worker code do not change. The interface boundary (AC5) makes the swap a one-class change.
+- Run the API process and the worker process against the same Redis. Multiple worker replicas are safe — BullMQ's deterministic `jobId` collapses duplicate enqueues.
+- The route, publish service, and worker code do not change. The interface boundary (AC5) makes the swap a single env-var change.
+- The worker entrypoint boots a BullMQ `Worker` and runs `reconcileAutoPostItems()` on startup. The `GET /content-scheduler/auto-post/health` endpoint surfaces `adapter`, `queue`, `overdue`, `redis`, and `recommended` so operators can confirm the queue is healthy.
 
 ### Service extraction (future, task `94d5e4fc`)
 
@@ -325,7 +321,7 @@ The production fix is to switch to the BullMQ adapter (`services/tasks-api/src/r
 | Pure helpers (`contentSchedulerCalendar.js`) | `contentSchedulerCalendar.test.js` covers timezone, NZST/NZDT offset, DST start edge, scheduling defaults, day-key grouping, drop-guard logic |
 | UI (`ContentSchedulerTab.jsx`) | `ContentSchedulerTab.test.jsx` covers mount/loading/error/retry, calendar grid layout, drag-and-drop reschedule, Unscheduled overflow, published read-only badge, max-one-per-day inline error, today-status banner |
 | API (`services/tasks-api`) | `contentScheduler.test.ts` covers CRUD, approve/unapprove, publish guard outcomes (incl. `not_approved`, `already_published_today`, `missing_credentials`), reorder, today-status |
-| Auto-post (`services/tasks-api`) | `contentSchedulerAutoPost.test.ts` covers the job queue adapter, BullMQ placeholder, in-process timer, end-to-end publish-via-auto-post |
+| Auto-post (`services/tasks-api`) | `contentSchedulerAutoPost.test.ts` covers the job queue adapter, BullMQ placeholder, in-process timer, end-to-end publish-via-auto-post. `contentSchedulerAutoPostDurable.test.ts` covers the BullMQ adapter (deterministic jobId, delay/attempts, cancel/hasJob/ping/queueStats/close), `reconcileAutoPostItems` (re-enqueue / scheduled-active / overdue / limit), `describeItemForReconcile`, and the `resolveRedisUrl` env precedence. |
 
 Mission Control suite: 161/161 green as of PR #257 merge.
 

@@ -11,26 +11,40 @@ import { contentSchedulerRouter } from './routes/contentScheduler.ts';
 import { xTweetRouter } from './routes/xTweet.ts';
 import { featureTaskAnalyticsRouter } from './routes/featureTaskAnalytics.ts';
 import { createInProcessJobSchedulerAdapter } from './routes/contentSchedulerJobs.inProcess.ts';
+import { createBullMqJobSchedulerAdapter } from './routes/contentSchedulerJobs.bullmq.ts';
 import {
   getJobSchedulerAdapterKind,
   setJobSchedulerAdapter
 } from './routes/contentSchedulerJobs.ts';
 import { processAutoPostJob } from './routes/autoPostWorker.ts';
+import { contentSchedulerAutoPostRouter } from './routes/contentSchedulerAutoPost.ts';
 
-// Install the default in-process JobSchedulerAdapter so the route layer
-// always has an adapter available. Tests can override this via
-// `setJobSchedulerAdapter(...)` in their setup. The adapter is registered
-// exactly once per process; calling `setJobSchedulerAdapter` again would
-// replace it, which is what tests use.
+// Adapter selection mirrors the worker entrypoint:
+//   - CONTENT_SCHEDULER_JOB_ADAPTER=bullmq → BullMQ + Redis (durable across
+//     restarts; required for production and cloud).
+//   - CONTENT_SCHEDULER_JOB_ADAPTER=in-process (default) → in-memory
+//     setTimeout queue. Survives the API's lifetime but not restart.
+//     Suitable for local dev and unit tests.
+// The selection is logged so an operator can see which adapter is live.
 let _adapterInstalled = false;
 function installDefaultAdapter() {
   if (_adapterInstalled) return;
   if (getJobSchedulerAdapterKind()) return;
-  const adapter = createInProcessJobSchedulerAdapter();
-  adapter.setHandler(async (job) => {
-    await processAutoPostJob(job);
-  });
-  setJobSchedulerAdapter(adapter, 'in-process');
+  const raw = (process.env.CONTENT_SCHEDULER_JOB_ADAPTER ?? 'in-process').toLowerCase();
+  if (raw === 'bullmq') {
+    const adapter = createBullMqJobSchedulerAdapter();
+    setJobSchedulerAdapter(adapter, 'bullmq');
+    // eslint-disable-next-line no-console
+    console.log('[tasks-api] JobSchedulerAdapter=bullmq (CONTENT_SCHEDULER_JOB_ADAPTER=bullmq)');
+  } else {
+    const adapter = createInProcessJobSchedulerAdapter();
+    adapter.setHandler(async (job) => {
+      await processAutoPostJob(job);
+    });
+    setJobSchedulerAdapter(adapter, 'in-process');
+    // eslint-disable-next-line no-console
+    console.log('[tasks-api] JobSchedulerAdapter=in-process (default)');
+  }
   _adapterInstalled = true;
 }
 
@@ -107,6 +121,7 @@ export function createApp() {
   app.use('/api/v1', requiredApprovalsRouter);
   app.use('/api/v1', tagsRouter);
   app.use('/api/v1', contentSchedulerRouter);
+  app.use('/api/v1', contentSchedulerAutoPostRouter);
   app.use('/api/v1', xTweetRouter());
   app.use('/api/v1', featureTaskAnalyticsRouter);
 
