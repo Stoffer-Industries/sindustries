@@ -708,6 +708,28 @@ Feature specs use a forward-only file lifecycle under `brain/tasks/specs/`:
 - `brain/tasks/specs/in-progress/` — approved specs attached to active feature work. On each `spec-check` run, the Rust lobster bootstraps `open/`, `in-progress/`, and `done/`, then fails loudly if any other direct subdirectory exists under `brain/tasks/specs/`. When a chat spec in `open/` is checked as approved, the lobster moves it to `in-progress/` and patches the task `**Spec:**` line. The move is idempotent; unchecked specs already in `in-progress/` are never moved back.
 - `brain/tasks/specs/done/` — specs for completed feature tasks. After `post-merge` transitions a task to `done`, the lobster moves its spec from `in-progress/` to `done/` and patches the task `**Spec:**` line. Specs already in `done/` stay there even if a task later reopens.
 
+### Spec archival: triggers, retries, and failure semantics
+
+The archival of `brain/tasks/specs/in-progress/<slug>.md` → `brain/tasks/specs/done/<slug>.md` runs on **two triggers** so a single broken run cannot leave a task wedged at `(done, in-progress)`:
+
+1. **Done transition (primary trigger).** Every code path that takes a feature task from `open`/`doing`/`acceptance` to `done` invokes the archive helper. Today that is `post-merge` (`agents/workflows/feature-task/src/main.rs` → `archive_done_task_spec`); the helper is idempotent and rewrites the task `**Spec:**` line in the same pass.
+2. **Reconciliation sweep (safety net).** A new CLI subcommand `archive-done-task-specs-sweep` (same Rust binary) walks every `status=done` task and retries the archive for any task whose `**Spec:**` line still points under `brain/tasks/specs/in-progress/`. Output is one summary envelope:
+   ```
+   archive_sweep_summary: scanned=<n> moved=<n> already=<n> retryable=<n> conflict=<n> not_applicable=<n>
+   ```
+   The sweep is exposed as a standalone CLI rather than wired into `feature-task.lobster.yaml` so Quinn (or a cron) can invoke it on demand after filesystem events; the helper itself is the same pure function the done transition uses, so behaviour is identical.
+
+**Filesystem access failures vs workflow failures.** The two failure classes produce different, deliberate surfaces and are never confused:
+
+- **Filesystem / permission / disk errors** (`fs::rename` fails, destination directory cannot be created, source unreadable): the helper returns `ArchiveOutcome::Retryable` with `from`/`to`/`reason`. The lobster posts a `[spec-archive-retryable]` task comment, sets `lobster_state.failure_fingerprint` to a stable hash of `(task_id, from_rel, error_kind)`, and marks Quinn as an attention owner. **The task is not reverted from `done`.** The next reconciliation sweep retries automatically; an operator must resolve the underlying filesystem issue to clear.
+- **Workflow / parse / plan failures** (`**Spec:**` line is multi-line or otherwise unparseable, destination exists with different content): the helper returns `ArchiveOutcome::Conflict` (destination-mismatch) or `ArchiveOutcome::NotApplicable` with `UnparseableSpecLine`. The lobster posts `[spec-archive-conflict]` with both `from` and `to` paths and an `action:` line; the sweep will not retry conflict cases until a human resolves the content mismatch. Unparseable Spec lines are surfaced as an explicit failure rather than silently skipped, so the legacy "inline annotation silently unparsed" mode is gone.
+
+**Inline-annotated Spec references.** The Spec-line parser tolerates a single trailing inline annotation in `(...)`, `[...]`, or `` `...` `` form, plus trailing punctuation (`,`, `.`, `;`) and optional backtick wrapping of the path. The strict path component is captured; the annotation is preserved across description rewrites by re-attaching it after the new path. Exotic multi-line / nested-paren / whitespace-in-path forms are rejected and surface as `UnparseableSpecLine` for human review — the parser does not silently skip.
+
+Lives in:
+- `agents/workflows/feature-task/src/main.rs` — `archive_task_spec_for_done_task` (pure decision), `apply_archive_outcome` (orchestration), `archive_done_task_specs_sweep` (reconciliation sweep CLI), `parse_product_spec_ref` + `extract_spec_path_from_line` (tolerant parser)
+- `agents/workflows/feature-task/WORKFLOW.md` — clippy gate remains the local quality bar; this change preserves the existing `cargo clippy --all-targets -- -D warnings` baseline
+
 Bookmark specs stay in `brain/bookmarks/specs/` through approval. The bookmark approval handler only toggles the file checkbox to `- [x] **Approved by Tom**`; it does not move the file. When the bookmark workflow creates or links a task from an approved bookmark spec, it moves that spec to `brain/tasks/specs/in-progress/<same-filename>.md` and creates/repairs the task `**Spec:**` line to point at the destination. From that point onward, the feature-task lifecycle treats bookmark-origin specs the same as chat-origin specs.
 
 The task description `**Spec:**` line is the authoritative pointer for `spec-check`; every move is paired with a best-effort idempotent description patch so the next lobster run reads the new path without fallback scanning.
