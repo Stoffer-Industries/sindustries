@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "prisma generate",
-    "dev": "tsx watch --require @sindustries/otel-node/register src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "prestart": "prisma generate",
     "start": "tsx --require @sindustries/otel-node/register src/server.ts",
     "pretest": "prisma generate",
