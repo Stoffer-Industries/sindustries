@@ -56,6 +56,13 @@ def workflow_env() -> dict[str, str]:
         token = _load_dotenv_token("LOBSTER_GITHUB_TOKEN")
         if token:
             env["GH_TOKEN"] = token
+    # The reconciliation command acts only on Tom's explicit checked marker,
+    # using Tom's server-scoped spec credential. The API still derives actor
+    # and permissions and remains the authoritative gate store.
+    if not env.get("TASKS_API_APPROVAL_TOKEN"):
+        token = _load_dotenv_token("TASKS_API_APPROVAL_TOKEN")
+        if token:
+            env["TASKS_API_APPROVAL_TOKEN"] = token
     return env
 
 
@@ -153,6 +160,37 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool, pipeline: Path) -> 
     return result
 
 
+def run_brain_spec_approval_reconciliation(base_url: str, dry_run: bool) -> dict[str, Any]:
+    cmd = [
+        "cargo",
+        "run",
+        "--manifest-path",
+        str(REPO / "agents/workflows/feature-task/Cargo.toml"),
+        "--",
+        "reconcile-brain-spec-approvals",
+        "--base-url",
+        base_url,
+        "--dry-run",
+        str(dry_run).lower(),
+        "--workspace-root",
+        str(WORKSPACE_ROOT),
+    ]
+    proc = subprocess.run(cmd, text=True, capture_output=True, env=workflow_env())
+    result: dict[str, Any] = {
+        "returncode": proc.returncode,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    }
+    if proc.returncode != 0:
+        result["error"] = (proc.stderr or proc.stdout or "brain spec approval reconciliation failed").strip()
+        return result
+    try:
+        result["envelope"] = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        result["error"] = f"Could not parse brain spec approval reconciliation envelope: {exc}"
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one feature-task workflow pass for every active feature task")
     parser.add_argument("--base-url", default=os.environ.get("TASKS_API_BASE_URL", DEFAULT_BASE_URL))
@@ -160,6 +198,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    reconciliation = run_brain_spec_approval_reconciliation(args.base_url, args.dry_run)
     tasks = discover_tasks(args.base_url, args.limit)
     results = [
         run_workflow(
@@ -171,6 +210,13 @@ def main() -> int:
         for task in tasks
     ]
     errors = [result for result in results if result.get("returncode") != 0 or result.get("error")]
+    reconciliation_envelope = reconciliation.get("envelope") or {}
+    if (
+        reconciliation.get("returncode") != 0
+        or reconciliation.get("error")
+        or reconciliation_envelope.get("criteriaMet") is False
+    ):
+        errors.insert(0, reconciliation)
     pipelines = sorted({task.get("_pipeline", str(PIPELINE)) for task in tasks})
     print(
         json.dumps(
@@ -178,6 +224,7 @@ def main() -> int:
                 "ok": not errors,
                 "pipelines": pipelines,
                 "count": len(tasks),
+                "brainSpecApprovalReconciliation": reconciliation,
                 "results": results,
                 "errors": errors,
             },
