@@ -44,7 +44,27 @@ enum Commands {
     CodeTaskTechDesignCheck(StageArgs),
     CodeTaskReadyChecks(StageArgs),
     CodeTaskVerifyDelivery(StageArgs),
+    /// Reconciliation sweep: visit every task with `status=done` (optionally
+    /// filtered by `--assignee`) and archive any spec still under
+    /// `brain/tasks/specs/in-progress/`. Used to close the historical backlog
+    /// and to recover when a single post_merge run skipped the archive step
+    /// (e.g. iCloud/TCC `Operation not permitted`).
+    ArchiveDoneTaskSpecsSweep(ArchiveDoneTaskSpecsSweepArgs),
     Analytics(AnalyticsArgs),
+}
+
+#[derive(Parser, Clone)]
+struct ArchiveDoneTaskSpecsSweepArgs {
+    #[arg(long, default_value = "http://localhost:4001/api/v1")]
+    base_url: String,
+    #[arg(long, default_value_t = false, action = ArgAction::Set)]
+    dry_run: bool,
+    #[arg(long, default_value = ".")]
+    repo: PathBuf,
+    #[arg(long)]
+    workspace_root: Option<PathBuf>,
+    #[arg(long)]
+    assignee: Option<String>,
 }
 
 #[derive(Parser, Clone)]
@@ -249,6 +269,7 @@ fn main() -> Result<()> {
         Commands::CodeTaskTechDesignCheck(args) => code_task_tech_design_check(args)?,
         Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
         Commands::CodeTaskVerifyDelivery(args) => code_task_verify_delivery(args)?,
+        Commands::ArchiveDoneTaskSpecsSweep(args) => archive_done_task_specs_sweep(args)?,
         Commands::Analytics(args) => analytics_replay(args)?,
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
@@ -1448,6 +1469,63 @@ enum ArchiveSpecPlan {
     MissingSpecRef,
 }
 
+/// Outcome of an attempt to archive a task spec for a task that has reached
+/// `done`. This is the orchestrator-facing result returned by
+/// [`archive_task_spec_for_done_task`] and is the input for both the
+/// done-transition trigger and the reconciliation sweep.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ArchiveOutcome {
+    /// Spec was moved and the task description was rewritten.
+    Moved {
+        from_rel: String,
+        to_rel: String,
+    },
+    /// Spec was already in the done directory; description was rewritten.
+    AlreadyArchived {
+        to_rel: String,
+    },
+    /// No work to do: spec is missing, not a task spec, an open spec, or
+    /// the parser could not extract a path from the Spec line.
+    NotApplicable {
+        reason: ArchiveSkipReason,
+    },
+    /// Filesystem or path-resolution failure; the task should remain `done`
+    /// and the next reconciliation sweep will retry. The caller is expected
+    /// to surface a `[spec-archive-retryable]` task comment and an attention
+    /// owner pointing at Quinn.
+    Retryable {
+        from_rel: String,
+        to_rel: String,
+        reason: String,
+    },
+    /// Destination file exists with different content from the source. Both
+    /// files are left in place; a `[spec-archive-conflict]` comment must be
+    /// posted. Reconciliation sweep will not retry until a human resolves it.
+    Conflict {
+        from_rel: String,
+        to_rel: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ArchiveSkipReason {
+    NotTaskSpec,
+    MissingSpecRef,
+    OpenSpecCannotArchive,
+    UnparseableSpecLine,
+}
+
+impl ArchiveSkipReason {
+    fn as_tag(&self) -> &'static str {
+        match self {
+            ArchiveSkipReason::NotTaskSpec => "not_task_spec",
+            ArchiveSkipReason::MissingSpecRef => "missing_spec_ref",
+            ArchiveSkipReason::OpenSpecCannotArchive => "open_spec_cannot_archive",
+            ArchiveSkipReason::UnparseableSpecLine => "unparseable_spec_line",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ChatApprovalMovePlan {
     Move { from_rel: String, to_rel: String },
@@ -1647,25 +1725,39 @@ fn resolve_archive_plan(plan: ArchiveSpecPlan, workspace_root: &Path) -> Result<
 /// Rewrite the task description's `**Spec:** <path>` line to point at the new
 /// archived path. If the line is missing, the description is returned unchanged.
 /// Returns `None` if no rewrite was needed (line missing or already at the new path).
+/// Tolerates inline annotations in `(...)`, `[...]`, or backticks — the
+/// annotation is preserved by re-attaching it after the new path.
 fn rewrite_spec_line_in_description(
     description: &str,
     old_path: &str,
     new_path: &str,
 ) -> Option<String> {
     // Match the bold-prefixed form used in feature-task descriptions:
-    //   **Spec:** <path>
+    //   **Spec:** <anything until EOL>
     // Case-insensitive on `Spec`. Allow optional trailing whitespace before EOL.
-    let re = Regex::new(r"(?m)^(\s*\*\*Spec:\*\*\s+)([^\s].*?)\s*$").ok()?;
+    let re = Regex::new(r"(?m)^(\s*\*\*Spec:\*\*\s+)(.+?)\s*$").ok()?;
     let mut updated = false;
     let rewritten = re.replace_all(description, |caps: &regex::Captures| {
         let prefix = &caps[1];
         let existing = caps[2].trim();
-        if existing == new_path {
+        // Strip a trailing inline annotation so we can compare the bare path.
+        let existing_path = strip_trailing_annotation(existing).unwrap_or(existing);
+        let existing_path = existing_path
+            .trim_end_matches([',', '.', ';'])
+            .trim()
+            .trim_matches('`');
+        if existing_path == new_path {
             // Already points at the archived path — leave it.
             caps[0].to_string()
-        } else if existing == old_path {
+        } else if existing_path == old_path {
             updated = true;
-            format!("{prefix}{new_path}")
+            // Preserve any trailing inline annotation by re-attaching it.
+            let annotation_suffix = if existing.len() > existing_path.len() {
+                &existing[existing_path.len()..]
+            } else {
+                ""
+            };
+            format!("{prefix}{new_path}{annotation_suffix}")
         } else {
             // Some other spec line, leave it alone.
             caps[0].to_string()
@@ -1678,129 +1770,349 @@ fn rewrite_spec_line_in_description(
     }
 }
 
-/// Run the spec-archive step for a task that just moved to `done`. The caller
-/// must have already updated `env.task` to reflect the new `done` status.
-/// Failures are surfaced as a `[feature-task-progress-checklist]` comment and
-/// a blocked envelope — the task stays at `done` (the move is idempotent and
-/// can be retried on the next post-merge run), but the lobster records the
-/// failure so it's visible in the heartbeat.
-fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
-    let Some(spec) = product_spec(&env.task) else {
-        env.action_taken = "post_merge_no_spec_to_archive".to_string();
-        return Ok(env);
+/// Attempt to archive the task's referenced spec for a task that has reached
+/// `done`. This is the pure decision + filesystem step shared by the
+/// done-transition trigger and the reconciliation sweep. It does **not**
+/// issue API calls; the caller is responsible for translating the
+/// [`ArchiveOutcome`] into envelope actions, description rewrites, and
+/// task comments.
+///
+/// Idempotency:
+/// - If the destination already exists with content matching the source,
+///   returns [`ArchiveOutcome::AlreadyArchived`].
+/// - If the destination already exists with **different** content, returns
+///   [`ArchiveOutcome::Conflict`] and leaves both files in place.
+/// - Otherwise renames the source to the destination and returns
+///   [`ArchiveOutcome::Moved`].
+///
+/// Retryable errors (e.g. `fs::rename` failure due to permission/disk)
+/// surface as [`ArchiveOutcome::Retryable`] rather than panicking — the
+/// task must stay `done` and the next sweep will retry.
+fn archive_task_spec_for_done_task(
+    task: &Task,
+    workspace_root: &Path,
+) -> ArchiveOutcome {
+    let Some(spec) = product_spec(task) else {
+        return ArchiveOutcome::NotApplicable {
+            reason: ArchiveSkipReason::UnparseableSpecLine,
+        };
     };
     let plan = plan_task_spec_archive(Some(&spec.path));
-    if matches!(
-        plan,
-        ArchiveSpecPlan::MissingSpecRef
-            | ArchiveSpecPlan::NotTaskSpec
-            | ArchiveSpecPlan::AlreadyArchived
-            | ArchiveSpecPlan::OpenSpecCannotArchive
-    ) {
-        env.action_taken = format!("post_merge_archive_noop_{}", plan_name(&plan));
-        return Ok(env);
-    }
+    let (from_rel, to_rel) = match &plan {
+        ArchiveSpecPlan::Move { from_rel, to_rel, .. } => (from_rel.clone(), to_rel.clone()),
+        ArchiveSpecPlan::AlreadyArchived => {
+            return ArchiveOutcome::AlreadyArchived {
+                to_rel: spec.path.clone(),
+            };
+        }
+        ArchiveSpecPlan::OpenSpecCannotArchive => {
+            return ArchiveOutcome::NotApplicable {
+                reason: ArchiveSkipReason::OpenSpecCannotArchive,
+            };
+        }
+        ArchiveSpecPlan::NotTaskSpec => {
+            return ArchiveOutcome::NotApplicable {
+                reason: ArchiveSkipReason::NotTaskSpec,
+            };
+        }
+        ArchiveSpecPlan::MissingSpecRef => {
+            return ArchiveOutcome::NotApplicable {
+                reason: ArchiveSkipReason::MissingSpecRef,
+            };
+        }
+    };
 
-    let resolved = match resolve_archive_plan(plan, workspace_root(args)) {
+    let resolved = match resolve_archive_plan(plan, workspace_root) {
         Ok(p) => p,
         Err(err) => {
-            return Ok(archive_block(
-                args,
-                env,
-                format!("Failed to resolve spec archive plan: {err}."),
-            ));
+            return ArchiveOutcome::Retryable {
+                from_rel,
+                to_rel,
+                reason: format!("resolve archive plan: {err}"),
+            };
         }
     };
     let ArchiveSpecPlan::Move {
         from_abs,
         to_abs,
-        from_rel,
-        to_rel,
+        ..
     } = resolved
     else {
-        return Ok(env);
+        return ArchiveOutcome::NotApplicable {
+            reason: ArchiveSkipReason::NotTaskSpec,
+        };
     };
 
-    if args.dry_run {
-        env.action_taken = "would_archive_task_spec".to_string();
-        return Ok(env);
-    }
-
-    // Idempotency check: if destination already exists and matches, skip the move.
     if to_abs.exists() {
-        // File already in done/ — rewrite the spec line and exit.
-        if let Some(new_desc) = rewrite_spec_line_in_description(
-            env.task.description.as_deref().unwrap_or(""),
-            &from_rel,
-            &to_rel,
-        ) {
-            match api_patch::<Task>(
-                &args.base_url,
-                &env.task.id,
-                json!({"description": new_desc}),
-            ) {
-                Ok(_) => {
-                    env.task = api_get_task(&args.base_url, &env.task.id)?;
-                    env.action_taken = "post_merge_archive_already_present".to_string();
-                }
-                Err(err) => return Err(err),
-            }
+        // Pre-existing destination. Compare content; only call it AlreadyArchived
+        // if the content matches the source. Otherwise leave both files in place
+        // and surface a Conflict.
+        let source_matches = match (fs::read(&from_abs), fs::read(&to_abs)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        };
+        if source_matches {
+            return ArchiveOutcome::AlreadyArchived { to_rel };
         }
-        return Ok(env);
+        return ArchiveOutcome::Conflict { from_rel, to_rel };
     }
 
-    fs::rename(&from_abs, &to_abs).with_context(|| {
-        format!(
-            "moving task spec from `{}` to `{}`",
-            from_abs.display(),
-            to_abs.display()
-        )
-    })?;
-
-    // Update the task description to point at the archived path.
-    let description = env.task.description.clone().unwrap_or_default();
-    let new_description =
-        rewrite_spec_line_in_description(&description, &from_rel, &to_rel).unwrap_or(description);
-    if new_description != env.task.description.clone().unwrap_or_default() {
-        api_patch::<Task>(
-            &args.base_url,
-            &env.task.id,
-            json!({"description": new_description}),
-        )?;
-        env.task = api_get_task(&args.base_url, &env.task.id)?;
+    if let Err(err) = fs::rename(&from_abs, &to_abs) {
+        return ArchiveOutcome::Retryable {
+            from_rel,
+            to_rel,
+            reason: format!("rename: {err}"),
+        };
     }
 
-    env.action_taken = "post_merge_archived_task_spec".to_string();
+    ArchiveOutcome::Moved { from_rel, to_rel }
+}
+
+/// Run the spec-archive step for a task that just moved to `done`. The caller
+/// must have already updated `env.task` to reflect the new `done` status.
+/// Behaviour:
+/// - `Moved` / `AlreadyArchived` → rewrite the task description, refresh the
+///   in-memory task, mark `action_taken`, and return.
+/// - `NotApplicable` → log a structured noop action; no comment.
+/// - `Retryable` → post a `[spec-archive-retryable]` task comment, set the
+///   lobster-state failure fingerprint, do **not** revert the task status.
+/// - `Conflict` → post a `[spec-archive-conflict]` task comment and leave the
+///   task alone; the sweep will not retry until a human resolves the conflict.
+fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
+    let outcome = archive_task_spec_for_done_task(&env.task, workspace_root(args));
+    apply_archive_outcome(&mut env, args, &outcome);
     Ok(env)
 }
 
-fn plan_name(plan: &ArchiveSpecPlan) -> &'static str {
-    match plan {
-        ArchiveSpecPlan::Move { .. } => "move",
-        ArchiveSpecPlan::AlreadyArchived => "already_archived",
-        ArchiveSpecPlan::OpenSpecCannotArchive => "open_spec_cannot_archive",
-        ArchiveSpecPlan::NotTaskSpec => "not_task_spec",
-        ArchiveSpecPlan::MissingSpecRef => "missing_spec_ref",
+/// Apply an [`ArchiveOutcome`] to the envelope: rewrite the description when
+/// appropriate, post task comments on retryable / conflict outcomes, and
+/// record a structured `action_taken` for the heartbeat summary.
+fn apply_archive_outcome(env: &mut Envelope, args: &StageArgs, outcome: &ArchiveOutcome) {
+    match outcome {
+        ArchiveOutcome::Moved { from_rel, to_rel } => {
+            rewrite_description_and_refresh(env, args, from_rel, to_rel);
+            env.action_taken = "post_merge_archived_task_spec".to_string();
+        }
+        ArchiveOutcome::AlreadyArchived { to_rel } => {
+            let from_rel = to_in_progress_relative(to_rel);
+            rewrite_description_and_refresh(env, args, &from_rel, to_rel);
+            env.action_taken = "post_merge_archive_already_present".to_string();
+        }
+        ArchiveOutcome::NotApplicable { reason } => {
+            env.action_taken = format!("post_merge_archive_noop_{}", reason.as_tag());
+        }
+        ArchiveOutcome::Retryable {
+            from_rel,
+            to_rel,
+            reason,
+        } => {
+            post_spec_archive_retryable(args, env, from_rel, to_rel, reason);
+        }
+        ArchiveOutcome::Conflict { from_rel, to_rel } => {
+            post_spec_archive_conflict(args, env, from_rel, to_rel);
+        }
     }
 }
 
-fn archive_block(args: &StageArgs, mut env: Envelope, message: String) -> Envelope {
-    if !args.dry_run {
-        let fingerprint = message.clone();
-        if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
-            env.lobster_state.failure_fingerprint = Some(fingerprint.clone());
-            let _ = add_comment(
-                &args.base_url,
-                &env.task.id,
-                &format!("[feature-task-progress-checklist]\n{message}"),
-            );
-            let _ = write_state(&args.base_url, &env.task.id, &env.lobster_state, None);
+fn to_in_progress_relative(to_rel: &str) -> String {
+    if let Some(suffix) = to_rel.strip_prefix(TASK_SPECS_DONE_DIR) {
+        format!("{TASK_SPECS_IN_PROGRESS_DIR}{suffix}")
+    } else {
+        to_rel.to_string()
+    }
+}
+
+fn rewrite_description_and_refresh(
+    env: &mut Envelope,
+    args: &StageArgs,
+    from_rel: &str,
+    to_rel: &str,
+) {
+    if args.dry_run {
+        env.action_taken = "would_archive_task_spec".to_string();
+        return;
+    }
+    let description = env.task.description.clone().unwrap_or_default();
+    let new_description = match rewrite_spec_line_in_description(&description, from_rel, to_rel) {
+        Some(d) => d,
+        None => return,
+    };
+    if new_description == description {
+        return;
+    }
+    if let Err(err) = api_patch::<Task>(
+        &args.base_url,
+        &env.task.id,
+        json!({"description": new_description}),
+    ) {
+        env.failures.push(format!("description rewrite failed: {err}"));
+        return;
+    }
+    if let Err(err) = api_get_task(&args.base_url, &env.task.id).map(|t| env.task = t) {
+        env.failures.push(format!("refresh after rewrite failed: {err}"));
+    }
+}
+
+fn post_spec_archive_retryable(
+    args: &StageArgs,
+    env: &mut Envelope,
+    from_rel: &str,
+    to_rel: &str,
+    reason: &str,
+) {
+    env.action_taken = "post_merge_archive_retryable".to_string();
+    env.criteria_met = false;
+    env.failures.push(format!("spec archive retryable: {reason}"));
+    if args.dry_run {
+        return;
+    }
+    let fingerprint = format!("spec_archive_retryable:{from_rel}:{to_rel}:{reason}");
+    if env.lobster_state.failure_fingerprint.as_deref() == Some(&fingerprint) {
+        return;
+    }
+    env.lobster_state.failure_fingerprint = Some(fingerprint);
+    let body = format!(
+        "[spec-archive-retryable]\nfrom: {from_rel}\nto: {to_rel}\nreason: {reason}\nretry: the next reconciliation sweep will retry automatically; resolve the underlying filesystem access issue to clear.\n"
+    );
+    let _ = add_comment(&args.base_url, &env.task.id, &body);
+    let _ = write_state(&args.base_url, &env.task.id, &env.lobster_state, None);
+}
+
+fn post_spec_archive_conflict(
+    args: &StageArgs,
+    env: &mut Envelope,
+    from_rel: &str,
+    to_rel: &str,
+) {
+    env.action_taken = "post_merge_archive_conflict".to_string();
+    env.criteria_met = false;
+    env.failures
+        .push(format!("spec archive conflict at {to_rel}"));
+    if args.dry_run {
+        return;
+    }
+    let fingerprint = format!("spec_archive_conflict:{from_rel}:{to_rel}");
+    if env.lobster_state.failure_fingerprint.as_deref() == Some(&fingerprint) {
+        return;
+    }
+    env.lobster_state.failure_fingerprint = Some(fingerprint);
+    let body = format!(
+        "[spec-archive-conflict]\nfrom: {from_rel}\nto: {to_rel}\nreason: destination already exists with different content; both files left in place.\naction: resolve the content mismatch and run the reconciliation sweep again.\n"
+    );
+    let _ = add_comment(&args.base_url, &env.task.id, &body);
+    let _ = write_state(&args.base_url, &env.task.id, &env.lobster_state, None);
+}
+
+/// Reconciliation sweep: visit every `status=done` task (optionally filtered
+/// by `--assignee`) and archive any spec still under
+/// `brain/tasks/specs/in-progress/`. Used to close the historical backlog and
+/// to recover when a single `post_merge` run skipped the archive step (e.g.
+/// the recent iCloud/TCC `Operation not permitted` incident). Idempotent —
+/// already-archived specs return `AlreadyArchived` and are no-ops.
+///
+/// Output envelope's `action_taken` is one of:
+/// - `archive_sweep_summary: scanned=<n> moved=<n> already=<n> retryable=<n> conflict=<n> not_applicable=<n>`
+fn archive_done_task_specs_sweep(args: ArchiveDoneTaskSpecsSweepArgs) -> Result<Envelope> {
+    let base_url = args.base_url.trim_end_matches('/').to_string();
+    let assignee_filter = args.assignee.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let tasks = list_done_tasks(&base_url, assignee_filter)?;
+    let mut moved = 0usize;
+    let mut already = 0usize;
+    let mut retryable = 0usize;
+    let mut conflict = 0usize;
+    let mut not_applicable = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    let stage_args = StageArgs {
+        base_url: args.base_url.clone(),
+        dry_run: args.dry_run,
+        repo: args.repo.clone(),
+        workspace_root: args.workspace_root.clone(),
+    };
+    let workspace = workspace_root(&stage_args);
+
+    for task in &tasks {
+        let outcome = archive_task_spec_for_done_task(task, workspace);
+        let mut env = Envelope {
+            task: task.clone(),
+            ..Envelope::default()
+        };
+        apply_archive_outcome(&mut env, &stage_args, &outcome);
+        match &outcome {
+            ArchiveOutcome::Moved { .. } => moved += 1,
+            ArchiveOutcome::AlreadyArchived { .. } => already += 1,
+            ArchiveOutcome::Retryable { from_rel, to_rel, reason } => {
+                retryable += 1;
+                failures.push(format!(
+                    "{} ({} -> {}): {}",
+                    env.task.id, from_rel, to_rel, reason
+                ));
+            }
+            ArchiveOutcome::Conflict { from_rel, to_rel } => {
+                conflict += 1;
+                failures.push(format!(
+                    "{} conflict {} -> {}",
+                    env.task.id, from_rel, to_rel
+                ));
+            }
+            ArchiveOutcome::NotApplicable { .. } => not_applicable += 1,
         }
     }
-    env.criteria_met = false;
-    env.action_taken = "post_merge_archive_failed".to_string();
-    env.failures = vec![message];
-    env
+
+    let envelope = Envelope {
+        criteria_met: retryable == 0 && conflict == 0,
+        already_past: false,
+        action_taken: format!(
+            "archive_sweep_summary: scanned={} moved={} already={} retryable={} conflict={} not_applicable={}",
+            tasks.len(),
+            moved,
+            already,
+            retryable,
+            conflict,
+            not_applicable
+        ),
+        task: Task::default(),
+        lobster_state: LobsterState::default(),
+        failures,
+    };
+    Ok(envelope)
+}
+
+fn list_done_tasks(base_url: &str, assignee: Option<&str>) -> Result<Vec<Task>> {
+    let mut url = format!("{}/tasks?status=done&limit=10000", base_url);
+    if let Some(a) = assignee {
+        url.push_str("&assignee=");
+        url.push_str(&percent_encode_assignee(a));
+    }
+    let body: Value = ureq::get(&url).call()?.into_json()?;
+    let data = body
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut tasks = Vec::new();
+    for item in data {
+        let task: Task = serde_json::from_value(item)?;
+        tasks.push(task);
+    }
+    Ok(tasks)
+}
+
+/// Percent-encode an assignee filter value. Assignee names are alphanumeric
+/// display names; only a small set of characters can land in the URL: space,
+/// `+`, `&`, `#`. Encode just those to avoid a full URL-escape dependency.
+fn percent_encode_assignee(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            ' ' => out.push_str("%20"),
+            '+' => out.push_str("%2B"),
+            '&' => out.push_str("%26"),
+            '#' => out.push_str("%23"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn is_typescript_spec_path(spec_path: &str) -> bool {
@@ -2684,14 +2996,84 @@ fn product_spec(task: &Task) -> Option<ProductSpecRef> {
     parse_product_spec_ref(&task.description.clone().unwrap_or_default())
 }
 
+/// Parse the `**Spec:**` line from a task description. Tolerates inline
+/// annotations in parens (`(...)`), brackets (`[...]`), backticks (`` `...` ``),
+/// and trailing punctuation that isn't part of the path. Returns `None` only
+/// when the line is genuinely missing or unparseable.
+///
+/// Used both for spec drift detection (where the strict form matters) and for
+/// archival (where we want to survive legacy inline notes). The lenient form
+/// here is intentionally bounded — exotic multi-line / malformed Spec values
+/// still return `None` and surface via the existing `MissingSpecRef` path.
 fn parse_product_spec_ref(text: &str) -> Option<ProductSpecRef> {
-    let re =
-        Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s*`?([^`\s]+(?:\.md|[._]spec\.ts))`?\s*$").unwrap();
-    re.captures(text)
-        .and_then(|cap| cap.get(1))
-        .map(|m| ProductSpecRef {
-            path: m.as_str().to_string(),
-        })
+    let line_re = Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s+(.+?)\s*$").unwrap();
+    let cap = line_re.captures(text)?;
+    let raw = cap.get(1)?.as_str();
+    extract_spec_path_from_line(raw)
+}
+
+/// Extract a spec path from the raw text after `**Spec:**`. Strips:
+///   - backtick-wrapped paths (`` `<path>` ``)
+///   - trailing punctuation (`,`, `.`, `;`)
+///   - one trailing inline annotation in `(...)`, `[...]`, or `` `...` `` form
+///
+/// Returns `None` when the residue is not a parseable spec path.
+fn extract_spec_path_from_line(raw: &str) -> Option<ProductSpecRef> {
+    let mut s = raw.trim();
+    // Strip a single trailing inline annotation: "(...)", "[...]", or "`...`".
+    if let Some(stripped) = strip_trailing_annotation(s) {
+        s = stripped;
+    }
+    // Trim trailing punctuation first (so a trailing `,` doesn't fool the
+    // backtick-wrap detector into seeing a backtick + comma residue).
+    s = s.trim_end_matches([',', '.', ';']);
+    // Strip optional backtick wrapping.
+    if s.starts_with('`') && s.ends_with('`') && s.len() >= 2 {
+        s = &s[1..s.len() - 1];
+    }
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Reject obviously malformed (whitespace, control chars, multi-token) values.
+    if s.chars().any(char::is_whitespace) {
+        return None;
+    }
+    // Reject shell-quoted or otherwise bracketed residue we didn't strip.
+    if matches!(s.chars().next(), Some('(') | Some('[') | Some('{'))
+        || matches!(s.chars().last(), Some(')') | Some(']') | Some('}'))
+    {
+        return None;
+    }
+    // Accept .md or .spec.ts / _spec.ts paths only (matches the existing
+    // strict regex's contract: `[._]spec\.ts` allows either `.` or `_`).
+    let valid_suffix = s.ends_with(".md") || s.ends_with(".spec.ts") || s.ends_with("_spec.ts");
+    if !valid_suffix {
+        return None;
+    }
+    Some(ProductSpecRef {
+        path: s.to_string(),
+    })
+}
+
+fn strip_trailing_annotation(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    if bytes.last().copied() != Some(b')') && bytes.last().copied() != Some(b']') && bytes.last().copied() != Some(b'`') {
+        return None;
+    }
+    let opener = match bytes.last().copied() {
+        Some(b')') => b'(',
+        Some(b']') => b'[',
+        Some(b'`') => b'`',
+        _ => return None,
+    };
+    // Find the matching opener at the same depth from the start. We don't
+    // handle nested parens here; that's exactly the slippery-slope surface
+    // the tech design calls out and we want to leave for human review.
+    if let Some(open_idx) = s.find(opener as char) {
+        return Some(s[..open_idx].trim_end());
+    }
+    None
 }
 
 fn product_spec_approved_by_tom(text: &str) -> bool {
@@ -6204,5 +6586,291 @@ detached
         }
 
         std::env::remove_var("CLIPPY_ENFORCE");
+    }
+
+    // ---- AC1/AC2/AC3/AC4/AC5/AC6: archive_task_spec_for_done_task outcomes ----
+
+    fn task_with_description(desc: &str) -> Task {
+        Task {
+            id: "test-task".to_string(),
+            description: Some(desc.to_string()),
+            ..Task::default()
+        }
+    }
+
+    fn write_in_progress_spec(workspace: &Path, slug: &str, content: &str) -> PathBuf {
+        let dir = workspace.join(TASK_SPECS_IN_PROGRESS_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(slug);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn archive_spec_parses_inline_annotated_spec_line() {
+        // AC3: legacy inline annotation form must remain parseable.
+        let desc = "Some prose.\n\n**Spec:** brain/tasks/specs/in-progress/example.md (legacy inline note)\n\nAC1: ...";
+        let parsed = parse_product_spec_ref(desc).expect("must parse");
+        assert_eq!(
+            parsed.path,
+            "brain/tasks/specs/in-progress/example.md"
+        );
+
+        // Backtick-wrapped path with trailing comma.
+        let desc2 = "**Spec:** `brain/tasks/specs/in-progress/foo.md`,\n";
+        assert_eq!(
+            parse_product_spec_ref(desc2).unwrap().path,
+            "brain/tasks/specs/in-progress/foo.md"
+        );
+
+        // Bracket annotation.
+        let desc3 = "**Spec:** brain/tasks/specs/in-progress/bar.md [archived ticket]";
+        assert_eq!(
+            parse_product_spec_ref(desc3).unwrap().path,
+            "brain/tasks/specs/in-progress/bar.md"
+        );
+
+        // Whitespace-only annotation is still parseable.
+        let desc4 = "**Spec:** brain/tasks/specs/in-progress/baz.md (a b c)";
+        assert_eq!(
+            parse_product_spec_ref(desc4).unwrap().path,
+            "brain/tasks/specs/in-progress/baz.md"
+        );
+    }
+
+    #[test]
+    fn archive_spec_rejects_unparseable_spec_line() {
+        // Multi-token path with whitespace -> reject (returns None).
+        assert!(parse_product_spec_ref("**Spec:** brain/tasks/specs/in-progress/foo bar.md").is_none());
+        // Bracket-only residue (no path component) -> reject.
+        assert!(parse_product_spec_ref("**Spec:** (just a note)").is_none());
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_moves_eligible_spec() {
+        let workspace = tempdir().unwrap();
+        let slug = "happy-path-2026.md";
+        let content = "# happy path\n";
+        write_in_progress_spec(workspace.path(), slug, content);
+
+        let desc = format!("**Spec:** brain/tasks/specs/in-progress/{slug}");
+        let task = task_with_description(&desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        match outcome {
+            ArchiveOutcome::Moved { from_rel, to_rel } => {
+                assert_eq!(from_rel, format!("brain/tasks/specs/in-progress/{slug}"));
+                assert_eq!(to_rel, format!("brain/tasks/specs/done/{slug}"));
+            }
+            other => panic!("expected Moved, got {other:?}"),
+        }
+
+        // File moved; destination content matches source content.
+        let done = workspace.path().join(TASK_SPECS_DONE_DIR).join(slug);
+        assert!(done.exists());
+        assert_eq!(fs::read_to_string(done).unwrap(), content);
+        // Source no longer exists.
+        assert!(!workspace.path().join(TASK_SPECS_IN_PROGRESS_DIR).join(slug).exists());
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_treats_inline_annotation_as_movable() {
+        let workspace = tempdir().unwrap();
+        let slug = "inline-annotated-2026.md";
+        write_in_progress_spec(workspace.path(), slug, "inline content\n");
+
+        let desc = format!(
+            "**Spec:** brain/tasks/specs/in-progress/{slug} (legacy annotation preserved)"
+        );
+        let task = task_with_description(&desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        assert!(matches!(outcome, ArchiveOutcome::Moved { .. }));
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_idempotent_on_pre_existing_destination() {
+        let workspace = tempdir().unwrap();
+        let slug = "idempotent-2026.md";
+        let content = "same content\n";
+        write_in_progress_spec(workspace.path(), slug, content);
+        // Pre-create destination with the same content.
+        let done_dir = workspace.path().join(TASK_SPECS_DONE_DIR);
+        fs::create_dir_all(&done_dir).unwrap();
+        fs::write(done_dir.join(slug), content).unwrap();
+
+        let desc = format!("**Spec:** brain/tasks/specs/in-progress/{slug}");
+        let task = task_with_description(&desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        match outcome {
+            ArchiveOutcome::AlreadyArchived { to_rel } => {
+                assert_eq!(to_rel, format!("brain/tasks/specs/done/{slug}"));
+            }
+            other => panic!("expected AlreadyArchived, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_surfaces_conflict_when_destination_differs() {
+        let workspace = tempdir().unwrap();
+        let slug = "conflict-2026.md";
+        write_in_progress_spec(workspace.path(), slug, "new content\n");
+        let done_dir = workspace.path().join(TASK_SPECS_DONE_DIR);
+        fs::create_dir_all(&done_dir).unwrap();
+        fs::write(done_dir.join(slug), "different content\n").unwrap();
+
+        let desc = format!("**Spec:** brain/tasks/specs/in-progress/{slug}");
+        let task = task_with_description(&desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        match outcome {
+            ArchiveOutcome::Conflict { from_rel, to_rel } => {
+                assert_eq!(from_rel, format!("brain/tasks/specs/in-progress/{slug}"));
+                assert_eq!(to_rel, format!("brain/tasks/specs/done/{slug}"));
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+        // Both files left in place.
+        assert!(workspace.path().join(TASK_SPECS_IN_PROGRESS_DIR).join(slug).exists());
+        assert!(workspace.path().join(TASK_SPECS_DONE_DIR).join(slug).exists());
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_returns_retryable_when_filesystem_fails() {
+        let workspace = tempdir().unwrap();
+        let slug = "fs-fail-2026.md";
+        let in_progress = write_in_progress_spec(workspace.path(), slug, "fs fail content\n");
+        // Make the in-progress file read-only so rename fails on macOS/Linux.
+        let mut perms = fs::metadata(&in_progress).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&in_progress, perms).unwrap();
+
+        let desc = format!("**Spec:** brain/tasks/specs/in-progress/{slug}");
+        let task = task_with_description(&desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+
+        // The file may have been moved to done/ or still be at in-progress/ depending on
+        // whether the readonly bit blocked the rename. Make both paths writable so the
+        // tempdir cleanup doesn't fail. Using PermissionsExt::set_mode avoids the clippy
+        // `permissions_set_readonly_false` warning (set_readonly(false) makes the file
+        // world-writable on Unix).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for candidate in [
+                in_progress.clone(),
+                workspace.path().join(TASK_SPECS_DONE_DIR).join(slug),
+            ] {
+                if let Ok(meta) = fs::metadata(&candidate) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o644);
+                    let _ = fs::set_permissions(&candidate, perms);
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            for candidate in [
+                in_progress.clone(),
+                workspace.path().join(TASK_SPECS_DONE_DIR).join(slug),
+            ] {
+                if let Ok(meta) = fs::metadata(&candidate) {
+                    let mut perms = meta.permissions();
+                    perms.set_readonly(false);
+                    let _ = fs::set_permissions(&candidate, perms);
+                }
+            }
+        }
+
+        // On some filesystems readonly rename still succeeds; only assert Retryable if rename failed.
+        match outcome {
+            ArchiveOutcome::Retryable { .. } => { /* expected when rename fails */ }
+            ArchiveOutcome::Moved { .. } => {
+                // Filesystem permitted the rename despite readonly bit (some FS allow it).
+            }
+            other => panic!("expected Retryable or Moved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_skips_non_task_spec_paths() {
+        let workspace = tempdir().unwrap();
+        // Bookmark spec path is not a task spec.
+        let desc = "**Spec:** brain/bookmarks/specs/example.md";
+        let task = task_with_description(desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        assert!(matches!(
+            outcome,
+            ArchiveOutcome::NotApplicable {
+                reason: ArchiveSkipReason::NotTaskSpec
+            }
+        ));
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_skips_open_spec_paths() {
+        let workspace = tempdir().unwrap();
+        let desc = "**Spec:** brain/tasks/specs/open/example.md";
+        let task = task_with_description(desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        assert!(matches!(
+            outcome,
+            ArchiveOutcome::NotApplicable {
+                reason: ArchiveSkipReason::OpenSpecCannotArchive
+            }
+        ));
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_treats_already_archived_as_noop() {
+        let workspace = tempdir().unwrap();
+        let desc = "**Spec:** brain/tasks/specs/done/example.md";
+        let task = task_with_description(desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        match outcome {
+            ArchiveOutcome::AlreadyArchived { to_rel } => {
+                assert_eq!(to_rel, "brain/tasks/specs/done/example.md");
+            }
+            other => panic!("expected AlreadyArchived, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_task_spec_for_done_task_handles_missing_spec_line() {
+        let workspace = tempdir().unwrap();
+        let desc = "No spec line here.\n\n## Outcome\n...";
+        let task = task_with_description(desc);
+        let outcome = archive_task_spec_for_done_task(&task, workspace.path());
+        assert!(matches!(
+            outcome,
+            ArchiveOutcome::NotApplicable {
+                reason: ArchiveSkipReason::UnparseableSpecLine
+            }
+        ));
+    }
+
+    #[test]
+    fn rewrite_spec_line_in_description_preserves_inline_annotation() {
+        let desc = "**Spec:** brain/tasks/specs/in-progress/foo.md (legacy inline note)";
+        let updated = rewrite_spec_line_in_description(
+            desc,
+            "brain/tasks/specs/in-progress/foo.md",
+            "brain/tasks/specs/done/foo.md",
+        )
+        .expect("must rewrite");
+        assert!(
+            updated.contains("brain/tasks/specs/done/foo.md"),
+            "rewritten: {updated}"
+        );
+        assert!(
+            updated.contains("(legacy inline note)"),
+            "annotation must be preserved: {updated}"
+        );
+    }
+
+    #[test]
+    fn percent_encode_assignee_handles_common_chars() {
+        assert_eq!(percent_encode_assignee("Rowan"), "Rowan");
+        assert_eq!(percent_encode_assignee("Tom Tester"), "Tom%20Tester");
+        assert_eq!(percent_encode_assignee("a+b"), "a%2Bb");
+        assert_eq!(percent_encode_assignee("a&b"), "a%26b");
+        assert_eq!(percent_encode_assignee("a#b"), "a%23b");
     }
 }
