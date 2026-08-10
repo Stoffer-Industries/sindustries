@@ -44,6 +44,9 @@ enum Commands {
     CodeTaskTechDesignCheck(StageArgs),
     CodeTaskReadyChecks(StageArgs),
     CodeTaskVerifyDelivery(StageArgs),
+    /// Reconcile Tom's checked approval marker on open brain task specs into
+    /// the authoritative structured `spec` TaskApproval row.
+    ReconcileBrainSpecApprovals(ReconcileBrainSpecApprovalsArgs),
     /// Reconciliation sweep: visit every task with `status=done` (optionally
     /// filtered by `--assignee`) and archive any spec still under
     /// `brain/tasks/specs/in-progress/`. Used to close the historical backlog
@@ -65,6 +68,16 @@ struct ArchiveDoneTaskSpecsSweepArgs {
     workspace_root: Option<PathBuf>,
     #[arg(long)]
     assignee: Option<String>,
+}
+
+#[derive(Parser, Clone)]
+struct ReconcileBrainSpecApprovalsArgs {
+    #[arg(long, default_value = "http://localhost:4001/api/v1")]
+    base_url: String,
+    #[arg(long, default_value_t = false, action = ArgAction::Set)]
+    dry_run: bool,
+    #[arg(long)]
+    workspace_root: PathBuf,
 }
 
 #[derive(Parser, Clone)]
@@ -269,6 +282,7 @@ fn main() -> Result<()> {
         Commands::CodeTaskTechDesignCheck(args) => code_task_tech_design_check(args)?,
         Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
         Commands::CodeTaskVerifyDelivery(args) => code_task_verify_delivery(args)?,
+        Commands::ReconcileBrainSpecApprovals(args) => reconcile_brain_spec_approvals(args)?,
         Commands::ArchiveDoneTaskSpecsSweep(args) => archive_done_task_specs_sweep(args)?,
         Commands::Analytics(args) => analytics_replay(args)?,
     };
@@ -1422,6 +1436,216 @@ const TASK_SPECS_DIR: &str = "brain/tasks/specs";
 const TASK_SPECS_OPEN_DIR: &str = "brain/tasks/specs/open";
 const TASK_SPECS_IN_PROGRESS_DIR: &str = "brain/tasks/specs/in-progress";
 const TASK_SPECS_DONE_DIR: &str = "brain/tasks/specs/done";
+const BRAIN_SPEC_APPROVAL_NOTE_PREFIX: &str = "Reconciled from checked brain spec";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BrainSpecApprovalPlan {
+    Grant { task_id: String },
+    AlreadyApproved { task_id: String },
+    Unchecked,
+    Revoked { task_id: String },
+    MissingLink,
+    Ambiguous { task_ids: Vec<String> },
+}
+
+/// Parse the single exact task/spec link used by approval reconciliation.
+/// Unlike the normal compatibility parser, duplicate Spec lines are rejected:
+/// a human approval must never be attached through an ambiguous description.
+fn reconciliation_spec_link(task: &Task) -> Option<String> {
+    let description = task.description.as_deref().unwrap_or("");
+    let line_re = Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s+(.+?)\s*$").unwrap();
+    let mut captures = line_re.captures_iter(description);
+    let first = captures.next()?;
+    if captures.next().is_some() {
+        return None;
+    }
+    extract_spec_path_from_line(first.get(1)?.as_str()).map(|spec| normalize_rel_path(&spec.path))
+}
+
+fn plan_brain_spec_approval(
+    spec_path: &str,
+    spec_text: &str,
+    tasks: &[Task],
+) -> BrainSpecApprovalPlan {
+    if !product_spec_approved_by_tom(spec_text) {
+        return BrainSpecApprovalPlan::Unchecked;
+    }
+    let normalized = normalize_rel_path(spec_path);
+    let mut matches: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.task_type.as_deref() == Some("feature"))
+        .filter(|task| reconciliation_spec_link(task).as_deref() == Some(normalized.as_str()))
+        .collect();
+    matches.sort_by(|a, b| a.id.cmp(&b.id));
+    if matches.is_empty() {
+        return BrainSpecApprovalPlan::MissingLink;
+    }
+    if matches.len() > 1 {
+        return BrainSpecApprovalPlan::Ambiguous {
+            task_ids: matches.iter().map(|task| task.id.clone()).collect(),
+        };
+    }
+    let task = matches[0];
+    if spec_is_approved(task) {
+        return BrainSpecApprovalPlan::AlreadyApproved {
+            task_id: task.id.clone(),
+        };
+    }
+    if task
+        .approvals
+        .iter()
+        .any(|approval| approval.approval_type == "spec" && approval.state == "revoked")
+    {
+        return BrainSpecApprovalPlan::Revoked {
+            task_id: task.id.clone(),
+        };
+    }
+    BrainSpecApprovalPlan::Grant {
+        task_id: task.id.clone(),
+    }
+}
+
+fn feature_policy_requires_spec(base_url: &str) -> Result<bool> {
+    let value: Value = api_get(base_url, "/task-types/feature/required-approvals")?;
+    let required = value
+        .get("requiredApprovals")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            anyhow!("feature required-approvals response omitted `requiredApprovals`")
+        })?;
+    Ok(required.iter().any(|value| value.as_str() == Some("spec")))
+}
+
+fn grant_reconciled_spec_approval(base_url: &str, task_id: &str, spec_path: &str) -> Result<()> {
+    let token = std::env::var("TASKS_API_APPROVAL_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            anyhow!("TASKS_API_APPROVAL_TOKEN is required to reconcile checked brain specs")
+        })?;
+    let url = format!(
+        "{}/tasks/{task_id}/approvals",
+        base_url.trim_end_matches('/')
+    );
+    let note = format!("{BRAIN_SPEC_APPROVAL_NOTE_PREFIX} `{spec_path}`.");
+    handle_api_result(
+        ureq::post(&url)
+            .set("Authorization", &format!("Bearer {token}"))
+            .send_json(json!({"type": "spec", "note": note})),
+    )?;
+    Ok(())
+}
+
+/// Scan only `brain/tasks/specs/open/*.md`, map checked specs to one active
+/// feature task, and grant the structured spec approval through the Tasks API.
+/// The API row remains the gate source; revoked rows, missing links, and
+/// ambiguous links are diagnostics and never trigger a write.
+fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Result<Envelope> {
+    if !feature_policy_requires_spec(&args.base_url)? {
+        return Ok(output(
+            true,
+            false,
+            "brain_spec_approval_reconciliation_skipped: feature_policy_has_no_spec_gate",
+            Task::default(),
+            LobsterState::default(),
+            vec![],
+        ));
+    }
+
+    let tasks = list_all_active_tasks(&args.base_url)?;
+    let open_dir = args.workspace_root.join(TASK_SPECS_OPEN_DIR);
+    let entries = fs::read_dir(&open_dir)
+        .with_context(|| format!("reading open task specs directory `{}`", open_dir.display()))?;
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("reading entry in `{}`", open_dir.display()))?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("md") {
+            continue;
+        }
+        if !entry
+            .file_type()
+            .map(|kind| kind.is_file())
+            .unwrap_or(false)
+        {
+            paths.push((path, false));
+        } else {
+            paths.push((path, true));
+        }
+    }
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut checked = 0usize;
+    let mut granted = 0usize;
+    let mut already = 0usize;
+    let mut unchecked = 0usize;
+    let mut failures = Vec::new();
+    for (path, accessible_file) in paths {
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("<invalid>");
+        let spec_rel = format!("{TASK_SPECS_OPEN_DIR}/{file_name}");
+        if !accessible_file {
+            failures.push(format!("Open task spec `{spec_rel}` is not an accessible regular file; no approval granted."));
+            continue;
+        }
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) => {
+                failures.push(format!(
+                    "Could not read open task spec `{spec_rel}`: {err}; no approval granted."
+                ));
+                continue;
+            }
+        };
+        match plan_brain_spec_approval(&spec_rel, &text, &tasks) {
+            BrainSpecApprovalPlan::Unchecked => unchecked += 1,
+            BrainSpecApprovalPlan::AlreadyApproved { .. } => {
+                checked += 1;
+                already += 1;
+            }
+            BrainSpecApprovalPlan::Grant { task_id } => {
+                checked += 1;
+                if args.dry_run {
+                    granted += 1;
+                } else if let Err(err) =
+                    grant_reconciled_spec_approval(&args.base_url, &task_id, &spec_rel)
+                {
+                    failures.push(format!("Could not grant structured `spec` approval for task `{task_id}` linked from `{spec_rel}`: {err}."));
+                } else {
+                    granted += 1;
+                }
+            }
+            BrainSpecApprovalPlan::Revoked { task_id } => {
+                checked += 1;
+                failures.push(format!("Task `{task_id}` has a revoked structured `spec` approval; `{spec_rel}` remains checked, but API revocation is authoritative. Re-check through a fresh human action before granting."));
+            }
+            BrainSpecApprovalPlan::MissingLink => {
+                checked += 1;
+                failures.push(format!("Checked open task spec `{spec_rel}` has no exact, unambiguous `**Spec:**` link from an active feature task requiring `spec`; no approval granted."));
+            }
+            BrainSpecApprovalPlan::Ambiguous { task_ids } => {
+                checked += 1;
+                failures.push(format!("Checked open task spec `{spec_rel}` is linked by multiple active feature tasks ({}); no approval granted.", task_ids.join(", ")));
+            }
+        }
+    }
+
+    Ok(output(
+        failures.is_empty(),
+        false,
+        &format!(
+            "brain_spec_approval_reconciliation: checked={checked} granted={granted} already_approved={already} unchecked={unchecked} failures={}",
+            failures.len()
+        ),
+        Task::default(),
+        LobsterState::default(),
+        failures,
+    ))
+}
+
 const TASK_SPEC_LIFECYCLE_DIRS: [&str; 4] = ["open", "in-progress", "done", "archived"];
 
 // ---- Post-merge worktree cleanup (feature task ba116063) ----
@@ -4353,6 +4577,102 @@ mod tests {
         assert_eq!(
             active,
             vec!["https://github.com/Stoffer-Industries/sindustries/pull/128".to_string()]
+        );
+    }
+
+    // --- brain spec approval reconciliation ---
+    const OPEN_SPEC_PATH: &str = "brain/tasks/specs/open/reconcile-me.md";
+    const CHECKED_SPEC: &str = "# Spec\n\n- [x] **Approved by Tom**\n";
+    const UNCHECKED_SPEC: &str = "# Spec\n\n- [ ] **Approved by Tom**\n";
+
+    fn linked_approval_task(task_type: &str, approvals: Vec<TaskApproval>) -> Task {
+        Task {
+            id: format!("{task_type}-task"),
+            task_type: Some(task_type.to_string()),
+            description: Some(format!("**Spec:** {OPEN_SPEC_PATH}")),
+            approvals,
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn checked_open_task_spec_plans_structured_spec_grant() {
+        let tasks = vec![linked_approval_task("feature", vec![])];
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, CHECKED_SPEC, &tasks),
+            BrainSpecApprovalPlan::Grant {
+                task_id: "feature-task".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn unchecked_open_task_spec_never_plans_grant() {
+        let tasks = vec![linked_approval_task("feature", vec![])];
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, UNCHECKED_SPEC, &tasks),
+            BrainSpecApprovalPlan::Unchecked
+        );
+    }
+
+    #[test]
+    fn already_approved_open_task_spec_is_idempotent() {
+        let tasks = vec![linked_approval_task(
+            "feature",
+            vec![approval_row("spec", "approved")],
+        )];
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, CHECKED_SPEC, &tasks),
+            BrainSpecApprovalPlan::AlreadyApproved {
+                task_id: "feature-task".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn checked_open_task_spec_without_link_fails_closed() {
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, CHECKED_SPEC, &[]),
+            BrainSpecApprovalPlan::MissingLink
+        );
+    }
+
+    #[test]
+    fn checked_open_task_spec_does_not_target_code_tasks() {
+        let tasks = vec![linked_approval_task("code", vec![])];
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, CHECKED_SPEC, &tasks),
+            BrainSpecApprovalPlan::MissingLink
+        );
+    }
+
+    #[test]
+    fn revoked_api_spec_approval_is_not_regranted_from_stale_checkbox() {
+        let tasks = vec![linked_approval_task(
+            "feature",
+            vec![approval_row("spec", "revoked")],
+        )];
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, CHECKED_SPEC, &tasks),
+            BrainSpecApprovalPlan::Revoked {
+                task_id: "feature-task".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_task_spec_links_are_rejected_as_malformed() {
+        let task = Task {
+            task_type: Some("feature".to_string()),
+            description: Some(format!(
+                "**Spec:** {OPEN_SPEC_PATH}\n**Spec:** brain/tasks/specs/open/other.md"
+            )),
+            ..Task::default()
+        };
+        assert!(reconciliation_spec_link(&task).is_none());
+        assert_eq!(
+            plan_brain_spec_approval(OPEN_SPEC_PATH, CHECKED_SPEC, &[task]),
+            BrainSpecApprovalPlan::MissingLink
         );
     }
 

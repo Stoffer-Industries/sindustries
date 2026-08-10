@@ -35,6 +35,29 @@ Both commands must exit zero locally before pushing. If clippy fails, fix the
 warning before requesting review — temporary exceptions must be called out in
 the PR description with a documented rationale.
 
+## Brain checkbox → structured spec approval reconciliation
+
+Before dispatching per-task workflows, `run.py` scans only
+`brain/tasks/specs/open/*.md`. An exact checked marker,
+`- [x] **Approved by Tom**`, is treated as Tom's request to grant the linked
+active feature task's structured `spec` approval. The reconciler requires one
+exact `**Spec:**` link and confirms that the Tasks API policy requires `spec`
+for feature tasks. It then writes through the authenticated approval endpoint;
+the resulting `TaskApproval` row remains the sole workflow gate source.
+
+The sweep is idempotent: an already-approved row produces no API write or
+second audit comment. Unchecked markers, revoked API rows, missing or duplicate
+links, inaccessible files, code tasks, and specs outside the open task-spec
+directory never grant approval and are reported as diagnostics. A revoked API
+row is deliberately not re-approved from a stale checked marker because API
+state is authoritative.
+
+The existing feature-task runner performs this reconciliation once per pass,
+so no separate cron is needed. Its environment must provide Tom's scoped
+`TASKS_API_APPROVAL_TOKEN` (the runner also loads that key from
+`~/.openclaw/.env`); the Tasks API still derives the actor and permitted
+approval type.
+
 ## Lobster PR-body evidence gate (opt-in)
 
 Set `CLIPPY_ENFORCE=true` to make the lobster's `verify_delivery` stage

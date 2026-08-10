@@ -636,7 +636,7 @@ The three workflows share the same Rust binary (feature + code). Gate approvals 
 
 ### Structured approval and authentication contract
 
-`TaskApproval` is the only source of truth for `spec`, `tech_design`, and `qa` gates. Missing or revoked rows fail closed. Legacy `[tech-design-approved] true`, `[qa-ac-verified] true`, and checked `Approved by Tom` text remain historical data only and cannot grant a runtime gate.
+`TaskApproval` is the only source of truth for `spec`, `tech_design`, and `qa` gates. Missing or revoked rows fail closed. Legacy `[tech-design-approved] true` and `[qa-ac-verified] true` comments remain historical data only. One narrow human-write projection is supported for feature specs: the feature-task runner reconciles the exact checked marker `- [x] **Approved by Tom**` from `brain/tasks/specs/open/*.md` into the uniquely linked task's structured `spec` row through the authenticated API. The checkbox never satisfies the gate by itself; unchecked/ambiguous/inaccessible inputs and revoked rows do not write, and the API row remains authoritative. Bookmark, `tech_design`, and `qa` semantics are unchanged.
 
 Browser approval writes require a durable login session:
 
@@ -658,7 +658,7 @@ The `.openclaw/` directory is outside this repo. Any required `.openclaw` change
 
 ## Spec Checksum Safeguards (factory-v2 last grandfathered edit)
 
-After a structured `spec` approval is granted, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The brain spec remains the AC source of truth in `open`; the task description is the source of truth in every later status. Legacy markdown markers may still be manipulated by the drift-resync compatibility machinery, but they do not grant the spec gate—the `TaskApproval` row does.
+After a structured `spec` approval is granted, the task record stores `specChecksum` (sha256 of the canonical AC JSON with sorted keys). The brain spec remains the AC source of truth in `open`; the task description is the source of truth in every later status. The open brain-spec checkbox is an authenticated write surface into the API, not a second gate source. Markdown markers may also be manipulated by the drift-resync compatibility machinery, but only the resulting `TaskApproval` row grants the spec gate.
 
 ### Fluid AC lifecycle state machine
 

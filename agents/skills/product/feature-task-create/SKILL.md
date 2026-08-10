@@ -95,9 +95,14 @@ Key constraints or non-obvious integration points. One paragraph max.
 ```
 
 Spec approval is a structured `TaskApproval` row. After Tom reviews the spec,
-he approves `spec` in the Tasks UI (or an authorized scoped service call does so
-on his behalf). Do not add or toggle an `Approved by Tom` markdown marker; the
-Lobster ignores legacy markers and fails closed on missing/revoked API state.
+he can approve `spec` in the Tasks UI, or check the exact marker
+`- [x] **Approved by Tom**` while the spec is under
+`brain/tasks/specs/open/`. The feature-task runner reconciles that checkbox
+through Tom's scoped Tasks API credential to the uniquely linked feature task.
+The API row remains authoritative: unchecked markers, missing/ambiguous links,
+and revoked rows fail closed, and already-approved rows are not written again.
+Do not use alternate checkbox wording or the marker for bookmark, tech-design,
+or QA approvals.
 
 Do not add a Quinn workstream. If Quinn needs to make `.openclaw` changes, Rowan posts `[openclaw-needed]` via the established handoff. The pr-open skill fills in Branch and PR when Rowan opens a PR.
 
