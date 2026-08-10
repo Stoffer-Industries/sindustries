@@ -96,7 +96,14 @@ const schema = z.object({
   OTEL_SDK_DISABLED: z.string().optional()
 }).superRefine((cfg, ctx) => {
   if (cfg.X_CLIENT === 'real') {
-    for (const key of ['X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_TOKEN_SECRET', 'X_ACTOR_SECRET'] as const) {
+    // X_ACTOR_SECRET is intentionally NOT in this list: it is an opt-in
+    // x-actor-secret header gate for the content-scheduler X publish path
+    // (see src/routes/contentSchedulerPublish.ts). When unset, that gate
+    // passes through (dev / local / CI), matching the route contract
+    // covered by test/contentScheduler.test.ts. Adding it here would
+    // block boot whenever X_CLIENT=real without the secret configured
+    // (e.g. the local prodlike .env, which intentionally omits it).
+    for (const key of ['X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_TOKEN_SECRET'] as const) {
       if (!cfg[key]) {
         ctx.addIssue({
           code: 'custom',
