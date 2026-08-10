@@ -626,7 +626,8 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
           attentionOwners: [
             { id: 'ao-1', taskId: TASK_ID, owner: 'Tom', addedBy: null, note: null, createdAt: new Date() }
           ]
-        })
+        }),
+        attentionOwners: []
       });
 
     const app = createApp();
