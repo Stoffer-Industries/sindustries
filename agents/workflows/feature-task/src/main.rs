@@ -3315,8 +3315,10 @@ fn mirror_task_approval_to_brain_spec_if_needed(
     repo: &Path,
     workspace_root: &Path,
 ) -> Result<()> {
-    let task_description = task.description.clone().unwrap_or_default();
-    if approval_marker_state(&task_description) != ApprovalMarker::Checked {
+    // AC1 (e2aba106): structured TaskApproval rows are the sole source of spec
+    // approval. The legacy `- [x] **Approved by Tom**` description marker is no
+    // longer read here; see `spec_is_approved` for the structured path.
+    if !spec_is_approved(task) {
         return Ok(());
     }
     let Some(spec) = product_spec(task) else {
@@ -4136,7 +4138,7 @@ mod tests {
     }
 
     #[test]
-    fn mirrors_task_approval_marker_to_unapproved_brain_spec() {
+    fn mirrors_structured_spec_approval_to_unapproved_brain_spec() {
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
         let spec_path = workspace.path().join("brain/tasks/specs/example.md");
@@ -4153,7 +4155,6 @@ mod tests {
         let task = Task {
             description: Some(
                 "**Spec:** brain/tasks/specs/example.md
-- [x] **Approved by Tom**
 
 ## Acceptance Criteria
 - [ ] Build it
@@ -4163,6 +4164,7 @@ mod tests {
   ACs: AC1"
                     .to_string(),
             ),
+            approvals: vec![approval_row("spec", "approved")],
             ..Task::default()
         };
 
@@ -4170,6 +4172,38 @@ mod tests {
         let updated = fs::read_to_string(&spec_path).unwrap();
         assert!(brain_spec_approved_by_tom(&updated));
         assert!(updated.contains("## Acceptance Criteria"));
+    }
+
+    #[test]
+    fn mirror_skips_when_no_structured_spec_approval() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
+        let original_brain_spec = "- [ ] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Implementation-ready criteria";
+        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        fs::write(&spec_path, original_brain_spec).unwrap();
+
+        // Description still carries the legacy marker (transition state), but
+        // there is no structured `spec` approval row. Per AC1 the legacy marker
+        // must no longer drive mirror_* — the brain spec must remain untouched.
+        let task = Task {
+            description: Some(
+                "**Spec:** brain/tasks/specs/example.md
+- [x] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Build it"
+                    .to_string(),
+            ),
+            ..Task::default()
+        };
+
+        mirror_task_approval_to_brain_spec_if_needed(&task, repo.path(), workspace.path()).unwrap();
+        let updated = fs::read_to_string(&spec_path).unwrap();
+        assert_eq!(updated, original_brain_spec, "brain spec must be untouched when no structured approval exists");
     }
 
     #[test]
