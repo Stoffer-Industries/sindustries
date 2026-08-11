@@ -365,8 +365,9 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       return badRequest(res, 'INVALID_DEPENDS_ON_IDS', 'dependsOnIds must be an array of UUID strings');
     }
 
-    // Description is passed through verbatim. The legacy `- [x] **Approved by Tom**`
-    // marker is no longer auto-unchecked here — approval state is structured via
+    // Description is passed through verbatim. The legacy task-description
+    // `Approved by Tom` approval marker (the `- [x]` checkbox line) is no
+    // longer auto-unchecked here — approval state is structured via
     // `TaskApproval` rows; the lobster revokes those rows on drift and Tom re-issues
     // approval via the structured endpoint. See task `e2aba106`.
     const nextDescription = description === undefined ? undefined : description || null;

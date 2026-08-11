@@ -38,8 +38,9 @@ the PR description with a documented rationale.
 ## Brain checkbox → structured spec approval reconciliation
 
 Before dispatching per-task workflows, `run.py` scans only
-`brain/tasks/specs/open/*.md`. An exact checked marker,
-`- [x] **Approved by Tom**`, is treated as Tom's request to grant the linked
+`brain/tasks/specs/open/*.md`. An exact checked marker — the
+`- [x]` checkbox line whose label is `**Approved by Tom**` in a brain-spec
+file — is treated as Tom's request to grant the linked
 active feature task's structured `spec` approval. The reconciler requires one
 exact `**Spec:**` link and confirms that the Tasks API policy requires `spec`
 for feature tasks. It then writes through the authenticated approval endpoint;
