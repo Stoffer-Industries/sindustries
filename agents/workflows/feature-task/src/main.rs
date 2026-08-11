@@ -506,9 +506,11 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let failures = spec_failures(&env.task, &args.repo, workspace_root(&args));
-    if failures.is_empty() && !args.dry_run {
-        mirror_task_approval_to_brain_spec_if_needed(&env.task, &args.repo, workspace_root(&args))?;
-    }
+    // The legacy task-description approval mirror (mirror_task_approval_to_brain_spec_if_needed)
+    // is removed as part of e2aba106 WS2: approval state is now exclusively structured TaskApproval
+    // rows, and the brain spec file marker is owned by the brain-spec workflow, not the task
+    // description. The auto-mirror previously rewrote the brain spec file from the task-description
+    // checkbox; with the task-description checkbox gone, there is nothing to mirror from.
     transition_or_block(
         &args,
         env,
@@ -1467,7 +1469,7 @@ fn plan_brain_spec_approval(
     spec_text: &str,
     tasks: &[Task],
 ) -> BrainSpecApprovalPlan {
-    if !product_spec_approved_by_tom(spec_text) {
+    if !brain_spec_approved_by_tom(spec_text) {
         return BrainSpecApprovalPlan::Unchecked;
     }
     let normalized = normalize_rel_path(spec_path);
@@ -1801,7 +1803,7 @@ fn plan_chat_spec_approval_move(spec_path: &str, spec_text: &str) -> ChatApprova
     let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
     let in_progress_prefix = format!("{TASK_SPECS_IN_PROGRESS_DIR}/");
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
-        if suffix.is_empty() || suffix.contains('/') || !product_spec_approved_by_tom(spec_text) {
+        if suffix.is_empty() || suffix.contains('/') || !brain_spec_approved_by_tom(spec_text) {
             return ChatApprovalMovePlan::Noop;
         }
         let suffix = suffix.to_string();
@@ -2574,13 +2576,12 @@ fn resync_spec_and_reset_checksum(
         });
     }
     let new_checksum = acceptance_criteria_checksum(&ac_lines);
-    // Strip the workflow approval marker before writing to the spec file — it
-    // lives in the task description only and must not appear as a spec AC.
-    let spec_ac_lines: Vec<String> = ac_lines
-        .iter()
-        .filter(|l| l.trim() != "**Approved by Tom**")
-        .cloned()
-        .collect();
+    // The legacy `- [x] **Approved by Tom**` marker no longer lives in task
+    // descriptions (e2aba106 WS1 froze the description-handling surface and
+    // WS2 removed the lobster's reads/writes of the task-description checkbox).
+    // Pass AC lines through verbatim so the brain spec's AC section is rebuilt
+    // from the same source the checksum was computed over.
+    let spec_ac_lines: Vec<String> = ac_lines.to_vec();
 
     // 2b. Validate the product spec still claims to be approved by Tom before we
     //     overwrite its AC section. If Tom has since flipped the spec to
@@ -2602,7 +2603,7 @@ fn resync_spec_and_reset_checksum(
             });
         }
     };
-    if !product_spec_approved_by_tom(&pre_existing_text) {
+    if !brain_spec_approved_by_tom(&pre_existing_text) {
         return Ok(Envelope {
             criteria_met: false,
             already_past: env.already_past,
@@ -2743,7 +2744,10 @@ fn block_on_spec_drift_fluid(
         env.failures = raw_failures;
         return Ok(Some(env));
     }
-    let description = env.task.description.clone().unwrap_or_default();
+    // e2aba106 WS2: the legacy description PATCH that auto-unchecked
+    // `**Approved by Tom**` is gone. The TypeScript-spec branch still surfaces a
+    // hard block (Quinn must resync manually via `[spec-resynced]`); the message
+    // wording is unchanged so existing `[spec-resynced]`-bound tests stay valid.
     if task_product_spec_is_typescript_spec(&env.task) {
         env.criteria_met = false;
         env.action_taken = format!("{action}_blocked_spec_drift");
@@ -2755,137 +2759,138 @@ fn block_on_spec_drift_fluid(
         env.failures = failures;
         return Ok(Some(env));
     }
-    let marker_state = approval_marker_state(&description);
-    match marker_state {
-        ApprovalMarker::Checked => {
-            // Drift + checked marker. Three sub-cases:
-            //   (a) WE previously unchecked this marker (state flag set) and Tom
-            //       has now re-checked it on the new spec — run resync.
-            //   (b) A `[spec-resynced]` comment exists whose bound fingerprint
-            //       matches the current drift episode and whose checksum matches
-            //       the stored checksum — trust the comment, allow progress.
-            //   (c) Otherwise this is the first time we've seen this drift
-            //       episode: uncheck the marker, post a checklist, and set the
-            //       uncheck-applied flag so a later re-check triggers resync.
-            //       Stale `[spec-resynced]` comments from previous episodes are
-            //       ignored here — they fall into the uncheck branch.
-            let fingerprint = drift_episode_fingerprint(&raw_failures);
-            let we_actioned_episode = env.lobster_state.spec_drift_uncheck_applied == Some(true);
-            let fresh_resync_record = latest_resync_record_matches_drift(
-                &env.task,
-                &fingerprint,
-                env.task.spec_checksum.as_deref(),
-            );
+    // e2aba106 WS2: approval state is now exclusively structured TaskApproval
+    // rows. The legacy `- [x] **Approved by Tom**` checkbox is no longer read
+    // from the task description; the lobster looks up the `spec` approval row
+    // and routes the drift response through the structured API.
+    let spec_approval = env
+        .task
+        .approvals
+        .iter()
+        .find(|a| a.approval_type == "spec");
+    let spec_is_approved = spec_approval.is_some_and(|a| a.state == "approved");
+    if spec_is_approved {
+        // Drift + approved spec. Three sub-cases:
+        //   (a) WE previously revoked this approval (state flag set) and Tom
+        //       has now re-approved it on the new spec — run resync.
+        //   (b) A `[spec-resynced]` comment exists whose bound fingerprint
+        //       matches the current drift episode and whose checksum matches
+        //       the stored checksum — trust the comment, allow progress.
+        //   (c) Otherwise this is the first time we've seen this drift
+        //       episode: revoke the spec approval via DELETE, post a
+        //       checklist, and set the uncheck-applied flag so a later
+        //       re-approval triggers resync. Stale `[spec-resynced]`
+        //       comments from previous episodes fall into the revoke branch.
+        let fingerprint = drift_episode_fingerprint(&raw_failures);
+        let we_actioned_episode = env.lobster_state.spec_drift_uncheck_applied == Some(true);
+        let fresh_resync_record = latest_resync_record_matches_drift(
+            &env.task,
+            &fingerprint,
+            env.task.spec_checksum.as_deref(),
+        );
 
-            // Dry-run fast path: report what would happen without writing.
-            if args.dry_run {
-                if we_actioned_episode || fresh_resync_record {
-                    return Ok(None);
-                }
-                env.criteria_met = false;
-                env.action_taken = format!("{action}_blocked_spec_drift");
-                env.failures = raw_failures;
-                return Ok(Some(env));
-            }
-
+        // Dry-run fast path: report what would happen without writing.
+        if args.dry_run {
             if we_actioned_episode || fresh_resync_record {
-                // Case (a) or (b): resync is appropriate.
-                return match resync_spec_and_reset_checksum(
-                    args,
-                    env,
-                    &raw_failures,
-                    &fingerprint,
-                    &args.repo,
-                ) {
-                    Ok(resynced) => {
-                        // Return Some in both the success and soft-failure cases so
-                        // the caller can update its in-memory env with the fresh
-                        // task and lobster_state. Callers check criteria_met to
-                        // decide whether to bail out or continue.
-                        Ok(Some(resynced))
-                    }
-                    Err(err) => Err(err),
-                };
+                return Ok(None);
             }
-
-            // Case (c): first encounter of this drift episode. Uncheck the
-            // marker, post a checklist comment summarising the drift, and
-            // set the uncheck-applied flag. Once Tom re-checks we will
-            // resync on the next heartbeat.
-            let mut failures = raw_failures.clone();
-            failures.push(
-                "Approval marker `**Approved by Tom**` is still checked and `[spec-resynced]` has not been posted. \
-                 Quinn will uncheck the marker and reset specChecksum; after that, Tom must re-check `**Approved by Tom**` on the new spec."
-                    .to_string(),
-            );
-            env.criteria_met = false;
-            env.action_taken = format!("{action}_blocked_spec_drift");
-            env.failures = failures.clone();
-            // Idempotency: only PATCH + comment when the fingerprint changes.
-            let joined_fingerprint = failures.join("\n");
-            let already_acted = env.lobster_state.failure_fingerprint.as_deref()
-                == Some(&joined_fingerprint)
-                && env
-                    .lobster_state
-                    .spec_drift_uncheck_applied
-                    .unwrap_or(false);
-            if !already_acted {
-                if let Some(patched) = uncheck_approval_marker(&description) {
-                    if let Err(err) = api_patch::<Task>(
-                        &args.base_url,
-                        &env.task.id,
-                        json!({"description": patched}),
-                    ) {
-                        if let Some(message) = spec_checksum_mismatch_message(&err) {
-                            // Tasks-api rejected the PATCH (e.g. ACs also changed).
-                            // Surface that as a hard block.
-                            env.criteria_met = false;
-                            env.action_taken = format!("{action}_blocked_spec_drift");
-                            env.failures = vec![message];
-                            return Ok(Some(env));
-                        }
-                        return Err(err);
-                    }
-                    env.task = api_get_task(&args.base_url, &env.task.id)?;
-                    env.lobster_state.spec_drift_uncheck_applied = Some(true);
-                }
-            }
-            let checklist = format!(
-                "[feature-task-progress-checklist]\n{}\n",
-                failures.join("\n")
-            );
-            if env.lobster_state.failure_fingerprint.as_deref() != Some(&joined_fingerprint) {
-                if let Err(err) = add_comment(&args.base_url, &env.task.id, &checklist) {
-                    if let Some(message) = spec_checksum_mismatch_message(&err) {
-                        // Should not happen because comments are now drift-tolerant,
-                        // but treat any 409 as a hard block anyway.
-                        env.criteria_met = false;
-                        env.action_taken = format!("{action}_blocked_spec_drift");
-                        env.failures = vec![message];
-                        return Ok(Some(env));
-                    }
-                    return Err(err);
-                }
-                env.lobster_state.failure_fingerprint = Some(joined_fingerprint);
-            }
-            write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
-            Ok(Some(env))
-        }
-        ApprovalMarker::Unchecked => {
-            env.criteria_met = false;
-            env.action_taken = format!("{action}_blocked_spec_drift");
-            env.failures = vec!["Approval marker `**Approved by Tom**` is unchecked. \
-                 Waiting for Tom to re-check it before drift can be re-evaluated."
-                .to_string()];
-            Ok(Some(env))
-        }
-        ApprovalMarker::Absent => {
-            // No marker present; legacy hard block behaviour.
             env.criteria_met = false;
             env.action_taken = format!("{action}_blocked_spec_drift");
             env.failures = raw_failures;
-            Ok(Some(env))
+            return Ok(Some(env));
         }
+
+        if we_actioned_episode || fresh_resync_record {
+            // Case (a) or (b): resync is appropriate.
+            return match resync_spec_and_reset_checksum(
+                args,
+                env,
+                &raw_failures,
+                &fingerprint,
+                &args.repo,
+            ) {
+                Ok(resynced) => {
+                    // Return Some in both success and soft-failure cases so
+                    // the caller can update its in-memory env with the fresh
+                    // task and lobster_state. Callers check criteria_met to
+                    // decide whether to bail out or continue.
+                    Ok(Some(resynced))
+                }
+                Err(err) => Err(err),
+            };
+        }
+
+        // Case (c): first encounter of this drift episode. Revoke the spec
+        // approval via DELETE (replaces the legacy description PATCH that
+        // auto-unchecked the marker), post a checklist comment summarising
+        // the drift, and set the uncheck-applied flag. Once Tom re-approves
+        // via POST /tasks/:id/approvals, the next heartbeat will resync.
+        let mut failures = raw_failures.clone();
+        failures.push(
+            "Structured `spec` TaskApproval is still approved and `[spec-resynced]` has not been posted. \
+             Quinn will revoke the structured approval; after that, Tom must re-approve `spec` via POST /tasks/:id/approvals on the new spec."
+                .to_string(),
+        );
+        env.criteria_met = false;
+        env.action_taken = format!("{action}_blocked_spec_drift");
+        env.failures = failures.clone();
+        // Idempotency: only DELETE + comment when the fingerprint changes.
+        let joined_fingerprint = failures.join("\n");
+        let already_acted = env.lobster_state.failure_fingerprint.as_deref()
+            == Some(&joined_fingerprint)
+            && env
+                .lobster_state
+                .spec_drift_uncheck_applied
+                .unwrap_or(false);
+        if !already_acted {
+            if let Err(err) = api_delete(
+                &args.base_url,
+                &format!("/tasks/{}/approvals/spec", env.task.id),
+            ) {
+                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                    // Tasks-api rejected the DELETE (e.g. ACs also changed).
+                    // Surface that as a hard block.
+                    env.criteria_met = false;
+                    env.action_taken = format!("{action}_blocked_spec_drift");
+                    env.failures = vec![message];
+                    return Ok(Some(env));
+                }
+                return Err(err);
+            }
+            env.task = api_get_task(&args.base_url, &env.task.id)?;
+            env.lobster_state.spec_drift_uncheck_applied = Some(true);
+        }
+        let checklist = format!(
+            "[feature-task-progress-checklist]\n{}\n",
+            failures.join("\n")
+        );
+        if env.lobster_state.failure_fingerprint.as_deref() != Some(&joined_fingerprint) {
+            if let Err(err) = add_comment(&args.base_url, &env.task.id, &checklist) {
+                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                    // Should not happen because comments are now drift-tolerant,
+                    // but treat any 409 as a hard block anyway.
+                    env.criteria_met = false;
+                    env.action_taken = format!("{action}_blocked_spec_drift");
+                    env.failures = vec![message];
+                    return Ok(Some(env));
+                }
+                return Err(err);
+            }
+            env.lobster_state.failure_fingerprint = Some(joined_fingerprint);
+        }
+        write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+        Ok(Some(env))
+    } else {
+        // No approved `spec` TaskApproval (either revoked or absent).
+        // Hard-block until Tom approves via the structured API.
+        env.criteria_met = false;
+        env.action_taken = format!("{action}_blocked_spec_drift");
+        env.failures = vec![
+            "Structured `spec` TaskApproval is missing or revoked. \
+             Approve via POST /tasks/:id/approvals (type=spec) before drift can be re-evaluated."
+                .to_string(),
+        ];
+        Ok(Some(env))
     }
 }
 
@@ -2991,6 +2996,13 @@ fn api_patch<T: for<'de> Deserialize<'de>>(
     let value: Value = handle_api_result(ureq::patch(&url).send_json(payload))?;
     serde_json::from_value(value.get("data").cloned().unwrap_or(value))
         .context("decode API patch response")
+}
+
+/// DELETE wrapper used to revoke a structured TaskApproval row
+/// (e.g. `DELETE /tasks/:id/approvals/spec` when spec drift is detected).
+fn api_delete(base_url: &str, path: &str) -> Result<Value> {
+    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    handle_api_result(ureq::delete(&url).call())
 }
 
 fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
@@ -3300,86 +3312,12 @@ fn strip_trailing_annotation(s: &str) -> Option<&str> {
     None
 }
 
-fn product_spec_approved_by_tom(text: &str) -> bool {
+fn brain_spec_approved_by_tom(text: &str) -> bool {
     Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$")
         .unwrap()
         .is_match(text)
 }
 
-fn mirror_task_approval_to_brain_spec_if_needed(
-    task: &Task,
-    repo: &Path,
-    workspace_root: &Path,
-) -> Result<()> {
-    let task_description = task.description.clone().unwrap_or_default();
-    if approval_marker_state(&task_description) != ApprovalMarker::Checked {
-        return Ok(());
-    }
-    let Some(spec) = product_spec(task) else {
-        return Ok(());
-    };
-    let path = resolve_product_spec_path(&spec.path, repo, workspace_root);
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("reading product spec `{}`", path.display()))?;
-    if product_spec_approved_by_tom(&text) {
-        return Ok(());
-    }
-    let updated = set_approval_marker_checked(&text);
-    fs::write(&path, updated)
-        .with_context(|| format!("writing product spec `{}`", path.display()))?;
-    Ok(())
-}
-
-fn set_approval_marker_checked(text: &str) -> String {
-    let unchecked_re = Regex::new(r"(?m)^\s*-\s*\[\s*\]\s+\*\*Approved by Tom\*\*\s*$")
-        .expect("approval marker regex compiles");
-    if unchecked_re.is_match(text) {
-        return unchecked_re
-            .replace(text, "- [x] **Approved by Tom**")
-            .to_string();
-    }
-    format!(
-        "- [x] **Approved by Tom**
-
-{}",
-        text.trim_start()
-    )
-}
-
-/// State of the `- [x] **Approved by Tom**` marker in a task description.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ApprovalMarker {
-    Checked,
-    Unchecked,
-    Absent,
-}
-
-fn approval_marker_state(description: &str) -> ApprovalMarker {
-    let checked_re = Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
-    if checked_re.is_match(description) {
-        return ApprovalMarker::Checked;
-    }
-    let unchecked_re = Regex::new(r"(?m)^\s*-\s*\[\s\]\s+\*\*Approved by Tom\*\*\s*$").unwrap();
-    if unchecked_re.is_match(description) {
-        return ApprovalMarker::Unchecked;
-    }
-    ApprovalMarker::Absent
-}
-
-/// Return a description with the approval marker toggled from checked to unchecked.
-/// Returns `None` if the marker is not currently in the checked state.
-fn uncheck_approval_marker(description: &str) -> Option<String> {
-    if approval_marker_state(description) != ApprovalMarker::Checked {
-        return None;
-    }
-    let re = Regex::new(r"(?m)^(\s*-\s*)\[[xX]\]\s+(\*\*Approved by Tom\*\*\s*)$").unwrap();
-    Some(
-        re.replace(description, |caps: &regex::Captures| {
-            format!("{}[ ] {}", &caps[1], &caps[2])
-        })
-        .into_owned(),
-    )
-}
 
 /// True if any task comment starts with `[spec-resynced]`.
 ///
@@ -3957,16 +3895,6 @@ mod tests {
         assert_eq!(spec.path, "brain/bookmarks/specs/example.md");
     }
 
-    fn task_with_approval_comment(comment: &str) -> Task {
-        Task {
-            comments: vec![TaskComment {
-                text: Some(comment.to_string()),
-                body: None,
-            }],
-            ..Task::default()
-        }
-    }
-
     // ---- tech_design_waived (task f77b7a60) ----
     //
     // `[tech-design-not-required]` is the code-task lobster's escape hatch for
@@ -4131,57 +4059,7 @@ mod tests {
         assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
     }
 
-    #[test]
-    fn mirrors_task_approval_marker_to_unapproved_brain_spec() {
-        let repo = tempdir().unwrap();
-        let workspace = tempdir().unwrap();
-        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
-        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
-        fs::write(
-            &spec_path,
-            "- [ ] **Approved by Tom**
 
-## Acceptance Criteria
-- [ ] Implementation-ready criteria",
-        )
-        .unwrap();
-
-        let task = Task {
-            description: Some(
-                "**Spec:** brain/tasks/specs/example.md
-- [x] **Approved by Tom**
-
-## Acceptance Criteria
-- [ ] Build it
-
-## Workstreams
-- Owner: Implementer
-  ACs: AC1"
-                    .to_string(),
-            ),
-            ..Task::default()
-        };
-
-        mirror_task_approval_to_brain_spec_if_needed(&task, repo.path(), workspace.path()).unwrap();
-        let updated = fs::read_to_string(&spec_path).unwrap();
-        assert!(product_spec_approved_by_tom(&updated));
-        assert!(updated.contains("## Acceptance Criteria"));
-    }
-
-    #[test]
-    fn set_approval_marker_checked_prepends_when_missing() {
-        let updated = set_approval_marker_checked(
-            "# Spec
-
-## Acceptance Criteria
-- [ ] AC1",
-        );
-        assert!(updated.starts_with(
-            "- [x] **Approved by Tom**
-
-# Spec"
-        ));
-    }
 
     #[test]
     fn resolves_product_specs_relative_to_workspace_root() {
@@ -5080,86 +4958,6 @@ mod tests {
 
     // ---- unchecked_task_ac_labels / ac_labels_in_pr_body / ac_labels_needing_new_pr ----
 
-    // ---- approval marker ----
-
-    #[test]
-    fn approval_marker_detects_checked_variant() {
-        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1\n";
-        assert_eq!(approval_marker_state(description), ApprovalMarker::Checked);
-    }
-
-    #[test]
-    fn approval_marker_detects_uppercase_checkbox() {
-        let description = "- [X] **Approved by Tom**";
-        assert_eq!(approval_marker_state(description), ApprovalMarker::Checked);
-    }
-
-    #[test]
-    fn approval_marker_detects_unchecked_variant() {
-        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1\n";
-        assert_eq!(
-            approval_marker_state(description),
-            ApprovalMarker::Unchecked
-        );
-    }
-
-    #[test]
-    fn approval_marker_is_absent_when_line_missing() {
-        let description = "## Acceptance Criteria\n- [ ] AC1\n";
-        assert_eq!(approval_marker_state(description), ApprovalMarker::Absent);
-    }
-
-    #[test]
-    fn uncheck_approval_marker_toggles_checkbox_only() {
-        let description =
-            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n";
-        let updated = uncheck_approval_marker(description).expect("should uncheck");
-        assert_eq!(approval_marker_state(&updated), ApprovalMarker::Unchecked);
-        assert!(updated.contains("- [ ] **Approved by Tom**"));
-        // AC text must be preserved verbatim
-        assert!(updated.contains("- [ ] AC1: Build it"));
-    }
-
-    #[test]
-    fn uncheck_approval_marker_returns_none_when_already_unchecked() {
-        let description = "- [ ] **Approved by Tom**\n";
-        assert!(uncheck_approval_marker(description).is_none());
-    }
-
-    #[test]
-    fn uncheck_approval_marker_returns_none_when_absent() {
-        let description = "## Acceptance Criteria\n- [ ] AC1\n";
-        assert!(uncheck_approval_marker(description).is_none());
-    }
-
-    #[test]
-    fn spec_resync_signal_present_detects_tagged_comment() {
-        let task = task_with_approval_comment("[spec-resynced] Reset checksum.");
-        assert!(spec_resync_signal_present(&task));
-    }
-
-    #[test]
-    fn spec_resync_signal_absent_without_tag() {
-        let task = task_with_approval_comment("Spec resync happened offline.");
-        assert!(!spec_resync_signal_present(&task));
-    }
-
-    #[test]
-    fn task_is_open_matches_status_only() {
-        #[allow(
-            clippy::field_reassign_with_default,
-            reason = "test fixture builds Task via Default then patches status fields; clearer than struct-update syntax for a 1-field test"
-        )]
-        let task = {
-            let mut task = Task::default();
-            task.status = "open".to_string();
-            assert!(task_is_open(&task));
-            task.status = "ready".to_string();
-            assert!(!task_is_open(&task));
-            task
-        };
-        let _ = task;
-    }
 
     // ---- block_on_spec_drift_fluid ----
 
@@ -5227,7 +5025,10 @@ mod tests {
     }
 
     #[test]
-    fn fluid_drift_legacy_block_when_marker_absent() {
+    fn fluid_drift_legacy_block_when_spec_approval_missing() {
+        // e2aba106 WS2: there is no longer a description-side marker. The drift
+        // gate keys off `task.approvals`. When no `spec` row exists (or the
+        // row is revoked) the gate hard-blocks with the structured message.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5247,7 +5048,6 @@ mod tests {
             spec_checksum: Some(spec_checksum(&approved)),
             ..Task::default()
         };
-        // ensure spec_checksum still differs from the new ACs
         task.spec_checksum = Some(spec_checksum(&approved));
         let env = Envelope {
             criteria_met: true,
@@ -5262,11 +5062,18 @@ mod tests {
         let blocked = result.expect("should block");
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
-        assert!(blocked.failures[0].contains("Spec drift detected"));
+        assert!(
+            blocked.failures[0].contains("Structured `spec` TaskApproval"),
+            "missing-approval drift must surface the structured message; got {:?}",
+            blocked.failures
+        );
     }
 
     #[test]
-    fn fluid_drift_blocks_when_marker_unchecked_waiting_for_tom() {
+    fn fluid_drift_blocks_when_spec_approval_revoked_waiting_for_tom() {
+        // WS2: the unchecked-marker case (ApprovalMarker::Unchecked) collapses
+        // into the same hard-block as the missing-approval case. Both gate on
+        // `task.approvals` not having an approved `spec` row.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5277,12 +5084,14 @@ mod tests {
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-unchecked".to_string(),
-            description: Some(description),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift".to_string(),
+            ),
             status: "ready".to_string(),
             spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "revoked")],
             ..Task::default()
         };
         let env = Envelope {
@@ -5299,12 +5108,15 @@ mod tests {
         assert!(!blocked.criteria_met);
         assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
         assert_eq!(blocked.failures.len(), 1);
-        assert!(blocked.failures[0].contains("Approval marker"));
-        assert!(blocked.failures[0].contains("unchecked"));
+        assert!(blocked.failures[0].contains("Structured `spec` TaskApproval"));
+        assert!(blocked.failures[0].contains("missing or revoked"));
     }
 
     #[test]
-    fn fluid_drift_dry_run_blocks_when_marker_checked_and_no_resync() {
+    fn fluid_drift_dry_run_blocks_when_spec_approved_and_no_resync() {
+        // e2aba106 WS2 / AC1: case (c) in dry-run. Approved structured
+        // `spec` TaskApproval + no prior revocation flag + no fresh
+        // `[spec-resynced]` record → block with the raw drift message.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5315,12 +5127,14 @@ mod tests {
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
-            id: "task-checked-no-resync".to_string(),
-            description: Some(description),
+            id: "task-approved-no-resync".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
+            ),
             status: "ready".to_string(),
             spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "approved")],
             ..Task::default()
         };
         let env = Envelope {
@@ -5344,11 +5158,12 @@ mod tests {
     }
 
     #[test]
-    fn fluid_drift_dry_run_unblocks_when_resync_flag_set() {
-        // AC4 case (a): lobster_state.spec_drift_uncheck_applied == Some(true)
-        // means WE previously unchecked the marker for this episode and Tom
-        // has now re-checked it. In dry-run the gate should report an
-        // unblocked spec_drift rather than running the live resync.
+    fn fluid_drift_dry_run_unblocks_when_revocation_flag_set() {
+        // e2aba106 WS2 / AC1 case (a): the lobster previously revoked the
+        // structured `spec` TaskApproval (lobster_state.spec_drift_uncheck_applied
+        // == Some(true)) and Tom has since re-approved it on the new spec.
+        // In dry-run, the gate should report allowed progression rather than
+        // running the live resync against the API.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5359,17 +5174,19 @@ mod tests {
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
             id: "task-resynced-flag".to_string(),
-            description: Some(description),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
+            ),
             status: "ready".to_string(),
             spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "approved")],
             ..Task::default()
         };
         #[allow(
             clippy::field_reassign_with_default,
-            reason = "test fixture builds LobsterState via Default then patches a single field for the resync-flag path; clearer than struct-update syntax here"
+            reason = "test fixture builds LobsterState via Default then patches a single field for the revocation-flag path; clearer than struct-update syntax here"
         )]
         let lobster_state = {
             let mut lobster_state = LobsterState::default();
@@ -5385,10 +5202,10 @@ mod tests {
             failures: Vec::new(),
         };
         let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
-            .expect("dry-run resync flag path should not error");
+            .expect("dry-run revocation flag path should not error");
         assert!(
             result.is_none(),
-            "resync flag path should signal allowed progression; got {:?}",
+            "revocation flag path should signal allowed progression; got {:?}",
             result
         );
     }
@@ -5514,9 +5331,10 @@ mod tests {
     }
 
     #[test]
-    fn fluid_drift_marker_unchecked_failure_message_is_stable() {
-        // Quinn (or anything else) parses failure text to decide what to do next.
-        // Lock the wording down so consumers can grep on it.
+    fn fluid_drift_revoked_approval_failure_message_is_stable() {
+        // e2aba106 WS2 / AC1: Quinn (or anything else) parses failure text
+        // to decide what to do next. Lock the structured-approval wording
+        // down so consumers can grep on it.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5527,12 +5345,14 @@ mod tests {
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
-            id: "task-unchecked-stable".to_string(),
-            description: Some(description),
+            id: "task-revoked-stable".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
+            ),
             status: "ready".to_string(),
             spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "revoked")],
             ..Task::default()
         };
         let env = Envelope {
@@ -5544,23 +5364,26 @@ mod tests {
             failures: Vec::new(),
         };
         let result = block_on_spec_drift_fluid(&args, env, "verify_delivery")
-            .expect("unchecked branch should not error");
-        let blocked = result.expect("unchecked marker should block");
+            .expect("revoked-approval branch should not error");
+        let blocked = result.expect("revoked approval should block");
         assert_eq!(blocked.failures.len(), 1);
         let message = &blocked.failures[0];
-        assert!(message.contains("Approval marker"));
-        assert!(message.contains("unchecked"));
         assert!(
-            message.contains("re-check"),
-            "expected wait-for-Tom message, got {message}"
+            message.contains("Structured `spec` TaskApproval"),
+            "expected structured-approval message; got {message}"
+        );
+        assert!(
+            message.contains("missing or revoked"),
+            "expected missing-or-revoked message; got {message}"
         );
     }
 
     #[test]
-    fn fluid_drift_marker_unchecked_ignores_existing_resync_comment() {
-        // If Quinn previously resynced an old episode but the marker is currently
-        // unchecked (Tom is mid re-approval for a new drift), the failure
-        // message must surface the wait-for-Tom branch, not pass through.
+    fn fluid_drift_revoked_approval_ignores_existing_resync_comment() {
+        // e2aba106 WS2 / AC1: a previous `[spec-resynced]` comment from an
+        // older episode must not bypass the current drift gate when the
+        // structured `spec` approval is revoked — the lobster must surface
+        // the missing/revoked message and stay blocked.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5571,12 +5394,14 @@ mod tests {
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        let description = "- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string();
         let task = Task {
-            id: "task-unchecked-old-resync".to_string(),
-            description: Some(description),
+            id: "task-revoked-old-resync".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
+            ),
             status: "doing".to_string(),
             spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "revoked")],
             comments: vec![TaskComment {
                 text: Some("[spec-resynced] Previous episode".to_string()),
                 body: None,
@@ -5592,10 +5417,14 @@ mod tests {
             failures: Vec::new(),
         };
         let result = block_on_spec_drift_fluid(&args, env, "feedback_aggregate")
-            .expect("unchecked branch should not error");
-        let blocked = result.expect("unchecked marker should still block");
+            .expect("revoked-approval branch should not error");
+        let blocked = result.expect("revoked approval should still block");
         assert!(!blocked.criteria_met);
-        assert!(blocked.failures[0].contains("unchecked"));
+        assert!(
+            blocked.failures[0].contains("Structured `spec` TaskApproval"),
+            "expected structured-approval message; got {:?}",
+            blocked.failures
+        );
     }
 
     // ---- AC4 helpers ----
@@ -6550,12 +6379,12 @@ keep me
     }
 
     #[test]
-    fn fluid_drift_stale_resync_comment_does_not_unblock_new_episode() {
-        // AC4 stale-drift guard: a `[spec-resynced]` comment from a
-        // PREVIOUS drift episode must not unblock a NEW drift episode.
-        // The fingerprint + checksum binding must differ for the new
-        // drift; if either differs, the comment is treated as stale and
-        // the lobster falls into the uncheck-marker branch.
+    fn fluid_drift_stale_resync_record_does_not_match_current_approval() {
+        // e2aba106 WS2 / AC1: a `[spec-resynced]` comment from a PREVIOUS
+        // drift episode (checksum or fingerprint differs from the current
+        // drift) must not unblock a NEW drift episode. The lobster falls
+        // into the case-(c) revoke branch and surfaces the raw drift
+        // message.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -6578,20 +6407,14 @@ keep me
             fp = old_fp,
         );
 
-        let description = "\
-- [x] **Approved by Tom**
-
-## Acceptance Criteria
-
-- [ ] AC1: Original
-- [ ] AC2: NEW drift
-"
-        .to_string();
         let task = Task {
             id: "task-stale-comment".to_string(),
-            description: Some(description),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Original\n- [ ] AC2: NEW drift\n".to_string(),
+            ),
             status: "doing".to_string(),
             spec_checksum: Some(original_checksum.clone()),
+            approvals: vec![approval_row("spec", "approved")],
             comments: vec![TaskComment {
                 text: Some(stale_comment),
                 body: None,
