@@ -22,7 +22,7 @@ import {
 } from './tasks/_validation.ts';
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
-import { descriptionHasSpecDrift, descriptionWithSpecDriftApprovalState } from './tasks/_spec.ts';
+import { descriptionHasSpecDrift } from './tasks/_spec.ts';
 import {
   buildWorkflowGateOwnerWhere,
   connectTags,
@@ -365,11 +365,13 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       return badRequest(res, 'INVALID_DEPENDS_ON_IDS', 'dependsOnIds must be an array of UUID strings');
     }
 
-    const nextDescription = description === undefined
-      ? undefined
-      : descriptionWithSpecDriftApprovalState(existing, description || null);
+    // Description is passed through verbatim. The legacy `- [x] **Approved by Tom**`
+    // marker is no longer auto-unchecked here — approval state is structured via
+    // `TaskApproval` rows; the lobster revokes those rows on drift and Tom re-issues
+    // approval via the structured endpoint. See task `e2aba106`.
+    const nextDescription = description === undefined ? undefined : description || null;
     const specApprovalRevocationRequired = description !== undefined
-      && descriptionHasSpecDrift(existing, nextDescription);
+      && descriptionHasSpecDrift(existing, nextDescription ?? '');
     if (nextDescription !== undefined) updates.description = nextDescription;
     if (assignee !== undefined) {
       if (assignee && !validAssignees.has(assignee)) {

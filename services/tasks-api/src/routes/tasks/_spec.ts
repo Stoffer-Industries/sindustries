@@ -3,6 +3,14 @@ import { acceptanceCriteriaText } from './_validation.ts';
 
 // Spec-checksum helpers extracted from tasks.ts. Encapsulates the canonical
 // form used for AC drift detection and the 409 SPEC_CHECKSUM_MISMATCH path.
+//
+// The legacy `- [x] **Approved by Tom**` approval checkbox in task descriptions
+// is no longer preserved, auto-unchecked, or rewritten by this surface (per
+// task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574`). Approval state is structured
+// via `TaskApproval` rows; the lobster reads that structured state, not this
+// markdown. Brain-spec and bookmark-spec file-level markers are preserved in
+// their own workflows (`agents/workflows/bookmarks` etc.) — this file never
+// touched those.
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -17,57 +25,18 @@ export function specChecksumForDescription(description) {
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-// The `**Approved by Tom**` marker line is owned by the Tasks API. When Tom
-// edits ACs after approval, the API accepts the edit but unchecks the marker
-// so the lobster can block until Tom re-checks it.
-const CHECKED_APPROVAL_MARKER_LINE = /^(\s*-\s*)\[[xX]\](\s+\*\*Approved by Tom\*\*\s*)$/m;
-const APPROVAL_MARKER_LINE = /^\s*-\s*\[[ xX]\]\s+\*\*Approved by Tom\*\*\s*$/;
-
-function stripApprovalMarker(text) {
-  return (text ?? '')
-    .split('\n')
-    .filter((line) => !APPROVAL_MARKER_LINE.test(line))
-    .join('\n')
-    .replace(/\n+$/, '')
-    .trimEnd();
-}
-
-/**
- * Return `true` when the only textual difference between two descriptions is
- * the checkbox state of the `**Approved by Tom**` approval marker.
- *
- * Used to allow the lobster to PATCH the description to uncheck the marker
- * even after spec approval, without compromising the spec-checksum guard on
- * real AC drift.
- */
-export function descriptionsDifferOnlyByApprovalMarker(oldDescription, newDescription) {
-  return stripApprovalMarker(oldDescription ?? '') === stripApprovalMarker(newDescription ?? '');
-}
-
-export function uncheckApprovalMarker(description) {
-  if (!description) return description;
-  return description.replace(CHECKED_APPROVAL_MARKER_LINE, '$1[ ]$2');
-}
-
-export function descriptionWithSpecDriftApprovalState(task, description) {
-  const nextDescription = description ?? task.description;
-  if (!task.specChecksum) return nextDescription;
-  if (!descriptionHasSpecDrift(task, nextDescription)) return nextDescription;
-  // Allow Tom to check the approval marker even during spec drift — it's his
-  // signal to the lobster that he's reviewed the new ACs and authorises resync.
-  // Only auto-uncheck when the edit contains actual AC content changes too.
-  if (descriptionsDifferOnlyByApprovalMarker(task.description ?? '', nextDescription)) {
-    return nextDescription;
-  }
-  return uncheckApprovalMarker(nextDescription);
-}
-
 /**
  * Return whether a proposed description changes the AC checksum already stored
- * on the task. Marker-only approval changes are intentionally not drift.
+ * on the task.
+ *
+ * Note: marker-only approval edits (e.g. Tom toggling `- [x] **Approved by Tom**`)
+ * are intentionally detected as drift here. Approval state is now structured
+ * via `TaskApproval` rows; this function compares the canonical AC text only,
+ * so a marker-only edit produces a different checksum and will be caught by
+ * the SPEC_CHECKSUM_MISMATCH guard. Tom must re-issue the spec approval via
+ * the structured endpoint after editing ACs, not by toggling the marker.
  */
 export function descriptionHasSpecDrift(task, description) {
   if (!task.specChecksum) return false;
-  if (descriptionsDifferOnlyByApprovalMarker(task.description ?? '', description ?? '')) return false;
-  return specChecksumForDescription(description) !== task.specChecksum;
+  return specChecksumForDescription(description ?? '') !== task.specChecksum;
 }
