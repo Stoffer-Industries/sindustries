@@ -17,6 +17,7 @@ import os
 import pathlib
 import re
 import subprocess
+import time
 from typing import Any
 
 CLIENT_PATH = pathlib.Path(__file__).parents[1] / "tasks_api_client.py"
@@ -431,6 +432,24 @@ def fetch_pending_tech_design_approvals(base_url: str | None = None) -> list[dic
     return approvals
 
 
+def _fetch_github_pr_detail(
+    config_dir: str, token_env: str, number: int, retries: int = 3
+) -> dict[str, Any]:
+    """Fetch PR detail, retrying GitHub's transient null mergeable response.
+
+    GitHub computes ``mergeable`` asynchronously and may return null while that
+    calculation is in progress. A single fetch can therefore silently hide a
+    PR that is otherwise ready to merge from the heartbeat queue.
+    """
+    detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{number}")
+    for _ in range(max(0, retries - 1)):
+        if detail.get("mergeable") is not None:
+            break
+        time.sleep(1)
+        detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{number}")
+    return detail
+
+
 def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
     """Read open PR state with the agent's own GitHub credentials; never mutate."""
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
@@ -446,7 +465,7 @@ def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
         if author != login and login not in requested:
             continue
         number = summary["number"]
-        detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{number}")
+        detail = _fetch_github_pr_detail(config_dir, token_env, number)
         detail["reviews"] = _gh_api(
             config_dir, token_env, f"repos/{REPO}/pulls/{number}/reviews?per_page=100"
         )
@@ -480,7 +499,7 @@ def fetch_linked_delivery_prs(
         pr_number = _pull_number_from_url(url)
         if pr_number is None:
             continue
-        detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{pr_number}")
+        detail = _fetch_github_pr_detail(config_dir, token_env, pr_number)
         detail["reviews"] = _gh_api(
             config_dir, token_env, f"repos/{REPO}/pulls/{pr_number}/reviews?per_page=100"
         )
