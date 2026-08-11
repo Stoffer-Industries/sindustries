@@ -357,6 +357,36 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(["quinnstoffer"], queue["authoredPrFeedback"][0]["changesRequestedBy"])
         self.assertEqual([], queue["mergeCandidates"])
 
+    def test_github_pr_detail_retries_transient_null_mergeable(self):
+        with (
+            patch.object(
+                agent_task_queue,
+                "_gh_api",
+                side_effect=[
+                    {"number": 42, "mergeable": None},
+                    {"number": 42, "mergeable": True},
+                ],
+            ) as gh_api,
+            patch.object(agent_task_queue.time, "sleep") as sleep,
+        ):
+            detail = agent_task_queue._fetch_github_pr_detail("~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN", 42)
+
+        self.assertTrue(detail["mergeable"])
+        self.assertEqual(2, gh_api.call_count)
+        sleep.assert_called_once_with(1)
+
+    def test_github_pr_detail_does_not_retry_known_mergeable_value(self):
+        with patch.object(
+            agent_task_queue,
+            "_gh_api",
+            return_value={"number": 42, "mergeable": True},
+        ) as gh_api, patch.object(agent_task_queue.time, "sleep") as sleep:
+            detail = agent_task_queue._fetch_github_pr_detail("~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN", 42)
+
+        self.assertTrue(detail["mergeable"])
+        gh_api.assert_called_once()
+        sleep.assert_not_called()
+
     def test_rowan_merge_candidate_requires_quinn_approval_and_green_ci(self):
         approved = pull_request(
             reviews=[
