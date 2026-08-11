@@ -369,6 +369,32 @@ jobs:
       - name: Run unit/component tests
         run: npm test --workspace apps/gymtrack
 
+  gymtrack-mcp-tests:
+    # W33 audit QW1: the gymtrack-mcp OAuth server (incl. refresh-token
+    # rotation) holds the most security-sensitive new code, but the
+    # package's `npm test` script was never wired into CI. Adding this
+    # job so `services/gymtrack-mcp/**` changes are validated against
+    # the existing vitest suite on every PR. Mirrors the gymtrack-tests
+    # job above; no Rollup native binary needed (vitest, not rollup).
+    name: gymtrack-mcp tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run gymtrack-mcp tests
+        run: npm test --workspace @sindustries/gymtrack-mcp
+
   design-system-sync:
     name: design system sync
     runs-on: ubuntu-latest
