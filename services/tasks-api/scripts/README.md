@@ -24,8 +24,8 @@ tsx scripts/migrate-legacy-approvals.ts --rollback <snapshot-path>
 
 | Signal | Mapped to |
 |---|---|
-| `- [x] **Approved by Tom**` in description | `spec` approval, owner = `Tom` |
-| `- [ ] **Approved by Tom**` in description | Intentionally not migrated (unchecked) |
+| Checked `Approved by Tom` line in description (a `- [x]` checkbox followed by `**Approved by Tom**`) | `spec` approval, owner = `Tom` |
+| Unchecked `Approved by Tom` line in description (`- [ ]` followed by `**Approved by Tom**`) | Intentionally not migrated (unchecked) |
 | `[tech-design-approved] true` in a comment | `tech_design` approval, owner = comment.author |
 | `[qa-ac-verified] true` in a comment | `qa` approval, owner = comment.author |
 

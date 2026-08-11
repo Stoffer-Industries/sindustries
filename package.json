@@ -5,7 +5,9 @@
     "sync:budgeting-pen": "node scripts/design/sync-budgeting-pen.mjs",
     "sync:design-systems-pen": "node scripts/design/sync-design-systems-pen.mjs",
     "sync:design-systems-lib": "node scripts/design/sync-design-systems-lib.mjs",
-    "check:design-sync": "node scripts/design/check-design-sync.mjs"
+    "check:design-sync": "node scripts/design/check-design-sync.mjs",
+    "lint:no-legacy-approval-marker": "node scripts/check-no-legacy-approval-marker.mjs",
+    "test:lint": "node --test scripts/test/check-no-absolute-paths.test.mjs scripts/test/check-no-legacy-approval-marker.test.mjs"
   },
   "workspaces": [
     "apps/*",
