@@ -1467,7 +1467,7 @@ fn plan_brain_spec_approval(
     spec_text: &str,
     tasks: &[Task],
 ) -> BrainSpecApprovalPlan {
-    if !product_spec_approved_by_tom(spec_text) {
+    if !brain_spec_approved_by_tom(spec_text) {
         return BrainSpecApprovalPlan::Unchecked;
     }
     let normalized = normalize_rel_path(spec_path);
@@ -1801,7 +1801,7 @@ fn plan_chat_spec_approval_move(spec_path: &str, spec_text: &str) -> ChatApprova
     let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
     let in_progress_prefix = format!("{TASK_SPECS_IN_PROGRESS_DIR}/");
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
-        if suffix.is_empty() || suffix.contains('/') || !product_spec_approved_by_tom(spec_text) {
+        if suffix.is_empty() || suffix.contains('/') || !brain_spec_approved_by_tom(spec_text) {
             return ChatApprovalMovePlan::Noop;
         }
         let suffix = suffix.to_string();
@@ -2602,7 +2602,7 @@ fn resync_spec_and_reset_checksum(
             });
         }
     };
-    if !product_spec_approved_by_tom(&pre_existing_text) {
+    if !brain_spec_approved_by_tom(&pre_existing_text) {
         return Ok(Envelope {
             criteria_met: false,
             already_past: env.already_past,
@@ -3300,7 +3300,11 @@ fn strip_trailing_annotation(s: &str) -> Option<&str> {
     None
 }
 
-fn product_spec_approved_by_tom(text: &str) -> bool {
+/// True if the supplied brain-spec file content carries a checked
+/// `- [x] **Approved by Tom**` marker. Reads **only** brain-spec text —
+/// task-description-side approval state lives in the structured
+/// `Task.approvals` rows (see [`spec_is_approved`]).
+fn brain_spec_approved_by_tom(text: &str) -> bool {
     Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$")
         .unwrap()
         .is_match(text)
@@ -3321,7 +3325,7 @@ fn mirror_task_approval_to_brain_spec_if_needed(
     let path = resolve_product_spec_path(&spec.path, repo, workspace_root);
     let text = fs::read_to_string(&path)
         .with_context(|| format!("reading product spec `{}`", path.display()))?;
-    if product_spec_approved_by_tom(&text) {
+    if brain_spec_approved_by_tom(&text) {
         return Ok(());
     }
     let updated = set_approval_marker_checked(&text);
@@ -4164,7 +4168,7 @@ mod tests {
 
         mirror_task_approval_to_brain_spec_if_needed(&task, repo.path(), workspace.path()).unwrap();
         let updated = fs::read_to_string(&spec_path).unwrap();
-        assert!(product_spec_approved_by_tom(&updated));
+        assert!(brain_spec_approved_by_tom(&updated));
         assert!(updated.contains("## Acceptance Criteria"));
     }
 
