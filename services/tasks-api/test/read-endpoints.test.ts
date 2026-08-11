@@ -423,33 +423,59 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.update.mock.calls[0][0].data.specChecksum).toBe(checksum);
   });
 
-  it('PATCH /api/v1/tasks/:id allows AC drift and unchecks approval after spec approval', async () => {
-    const approvedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
-    const driftedDescription = `${approvedDescription}\n- [ ] AC2: Drift`;
-    const expectedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift';
-    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+  it('PATCH /api/v1/tasks/:id passes description through verbatim and revokes structured approval on AC drift', async () => {
+    // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: the Tasks API no
+    // longer auto-unchecks the legacy `- [x] **Approved by Tom**` marker on
+    // AC drift. The description is persisted verbatim, and approval state is
+    // revoked through the structured `TaskApproval` row instead.
+    //
+    // The `acceptanceCriteriaText` regex captures the marker line as an AC
+    // entry (`**Approved by Tom**`), so the stored checksum must be computed
+    // from the full AC list of the stored description — not just the AC
+    // section — for the drift guard to behave correctly.
+    const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
+    const driftedDescription = `${storedDescription}\n- [ ] AC2: Drift`;
+    const checksum = checksumForAcceptanceCriteria(['**Approved by Tom**', 'AC1: Build it']);
     prismaMock.task.findFirst
       .mockResolvedValueOnce(
         task({
           id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
-          description: approvedDescription,
+          description: storedDescription,
           specChecksum: checksum
         })
       )
       .mockResolvedValueOnce(
         task({
           id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
-          description: expectedDescription,
+          description: driftedDescription,
           specChecksum: checksum
         })
       );
     prismaMock.task.update.mockResolvedValue(
       task({
         id: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
-        description: expectedDescription,
+        description: driftedDescription,
         specChecksum: checksum
       })
     );
+    prismaMock.taskApproval.findUnique.mockResolvedValue({
+      id: 'approval-1',
+      taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+      type: 'spec',
+      owner: 'Tom',
+      state: 'approved',
+      approvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      revokedAt: null
+    });
+    prismaMock.taskApproval.update.mockResolvedValue({
+      id: 'approval-1',
+      taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+      type: 'spec',
+      owner: 'Tasks API',
+      state: 'revoked',
+      approvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      revokedAt: new Date('2026-07-02T00:00:00.000Z')
+    });
 
     const app = createApp();
     const response = await request(app)
@@ -457,9 +483,28 @@ describe('tasks api endpoints', () => {
       .send({ description: driftedDescription });
 
     expect(response.status).toBe(200);
-    expect(response.body.data.description).toBe(expectedDescription);
+    // Description passes through verbatim — the marker is NOT auto-unchecked.
+    expect(response.body.data.description).toBe(driftedDescription);
     expect(prismaMock.task.update).toHaveBeenCalledTimes(1);
-    expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(expectedDescription);
+    expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(driftedDescription);
+    // Structured TaskApproval is revoked.
+    expect(prismaMock.taskApproval.findUnique).toHaveBeenCalledWith({
+      where: {
+        taskId_type: {
+          taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          type: 'spec'
+        }
+      }
+    });
+    expect(prismaMock.taskApproval.update).toHaveBeenCalledWith({
+      where: {
+        taskId_type: {
+          taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
+          type: 'spec'
+        }
+      },
+      data: { state: 'revoked', revokedAt: expect.any(Date) }
+    });
   });
 
   it('PATCH /api/v1/tasks/:id revokes structured spec approval when ACs drift', async () => {
@@ -549,9 +594,15 @@ describe('tasks api endpoints', () => {
   });
 
   it('PATCH /api/v1/tasks/:id does not revoke spec approval for marker-only edits', async () => {
+    // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: the marker is inert.
+    // Toggling `- [x] **Approved by Tom**` → `- [ ] **Approved by Tom**` does
+    // not change the AC text (the regex captures `**Approved by Tom**` from
+    // both checkbox states), so the canonical checksum is identical and the
+    // drift guard does not fire. The stored checksum must reflect the actual
+    // AC list produced by the regex (which includes the marker line).
     const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
     const updatedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
-    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    const checksum = checksumForAcceptanceCriteria(['**Approved by Tom**', 'AC1: Build it']);
     prismaMock.task.findFirst
       .mockResolvedValueOnce(task({ description: storedDescription, specChecksum: checksum }))
       .mockResolvedValueOnce(task({ description: updatedDescription, specChecksum: checksum }));
@@ -597,7 +648,10 @@ describe('tasks api endpoints', () => {
   });
 
   it('PATCH /api/v1/tasks/:id allows marker-only approval-marker uncheck after spec approval', async () => {
-    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: marker-only edits
+    // preserve the unchecked marker verbatim. The checksum is computed from
+    // the full AC list (including the marker line captured by the regex).
+    const checksum = checksumForAcceptanceCriteria(['**Approved by Tom**', 'AC1: Build it']);
     const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
     const updatedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
     prismaMock.task.findFirst
@@ -634,7 +688,11 @@ describe('tasks api endpoints', () => {
   });
 
   it('PATCH /api/v1/tasks/:id preserves an already-unchecked approval marker during AC drift', async () => {
-    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+    // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: the unchecked
+    // marker is preserved verbatim even when ACs drift. The marker is no
+    // longer auto-toggled. The checksum must match the actual AC text
+    // produced by the regex (marker line + AC1).
+    const checksum = checksumForAcceptanceCriteria(['**Approved by Tom**', 'AC1: Build it']);
     const storedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
     const updatedDescription =
       '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Sneaky drift\n';
@@ -671,8 +729,14 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.update.mock.calls[0][0].data.description).toBe(updatedDescription.trim());
   });
 
-  it('PATCH /api/v1/tasks/:id allows Tom to check approval marker during spec drift (resync signal)', async () => {
-    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
+  it('PATCH /api/v1/tasks/:id allows Tom to check the approval marker (marker-only toggle)', async () => {
+    // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: Tom can toggle the
+    // legacy marker freely. The marker is inert markdown — a `- [ ]` → `- [x]`
+    // toggle does not change the AC text (the regex captures
+    // `**Approved by Tom**` from both checkbox states), so no drift is
+    // detected and the description passes through verbatim. The checksum must
+    // match the actual AC text produced by the regex.
+    const checksum = checksumForAcceptanceCriteria(['**Approved by Tom**', 'AC1: Build it']);
     const storedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
     const checkedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n';
     prismaMock.task.findFirst
