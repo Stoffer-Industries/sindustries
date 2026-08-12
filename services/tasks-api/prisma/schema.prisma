@@ -40,6 +40,9 @@ model Task {
 
   taskType        String?      // content | code | research | feature
   specChecksum    String?
+  workflowHandoffRoleId String?
+  workflowHandoffGate   String?
+  workflowHandoffReason String?
 
   tags            TaskTag[]
   comments        TaskComment[]
@@ -52,6 +55,7 @@ model Task {
   @@index([archivedAt, priority])
   @@index([status, statusChangedAt])
   @@index([dueAt])
+  @@index([workflowHandoffRoleId])
 }
 
 /// Exceptional or otherwise unmodelled requests for a person's attention.

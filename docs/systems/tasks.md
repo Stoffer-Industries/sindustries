@@ -205,12 +205,12 @@ Task ownership is split into five **independent** planes. No plane silently deri
 The API surfaces each plane independently:
 
 - `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
-- `approvals` (raw rows) and `workflowGates` (derived view: `[{ type, owner, state }]`, only `state: "outstanding"` entries drive the discovery queue and the workflow-gate avatar layer).
+- `approvals` (raw rows) and `workflowGates` (compatibility-named view of the one explicit active handoff: `[{ roleId, owner, gate, reason, state: "outstanding" }]`). The persisted role ID is stable; `owner` is resolved when the API responds from central configuration. An absent handoff returns `[]`.
 - `attentionOwners` / `attentionOwnerDetails` (exceptional attention).
 
 Discovery filters on `GET /tasks`:
 
-- `?workflowGateOwner=<name>` — tasks with an outstanding gate whose configured owner is `<name>`. Scopes by `taskType`s that require an approval type owned by the requester, and requires no approved row for any of those types.
+- `?workflowGateOwner=<name>` — tasks whose persisted active handoff role currently resolves to `<name>`. This filter does not infer work from task type, status, lifecycle, or approval rows.
 - `?attentionOwner=<name>` — tasks with at least one `TaskAttentionOwner` row whose owner matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.

@@ -16,6 +16,7 @@ import {
   normalizeDependsOnIds,
   normalizeString,
   normalizeTags,
+  normalizeWorkflowHandoff,
   parseDate,
   parseLimit,
   parseTaskId
@@ -26,7 +27,6 @@ import { descriptionHasSpecDrift } from './tasks/_spec.ts';
 import {
   buildWorkflowGateOwnerWhere,
   connectTags,
-  resolveGateContext,
   validateDependsOnIds
 } from './tasks/_deps.ts';
 
@@ -226,8 +226,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
 
     return res.status(200).json({
       data: pageTasks.map((task) => {
-        const gateContext = resolveGateContext(task.taskType);
-        return mapTask(task, gateContext);
+        return mapTask(task);
       }),
       page: {
         limit,
@@ -266,8 +265,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
       return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
     }
 
-    const gateContext = resolveGateContext(task.taskType);
-    return res.status(200).json({ data: mapTask(task, gateContext) });
+    return res.status(200).json({ data: mapTask(task) });
   } catch (error) {
     return next(error);
   }
@@ -335,8 +333,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
       }
     });
 
-    const gateContext = resolveGateContext(created.taskType);
-    return res.status(201).json({ data: mapTask(created, gateContext) });
+    return res.status(201).json({ data: mapTask(created) });
   } catch (error) {
     return next(error);
   }
@@ -355,6 +352,13 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     const title = normalizeString(req.body?.title);
     const description = req.body?.description === undefined ? undefined : normalizeString(req.body.description);
     const assignee = req.body?.assignee === undefined ? undefined : normalizeString(req.body.assignee);
+    if (req.body?.workflowHandoff !== undefined) {
+      const handoff = normalizeWorkflowHandoff(req.body.workflowHandoff);
+      if (!handoff) return badRequest(res, 'INVALID_WORKFLOW_HANDOFF', 'workflowHandoff must be null or { roleId, optional gate, optional reason } with a supported roleId');
+      updates.workflowHandoffRoleId = handoff.roleId;
+      updates.workflowHandoffGate = handoff.gate;
+      updates.workflowHandoffReason = handoff.reason;
+    }
 
     if (req.body?.title !== undefined) {
       if (!title) return badRequest(res, 'TITLE_EMPTY', 'title cannot be empty');
@@ -542,8 +546,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       });
     });
 
-    const gateContext = resolveGateContext(task.taskType);
-    return res.status(200).json({ data: mapTask(task, gateContext) });
+    return res.status(200).json({ data: mapTask(task) });
   } catch (error) {
     return next(error);
   }

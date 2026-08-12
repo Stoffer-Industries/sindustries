@@ -1,4 +1,5 @@
 import { DEFAULT_LIMIT, MAX_LIMIT, uuidPattern } from './_constants.ts';
+import { WORKFLOW_HANDOFF_ROLE_IDS } from '../../config/workflowHandoffs.ts';
 
 // Validation helpers extracted from tasks.ts. Pure functions — no side
 // effects; all errors are returned to the caller via return values so the
@@ -44,6 +45,25 @@ export function normalizeDependsOnIds(value) {
   }
 
   return normalized;
+}
+
+export function normalizeWorkflowHandoff(value) {
+  if (value === null) return { roleId: null, gate: null, reason: null };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.some((key) => !['roleId', 'gate', 'reason'].includes(key))) return null;
+  const roleId = normalizeString(value.roleId);
+  if (typeof roleId !== 'string' || !WORKFLOW_HANDOFF_ROLE_IDS.has(roleId)) return null;
+  const normalizeOptional = (field) => {
+    if (field === undefined || field === null) return null;
+    if (typeof field !== 'string') return undefined;
+    const normalized = field.trim();
+    return normalized.length > 0 && normalized.length <= 500 ? normalized : undefined;
+  };
+  const gate = normalizeOptional(value.gate);
+  const reason = normalizeOptional(value.reason);
+  if (gate === undefined || reason === undefined) return null;
+  return { roleId, gate, reason };
 }
 
 /**

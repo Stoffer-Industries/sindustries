@@ -191,3 +191,48 @@ Validation gates: Tasks API unit/integration tests, Prisma validation/migration 
 - Visual deduplication must retain multiple semantic roles in accessibility/detail text.
 - The previous design and commit incorrectly modelled attention owners as `blockedBy` and derived blocked semantics from them. Those names and derived fields must be removed before route/UI work continues.
 - The revised spec approval is currently revoked and the prior tech-design approval predates the revision. Implementation should not proceed beyond reconciling this foundation until Tom re-approves the spec and Quinn approves this revised design.
+
+
+## WS5 revision — Lobster-owned active workflow handoffs (2026-08-12)
+
+The original WS1 derived every missing required approval as an outstanding `workflowGate`. That made future gates appear actionable too early—for example, the QA owner appeared while a task was still in `doing`. The Tasks API cannot correct this by inspecting task status without duplicating Lobster lifecycle rules.
+
+### Source-of-truth correction
+
+- `TaskApproval` remains the durable record of required, approved, and revoked gates.
+- Lobster becomes the sole authority for the handoff currently blocking its next transition.
+- The task stores one optional `activeWorkflowHandoff` carrying a stable role ID, gate ID, and human-readable reason.
+- Lobster sets the handoff when a gate blocks, clears it when the gate passes, and replaces it when a later gate becomes active.
+- The Tasks API validates and persists the handoff but does not derive it from status or approvals.
+- The Tasks app renders the API result and contains no lifecycle-state rules.
+
+### Global role vocabulary
+
+Lobster writes stable role IDs, never names:
+
+- `product_spec_approver`
+- `tech_design_approver`
+- `qa_verifier`
+
+The centrally loaded Tasks API policy resolves these roles to current owners. Defaults remain Tom, Quinn, and Tom respectively. Changing a role holder therefore requires configuration, not a Rust workflow change. Unknown roles fail closed rather than being guessed or displayed as people.
+
+### API projection and compatibility
+
+The public `workflowGates` array remains as the compatibility projection consumed by the existing UI, but contains at most the explicitly active handoff. `?workflowGateOwner=<owner>` filters by the stored role after resolving that role through central policy. Approved and future `TaskApproval` rows do not create discovery results or avatars.
+
+### Transition semantics
+
+| Lobster gate | Active role while blocked | On success |
+|---|---|---|
+| Feature spec check | `product_spec_approver` | clear |
+| Feature/code tech-design check | `tech_design_approver` | clear |
+| Delivery/PR verification | none; assignee remains delivery owner | clear |
+| Post-merge QA verification | `qa_verifier` | clear on `done` |
+
+Direct recovery transitions use the same rule: reverting to `acceptance` for missing QA sets `qa_verifier`; reverting to `doing` for uncovered ACs clears QA because implementation is again the active responsibility.
+
+### WS5 validation
+
+- Tasks API tests: explicit handoff persistence, validation, role resolution, owner filtering, and independence from `TaskApproval`.
+- Rust tests: blocked gates write the correct role ID; successful transitions clear stale handoffs; dry-run performs no write; reruns repair stale state.
+- Tasks app tests: stacked avatars consume only the projected active handoff and do not infer future gates.

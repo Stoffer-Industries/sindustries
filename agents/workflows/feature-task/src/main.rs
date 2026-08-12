@@ -151,6 +151,16 @@ struct Task {
     approvals: Vec<TaskApproval>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ActiveWorkflowHandoff {
+    role: String,
+    #[serde(default)]
+    gate: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct TaskComment {
     #[serde(default)]
@@ -479,7 +489,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
         if !failures.is_empty() {
             if !args.dry_run {
-                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "open"}))?;
+                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "open", "workflowHandoff": workflow_handoff("product_spec_approver", "spec", "Product spec approval is required")}))?;
                 env.task = api_get_task(&args.base_url, &env.task.id)?;
                 let fingerprint = failures.join("\n");
                 if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
@@ -517,6 +527,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         "ready",
         "spec_check",
         failures,
+        Some(workflow_handoff("product_spec_approver", "spec", "Product spec approval is required")),
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `ready`.",
     )
@@ -575,6 +586,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
         "doing",
         "ready_checks",
         failures,
+        Some(workflow_handoff("tech_design_approver", "tech_design", "Tech design approval is required")),
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `doing`.",
     )
@@ -643,6 +655,7 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
         "ready",
         "code_task_tech_design_check",
         failures,
+        Some(workflow_handoff("tech_design_approver", "tech_design", "Tech design approval is required")),
         "[code-task-tech-design-checklist]",
         "Code task workflow moved task to `ready`.",
     )
@@ -692,6 +705,7 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
         "doing",
         "code_task_ready_checks",
         failures,
+        None,
         "[code-task-progress-checklist]",
         "Code task workflow moved task to `doing`.",
     )
@@ -811,6 +825,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         "acceptance",
         "verify_delivery",
         failures,
+        None,
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `acceptance`.",
     )
@@ -1172,7 +1187,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             let labels = needs_pr.join(", ");
             let fingerprint = format!("uncovered_acs:{labels}");
             if !args.dry_run {
-                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "doing"}))?;
+                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "doing", "workflowHandoff": Value::Null}))?;
                 env.task = api_get_task(&args.base_url, &env.task.id)?;
                 if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
                     env.lobster_state.failure_fingerprint = Some(fingerprint);
@@ -1204,7 +1219,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
                 api_patch::<Task>(
                     &args.base_url,
                     &env.task.id,
-                    json!({"status": "acceptance"}),
+                    json!({"status": "acceptance", "workflowHandoff": workflow_handoff("qa_verifier", "qa", "Acceptance criteria require QA verification")}),
                 )?;
                 env.task = api_get_task(&args.base_url, &env.task.id)?;
                 let fingerprint = qa_failures.join("\n");
@@ -1263,6 +1278,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         "done",
         "post_merge",
         failures,
+        Some(workflow_handoff("qa_verifier", "qa", "Acceptance criteria require QA verification")),
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `done`.",
     )?;
@@ -1320,16 +1336,22 @@ fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Resul
     Ok(env)
 }
 
+fn workflow_handoff(role: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
+    ActiveWorkflowHandoff { role: role.to_string(), gate: Some(gate.to_string()), reason: Some(reason.to_string()) }
+}
+
 /// `comment_tag` is the bracket tag written on the progress-checklist
 /// comment when failures are present (e.g. `[feature-task-progress-checklist]`
 /// or `[code-task-progress-checklist]`). `move_message` is the human prose
 /// prepended to the `[lobster-state]` write when the task transitions.
+#[allow(clippy::too_many_arguments)]
 fn transition_or_block(
     args: &StageArgs,
     mut env: Envelope,
     next_status: &str,
     action: &str,
     failures: Vec<String>,
+    handoff_on_block: Option<ActiveWorkflowHandoff>,
     comment_tag: &str,
     move_message: &str,
 ) -> Result<Envelope> {
@@ -1341,8 +1363,8 @@ fn transition_or_block(
         } else {
             format!("moved_to_{next_status}")
         };
-        if !args.dry_run && env.task.status != next_status {
-            let mut patch = json!({"status": next_status});
+        if !args.dry_run {
+            let mut patch = json!({"status": next_status, "workflowHandoff": Value::Null});
             if next_status == "ready" {
                 patch["specChecksum"] = Value::String(spec_checksum(&env.task));
             }
@@ -1374,6 +1396,10 @@ fn transition_or_block(
     } else {
         env.action_taken = format!("{action}_blocked");
         let fingerprint = failures.join("\n");
+        if !args.dry_run {
+            api_patch::<Task>(&args.base_url, &env.task.id, json!({"workflowHandoff": handoff_on_block}))?;
+            env.task = api_get_task(&args.base_url, &env.task.id)?;
+        }
         if !args.dry_run && env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
             env.lobster_state.failure_fingerprint = Some(fingerprint);
             if let Err(err) = add_comment(

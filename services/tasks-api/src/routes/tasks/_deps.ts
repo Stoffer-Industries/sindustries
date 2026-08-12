@@ -1,10 +1,6 @@
 import { prisma } from '../../lib/prisma.ts';
 import { badRequest } from '../../lib/http.ts';
-import {
-  gateOwnerFor,
-  loadRequiredApprovalsConfig,
-  requiredApprovalsFor
-} from '../../config/requiredApprovals.ts';
+import { workflowHandoffRolesForOwner } from '../../config/workflowHandoffs.ts';
 
 // Tag/dependency helpers extracted from tasks.ts. These touch the DB and
 // signal errors via the response object so the caller short-circuits.
@@ -22,20 +18,6 @@ import {
  * are empty — no required approvals, no configured owners — which mirrors
  * `requiredApprovalsFor`'s semantics.
  */
-export function resolveGateContext(taskType: string | null | undefined): {
-  requiredApprovalTypes: string[];
-  gateOwnersByType: Record<string, string>;
-} {
-  const config = loadRequiredApprovalsConfig();
-  const requiredApprovalTypes = requiredApprovalsFor(config, taskType);
-  const gateOwnersByType: Record<string, string> = {};
-  for (const type of requiredApprovalTypes) {
-    const owner = gateOwnerFor(config, type);
-    if (owner) gateOwnersByType[type] = owner;
-  }
-  return { requiredApprovalTypes, gateOwnersByType };
-}
-
 /**
  * Build a Prisma `where` fragment for `?workflowGateOwner=OWNER` discovery
  * filtering. A task matches when its `taskType` requires at least one
@@ -52,38 +34,8 @@ export function resolveGateContext(taskType: string | null | undefined): {
  * `console.warn` is acceptable noise; see the tech design.
  */
 export function buildWorkflowGateOwnerWhere(owner: string): Array<Record<string, unknown>> {
-  const config = loadRequiredApprovalsConfig();
-  const ownedTypes = Object.entries(config.owners)
-    .filter(([, candidate]) => candidate === owner)
-    .map(([type]) => type);
-
-  if (ownedTypes.length === 0) return [];
-
-  const taskTypesForOwned = new Set<string>();
-  for (const [taskType, required] of Object.entries(config.mappings)) {
-    if (required.some((type) => ownedTypes.includes(type))) {
-      taskTypesForOwned.add(taskType);
-    }
-  }
-
-  if (taskTypesForOwned.size === 0) return [];
-
-  const taskTypeFilter = {
-    taskType: { in: [...taskTypesForOwned] }
-  };
-
-  // Outstanding = no approved row for any of OWNER's types. A single task
-  // matches if AT LEAST ONE of OWNER's gates is outstanding; we encode that
-  // with an OR over the per-type "no approved row" clauses.
-  const anyOutstanding = {
-    OR: ownedTypes.map((type) => ({
-      NOT: {
-        approvals: { some: { type, state: 'approved' } }
-      }
-    }))
-  };
-
-  return [taskTypeFilter, anyOutstanding];
+  const roleIds = workflowHandoffRolesForOwner(owner);
+  return roleIds.length > 0 ? [{ workflowHandoffRoleId: { in: roleIds } }] : [];
 }
 
 export async function connectTags(tagNames) {
