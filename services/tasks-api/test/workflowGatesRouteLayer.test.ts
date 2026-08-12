@@ -51,17 +51,16 @@ vi.mock('../src/lib/prisma.ts', () => ({
 
 const { createApp } = await import('../src/app.ts');
 const {
-  deriveWorkflowGates,
   mapTask
 } = await import('../src/routes/tasks/_mapper.ts');
 const {
   normalizeAttentionOwners,
+  normalizeWorkflowHandoff,
   MAX_ATTENTION_OWNERS,
   MAX_ATTENTION_OWNER_LENGTH
 } = await import('../src/routes/tasks/_validation.ts');
 const {
-  buildWorkflowGateOwnerWhere,
-  resolveGateContext
+  buildWorkflowGateOwnerWhere
 } = await import('../src/routes/tasks/_deps.ts');
 const {
   DEFAULT_REQUIRED_APPROVALS,
@@ -72,6 +71,7 @@ const {
 const {
   _resetStartupLogForTesting
 } = await import('../src/config/requiredApprovals.ts');
+const { WORKFLOW_HANDOFF_ROLE_OWNERS } = await import('../src/config/workflowHandoffs.ts');
 
 const TASK_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -93,6 +93,9 @@ function baseTaskFixture(overrides: Record<string, unknown> = {}) {
     comments: [],
     approvals: [],
     attentionOwners: [],
+    workflowHandoffRoleId: null,
+    workflowHandoffGate: null,
+    workflowHandoffReason: null,
     dependencies: [],
     dependedOnBy: [],
     analyticsEvents: [],
@@ -159,205 +162,6 @@ describe('config — approval owners', () => {
   });
 });
 
-describe('deriveWorkflowGates', () => {
-  it('returns [] when no approval types are required', () => {
-    const task = baseTaskFixture({ taskType: 'research' });
-    const result = deriveWorkflowGates(task, [], {});
-    expect(result).toEqual([]);
-  });
-
-  it('marks every required type as outstanding when no approval row exists', () => {
-    const task = baseTaskFixture({ taskType: 'feature' });
-    const result = deriveWorkflowGates(
-      task,
-      ['spec', 'tech_design', 'qa'],
-      { spec: 'Tom', tech_design: 'Quinn', qa: 'Tom' }
-    );
-    expect(result).toEqual([
-      { type: 'spec', owner: 'Tom', state: 'outstanding' },
-      { type: 'tech_design', owner: 'Quinn', state: 'outstanding' },
-      { type: 'qa', owner: 'Tom', state: 'outstanding' }
-    ]);
-  });
-
-  it('marks approved types as approved (no longer outstanding)', () => {
-    const task = baseTaskFixture({
-      approvals: [
-        {
-          id: 'a-spec',
-          taskId: TASK_ID,
-          type: 'spec',
-          owner: 'Tom',
-          state: 'approved',
-          approvedAt: new Date('2026-08-08T01:00:00Z'),
-          revokedAt: null,
-          note: null,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      ]
-    });
-    const result = deriveWorkflowGates(
-      task,
-      ['spec', 'tech_design', 'qa'],
-      { spec: 'Tom', tech_design: 'Quinn', qa: 'Tom' }
-    );
-    expect(result[0]).toEqual({ type: 'spec', owner: 'Tom', state: 'approved' });
-    expect(result[1]?.state).toBe('outstanding');
-    expect(result[2]?.state).toBe('outstanding');
-  });
-
-  it('prefers the approval row owner over the configured owner when both exist', () => {
-    const task = baseTaskFixture({
-      approvals: [
-        {
-          id: 'a-td',
-          taskId: TASK_ID,
-          type: 'tech_design',
-          owner: 'Quinn',
-          state: 'outstanding',
-          approvedAt: null,
-          revokedAt: null,
-          note: 'design revision needed',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      ]
-    });
-    const result = deriveWorkflowGates(
-      task,
-      ['tech_design'],
-      { tech_design: 'Quinn' }
-    );
-    expect(result).toEqual([
-      { type: 'tech_design', owner: 'Quinn', state: 'outstanding' }
-    ]);
-  });
-
-  it('excludes free-form approval rows whose type is not required', () => {
-    const task = baseTaskFixture({
-      approvals: [
-        {
-          id: 'a-x',
-          taskId: TASK_ID,
-          type: 'legacy',
-          owner: 'Tom',
-          state: 'approved',
-          approvedAt: new Date(),
-          revokedAt: null,
-          note: null,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      ]
-    });
-    const result = deriveWorkflowGates(task, ['spec'], { spec: 'Tom' });
-    expect(result).toEqual([
-      { type: 'spec', owner: 'Tom', state: 'outstanding' }
-    ]);
-  });
-
-  it('preserves required-approval policy order regardless of approval row order', () => {
-    const task = baseTaskFixture({
-      approvals: [
-        {
-          id: 'a-qa',
-          taskId: TASK_ID,
-          type: 'qa',
-          owner: 'Tom',
-          state: 'approved',
-          approvedAt: new Date(),
-          revokedAt: null,
-          note: null,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        },
-        {
-          id: 'a-spec',
-          taskId: TASK_ID,
-          type: 'spec',
-          owner: 'Tom',
-          state: 'outstanding',
-          approvedAt: null,
-          revokedAt: null,
-          note: null,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      ]
-    });
-    const result = deriveWorkflowGates(
-      task,
-      ['spec', 'tech_design', 'qa'],
-      { spec: 'Tom', tech_design: 'Quinn', qa: 'Tom' }
-    );
-    expect(result.map((g) => g.type)).toEqual(['spec', 'tech_design', 'qa']);
-    expect(result[0]?.state).toBe('outstanding');
-    expect(result[2]?.state).toBe('approved');
-  });
-});
-
-describe('mapTask — workflowGates response field', () => {
-  it('exposes workflowGates from MapTaskOptions', () => {
-    const task = baseTaskFixture({ taskType: 'feature' });
-    const result = mapTask(task, {
-      requiredApprovalTypes: ['spec', 'tech_design', 'qa'],
-      gateOwnersByType: { spec: 'Tom', tech_design: 'Quinn', qa: 'Tom' }
-    });
-    expect(result.workflowGates).toEqual([
-      { type: 'spec', owner: 'Tom', state: 'outstanding' },
-      { type: 'tech_design', owner: 'Quinn', state: 'outstanding' },
-      { type: 'qa', owner: 'Tom', state: 'outstanding' }
-    ]);
-  });
-
-  it('returns workflowGates: [] when no MapTaskOptions are passed (legacy callers)', () => {
-    const task = baseTaskFixture();
-    const result = mapTask(task);
-    expect(result.workflowGates).toEqual([]);
-  });
-
-  it('keeps attentionOwners and approvals independent of workflowGates (AC4)', () => {
-    const task = baseTaskFixture({
-      attentionOwners: [
-        {
-          id: 'ao-1',
-          taskId: TASK_ID,
-          owner: 'Tom',
-          addedBy: 'Quinn',
-          note: 'unexpected issue',
-          createdAt: new Date()
-        }
-      ],
-      approvals: [
-        {
-          id: 'a-td',
-          taskId: TASK_ID,
-          type: 'tech_design',
-          owner: 'Quinn',
-          state: 'outstanding',
-          approvedAt: null,
-          revokedAt: null,
-          note: null,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      ]
-    });
-    const result = mapTask(task, {
-      requiredApprovalTypes: ['tech_design'],
-      gateOwnersByType: { tech_design: 'Quinn' }
-    });
-    expect(result.attentionOwners).toEqual(['Tom']);
-    expect(result.workflowGates).toEqual([
-      { type: 'tech_design', owner: 'Quinn', state: 'outstanding' }
-    ]);
-    // task.blocked must remain independent — attention ownership does
-    // not derive blocked state (AC7 backward compat).
-    expect(result.blocked).toBe(false);
-  });
-});
-
 describe('normalizeAttentionOwners', () => {
   it('returns an empty array when given an empty array', () => {
     const result = normalizeAttentionOwners([]);
@@ -404,78 +208,6 @@ describe('normalizeAttentionOwners', () => {
   it('rejects a non-array value', () => {
     expect(normalizeAttentionOwners('Tom' as unknown)).toBeNull();
     expect(normalizeAttentionOwners({ owners: ['Tom'] } as unknown)).toBeNull();
-  });
-});
-
-describe('resolveGateContext', () => {
-  beforeEach(() => {
-    _resetStartupLogForTesting();
-  });
-
-  it('returns the configured required types and owners for a known taskType', () => {
-    const result = resolveGateContext('feature');
-    expect(result.requiredApprovalTypes).toEqual(['spec', 'tech_design', 'qa']);
-    expect(result.gateOwnersByType).toEqual({
-      spec: 'Tom',
-      tech_design: 'Quinn',
-      qa: 'Tom'
-    });
-  });
-
-  it('returns empty lists for an unknown taskType', () => {
-    const result = resolveGateContext('research');
-    expect(result.requiredApprovalTypes).toEqual([]);
-    expect(result.gateOwnersByType).toEqual({});
-  });
-
-  it('returns empty lists for a null taskType', () => {
-    const result = resolveGateContext(null);
-    expect(result.requiredApprovalTypes).toEqual([]);
-    expect(result.gateOwnersByType).toEqual({});
-  });
-});
-
-describe('buildWorkflowGateOwnerWhere', () => {
-  beforeEach(() => {
-    _resetStartupLogForTesting();
-  });
-
-  it('returns [] when the owner owns no approval types', () => {
-    const result = buildWorkflowGateOwnerWhere('Somebody');
-    expect(result).toEqual([]);
-  });
-
-  it('returns the right taskType + outstanding-gate clause for Quinn (tech_design owner)', () => {
-    const result = buildWorkflowGateOwnerWhere('Quinn');
-    // Should scope to taskTypes that require tech_design (feature, code)
-    expect(result).toHaveLength(2);
-    expect(result[0]).toMatchObject({
-      taskType: { in: expect.arrayContaining(['feature', 'code']) }
-    });
-    // Should require NO approved tech_design row (gate still outstanding)
-    expect(result[1]).toMatchObject({
-      OR: expect.arrayContaining([
-        expect.objectContaining({
-          NOT: expect.objectContaining({
-            approvals: expect.objectContaining({
-              some: expect.objectContaining({
-                type: 'tech_design',
-                state: 'approved'
-              })
-            })
-          })
-        })
-      ])
-    });
-  });
-
-  it('returns the right taskType + outstanding-gate clause for Tom (spec + qa owner)', () => {
-    const result = buildWorkflowGateOwnerWhere('Tom');
-    // Tom owns both spec and qa; the OR must cover both.
-    expect(result).toHaveLength(2);
-    const outstandingClause = result[1] as { OR: Array<{ NOT: { approvals: { some: { type: string } } } }> };
-    const types = outstandingClause.OR.map((c) => c.NOT.approvals.some.type).sort();
-    expect(types).toEqual(['qa', 'spec']);
   });
 });
 
@@ -765,5 +497,67 @@ describe('loadRequiredApprovalsConfig — owners merge with defaults', () => {
     expect(result.owners.spec).toBe('Tom');
     expect(result.owners.tech_design).toBe('Quinn');
     expect(result.owners.qa).toBe('Tom');
+  });
+});
+
+describe('explicit workflow handoffs', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('has stable centrally configured role ownership', () => {
+    expect(WORKFLOW_HANDOFF_ROLE_OWNERS).toEqual({
+      product_spec_approver: 'Tom', tech_design_approver: 'Quinn', qa_verifier: 'Tom'
+    });
+  });
+
+  it('maps only the single persisted active handoff and resolves its current owner', () => {
+    expect(mapTask(baseTaskFixture({
+      workflowHandoffRoleId: 'tech_design_approver',
+      workflowHandoffGate: 'tech_design',
+      workflowHandoffReason: 'Design needs approval',
+      approvals: [{ id: 'a', type: 'spec', owner: 'Tom', state: 'revoked', approvedAt: new Date(), createdAt: new Date(), updatedAt: new Date() }]
+    })).workflowGates).toEqual([{
+      roleId: 'tech_design_approver', owner: 'Quinn', gate: 'tech_design',
+      reason: 'Design needs approval', state: 'outstanding'
+    }]);
+    expect(mapTask(baseTaskFixture()).workflowGates).toEqual([]);
+  });
+
+  it('validates set and clear payloads', () => {
+    expect(normalizeWorkflowHandoff(null)).toEqual({ roleId: null, gate: null, reason: null });
+    expect(normalizeWorkflowHandoff({ roleId: 'qa_verifier', gate: 'qa' })).toEqual({ roleId: 'qa_verifier', gate: 'qa', reason: null });
+    expect(normalizeWorkflowHandoff({ roleId: 'qa' })).toBeNull();
+    expect(normalizeWorkflowHandoff({ roleId: 'qa_verifier', reason: '' })).toBeNull();
+  });
+
+  it('filters owner queues by persisted role id, case-insensitively', () => {
+    expect(buildWorkflowGateOwnerWhere('quinn')).toEqual([{ workflowHandoffRoleId: { in: ['tech_design_approver'] } }]);
+    expect(buildWorkflowGateOwnerWhere('Tom')).toEqual([{ workflowHandoffRoleId: { in: ['product_spec_approver', 'qa_verifier'] } }]);
+    expect(buildWorkflowGateOwnerWhere('Nobody')).toEqual([]);
+  });
+
+  it('PATCH persists an explicit handoff and returns its resolved owner', async () => {
+    const updated = baseTaskFixture({ workflowHandoffRoleId: 'qa_verifier', workflowHandoffGate: 'qa' });
+    prismaMock.task.findFirst.mockResolvedValueOnce(baseTaskFixture());
+    prismaMock.$transaction.mockImplementation(async (fn) => fn({
+      task: { update: vi.fn(), findFirst: vi.fn().mockResolvedValue(updated) },
+      taskApproval: prismaMock.taskApproval, taskComment: prismaMock.taskComment,
+      taskTag: prismaMock.taskTag, taskDependency: prismaMock.taskDependency,
+      taskAttentionOwner: prismaMock.taskAttentionOwner
+    }));
+    const response = await request(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ workflowHandoff: { roleId: 'qa_verifier', gate: 'qa' } });
+    expect(response.status).toBe(200);
+    expect(response.body.data.workflowGates).toEqual([{
+      roleId: 'qa_verifier', owner: 'Tom', gate: 'qa', reason: null, state: 'outstanding'
+    }]);
+  });
+
+  it('rejects unknown role ids before writing', async () => {
+    prismaMock.task.findFirst.mockResolvedValueOnce(baseTaskFixture());
+    const response = await request(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ workflowHandoff: { roleId: 'unknown' } });
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_WORKFLOW_HANDOFF');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });

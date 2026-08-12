@@ -33,6 +33,16 @@ REST API (M3 slice):
 - `GET /api/v1/tags`
 - `POST /api/v1/tags`
 
+### Explicit workflow handoff
+
+`PATCH /api/v1/tasks/:id` accepts `workflowHandoff: { roleId, gate?, reason? }`
+to replace the task's single active handoff, or `workflowHandoff: null` to clear
+it. Supported stable role IDs are `product_spec_approver`,
+`tech_design_approver`, and `qa_verifier`; their current owners are centrally
+configured as Tom, Quinn, and Tom. Task responses preserve the compatibility
+field `workflowGates`, containing zero or one resolved handoff. The API stores
+and exposes the handoff but deliberately does not infer lifecycle/status rules.
+
 Content Scheduler endpoints (`/api/v1/content-scheduler/*`, see
 `docs/specs/content-scheduler-tab-tech-design.md`):
 - `GET /items?status=` — list non-`removed` items; sorted by status, position, createdAt.
