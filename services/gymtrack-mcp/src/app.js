@@ -22,8 +22,29 @@ function parseBearerToken(req) {
   return match ? match[1] : null;
 }
 
+function setBearerChallengeHeader(res, issuer) {
+  res.setHeader(
+    'WWW-Authenticate',
+    `Bearer realm="gymtrack-mcp", resource_metadata="${issuer}/.well-known/oauth-protected-resource"`
+  );
+}
+
 function oauthJsonError(res, status, error, description) {
   return res.status(status).json({ error, error_description: description });
+}
+
+// Strip token-shaped strings, Bearer-prefixed values, and Supabase URLs from
+// error text before returning it to clients. Bounded to 80 characters so the
+// response shape stays predictable. Original detail is still available via
+// server-side logging at each catch site.
+function redactErrorForResponse(message) {
+  if (message == null) return '';
+  const text = String(message);
+  const redacted = text
+    .replace(/[A-Za-z0-9_-]{32,}/g, '…[redacted]…')
+    .replace(/Bearer\s+\S+/gi, 'Bearer …[redacted]…')
+    .replace(/https?:\/\/[^\s]*supabase[^\s]*/gi, '…[redacted-supabase-url]…');
+  return redacted.length > 80 ? `${redacted.slice(0, 80)}…` : redacted;
 }
 
 function jsonRpcSuccess(id, result) {
@@ -177,17 +198,23 @@ export function createApp({
 
       return res.redirect(302, consentUrl.toString());
     } catch (error) {
-      return oauthJsonError(res, 500, 'server_error', error.message);
+      return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(error.message));
     }
   });
 
   app.post('/oauth/authorize/decision', async (req, res) => {
     try {
       const bearer = parseBearerToken(req);
-      if (!bearer) return oauthJsonError(res, 401, 'invalid_request', 'Missing user access token.');
+      if (!bearer) {
+        setBearerChallengeHeader(res, config.issuer);
+        return oauthJsonError(res, 401, 'invalid_request', 'Missing user access token.');
+      }
 
       const user = await repo.verifySupabaseUserAccessToken(bearer);
-      if (!user) return oauthJsonError(res, 401, 'access_denied', 'User session is not valid.');
+      if (!user) {
+        setBearerChallengeHeader(res, config.issuer);
+        return oauthJsonError(res, 401, 'access_denied', 'User session is not valid.');
+      }
 
       const requestError = validateAuthorizeRequest({
         ...req.body,
@@ -239,7 +266,7 @@ export function createApp({
         })
       });
     } catch (error) {
-      return oauthJsonError(res, 500, 'server_error', error.message);
+      return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(error.message));
     }
   });
 
@@ -347,7 +374,7 @@ export function createApp({
         }
 
         if (rotation.status !== 'rotated') {
-          return oauthJsonError(res, 500, 'server_error', `Unexpected refresh rotation status: ${rotation.status}`);
+          return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(`Unexpected refresh rotation status: ${rotation.status}`));
         }
 
         return res.status(200).json({
@@ -361,7 +388,7 @@ export function createApp({
 
       return oauthJsonError(res, 400, 'unsupported_grant_type', `Unsupported grant_type: ${grantType}`);
     } catch (error) {
-      return oauthJsonError(res, 500, 'server_error', error.message);
+      return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(error.message));
     }
   });
 
@@ -385,7 +412,7 @@ export function createApp({
 
       return res.status(200).end();
     } catch (error) {
-      return oauthJsonError(res, 500, 'server_error', error.message);
+      return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(error.message));
     }
   });
 
@@ -398,6 +425,7 @@ export function createApp({
     try {
       const identity = await resolveOAuthIdentity(repo, parseBearerToken(req), now());
       if (!identity) {
+        setBearerChallengeHeader(res, config.issuer);
         return res.status(401).json(jsonRpcError(rpc.id ?? null, -32001, 'Unauthorized.'));
       }
 
@@ -429,7 +457,7 @@ export function createApp({
     } catch (error) {
       const status = error?.status ?? 500;
       const code = status === 400 ? -32602 : status === 403 ? -32003 : -32000;
-      return res.status(status).json(jsonRpcError(rpc.id ?? null, code, error.message));
+      return res.status(status).json(jsonRpcError(rpc.id ?? null, code, redactErrorForResponse(error.message)));
     }
   });
 
