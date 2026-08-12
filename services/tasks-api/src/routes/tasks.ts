@@ -104,10 +104,11 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // to generic attention rows. Combining them via AND lets a user view
     // e.g. "Quinn's outstanding gates AND the attention requests Quinn
     // raised" without conflating the two planes.
-    const workflowGateOwnerFilter =
-      typeof workflowGateOwner === 'string' && workflowGateOwner.trim().length > 0
-        ? buildWorkflowGateOwnerWhere(workflowGateOwner.trim())
-        : [];
+    const workflowGateOwnerRequested =
+      typeof workflowGateOwner === 'string' && workflowGateOwner.trim().length > 0;
+    const workflowGateOwnerFilter = workflowGateOwnerRequested
+      ? buildWorkflowGateOwnerWhere(workflowGateOwner.trim())
+      : [];
     const attentionOwnerFilter =
       typeof attentionOwner === 'string' && attentionOwner.trim().length > 0
         ? {
@@ -158,7 +159,9 @@ tasksRouter.get('/tasks', async (req, res, next) => {
         : {}),
       ...(blocked !== undefined ? { blocked: blocked === 'true' } : {}),
       ...attentionOwnerFilter,
-      ...(workflowGateOwnerFilter.length > 0 ? { AND: workflowGateOwnerFilter } : {})
+      ...(workflowGateOwnerRequested
+        ? { AND: workflowGateOwnerFilter.length > 0 ? workflowGateOwnerFilter : [{ id: { equals: '' } }] }
+        : {})
     };
 
     const queryWhere = decodedCursor

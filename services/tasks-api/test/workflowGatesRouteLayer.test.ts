@@ -391,16 +391,25 @@ describe('GET /api/v1/tasks — discovery filters', () => {
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
   });
 
-  it('?workflowGateOwner=Quinn scopes to taskTypes requiring tech_design with no approved tech_design row', async () => {
+  it.each([
+    ['Quinn', ['tech_design_approver']],
+    ['Tom', ['product_spec_approver', 'qa_verifier']]
+  ])('?workflowGateOwner=%s filters directly by persisted role ids', async (owner, roleIds) => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
-    const app = createApp();
-    await request(app).get('/api/v1/tasks').query({ workflowGateOwner: 'Quinn' });
+    await request(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: owner });
 
-    expect(prismaMock.task.findMany).toHaveBeenCalledTimes(1);
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
-    expect(where).toHaveProperty('AND');
-    expect(Array.isArray(where.AND)).toBe(true);
+    expect(where.AND).toEqual([{ workflowHandoffRoleId: { in: roleIds } }]);
+  });
+
+  it('?workflowGateOwner with no configured roles returns zero tasks instead of broadening', async () => {
+    prismaMock.task.findMany.mockResolvedValue([]);
+
+    await request(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: 'Rowan' });
+
+    const where = prismaMock.task.findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual([{ id: { equals: '' } }]);
   });
 
   it('?attentionOwner=Tom scopes to tasks with at least one matching row', async () => {
@@ -520,6 +529,13 @@ describe('explicit workflow handoffs', () => {
       reason: 'Design needs approval', state: 'outstanding'
     }]);
     expect(mapTask(baseTaskFixture()).workflowGates).toEqual([]);
+  });
+
+  it('omits an unresolvable persisted role instead of exposing ownerless work', () => {
+    expect(mapTask(baseTaskFixture({
+      workflowHandoffRoleId: 'removed_role',
+      workflowHandoffGate: 'legacy'
+    })).workflowGates).toEqual([]);
   });
 
   it('validates set and clear payloads', () => {

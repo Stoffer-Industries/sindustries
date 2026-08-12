@@ -97,6 +97,31 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertEqual(classification, "ACTIONABLE")
 
+    def test_active_handoff_owned_by_agent_overrides_stale_progress(self):
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                assignee="Rowan",
+                workflowGates=[{"owner": "Rowan", "state": "outstanding", "gate": "implementation"}],
+                comments=[{"text": "Missing `[implementer-prs]` delivery."}],
+            )
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("owned by Rowan", reason)
+
+    def test_active_handoff_owned_by_other_agent_overrides_stale_progress(self):
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                assignee="Rowan",
+                workflowGates=[{"owner": "Tom", "state": "outstanding", "gate": "spec"}],
+                comments=[{
+                    "text": "[code-task-progress-checklist]\n"
+                    "Missing `[implementer-prs]` task comment with at least one PR URL."
+                }],
+            )
+        )
+        self.assertEqual(classification, "WAITING_EXTERNAL")
+        self.assertIn("owned by Tom", reason)
+
     def test_closed_unmerged_implementer_pr_is_actionable(self):
         pr_url = "https://github.com/acme/repo/pull/1"
         classification, reason = agent_task_queue.classify_task(
