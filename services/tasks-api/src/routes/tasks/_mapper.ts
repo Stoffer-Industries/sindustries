@@ -70,9 +70,10 @@ export function mapTask(task) {
   // state; `task.blocked` and `dependencyBlocked` retain their own semantics.
   const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
-  const workflowGates = task.workflowHandoffRoleId ? [{
+  const workflowHandoffOwner = workflowHandoffOwnerFor(task.workflowHandoffRoleId);
+  const workflowGates = task.workflowHandoffRoleId && workflowHandoffOwner ? [{
     roleId: task.workflowHandoffRoleId,
-    owner: workflowHandoffOwnerFor(task.workflowHandoffRoleId),
+    owner: workflowHandoffOwner,
     gate: task.workflowHandoffGate ?? null,
     reason: task.workflowHandoffReason ?? null,
     state: 'outstanding' as const

@@ -215,6 +215,21 @@ def classify_task(
     delivery_prs: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     """Return (classification, reason) for one full Tasks API task object."""
+    active_handoffs = [
+        gate for gate in task.get("workflowGates") or []
+        if gate.get("state") == "outstanding" and gate.get("owner")
+    ]
+    if active_handoffs:
+        agent = _task_agent(task).lower()
+        owned = next(
+            (gate for gate in active_handoffs if str(gate.get("owner")).lower() == agent),
+            None,
+        )
+        if owned:
+            return "ACTIONABLE", f"active workflow handoff is owned by {_task_agent(task)}"
+        owners = ", ".join(str(gate["owner"]) for gate in active_handoffs)
+        return "WAITING_EXTERNAL", f"active workflow handoff is owned by {owners}"
+
     if task.get("dependencyBlocked"):
         return "DEPENDENCY_BLOCKED", "one or more task dependencies are incomplete"
     if task.get("blocked"):
