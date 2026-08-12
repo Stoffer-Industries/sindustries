@@ -154,7 +154,7 @@ struct Task {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ActiveWorkflowHandoff {
-    role: String,
+    role_id: String,
     #[serde(default)]
     gate: Option<String>,
     #[serde(default)]
@@ -1336,8 +1336,8 @@ fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Resul
     Ok(env)
 }
 
-fn workflow_handoff(role: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
-    ActiveWorkflowHandoff { role: role.to_string(), gate: Some(gate.to_string()), reason: Some(reason.to_string()) }
+fn workflow_handoff(role_id: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
+    ActiveWorkflowHandoff { role_id: role_id.to_string(), gate: Some(gate.to_string()), reason: Some(reason.to_string()) }
 }
 
 /// `comment_tag` is the bracket tag written on the progress-checklist
@@ -3948,6 +3948,18 @@ mod tests {
                 fs::read_to_string(Path::new("agents/workflows/feature-task/fixtures").join(name))
             })
             .unwrap()
+    }
+
+    #[test]
+    fn workflow_handoff_serializes_tasks_api_role_id_contract() {
+        let value = serde_json::to_value(workflow_handoff(
+            "product_spec_approver",
+            "spec",
+            "Product spec approval is required",
+        ))
+        .unwrap();
+        assert_eq!(value["roleId"], "product_spec_approver");
+        assert!(value.get("role").is_none());
     }
 
     #[test]
