@@ -78,6 +78,16 @@ class ParseXLinkTests(unittest.TestCase):
         self.assertEqual(parse_x_link("https://x.com/some_body/status/1234567890"),
                          ("some_body", "1234567890"))
 
+    def test_canonical_x_url_returns_status_without_handle(self):
+        self.assertEqual(parse_x_link("https://x.com/i/web/status/1234567890"),
+                         (None, "1234567890"))
+
+    def test_canonical_twitter_mobile_url_with_query(self):
+        self.assertEqual(
+            parse_x_link("https://mobile.twitter.com/i/web/status/1234567890?s=20"),
+            (None, "1234567890"),
+        )
+
     def test_non_x_url_returns_none(self):
         self.assertIsNone(parse_x_link("https://example.com/blog/post-123"))
 
@@ -177,6 +187,19 @@ class ComposeAuthorTweetTests(unittest.TestCase):
             })
         self.assertEqual(text, "@fallback hi")
         # invoke_llm_json is called positionally: (prompt, input_payload, schema).
+        self.assertEqual(m.call_args.args[1]["handle"], "fallback")
+
+    def test_compose_canonical_url_uses_authorHandle(self):
+        with mock.patch(
+            "x_author_tweet.invoke_llm_json",
+            return_value={"tweet": "@fallback hi"},
+        ) as m:
+            text = compose_author_tweet({
+                "link": "https://x.com/i/web/status/1234567890",
+                "authorHandle": "fallback",
+                "title": "x",
+            })
+        self.assertEqual(text, "@fallback hi")
         self.assertEqual(m.call_args.args[1]["handle"], "fallback")
 
     def test_compose_rejects_non_dict_state(self):
@@ -364,6 +387,23 @@ class TryPostAuthorTweetTests(unittest.TestCase):
         self.assertEqual(result["status"], POSTED)
         self.assertEqual(result["tweetUrl"], "https://x.com/u/status/abc")
         self.assertEqual(result["postedAt"], "2026-07-19T00:00:00.000Z")
+
+    def test_canonical_url_posts_using_status_id(self):
+        with mock.patch(
+            "x_author_tweet.compose_author_tweet",
+            return_value="@somebody great post",
+        ), mock.patch(
+            "x_author_tweet.call_x_tweets_route",
+            return_value={"url": "https://x.com/u/status/abc", "postedAt": "now"},
+        ) as post:
+            result = try_post_author_tweet({
+                "source": "x",
+                "link": "https://x.com/i/web/status/1234567890",
+                "authorHandle": "somebody",
+                "title": "x",
+            })
+        self.assertEqual(result["status"], POSTED)
+        post.assert_called_once_with("@somebody great post", "1234567890", base_url=None)
 
     def test_compose_returns_empty_records_error(self):
         with mock.patch(

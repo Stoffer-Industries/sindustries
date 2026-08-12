@@ -1901,6 +1901,47 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["tweetLog"]["tweetUrl"], "https://x.com/u/status/abc")
         self.assertEqual(item["tweetLog"]["authorHandle"], "somebody")
 
+    def test_resolve_spec_request_canonical_x_url_preserves_author_handle(self):
+        self._seed_pending_state(
+            source="x",
+            link="https://x.com/i/web/status/1234567890",
+        )
+        state = common.load_state(self.state_path)
+        state["items"][self.bookmark["bookmarkKey"]]["authorHandle"] = "somebody"
+        common.save_state(state, self.state_path)
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+            return_value={
+                "status": "posted",
+                "tweetUrl": "https://x.com/u/status/abc",
+                "postedAt": "2026-07-19T00:00:00.000Z",
+            },
+        ):
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(item["tweetLog"]["authorHandle"], "somebody")
+
+    def test_resolve_spec_request_malformed_x_link_persists_skipped_outcome(self):
+        self._seed_pending_state(source="x", link="not-a-url")
+
+        with patch.object(
+            resolve_spec_request,
+            "try_post_author_tweet",
+            return_value={"status": "skipped", "error": "missing_x_link"},
+        ):
+            rc = self._run_resolve_with_created_tasks()
+
+        self.assertEqual(rc, 0)
+        item = common.load_state(self.state_path)["items"][self.bookmark["bookmarkKey"]]
+        self.assertEqual(
+            item["tweetLog"],
+            {"status": "skipped", "error": "missing_x_link"},
+        )
+
     def test_resolve_spec_request_non_x_source_writes_no_tweet_log(self):
         # AC2: a non-X source must NOT have a tweetLog entry written, even
         # when the approval lands in `tasked`. The hook site filters

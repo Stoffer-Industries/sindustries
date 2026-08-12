@@ -66,19 +66,23 @@ class TasksApiUnreachableError(RuntimeError):
 
 # --- URL parsing ---------------------------------------------------------
 
-# x.com / twitter.com canonical status URL — handle and status id.
+# x.com / twitter.com status URLs. The canonical ``/i/web/status/<id>`` form
+# intentionally carries no author handle, so its parsed handle is ``None``.
 _X_STATUS_RE = re.compile(
-    r"^https?://(?:www\.|mobile\.)?(?:twitter|x)\.com/(?P<handle>[A-Za-z0-9_]{1,15})/status(?:es)?/(?P<status_id>\d+)/?(?:\?.*)?(?:#.*)?$",
+    r"^https?://(?:www\.|mobile\.)?(?:twitter|x)\.com/"
+    r"(?:(?P<handle>[A-Za-z0-9_]{1,15})/status(?:es)?|i/web/status)/"
+    r"(?P<status_id>\d+)/?(?:\?.*)?(?:#.*)?$",
     re.IGNORECASE,
 )
 
 
-def parse_x_link(url: str | None) -> tuple[str, str] | None:
+def parse_x_link(url: str | None) -> tuple[str | None, str] | None:
     """Parse a bookmark URL into ``(handle, status_id)`` if it's an X status URL.
 
-    Returns ``None`` for non-X URLs, malformed paths, or empty handles. Splits
-    on ``/status/`` or ``/statuses/`` (legacy alias), trims query string and
-    anchor, accepts x.com / twitter.com / mobile.twitter.com variants.
+    ``handle`` is ``None`` for canonical ``/i/web/status/<id>`` URLs, which do
+    not encode an author. Returns ``None`` for non-X URLs or malformed paths.
+    Accepts x.com / twitter.com and their www/mobile variants, including the
+    legacy ``/statuses/`` alias, query strings, and anchors.
     """
     if not isinstance(url, str):
         return None
@@ -88,9 +92,10 @@ def parse_x_link(url: str | None) -> tuple[str, str] | None:
     match = _X_STATUS_RE.match(cleaned)
     if not match:
         return None
-    handle = match.group("handle").strip()
+    handle_group = match.group("handle")
+    handle = handle_group.strip() if handle_group else None
     status_id = match.group("status_id").strip()
-    if not handle or not status_id:
+    if not status_id:
         return None
     return (handle, status_id)
 
@@ -136,7 +141,10 @@ def compose_author_tweet(state_item: dict[str, Any]) -> str:
     if not isinstance(state_item, dict):
         raise TweetComposeError("state_item must be a dict")
     parsed = parse_x_link(state_item.get("link"))
-    handle = parsed[0] if parsed else (state_item.get("authorHandle") or "")
+    # Canonical /i/web/status URLs identify the tweet but not its author. Use
+    # the denormalised ingest metadata in that case so composition still gets
+    # the same handle supplied by handle-bearing status URLs.
+    handle = (parsed[0] if parsed else None) or (state_item.get("authorHandle") or "")
     if not handle:
         raise TweetComposeError("no author handle available for tweet composition")
     title = (state_item.get("title") or "").strip()

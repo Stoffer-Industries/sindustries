@@ -123,35 +123,24 @@ def main() -> int:
                 except Exception as exc:  # pragma: no cover - defensive guard
                     logger.warning("author-tweet step raised for %s: %s", bookmark_key, exc)
                     tweet_log = {"status": "error", "error": f"unexpected:{exc}"}
-                # Persist `tweetLog` for the outcomes we care about:
-                #   - posted  → the tweet is live (AC1, AC4)
-                #   - error   → something failed, surface for ops (AC3, AC4)
-                #   - skipped with reason=missing_credentials → AC5 reframed:
-                #     the route refused without an upstream X HTTP call.
-                #     Surfacing the reason lets us tell, at a glance, why
-                #     a bookmark that should have been tweeted wasn't.
-                # The other `skipped` variants (non_x_source, missing_x_link)
-                # are deliberately discarded — the spec says non-X sources
-                # MUST NOT carry the field.
-                persist = bool(tweet_log) and (
-                    tweet_log.get("status") in {"posted", "error"}
-                    or (
-                        tweet_log.get("status") == "skipped"
-                        and tweet_log.get("error") == "missing_credentials"
-                    )
-                )
-                if persist:
+                # Every outcome from an X-source attempt is operationally
+                # relevant, including malformed/missing links. Persist it so
+                # a skipped attempt is visible rather than silently lost.
+                # Non-X sources still never enter this branch (AC2).
+                if tweet_log:
                     # Carry over the author handle for downstream surfaces
                     # that want to render the @-mention without re-parsing
-                    # `link`. Cheap re-parse; cached only at write time.
+                    # `link`. Canonical /i/web/status links have no handle,
+                    # so preserve any denormalised authorHandle from ingest.
                     parsed = None
                     try:
                         from x_author_tweet import parse_x_link
                         parsed = parse_x_link(state_item.get("link"))
                     except Exception:
                         parsed = None
-                    if parsed and "authorHandle" not in tweet_log:
-                        tweet_log["authorHandle"] = parsed[0]
+                    author_handle = (parsed[0] if parsed else None) or state_item.get("authorHandle")
+                    if author_handle and "authorHandle" not in tweet_log:
+                        tweet_log["authorHandle"] = author_handle
                     state_item["tweetLog"] = tweet_log
 
             resolved_items.append({
