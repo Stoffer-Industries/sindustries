@@ -79,6 +79,21 @@
   margin-left: auto;
 }
 
+.task-owner-stack {
+  align-items: center;
+  display: flex;
+}
+
+/* Avatars are 24px wide; pull each subsequent owner left by 8px (33%). */
+.task-owner-stack > * + * {
+  margin-left: -8px;
+}
+
+.task-owner-stack-item {
+  display: inline-flex;
+  position: relative;
+}
+
 .task-id-copy-btn {
   align-items: center;
   background: var(--si-color-bg-field);

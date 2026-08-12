@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Avatar, Badge } from '@sindustries/ui/react';
-import { assigneeInitial } from '../utils/helpers.js';
+import { Badge } from '@sindustries/ui/react';
 import { PRIORITIES } from '../utils/constants.js';
-import { assigneeDisplayName, findAssigneeUser } from '../users/assignees.js';
 import { StackedAvatarGroup } from './StackedAvatarGroup.jsx';
 
 function priorityVariant(priority) {
@@ -27,10 +25,6 @@ function taskCardTags(task) {
 export function TaskCardSummary({ task, hasDraft, onTitleClick, showCopyId = true }) {
   const date = taskCardDate(task);
   const tags = taskCardTags(task);
-  const assigneeLetter = assigneeInitial(task.assignee);
-  const assigneeUser = findAssigneeUser(task.assignee);
-  const assigneeLabel = assigneeDisplayName(task.assignee);
-  const avatarSrc = assigneeUser?.avatarSrc ?? null;
   const TitleTag = onTitleClick ? 'button' : 'div';
   const [didCopy, setDidCopy] = useState(false);
   const copyTimeoutRef = useRef(null);
@@ -84,15 +78,6 @@ export function TaskCardSummary({ task, hasDraft, onTitleClick, showCopyId = tru
             >
               {didCopy ? 'Copied' : 'ID'}
             </button>
-          ) : null}
-          {assigneeLetter ? (
-            <Avatar
-              src={avatarSrc ?? undefined}
-              alt={assigneeLabel || undefined}
-              aria-label={assigneeLabel ? `Assignee ${assigneeLabel}` : undefined}
-            >
-              {assigneeLetter}
-            </Avatar>
           ) : null}
           <StackedAvatarGroup task={task} />
           {date ? <time className="task-card-date" dateTime={date}>{date}</time> : null}

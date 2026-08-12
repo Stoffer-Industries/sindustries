@@ -73,11 +73,11 @@ describe('TaskCardSummary', () => {
           />
         );
 
-        const avatar = screen.getByLabelText('Assignee Quinn');
-        expect(avatar).toHaveClass('si-avatar');
-        expect(avatar).toHaveTextContent('Q');
+        const avatar = screen.getByLabelText('delivery assignee Quinn');
+        expect(avatar.querySelector('.si-avatar')).not.toBeNull();
+        expect(avatar.querySelector('.si-avatar')).toHaveTextContent('Q');
         // No <img> should render when avatarSrc is null.
-        expect(avatar.querySelector('img')).toBeNull();
+        expect(avatar.querySelector('.si-avatar img')).toBeNull();
       });
     });
 
@@ -95,10 +95,10 @@ describe('TaskCardSummary', () => {
         />
       );
 
-      const avatar = screen.getByLabelText('Assignee someone-new');
-      expect(avatar).toHaveClass('si-avatar');
-      expect(avatar).toHaveTextContent('S');
-      expect(avatar.querySelector('img')).toBeNull();
+      const avatar = screen.getByLabelText('delivery assignee someone-new');
+      expect(avatar.querySelector('.si-avatar')).not.toBeNull();
+      expect(avatar.querySelector('.si-avatar')).toHaveTextContent('S');
+      expect(avatar.querySelector('.si-avatar img')).toBeNull();
     });
 
     it('omits the avatar entirely when the assignee is empty / whitespace', () => {
@@ -134,7 +134,7 @@ describe('TaskCardSummary', () => {
         />
       );
 
-      expect(screen.getByLabelText('Assignee Quinn')).toBeInTheDocument();
+      expect(screen.getByLabelText('delivery assignee Quinn')).toBeInTheDocument();
     });
 
     it('falls back to the raw assignee label for unknown free-form assignees', () => {
@@ -151,7 +151,7 @@ describe('TaskCardSummary', () => {
         />
       );
 
-      expect(screen.getByLabelText('Assignee someone-new')).toBeInTheDocument();
+      expect(screen.getByLabelText('delivery assignee someone-new')).toBeInTheDocument();
     });
   });
 
@@ -191,7 +191,7 @@ describe('TaskCardSummary', () => {
           />
         );
 
-        const avatar = screen.getByLabelText('Assignee Quinn');
+        const avatar = screen.getByLabelText('delivery assignee Quinn');
         const img = avatar.querySelector('img');
         expect(img).not.toBeNull();
         expect(img).toHaveAttribute('src', '/avatars/__test-fixture__.png');
