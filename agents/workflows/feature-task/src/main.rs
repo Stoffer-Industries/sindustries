@@ -2733,6 +2733,14 @@ fn block_on_spec_drift_fluid(
     mut env: Envelope,
     action: &str,
 ) -> Result<Option<Envelope>> {
+    // Code tasks intentionally do not participate in the product-spec
+    // lifecycle. Their pipeline shares the delivery/feedback stages with
+    // feature tasks, but must not run feature-task spec checksum or approval
+    // handling here. In particular, historical `specChecksum` values on a
+    // code task must not make the shared stages require a `spec` approval.
+    if env.task.task_type.as_deref() == Some("code") {
+        return Ok(None);
+    }
     let raw_failures = spec_checksum_failures(&env.task);
     if raw_failures.is_empty() {
         return Ok(None);
@@ -4980,6 +4988,34 @@ mod tests {
         };
         let result =
             block_on_spec_drift_fluid(&args, env, "spec_check").expect("no-drift should not error");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn code_task_skips_feature_spec_drift_gate_even_with_historical_checksum() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: false,
+        };
+        let task = Task {
+            task_type: Some("code".to_string()),
+            spec_checksum: Some("historical-checksum".to_string()),
+            status: "doing".to_string(),
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+
+        let result = block_on_spec_drift_fluid(&args, env, "verify_delivery")
+            .expect("code tasks must bypass feature spec-drift handling");
         assert!(result.is_none());
     }
 
