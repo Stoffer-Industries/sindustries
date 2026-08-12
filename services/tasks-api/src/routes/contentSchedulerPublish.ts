@@ -115,7 +115,7 @@ export class RealXClient implements XClient {
     private readonly timeoutMs: number = 10_000
   ) {}
 
-  private async oauthHeader(method: string, url: string, bodyParams: Record<string, string>): Promise<string> {
+  private async oauthHeader(method: string, url: string): Promise<string> {
     const { createHmac } = await import('node:crypto');
 
     const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -130,10 +130,12 @@ export class RealXClient implements XClient {
       oauth_version: '1.0'
     };
 
-    const allParams = { ...oauthParams, ...bodyParams };
-    const paramString = Object.keys(allParams)
+    // RFC 5849 only includes form-encoded body parameters in the signature
+    // base string. This request uses application/json, so neither `text` nor
+    // the nested `reply` object belongs in the OAuth parameter set.
+    const paramString = Object.keys(oauthParams)
       .sort()
-      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`)
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(oauthParams[k])}`)
       .join('&');
 
     const baseString = [method.toUpperCase(), encodeURIComponent(url), encodeURIComponent(paramString)].join('&');
@@ -151,15 +153,14 @@ export class RealXClient implements XClient {
 
   async createTweet(input: { text: string; in_reply_to_tweet_id?: string }): Promise<{ url: string; postedAt: Date }> {
     const url = 'https://api.twitter.com/2/tweets';
-    const body: Record<string, string> = { text: input.text };
+    const body: {
+      text: string;
+      reply?: { in_reply_to_tweet_id: string };
+    } = { text: input.text };
     if (input.in_reply_to_tweet_id) {
-      body.reply = JSON.stringify({ in_reply_to_tweet_id: input.in_reply_to_tweet_id });
+      body.reply = { in_reply_to_tweet_id: input.in_reply_to_tweet_id };
     }
-    const bodyParams: Record<string, string> = {};
-    if (input.in_reply_to_tweet_id) {
-      bodyParams.reply = body.reply;
-    }
-    const authorization = await this.oauthHeader('POST', url, bodyParams);
+    const authorization = await this.oauthHeader('POST', url);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {

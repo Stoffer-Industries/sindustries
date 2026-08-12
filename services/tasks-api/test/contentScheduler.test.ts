@@ -140,6 +140,43 @@ describe('FakeXClient', () => {
   });
 });
 
+// --- RealXClient ----------------------------------------------------------
+
+describe('RealXClient', () => {
+  it('does not include JSON reply parameters in the OAuth signature', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: { id: 'posted-id' } })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new RealXClient('key', 'secret', 'token', 'token-secret');
+    await client.createTweet({
+      text: 'hello',
+      in_reply_to_tweet_id: '1234567890'
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0];
+    const authorization = requestInit.headers.authorization as string;
+    // Fixed nonce/timestamp make the signature deterministic. This value is
+    // calculated from OAuth protocol params only; including JSON `reply`
+    // would produce kt%2FNtgoJL54l4hDWf0LoKY2oQU0%3D instead.
+    expect(authorization).toContain(
+      'oauth_signature="%2F0jDfWWaI%2FPrgRKfvb22Xwqe6Eo%3D"'
+    );
+    expect(authorization).not.toContain('reply');
+    expect(requestInit.body).toBe(JSON.stringify({
+      text: 'hello',
+      reply: { in_reply_to_tweet_id: '1234567890' }
+    }));
+
+    vi.unstubAllGlobals();
+  });
+});
+
 // --- getXClient selection -------------------------------------------------
 
 describe('getXClient', () => {
