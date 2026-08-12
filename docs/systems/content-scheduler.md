@@ -86,6 +86,12 @@ Terminal statuses: `published`, `removed`. Items in `removed` are kept in the ta
 
 The `autoPost*` fields landed in migration `20260717000000_add_content_scheduler_auto_post_fields`.
 
+#### Partial unique index: `(source, sourceRef)`
+
+A partial unique index on `(source, sourceRef)` (where `sourceRef IS NOT NULL`) was added in migration `20260813000000_add_content_scheduler_source_ref_unique`. PostgreSQL permits multiple `NULL` values, so manual rows with `NULL sourceRef` remain valid; only non-null `(source, sourceRef)` pairs must be unique within a source. The migration runs a preflight query and aborts with a clear operator message if any existing non-null pairs would collide — it never silently deletes or merges rows.
+
+This index is the **domain idempotency key** for source-ingestion workflows (currently CTO Craft). Re-running the same import is a no-op at the DB layer; `createMany({ skipDuplicates: true })` returns the actual insert count and the API surfaces `skippedDuplicateCount`.
+
 ### Status state machine
 
 ```
@@ -100,6 +106,20 @@ The `autoPost*` fields landed in migration `20260717000000_add_content_scheduler
 - `draft` exists for parity with the earlier spec but the current UI composes items directly into `queued`. `draft` is reserved for future "save without queue" affordances.
 - `published` is reached only via `POST /items/:id/publish` (manual) or via the auto-post worker. Both call the shared `publishContentSchedulerItem` service.
 - `removed` is a soft-delete; rows are retained.
+
+### CTO Craft integration (task 9dfe56e4)
+
+The CTO Craft recurring tweet-draft pipeline (LangGraph POC, see `docs/specs/cto-craft-tweet-pipeline-tech-design.md`) is the first consumer of the import endpoint above. On each weekly run it:
+
+1. Discovers the latest Tech Manager Weekly issue (public archive).
+2. Extracts up to 30 public article links from the issue body.
+3. Fetches each article with SSRF-safe bounds (DNS revalidation per hop, response size cap, no cookies/credentials, content-type allowlist).
+4. Scores each article against Tom's worldview profile via a structured LLM call (the production model adapter is wired in a follow-up; the POC ships the FakeAngleModel for offline CI).
+5. Selects 3–5 distinct angles ordered by resonance score and evidence strength.
+6. Posts the batch to `POST /content-scheduler/imports/cto-craft` with the shared `CONTENT_SCHEDULER_INGEST_SECRET` header. The endpoint creates `draft` items with `source=cto_craft` and `sourceRef=<canonical article URL>`; duplicates within the batch or against pre-existing rows are silently skipped via the partial unique index.
+7. Returns a structured JSON envelope (`outcome: created | noop | failed`, `notification` text). The cron prompt at `agents/crons/prompts/cto-craft-tweet-drafts.md` announces the `notification` verbatim only on `created`, returns `NO_REPLY` on `noop`, and escalates `failed` to Lox via the standard notify-soft-fail path.
+
+Mission Control surfaces the new drafts through the existing Content Scheduler list flow. Tom approves / schedules / publishes from Mission Control; the workflow never touches approval, scheduling, or publishing state.
 
 ---
 
@@ -118,6 +138,7 @@ All routes are mounted under `/api/v1` from `services/tasks-api/src/app.ts`. COR
 | `POST` | `/content-scheduler/items/:id/remove` | Soft-delete; sets `status=removed`, `removedAt=now`. Cancels any in-flight delayed job. |
 | `POST` | `/content-scheduler/reorder` | Body: `{ ids: string[] }`. Rewrites `position` for `queued` items only. |
 | `GET` | `/content-scheduler/today-status` | `{ publishedCount, cap, publishedItemId }` for `Pacific/Auckland` today. Drives the day-status banner and the "max reached" UI hint. |
+| `POST` | `/content-scheduler/imports/cto-craft` | Trusted internal batch import used by the [CTO Craft LangGraph workflow](#cto-craft-integration-task-9dfe56e4). Always creates `source=cto_craft, status=draft, scheduledFor=null, position=0`. Authenticated via `x-content-ingest-secret` when `CONTENT_SCHEDULER_INGEST_SECRET` is configured; pass-through when unset. Idempotent via the partial `(source, sourceRef)` unique index — re-running returns `createdCount=0`. |
 
 ### `guardPublish` outcomes
 

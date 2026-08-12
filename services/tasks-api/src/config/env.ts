@@ -75,6 +75,15 @@ const schema = z.object({
   X_ACTOR_SECRET: z.string().min(32, 'X_ACTOR_SECRET must be at least 32 chars; generate with openssl rand -hex 32').optional(),
   X_HANDLE: z.string().default('sindustries'),
 
+  // Content Scheduler — trusted internal batch import (CTO Craft
+  // LangGraph pipeline; see task 9dfe56e4). When set, callers MUST send
+  // a matching `x-content-ingest-secret` header on
+  // POST /content-scheduler/imports/cto-craft. When UNSET (dev / local /
+  // CI), the import gate is pass-through so local workflows stay
+  // usable. The matching secret must also be provisioned to the
+  // CTO Craft workflow runtime as CONTENT_SCHEDULER_INGEST_SECRET.
+  CONTENT_SCHEDULER_INGEST_SECRET: z.string().min(32, 'CONTENT_SCHEDULER_INGEST_SECRET must be at least 32 chars; generate with openssl rand -hex 32').optional(),
+
   // Content Scheduler — auto-post job adapter.
   CONTENT_SCHEDULER_JOB_ADAPTER: z.enum(['in-process', 'bullmq']).default('in-process'),
   CONTENT_SCHEDULER_REDIS_URL: z.string().url().optional(),
@@ -143,6 +152,7 @@ export const TASKS_API_SECRET_KEYS = [
   'X_ACCESS_TOKEN',
   'X_ACCESS_TOKEN_SECRET',
   'X_ACTOR_SECRET',
+  'CONTENT_SCHEDULER_INGEST_SECRET',
   'TASKS_API_APPROVAL_USERS',
   'TASKS_API_APPROVAL_SERVICE_CREDENTIALS',
   'DATABASE_URL'

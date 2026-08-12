@@ -39,6 +39,7 @@ import {
   parseId,
   uuidPattern,
   validateBody,
+  validateImportItems,
   validSources,
   validStatuses
 } from './contentSchedulerValidation.ts';
@@ -497,6 +498,125 @@ contentSchedulerRouter.get('/content-scheduler/today-status', async (_req, res, 
         publishedAt: todays[0]?.publishedAt ?? null,
         publishedUrl: todays[0]?.publishedUrl ?? null,
         cap: 1
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Trusted internal batch import for the CTO Craft LangGraph pipeline
+// (task 9dfe56e4). The endpoint is intentionally narrow:
+//
+//   - 1–5 items per batch, each item validated by validateImportItems.
+//   - Always creates with status='draft', source='cto_craft',
+//     scheduledFor=null, position=0. Callers cannot bypass.
+//   - Auth: x-content-ingest-secret header is required when
+//     CONTENT_SCHEDULER_INGEST_SECRET is configured. When unset
+//     (dev/local/CI), the gate is pass-through.
+//   - Idempotency: the (source, sourceRef) partial unique index enforces
+//     dedup at the database layer. We use createMany({ skipDuplicates: true })
+//     so duplicates in the batch or against pre-existing rows are silently
+//     skipped and reported via skippedDuplicateCount.
+//   - Never approve, schedule, or publish imported items.
+// ---------------------------------------------------------------------------
+
+function checkContentIngestSecret(providedHeader: string | undefined | null): {
+  ok: boolean;
+  configured: boolean;
+  reason?: 'MISSING_HEADER' | 'MISMATCH';
+} {
+  const expected = process.env.CONTENT_SCHEDULER_INGEST_SECRET;
+  if (!expected || expected.length === 0) {
+    return { ok: true, configured: false };
+  }
+  if (typeof providedHeader !== 'string' || providedHeader.length === 0) {
+    return { ok: false, configured: true, reason: 'MISSING_HEADER' };
+  }
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const providedBuf = Buffer.from(providedHeader, 'utf8');
+  if (expectedBuf.length !== providedBuf.length) {
+    return { ok: false, configured: true, reason: 'MISMATCH' };
+  }
+  const { timingSafeEqual } = require('node:crypto') as typeof import('node:crypto');
+  const equal = timingSafeEqual(expectedBuf, providedBuf);
+  if (!equal) {
+    return { ok: false, configured: true, reason: 'MISMATCH' };
+  }
+  return { ok: true, configured: true };
+}
+
+contentSchedulerRouter.post('/content-scheduler/imports/cto-craft', async (req, res, next) => {
+  try {
+    const rawHeader = req.headers['x-content-ingest-secret'];
+    const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    const guard = checkContentIngestSecret(headerValue);
+    if (!guard.ok) {
+      return sendError(
+        res,
+        401,
+        'UNAUTHORIZED',
+        guard.reason === 'MISSING_HEADER'
+          ? 'Missing x-content-ingest-secret header (CONTENT_SCHEDULER_INGEST_SECRET is configured)'
+          : 'Invalid x-content-ingest-secret header'
+      );
+    }
+
+    const { items } = req.body ?? {};
+    const itemsError = validateImportItems(items);
+    if (itemsError) {
+      return badRequest(res, 'INVALID_ITEMS', itemsError);
+    }
+
+    const now = new Date();
+    const rows = (items as Array<{ body: string; sourceRef: string; issueRef?: string; evidenceExcerpt?: string }>).map(
+      (item) => ({
+        body: item.body.trim(),
+        source: 'cto_craft' as const,
+        sourceRef: item.sourceRef,
+        status: 'draft' as const,
+        scheduledFor: null,
+        position: 0,
+        approvedAt: null,
+        approvedBy: null,
+        publishedAt: null,
+        publishedUrl: null,
+        publishError: null,
+        createdAt: now,
+        updatedAt: now,
+        removedAt: null
+      })
+    );
+
+    const result = await prisma.contentSchedulerItem.createMany({
+      data: rows,
+      skipDuplicates: true
+    });
+
+    // createMany({ skipDuplicates: true }) returns only the count of rows
+    // actually inserted. Duplicates within the batch (or against
+    // pre-existing rows with the same (source, sourceRef)) are silently
+    // skipped. We re-read the affected sourceRefs to expose IDs and the
+    // canonical sourceRef list — note this list may include pre-existing
+    // rows, so we cannot derive skippedDuplicateCount from
+    // rows.length - persisted.length.
+    const refs = rows.map((r) => r.sourceRef);
+    const persisted = await prisma.contentSchedulerItem.findMany({
+      where: { source: 'cto_craft', sourceRef: { in: refs } },
+      select: { id: true, sourceRef: true }
+    });
+    const createdCount = result.count;
+    const skippedDuplicateCount = rows.length - createdCount;
+    const createdIds = persisted.map((p) => p.id);
+    const createdSourceRefs = persisted.map((p) => p.sourceRef);
+
+    res.status(201).json({
+      data: {
+        createdCount,
+        skippedDuplicateCount,
+        createdIds,
+        sourceRefs: createdSourceRefs
       }
     });
   } catch (err) {
