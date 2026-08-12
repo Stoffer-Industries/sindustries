@@ -42,7 +42,13 @@ Smoke checks:
 curl -fsS https://gymtrack-mcp.fly.dev/health
 curl -fsS https://gymtrack-mcp.fly.dev/.well-known/oauth-authorization-server
 curl -fsS https://gymtrack-mcp.fly.dev/.well-known/oauth-protected-resource
+curl -i -X POST https://gymtrack-mcp.fly.dev/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+  | grep -i '^www-authenticate'
 ```
+
+The unauthenticated `POST /mcp` must respond with `401` **and** a `WWW-Authenticate` header of the form `Bearer realm="gymtrack-mcp", resource_metadata="https://gymtrack-mcp.fly.dev/.well-known/oauth-protected-resource"`. This header is the discovery pre-requisite for ChatGPT's connector UI, OpenClaw clients, and any other MCP client following RFC 6750 / OAuth 2.1 — without it the OAuth dance cannot start.
 
 ### Supabase OAuth clients
 
@@ -84,6 +90,8 @@ ChatGPT custom MCP apps are plan- and role-gated. The current OpenAI flow requir
 - [ ] Confirm all three tools are discovered.
 
 If ChatGPT requires Client ID Metadata Documents, Dynamic Client Registration, an `offline_access` scope, or a confidential client secret rather than accepting the seeded public client, stop and capture the provider error. Those server capabilities are not implemented by the merged MCP service and need a follow-up design; do not invent a secret or weaken redirect validation.
+
+**Regression signal:** ChatGPT surfaces a missing or malformed `WWW-Authenticate` header to the user as "automatic client registration is not supported". If the connector UI starts emitting that message after a deploy, the first place to look is the `curl -i` smoke check above — the response header must advertise the bearer scheme and protected-resource metadata URL.
 
 ## Acceptance smoke test
 

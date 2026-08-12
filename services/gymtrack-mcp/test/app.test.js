@@ -520,4 +520,79 @@ describe('GymTrack MCP OAuth server', () => {
       expect.objectContaining({ userId: 'user-1', legacyAgentKeyId: null })
     );
   });
+
+  it('advertises the bearer challenge header on unauthenticated /mcp requests', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/mcp')
+      .send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32001, message: 'Unauthorized.' }
+    });
+    expect(response.headers['www-authenticate']).toBe(
+      'Bearer realm="gymtrack-mcp", resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"'
+    );
+  });
+
+  it('advertises the bearer challenge header on unauthenticated /oauth/authorize/decision requests', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/authorize/decision')
+      .send({
+        approve: true,
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        scope: 'history:read',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    expect(response.status).toBe(401);
+    expect(response.headers['www-authenticate']).toBe(
+      'Bearer realm="gymtrack-mcp", resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"'
+    );
+  });
+
+  it('redacts token-shaped, bearer-prefixed, and supabase substrings from 500 error descriptions', async () => {
+    class ThrowingRepo extends FakeRepo {
+      async getOAuthClient() {
+        const tokenLike = 'a'.repeat(40);
+        const jwtLike = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload';
+        const supabaseUrl = 'https://abcdefghijklmnop.supabase.co/rest/v1/foo';
+        throw new Error(`Connection failed: ${tokenLike} Bearer ${jwtLike} ${supabaseUrl}`);
+      }
+    }
+    const repo = new ThrowingRepo();
+    const { app } = makeApp({ repo });
+
+    const response = await request(app)
+      .get('/oauth/authorize')
+      .query({
+        response_type: 'code',
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        scope: 'history:read',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('server_error');
+    const description = response.body.error_description;
+    expect(description).not.toContain('a'.repeat(40));
+    expect(description).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
+    expect(description).not.toContain('supabase.co');
+    expect(description).toContain('…[redacted]…');
+    expect(description).toContain('…[redacted-supabase-url]…');
+    // 80-char cap with one trailing ellipsis if truncation occurred
+    expect(description.length).toBeLessThanOrEqual(81);
+  });
 });

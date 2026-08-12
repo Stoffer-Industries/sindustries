@@ -10,6 +10,7 @@ export function loadConfig(env = process.env) {
     webOrigin,
     accessTokenTtlSeconds: Number(env.GYMTRACK_MCP_ACCESS_TOKEN_TTL_SECONDS ?? 3600),
     refreshTokenTtlSeconds: Number(env.GYMTRACK_MCP_REFRESH_TOKEN_TTL_SECONDS ?? 60 * 60 * 24 * 90),
-    authorizationCodeTtlSeconds: Number(env.GYMTRACK_MCP_AUTH_CODE_TTL_SECONDS ?? 600)
+    authorizationCodeTtlSeconds: Number(env.GYMTRACK_MCP_AUTH_CODE_TTL_SECONDS ?? 600),
+    protectedResourceMetadataUrl: `${issuer}/.well-known/oauth-protected-resource`
   };
 }
