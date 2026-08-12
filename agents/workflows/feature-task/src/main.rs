@@ -2791,6 +2791,7 @@ fn block_on_spec_drift_fluid(
                 .to_string(),
         );
         env.failures = failures;
+        publish_spec_approval_handoff(args, &mut env)?;
         return Ok(Some(env));
     }
     // e2aba106 WS2: approval state is now exclusively structured TaskApproval
@@ -2895,6 +2896,7 @@ fn block_on_spec_drift_fluid(
             env.task = api_get_task(&args.base_url, &env.task.id)?;
             env.lobster_state.spec_drift_uncheck_applied = Some(true);
         }
+        publish_spec_approval_handoff(args, &mut env)?;
         let checklist = format!(
             "[feature-task-progress-checklist]\n{}\n",
             failures.join("\n")
@@ -2925,8 +2927,33 @@ fn block_on_spec_drift_fluid(
              Approve via POST /tasks/:id/approvals (type=spec) before drift can be re-evaluated."
                 .to_string(),
         ];
+        publish_spec_approval_handoff(args, &mut env)?;
         Ok(Some(env))
     }
+}
+
+/// A spec-drift block can happen in any active lifecycle state, so it cannot
+/// rely on the normal open → ready transition to publish ownership. Persist
+/// the same explicit handoff used by the queue classifier so task cards show
+/// Tom whenever the workflow is waiting on his spec approval, including when
+/// the task is already in `doing` or `acceptance`.
+fn publish_spec_approval_handoff(args: &StageArgs, env: &mut Envelope) -> Result<()> {
+    if args.dry_run {
+        return Ok(());
+    }
+    api_patch::<Task>(
+        &args.base_url,
+        &env.task.id,
+        json!({
+            "workflowHandoff": workflow_handoff(
+                "product_spec_approver",
+                "spec",
+                "Product spec approval is required",
+            )
+        }),
+    )?;
+    env.task = api_get_task(&args.base_url, &env.task.id)?;
+    Ok(())
 }
 
 /// Return true when the Tasks API already revoked the structured spec
