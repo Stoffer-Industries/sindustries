@@ -2791,6 +2791,7 @@ fn block_on_spec_drift_fluid(
         //       comments from previous episodes fall into the revoke branch.
         let fingerprint = drift_episode_fingerprint(&raw_failures);
         let we_actioned_episode = env.lobster_state.spec_drift_uncheck_applied == Some(true);
+        let api_reapproval_after_auto_revoke = structured_spec_reapproval_after_auto_revoke(&env.task);
         let fresh_resync_record = latest_resync_record_matches_drift(
             &env.task,
             &fingerprint,
@@ -2799,7 +2800,7 @@ fn block_on_spec_drift_fluid(
 
         // Dry-run fast path: report what would happen without writing.
         if args.dry_run {
-            if we_actioned_episode || fresh_resync_record {
+            if we_actioned_episode || api_reapproval_after_auto_revoke || fresh_resync_record {
                 return Ok(None);
             }
             env.criteria_met = false;
@@ -2808,7 +2809,7 @@ fn block_on_spec_drift_fluid(
             return Ok(Some(env));
         }
 
-        if we_actioned_episode || fresh_resync_record {
+        if we_actioned_episode || api_reapproval_after_auto_revoke || fresh_resync_record {
             // Case (a) or (b): resync is appropriate.
             return match resync_spec_and_reset_checksum(
                 args,
@@ -2900,6 +2901,36 @@ fn block_on_spec_drift_fluid(
         ];
         Ok(Some(env))
     }
+}
+
+/// Return true when the Tasks API already revoked the structured spec
+/// approval after an AC edit and Tom subsequently approved it again.
+///
+/// API-side AC edits cannot set the lobster's local
+/// `spec_drift_uncheck_applied` flag, so the ordered immutable audit comments
+/// are the durable cross-system evidence for this path. The Tasks API returns
+/// comments oldest-first; require its exact auto-revoke audit followed by its
+/// exact approval audit. Structured approval state remains the gate source.
+fn structured_spec_reapproval_after_auto_revoke(task: &Task) -> bool {
+    if !task
+        .approvals
+        .iter()
+        .any(|approval| approval.approval_type == "spec" && approval.state == "approved")
+    {
+        return false;
+    }
+
+    let mut saw_auto_revoke = false;
+    for comment in &task.comments {
+        match comment_text(comment).trim() {
+            "Approval spec revoked by Tasks API after acceptance criteria changed." => {
+                saw_auto_revoke = true;
+            }
+            "Approval spec approved by Tom." if saw_auto_revoke => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn manual_block_failures(task: &Task) -> Vec<String> {
@@ -3009,8 +3040,19 @@ fn api_patch<T: for<'de> Deserialize<'de>>(
 /// DELETE wrapper used to revoke a structured TaskApproval row
 /// (e.g. `DELETE /tasks/:id/approvals/spec` when spec drift is detected).
 fn api_delete(base_url: &str, path: &str) -> Result<Value> {
+    let token = std::env::var("TASKS_API_APPROVAL_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            anyhow!("TASKS_API_APPROVAL_TOKEN is required to revoke structured approvals")
+        })?;
     let url = format!("{}{}", base_url.trim_end_matches('/'), path);
-    handle_api_result(ureq::delete(&url).call())
+    handle_api_result(
+        ureq::delete(&url)
+            .set("Authorization", &format!("Bearer {token}"))
+            .call(),
+    )
 }
 
 fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
@@ -5191,6 +5233,68 @@ mod tests {
             "expected drift message; got {:?}",
             blocked.failures
         );
+    }
+
+    #[test]
+    fn fluid_drift_dry_run_unblocks_after_api_auto_revoke_and_tom_reapproval() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: true,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Original".to_string()),
+            ..Task::default()
+        };
+        let task = Task {
+            id: "task-api-reapproved".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Original\n- [ ] AC2: Drift".to_string(),
+            ),
+            status: "doing".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "approved")],
+            comments: vec![
+                TaskComment {
+                    text: Some(
+                        "Approval spec revoked by Tasks API after acceptance criteria changed."
+                            .to_string(),
+                    ),
+                    body: None,
+                },
+                TaskComment {
+                    text: Some("Approval spec approved by Tom.".to_string()),
+                    body: None,
+                },
+            ],
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+
+        let result = block_on_spec_drift_fluid(&args, env, "verify_delivery")
+            .expect("fresh API reapproval should be recognized");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn initial_approval_without_api_auto_revoke_still_blocks_drift() {
+        let task = Task {
+            approvals: vec![approval_row("spec", "approved")],
+            comments: vec![TaskComment {
+                text: Some("Approval spec approved by Tom.".to_string()),
+                body: None,
+            }],
+            ..Task::default()
+        };
+        assert!(!structured_spec_reapproval_after_auto_revoke(&task));
     }
 
     #[test]
