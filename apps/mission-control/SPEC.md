@@ -128,7 +128,7 @@ surface.
 |---|---|---|---|
 | Sidebar | `(shell-level)` | `Sidebar.jsx` | Vertical collapsible nav with collapse toggle + day/night theme toggle (Design System `Button` `variant="nav"` and `variant="ghost"`); state persisted via `localStorage` |
 | Tasks | `/tasks` | `Tabs/TasksTab.jsx` (iframe) | Embedded tasks app — all existing flows remain available |
-| Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (KPIs, curations, Sankey of the curation pipeline, funnel, per-topic counts, state counts over time, recent transitions); toolbar filters by time window + topic |
+| Bookmarks | `/bookmarks` | `Tabs/BookmarksTab.jsx` | Bookmark pipeline dashboard (Compounding % (7d) KPI tile, state-count KPIs, curations, Sankey of the curation pipeline, funnel, per-topic counts, state counts over time, recent transitions); toolbar filters by time window + topic |
 | Flow metrics | `/flow-metrics` | `Tabs/FlowMetricsTab.jsx` | Filter row (assignee, tag), metric cards, throughput chart, WIP chart |
 | Design System | `/design-system` | `Tabs/DesignSystemTab.jsx` | Shared `DesignSystemPage` specimen (Tokens / Pulse / Brand); follows the shell's `data-si-theme` (the Mission Control tab bar is the canonical navigation — no in-page back link, no in-page theme toggle) |
 | Content | `/content-scheduler` | `Tabs/ContentSchedulerTab.jsx` | Content scheduler 10-day calendar: composer + 10-column day grid (Pacific/Auckland) + Unscheduled overflow + drag-and-drop reschedule; max-one-published-per-day drop guard at the UI layer |
@@ -162,6 +162,7 @@ specimen mount.
 | Recent transitions | Vitest: `bookmarkPipeline.test.js` covers `recentTransitions` scope + ordering |
 | State source fetch | Vitest: `bookmarkStateSource.test.js` covers parallel fetch + 404 → empty defaults |
 | BookmarksTab render | Vitest: `tabs/BookmarksTab.test.jsx` covers loading/data/error/refresh paths |
+| Compounding % (7d) KPI tile | Vitest: `compoundingSignal.test.js` covers schema validation, classify, stale, bands (24.9/25.0/49.9/50.0 boundaries), subtitle, headline formatting; `tabs/BookmarksKpiRow.test.jsx` covers the same bands at the component level plus missing/malformed placeholders, stale marker, subtitle, and independent-failure semantics |
 | SIndustries tab iframe + fallback | Vitest: `tabs/SIndustriesTab.test.jsx` covers initial iframe render, fallback after timeout, and success-path load event |
 | Content Scheduler 10-day calendar | Vitest: `tabs/ContentSchedulerTab.test.jsx` covers composer create/approve/publish/remove, calendar grid layout, Unscheduled overflow, drag-and-drop reschedule (HH:MM preservation + 09:00 default), max-one-per-day drop guard, published read-only badge, today-status banner; pure helpers in `tabs/contentSchedulerCalendar.test.js` cover NZST/NZDT offset + DST start edge + day-key grouping |
 
@@ -205,6 +206,23 @@ specimen mount.
   In production (`vite build`) the plugin is a no-op and the tab renders
   an empty state. Optional override via `VITE_BOOKMARK_STATE_BASE_URL`
   for staging/prod.
+- **Compounding signal** is read by the Bookmarks tab from
+  `brain/state/compounding-signal.json` via the dev-only Vite plugin
+  route `GET /api/compounding-signal` (404 when the file is missing,
+  500 when malformed). The tile renders the headline percentage with
+  one of four bands — green ≥ 50%, amber 25-49%, red < 25%, neutral for
+  null/missing/malformed — plus a subtitle `<referenced>/<eligible>
+  referenced · <n> dossier promotions`. A stale marker appears when
+  `generatedAt` is more than 8 days old (read-time condition; the
+  artifact itself is never rewritten to say "stale"). A signal fetch
+  failure never blocks the rest of the tab — the `compoundingSignal`
+  field on `loadBookmarkState()` is independent of `snapshot` and
+  `transitions`, and the tab's global error card is not triggered by a
+  missing or malformed signal. The signal is produced by
+  `agents/workflows/bookmarks/scripts/compute_compounding_signal.py`
+  and is read-only against all upstream pipeline data. See
+  [`docs/runbooks/bookmark-compounding-signal.md`](../runbooks/bookmark-compounding-signal.md)
+  for the operator runbook and failure-case recovery.
 
 ## Open Items
 
