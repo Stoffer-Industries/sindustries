@@ -3573,6 +3573,7 @@ fn acceptance_criteria_text(text: &str) -> Vec<String> {
     let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(.+)$").unwrap();
     re.captures_iter(text)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().trim().to_string()))
+        .filter(|criterion| criterion != "**Approved by Tom**")
         .collect()
 }
 
@@ -4242,6 +4243,17 @@ mod tests {
                 "a": { "second": 2, "first": 1 }
             })),
             br#"{"a":{"first":1,"second":2},"acceptanceCriteria":["AC2: Build the second thing","AC1: Build the first thing"],"z":"last"}"#
+        );
+    }
+
+    #[test]
+    fn legacy_approval_marker_is_not_an_acceptance_criterion() {
+        let with_marker = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it";
+        let without_marker = "## Acceptance Criteria\n- [ ] AC1: Build it";
+
+        assert_eq!(
+            acceptance_criteria_text(with_marker),
+            acceptance_criteria_text(without_marker)
         );
     }
 

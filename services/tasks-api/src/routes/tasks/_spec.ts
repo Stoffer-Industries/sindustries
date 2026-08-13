@@ -30,13 +30,9 @@ export function specChecksumForDescription(description) {
  * Return whether a proposed description changes the AC checksum already stored
  * on the task.
  *
- * Note: marker-only approval edits (e.g. Tom toggling the checked
- * `Approved by Tom` line in the task description) are intentionally detected
- * as drift here. Approval state is now structured
- * via `TaskApproval` rows; this function compares the canonical AC text only,
- * so a marker-only edit produces a different checksum and will be caught by
- * the SPEC_CHECKSUM_MISMATCH guard. Tom must re-issue the spec approval via
- * the structured endpoint after editing ACs, not by toggling the marker.
+ * Historical approval-marker lines are excluded by acceptanceCriteriaText.
+ * Approval state is structured via `TaskApproval` rows, so toggling a retired
+ * marker must not revoke an otherwise-current approval.
  */
 export function descriptionHasSpecDrift(task, description) {
   if (!task.specChecksum) return false;
