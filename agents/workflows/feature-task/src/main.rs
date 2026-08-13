@@ -2838,7 +2838,11 @@ fn block_on_spec_drift_fluid(
 
         // Dry-run fast path: report what would happen without writing.
         if args.dry_run {
-            if we_actioned_episode || api_reapproval_after_auto_revoke || fresh_resync_record {
+            if we_actioned_episode
+                || api_reapproval_after_auto_revoke
+                || fresh_resync_record
+                || spec_check_should_skip_legacy_mutation(&env.task)
+            {
                 return Ok(None);
             }
             env.criteria_met = false;
@@ -2867,11 +2871,17 @@ fn block_on_spec_drift_fluid(
             };
         }
 
-        // Case (c): first encounter of this drift episode. Revoke the spec
-        // approval via DELETE (replaces the legacy description PATCH that
-        // auto-unchecked the marker), post a checklist comment summarising
-        // the drift, and set the uncheck-applied flag. Once Tom re-approves
-        // via POST /tasks/:id/approvals, the next heartbeat will resync.
+        // Case (c): first encounter of this drift episode. As with the
+        // spec-check legacy-mutation guard above, an already-approved
+        // structured spec is authoritative. Checksum drift alone is
+        // non-fatal here, so do not revoke that approval through the
+        // workflow credential (which may intentionally be scoped to Quinn's
+        // tech-design approval only). A future explicit approval lifecycle
+        // action may still move this task into case (a) or (b).
+        if spec_check_should_skip_legacy_mutation(&env.task) {
+            return Ok(None);
+        }
+
         let mut failures = raw_failures.clone();
         failures.push(
             "Structured `spec` TaskApproval is still approved and `[spec-resynced]` has not been posted. \
@@ -5304,10 +5314,10 @@ mod tests {
     }
 
     #[test]
-    fn fluid_drift_dry_run_blocks_when_spec_approved_and_no_resync() {
-        // e2aba106 WS2 / AC1: case (c) in dry-run. Approved structured
-        // `spec` TaskApproval + no prior revocation flag + no fresh
-        // `[spec-resynced]` record → block with the raw drift message.
+    fn fluid_drift_dry_run_allows_approved_spec_without_resync() {
+        // Case (c): an approved structured `spec` TaskApproval is
+        // authoritative even when no prior revocation flag or fresh
+        // `[spec-resynced]` record exists.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -5338,14 +5348,47 @@ mod tests {
         };
         let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
             .expect("dry-run should not error");
-        let blocked = result.expect("should block");
-        assert!(!blocked.criteria_met);
-        assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
         assert!(
-            blocked.failures[0].contains("Spec drift detected"),
-            "expected drift message; got {:?}",
-            blocked.failures
+            result.is_none(),
+            "approved spec drift should be non-fatal; got {:?}",
+            result
         );
+    }
+
+    #[test]
+    fn fluid_drift_live_case_c_does_not_revoke_approved_spec() {
+        let args = StageArgs {
+            base_url: "http://example.invalid".to_string(),
+            repo: PathBuf::from("."),
+            workspace_root: None,
+            dry_run: false,
+        };
+        let approved = Task {
+            description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
+            ..Task::default()
+        };
+        let task = Task {
+            id: "task-approved-live".to_string(),
+            description: Some(
+                "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift".to_string(),
+            ),
+            status: "ready".to_string(),
+            spec_checksum: Some(spec_checksum(&approved)),
+            approvals: vec![approval_row("spec", "approved")],
+            ..Task::default()
+        };
+        let env = Envelope {
+            criteria_met: true,
+            already_past: false,
+            action_taken: String::new(),
+            task,
+            lobster_state: LobsterState::default(),
+            failures: Vec::new(),
+        };
+
+        let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
+            .expect("authoritative approval must avoid the DELETE request");
+        assert!(result.is_none());
     }
 
     #[test]
@@ -6632,12 +6675,10 @@ keep me
     }
 
     #[test]
-    fn fluid_drift_stale_resync_record_does_not_match_current_approval() {
-        // e2aba106 WS2 / AC1: a `[spec-resynced]` comment from a PREVIOUS
-        // drift episode (checksum or fingerprint differs from the current
-        // drift) must not unblock a NEW drift episode. The lobster falls
-        // into the case-(c) revoke branch and surfaces the raw drift
-        // message.
+    fn fluid_drift_stale_resync_record_does_not_revoke_current_approval() {
+        // A `[spec-resynced]` comment from a previous drift episode does not
+        // match the current drift, but Case (c) still treats the approved
+        // structured spec as authoritative and avoids revocation.
         let args = StageArgs {
             base_url: "http://example.invalid".to_string(),
             repo: PathBuf::from("."),
@@ -6685,16 +6726,10 @@ keep me
         };
         let result = block_on_spec_drift_fluid(&args, env, "ready_checks")
             .expect("stale-comment path should not error");
-        let blocked = result.expect("stale comment must not bypass drift");
-        assert!(!blocked.criteria_met);
-        assert_eq!(blocked.action_taken, "ready_checks_blocked_spec_drift");
         assert!(
-            blocked
-                .failures
-                .iter()
-                .any(|f| f.contains("Spec drift detected")),
-            "expected drift message, got {:?}",
-            blocked.failures
+            result.is_none(),
+            "stale comment must not cause approved spec revocation; got {:?}",
+            result
         );
     }
 
