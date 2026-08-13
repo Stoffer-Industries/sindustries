@@ -64,5 +64,8 @@ describe('descriptionHasSpecDrift', () => {
     });
     const uncheckedMarker = description.replace('- [x] **Approved by Tom**', '- [ ] **Approved by Tom**');
     expect(descriptionHasSpecDrift(task, uncheckedMarker)).toBe(false);
+    expect(specChecksumForDescription(description)).toBe(
+      specChecksumForDescription('## Outcome\n\n## Acceptance Criteria\n- [ ] AC1')
+    );
   });
 });

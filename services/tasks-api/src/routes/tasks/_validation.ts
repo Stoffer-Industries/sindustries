@@ -133,7 +133,12 @@ export function acceptanceCriteriaText(description) {
   const re = /^\s*-\s*\[[ xX]\]\s+(.+)$/gm;
   let match;
   while ((match = re.exec(description)) !== null) {
-    criteria.push(match[1].trim());
+    const text = match[1].trim();
+    // Historical task descriptions can still contain the retired approval
+    // checkbox. It is metadata, not an acceptance criterion, and toggling it
+    // must never change the product-spec checksum.
+    if (/^\*\*Approved by Tom\*\*$/.test(text)) continue;
+    criteria.push(text);
   }
   return criteria;
 }
