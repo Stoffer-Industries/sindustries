@@ -78,7 +78,7 @@ WSJF favours small-but-valuable work over big-but-valuable work per unit of effo
 
 **How this reaches Tasks:** Tasks tag themselves with one or more Impacts (unchanged — no new tagging behaviour). A Task's derived strategic-fit badge is the score of the highest-WSJF `active` Initiative backing any of its tagged Impacts. This is computed, not stored by hand, and re-derives automatically when Initiative status or WSJF inputs change. `urgent` on the Task always overrides the derived badge.
 
-**Where the live numbers live:** the reasoning framework (this file) defines *how* to score. The actual Impacts, Initiatives, and their current weights/status/WSJF inputs live in `brain/sindustries/strategy-graph.md` — that file is the instance data, this skill is the method.
+**Where the live numbers live:** the reasoning framework (this file) defines *how* to score. The actual Impacts, Initiatives, and their current weights/status/WSJF inputs live in `brain/strategy/strategy-graph.md` — that file is the instance data, this skill is the method.
 
 That instance file also names each Initiative's kind — permanent **Capability Theme** (never graduates, serves everything) vs temporary **Products bucket** entry (unranked against siblings until it proves real usage and can graduate into its own Value Stream) — and the graduation rule between them. This skill's Theme/Value Stream/ART vocabulary above is the SAFe-derived reasoning shape; the Capability/Products split is how Sindustries currently maps its own initiatives onto that shape, kept in the instance file, not duplicated here.
 

@@ -156,7 +156,7 @@ If you fell back to scattergun (step 2), state that explicitly:
 
 This runs independently of the content-task discovery above — different cadence, different trigger. It is a market-research check, not a generic research loop.
 
-1. Read `brain/sindustries/strategy-graph.md`. List every `active` Initiative tagged with the **Money or Users** Impact.
+1. Read `brain/strategy/strategy-graph.md`. List every `active` Initiative tagged with the **Money or Users** Impact.
 2. For each, check `brain/initiatives/<slug>/market-research.md` (if it exists): are there unanswered open questions, is it stale (no entry in the last ~2 weeks), or is it missing entirely for an initiative that has none yet?
 3. **A research/campaign pass is due when any of:**
    - An initiative newly gained the Money or Users tag and has no `market-research.md` yet

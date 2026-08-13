@@ -11,7 +11,7 @@ Use this skill when creating or reviewing an initiative at `brain/initiatives/<s
 
 An initiative is a bounded business hypothesis with a concrete output. Its `index.md` is the stable front door for the initiative; it is not a task list, campaign plan, market-research log, or scorecard.
 
-The strategy graph at `brain/sindustries/strategy-graph.md` remains the source of truth for initiative relationships, Impact tags, status, and WSJF inputs/scores. Never copy WSJF values into `index.md`.
+The strategy graph at `brain/strategy/strategy-graph.md` remains the source of truth for initiative relationships, Impact tags, status, and WSJF inputs/scores. Never copy WSJF values into `index.md`.
 
 ## When to use
 
@@ -24,7 +24,7 @@ The strategy graph at `brain/sindustries/strategy-graph.md` remains the source o
 
 Read, in order:
 
-1. `brain/sindustries/strategy-graph.md` — canonical initiative name, hypothesis, output, Impact relationships, and status.
+1. `brain/strategy/strategy-graph.md` — canonical initiative name, hypothesis, output, Impact relationships, and status.
 2. `brain/README.md` — folder and output conventions.
 3. Existing `brain/initiatives/<slug>/index.md`, if present.
 4. Existing initiative artifacts (`market-research.md`, `campaign.md`, `feature-ideas.md`, `prospects/`) for links and open questions.
@@ -43,7 +43,7 @@ Create `brain/initiatives/<slug>/index.md` with this structure:
 **Impacts:** <Impact name(s)>
 **Exec Owner:** <single named person accountable for driving this initiative — Tom, Quinn, or Ivy>
 **Contributors:** <agents/people doing the work — may be a list>
-**Strategy graph:** [`strategy-graph.md`](../../sindustries/strategy-graph.md)
+**Strategy graph:** [`strategy-graph.md`](../../strategy/strategy-graph.md)
 
 ## Hypothesis
 
