@@ -13,7 +13,7 @@ shipped_date: null
 - **Task:** `9dfe56e4-13c4-4bb4-b53f-de7c77afd0d2` — CTO Craft recurring tweet-draft pipeline
 - **Repository:** `Stoffer-Industries/sindustries`
 - **Branch:** `task-9dfe56e4-cto-craft-langgraph`
-- **Worktree:** `/Users/quinnstoffer/.openclaw/workspace/worktrees/task-9dfe56e4-cto-craft-langgraph`
+- **Canonical checkout for runtime/cron commands:** `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`
 - **Product spec:** `brain/tasks/specs/in-progress/cto-craft-tweet-pipeline.md`
 - **Design intent:** use this bounded content workflow as the first production-shaped LangGraph proof of concept before considering LangGraph for incident response or broader workflow consolidation.
 
@@ -410,9 +410,11 @@ LangGraph does not require LangChain model wrappers. For the POC, `angle_model.p
 
 The adapter must:
 
-- use a new isolated session/run identifier per article;
+- run as a non-delivering one-shot OpenClaw model invocation per article;
 - set an explicit timeout;
-- require one JSON object matching the Pydantic schema;
+- require one JSON object matching the Pydantic schema (or `null`);
+- parse/validate JSON strictly before returning an `AngleOutput`;
+- use bounded retry semantics for transient invocation failures and invalid structured output;
 - record model/path provenance without storing full article text in logs;
 - be replaceable by a fake in tests.
 
@@ -555,7 +557,7 @@ These are implementation increments on one branch/PR, not separate product relea
 - Permanent/gated article failures are skipped with diagnostics.
 - Selection returns at most five and one per canonical `sourceRef`.
 - Fewer than three qualified candidates produces no-op.
-- Checkpointed run resumes after injected process failure without repeating completed branches where LangGraph guarantees persisted completion.
+- Checkpointed run resumes after injected process failure without repeating completed branches where LangGraph guarantees persisted completion (covered in CI with the in-memory test checkpointer; Postgres remains the live backend).
 - Advisory lock makes an overlapping invocation a no-op.
 - Import response with `createdCount=0` suppresses notification.
 - Import response with `createdCount>0` produces the expected notification.
@@ -579,6 +581,7 @@ These are implementation increments on one branch/PR, not separate product relea
 - Run graph with a local HTTP fixture server and real PostgreSQL checkpointer.
 - Kill the workflow after candidate selection, restart with the same thread ID, and verify successful continuation.
 - Simulate Content Scheduler committing the batch and dropping the response; retry and verify no duplicates.
+- Note any Postgres-only durability coverage that remains outside CI and keep it explicitly gated/documented rather than implied.
 - Run twice against the same issue and verify second result is silent.
 - Run with no new issue and verify no API write or notification.
 - Validate migration against a database containing representative null and non-null `sourceRef` rows.

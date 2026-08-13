@@ -2,10 +2,10 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
 
 # Workflow
 
-1. Run the workflow CLI once from the implementation repo's worktree:
+1. Run the workflow CLI once from the canonical repo checkout:
 
    ```bash
-   cd /Users/quinnstoffer/.openclaw/workspace/worktrees/task-9dfe56e4-cto-craft-langgraph
+   cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
    CTO_CRAFT_LANGGRAPH_DATABASE_URL="<from secrets>" \
    CONTENT_SCHEDULER_BASE_URL="https://api.sindustries.dev" \
    CONTENT_SCHEDULER_INGEST_SECRET="<from secrets>" \

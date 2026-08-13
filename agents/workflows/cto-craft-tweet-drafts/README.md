@@ -63,6 +63,8 @@ returns `NO_REPLY`.
 | `CTO_CRAFT_FETCH_TIMEOUT_SECONDS` | Optional; default 15 |
 | `CTO_CRAFT_MODEL_TIMEOUT_SECONDS` | Optional; default 30 |
 | `CTO_CRAFT_MIN_RESONANCE_SCORE` | Optional; default 0.55 |
+| `CTO_CRAFT_OPENCLAW_MODEL` | Optional; default `minimax-portal/MiniMax-M3` |
+| `CTO_CRAFT_OPENCLAW_MAX_ATTEMPTS` | Optional; default 2, max 3 |
 
 ## Tests
 
@@ -72,7 +74,8 @@ uv run --frozen pytest tests/
 
 All tests are deterministic and offline. The fake model adapter and fake HTTP
 server are used in place of any external model or network call. CI does not
-need API keys.
+need API keys. Durability coverage uses LangGraph's in-memory test
+checkpointer in CI; the live Postgres checkpointer remains the runtime backend.
 
 ## Non-goals
 

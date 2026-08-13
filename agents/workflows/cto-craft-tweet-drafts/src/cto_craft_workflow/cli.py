@@ -24,19 +24,22 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from langgraph.checkpoint.postgres import PostgresSaver
+import psycopg
 
 from cto_craft_workflow.angle_model import (
     FakeAngleModel,
+    OpenClawInvocationConfig,
+    OpenClawStructuredAngleModel,
     StructuredAngleModel,
     load_prompts,
 )
 from cto_craft_workflow.content_scheduler import ImportClient
 from cto_craft_workflow.graph import GraphDeps, build_graph
+from cto_craft_workflow.locking import workflow_lock
 from cto_craft_workflow.safe_fetch import make_fetcher
 from cto_craft_workflow.settings import Settings, load_settings
 from cto_craft_workflow.state import make_initial_state
@@ -89,17 +92,14 @@ def _print_envelope(envelope: dict) -> None:
     sys.stdout.flush()
 
 
-def _build_real_model(timeout: float) -> StructuredAngleModel:
-    """Build the production angle model.
+def _build_real_model(settings: Settings) -> StructuredAngleModel:
+    """Build the production angle model."""
 
-    PR #1 ships a stub that raises ``NotImplementedError``; PR #2 wires
-    the OpenClaw structured-agent invocation path. The graph is runtime
-    agnostic so the swap is a single-function change.
-    """
-
-    raise NotImplementedError(
-        "The production angle model is wired in PR #2. "
-        "PR #1 ships the FakeAngleModel for offline CI only."
+    return OpenClawStructuredAngleModel(
+        config=OpenClawInvocationConfig(
+            model=settings.openclaw_model,
+            max_attempts=settings.openclaw_max_attempts,
+        )
     )
 
 
@@ -143,7 +143,7 @@ def _build_graph(
     return build_graph(
         GraphDeps(
             fetcher=fetcher,
-            model=model or FakeAngleModel(fixtures=[]),
+            model=model or _build_real_model(settings),
             system_prompt=system_prompt,
             worldview_profile=worldview_profile,
             min_resonance_score=settings.min_resonance_score,
@@ -182,6 +182,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         "maxSelectedAngles": settings.max_selected_angles,
         "modelTimeoutSeconds": settings.model_timeout_seconds,
         "fetchTimeoutSeconds": settings.fetch_timeout_seconds,
+        "openclawModel": settings.openclaw_model,
+        "openclawMaxAttempts": settings.openclaw_max_attempts,
     }
     sys.stdout.write(json.dumps(summary, separators=(",", ":")) + "\n")
     return 0
@@ -190,68 +192,60 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the workflow once and print the envelope."""
 
-    settings = load_settings(require_secrets=True)
-
-    # The production angle model is wired in PR #2. PR #1 keeps the
-    # real ``run`` command for parity but explicitly errors out so the
-    # cron prompt surface is honest about what is wired.
-    if not args.dry_run:
-        raise NotImplementedError(
-            "Live run requires the production angle model adapter, "
-            "which is shipped in PR #2. Use --dry-run for the offline "
-            "graph smoke test against fixtures."
-        )
-
+    settings = load_settings(require_secrets=not args.dry_run)
     started_at = datetime.now(tz=timezone.utc).isoformat()
     run_key, thread_id = _auckland_iso_week_key()
     initial = make_initial_state(run_key=run_key, thread_id=thread_id, started_at=started_at)
 
-    from cto_craft_workflow.angle_model import AngleOutput
+    if args.dry_run:
+        # Dry-run remains deterministic and side-effect free; graph behavior is
+        # covered by fixture-backed tests rather than the live fetch/import path.
+        from cto_craft_workflow.angle_model import AngleOutput
 
-    fixtures = [
-        AngleOutput(
-            canonical_url="https://example.com/strong-1",
-            angle="Naming the cost of slow iteration",
-            tweet_body="Slow iteration is paid for by the team closest to the user. Measure who is exposed to the delay, not who is exposed to the report.",
-            evidence_excerpt="When teams track effort without measuring exposure to delay, the cost is paid by the wrong group.",
-            resonance_score=0.84,
-            evidence_strength=0.78,
-            worldview_axes=["anti_rent_hours", "hard_money"],
-        ),
-        AngleOutput(
-            canonical_url="https://example.com/strong-2",
-            angle="Concrete boundary decisions beat process prescriptions",
-            tweet_body="Information architecture, not process, decides who owns the failure. Cross-team incidents pull the right answer out of the org chart every time.",
-            evidence_excerpt="Boundary decisions are made by the org chart, not by the process doc.",
-            resonance_score=0.81,
-            evidence_strength=0.74,
-            worldview_axes=["builder_architect", "autonomy_ownership"],
-        ),
-        AngleOutput(
-            canonical_url="https://example.com/strong-3",
-            angle="Generic 'communicate better' prescriptions skip the hard part",
-            tweet_body="Most 'communicate better' advice skips the part where the listener has to act on it. Hire for the message-receiving role, not the message-sending one.",
-            evidence_excerpt="The strongest predictor of team success is the clarity of the receiving role, not the sending voice.",
-            resonance_score=0.72,
-            evidence_strength=0.71,
-            worldview_axes=["anti_fluff", "autonomy_ownership"],
-        ),
-    ]
-    model = FakeAngleModel(fixtures=fixtures)
-
-    import_fn = _build_import_fn(settings)
-    graph = _build_graph(settings=settings, import_fn=import_fn, model=model)
-
-    config = {"configurable": {"thread_id": thread_id}}
-    final = graph.invoke(initial, config=config)
+        model: StructuredAngleModel = FakeAngleModel(fixtures=[
+            AngleOutput(canonical_url="https://example.com/strong-1", angle="Naming the cost of slow iteration", tweet_body="Slow iteration is paid for by the team closest to the user.", evidence_excerpt="The cost is paid by the wrong group.", resonance_score=0.84, evidence_strength=0.78, worldview_axes=["anti_rent_hours"]),
+            AngleOutput(canonical_url="https://example.com/strong-2", angle="Boundaries decide ownership", tweet_body="Information architecture decides who owns the failure.", evidence_excerpt="Boundary decisions are made by the org chart.", resonance_score=0.81, evidence_strength=0.74, worldview_axes=["builder_architect"]),
+            AngleOutput(canonical_url="https://example.com/strong-3", angle="Hire for the receiver", tweet_body="Most communication advice skips the receiving role.", evidence_excerpt="Clarity of the receiving role predicts success.", resonance_score=0.72, evidence_strength=0.71, worldview_axes=["anti_fluff"]),
+        ])
+        graph = _build_graph(
+            settings=settings,
+            import_fn=lambda items: {"createdCount": len(items), "skippedDuplicateCount": 0, "createdIds": [], "sourceRefs": [item["sourceRef"] for item in items]},
+            model=model,
+        )
+        final = graph.invoke(initial, config={"configurable": {"thread_id": thread_id}})
+    else:
+        import_fn, client = _build_import_fn(settings)
+        try:
+            with _run_checkpointer(settings) as checkpointer:
+                checkpointer.setup()
+                with psycopg.connect(settings.database_url) as lock_connection:
+                    with workflow_lock(lock_connection) as lock:
+                        if not lock.acquired:
+                            final = {"outcome": "noop", "diagnostics": [{"node": "run", "code": "ALREADY_RUNNING", "message": "another invocation holds the workflow lock"}]}
+                        else:
+                            system_prompt, worldview_profile = load_prompts()
+                            graph = build_graph(
+                                GraphDeps(
+                                    fetcher=make_fetcher(settings),
+                                    model=_build_real_model(settings),
+                                    system_prompt=system_prompt,
+                                    worldview_profile=worldview_profile,
+                                    min_resonance_score=settings.min_resonance_score,
+                                    max_selected_angles=settings.max_selected_angles,
+                                    model_timeout_seconds=settings.model_timeout_seconds,
+                                    archive_url=settings.tmw_archive_url,
+                                    import_fn=import_fn,
+                                ),
+                                checkpointer=checkpointer,
+                            )
+                            final = graph.invoke(initial, config={"configurable": {"thread_id": thread_id}})
+        finally:
+            client.close()
 
     outcome = final.get("outcome") or "noop"
     import_result = final.get("import_result") or {}
     return _print_envelope_from_outcome(
-        outcome=outcome,
-        final_state=final,
-        import_result=import_result,
-        started_at=started_at,
+        outcome=outcome, final_state=final, import_result=import_result, started_at=started_at
     )
 
 
@@ -292,15 +286,19 @@ def cmd_replay(args: argparse.Namespace) -> int:
     if not thread_id:
         raise SystemExit("--thread-id is required for replay")
 
-    import_fn = _build_import_fn(settings)
-    graph = _build_graph(settings=settings, import_fn=import_fn)
+    import_bundle = _build_import_fn(settings)
+    import_fn = import_bundle[0] if isinstance(import_bundle, tuple) else import_bundle
+    graph = _build_graph(
+        settings=settings,
+        import_fn=import_fn,
+    )
 
     with _run_checkpointer(settings) as checkpointer:
         # Re-attach the configured checkpointer to a fresh graph compile.
         graph = build_graph(
             GraphDeps(
                 fetcher=make_fetcher(settings),
-                model=FakeAngleModel(fixtures=[]),
+                model=_build_real_model(settings),
                 system_prompt=load_prompts()[0],
                 worldview_profile=load_prompts()[1],
                 min_resonance_score=settings.min_resonance_score,
