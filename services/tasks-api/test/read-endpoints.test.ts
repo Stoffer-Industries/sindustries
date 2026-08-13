@@ -596,13 +596,11 @@ describe('tasks api endpoints', () => {
   it('PATCH /api/v1/tasks/:id does not revoke spec approval for marker-only edits', async () => {
     // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: the marker is inert.
     // Toggling `- [x] **Approved by Tom**` → `- [ ] **Approved by Tom**` does
-    // not change the AC text (the regex captures `**Approved by Tom**` from
-    // both checkbox states), so the canonical checksum is identical and the
-    // drift guard does not fire. The stored checksum must reflect the actual
-    // AC list produced by the regex (which includes the marker line).
+    // not change the AC text because the retired marker is excluded from the
+    // canonical AC list in both states.
     const storedDescription = '- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
     const updatedDescription = '- [ ] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it';
-    const checksum = checksumForAcceptanceCriteria(['**Approved by Tom**', 'AC1: Build it']);
+    const checksum = checksumForAcceptanceCriteria(['AC1: Build it']);
     prismaMock.task.findFirst
       .mockResolvedValueOnce(task({ description: storedDescription, specChecksum: checksum }))
       .mockResolvedValueOnce(task({ description: updatedDescription, specChecksum: checksum }));
