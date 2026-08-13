@@ -247,6 +247,34 @@
   font-size: 12px;
 }
 
+/* Compounding band colours for the Compounding % (7d) tile. Using the
+   existing semantic palette tokens keeps the colours consistent with the
+   rest of the dashboard rather than introducing a new opaque palette.
+   AC4: green >= 50%, amber 25-49%, red < 25%, neutral for null/missing. */
+.bookmarks-tab__kpi-value--green {
+  color: var(--si-color-success, #1e7d3a);
+}
+
+.bookmarks-tab__kpi-value--amber {
+  color: var(--si-color-warning, #b25b00);
+}
+
+.bookmarks-tab__kpi-value--red {
+  color: var(--si-color-danger, #b3261e);
+}
+
+.bookmarks-tab__kpi-value--neutral {
+  color: var(--si-color-text-muted, #666);
+}
+
+.bookmarks-tab__kpi-meta {
+  margin-top: 2px;
+  color: var(--si-color-text-muted, #999);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .bookmarks-tab__section-title {
   margin: 0 0 4px;
   font-size: 16px;

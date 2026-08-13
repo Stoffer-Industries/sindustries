@@ -31,6 +31,7 @@ function brainStateApi() {
       const brainRoot = resolveBrainRoot();
       const statePath = path.join(brainRoot, 'state', 'bookmark-review-state.json');
       const transitionsPath = path.join(brainRoot, 'state', 'bookmark-transitions.jsonl');
+      const signalPath = path.join(brainRoot, 'state', 'compounding-signal.json');
 
       server.middlewares.use('/api/state', (_req, res) => {
         try {
@@ -58,6 +59,37 @@ function brainStateApi() {
           res.setHeader('content-type', 'application/json; charset=utf-8');
           res.statusCode = 200;
           res.end(JSON.stringify(rows));
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err?.message ?? 'unknown' }));
+        }
+      });
+
+      // Compounding signal is a derived artifact. A missing file is a normal
+      // state (the artifact only exists after the first weekly run) and 404s
+      // here so the client can distinguish "no data yet" from a malformed
+      // payload. A malformed payload is a 500 so the client can show the
+      // "malformed" placeholder without crashing Vite.
+      server.middlewares.use('/api/compounding-signal', (_req, res) => {
+        try {
+          if (!fs.existsSync(signalPath)) {
+            res.statusCode = 404;
+            res.setHeader('content-type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({ error: 'compounding-signal.json missing' }));
+            return;
+          }
+          const body = fs.readFileSync(signalPath, 'utf8');
+          try {
+            JSON.parse(body);
+          } catch (parseErr) {
+            res.statusCode = 500;
+            res.setHeader('content-type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({ error: `compounding-signal.json malformed: ${parseErr?.message ?? 'parse error'}` }));
+            return;
+          }
+          res.setHeader('content-type', 'application/json; charset=utf-8');
+          res.statusCode = 200;
+          res.end(body);
         } catch (err) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: err?.message ?? 'unknown' }));
