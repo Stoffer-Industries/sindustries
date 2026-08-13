@@ -114,21 +114,21 @@ oriented (the W27 SPEC's flow 1 contract).
 The W28 audit flagged two structural issues with the current
 implementation that are tracked but not yet fixed.
 
-### H1 — hard-coded Tasks-app iframe URL
+### H1 — hard-coded Tasks-app iframe URL (resolved for dev)
 
-`apps/mission-control/src/tabs/TasksTab.jsx:6-18` builds the iframe
-URL from `window.location.port` via a `localhost:517X` lookup table
-and falls back to `http://localhost:5173`. There is no `VITE_TASKS_APP_URL`
-override, no discussion of production deploy, and no same-origin /
-frame-ancestor policy. This blocks single-URL production deploy until
-either the Tasks app is built into the Mission Control bundle or both apps are
-fronted by a reverse proxy. **Quick win Q3 in the W28 task plan** —
-env override + corrected port map — addresses the dev-side ergonomics;
-production deploy remains a separate piece of work.
+The dev-side half of H1 (no `VITE_TASKS_APP_URL` override) was
+resolved by `8d19ac2 refactor(tasks): update tasks app URL handling to
+use environment variable` (Tue Jul 7 2026). The iframe URL is now
+derived from `import.meta.env.VITE_TASKS_APP_URL ?? 'http://localhost:5173'`
+(`apps/mission-control/src/tabs/TasksTab.jsx`), with the Tilt dev
+environment exporting the variable per `infra/tilt/Tiltfile`. The
+single-URL production deploy half of H1 (no reverse proxy or bundled
+mount in place today) remains open — see [Production](#production) for
+the option set.
 
 ### M4 — no sandbox, referrerpolicy, or CSP frame-ancestors
 
-`apps/mission-control/src/tabs/TasksTab.jsx:24-31` emits the iframe
+`apps/mission-control/src/tabs/TasksTab.jsx` emits the iframe
 without `sandbox`, `referrerpolicy`, or a CSP header story on the
 Tasks-app side. Once Tasks auth lands, the Tasks app inside Mission Control
 will share the parent origin's cookies. Even in the Tailnet case,
