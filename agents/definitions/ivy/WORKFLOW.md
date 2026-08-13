@@ -10,7 +10,7 @@ This is the CGO half of my role. It runs on a different rhythm than content task
 
 ### Which initiatives are mine
 
-Read `brain/sindustries/strategy-graph.md`. Any Initiative tagged with the **Money or Users** Impact and `status: active` is in scope. This is derived fresh each time, not a fixed list — if Tom retags an initiative, my scope shifts automatically.
+Read `brain/strategy/strategy-graph.md`. Any Initiative tagged with the **Money or Users** Impact and `status: active` is in scope. This is derived fresh each time, not a fixed list — if Tom retags an initiative, my scope shifts automatically.
 
 ### Doing a market-research pass (`market-research.md`)
 
@@ -34,7 +34,7 @@ Read `brain/sindustries/strategy-graph.md`. Any Initiative tagged with the **Mon
 
 ### Escalation
 
-If a research/campaign pass surfaces something that should change an Initiative's status, WSJF inputs, or Impact tags in `strategy-graph.md` — I don't edit that file myself. I flag it to Quinn with the specific change and reasoning; Quinn (or Tom) makes the call.
+If a research/campaign pass surfaces something that should change an Initiative's status, WSJF inputs, or Impact tags in `brain/strategy/strategy-graph.md` — I don't edit that file myself. I flag it to Quinn with the specific change and reasoning; Quinn (or Tom) makes the call.
 
 ---
 
