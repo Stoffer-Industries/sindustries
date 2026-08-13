@@ -320,11 +320,54 @@ never raised, so the JSONL path is unaffected.
 
 ---
 
+## Compounding Signal (read-only observability)
+
+The compounding signal answers the operator's first question — "are we
+compounding yet?" — with one number per week, a four-week trend, and the
+current week's dossier-promotion count. It is a derived read-only
+observer of existing pipeline artifacts; it never writes to or imports
+the bookmark state machine, the approval workflow, the lobster dispatch,
+or the task creation path.
+
+- **Inputs:**
+  - `brain/state/bookmark-review-state.json` (the existing authoritative state file).
+  - `brain/state/index/bookmark-corpus-index.jsonl` (the corpus index from
+    the knowledge-base spec; missing file is treated as empty corpus).
+  - `brain/state/dossier-promotions.jsonl` (the promotion event log from
+    the evidence-layer spec; missing file is treated as zero events).
+- **Outputs:**
+  - `brain/state/compounding-signal.json` (machine-readable; canonical for the dashboard).
+  - `brain/state/compounding-signal.md` (deterministic operator rendering;
+    shares `runId` with the JSON).
+- **Calculator:** `agents/workflows/bookmarks/scripts/compute_compounding_signal.py` (Python
+  standard library only; no other workflow imports).
+- **Tests:** `agents/workflows/bookmarks/scripts/tests/test_compute_compounding_signal.py` (51 tests).
+- **Pulse consumer:** the `Compounding % (7d)` KPI tile in the Bookmarks tab.
+  The tile reads `/api/compounding-signal` (Vite dev plugin) and renders
+  one of four bands (green ≥ 50%, amber 25-49%, red < 25%, neutral for
+  null/missing/malformed). A stale marker appears when `generatedAt` is
+  more than 8 days old; the dashboard never blocks another pipeline
+  stage on a signal failure.
+- **Cadence:** weekly cron (Monday 08:15 `Pacific/Auckland`). The cron
+  prompt lives at `agents/crons/prompts/bookmark-compounding-signal.md`.
+- **Operator runbook:** `docs/runbooks/bookmark-compounding-signal.md`.
+- **Tech design:** `docs/specs/compounding-signal-for-bookmark-pipeline-tech-design.md`.
+
+The signal is downstream of three draft specs (knowledge-base metadata,
+evidence-layer dossier promotion, prior-context references). If any of
+those drafts is declined or revised, this section needs a follow-up
+revision and the calculator's adapter boundaries may need to change.
+The dashboard tile itself does not write or import any of those
+upstream contracts.
+
+---
+
 ## Related
 
 - Task: `b179c0e3-c6b0-4c9d-97dc-982d3b841783` — Bookmark pipeline analytics — Postgres transition log
 - Task: `a5a4ed8f-e7c4-4b6c-8ac9-bb962211ac44` — spec folder lifecycle and lobster sync
 - Task: `55ac9240-d54a-4b2c-88c4-8bb8af85d2b2` — Bookmark approval: tweet at original X author when tasked (this PR)
+- Task: `faf260e9-fe7b-4ce5-86ba-e47acab0ddb3` — Compounding signal for the bookmark pipeline
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/216
 - PR: https://github.com/Stoffer-Industries/sindustries/pull/236 (Sankey + states-over-time + retire tools dashboard tech design)
 - Tech design: `docs/specs/bookmark-pipeline-analytics-postgres-transition-log-tech-design.md`
