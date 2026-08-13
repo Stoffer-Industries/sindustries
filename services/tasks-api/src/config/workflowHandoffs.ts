@@ -6,6 +6,25 @@ export const WORKFLOW_HANDOFF_ROLE_OWNERS = {
 
 export type WorkflowHandoffRoleId = keyof typeof WORKFLOW_HANDOFF_ROLE_OWNERS;
 
+export const APPROVAL_WORKFLOW_HANDOFFS = {
+  spec: {
+    roleId: 'product_spec_approver',
+    reason: 'Product spec approval is required'
+  },
+  tech_design: {
+    roleId: 'tech_design_approver',
+    reason: 'Tech design approval is required'
+  },
+  qa: {
+    roleId: 'qa_verifier',
+    reason: 'QA approval is required'
+  }
+} as const satisfies Record<string, { roleId: WorkflowHandoffRoleId; reason: string }>;
+
+export function workflowHandoffForApproval(type: string) {
+  return APPROVAL_WORKFLOW_HANDOFFS[type as keyof typeof APPROVAL_WORKFLOW_HANDOFFS] ?? null;
+}
+
 export const WORKFLOW_HANDOFF_ROLE_IDS = new Set<string>(
   Object.keys(WORKFLOW_HANDOFF_ROLE_OWNERS)
 );
