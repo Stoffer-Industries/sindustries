@@ -25,7 +25,15 @@ const TASK_ID = '11111111-1111-1111-1111-111111111111';
 const TOM_TOKEN = 'tom-service-token-long-enough';
 const QUINN_TOKEN = 'quinn-service-token-long-enough';
 const TOM_SESSION = 'tom-browser-session-long-enough';
-const activeTask = { id: TASK_ID, status: 'ready', archivedAt: null };
+const activeTask = {
+  id: TASK_ID,
+  status: 'ready',
+  archivedAt: null,
+  taskType: 'feature',
+  workflowHandoffRoleId: null,
+  workflowHandoffGate: null,
+  workflowHandoffReason: null
+};
 function approval(overrides = {}) { return { id: 'a1', taskId: TASK_ID, type: 'spec', owner: 'Tom', state: 'approved', approvedAt: new Date('2026-08-08T04:00:00Z'), revokedAt: null, note: null, createdAt: new Date(), updatedAt: new Date(), ...overrides }; }
 function auth(token = TOM_TOKEN) { return { Authorization: `Bearer ${token}` }; }
 
@@ -86,6 +94,48 @@ describe('task approval boundary', () => {
     expect(prismaMock.taskComment.create).toHaveBeenCalledWith({ data: { taskId: TASK_ID, author: 'Tom', body: 'Approval spec approved by Tom.' } });
   });
 
+  it('clears a matching workflow handoff in the approval transaction', async () => {
+    prismaMock.task.findUnique.mockResolvedValue({
+      ...activeTask,
+      workflowHandoffRoleId: 'product_spec_approver',
+      workflowHandoffGate: 'spec',
+      workflowHandoffReason: 'Product spec approval is required'
+    });
+    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approval());
+    prismaMock.task.update.mockResolvedValue({});
+    prismaMock.taskComment.create.mockResolvedValue({});
+
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.task.update).toHaveBeenCalledWith({
+      where: { id: TASK_ID },
+      data: {
+        workflowHandoffRoleId: null,
+        workflowHandoffGate: null,
+        workflowHandoffReason: null
+      }
+    });
+  });
+
+  it('does not clear an unrelated workflow handoff when approving another gate', async () => {
+    prismaMock.task.findUnique.mockResolvedValue({
+      ...activeTask,
+      workflowHandoffRoleId: 'qa_verifier',
+      workflowHandoffGate: 'qa',
+      workflowHandoffReason: 'QA approval is required'
+    });
+    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approval());
+    prismaMock.taskComment.create.mockResolvedValue({});
+
+    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec' });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+  });
+
   it('rolls back/surfaces failure when the audit insert fails', async () => {
     prismaMock.$transaction.mockRejectedValue(new Error('audit failed'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -104,6 +154,26 @@ describe('task approval boundary', () => {
     prismaMock.taskApproval.update.mockResolvedValue(approval({ state: 'revoked', revokedAt: new Date() })); prismaMock.taskComment.create.mockResolvedValue({});
     const res = await request(createApp()).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`).set(auth());
     expect(res.status).toBe(200); expect(prismaMock.taskComment.create).toHaveBeenCalledWith({ data: { taskId: TASK_ID, author: 'Tom', body: 'Approval spec revoked by Tom.' } });
+  });
+
+  it('restores the required workflow handoff in the revocation transaction', async () => {
+    prismaMock.task.findUnique.mockResolvedValue(activeTask);
+    prismaMock.taskApproval.findUnique.mockResolvedValue(approval());
+    prismaMock.taskApproval.update.mockResolvedValue(approval({ state: 'revoked', revokedAt: new Date() }));
+    prismaMock.task.update.mockResolvedValue({});
+    prismaMock.taskComment.create.mockResolvedValue({});
+
+    const res = await request(createApp()).delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`).set(auth());
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.task.update).toHaveBeenCalledWith({
+      where: { id: TASK_ID },
+      data: {
+        workflowHandoffRoleId: 'product_spec_approver',
+        workflowHandoffGate: 'spec',
+        workflowHandoffReason: 'Product spec approval is required'
+      }
+    });
   });
 
   it.each([null, approval({ state: 'revoked', revokedAt: new Date() })])('DELETE is an idempotent no-op with no comment', async (existing) => {

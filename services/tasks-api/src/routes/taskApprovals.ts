@@ -5,6 +5,8 @@ import { authorizeApprovalType, requireApprovalPrincipal, type ApprovalType } fr
 import { parseTaskId } from './tasks/_validation.ts';
 import { mapTaskApproval } from './tasks/_mapper.ts';
 import { validApprovalTypes } from './tasks/_constants.ts';
+import { loadRequiredApprovalsConfig, requiredApprovalsFor } from '../config/requiredApprovals.ts';
+import { workflowHandoffForApproval } from '../config/workflowHandoffs.ts';
 
 export const taskApprovalsRouter = Router();
 
@@ -23,6 +25,28 @@ function normalizeNote(value) {
 
 function immutableTask(res) {
   return sendError(res, 409, 'TASK_IMMUTABLE', 'Approvals cannot be changed on an archived or done task');
+}
+
+function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'revoked') {
+  const handoff = workflowHandoffForApproval(type);
+  if (!handoff) return null;
+
+  if (action === 'approved') {
+    if (task.workflowHandoffGate !== type) return null;
+    return {
+      workflowHandoffRoleId: null,
+      workflowHandoffGate: null,
+      workflowHandoffReason: null
+    };
+  }
+
+  const required = requiredApprovalsFor(loadRequiredApprovalsConfig(), task.taskType);
+  if (!required.includes(type)) return null;
+  return {
+    workflowHandoffRoleId: handoff.roleId,
+    workflowHandoffGate: type,
+    workflowHandoffReason: handoff.reason
+  };
 }
 
 export function approvalAuditBody(type: ApprovalType, action: 'approved' | 'revoked', actor: string) {
@@ -57,11 +81,24 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     const actor = req.approvalPrincipal!.actor;
 
     const result = await prisma.$transaction(async (tx) => {
-      const task = await tx.task.findUnique({ where: { id }, select: { id: true, status: true, archivedAt: true } });
+      const task = await tx.task.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+          archivedAt: true,
+          taskType: true,
+          workflowHandoffRoleId: true,
+          workflowHandoffGate: true,
+          workflowHandoffReason: true
+        }
+      });
       if (!task) return { kind: 'missing' } as const;
       if (task.archivedAt || task.status === 'done') return { kind: 'immutable' } as const;
       const existing = await tx.taskApproval.findUnique({ where: { taskId_type: { taskId: id, type } } });
       if (existing?.state === 'approved' && existing.owner === actor && existing.note === note) {
+        const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');
+        if (handoffUpdate) await tx.task.update({ where: { id }, data: handoffUpdate });
         return { kind: 'approval', approval: existing } as const;
       }
       const now = new Date();
@@ -70,6 +107,8 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
         create: { taskId: id, type, owner: actor, note, state: 'approved', approvedAt: now },
         update: { owner: actor, note, state: 'approved', approvedAt: now, revokedAt: null }
       });
+      const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');
+      if (handoffUpdate) await tx.task.update({ where: { id }, data: handoffUpdate });
       await tx.taskComment.create({ data: { taskId: id, author: actor, body: approvalAuditBody(type, 'approved', actor) } });
       return { kind: 'approval', approval } as const;
     });
@@ -89,15 +128,34 @@ taskApprovalsRouter.delete('/tasks/:id/approvals/:type', requireApprovalPrincipa
     const actor = req.approvalPrincipal!.actor;
 
     const result = await prisma.$transaction(async (tx) => {
-      const task = await tx.task.findUnique({ where: { id }, select: { id: true, status: true, archivedAt: true } });
+      const task = await tx.task.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+          archivedAt: true,
+          taskType: true,
+          workflowHandoffRoleId: true,
+          workflowHandoffGate: true,
+          workflowHandoffReason: true
+        }
+      });
       if (!task) return { kind: 'missing' } as const;
       if (task.archivedAt || task.status === 'done') return { kind: 'immutable' } as const;
       const existing = await tx.taskApproval.findUnique({ where: { taskId_type: { taskId: id, type } } });
-      if (!existing || existing.state === 'revoked') return { kind: 'approval', approval: existing ?? null } as const;
+      if (!existing || existing.state === 'revoked') {
+        if (existing?.state === 'revoked') {
+          const handoffUpdate = approvalHandoffUpdate(task, type, 'revoked');
+          if (handoffUpdate) await tx.task.update({ where: { id }, data: handoffUpdate });
+        }
+        return { kind: 'approval', approval: existing ?? null } as const;
+      }
       const approval = await tx.taskApproval.update({
         where: { taskId_type: { taskId: id, type } },
         data: { state: 'revoked', revokedAt: new Date() }
       });
+      const handoffUpdate = approvalHandoffUpdate(task, type, 'revoked');
+      if (handoffUpdate) await tx.task.update({ where: { id }, data: handoffUpdate });
       await tx.taskComment.create({ data: { taskId: id, author: actor, body: approvalAuditBody(type, 'revoked', actor) } });
       return { kind: 'approval', approval } as const;
     });
