@@ -482,7 +482,11 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
             "[feature-task-blocked]",
         );
     }
-    if !args.dry_run {
+    // Structured approval is authoritative. Once any actor has an approved
+    // `spec` row, do not try to reconcile the legacy brain-spec path/marker:
+    // that mutation is both redundant and may run under a principal that is
+    // intentionally forbidden from owning spec approvals.
+    if !args.dry_run && !spec_check_should_skip_legacy_mutation(&env.task) {
         env = move_approved_chat_spec_if_needed(&args, env)?;
     }
     if is_past(&env.task, "open") {
@@ -952,6 +956,13 @@ fn task_approval_granted(task: &Task, approval_type: &str) -> bool {
     task.approvals
         .iter()
         .any(|a| a.approval_type == approval_type && a.state == "approved")
+}
+
+/// The structured approval row is the source of truth regardless of actor.
+/// Spec-check may still advance the task and snapshot its checksum, but must
+/// not rewrite the linked brain spec or task description after approval.
+fn spec_check_should_skip_legacy_mutation(task: &Task) -> bool {
+    task_approval_granted(task, "spec")
 }
 fn qa_ac_verified_structured(task: &Task) -> bool {
     task_approval_granted(task, "qa")
@@ -4139,6 +4150,31 @@ mod tests {
     //   AC3 (Rust unit tests cover both accept and reject cases):
     //     all seven tests above.
     //
+
+    #[test]
+    fn spec_check_skips_legacy_mutation_for_any_approved_spec_actor() {
+        let task = Task {
+            approvals: vec![TaskApproval {
+                approval_type: "spec".to_string(),
+                state: "approved".to_string(),
+                owner: Some("Quinn".to_string()),
+                ..TaskApproval::default()
+            }],
+            ..Task::default()
+        };
+
+        assert!(spec_check_should_skip_legacy_mutation(&task));
+    }
+
+    #[test]
+    fn spec_check_keeps_legacy_mutation_available_without_approved_spec() {
+        let task = Task {
+            approvals: vec![approval_row("spec", "revoked")],
+            ..Task::default()
+        };
+
+        assert!(!spec_check_should_skip_legacy_mutation(&task));
+    }
 
     #[test]
     fn spec_gate_accepts_structured_approval_row() {

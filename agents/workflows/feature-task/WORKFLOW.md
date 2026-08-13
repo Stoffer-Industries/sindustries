@@ -47,11 +47,15 @@ for feature tasks. It then writes through the authenticated approval endpoint;
 the resulting `TaskApproval` row remains the sole workflow gate source.
 
 The sweep is idempotent: an already-approved row produces no API write or
-second audit comment. Unchecked markers, revoked API rows, missing or duplicate
-links, inaccessible files, code tasks, and specs outside the open task-spec
-directory never grant approval and are reported as diagnostics. A revoked API
-row is deliberately not re-approved from a stale checked marker because API
-state is authoritative.
+second audit comment. The per-task `spec-check` stage applies the same defensive
+guard before legacy brain-spec/task-description reconciliation: if any actor
+already owns an approved structured `spec` row, it skips that mutation entirely
+while continuing normal gate evaluation. This preserves approval ownership and
+avoids retrying the mutation with a principal that cannot own `spec` approval.
+Unchecked markers, revoked API rows, missing or duplicate links, inaccessible
+files, code tasks, and specs outside the open task-spec directory never grant
+approval and are reported as diagnostics. A revoked API row is deliberately not
+re-approved from a stale checked marker because API state is authoritative.
 
 The existing feature-task runner performs this reconciliation once per pass,
 so no separate cron is needed. Its environment must provide Tom's scoped
