@@ -12,8 +12,10 @@ tests assert:
 - a run that fanouts off the issue URL fetches each article once and
   dedupes by canonical URL.
 
-The tests deliberately do not assert on the production import client or
-the Postgres checkpointer. Those are wired in PR #2 and PR #3.
+The tests deliberately keep external runtime dependencies out of scope.
+Production adapter behavior and durability semantics are covered by
+separate deterministic tests in ``test_angle_model.py`` and
+``test_durability.py``.
 """
 
 from __future__ import annotations

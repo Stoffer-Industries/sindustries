@@ -23,6 +23,8 @@ DEFAULT_TMW_ARCHIVE_URL = "https://www.techmanagerweekly.com/"
 DEFAULT_FETCH_TIMEOUT_SECONDS = 15.0
 DEFAULT_MODEL_TIMEOUT_SECONDS = 30.0
 DEFAULT_MIN_RESONANCE_SCORE = 0.55
+DEFAULT_OPENCLAW_MODEL = "minimax-portal/MiniMax-M3"
+DEFAULT_OPENCLAW_MAX_ATTEMPTS = 2
 DEFAULT_MAX_ISSUE_BYTES = 1 * 1024 * 1024
 DEFAULT_MAX_ARTICLE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_REDIRECTS = 5
@@ -40,6 +42,8 @@ class Settings:
     fetch_timeout_seconds: float
     model_timeout_seconds: float
     min_resonance_score: float
+    openclaw_model: str
+    openclaw_max_attempts: int
     max_issue_bytes: int
     max_article_bytes: int
     max_redirects: int
@@ -101,6 +105,18 @@ def _optional_score(name: str, default: float) -> float:
     return value
 
 
+def _optional_model(name: str, default: str) -> str:
+    value = os.environ.get(name, "").strip()
+    return value or default
+
+
+def _optional_attempts(name: str, default: int) -> int:
+    value = _optional_int(name, default)
+    if value < 1 or value > 3:
+        raise RuntimeError(f"{name} must be in [1, 3], got {value}")
+    return value
+
+
 def load_settings(*, require_secrets: bool = True) -> Settings:
     """Build a Settings instance from the current process environment.
 
@@ -145,6 +161,12 @@ def load_settings(*, require_secrets: bool = True) -> Settings:
         min_resonance_score=_optional_score(
             "CTO_CRAFT_MIN_RESONANCE_SCORE", DEFAULT_MIN_RESONANCE_SCORE
         ),
+        openclaw_model=_optional_model(
+            "CTO_CRAFT_OPENCLAW_MODEL", DEFAULT_OPENCLAW_MODEL
+        ),
+        openclaw_max_attempts=_optional_attempts(
+            "CTO_CRAFT_OPENCLAW_MAX_ATTEMPTS", DEFAULT_OPENCLAW_MAX_ATTEMPTS
+        ),
         max_issue_bytes=_optional_int(
             "CTO_CRAFT_MAX_ISSUE_BYTES", DEFAULT_MAX_ISSUE_BYTES
         ),
@@ -165,6 +187,8 @@ __all__ = [
     "DEFAULT_FETCH_TIMEOUT_SECONDS",
     "DEFAULT_MODEL_TIMEOUT_SECONDS",
     "DEFAULT_MIN_RESONANCE_SCORE",
+    "DEFAULT_OPENCLAW_MODEL",
+    "DEFAULT_OPENCLAW_MAX_ATTEMPTS",
     "DEFAULT_MAX_ISSUE_BYTES",
     "DEFAULT_MAX_ARTICLE_BYTES",
     "DEFAULT_MAX_REDIRECTS",

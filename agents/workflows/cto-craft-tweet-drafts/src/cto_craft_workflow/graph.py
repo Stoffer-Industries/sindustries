@@ -206,7 +206,11 @@ def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
         return {"candidates": []}
 
     user_message = _build_angle_user_message(extracted)
-    prompt = AnglePrompt(system_prompt=deps.system_prompt, user_message=user_message)
+    system_prompt = deps.system_prompt.rstrip()
+    worldview_profile = deps.worldview_profile.strip()
+    if worldview_profile:
+        system_prompt = f"{system_prompt}\n\n{worldview_profile}" if system_prompt else worldview_profile
+    prompt = AnglePrompt(system_prompt=system_prompt, user_message=user_message)
     try:
         out: AngleOutput | None = deps.model.evaluate_one(
             prompt=prompt,
@@ -399,6 +403,7 @@ def build_graph(
     deps: GraphDeps,
     *,
     checkpointer: Any | None = None,
+    interrupt_before: list[str] | None = None,
 ) -> CompiledStateGraph:
     """Build the compiled LangGraph state machine."""
 
@@ -447,7 +452,10 @@ def build_graph(
     workflow.add_edge(NOTIFY, END)
     workflow.add_edge(COMPLETE_NOOP, END)
 
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
+    )
 
 
 def _route_after_extract_with_fanout(state: PipelineState) -> str | list[Send]:
