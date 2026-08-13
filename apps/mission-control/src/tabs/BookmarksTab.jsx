@@ -41,7 +41,11 @@ export function BookmarksTab() {
   const reload = useCallback(async () => {
     try {
       const next = await loadBookmarkState();
-      setData({ snapshot: next.snapshot, transitions: next.transitions });
+      setData({
+        snapshot: next.snapshot,
+        transitions: next.transitions,
+        compoundingSignal: next.compoundingSignal
+      });
       setLoadedAt(next.loadedAt);
       setError(null);
     } catch (err) {
@@ -72,6 +76,7 @@ export function BookmarksTab() {
 
   const snapshot = data?.snapshot ?? null;
   const transitions = data?.transitions ?? [];
+  const compoundingSignal = data?.compoundingSignal ?? { status: 'missing', signal: null, error: null };
   const items = useMemo(() => itemList(snapshot), [snapshot]);
   const byKey = useMemo(() => itemByKey(snapshot), [snapshot]);
   const topics = useMemo(() => availableTopics(items), [items]);
@@ -153,7 +158,7 @@ export function BookmarksTab() {
 
       <BookmarksPendingApprovals pending={pending} relativeAge={relativeAge} />
 
-      <BookmarksKpiRow kpis={kpis} />
+      <BookmarksKpiRow kpis={kpis} compoundingSignal={compoundingSignal} />
 
       <BookmarksCurationsGrid curations={curations} relativeAge={relativeAge} />
 
