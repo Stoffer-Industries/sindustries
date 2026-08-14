@@ -86,11 +86,11 @@ Terminal statuses: `published`, `removed`. Items in `removed` are kept in the ta
 
 The `autoPost*` fields landed in migration `20260717000000_add_content_scheduler_auto_post_fields`.
 
-#### Partial unique index: `(source, sourceRef)`
+#### CTO Craft partial unique index: `(source, sourceRef)`
 
-A partial unique index on `(source, sourceRef)` (where `sourceRef IS NOT NULL`) was added in migration `20260813000000_add_content_scheduler_source_ref_unique`. PostgreSQL permits multiple `NULL` values, so manual rows with `NULL sourceRef` remain valid; only non-null `(source, sourceRef)` pairs must be unique within a source. The migration runs a preflight query and aborts with a clear operator message if any existing non-null pairs would collide — it never silently deletes or merges rows.
+A partial unique index on `(source, sourceRef)` (where `source = 'cto_craft' AND sourceRef IS NOT NULL`) was added in migration `20260813000000_add_content_scheduler_source_ref_unique`. It enforces one row per canonical article URL for CTO Craft imports while allowing other workflows, such as weekly `ops_notes` reviews, to create multiple candidates from one source reference. The migration runs a scoped preflight query and aborts with a clear operator message if existing CTO Craft pairs would collide — it never silently deletes or merges rows.
 
-This index is the **domain idempotency key** for source-ingestion workflows (currently CTO Craft). Re-running the same import is a no-op at the DB layer; `createMany({ skipDuplicates: true })` returns the actual insert count and the API surfaces `skippedDuplicateCount`.
+This index is the **domain idempotency key** for the CTO Craft ingestion workflow. Re-running the same import is a no-op at the DB layer; `createMany({ skipDuplicates: true })` returns the actual insert count and the API surfaces `skippedDuplicateCount`.
 
 ### Status state machine
 
