@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,16 @@ from common import (
     save_state,
     slugify,
     transition_log_path,
+)
+
+WIKI_SCRIPT_ROOT = Path(__file__).resolve().parents[2] / "wiki"
+if str(WIKI_SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(WIKI_SCRIPT_ROOT))
+
+from wiki_catalog import (
+    configure_workspace as configure_wiki_workspace,
+    event_key_for_payload,
+    upsert_entry as wiki_upsert_entry,
 )
 
 SUMMARY_PROMPT = """You are summarising a saved bookmark for a personal research pipeline.
@@ -163,6 +174,7 @@ def main() -> int:
     data = json.load(__import__("sys").stdin)
     candidates = data.get("candidates", [])
     reviews_root = (WORKSPACE / args.reviews_root).resolve()
+    configure_wiki_workspace(WORKSPACE)
     state = load_state(Path(STATE_PATH))
     items = state["items"]
 
@@ -211,6 +223,22 @@ def main() -> int:
         ensure_parent(doc_path)
         doc_path.write_text(build_summary_md(record_with_provenance, summary, provenance), encoding="utf-8")
 
+        summary_doc_rel = f"brain/bookmarks/summaries/{doc_path.name}"
+        wiki_upsert_entry(
+            "summary",
+            summary_doc_rel,
+            record["title"],
+            summary["headline"],
+            event_key=event_key_for_payload(
+                "summary-ingest",
+                {
+                    "source": summary_doc_rel,
+                    "title": record["title"],
+                    "summary": summary["headline"],
+                },
+            ),
+        )
+
         previous_status = existing.get("reviewStatus")
         existing.update({
             "bookmarkKey": bookmark_key,
@@ -224,7 +252,7 @@ def main() -> int:
             "dateArchived": record.get("dateArchived", ""),
             "bodyExcerpt": record.get("bodyExcerpt", ""),
             "reviewStatus": "summarized",
-            "summaryDoc": f"brain/bookmarks/summaries/{doc_path.name}",
+            "summaryDoc": summary_doc_rel,
             "summary": summary,
             "reviewProvenance": provenance,
             "specDocs": existing.get("specDocs", []),

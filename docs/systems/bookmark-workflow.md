@@ -1,7 +1,7 @@
 # Bookmark Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-08-09
+**Last updated:** 2026-08-14
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmarks/`
 
 ---
@@ -34,7 +34,8 @@ ingested  summarized  needs_research (human-gated)                      declined
 - **Separate lobster cron** (runs `summarize.py`)
 - Picks up `ingested` items, runs LLM pass, writes summary to `brain/bookmarks/summaries/<slug>-<key>.md`
 - Summary shape: `headline`, `problem`, `approach`, `valueProposition`, `keyDetails`, `relevantTo`, `constraints`
-- Sets `reviewStatus: summarized`; does NOT set an opinion on whether to implement
+- Immediately upserts the summary into `brain/wiki/index.md` through `agents/workflows/wiki/wiki_catalog.py` and appends an ingest entry to `brain/wiki/log.md`
+- Sets `reviewStatus: summarized` only after the wiki write succeeds; does NOT set an opinion on whether to implement
 
 ### 3. Curate
 - **Heartbeat step** (Quinn) — see `HEARTBEAT.md` → BOOKMARK CURATION
@@ -51,7 +52,7 @@ ingested  summarized  needs_research (human-gated)                      declined
   - Reuses existing spec files on disk (transitions to `spec_created`)
   - Sets `reviewStatus: spec_requested` if no spec exists (queues for Quinn heartbeat)
 - **Heartbeat step** (Quinn) picks up `spec_requested` items via `list_spec_requests.py`, writes spec markdown to `brain/bookmarks/specs/<slug>-<key>.md`, then calls `validate_spec_output.py`
-- `validate_spec_output.py` transitions item to `spec_created` and logs the transition
+- `validate_spec_output.py` validates the files, upserts each spec into `brain/wiki/index.md`, appends wiki ingest history, then transitions the item to `spec_created`
 - `list_spec_requests.py` guards against state drift: items with `approvalStatus=approved` AND non-empty `taskIds` are skipped even if `reviewStatus` is still `spec_requested`. This is a read-only guard — it does not write state. **Side effect:** once a bookmark has been approved and tasked, it will not receive a secondary spec dispatch even if re-curated with a high score. This is intentional.
 
 ### 5. Approval
@@ -65,6 +66,7 @@ ingested  summarized  needs_research (human-gated)                      declined
 ### 6. Task Creation
 - After `approve`, `create_tasks_from_proposals.py` pushes tasks to the Tasks API
 - On task creation or task reuse, the workflow moves each approved spec from `brain/bookmarks/specs/<slug>-<key>.md` to `brain/tasks/specs/in-progress/<slug>-<key>.md` and creates/repairs the task `**Spec:**` line to point at the destination
+- The same move retargets the matching wiki row from the bookmark-spec path to the task-spec path through `agents/workflows/wiki/wiki_catalog.py`, preserving metadata and logging `Moved-From`
 - Once moved to `brain/tasks/specs/in-progress/`, bookmark-origin specs follow the feature-task lifecycle (`in-progress/` → `done/` on task completion)
 - Sets `reviewStatus: tasked` — **terminal**
 
@@ -217,6 +219,8 @@ and does not emit a duplicate transition entry.
 |---|---|
 | `brain/state/bookmark-review-state.json` | Single source of truth for all bookmark states |
 | `brain/state/bookmark-transitions.jsonl` | Append-only transition log (used by Mission Control's `/bookmarks` dashboard; authoritative source of truth) |
+| `brain/wiki/index.md` | Grounded recall catalog; summary/spec hooks update it incrementally |
+| `brain/wiki/log.md` | Append-only wiki ingest/query/lint history |
 | `analytics.bookmark_transitions` (Postgres) | Queryable mirror of every transition; best-effort, write happens after JSONL append. See "Analytics Mirror" below. |
 | `brain/state/focus-config.json` | Curation config: topics, relevanceThreshold, recurationDays, batchSize |
 | `brain/state/bookmark-approval-topics.json` | Telegram delivery config: chatId + threadId per topic |
@@ -233,20 +237,21 @@ and does not emit a duplicate transition entry.
 |---|---|---|---|
 | `run_x_ingest.py` | Ingest | ingest cron | Entry point via `agents/skills/bookmarks/x-ingest/` |
 | `lobster_list_curate_candidates.py` | Ingest | review lobster | Collects candidate bookmarks for the pipeline |
-| `lobster_summarize.py` | Summarize | review lobster | Faithful extraction; no classification |
+| `lobster_summarize.py` | Summarize | review lobster | Faithful extraction; no classification; fail-closed wiki summary ingest |
 | `list_curate_candidates.py` | Curate | heartbeat | Filter only — no LLM; outputs candidate batch for Quinn |
 | `validate_curate_output.py` | Curate | heartbeat | Applies Quinn's curation verdict to state |
 | `lobster_list_curations.py` | Spec | review lobster | Routes high-score curated items into the pipeline |
 | `lobster_generate_specs.py` | Spec | review lobster | Reuses existing spec files or sets `spec_requested` |
 | `list_spec_requests.py` | Spec | heartbeat | Returns `spec_requested` items for Quinn to write; skips items where `approvalStatus=approved` AND `taskIds` non-empty (drift guard, read-only) |
-| `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; transitions to `spec_created` |
+| `validate_spec_output.py` | Spec | heartbeat | Verifies spec files exist; updates wiki spec rows; transitions to `spec_created` |
 | `lobster_request_spec_approval.py` | Approval | review lobster | Prepares packages, finalizes non-approval items, compacts payload, and pauses for approval gate |
 | `run_bookmark_curate.py` | Approval | review cron | Orchestrates lobster run + `request_topic_approval.py` (in `agents/skills/bookmarks/curate/`) |
 | `request_topic_approval.py` | Approval | review cron | Sends Telegram approval message; gates on `specDocs` presence |
 | `handle_approval_reply.py` | Approval | openclaw extension | Parses Tom's reply; routes to approve/decline/revise (lives in `.openclaw/extensions/approval-reply/`) |
 | `rebuild_revised_approval.py` | Approval | resumed lobster | Regenerates approval package after a revision request |
 | `lobster_resolve_topic_approval.py` | Approval | resumed lobster | Applies approved/declined/revision state change |
-| `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown; moves approved-and-tasked specs into `brain/tasks/specs/in-progress/` |
+| `lobster_create_tasks_from_proposals.py` | Task | resumed lobster | Creates Tasks API tasks; reads title and ACs from spec markdown; moves approved-and-tasked specs into `brain/tasks/specs/in-progress/`; retargets matching wiki rows |
+| `agents/workflows/wiki/wiki_catalog.py` | Recall support | helper CLI | Owns markdown wiki upsert, retarget, read-source, query log, and dead-link lint contracts |
 | `x_author_tweet.py` | Author tweet | resumed lobster | Best-effort reply tweet at the original X author when an X-sourced bookmark lands in `tasked` with ≥1 task ID; writes `tweetLog` back to state. Lives next to the lobster scripts. |
 | `run_bookmark_state_analyzer.py` | Inspect | skill | Compact state summary without loading full JSON (in `agents/skills/bookmarks/state/`) |
 
@@ -290,7 +295,7 @@ If a spec's topic isn't in the config, falls back to `general`. If `general` is 
 | Curation not refreshing | `recurationDays` not elapsed or item in terminal status | Check `focus-config.json`, lower `recurationDays` or manually clear `item.curation` |
 | Lobster exits 137 | OOM during lobster run | Check available memory; lobster may need to be run with a lower batch `limit` arg |
 | Approved spec checkbox stayed unchecked | Approval handler failed before atomic marker write or spec file is malformed | Re-run approval handling after restoring a `- [ ] **Approved by Tom**` marker in the bookmark spec. |
-| Task points at `brain/bookmarks/specs/` after task creation | Previous run created/reused a task but failed before repairing the `**Spec:**` line | Re-run `lobster_create_tasks_from_proposals.py`; destination-present/source-absent is treated as an idempotent repair path. |
+| Task points at `brain/bookmarks/specs/` after task creation | Previous run created/reused a task but failed before repairing the `**Spec:**` line | Re-run `lobster_create_tasks_from_proposals.py`; destination-present/source-absent is treated as an idempotent repair path and will also repair the wiki row retarget. |
 
 ---
 

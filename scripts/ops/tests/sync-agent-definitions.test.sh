@@ -6,16 +6,25 @@ trap 'rm -rf "$TMP"' EXIT
 export OPENCLAW_WORKSPACE_ROOT="$TMP/workspace"
 export OPENCLAW_AGENT_DEFS_BACKUP_ROOT="$TMP/backups"
 export OPENCLAW_AGENT_DEFS_LOCK_DIR="$TMP/lock"
-mkdir -p "$OPENCLAW_WORKSPACE_ROOT/agents/rowan"
+export OPENCLAW_AGENT_DEFS_SOURCE_REF="WORKTREE"
+mkdir -p "$OPENCLAW_WORKSPACE_ROOT/agents/rowan" "$OPENCLAW_WORKSPACE_ROOT/agents/vara"
 printf 'keep me\n' > "$OPENCLAW_WORKSPACE_ROOT/AGENTS.md"
 printf 'old soul\n' > "$OPENCLAW_WORKSPACE_ROOT/agents/rowan/SOUL.md"
+printf 'old workflow\n' > "$OPENCLAW_WORKSPACE_ROOT/agents/vara/WORKFLOW.md"
 
 "$SCRIPT" >/dev/null
-cmp <(git -C "$(cd "$(dirname "$SCRIPT")/../.." && pwd)" show origin/main:agents/definitions/rowan/SOUL.md) "$OPENCLAW_WORKSPACE_ROOT/agents/rowan/SOUL.md"
+repo_root="$(cd "$(dirname "$SCRIPT")/../.." && pwd)"
+cmp "$repo_root/agents/definitions/rowan/SOUL.md" "$OPENCLAW_WORKSPACE_ROOT/agents/rowan/SOUL.md"
+cmp "$repo_root/agents/definitions/vara/WORKFLOW.md" "$OPENCLAW_WORKSPACE_ROOT/agents/vara/WORKFLOW.md"
 [[ "$(cat "$OPENCLAW_WORKSPACE_ROOT/AGENTS.md")" == "keep me" ]]
+[[ -f "$OPENCLAW_WORKSPACE_ROOT/agents/vara/AGENTS.md" ]]
+[[ "$(cat "$OPENCLAW_WORKSPACE_ROOT/agents/vara/AGENTS.md")" == "keep me" ]]
 backup=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -path '*/rowan/SOUL.md' -type f -print -quit)
 [[ -n "$backup" ]]
 [[ "$(cat "$backup")" == "old soul" ]]
+vara_backup=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -path '*/vara/WORKFLOW.md' -type f -print -quit)
+[[ -n "$vara_backup" ]]
+[[ "$(cat "$vara_backup")" == "old workflow" ]]
 
 before=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -type f | wc -l | tr -d ' ')
 "$SCRIPT" >/dev/null
