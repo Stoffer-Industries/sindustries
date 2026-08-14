@@ -1465,6 +1465,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         with patch.object(create_tasks_from_proposals, "WORKSPACE", self.root), \
              patch.object(create_tasks_from_proposals, "list_tasks", return_value=[]), \
+             patch.object(create_tasks_from_proposals, "wiki_retarget_entry"), \
              patch.object(create_tasks_from_proposals, "api_request", return_value={"data": {"id": "task-123"}}) as api_mock:
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["create_tasks_from_proposals.py", "--base-url", "http://api", "--json"]):
                 rc = create_tasks_from_proposals.main()
@@ -1542,6 +1543,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
         with patch.object(create_tasks_from_proposals, "WORKSPACE", self.root), \
              patch.object(create_tasks_from_proposals, "list_tasks", return_value=[existing_task]), \
+             patch.object(create_tasks_from_proposals, "wiki_retarget_entry"), \
              patch.object(create_tasks_from_proposals, "api_request", return_value={"data": {"id": "task-new"}}) as api_mock:
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["create_tasks_from_proposals.py", "--base-url", "http://api", "--json"]):
                 rc = create_tasks_from_proposals.main()
