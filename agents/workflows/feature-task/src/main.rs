@@ -3102,13 +3102,24 @@ fn api_get_task(base_url: &str, task_id: &str) -> Result<Task> {
     api_get(base_url, &format!("/tasks/{task_id}"))
 }
 
+fn authenticated_api_patch_request(url: &str) -> ureq::Request {
+    let mut request = ureq::patch(url);
+    if let Ok(token) = std::env::var("TASKS_API_APPROVAL_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+    }
+    request
+}
+
 fn api_patch<T: for<'de> Deserialize<'de>>(
     base_url: &str,
     task_id: &str,
     payload: Value,
 ) -> Result<T> {
     let url = format!("{}/tasks/{task_id}", base_url.trim_end_matches('/'));
-    let value: Value = handle_api_result(ureq::patch(&url).send_json(payload))?;
+    let value: Value = handle_api_result(authenticated_api_patch_request(&url).send_json(payload))?;
     serde_json::from_value(value.get("data").cloned().unwrap_or(value))
         .context("decode API patch response")
 }
@@ -7319,6 +7330,20 @@ detached
             updated.contains("(legacy inline note)"),
             "annotation must be preserved: {updated}"
         );
+    }
+
+    #[test]
+    fn api_patch_request_uses_tasks_api_approval_token() {
+        let previous = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
+        std::env::set_var("TASKS_API_APPROVAL_TOKEN", "test-service-token");
+
+        let request = authenticated_api_patch_request("http://localhost/tasks/task-1");
+
+        match previous {
+            Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
+            None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
+        }
+        assert_eq!(request.header("Authorization"), Some("Bearer test-service-token"));
     }
 
     #[test]
