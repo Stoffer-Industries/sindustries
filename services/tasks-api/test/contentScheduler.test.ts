@@ -297,15 +297,19 @@ describe('contentScheduler routes', () => {
 
   it('POST /content-scheduler/items/:id/approve sets approvedAt + approvedBy', async () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'queued' }));
-    prismaMock.contentSchedulerItem.update.mockResolvedValue(itemFixture({ status: 'approved', approvedAt: new Date(), approvedBy: 'Tom' }));
+    prismaMock.contentSchedulerItem.update.mockResolvedValue(itemFixture({ status: 'approved', approvedAt: new Date(), approvedBy: 'IntegrationTest' }));
     const app = createApp();
+    // Per task 0719a8e3 (requireAuthenticatedUser + AC2 actor authority),
+    // the authenticated actor overrides the x-actor audit-trail header.
+    // authedRequest() authenticates as 'IntegrationTest' so the route
+    // uses that as approvedBy and logs a warn about the header mismatch.
     const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/approve')
       .set('x-actor', 'Tom');
     expect(res.status).toBe(200);
     expect(prismaMock.contentSchedulerItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ approvedBy: 'Tom', status: 'approved' })
+        data: expect.objectContaining({ approvedBy: 'IntegrationTest', status: 'approved' })
       })
     );
   });

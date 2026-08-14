@@ -51,6 +51,9 @@ describe('tasks-api config schema', () => {
     process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173,http://localhost:4173';
     process.env.X_CLIENT = 'fake';
     process.env.CONTENT_SCHEDULER_JOB_ADAPTER = 'in-process';
+    // Reset the integration-test credential seeded by test/setup.ts so the
+    // dev-env expectation of an empty credential store holds (task 0719a8e3).
+    process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = '[]';
 
     const { config } = await loadEnvFresh();
     expect(config.NODE_ENV).toBe('development');
