@@ -146,10 +146,10 @@ describe('validatePlannedWorkoutBody', () => {
 });
 
 describe('buildInsertRows', () => {
-  it('flattens parent and child rows with user_id and key_id', () => {
+  it('flattens parent and child rows with user_id and consent_id', () => {
     const { parentRow, setRows } = buildInsertRows({
       userId: 'user-1',
-      keyId: 'key-1',
+      consentId: 'consent-1',
       body: {
         scheduledFor: '2026-07-24',
         title: 'Upper Body',
@@ -168,7 +168,7 @@ describe('buildInsertRows', () => {
 
     expect(parentRow).toEqual({
       user_id: 'user-1',
-      agent_key_id: 'key-1',
+      consent_id: 'consent-1',
       scheduled_for: '2026-07-24',
       title: 'Upper Body',
       notes: 'workout rationale',
@@ -195,7 +195,7 @@ describe('buildInsertRows', () => {
   it('trims whitespace from string fields', () => {
     const { parentRow, setRows } = buildInsertRows({
       userId: 'user-1',
-      keyId: 'key-1',
+      consentId: 'consent-1',
       body: {
         scheduledFor: '2026-07-24',
         title: '  Upper Body  ',
@@ -218,7 +218,7 @@ describe('buildInsertRows', () => {
   it('defaults unit to kg and notes to null when missing', () => {
     const { setRows } = buildInsertRows({
       userId: 'u',
-      keyId: 'k',
+      consentId: 'c',
       body: {
         scheduledFor: '2026-07-24',
         title: 'Plan',
@@ -232,7 +232,7 @@ describe('buildInsertRows', () => {
   it('numbers sets sequentially per exercise starting at 1', () => {
     const { setRows } = buildInsertRows({
       userId: 'u',
-      keyId: 'k',
+      consentId: 'c',
       body: {
         scheduledFor: '2026-07-24',
         title: 'Plan',
@@ -251,5 +251,17 @@ describe('buildInsertRows', () => {
     expect(setRows.map((r) => r.set_index)).toEqual([1, 2, 3, 1]);
     expect(setRows.slice(0, 3).map((r) => r.exercise_name)).toEqual(['A', 'A', 'A']);
     expect(setRows[3].exercise_name).toBe('B');
+  });
+
+  it('records consent_id: null when consentId is omitted', () => {
+    const { parentRow } = buildInsertRows({
+      userId: 'u',
+      body: {
+        scheduledFor: '2026-07-24',
+        title: 'Plan',
+        exercises: [{ name: 'Bench', sets: [{ reps: 5, weight: 50 }] }]
+      }
+    });
+    expect(parentRow.consent_id).toBeNull();
   });
 });

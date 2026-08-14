@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the agent auth module so the handler is exercised against a stub
-// adminClient + resolveAgentIdentity.
+// adminClient + resolveOAuthIdentity.
 const mockAdminClient = { from: vi.fn() };
 
-vi.mock('../../server/agentAuth.js', async (importOriginal) => {
+vi.mock('../../server/oauthAuth.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     adminClient: () => mockAdminClient,
-    resolveAgentIdentity: vi.fn()
+    resolveOAuthIdentity: vi.fn()
   };
 });
 
 import handler from '../../api/agent/exercises/[exerciseName]/progression.js';
-import { resolveAgentIdentity } from '../../server/agentAuth.js';
+import { resolveOAuthIdentity } from '../../server/oauthAuth.js';
 import {
   DEFAULT_LIMIT,
   EXERCISE_NAME_MAX_LENGTH,
@@ -64,7 +64,7 @@ function makeRes() {
 
 beforeEach(() => {
   mockAdminClient.from.mockReset();
-  resolveAgentIdentity.mockReset();
+  resolveOAuthIdentity.mockReset();
 });
 
 afterEach(() => {
@@ -166,11 +166,11 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
     expect(res.statusCode).toBe(405);
     expect(res.headers.Allow).toBe('GET');
     expect(res.body).toEqual({ error: 'method_not_allowed' });
-    expect(resolveAgentIdentity).not.toHaveBeenCalled();
+    expect(resolveOAuthIdentity).not.toHaveBeenCalled();
   });
 
   it('returns 401 when no agent identity is resolved', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce(null);
+    resolveOAuthIdentity.mockResolvedValueOnce(null);
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: { exerciseName: 'Bench Press' } }, res);
     expect(res.statusCode).toBe(401);
@@ -178,8 +178,8 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
     expect(mockAdminClient.from).not.toHaveBeenCalled();
   });
 
-  it('returns 500 when resolveAgentIdentity throws', async () => {
-    resolveAgentIdentity.mockRejectedValueOnce(new Error('connection refused'));
+  it('returns 500 when resolveOAuthIdentity throws', async () => {
+    resolveOAuthIdentity.mockRejectedValueOnce(new Error('connection refused'));
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: { exerciseName: 'Bench Press' } }, res);
     expect(res.statusCode).toBe(500);
@@ -189,7 +189,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('returns 400 when the exercise name is missing', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: {} }, res);
     expect(res.statusCode).toBe(400);
@@ -199,7 +204,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('returns 400 when the exercise name is whitespace-only', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: { exerciseName: '   ' } }, res);
     expect(res.statusCode).toBe(400);
@@ -209,7 +219,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('returns 400 when the limit is out of range', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: { exerciseName: 'Bench Press', limit: '999' } }, res);
     expect(res.statusCode).toBe(400);
@@ -219,7 +234,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('queries workout_sets scoped to user_id + exercise name and returns the formatted payload', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     const dbRows = [
       {
         set_index: 1,
@@ -275,7 +295,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('escapes ilike special characters in the exercise name', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     // Use a Proxy that records the final `.ilike` call to assert the pattern.
     let capturedPattern = null;
     const chain = new Proxy(
@@ -301,7 +326,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('returns an empty sets array when there are no results', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     mockAdminClient.from.mockReturnValueOnce(buildChain({ data: [], error: null }));
 
     const res = makeRes();
@@ -312,7 +342,12 @@ describe('GET /api/agent/exercises/:exerciseName/progression', () => {
   });
 
   it('returns 500 when the database query errors', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'progression:read'
+    });
     mockAdminClient.from.mockReturnValueOnce(
       buildChain({ data: null, error: new Error('relation workout_sets does not exist') })
     );

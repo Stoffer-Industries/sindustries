@@ -94,7 +94,7 @@ export async function callMcpTool({ client, identity, name, args }) {
     }
     const result = await createPlannedWorkout(client, {
       userId: identity.userId,
-      legacyAgentKeyId: null,
+      consentId: identity.consentId,
       body: args
     });
     return mcpJson(result);

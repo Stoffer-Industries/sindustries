@@ -19,8 +19,7 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 
 - **Anyone** — can self-sign-up at `/signup` with email + password or Google. Apple is gated on the Supabase project having Apple configured — currently disabled, so the Apple button is not rendered.
 - **Existing GymTrack users** — can sign in at `/login` with email + password, or with Google when the flow originates from a protected route such as `/agent-consent`.
-- **Legacy REST agents** — authenticate via static bearer keys stored in `public.gymtrack_agent_api_keys`. These keys continue to work unchanged.
-- **MCP clients** — authenticate through the GymTrack MCP OAuth flow. The issued bearer token is scoped to one GymTrack user and one consent record; it can discover tools, plan workouts, read history, and read exercise progression, but only for that user.
+- **MCP clients** — authenticate through the GymTrack MCP OAuth flow. The issued bearer token is scoped to one GymTrack user and one consent record; it can discover tools, plan workouts, read history, and read exercise progression, but only for that user. The same OAuth token is accepted by both the MCP server (`/mcp`) and the REST endpoints under `/api/agent/*`.
 
 ## Flows
 
@@ -117,10 +116,9 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 
 - `public.workouts` — one row per workout session. RLS: `auth.uid() = user_id`.
 - `public.workout_sets` — one row per set. RLS via parent `workouts.user_id = auth.uid()`.
-- `public.gymtrack_agent_api_keys` — legacy static REST credentials; plaintext tokens never stored.
-- `public.planned_workouts` / `public.planned_workout_sets` — planned workout state shared by both legacy REST agents and MCP clients.
+- `public.planned_workouts` / `public.planned_workout_sets` — planned workout state created by MCP clients via OAuth. `planned_workouts.consent_id` (FK → `gymtrack_oauth_consents.id`) records which connected agent authored the plan.
 - `public.gymtrack_oauth_clients` — static allowlist of supported MCP clients and their registered redirect URIs.
-- `public.gymtrack_oauth_consents` — one active consent per `user_id + client_id`; drives the Agents settings page.
+- `public.gymtrack_oauth_consents` — one active consent per `user_id + client_id`; drives the Agents settings page and is the only credential path for agent access to workout data.
 - `public.gymtrack_oauth_authorization_codes` — hashed authorization codes with PKCE challenge metadata.
 - `public.gymtrack_oauth_tokens` — hashed access/refresh tokens, refresh-token family ids, rotation metadata, and revocation timestamps.
 
@@ -141,15 +139,15 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 
 ## Agent surfaces
 
-### Legacy REST agent API
+### OAuth-protected REST endpoints
 
-Server-side endpoints under `apps/gymtrack/api/agent/`, implemented in `apps/gymtrack/server/agentAuth.js` plus per-route handlers.
+Server-side endpoints under `apps/gymtrack/api/agent/`, implemented in `apps/gymtrack/server/oauthAuth.js` plus per-route handlers.
 
-- `POST /api/agent/planned-workouts`
-- `GET /api/agent/history?limit=1..50`
-- `GET /api/agent/exercises/:exerciseName/progression?limit=1..200`
+- `POST /api/agent/planned-workouts` (scope: `workouts:write`)
+- `GET /api/agent/history?limit=1..50` (scope: `history:read`)
+- `GET /api/agent/exercises/:exerciseName/progression?limit=1..200` (scope: `progression:read`)
 
-These routes still authenticate with `Authorization: Bearer <legacy static key>` and still resolve the caller through `public.gymtrack_agent_api_keys`. This preserves existing integrations from task `f520c396` unchanged.
+Every route authenticates with `Authorization: Bearer <oauth access token>` and resolves the caller through `gymtrack_oauth_tokens` + `gymtrack_oauth_consents` (both checked for `revoked_at` and active expiry on every request). The resolved identity is `{ user_id, consent_id, client_id, scope }`. Scope enforcement is per-route and per-method — `plan_workout` requires `workouts:write`, `read_history` requires `history:read`, `read_exercise_progression` requires `progression:read`. The legacy static-key credential system was decommissioned in task `1eb6e48c`; OAuth is the only credential path for agent access to workout data.
 
 ### MCP server
 
@@ -168,7 +166,7 @@ Available tools:
 - `read_history`
 - `read_exercise_progression`
 
-The MCP server always derives the acting `user_id` from the validated OAuth access token. Tool arguments never supply or override the owner id, so an MCP client authorized for one user cannot read or write another user's data.
+The MCP server always derives the acting `user_id` from the validated OAuth access token. Tool arguments never supply or override the owner id, so an MCP client authorized for one user cannot read or write another user's data. The MCP server and the REST endpoints share the same `gymtrack_oauth_*` tables; a token issued by the MCP OAuth flow can be presented to either surface, with the same revocation semantics.
 
 ## Coverage and tests
 
@@ -178,7 +176,7 @@ The MCP server always derives the acting `user_id` from the validated OAuth acce
 | Google social login wiring | `test/e2e/signup-google.spec.ts` |
 | Planned workouts browse + connect-agent CTA visibility/provider links | `test/e2e/workouts-tab.spec.ts` + `src/components/WorkoutsTab.test.jsx` |
 | Connected agents list + revoke UI | `src/components/ConnectedAgentsPage.test.jsx` |
-| Legacy REST handlers | `src/lib/agentAuth.test.js`, `src/lib/plannedWorkoutsHandler.test.js`, `src/lib/historyHandler.test.js`, `src/lib/progressionHandler.test.js` |
+| OAuth-protected REST handlers | `src/lib/oauthAuth.test.js`, `src/lib/plannedWorkoutsHandler.test.js`, `src/lib/historyHandler.test.js`, `src/lib/progressionHandler.test.js` |
 | MCP OAuth flow, PKCE exchange, refresh rotation, tool discovery | `services/gymtrack-mcp/test/app.test.js` |
 
 Playwright still runs against the Vite dev server on port 5179 with `iPhone 13` device emulation. There is still no end-to-end Playwright spec that drives a real external MCP client through OAuth against a live Supabase project; the current branch covers that surface with service integration tests instead.
@@ -198,4 +196,4 @@ Playwright still runs against the Vite dev server on port 5179 with `iPhone 13` 
 
 - Building GymTrack-owned planning intelligence.
 - Shipping every OAuth provider on day one; Google is the minimum supported social-login path.
-- Replacing or breaking the existing `/api/agent/*` integrations.
+- Replacing or breaking the existing `/api/agent/*` integrations (already OAuth-only; see Agent surfaces → OAuth-protected REST endpoints).

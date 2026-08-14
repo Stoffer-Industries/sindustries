@@ -611,7 +611,7 @@ describe('GymTrack MCP OAuth server', () => {
     expect(call.status).toBe(200);
     expect(createPlannedWorkout).toHaveBeenCalledWith(
       {},
-      expect.objectContaining({ userId: 'user-1', legacyAgentKeyId: null })
+      expect.objectContaining({ userId: 'user-1', consentId: consent.id })
     );
   });
 
