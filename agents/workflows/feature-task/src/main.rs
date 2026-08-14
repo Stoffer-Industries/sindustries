@@ -15,7 +15,7 @@ use std::{
 mod ac_parsing;
 mod analytics;
 
-const AUTHOR: &str = "Lobster";
+const AUTHOR: &str = "Lobster"; // deprecated: comment author is now derived from the authenticated actor (task 0719a8e3); retained for log messages only
 const WORKFLOW: &str = "feature-task-workflow";
 const CODE_TASK_WORKFLOW: &str = "code-task-workflow";
 const STATE_TAG: &str = "[lobster-state]";
@@ -3134,7 +3134,30 @@ fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
         "{}/tasks/{task_id}/comments",
         base_url.trim_end_matches('/')
     );
-    handle_api_result(ureq::post(&url).send_json(json!({"author": AUTHOR, "text": text})))?;
+    // The comment author is now derived from the authenticated session
+    // (task 0719a8e3). Body-supplied author is rejected with 403 if it
+    // disagrees with the authenticated actor, so we never set it here.
+    // We authenticate with FEATURE_TASK_LOBSTER_TOKEN (preferred) or fall
+    // back to TASKS_API_APPROVAL_TOKEN (Quinn actor) when the per-agent
+    // token is not provisioned yet.
+    let token = std::env::var("FEATURE_TASK_LOBSTER_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var("TASKS_API_APPROVAL_TOKEN")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .ok_or_else(|| {
+            anyhow!("FEATURE_TASK_LOBSTER_TOKEN (or TASKS_API_APPROVAL_TOKEN) is required to post comments")
+        })?;
+    handle_api_result(
+        ureq::post(&url)
+            .set("Authorization", &format!("Bearer {token}"))
+            .send_json(json!({"text": text})),
+    )?;
     Ok(())
 }
 

@@ -566,16 +566,34 @@ tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
     // creation. Checking here blocks all discussion on drifted tasks, which
     // is the opposite of what we want — the new ACs need to be discussed.
 
-    const author = normalizeString(req.body?.author);
+    // Comment author is derived from the authenticated user (task 0719a8e3).
+    // The `author` field on the request body is ignored unless it matches
+    // the authenticated actor; a mismatch is a hard 403 rather than a
+    // silent overwrite, so the caller gets a visible security signal.
+    const authenticatedActor = req.user?.actor;
+    if (!authenticatedActor) {
+      // Defensive: the requireAuthenticatedUser middleware runs ahead of
+      // this handler and would have already returned 401. Reaching here
+      // means the middleware was bypassed (e.g. direct handler invocation
+      // in a test) — refuse rather than fall back to body-supplied author.
+      return sendError(res, 401, 'AUTH_REQUIRED', 'A valid session or service credential is required');
+    }
+    const requestedAuthor = normalizeString(req.body?.author);
+    if (requestedAuthor && requestedAuthor !== authenticatedActor) {
+      return sendError(
+        res,
+        403,
+        'COMMENT_AUTHOR_FORBIDDEN',
+        'author is derived from the authenticated session; body.author must match'
+      );
+    }
     const text = normalizeString(req.body?.text);
-
-    if (!author) return badRequest(res, 'COMMENT_AUTHOR_REQUIRED', 'author is required');
     if (!text) return badRequest(res, 'COMMENT_TEXT_REQUIRED', 'text is required');
 
     const comment = await prisma.taskComment.create({
       data: {
         taskId: id,
-        author,
+        author: authenticatedActor,
         body: text
       }
     });

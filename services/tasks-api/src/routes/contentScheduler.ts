@@ -51,8 +51,22 @@ import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts
 
 
 function actor(req: any): string {
+  // After the requireAuthenticatedUser middleware (task 0719a8e3), the
+  // authenticated actor is authoritative. The `x-actor` header is kept as
+  // a backwards-compatible audit-trail signal: if it is set and disagrees
+  // with the authenticated actor, we log a warning but accept the
+  // authenticated value. Phase 2 (cloud auth) will drop the header.
+  const authenticated = req.user?.actor;
   const header = req.headers['x-actor'];
-  if (typeof header === 'string' && header.trim().length > 0) return header.trim();
+  const headerValue = typeof header === 'string' && header.trim().length > 0 ? header.trim() : null;
+  if (headerValue && authenticated && headerValue !== authenticated) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[content-scheduler] x-actor header '${headerValue}' disagrees with authenticated actor '${authenticated}'; using authenticated actor`
+    );
+  }
+  if (authenticated) return authenticated;
+  if (headerValue) return headerValue;
   return 'unknown';
 }
 

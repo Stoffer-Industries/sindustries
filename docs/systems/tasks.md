@@ -648,6 +648,32 @@ Agent writes use `Authorization: Bearer <service-token>` with a separately scope
 
 Approval POST/DELETE and their ordinary audit comment execute in one Prisma transaction. A real transition creates exactly one comment (`Approval <type> approved|revoked by <actor>.`); identical POST and absent/already-revoked DELETE are no-ops with no duplicate history. Archived and `done` tasks are immutable.
 
+### General-mutation authentication boundary (task `0719a8e3`)
+
+Every `POST` / `PATCH` / `DELETE` on the tasks-api mutation surface requires the same `tasks_api_session` cookie or `Authorization: Bearer <token>` credential that the approval routes use. The credential store is the shared `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` env var — no second identity system. The middleware in `services/tasks-api/src/middleware/requireAuth.ts` sets `req.user = { actor, kind }` on success and returns `401 AUTH_REQUIRED` on failure. GET endpoints stay open so the Tasks UI and agent task queue keep reading without friction.
+
+Gated surfaces (mounted ahead of every router in `app.ts`):
+
+- `POST /tasks`, `PATCH /tasks/:id`, `DELETE /tasks/:id`, `POST /tasks/:id/comments`
+- `POST /tags` (and any future `PATCH`/`DELETE` on `/tags`)
+- All write paths under `/content-scheduler/*` (items CRUD, approve/unapprove/publish/remove, reorder, the `cto-craft` trusted ingest)
+- `POST /feature-task-analytics/events`
+
+Comment author is derived from the authenticated actor (task `0719a8e3` AC2). A body-supplied `author` field on `POST /tasks/:id/comments` is rejected with `403 COMMENT_AUTHOR_FORBIDDEN` when it disagrees with the authenticated actor; matching it is accepted (and ignored otherwise). This makes impersonation impossible: even a request with `author: "Quinn"` is persisted as the authenticated actor, never the body-supplied value.
+
+The content-scheduler `x-actor` header is kept as a backwards-compatible audit-trail signal (Phase 1). When set, the API logs a warning if the header disagrees with the authenticated actor and uses the authenticated actor as authoritative. Phase 2 (cloud auth, task `206927ed`) will drop the header entirely.
+
+Per-agent service credentials — each trusted writer has its own token so the comment author / audit-trail actor surfaces correctly:
+
+| Env var | Actor (derived) | Used by |
+|---|---|---|
+| `TASKS_API_APPROVAL_TOKEN` | `Quinn` | Approval writes (existing) — Quinn-only `tech_design` gate |
+| `BOOKMARK_LOBSTER_TOKEN` | `bookmark_lobster` | `agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py` |
+| `CONTENT_TASKS_TOKEN` | `Lobster` | `agents/workflows/content-tasks/scripts/common.py` |
+| `FEATURE_TASK_LOBSTER_TOKEN` | `feature_task_lobster` | `agents/workflows/feature-task/src/main.rs` (`add_comment`), `agents/workflows/feature-task/src/analytics.rs` |
+
+When both `TASKS_API_APPROVAL_USERS` and `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` are empty the API refuses every mutation with `401 AUTH_REQUIRED`. Local dev must provision at least one user or service credential — see `services/tasks-api/test/mutationAuthIntegration.test.ts` for the contract. Quinn provisions the four per-agent tokens in `~/.openclaw/.env` and the relevant agent env files; each agent only learns its own token.
+
 ---
 
 ## `.openclaw` boundary

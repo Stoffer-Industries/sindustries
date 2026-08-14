@@ -23,14 +23,20 @@ TASKS_CLIENT_DIR = _SINDUSTRIES_ROOT / "agents" / "skills" / "ops" / "tasks-api"
 if str(TASKS_CLIENT_DIR) not in sys.path:
     sys.path.insert(0, str(TASKS_CLIENT_DIR))
 
-from tasks_api_client import api_request, get_base_url, get_task, list_tasks  # noqa: E402
+from tasks_api_client import api_request, get_base_url, get_task, list_tasks, service_token_env  # noqa: E402
 
 STATE_TAG = "[lobster-state]"
 IVY_PRS_TAG = "[ivy-prs]"
 IVY_TWEETS_QUEUED_TAG = "[ivy-tweets-queued]"
 IVY_TWEETS_QUEUED_RE = re.compile(r"^\[ivy-tweets-queued\]\s+theme:\s+\S")
 WEEKLY_CONTENT_TITLE_RE = re.compile(r"weekly\s+(review|content\s+updates?)", re.I)
-AUTHOR = "Lobster"
+# Author is now derived from the authenticated session (task 0719a8e3).
+# The legacy `AUTHOR = "Lobster"` constant is removed; the API rejects any
+# body-supplied author that disagrees with the authenticated actor. The
+# content-tasks Lobster authenticates with its own CONTENT_TASKS_TOKEN so
+# the comment author surfaces as `Lobster` (the actor name on the token).
+# AUTHOR = "Lobster"  # deprecated: use the authenticated actor instead
+CONTENT_TASKS_TOKEN = service_token_env("CONTENT_TASKS_TOKEN")
 STATUS_ORDER = {"open": 0, "ready": 1, "doing": 2, "acceptance": 3, "done": 4}
 PR_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)", re.I)
 # Use horizontal whitespace for indentation. `\s` also matches newlines, so
@@ -142,7 +148,7 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def add_comment(task_id: str, text: str, base_url: str | None = None) -> dict[str, Any]:
     base = base_url or get_base_url()
-    return api_request("POST", base, f"/tasks/{task_id}/comments", {"author": AUTHOR, "text": text})
+    return api_request("POST", base, f"/tasks/{task_id}/comments", {"text": text}, token=CONTENT_TASKS_TOKEN)
 
 
 def write_lobster_state(task_id: str, state: dict[str, Any], note: str | None = None, base_url: str | None = None) -> dict[str, Any]:
@@ -155,7 +161,7 @@ def write_lobster_state(task_id: str, state: dict[str, Any], note: str | None = 
 
 def patch_task(task_id: str, payload: dict[str, Any], base_url: str | None = None) -> dict[str, Any]:
     base = base_url or get_base_url()
-    resp = api_request("PATCH", base, f"/tasks/{task_id}", payload)
+    resp = api_request("PATCH", base, f"/tasks/{task_id}", payload, token=CONTENT_TASKS_TOKEN)
     if isinstance(resp, dict) and isinstance(resp.get("data"), dict):
         return resp["data"]
     return resp if isinstance(resp, dict) else {}
