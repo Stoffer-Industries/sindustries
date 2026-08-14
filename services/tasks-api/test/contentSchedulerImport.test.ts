@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // --- Prisma mock ---------------------------------------------------------
@@ -64,7 +65,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       ]);
 
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
 
@@ -87,7 +88,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
 
     it('returns 1–5 items (boundary)', async () => {
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items: [] });
       expect(res.status).toBe(400);
@@ -99,7 +100,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
         itemBody(`item ${i}`, `https://example.com/${i}`)
       );
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
       expect(res.status).toBe(400);
@@ -123,7 +124,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       ]);
 
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
 
@@ -146,7 +147,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       ]);
 
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
 
@@ -160,7 +161,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
     it('rejects body longer than 280 characters', async () => {
       const items = [itemBody('x'.repeat(281), STRONG_REF)];
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
       expect(res.status).toBe(400);
@@ -171,7 +172,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
     it('rejects non-http sourceRef', async () => {
       const items = [itemBody('a body', 'javascript:alert(1)')];
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
       expect(res.status).toBe(400);
@@ -184,7 +185,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
         itemBody('second', STRONG_REF)
       ];
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
       expect(res.status).toBe(400);
@@ -194,7 +195,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
     it('rejects empty body', async () => {
       const items = [itemBody('   ', STRONG_REF)];
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
       expect(res.status).toBe(400);
@@ -203,7 +204,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
 
     it('rejects items that are not an array', async () => {
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items: 'not-an-array' });
       expect(res.status).toBe(400);
@@ -215,7 +216,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
     it('rejects with 401 when secret is configured and header is missing', async () => {
       process.env.CONTENT_SCHEDULER_INGEST_SECRET = 'a'.repeat(64);
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items: [itemBody('body', STRONG_REF)] });
       expect(res.status).toBe(401);
@@ -226,7 +227,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
     it('rejects with 401 when secret is configured and header mismatches', async () => {
       process.env.CONTENT_SCHEDULER_INGEST_SECRET = 'a'.repeat(64);
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .set('x-content-ingest-secret', 'b'.repeat(64))
         .send({ items: [itemBody('body', STRONG_REF)] });
@@ -241,7 +242,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       prismaMock.contentSchedulerItem.findMany.mockResolvedValue([asPersisted(STRONG_REF, 'id-1')]);
 
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .set('x-content-ingest-secret', secret)
         .send({ items: [itemBody('body', STRONG_REF)] });
@@ -254,7 +255,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       prismaMock.contentSchedulerItem.findMany.mockResolvedValue([asPersisted(STRONG_REF, 'id-1')]);
 
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items: [itemBody('body', STRONG_REF)] });
       expect(res.status).toBe(201);
@@ -268,7 +269,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       prismaMock.contentSchedulerItem.findMany.mockResolvedValue([asPersisted(STRONG_REF, 'id-1')]);
 
       const app = await createApp();
-      const res = await request(app)
+      const res = await authedRequest(app)
         .post('/api/v1/content-scheduler/imports/cto-craft')
         .send({ items });
 

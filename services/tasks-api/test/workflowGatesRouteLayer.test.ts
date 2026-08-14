@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mirrors the route-layer prisma mock pattern from taskApprovals.test.ts:
@@ -229,7 +230,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
       }); // post-update fetch
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ attentionOwners: ['Tom'] });
 
@@ -247,7 +248,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
       .mockResolvedValueOnce(baseTaskFixture({ attentionOwners: [] }));
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ attentionOwners: [] });
 
@@ -267,7 +268,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
       }));
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ status: 'doing' });
 
@@ -281,7 +282,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
     prismaMock.task.findFirst.mockResolvedValueOnce({ id: TASK_ID, taskType: 'feature', archivedAt: null });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ attentionOwners: 'Tom' });
 
@@ -294,7 +295,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
     const many = Array.from({ length: MAX_ATTENTION_OWNERS + 1 }, (_, i) => `p${i}`);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ attentionOwners: many });
 
@@ -318,7 +319,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
       });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ attentionOwners: [] });
 
@@ -363,7 +364,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
       });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ attentionOwners: [] });
 
@@ -397,7 +398,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
   ])('?workflowGateOwner=%s filters directly by persisted role ids', async (owner, roleIds) => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
-    await request(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: owner });
+    await authedRequest(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: owner });
 
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
     expect(where.AND).toEqual([{ workflowHandoffRoleId: { in: roleIds } }]);
@@ -406,7 +407,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
   it('?workflowGateOwner with no configured roles returns zero tasks instead of broadening', async () => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
-    await request(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: 'Rowan' });
+    await authedRequest(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: 'Rowan' });
 
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
     expect(where.AND).toEqual([{ id: { equals: '' } }]);
@@ -416,7 +417,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
     const app = createApp();
-    await request(app).get('/api/v1/tasks').query({ attentionOwner: 'Tom' });
+    await authedRequest(app).get('/api/v1/tasks').query({ attentionOwner: 'Tom' });
 
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
     expect(where.attentionOwners).toEqual({
@@ -427,7 +428,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
   it('includes attentionOwners in the findMany include so the response can map them', async () => {
     prismaMock.task.findMany.mockResolvedValue([]);
     const app = createApp();
-    await request(app).get('/api/v1/tasks');
+    await authedRequest(app).get('/api/v1/tasks');
     const include = prismaMock.task.findMany.mock.calls[0][0].include;
     expect(include).toHaveProperty('attentionOwners', true);
   });
@@ -435,7 +436,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
   it('does not apply the workflow-gate filter when the param is empty', async () => {
     prismaMock.task.findMany.mockResolvedValue([]);
     const app = createApp();
-    await request(app).get('/api/v1/tasks').query({ workflowGateOwner: '' });
+    await authedRequest(app).get('/api/v1/tasks').query({ workflowGateOwner: '' });
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
     expect(where).not.toHaveProperty('AND');
   });
@@ -560,7 +561,7 @@ describe('explicit workflow handoffs', () => {
       taskTag: prismaMock.taskTag, taskDependency: prismaMock.taskDependency,
       taskAttentionOwner: prismaMock.taskAttentionOwner
     }));
-    const response = await request(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
+    const response = await authedRequest(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ workflowHandoff: { roleId: 'qa_verifier', gate: 'qa' } });
     expect(response.status).toBe(200);
     expect(response.body.data.workflowGates).toEqual([{
@@ -570,7 +571,7 @@ describe('explicit workflow handoffs', () => {
 
   it('rejects unknown role ids before writing', async () => {
     prismaMock.task.findFirst.mockResolvedValueOnce(baseTaskFixture());
-    const response = await request(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
+    const response = await authedRequest(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ workflowHandoff: { roleId: 'unknown' } });
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('INVALID_WORKFLOW_HANDOFF');

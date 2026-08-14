@@ -15,7 +15,9 @@ use std::{
 mod ac_parsing;
 mod analytics;
 
-const AUTHOR: &str = "Lobster"; // deprecated: comment author is now derived from the authenticated actor (task 0719a8e3); retained for log messages only
+// Comment author is derived from the authenticated actor at the API
+// boundary (task 0719a8e3); this workflow no longer carries a literal
+// "Lobster" author fallback.
 const WORKFLOW: &str = "feature-task-workflow";
 const CODE_TASK_WORKFLOW: &str = "code-task-workflow";
 const STATE_TAG: &str = "[lobster-state]";

@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -79,7 +80,7 @@ describe('tasks api endpoints', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .get('/api/v1/tasks')
       .query({ status: 'open', limit: 2, q: 'task' });
 
@@ -116,7 +117,7 @@ describe('tasks api endpoints', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks');
+    const response = await authedRequest(app).get('/api/v1/tasks');
 
     expect(response.status).toBe(200);
     expect(response.body.data[0].dependsOn).toEqual([
@@ -138,7 +139,7 @@ describe('tasks api endpoints', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .get('/api/v1/tasks')
       .query({ includeArchived: 'true' });
 
@@ -154,7 +155,7 @@ describe('tasks api endpoints', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .get('/api/v1/tasks')
       .query({ taskType: 'feature' });
 
@@ -168,7 +169,7 @@ describe('tasks api endpoints', () => {
   it('GET /api/v1/tasks rejects invalid taskType filters', async () => {
     const app = createApp();
 
-    const response = await request(app).get('/api/v1/tasks').query({ taskType: 'invalid' });
+    const response = await authedRequest(app).get('/api/v1/tasks').query({ taskType: 'invalid' });
 
     expect(response.status).toBe(400);
     expect(response.body).toEqual({
@@ -180,7 +181,7 @@ describe('tasks api endpoints', () => {
   it('GET /api/v1/tasks validates bad status filter', async () => {
     const app = createApp();
 
-    const response = await request(app).get('/api/v1/tasks').query({ status: 'blocked' });
+    const response = await authedRequest(app).get('/api/v1/tasks').query({ status: 'blocked' });
 
     expect(response.status).toBe(400);
     expect(response.body).toEqual({
@@ -225,7 +226,7 @@ describe('tasks api endpoints', () => {
     );
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks/22222222-2222-2222-2222-222222222222');
+    const response = await authedRequest(app).get('/api/v1/tasks/22222222-2222-2222-2222-222222222222');
 
     expect(response.status).toBe(200);
     expect(response.body.data.id).toBe('22222222-2222-2222-2222-222222222222');
@@ -265,7 +266,7 @@ describe('tasks api endpoints', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/tasks/11111111-1111-1111-1111-111111111111/comments')
       .send({ author: '  Rowan  ', text: '  Investigated API contract  ' });
 
@@ -290,7 +291,7 @@ describe('tasks api endpoints', () => {
     const app = createApp();
 
     prismaMock.task.findFirst.mockResolvedValueOnce(task());
-    const missingAuthor = await request(app)
+    const missingAuthor = await authedRequest(app)
       .post('/api/v1/tasks/11111111-1111-1111-1111-111111111111/comments')
       .send({ text: 'hello' });
     expect(missingAuthor.status).toBe(400);
@@ -299,7 +300,7 @@ describe('tasks api endpoints', () => {
     });
 
     prismaMock.task.findFirst.mockResolvedValueOnce(task());
-    const missingText = await request(app)
+    const missingText = await authedRequest(app)
       .post('/api/v1/tasks/11111111-1111-1111-1111-111111111111/comments')
       .send({ author: 'Rowan', text: '   ' });
     expect(missingText.status).toBe(400);
@@ -308,7 +309,7 @@ describe('tasks api endpoints', () => {
     });
 
     prismaMock.task.findFirst.mockResolvedValueOnce(null);
-    const missingTask = await request(app)
+    const missingTask = await authedRequest(app)
       .post('/api/v1/tasks/99999999-9999-9999-9999-999999999999/comments')
       .send({ author: 'Rowan', text: 'hello' });
     expect(missingTask.status).toBe(404);
@@ -354,7 +355,7 @@ describe('tasks api endpoints', () => {
   ])('$label with 400 INVALID_TASK_ID and skips the prisma lookup', async ({ method, path, body }) => {
     const app = createApp();
 
-    const req = request(app)[method](path);
+    const req = authedRequest(app)[method](path);
     const response = body ? await req.send(body) : await req;
 
     expect(response.status).toBe(400);
@@ -374,7 +375,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findFirst.mockResolvedValueOnce(null);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks/99999999-9999-9999-9999-999999999999');
+    const response = await authedRequest(app).get('/api/v1/tasks/99999999-9999-9999-9999-999999999999');
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({
@@ -390,7 +391,7 @@ describe('tasks api endpoints', () => {
     );
 
     const app = createApp();
-    const response = await request(app).post('/api/v1/tasks').send({
+    const response = await authedRequest(app).post('/api/v1/tasks').send({
       title: 'Created task',
       priority: 'high',
       taskType: 'feature',
@@ -414,7 +415,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.update.mockResolvedValue(task({ status: 'ready', specChecksum: checksum }));
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ status: 'ready', specChecksum: checksum });
 
@@ -478,7 +479,7 @@ describe('tasks api endpoints', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
       .send({ description: driftedDescription });
 
@@ -562,7 +563,7 @@ describe('tasks api endpoints', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
       .send({ description: driftedDescription });
 
@@ -607,7 +608,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.update.mockResolvedValue(task({ description: updatedDescription, specChecksum: checksum }));
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ description: updatedDescription });
 
@@ -635,7 +636,7 @@ describe('tasks api endpoints', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70/comments')
       .send({ author: 'Rowan', text: 'trying to comment' });
 
@@ -676,7 +677,7 @@ describe('tasks api endpoints', () => {
     );
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
       .send({ description: updatedDescription });
 
@@ -718,7 +719,7 @@ describe('tasks api endpoints', () => {
     );
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
       .send({ description: updatedDescription });
 
@@ -761,7 +762,7 @@ describe('tasks api endpoints', () => {
     );
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70')
       .send({ description: checkedDescription });
 
@@ -779,7 +780,7 @@ describe('tasks api endpoints', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks');
+    const response = await authedRequest(app).get('/api/v1/tasks');
 
     expect(response.status).toBe(200);
     expect(response.body.data.map((item) => item.title)).toEqual(
@@ -789,7 +790,7 @@ describe('tasks api endpoints', () => {
 
   it('POST /api/v1/tasks rejects invalid taskType values', async () => {
     const app = createApp();
-    const response = await request(app).post('/api/v1/tasks').send({
+    const response = await authedRequest(app).post('/api/v1/tasks').send({
       title: 'Created task',
       taskType: 'invalid'
     });
@@ -808,7 +809,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.update.mockResolvedValue(task({ title: 'Updated title', status: 'doing' }));
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ title: 'Updated title', status: 'doing' });
 
@@ -839,7 +840,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.update.mockResolvedValue(task());
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: [dependencyId, dependencyId] });
 
@@ -862,7 +863,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.update.mockResolvedValue(task());
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: [] });
 
@@ -877,7 +878,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findFirst.mockResolvedValue(task());
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: ['not-a-uuid'] });
 
@@ -892,7 +893,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findFirst.mockResolvedValue(task());
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: ['11111111-1111-1111-1111-111111111111'] });
 
@@ -907,7 +908,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: [dependencyId] });
 
@@ -922,7 +923,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findMany.mockResolvedValue([{ id: dependencyId, archivedAt: new Date('2026-03-01T00:00:00.000Z') }]);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: [dependencyId] });
 
@@ -938,7 +939,7 @@ describe('tasks api endpoints', () => {
     prismaMock.taskDependency.findFirst.mockResolvedValue({ taskId: dependencyId });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ dependsOnIds: [dependencyId] });
 
@@ -955,7 +956,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.update.mockResolvedValue(task({ taskType: 'feature' }));
 
     const app = createApp();
-    const feature = await request(app)
+    const feature = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ taskType: 'feature' });
 
@@ -963,7 +964,7 @@ describe('tasks api endpoints', () => {
     expect(feature.body.data.taskType).toBe('feature');
     expect(prismaMock.task.update.mock.calls[0][0].data.taskType).toBe('feature');
 
-    const invalid = await request(app)
+    const invalid = await authedRequest(app)
       .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
       .send({ taskType: 'invalid' });
 
@@ -982,7 +983,7 @@ describe('tasks api endpoints', () => {
     });
 
     const app = createApp();
-    const response = await request(app).delete('/api/v1/tasks/11111111-1111-1111-1111-111111111111');
+    const response = await authedRequest(app).delete('/api/v1/tasks/11111111-1111-1111-1111-111111111111');
 
     expect(response.status).toBe(200);
     expect(response.body.data.id).toBe('11111111-1111-1111-1111-111111111111');
@@ -993,7 +994,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findFirst.mockResolvedValue(null);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tasks/99999999-9999-9999-9999-999999999999');
+    const response = await authedRequest(app).get('/api/v1/tasks/99999999-9999-9999-9999-999999999999');
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({
@@ -1008,7 +1009,7 @@ describe('tasks api endpoints', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/tags');
+    const response = await authedRequest(app).get('/api/v1/tags');
 
     expect(response.status).toBe(200);
     expect(response.body.data.map((tag) => tag.name)).toEqual(['backend', 'frontend']);
@@ -1019,7 +1020,7 @@ describe('tasks api endpoints', () => {
     prismaMock.tag.upsert.mockResolvedValue({ id: 'tag-1', name: 'backend', createdAt: new Date() });
 
     const app = createApp();
-    const response = await request(app).post('/api/v1/tags').send({ name: 'Backend' });
+    const response = await authedRequest(app).post('/api/v1/tags').send({ name: 'Backend' });
 
     expect(response.status).toBe(201);
     expect(response.body.data.name).toBe('backend');
