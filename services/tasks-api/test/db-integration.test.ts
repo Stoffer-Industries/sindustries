@@ -34,16 +34,19 @@ describe('tasks api db integration', () => {
 
     const commented = await authedRequest(app)
       .post(`/api/v1/tasks/${taskId}/comments`)
-      .send({ author: 'CI', text: 'Happy-path integration comment' });
+      .send({ text: 'Happy-path integration comment' });
 
     expect(commented.status).toBe(201);
-    expect(commented.body.data.author).toBe('CI');
+    // Per task 0719a8e3 AC2: comment author is derived from the authenticated
+    // user. authedRequest() authenticates as 'IntegrationTest' (seeded by
+    // test/setup.ts), so the comment is persisted under that actor.
+    expect(commented.body.data.author).toBe('IntegrationTest');
     expect(commented.body.data.text).toBe('Happy-path integration comment');
 
     const detail = await authedRequest(app).get(`/api/v1/tasks/${taskId}`);
     expect(detail.status).toBe(200);
     expect(detail.body.data.comments).toEqual([
-      expect.objectContaining({ author: 'CI', text: 'Happy-path integration comment' })
+      expect.objectContaining({ author: 'IntegrationTest', text: 'Happy-path integration comment' })
     ]);
 
     const archived = await authedRequest(app).delete(`/api/v1/tasks/${taskId}`);
