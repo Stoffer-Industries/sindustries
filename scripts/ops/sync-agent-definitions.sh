@@ -6,7 +6,8 @@ WORKSPACE_ROOT=${OPENCLAW_WORKSPACE_ROOT:-"$HOME/.openclaw/workspace"}
 BACKUP_ROOT=${OPENCLAW_AGENT_DEFS_BACKUP_ROOT:-"$HOME/.openclaw/backups/agent-definitions"}
 LOCK_DIR=${OPENCLAW_AGENT_DEFS_LOCK_DIR:-"${TMPDIR:-/tmp}/openclaw-agent-definitions-sync.lock"}
 SOURCE_ROOT=agents/definitions
-AGENTS=(quinn rowan lox ivy)
+SOURCE_REF=${OPENCLAW_AGENT_DEFS_SOURCE_REF:-origin/main}
+AGENTS=(quinn rowan lox ivy vara)
 # Non-quinn agents also need the canonical AGENTS.md copied from the
 # workspace root into their own workspace dir. It is not sourced from
 # agents/definitions/<agent>/ (it is shared, not per-agent) and previously
@@ -20,7 +21,9 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
-git -C "$REPO_ROOT" fetch --quiet origin main
+if [[ "$SOURCE_REF" != "WORKTREE" && ( "$SOURCE_REF" == origin/* || "$SOURCE_REF" == */* ) ]]; then
+  git -C "$REPO_ROOT" fetch --quiet origin main
+fi
 
 backup_stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 backup_dir="$BACKUP_ROOT/$backup_stamp"
@@ -28,9 +31,16 @@ changed=0
 
 for agent in "${AGENTS[@]}"; do
   source_dir="$SOURCE_ROOT/$agent"
-  if ! git -C "$REPO_ROOT" cat-file -e "origin/main:$source_dir" 2>/dev/null; then
-    echo "missing source directory on origin/main: $source_dir" >&2
-    exit 1
+  if [[ "$SOURCE_REF" == "WORKTREE" ]]; then
+    if [[ ! -d "$REPO_ROOT/$source_dir" ]]; then
+      echo "missing source directory in worktree: $source_dir" >&2
+      exit 1
+    fi
+  else
+    if ! git -C "$REPO_ROOT" cat-file -e "$SOURCE_REF:$source_dir" 2>/dev/null; then
+      echo "missing source directory on $SOURCE_REF: $source_dir" >&2
+      exit 1
+    fi
   fi
 
   if [[ "$agent" == quinn ]]; then
@@ -45,7 +55,11 @@ for agent in "${AGENTS[@]}"; do
     [[ "$filename" == "AGENTS.md" ]] && continue
     destination="$destination_dir/$filename"
     staged=$(mktemp "${TMPDIR:-/tmp}/agent-definition.XXXXXX")
-    git -C "$REPO_ROOT" show "origin/main:$source_path" > "$staged"
+    if [[ "$SOURCE_REF" == "WORKTREE" ]]; then
+      cat "$REPO_ROOT/$source_path" > "$staged"
+    else
+      git -C "$REPO_ROOT" show "$SOURCE_REF:$source_path" > "$staged"
+    fi
 
     # A symlink is never an acceptable runtime destination. OpenClaw's
     # bootstrap security boundary can reject a definition that resolves
@@ -66,7 +80,13 @@ for agent in "${AGENTS[@]}"; do
     rm -f "$staged"
     echo "synced $source_path -> $destination"
     changed=$((changed + 1))
-  done < <(git -C "$REPO_ROOT" ls-tree -r --name-only origin/main -- "$source_dir" | grep -E '\.md$')
+  done < <(
+    if [[ "$SOURCE_REF" == "WORKTREE" ]]; then
+      find "$REPO_ROOT/$source_dir" -type f -name '*.md' | sed "s#^$REPO_ROOT/##" | sort
+    else
+      git -C "$REPO_ROOT" ls-tree -r --name-only "$SOURCE_REF" -- "$source_dir" | grep -E '\.md$'
+    fi
+  )
 
   # AGENTS.md: canonical copy lives at the workspace root and is shared
   # across all agents (not agent-specific, so it is not part of

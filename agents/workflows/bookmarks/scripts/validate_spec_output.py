@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,19 @@ from bookmark_state_machine import (
     is_task_linked,
     reconcile_tasked_item,
 )
+
+WIKI_SCRIPT_ROOT = Path(__file__).resolve().parents[2] / "wiki"
+if str(WIKI_SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(WIKI_SCRIPT_ROOT))
+
+from wiki_catalog import (
+    configure_workspace as configure_wiki_workspace,
+    event_key_for_payload,
+    upsert_entry as wiki_upsert_entry,
+)
+
+H1_RE = re.compile(r"^#\s+(?:Spec\s*[—–-]+\s*)?(.*\S)\s*$", re.MULTILINE)
+SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
 DEFAULT_OUTPUT = STATE_ROOT / "spec-output.json"
 REQUIRED_SPEC_KEYS = {"title", "specDoc"}
@@ -85,7 +99,57 @@ def build_proposals(entry: dict[str, Any]) -> tuple[list[str], list[dict[str, An
 
 
 
-def main() -> int:
+def extract_spec_title_and_summary(spec_doc: str) -> tuple[str, str]:
+    text = (WORKSPACE / spec_doc).read_text(encoding="utf-8")
+
+    title_match = H1_RE.search(text)
+    if title_match and title_match.group(1).strip():
+        title = title_match.group(1).strip()
+    else:
+        title = Path(spec_doc).stem.replace("-", " ").strip().title()
+
+    outcome_summary = ""
+    match = re.search(r"^##\s+Outcome\s*$", text, re.MULTILINE)
+    if match:
+        tail = text[match.end() :]
+        next_heading = SECTION_RE.search(tail)
+        body = tail[: next_heading.start()] if next_heading else tail
+        outcome_summary = normalize_summary_excerpt(body)
+
+    if not outcome_summary:
+        body_without_frontmatter = text
+        if text.startswith("---\n"):
+            _, _, remainder = text.partition("---\n")
+            _, _, body_without_frontmatter = remainder.partition("---\n")
+        outcome_summary = normalize_summary_excerpt(body_without_frontmatter)
+
+    return title, outcome_summary or "Spec catalog entry"
+
+
+
+def normalize_summary_excerpt(text: str, *, limit: int = 220) -> str:
+    lines = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("- ["):
+            line = re.sub(r"^- \[[ xX]\]\s*", "", line)
+        elif line.startswith("- "):
+            line = line[2:].strip()
+        lines.append(line)
+        if lines:
+            break
+    excerpt = re.sub(r"\s+", " ", " ".join(lines)).strip()
+    if len(excerpt) > limit:
+        excerpt = excerpt[: limit - 1].rstrip() + "…"
+    return excerpt
+
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = ["--json"]
     p = argparse.ArgumentParser(
         description="Validate spec-output.json and apply state transitions"
     )
@@ -100,9 +164,10 @@ def main() -> int:
         help="Do not rename the input to <name>.processed after applying.",
     )
     p.add_argument("--json", action="store_true")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     input_path = Path(args.input)
+    configure_wiki_workspace(WORKSPACE)
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
@@ -204,6 +269,23 @@ def main() -> int:
             })
             continue
 
+        for spec_doc in spec_docs:
+            spec_title, spec_summary = extract_spec_title_and_summary(spec_doc)
+            wiki_upsert_entry(
+                "spec",
+                spec_doc,
+                spec_title,
+                spec_summary,
+                event_key=event_key_for_payload(
+                    "spec-ingest",
+                    {
+                        "source": spec_doc,
+                        "title": spec_title,
+                        "summary": spec_summary,
+                    },
+                ),
+            )
+
         previous_status = item.get("reviewStatus")
         item.update({
             "reviewStatus": "spec_created",
@@ -257,4 +339,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

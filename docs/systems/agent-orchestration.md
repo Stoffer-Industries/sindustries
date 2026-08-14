@@ -2,7 +2,7 @@
 
 > The high-level map of how work flows through our setup. If something looks weird, start here, then drill into the linked system doc.
 
-**Last reviewed:** 2026-06-26
+**Last reviewed:** 2026-08-14
 **Owner:** Quinn (chief of staff)
 **Audience:** Tom — when you need to remember what runs where
 
@@ -33,6 +33,7 @@ flowchart TB
     rowan[Rowan]
     ivy[Ivy]
     lox[Lox]
+    vara[Vara]
   end
 
   subgraph surfaces[Surfaces to Tom]
@@ -55,6 +56,7 @@ flowchart TB
   quinn --> rowan
   quinn --> ivy
   quinn --> lox
+  quinn --> vara
   tasks_api --> rowan
   content --> ivy
 
@@ -68,10 +70,11 @@ flowchart TB
   alerts --> tom
 ```
 
-**Three read paths for Tom:**
+**Four read paths for Tom:**
 1. You ask Quinn → Quinn orchestrates → Rowan / Ivy / Lox → PR → you merge
 2. Heartbeat ticks → finds actionable work → advances state → reports in morning brief
 3. X bookmark or web link → ingest → curate → spec → task → Rowan → PR
+4. Recall question → Quinn delegates to Vara → grounded answer with exact wiki citations
 
 ---
 
@@ -309,6 +312,7 @@ flowchart LR
 | `brain/bookmarks/` | Inbound material (X, links, research) | x-bookmark-ingest |
 | `brain/reviews/` | Our opinions / analysis on bookmarks | Quinn |
 | `brain/tasks/specs/` | Implementation-target docs for feature tasks | Quinn / Rowan |
+| `brain/wiki/` | Grounded recall catalog + append-only recall/lint history | Vara |
 | `brain/posts/` | Public content (blog, social) | Ivy |
 | `brain/ops/notes/` | Daily content signals (feeds weekly review) | Quinn / Lox |
 | `brain/content/sindustries-weekly-content/` | Weekly review files for Tom triage | Quinn |
@@ -336,6 +340,7 @@ flowchart LR
 | **Rowan** | Developer | Code, PRs | Nothing (reads state, writes code) |
 | **Ivy** | Content | Blog posts, public copy, website content edits | Nothing (read-only) |
 | **Lox** | Infra + incidents | Runbooks, daily health logs, incident reviews | Incident state, ops alerts |
+| **Vara** | Grounded recall | `brain/wiki/index.md`, `brain/wiki/log.md` through the helper | Wiki catalog + lint/query history |
 
 **Critical rule:** Agents (Rowan, Ivy, Lox) **never** change task status, blocked, or completedAt. Only Quinn during heartbeat.
 
@@ -354,13 +359,28 @@ Quick troubleshooting pointer — find the symptom and check the file.
 | PR not appearing | `gh pr list --repo Stoffer-Industries/sindustries` |
 | Curation scores stale | `brain/state/bookmark-review-state.json` → check `curation.createdAt` |
 | Weekly content review missing | `agents/crons/prompts/sindustries-weekly-content.md` + last entry in `brain/content/sindustries-weekly-content/` |
+| Wiki citation looks wrong or missing | `brain/wiki/index.md` + `brain/wiki/log.md` + `agents/workflows/wiki/wiki_catalog.py lint --json` |
 | Infra incident | workspace `docs/infra/incident-reviews/` + Lox daily log |
 | Lox did not escalate | `agents/skills/ops/notify-soft-fail/SKILL.md` delivery chain |
 | Quinn escalation stuck | `quinn-ops-state.json` → check `attempts` and `severity` |
 
 ---
 
-## 6. OpenClaw Runtime
+## 6. Grounded Recall
+
+Vara owns the markdown-first recall layer over selected workspace knowledge.
+
+- `brain/wiki/index.md` is the sole catalog and citation allowlist.
+- `brain/wiki/log.md` is the sole append-only history for ingest, query, and lint events.
+- Summary completion, spec validation, and bookmark-spec → task-spec moves update the wiki incrementally through `agents/workflows/wiki/wiki_catalog.py`.
+- Recall answers must cite exact indexed paths and must not broaden into uncatalogued `brain/` content or deep external research.
+- Daily dead-link lint is isolated in `agents/crons/prompts/vara-deadlink-lint.md`; broken references alert Lox/Quinn but are never auto-deleted.
+
+This keeps personal knowledge recall inside the workspace/OpenClaw boundary rather than introducing a product service or hidden index.
+
+---
+
+## 7. OpenClaw Runtime
 
 OpenClaw is the gateway process that runs all agents. It handles channel routing, session lifecycle, cron scheduling, tool execution, and model calls.
 
@@ -387,6 +407,7 @@ Tom's machine
 | Rowan | `agent:rowan` | Sindustries infra topic |
 | Ivy | `agent:ivy` | Internal only |
 | Lox | `agent:lox` | Sindustries infra topic |
+| Vara | `agent:vara` | Internal only |
 
 **Channel routing:** Messages arrive via Telegram and are routed to the correct agent based on chat ID and topic ID. Authorized senders are configured in `openclaw.json` under `channels.telegram.allowFrom`. Only Tom's number is allowlisted.
 

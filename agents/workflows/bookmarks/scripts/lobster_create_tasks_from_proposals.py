@@ -11,6 +11,16 @@ from pathlib import Path
 
 from common import WORKSPACE, dump_json, now_iso
 
+WIKI_SCRIPT_ROOT = Path(__file__).resolve().parents[2] / "wiki"
+if str(WIKI_SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(WIKI_SCRIPT_ROOT))
+
+from wiki_catalog import (
+    configure_workspace as configure_wiki_workspace,
+    event_key_for_payload,
+    retarget_entry as wiki_retarget_entry,
+)
+
 SCRIPT_ROOT = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "ops" / "tasks-api"
 if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
@@ -186,6 +196,15 @@ def create_task_for_spec(
         try:
             moved_doc, moved = move_bookmark_spec_to_task_in_progress(spec_doc)
             patch_task_spec_line(base_url, str(existing['id']), spec_doc, moved_doc, existing)
+            if spec_doc != moved_doc:
+                wiki_retarget_entry(
+                    spec_doc,
+                    moved_doc,
+                    event_key=event_key_for_payload(
+                        "spec-retarget",
+                        {"old": spec_doc, "new": moved_doc},
+                    ),
+                )
         except FileNotFoundError:
             # Backward-compatible reuse path for legacy tasks/tests where the
             # dedupe marker already exists but the source spec is absent. New
@@ -244,6 +263,15 @@ def create_task_for_spec(
         moved_doc, moved = move_bookmark_spec_to_task_in_progress(spec_doc)
         if moved_doc != task_spec_doc:
             patch_task_spec_line(base_url, str(task_id), task_spec_doc, moved_doc, task if isinstance(task, dict) else None)
+        if spec_doc != moved_doc:
+            wiki_retarget_entry(
+                spec_doc,
+                moved_doc,
+                event_key=event_key_for_payload(
+                    "spec-retarget",
+                    {"old": spec_doc, "new": moved_doc},
+                ),
+            )
     except Exception as exc:  # noqa: BLE001
         return None, {
             'bookmarkKey': bookmark_key,
@@ -276,6 +304,7 @@ def main() -> int:
     args = p.parse_args()
 
     data = json.load(__import__('sys').stdin)
+    configure_wiki_workspace(WORKSPACE)
     base_url = args.base_url.strip() or (os.getenv('TASKS_API_BASE_URL') or '').strip() or 'http://localhost:4000/api/v1'
     existing_by_marker = existing_tasks_by_marker(base_url)
 

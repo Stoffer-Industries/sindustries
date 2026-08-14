@@ -21,6 +21,7 @@ if str(TASKS_API) not in sys.path:
 def load_module(name: str, file_name: str, workspace: Path):
     os.environ['OPENCLAW_WORKSPACE'] = str(workspace)
     sys.modules.pop('common', None)
+    sys.modules.pop('wiki_catalog', None)
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / file_name)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -67,6 +68,8 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
                 encoding='utf-8',
             )
             seen_payloads = []
+            wiki = load_module('wiki_catalog_lifecycle_test', '../../wiki/wiki_catalog.py', workspace)
+            wiki.upsert_entry('spec', source_rel, 'Example', 'Ship it')
 
             def fake_api(method, base_url, path, payload=None):
                 seen_payloads.append((method, path, payload))
@@ -87,6 +90,9 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
             self.assertTrue((workspace / dest_rel).exists())
             post_payload = seen_payloads[0][2]
             self.assertIn(f'**Spec:** {dest_rel}', post_payload['description'])
+            index_text = (workspace / 'brain/wiki/index.md').read_text(encoding='utf-8')
+            self.assertNotIn(f'`{source_rel}`', index_text)
+            self.assertIn(f'`{dest_rel}`', index_text)
 
     def test_bookmark_move_is_idempotent_and_repairs_stale_spec_line_for_existing_task(self):
         with tempfile.TemporaryDirectory() as td:
@@ -94,10 +100,16 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
             mod = load_module('lobster_create_tasks_idempotent_test', 'lobster_create_tasks_from_proposals.py', workspace)
             source_rel = 'brain/bookmarks/specs/example-abcd1234.md'
             dest_rel = 'brain/tasks/specs/in-progress/example-abcd1234.md'
+            source = workspace / source_rel
+            source.parent.mkdir(parents=True)
+            source.write_text('# Spec — Example\n', encoding='utf-8')
             dest = workspace / dest_rel
             dest.parent.mkdir(parents=True)
             dest.write_text('# Spec — Example\n', encoding='utf-8')
             patched = []
+            wiki = load_module('wiki_catalog_idempotent_test', '../../wiki/wiki_catalog.py', workspace)
+            wiki.upsert_entry('spec', source_rel, 'Example', 'Ship it')
+            source.unlink()
 
             def fake_api(method, base_url, path, payload=None):
                 if method == 'GET':
@@ -114,6 +126,9 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual(result['specDoc'], dest_rel)
             self.assertEqual(patched, [f'**Spec:** {dest_rel}'])
+            index_text = (workspace / 'brain/wiki/index.md').read_text(encoding='utf-8')
+            self.assertNotIn(f'`{source_rel}`', index_text)
+            self.assertEqual(index_text.count(f'`{dest_rel}`'), 1)
 
 
 if __name__ == '__main__':
