@@ -213,7 +213,10 @@ describe('adminClient', () => {
   });
 
   it('recreates the client after _resetAdminClientForTests', () => {
-    mockCreateClient.mockReturnValue({ from: vi.fn() });
+    // mockImplementation (not mockReturnValue) so each createClient call returns
+    // a fresh client object — mockReturnValue would return the same reference
+    // every call and break the `a !== b` identity assertion below.
+    mockCreateClient.mockImplementation(() => ({ from: vi.fn() }));
     const a = adminClient();
     _resetAdminClientForTests();
     const b = adminClient();
