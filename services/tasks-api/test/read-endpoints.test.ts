@@ -259,21 +259,24 @@ describe('tasks api endpoints', () => {
     prismaMock.taskComment.create.mockResolvedValue({
       id: 'comment-1',
       taskId: '11111111-1111-1111-1111-111111111111',
-      author: 'Rowan',
+      author: 'IntegrationTest',
       body: 'Investigated API contract',
       createdAt: new Date('2026-03-12T00:00:00.000Z'),
       updatedAt: new Date('2026-03-12T00:00:00.000Z')
     });
 
     const app = createApp();
+    // Per task 0719a8e3 AC2: comment author is derived from the authenticated
+    // user. authedRequest() authenticates as 'IntegrationTest', so the body
+    // omits author entirely (the route uses req.user.actor as the author).
     const response = await authedRequest(app)
       .post('/api/v1/tasks/11111111-1111-1111-1111-111111111111/comments')
-      .send({ author: '  Rowan  ', text: '  Investigated API contract  ' });
+      .send({ text: '  Investigated API contract  ' });
 
     expect(response.status).toBe(201);
     expect(response.body.data).toEqual({
       id: 'comment-1',
-      author: 'Rowan',
+      author: 'IntegrationTest',
       text: 'Investigated API contract',
       createdAt: '2026-03-12T00:00:00.000Z',
       updatedAt: '2026-03-12T00:00:00.000Z'
@@ -281,7 +284,7 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.taskComment.create).toHaveBeenCalledWith({
       data: {
         taskId: '11111111-1111-1111-1111-111111111111',
-        author: 'Rowan',
+        author: 'IntegrationTest',
         body: 'Investigated API contract'
       }
     });
@@ -290,19 +293,16 @@ describe('tasks api endpoints', () => {
   it('POST /api/v1/tasks/:id/comments validates required fields and missing task', async () => {
     const app = createApp();
 
-    prismaMock.task.findFirst.mockResolvedValueOnce(task());
-    const missingAuthor = await authedRequest(app)
-      .post('/api/v1/tasks/11111111-1111-1111-1111-111111111111/comments')
-      .send({ text: 'hello' });
-    expect(missingAuthor.status).toBe(400);
-    expect(missingAuthor.body).toEqual({
-      error: { code: 'COMMENT_AUTHOR_REQUIRED', message: 'author is required' }
-    });
+    // Per task 0719a8e3 AC2: comment author is derived from the authenticated
+    // user, so a missing body.author is no longer a validation error — the
+    // route uses req.user.actor as the author. We assert missing-text and
+    // missing-task paths here; forged-author and missing-auth coverage lives
+    // in mutationAuthIntegration.test.ts.
 
     prismaMock.task.findFirst.mockResolvedValueOnce(task());
     const missingText = await authedRequest(app)
       .post('/api/v1/tasks/11111111-1111-1111-1111-111111111111/comments')
-      .send({ author: 'Rowan', text: '   ' });
+      .send({ text: '   ' });
     expect(missingText.status).toBe(400);
     expect(missingText.body).toEqual({
       error: { code: 'COMMENT_TEXT_REQUIRED', message: 'text is required' }
@@ -311,7 +311,7 @@ describe('tasks api endpoints', () => {
     prismaMock.task.findFirst.mockResolvedValueOnce(null);
     const missingTask = await authedRequest(app)
       .post('/api/v1/tasks/99999999-9999-9999-9999-999999999999/comments')
-      .send({ author: 'Rowan', text: 'hello' });
+      .send({ text: 'hello' });
     expect(missingTask.status).toBe(404);
     expect(missingTask.body).toEqual({
       error: { code: 'TASK_NOT_FOUND', message: 'Task not found' }
@@ -629,19 +629,22 @@ describe('tasks api endpoints', () => {
     prismaMock.taskComment.create.mockResolvedValueOnce({
       id: 'c1000000-0000-0000-0000-000000000000',
       taskId: '2527ff9d-4369-444f-995d-4d4bb0ac7b70',
-      author: 'Rowan',
+      author: 'IntegrationTest',
       body: 'trying to comment',
       createdAt: new Date('2026-07-01T00:00:00.000Z'),
       updatedAt: new Date('2026-07-01T00:00:00.000Z')
     });
 
     const app = createApp();
+    // Per task 0719a8e3 AC2: comment author comes from the authenticated user
+    // (authedRequest() → 'IntegrationTest'). Body author omitted because a
+    // mismatched body.author would 403 instead of succeeding.
     const response = await authedRequest(app)
       .post('/api/v1/tasks/2527ff9d-4369-444f-995d-4d4bb0ac7b70/comments')
-      .send({ author: 'Rowan', text: 'trying to comment' });
+      .send({ text: 'trying to comment' });
 
     expect(response.status).toBe(201);
-    expect(response.body.data.author).toBe('Rowan');
+    expect(response.body.data.author).toBe('IntegrationTest');
     expect(response.body.data.text).toBe('trying to comment');
     expect(prismaMock.taskComment.create).toHaveBeenCalledTimes(1);
   });
