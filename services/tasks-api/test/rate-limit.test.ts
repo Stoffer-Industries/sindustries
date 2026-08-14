@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const originalMax = process.env.TASKS_API_RATE_LIMIT_MAX;
@@ -26,8 +27,8 @@ describe('sensitive endpoint rate limit', () => {
     process.env.TASKS_API_RATE_LIMIT_WINDOW_MS = '60000';
     const { createApp } = await import('../src/app.ts');
     const app = createApp();
-    expect((await request(app).post('/api/v1/tasks').send({})).status).toBe(400);
-    const blocked = await request(app).post('/api/v1/tasks').send({});
+    expect((await authedRequest(app).post('/api/v1/tasks').send({})).status).toBe(400);
+    const blocked = await authedRequest(app).post('/api/v1/tasks').send({});
     expect(blocked.status).toBe(429);
     expect(blocked.headers['retry-after']).toBeDefined();
     expect(blocked.body.error.code).toBe('RATE_LIMITED');

@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // --- Prisma mock ---------------------------------------------------------
@@ -58,7 +59,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -104,7 +105,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -148,7 +149,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
     });
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         events: [
@@ -178,7 +179,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects malformed taskId with 400', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: 'not-a-uuid',
@@ -194,7 +195,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects invalid eventType with 400', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -208,7 +209,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects gate_failure events missing gate', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -224,7 +225,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects gate_failure events missing cause', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -240,7 +241,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects terminal_summary events that include gate', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -256,7 +257,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects terminal_summary events with invalid terminalStatus', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -271,7 +272,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects terminal_summary events with non-integer counts', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({
         taskId: VALID_UUID,
@@ -286,7 +287,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
 
   it('rejects empty batch', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({ events: [] });
 
@@ -304,7 +305,7 @@ describe('POST /api/v1/feature-task-analytics/events', () => {
     }));
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .post('/api/v1/feature-task-analytics/events')
       .send({ events });
 
@@ -340,7 +341,7 @@ describe('GET /api/v1/feature-task-analytics/tasks/:taskId/events', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`);
+    const response = await authedRequest(app).get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`);
 
     expect(response.status).toBe(200);
     expect(response.body.data).toHaveLength(1);
@@ -354,7 +355,7 @@ describe('GET /api/v1/feature-task-analytics/tasks/:taskId/events', () => {
     prismaMock.task.findFirst.mockResolvedValue(null);
 
     const app = createApp();
-    const response = await request(app).get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`);
+    const response = await authedRequest(app).get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`);
 
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe('TASK_NOT_FOUND');
@@ -362,7 +363,7 @@ describe('GET /api/v1/feature-task-analytics/tasks/:taskId/events', () => {
 
   it('rejects malformed taskId', async () => {
     const app = createApp();
-    const response = await request(app).get('/api/v1/feature-task-analytics/tasks/nope/events');
+    const response = await authedRequest(app).get('/api/v1/feature-task-analytics/tasks/nope/events');
 
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('INVALID_TASK_ID');
@@ -398,7 +399,7 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue([]);
 
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .get('/api/v1/feature-task-analytics/weekly')
       .query({});
 
@@ -457,7 +458,7 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/feature-task-analytics/weekly');
+    const response = await authedRequest(app).get('/api/v1/feature-task-analytics/weekly');
 
     expect(response.status).toBe(200);
     const currentWeek = response.body.data[7];
@@ -488,7 +489,7 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     ]);
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/feature-task-analytics/weekly');
+    const response = await authedRequest(app).get('/api/v1/feature-task-analytics/weekly');
 
     expect(response.status).toBe(200);
     const currentWeek = response.body.data[7];
@@ -499,7 +500,7 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
 
   it('rejects invalid weeks query', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .get('/api/v1/feature-task-analytics/weekly')
       .query({ weeks: 0 });
 
@@ -509,7 +510,7 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
 
   it('rejects weeks > 52', async () => {
     const app = createApp();
-    const response = await request(app)
+    const response = await authedRequest(app)
       .get('/api/v1/feature-task-analytics/weekly')
       .query({ weeks: 100 });
 
@@ -534,7 +535,7 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     );
 
     const app = createApp();
-    const response = await request(app).get('/api/v1/feature-task-analytics/weekly');
+    const response = await authedRequest(app).get('/api/v1/feature-task-analytics/weekly');
 
     expect(response.status).toBe(200);
     const currentWeek = response.body.data[7];

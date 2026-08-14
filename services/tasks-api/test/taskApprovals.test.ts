@@ -51,8 +51,13 @@ describe('task approval boundary', () => {
   });
 
   it('rejects an unauthenticated mutation before database access', async () => {
+    // The general-mutation auth gate (task 0719a8e3) runs ahead of the
+    // approval-specific gate; an unauthenticated request now returns 401
+    // AUTH_REQUIRED before reaching the approval-route handler. The intent
+    // (rejected before any DB access) is preserved — see
+    // requireAuthenticatedUser in src/middleware/requireAuth.ts.
     const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).send({ type: 'spec' });
-    expect(res.status).toBe(401); expect(res.body.error.code).toBe('APPROVAL_AUTH_REQUIRED');
+    expect(res.status).toBe(401); expect(res.body.error.code).toBe('AUTH_REQUIRED');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 

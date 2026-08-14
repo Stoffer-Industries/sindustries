@@ -71,7 +71,7 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
             wiki = load_module('wiki_catalog_lifecycle_test', '../../wiki/wiki_catalog.py', workspace)
             wiki.upsert_entry('spec', source_rel, 'Example', 'Ship it')
 
-            def fake_api(method, base_url, path, payload=None):
+            def fake_api(method, base_url, path, payload=None, *, token=None):
                 seen_payloads.append((method, path, payload))
                 if method == 'POST':
                     return {'data': {'id': 'task-1', 'description': payload['description'], 'tags': payload['tags']}}
@@ -111,7 +111,7 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
             wiki.upsert_entry('spec', source_rel, 'Example', 'Ship it')
             source.unlink()
 
-            def fake_api(method, base_url, path, payload=None):
+            def fake_api(method, base_url, path, payload=None, *, token=None):
                 if method == 'GET':
                     return {'data': {'id': 'task-1', 'description': f'**Spec:** {source_rel}\n'}}
                 if method == 'PATCH':

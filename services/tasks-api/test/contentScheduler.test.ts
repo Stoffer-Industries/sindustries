@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   guardPublish,
@@ -248,7 +249,7 @@ describe('contentScheduler routes', () => {
   it('GET /api/v1/content-scheduler/items lists non-removed items', async () => {
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([itemFixture()]);
     const app = createApp();
-    const res = await request(app).get('/api/v1/content-scheduler/items');
+    const res = await authedRequest(app).get('/api/v1/content-scheduler/items');
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(prismaMock.contentSchedulerItem.findMany).toHaveBeenCalledWith(
@@ -258,14 +259,14 @@ describe('contentScheduler routes', () => {
 
   it('GET /api/v1/content-scheduler/items rejects unknown status filter', async () => {
     const app = createApp();
-    const res = await request(app).get('/api/v1/content-scheduler/items?status=bogus');
+    const res = await authedRequest(app).get('/api/v1/content-scheduler/items?status=bogus');
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_STATUS_FILTER');
   });
 
   it('POST /api/v1/content-scheduler/items rejects empty body', async () => {
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/items')
       .send({ body: '   ' });
     expect(res.status).toBe(400);
@@ -274,7 +275,7 @@ describe('contentScheduler routes', () => {
 
   it('POST /api/v1/content-scheduler/items rejects body > 1000 chars', async () => {
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/items')
       .send({ body: 'x'.repeat(1001) });
     expect(res.status).toBe(400);
@@ -285,7 +286,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.aggregate.mockResolvedValue({ _max: { position: 4 } });
     prismaMock.contentSchedulerItem.create.mockResolvedValue(itemFixture({ position: 5 }));
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/items')
       .send({ body: 'Tweet body', source: 'ops_notes' });
     expect(res.status).toBe(201);
@@ -298,7 +299,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'queued' }));
     prismaMock.contentSchedulerItem.update.mockResolvedValue(itemFixture({ status: 'approved', approvedAt: new Date(), approvedBy: 'Tom' }));
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/approve')
       .set('x-actor', 'Tom');
     expect(res.status).toBe(200);
@@ -312,7 +313,7 @@ describe('contentScheduler routes', () => {
   it('POST /content-scheduler/items/:id/approve returns 409 on already published', async () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'published' }));
     const app = createApp();
-    const res = await request(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/approve');
+    const res = await authedRequest(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/approve');
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ALREADY_PUBLISHED');
   });
@@ -320,7 +321,7 @@ describe('contentScheduler routes', () => {
   it('POST /content-scheduler/items/:id/publish refuses NOT_APPROVED', async () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'queued' }));
     const app = createApp();
-    const res = await request(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/publish');
+    const res = await authedRequest(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/publish');
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('NOT_APPROVED');
   });
@@ -333,7 +334,7 @@ describe('contentScheduler routes', () => {
     );
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([{ id: otherId }]);
     const app = createApp();
-    const res = await request(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
+    const res = await authedRequest(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('DAY_CAP_REACHED');
   });
@@ -349,7 +350,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]); // today-status empty
     prismaMock.contentSchedulerItem.update.mockResolvedValue({ ...item, status: 'published', publishedUrl: 'https://x.com/sindustries/status/abc', publishedAt: new Date() });
     const app = createApp();
-    const res = await request(app).post('/api/v1/content-scheduler/items/cccc1111-1111-1111-1111-111111111111/publish');
+    const res = await authedRequest(app).post('/api/v1/content-scheduler/items/cccc1111-1111-1111-1111-111111111111/publish');
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('published');
     expect(res.body.data.publishedUrl).toMatch(/^https:\/\/x\.com\//);
@@ -369,7 +370,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
     const app = createApp();
-    const res = await request(app).post('/api/v1/content-scheduler/items/dddd1111-1111-1111-1111-111111111111/publish');
+    const res = await authedRequest(app).post('/api/v1/content-scheduler/items/dddd1111-1111-1111-1111-111111111111/publish');
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe('MISSING_CREDENTIALS');
     delete process.env.X_CLIENT;
@@ -384,7 +385,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
     const app = createApp();
-    const res = await request(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
+    const res = await authedRequest(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
     expect(res.body.error.message).toMatch(/Missing x-actor-secret/i);
@@ -401,7 +402,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post(`/api/v1/content-scheduler/items/${itemId}/publish`)
       .set('x-actor-secret', 'not-the-right-value');
     expect(res.status).toBe(401);
@@ -425,7 +426,7 @@ describe('contentScheduler routes', () => {
       publishedAt: new Date()
     });
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post(`/api/v1/content-scheduler/items/${itemId}/publish`)
       .set('x-actor-secret', 'deploy-secret');
     expect(res.status).toBe(200);
@@ -449,7 +450,7 @@ describe('contentScheduler routes', () => {
     });
     const app = createApp();
     // No x-actor-secret header sent — should still succeed because the gate is disabled.
-    const res = await request(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
+    const res = await authedRequest(app).post(`/api/v1/content-scheduler/items/${itemId}/publish`);
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('published');
     delete process.env.X_CLIENT;
@@ -466,7 +467,7 @@ describe('contentScheduler routes', () => {
     ]);
     prismaMock.contentSchedulerItem.update.mockImplementation(async ({ where, data }: any) => ({ id: where.id, position: data.position }));
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/reorder')
       .send({ ids: [idC, idA, idB] });
     expect(res.status).toBe(200);
@@ -483,7 +484,7 @@ describe('contentScheduler routes', () => {
       { id: idA, status: 'published' }
     ]);
     const app = createApp();
-    const res = await request(app)
+    const res = await authedRequest(app)
       .post('/api/v1/content-scheduler/reorder')
       .send({ ids: [idA] });
     expect(res.status).toBe(409);
@@ -494,7 +495,7 @@ describe('contentScheduler routes', () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'queued' }));
     prismaMock.contentSchedulerItem.update.mockResolvedValue(itemFixture({ status: 'removed', removedAt: new Date() }));
     const app = createApp();
-    const res = await request(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/remove');
+    const res = await authedRequest(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/remove');
     expect(res.status).toBe(200);
     expect(prismaMock.contentSchedulerItem.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'removed' }) })
@@ -504,7 +505,7 @@ describe('contentScheduler routes', () => {
   it('POST /content-scheduler/items/:id/remove refuses when already published', async () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'published' }));
     const app = createApp();
-    const res = await request(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/remove');
+    const res = await authedRequest(app).post('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/remove');
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ALREADY_PUBLISHED');
   });
@@ -512,7 +513,7 @@ describe('contentScheduler routes', () => {
   it('GET /content-scheduler/today-status returns publishedCount + cap', async () => {
     prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
     const app = createApp();
-    const res = await request(app).get('/api/v1/content-scheduler/today-status');
+    const res = await authedRequest(app).get('/api/v1/content-scheduler/today-status');
     expect(res.status).toBe(200);
     expect(res.body.data.publishedCount).toBe(0);
     expect(res.body.data.cap).toBe(1);

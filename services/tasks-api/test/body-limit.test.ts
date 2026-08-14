@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { authedRequest } from './helpers/auth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const originalLimit = process.env.TASKS_API_JSON_LIMIT;
@@ -20,7 +21,7 @@ describe('JSON body limit', () => {
   it('returns 413 for an oversized JSON request', async () => {
     process.env.TASKS_API_JSON_LIMIT = '1kb';
     const { createApp } = await import('../src/app.ts');
-    const response = await request(createApp())
+    const response = await authedRequest(createApp())
       .post('/api/v1/tasks')
       .set('Content-Type', 'application/json')
       .send({ value: 'x'.repeat(2048) });
@@ -32,7 +33,7 @@ describe('JSON body limit', () => {
   it('accepts a small JSON request for normal route handling', async () => {
     process.env.TASKS_API_JSON_LIMIT = '1kb';
     const { createApp } = await import('../src/app.ts');
-    const response = await request(createApp()).post('/api/v1/tasks').send({ value: 'x' });
+    const response = await authedRequest(createApp()).post('/api/v1/tasks').send({ value: 'x' });
     expect(response.status).toBe(400);
     expect(response.body.error.code).not.toBe('PAYLOAD_TOO_LARGE');
   });
