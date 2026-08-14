@@ -402,6 +402,100 @@ describe('GymTrack MCP OAuth server', () => {
     expect(repo.consents[0].revoked_at).toBe(fixedNow.toISOString());
   });
 
+  it('cascades revocation across the token family when a rotated refresh token is replayed', async () => {
+    const fixedNow = new Date('2026-08-04T00:00:00.000Z');
+    const { app, repo } = makeApp({ now: () => fixedNow });
+
+    const decision = await request(app)
+      .post('/oauth/authorize/decision')
+      .set('Authorization', 'Bearer supabase-user-token')
+      .send({
+        approve: true,
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        scope: 'history:read progression:read workouts:write',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    const verifier = 'verifier-family-cascade';
+    repo.codes[0].code_challenge = pkceChallengeForVerifier(verifier);
+    const code = new URL(decision.body.redirectTo).searchParams.get('code');
+
+    const exchange = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: 'claude-desktop',
+        redirect_uri: 'https://claude.example/callback',
+        code,
+        code_verifier: verifier
+      });
+
+    expect(exchange.status).toBe(200);
+    const originalRefreshToken = exchange.body.refresh_token;
+
+    const rotation = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'refresh_token',
+        client_id: 'claude-desktop',
+        refresh_token: originalRefreshToken
+      });
+
+    expect(rotation.status).toBe(200);
+    const rotatedRefreshToken = rotation.body.refresh_token;
+
+    expect(repo.tokens).toHaveLength(2);
+    const sourceToken = repo.tokens[0];
+    const replacementToken = repo.tokens[1];
+    expect(replacementToken.parent_token_id).toBe(sourceToken.id);
+    expect(sourceToken.rotated_at).toBe(fixedNow.toISOString());
+    expect(sourceToken.revocation_reason).toBe('refresh_rotated');
+    expect(replacementToken.revoked_at).toBeNull();
+    expect(replacementToken.revocation_reason).toBeNull();
+
+    const replay = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'refresh_token',
+        client_id: 'claude-desktop',
+        refresh_token: originalRefreshToken
+      });
+
+    expect(replay.status).toBe(400);
+    expect(replay.body.error).toBe('invalid_grant');
+
+    // Family cascade: the already-rotated source token keeps its original rotation
+    // reason (the cascade skips rows whose revoked_at is already set), and the
+    // replacement token — the one an attacker would actually try to use next —
+    // is revoked with the dedicated cascade reason.
+    expect(sourceToken.revocation_reason).toBe('refresh_rotated');
+    expect(replacementToken.revoked_at).toBe(fixedNow.toISOString());
+    expect(replacementToken.revocation_reason).toBe('refresh_replay_detected');
+    expect(repo.consents[0].revoked_at).toBe(fixedNow.toISOString());
+
+    // The replacement's refresh token must also be unusable after the cascade —
+    // attempting to rotate it surfaces the now-revoked consent and returns
+    // invalid_grant, not a new access token.
+    const subsequentRefresh = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'refresh_token',
+        client_id: 'claude-desktop',
+        refresh_token: rotatedRefreshToken
+      });
+
+    expect(subsequentRefresh.status).toBe(400);
+    expect(subsequentRefresh.body.error).toBe('invalid_grant');
+    expect(repo.tokens).toHaveLength(2);
+  });
+
   it('revocation disables both MCP access and refresh-token exchange', async () => {
     const { app, repo } = makeApp();
 
