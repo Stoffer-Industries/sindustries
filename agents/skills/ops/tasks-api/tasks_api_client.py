@@ -25,13 +25,20 @@ import urllib.parse
 import urllib.request
 
 
-def api_request(method: str, base_url: str, path: str, payload=None):
+def api_request(method: str, base_url: str, path: str, payload=None, *, token: str | None = None):
     url = f"{base_url.rstrip('/')}{path}"
     data = None
     headers = {"content-type": "application/json"}
-    service_token = (os.getenv("TASKS_API_APPROVAL_TOKEN") or "").strip()
-    if service_token:
-        headers["authorization"] = f"Bearer {service_token}"
+    # Per-call `token` overrides the default TASKS_API_APPROVAL_TOKEN. This
+    # lets trusted agent processes (bookmark_lobster, content-tasks Lobster,
+    # feature_task_lobster) authenticate with their own per-agent service
+    # credential so the API derives the comment author / audit-trail actor
+    # correctly (task 0719a8e3). Falls back to TASKS_API_APPROVAL_TOKEN when
+    # `token` is None so existing call sites that don't know about the
+    # per-agent env vars keep working.
+    resolved_token = (token if token is not None else os.getenv("TASKS_API_APPROVAL_TOKEN") or "").strip()
+    if resolved_token:
+        headers["authorization"] = f"Bearer {resolved_token}"
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
 
@@ -43,6 +50,19 @@ def api_request(method: str, base_url: str, path: str, payload=None):
     except Exception as e:  # noqa: BLE001
         print(f"API {method} {path} failed: {e}", file=sys.stderr)
         raise
+
+
+def service_token_env(name: str) -> str | None:
+    """Read a per-agent service-token env var; return None if unset/empty.
+
+    Use this to fetch a per-agent credential for the tasks-api mutation
+    surface. Pass the returned value to `api_request(..., token=...)` so
+    the API derives the comment author / audit-trail actor correctly
+    (task 0719a8e3). Falls back to TASKS_API_APPROVAL_TOKEN when the
+    per-agent env var is unset, mirroring the prior single-token flow.
+    """
+    value = (os.getenv(name) or "").strip()
+    return value or None
 
 
 def get_base_url() -> str:

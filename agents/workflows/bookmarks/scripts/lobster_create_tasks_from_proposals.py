@@ -25,7 +25,13 @@ SCRIPT_ROOT = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "o
 if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
-from tasks_api_client import api_request, list_tasks  # noqa: E402
+from tasks_api_client import api_request, list_tasks, service_token_env  # noqa: E402
+
+# Per-agent service credential for the tasks-api mutation surface
+# (task 0719a8e3). Read once at module load so the env var can be set in
+# the calling agent's shell / .env. Falls back to TASKS_API_APPROVAL_TOKEN
+# inside api_request when unset.
+BOOKMARK_LOBSTER_TOKEN = service_token_env('BOOKMARK_LOBSTER_TOKEN')
 
 
 TASK_SPECS_IN_PROGRESS = 'brain/tasks/specs/in-progress'
@@ -77,7 +83,7 @@ def patch_task_spec_line(base_url: str, task_id: str, old_path: str, new_path: s
     desc = str(task_data.get('description') or '')
     new_desc = rewrite_spec_line(desc, old_path, new_path)
     if new_desc != desc:
-        api_request('PATCH', base_url, f'/tasks/{task_id}', {'description': new_desc})
+        api_request('PATCH', base_url, f'/tasks/{task_id}', {'description': new_desc}, token=BOOKMARK_LOBSTER_TOKEN)
 
 
 def proposal_marker(bookmark_key: str, spec_docs: list[str], proposal: dict) -> str:
@@ -246,7 +252,7 @@ def create_task_for_spec(
         'status': 'open',
         'tags': task_tags(topic, bookmark_key, [task_spec_destination(d) for d in spec_docs], marker),
     }
-    response = api_request('POST', base_url, '/tasks', payload)
+    response = api_request('POST', base_url, '/tasks', payload, token=BOOKMARK_LOBSTER_TOKEN)
     task = response.get('data') if isinstance(response, dict) else None
     task_id = task.get('id') if isinstance(task, dict) else None
     if task_id is None:

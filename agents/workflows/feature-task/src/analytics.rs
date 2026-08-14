@@ -108,12 +108,35 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// POST a single analytics event to the Tasks API. Best-effort: errors are
 /// logged to stderr and swallowed so analytics observability never blocks
 /// task progression.
+///
+/// Auth (task 0719a8e3): the analytics-events endpoint is now gated by the
+/// general-mutation auth middleware. We authenticate with
+/// FEATURE_TASK_LOBSTER_TOKEN (preferred) and fall back to
+/// TASKS_API_APPROVAL_TOKEN (Quinn actor) so this continues to work
+/// before Quinn provisions the per-agent token. When both env vars are
+/// unset we still attempt the POST so that locally-developed flows
+/// without secrets can iterate (the API will 401 in that case and we
+/// log+swallow, matching the existing best-effort posture).
 fn post_event_best_effort(args: &StageArgs, payload: Value) {
     let url = format!(
         "{}/feature-task-analytics/events",
         args.base_url.trim_end_matches('/')
     );
-    match ureq::post(&url).send_json(payload) {
+    let token = std::env::var("FEATURE_TASK_LOBSTER_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var("TASKS_API_APPROVAL_TOKEN")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    let mut request = ureq::post(&url);
+    if let Some(ref token) = token {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    match request.send_json(payload) {
         Ok(_) => {}
         Err(err) => {
             eprintln!("warning: analytics POST failed for {url}: {err}");

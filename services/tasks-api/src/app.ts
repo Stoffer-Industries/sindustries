@@ -1,6 +1,7 @@
 import express from 'express';
 import { helmetPreset } from './middleware/helmetPreset';
 import { createRateLimit } from './middleware/rateLimit';
+import { requireAuthenticatedUser } from './middleware/requireAuth.ts';
 import { healthRouter } from './routes/health';
 import { config } from './config/index.ts';
 import { tasksRouter } from './routes/tasks';
@@ -105,6 +106,27 @@ export function createApp() {
   app.use('/api/v1/content-scheduler/items/:id/publish', writeEndpointRateLimit);
   app.use('/api/v1/auth/session', (req, res, next) =>
     req.method === 'POST' ? writeEndpointRateLimit(req, res, next) : next()
+  );
+
+  // General-mutation authentication gate (task 0719a8e3). Every
+  // POST/PATCH/DELETE on the task, tag, content-scheduler, and analytics
+  // surfaces requires a valid session cookie or Bearer service credential.
+  // GET endpoints stay open so the UI / agent queue / tasks app continue
+  // to read without friction.
+  //
+  // The middleware is mounted ahead of the routers so 401s are returned
+  // before any handler runs (and before Prisma is hit). Per-route
+  // authorization (e.g. "comments allowed for any authenticated user") is
+  // the route's responsibility; this middleware only authenticates.
+  const mutationMethods = new Set(['POST', 'PATCH', 'DELETE']);
+  const gateMutations = (req: express.Request, res: express.Response, next: express.NextFunction) =>
+    mutationMethods.has(req.method) ? requireAuthenticatedUser(req, res, next) : next();
+
+  app.use('/api/v1/tasks', gateMutations);
+  app.use('/api/v1/tags', gateMutations);
+  app.use('/api/v1/content-scheduler', gateMutations);
+  app.use('/api/v1/feature-task-analytics/events', (req, _res, next) =>
+    req.method === 'POST' ? requireAuthenticatedUser(req, _res, next) : next()
   );
 
   app.get('/health', (_req, res) => {
