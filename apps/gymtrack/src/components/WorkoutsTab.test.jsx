@@ -70,7 +70,7 @@ function makeWorkout({ id, scheduled_for, title = 'Push day', sets = [] }) {
   return {
     id,
     user_id: 'user-1',
-    agent_key_id: null,
+    consent_id: null,
     scheduled_for,
     title,
     notes: null,

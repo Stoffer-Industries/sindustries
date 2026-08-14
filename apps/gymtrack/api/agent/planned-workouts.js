@@ -32,9 +32,9 @@ import {
   adminClient,
   badRequest,
   rejectIfWrongMethod,
-  resolveAgentIdentity,
+  resolveOAuthIdentity,
   unauthorized
-} from '../../server/agentAuth.js';
+} from '../../server/oauthAuth.js';
 import {
   buildInsertRows,
   createPlannedWorkout,
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
 
   let identity;
   try {
-    identity = await resolveAgentIdentity(req);
+    identity = await resolveOAuthIdentity(req, { requireScope: 'workouts:write' });
   } catch (err) {
     return res.status(500).json({ error: 'server_error', message: err?.message ?? 'Auth lookup failed.' });
   }
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
   try {
     const result = await createPlannedWorkout(client, {
       userId: identity.user_id,
-      legacyAgentKeyId: identity.key_id,
+      consentId: identity.consent_id,
       body
     });
     return res.status(201).json(result);

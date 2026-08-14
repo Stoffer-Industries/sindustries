@@ -1,4 +1,4 @@
-import { adminClient, parseBearerToken, rejectIfWrongMethod } from '../../server/agentAuth.js';
+import { adminClient, parseBearerToken, rejectIfWrongMethod } from '../../server/oauthAuth.js';
 
 export default async function handler(req, res) {
   if (rejectIfWrongMethod(req, res, ['POST'])) return;

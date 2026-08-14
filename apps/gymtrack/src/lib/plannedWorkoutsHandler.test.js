@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the agent auth module so we can stub adminClient() and
-// resolveAgentIdentity() independently of the real supabase client. The
+// Mock the OAuth auth module so we can stub adminClient() and
+// resolveOAuthIdentity() independently of the real supabase client. The
 // response helpers (badRequest, unauthorized, rejectIfWrongMethod) are passed
 // through from the real module so the handler's bailing-on-truthy contract
 // keeps working unchanged.
 const mockAdminClient = { from: vi.fn() };
 
-vi.mock('../../server/agentAuth.js', async (importOriginal) => {
+vi.mock('../../server/oauthAuth.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     adminClient: () => mockAdminClient,
-    resolveAgentIdentity: vi.fn()
+    resolveOAuthIdentity: vi.fn()
   };
 });
 
 import handler from '../../api/agent/planned-workouts.js';
-import { resolveAgentIdentity } from '../../server/agentAuth.js';
+import { resolveOAuthIdentity } from '../../server/oauthAuth.js';
 
 function buildChain(terminal) {
   const proxy = new Proxy(
@@ -76,7 +76,7 @@ const validBody = {
 
 beforeEach(() => {
   mockAdminClient.from.mockReset();
-  resolveAgentIdentity.mockReset();
+  resolveOAuthIdentity.mockReset();
 });
 
 afterEach(() => {
@@ -90,11 +90,11 @@ describe('POST /api/agent/planned-workouts', () => {
     expect(res.statusCode).toBe(405);
     expect(res.headers.Allow).toBe('POST');
     expect(res.body).toEqual({ error: 'method_not_allowed' });
-    expect(resolveAgentIdentity).not.toHaveBeenCalled();
+    expect(resolveOAuthIdentity).not.toHaveBeenCalled();
   });
 
   it('returns 401 when no agent identity is resolved', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce(null);
+    resolveOAuthIdentity.mockResolvedValueOnce(null);
     const res = makeRes();
     await handler(
       { method: 'POST', headers: { authorization: 'Bearer unknown' }, body: validBody },
@@ -105,8 +105,8 @@ describe('POST /api/agent/planned-workouts', () => {
     expect(mockAdminClient.from).not.toHaveBeenCalled();
   });
 
-  it('returns 500 when resolveAgentIdentity throws', async () => {
-    resolveAgentIdentity.mockRejectedValueOnce(new Error('connection refused'));
+  it('returns 500 when resolveOAuthIdentity throws', async () => {
+    resolveOAuthIdentity.mockRejectedValueOnce(new Error('connection refused'));
     const res = makeRes();
     await handler(
       { method: 'POST', headers: { authorization: 'Bearer whatever' }, body: validBody },
@@ -119,7 +119,12 @@ describe('POST /api/agent/planned-workouts', () => {
   });
 
   it('returns 400 with the validation message when the body is malformed', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'workouts:write'
+    });
     const res = makeRes();
     await handler(
       { method: 'POST', headers: { authorization: 'Bearer good' }, body: { title: '' } },
@@ -132,7 +137,12 @@ describe('POST /api/agent/planned-workouts', () => {
   });
 
   it('inserts the parent then the children and returns 201 with plannedWorkoutId + setCount', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'workouts:write'
+    });
     mockAdminClient.from
       .mockReturnValueOnce(buildChain({ data: { id: 'plan-uuid' }, error: null }))
       .mockReturnValueOnce(buildChain({ error: null }));
@@ -150,7 +160,12 @@ describe('POST /api/agent/planned-workouts', () => {
   });
 
   it('rolls back the parent insert when the child insert fails', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'workouts:write'
+    });
     mockAdminClient.from
       .mockReturnValueOnce(buildChain({ data: { id: 'plan-uuid' }, error: null }))
       .mockReturnValueOnce(buildChain({ error: new Error('FK violation') }))
@@ -171,7 +186,12 @@ describe('POST /api/agent/planned-workouts', () => {
   });
 
   it('returns 500 when the parent insert itself fails', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'workouts:write'
+    });
     mockAdminClient.from.mockReturnValueOnce(
       buildChain({ data: null, error: new Error('parent insert failed') })
     );
@@ -190,7 +210,12 @@ describe('POST /api/agent/planned-workouts', () => {
   });
 
   it('parses a stringified JSON body for Vercel runtime variance', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'workouts:write'
+    });
     mockAdminClient.from
       .mockReturnValueOnce(buildChain({ data: { id: 'plan-uuid' }, error: null }))
       .mockReturnValueOnce(buildChain({ error: null }));

@@ -1,21 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the agent auth module so the handler is exercised against a stub
-// adminClient + resolveAgentIdentity. The response helpers and middleware
+// Mock the OAuth auth module so the handler is exercised against a stub
+// adminClient + resolveOAuthIdentity. The response helpers and middleware
 // helpers are passed through from the real module.
 const mockAdminClient = { from: vi.fn() };
 
-vi.mock('../../server/agentAuth.js', async (importOriginal) => {
+vi.mock('../../server/oauthAuth.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     adminClient: () => mockAdminClient,
-    resolveAgentIdentity: vi.fn()
+    resolveOAuthIdentity: vi.fn()
   };
 });
 
 import handler from '../../api/agent/history.js';
-import { resolveAgentIdentity } from '../../server/agentAuth.js';
+import { resolveOAuthIdentity } from '../../server/oauthAuth.js';
 import { DEFAULT_LIMIT, MAX_LIMIT, MIN_LIMIT, parseLimit } from '../../api/agent/history.js';
 
 function buildChain(terminal) {
@@ -56,7 +56,7 @@ function makeRes() {
 
 beforeEach(() => {
   mockAdminClient.from.mockReset();
-  resolveAgentIdentity.mockReset();
+  resolveOAuthIdentity.mockReset();
 });
 
 afterEach(() => {
@@ -108,11 +108,11 @@ describe('GET /api/agent/history', () => {
     expect(res.statusCode).toBe(405);
     expect(res.headers.Allow).toBe('GET');
     expect(res.body).toEqual({ error: 'method_not_allowed' });
-    expect(resolveAgentIdentity).not.toHaveBeenCalled();
+    expect(resolveOAuthIdentity).not.toHaveBeenCalled();
   });
 
   it('returns 401 when no agent identity is resolved', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce(null);
+    resolveOAuthIdentity.mockResolvedValueOnce(null);
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: {} }, res);
     expect(res.statusCode).toBe(401);
@@ -120,8 +120,8 @@ describe('GET /api/agent/history', () => {
     expect(mockAdminClient.from).not.toHaveBeenCalled();
   });
 
-  it('returns 500 when resolveAgentIdentity throws', async () => {
-    resolveAgentIdentity.mockRejectedValueOnce(new Error('connection refused'));
+  it('returns 500 when resolveOAuthIdentity throws', async () => {
+    resolveOAuthIdentity.mockRejectedValueOnce(new Error('connection refused'));
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: {} }, res);
     expect(res.statusCode).toBe(500);
@@ -131,7 +131,12 @@ describe('GET /api/agent/history', () => {
   });
 
   it('returns 400 when the limit is out of range', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'history:read'
+    });
     const res = makeRes();
     await handler({ method: 'GET', headers: {}, query: { limit: '0' } }, res);
     expect(res.statusCode).toBe(400);
@@ -141,7 +146,12 @@ describe('GET /api/agent/history', () => {
   });
 
   it('queries workouts scoped to user_id with the default limit and returns the formatted payload', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'history:read'
+    });
     const dbRows = [
       {
         id: 'w-1',
@@ -177,7 +187,12 @@ describe('GET /api/agent/history', () => {
   });
 
   it('includes planned target fields when a set is linked to a planned set', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'history:read'
+    });
     const dbRows = [
       {
         id: 'w-2',
@@ -219,7 +234,12 @@ describe('GET /api/agent/history', () => {
   });
 
   it('returns an empty workouts array when there are no results', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'history:read'
+    });
     mockAdminClient.from.mockReturnValueOnce(buildChain({ data: [], error: null }));
 
     const res = makeRes();
@@ -230,7 +250,12 @@ describe('GET /api/agent/history', () => {
   });
 
   it('returns 500 when the database query errors', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'history:read'
+    });
     mockAdminClient.from.mockReturnValueOnce(
       buildChain({ data: null, error: new Error('relation workouts does not exist') })
     );
@@ -244,7 +269,12 @@ describe('GET /api/agent/history', () => {
   });
 
   it('passes the requested limit to the supabase query', async () => {
-    resolveAgentIdentity.mockResolvedValueOnce({ user_id: 'user-1', key_id: 'key-1' });
+    resolveOAuthIdentity.mockResolvedValueOnce({
+      user_id: 'user-1',
+      consent_id: 'consent-1',
+      client_id: 'claude-desktop',
+      scope: 'history:read'
+    });
     const chain = buildChain({ data: [], error: null });
     mockAdminClient.from.mockReturnValueOnce(chain);
 

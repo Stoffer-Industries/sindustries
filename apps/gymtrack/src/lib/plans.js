@@ -14,7 +14,7 @@ import { supabase } from './supabase.js';
  * @typedef {Object} PlannedWorkout
  * @property {string} id
  * @property {string} user_id
- * @property {string|null} agent_key_id
+ * @property {string|null} consent_id
  * @property {string} scheduled_for  YYYY-MM-DD
  * @property {string} title
  * @property {string|null} notes
@@ -23,7 +23,7 @@ import { supabase } from './supabase.js';
  */
 
 const PLAN_WITH_SETS_SELECT =
-  'id,user_id,agent_key_id,scheduled_for,title,notes,status,planned_workout_sets(id,planned_workout_id,exercise_name,set_index,target_reps,target_weight,unit,notes)';
+  'id,user_id,consent_id,scheduled_for,title,notes,status,planned_workout_sets(id,planned_workout_id,exercise_name,set_index,target_reps,target_weight,unit,notes)';
 
 /**
  * Fetch the user's planned workout (if any) scheduled for `yyyyMmDd`. The
@@ -115,7 +115,7 @@ export function shapePlannedWorkout(row) {
   return {
     id: row.id,
     user_id: row.user_id,
-    agent_key_id: row.agent_key_id ?? null,
+    consent_id: row.consent_id ?? null,
     scheduled_for: row.scheduled_for,
     title: row.title,
     notes: row.notes ?? null,

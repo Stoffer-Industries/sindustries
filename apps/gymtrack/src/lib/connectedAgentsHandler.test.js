@@ -5,7 +5,7 @@ const mockAdminClient = {
   from: vi.fn()
 };
 
-vi.mock('../../server/agentAuth.js', async (importOriginal) => {
+vi.mock('../../server/oauthAuth.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,

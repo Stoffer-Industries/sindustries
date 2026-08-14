@@ -83,7 +83,7 @@ export function validatePlannedWorkoutBody(body) {
   return null;
 }
 
-export function buildInsertRows({ userId, legacyAgentKeyId = null, keyId = null, body }) {
+export function buildInsertRows({ userId, consentId = null, body }) {
   const setRows = [];
   body.exercises.forEach((exercise) => {
     exercise.sets.forEach((set, idx) => {
@@ -102,7 +102,7 @@ export function buildInsertRows({ userId, legacyAgentKeyId = null, keyId = null,
   return {
     parentRow: {
       user_id: userId,
-      agent_key_id: legacyAgentKeyId ?? keyId,
+      consent_id: consentId,
       scheduled_for: body.scheduledFor,
       title: body.title.trim(),
       notes: body.notes?.trim() || null,
@@ -112,8 +112,8 @@ export function buildInsertRows({ userId, legacyAgentKeyId = null, keyId = null,
   };
 }
 
-export async function createPlannedWorkout(client, { userId, legacyAgentKeyId = null, keyId = null, body }) {
-  const { parentRow, setRows } = buildInsertRows({ userId, legacyAgentKeyId, keyId, body });
+export async function createPlannedWorkout(client, { userId, consentId = null, body }) {
+  const { parentRow, setRows } = buildInsertRows({ userId, consentId, body });
 
   const { data: parent, error: parentErr } = await client
     .from('planned_workouts')

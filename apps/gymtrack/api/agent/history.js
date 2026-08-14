@@ -42,9 +42,9 @@ import {
   adminClient,
   badRequest,
   rejectIfWrongMethod,
-  resolveAgentIdentity,
+  resolveOAuthIdentity,
   unauthorized
-} from '../../server/agentAuth.js';
+} from '../../server/oauthAuth.js';
 import {
   fetchWorkoutHistory,
   formatHistoryResponse,
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
 
   let identity;
   try {
-    identity = await resolveAgentIdentity(req);
+    identity = await resolveOAuthIdentity(req, { requireScope: 'history:read' });
   } catch (err) {
     return res.status(500).json({ error: 'server_error', message: err?.message ?? 'Auth lookup failed.' });
   }
