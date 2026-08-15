@@ -368,5 +368,25 @@
     "links": [],
     "evidence": "Encryption at rest shipped with key-rotation documentation and ownership-contract tests covering same-user access and cross-user denial.",
     "visibility": "published"
+  },
+  {
+    "title": "Tasks API native approvals",
+    "slug": "tasks-api-native-approvals",
+    "releasedAt": "2026-08-08",
+    "summary": "Structured approval records now drive the task approval pipeline instead of matching approval text in descriptions and comments.",
+    "type": "system",
+    "links": [],
+    "evidence": "Native approval records shipped end to end across storage, workflow gates, and scheduled automation on 2026-08-08.",
+    "visibility": "published"
+  },
+  {
+    "title": "Bookmark compounding-signal KPI",
+    "slug": "bookmark-compounding-signal-kpi",
+    "releasedAt": "2026-08-13",
+    "summary": "Bookmark curation quality now has a visible 7-day rolling Compounding % metric in Mission Control.",
+    "type": "system",
+    "links": [],
+    "evidence": "The compounding-signal calculator and Mission Control KPI tile shipped on 2026-08-13.",
+    "visibility": "published"
   }
 ]
