@@ -58,17 +58,20 @@ Migration `apps/gymtrack/supabase/migrations/20260804070000_mcp_oauth.sql` seeds
 | --- | --- | --- |
 | Claude | `claude-desktop` | `https://claude.ai/api/mcp/auth_callback` |
 | ChatGPT | `chatgpt` | `https://chatgpt.com/connector_platform_oauth_redirect` |
+| OpenClaw | `openclaw` | `http://127.0.0.1:8789/callback` |
+
+The third row is added by `apps/gymtrack/supabase/migrations/20260815070000_openclaw_oauth_client.sql` (task `30251df0`). `127.0.0.1:8789` is the loopback redirect OpenClaw binds for the duration of the OAuth dance (RFC 8252 §7.3 / OAuth 2.1 §10.2); it is one port above `local-dev`'s `8788` so no two seeded clients collide. If port `8789` is unavailable on a host, surface an actionable error to the user — do not silently bind a different port.
 
 Confirm the production rows have not drifted:
 
 ```sql
 select client_id, client_name, redirect_uris
 from public.gymtrack_oauth_clients
-where client_id in ('claude-desktop', 'chatgpt')
+where client_id in ('claude-desktop', 'chatgpt', 'openclaw')
 order by client_id;
 ```
 
-If either provider reports a redirect mismatch, capture the exact `redirect_uri` it sent, verify it against that provider's current documentation, and update only that client's allowlist. Do not add wildcard redirect URIs.
+If any provider reports a redirect mismatch, capture the exact `redirect_uri` it sent, verify it against that provider's current documentation, and update only that client's allowlist. Do not add wildcard redirect URIs.
 
 ### Claude end-to-end
 

@@ -26,6 +26,11 @@ class FakeRepo {
         client_id: 'claude-desktop',
         client_name: 'Claude Desktop',
         redirect_uris: ['https://claude.example/callback']
+      },
+      {
+        client_id: 'openclaw',
+        client_name: 'OpenClaw',
+        redirect_uris: ['http://127.0.0.1:8789/callback']
       }
     ];
     this.users = new Map([['supabase-user-token', { id: 'user-1', email: 'rowan@example.com' }]]);
@@ -688,5 +693,65 @@ describe('GymTrack MCP OAuth server', () => {
     expect(description).toContain('…[redacted-supabase-url]…');
     // 80-char cap with one trailing ellipsis if truncation occurred
     expect(description.length).toBeLessThanOrEqual(81);
+  });
+
+  it('rejects openclaw token exchange when no consent row exists for (user_id, openclaw)', async () => {
+    const { app, repo } = makeApp();
+
+    // Build an authorization code that points at a consent_id that does not
+    // exist in the repo. This mirrors the "consent row never written" condition
+    // AC4 locks against: a fresh OpenClaw install attempting the PKCE dance
+    // against a user who has never approved the new client_id.
+    const code = 'openclaw-orphan-consent-code';
+    const verifier = 'openclaw-orphan-verifier';
+    await repo.createAuthorizationCode({
+      consentId: 'consent-does-not-exist',
+      userId: 'user-1',
+      clientId: 'openclaw',
+      codeHash: sha256Hex(code),
+      redirectUri: 'http://127.0.0.1:8789/callback',
+      scope: 'history:read progression:read workouts:write',
+      codeChallenge: pkceChallengeForVerifier(verifier),
+      codeChallengeMethod: 'S256',
+      expiresAt: new Date('2026-08-15T01:00:00.000Z')
+    });
+
+    const exchange = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: 'openclaw',
+        redirect_uri: 'http://127.0.0.1:8789/callback',
+        code,
+        code_verifier: verifier
+      });
+
+    expect(exchange.status).toBe(400);
+    expect(exchange.body.error).toBe('invalid_grant');
+    expect(exchange.body.error_description).toMatch(/consent/i);
+    expect(repo.tokens).toHaveLength(0);
+  });
+
+  it('rejects openclaw authorize requests with a redirect_uri that is not registered for the client', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .get('/oauth/authorize')
+      .query({
+        response_type: 'code',
+        client_id: 'openclaw',
+        redirect_uri: 'https://attacker.example/callback',
+        scope: 'history:read',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_client');
+    expect(response.body.error_description).toBe(
+      'redirect_uri is not registered for this client.'
+    );
   });
 });
