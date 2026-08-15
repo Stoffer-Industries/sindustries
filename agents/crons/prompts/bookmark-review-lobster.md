@@ -1,3 +1,7 @@
+## Process hygiene
+
+Do not spawn detached/background processes during this run, and never kill a running process or session as part of a probe. If any exec step hangs, let it hit its own timeout rather than killing it — a manual kill flips the cron run to `error` even when the pipeline work underneath succeeded.
+
 ## Pre-check — bail early if nothing to do
 
 Run this first:
