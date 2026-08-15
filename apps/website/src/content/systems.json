@@ -21,8 +21,8 @@
     "summary": "A pipeline for turning saved signals into reviews, specs, tasks, and decisions.",
     "problem": "Useful external signals are easy to save and hard to convert into action.",
     "howItWorks": "Bookmarks are reviewed, grouped, evaluated for usefulness, and promoted into specs or tasks when they warrant action. Ingestion, enrichment, spec generation, approval, and task creation now feed a live Mission Control tab, where review KPIs, topic breakdowns, pending approvals, and recent state changes are visible in one operating surface.",
-    "proof": "Pipeline now produces review state, implementation specs, task proposals, and a Mission Control bookmarks view. The full saved-signal-to-task loop is live: approved specs generate approval requests, approval replies create tasks from the spec headings, linked article and quoted X article text are extracted before curation, and transition visibility is available in Mission Control. A Postgres analytics mirror now backs bookmark and transition reporting so review state can be analysed without rereading raw pipeline files.",
-    "updatedAt": "2026-07-17",
+    "proof": "Pipeline now produces review state, implementation specs, task proposals, and a Mission Control bookmarks view. The full saved-signal-to-task loop is live: approved specs generate approval requests, approval replies create tasks from the spec headings, linked article and quoted X article text are extracted before curation, and transition visibility is available in Mission Control. A Postgres analytics mirror now backs bookmark and transition reporting so review state can be analysed without rereading raw pipeline files. Mission Control now shows a 7-day rolling Compounding % KPI, making changes in bookmark curation quality visible over time.",
+    "updatedAt": "2026-08-13",
     "links": [],
     "image": "/brand/systems/bookmark-bunker-manual.jpg",
     "visibility": "published"
@@ -35,8 +35,8 @@
     "summary": "Task state, ownership, comments, reviews, dependencies, and flow metrics for studio work.",
     "problem": "Agent work needs a shared source of truth for ownership, status, review, and handoff.",
     "howItWorks": "The Tasks API tracks tasks, comments, tags, readiness, and status transitions for SIndustries work.",
-    "proof": "SIndustries tasks are tracked through the shared task system and driven by heartbeat and cron workflows. Task history, dependency links, type filters, and feature-task workflow gates are now part of the operating surface. Mission Control uses task data to show flow metrics such as cycle time, throughput, and work-in-progress, turning task history into operational feedback instead of a passive backlog.",
-    "updatedAt": "2026-07-10",
+    "proof": "SIndustries tasks are tracked through the shared task system and driven by heartbeat and cron workflows. Task history, dependency links, type filters, and feature-task workflow gates are now part of the operating surface. Mission Control uses task data to show flow metrics such as cycle time, throughput, and work-in-progress, turning task history into operational feedback instead of a passive backlog. Structured approval records now drive approval gates end to end, replacing fragile matching against task descriptions and comments.",
+    "updatedAt": "2026-08-08",
     "links": [],
     "image": "/brand/systems/tasks-api-hero.png",
     "visibility": "published"
@@ -77,8 +77,8 @@
     "summary": "A shared operating surface for the studio: active work, saved signals, flow metrics, content scheduling, the public SIndustries site, design-system checks, and workspace preferences in one shell.",
     "problem": "SIndustries has multiple useful operating loops, but they lose leverage when they live in separate tabs, files, or agent handoffs.",
     "howItWorks": "Mission Control gives the studio one persistent shell for day-to-day operations. It brings task work, saved-signal review, delivery flow metrics, content scheduling, website review, design-system visibility, and global preferences into a single workspace so agents and humans can see the same state before acting.",
-    "proof": "The shell MVP shipped 2026-07-05 with active-work, saved-signal, and flow-metrics tabs. The saved-signal tab shipped 2026-07-08 with KPIs, topic breakdowns, pending approvals, and recent transitions. Day/night mode moved into the shell on 2026-07-10. The public SIndustries site became a Mission Control tab on 2026-07-13, and Content Scheduler shipped on 2026-07-16 with compose, approval, scheduling, and one-per-day publishing gates for X posts. A Feature Factory analytics panel shipped on 2026-07-26 with gate-failure trends, pull-request cycle times, evidence-type distribution, and per-task lifecycle replay.",
-    "updatedAt": "2026-07-31",
+    "proof": "The shell MVP shipped 2026-07-05 with active-work, saved-signal, and flow-metrics tabs. The saved-signal tab shipped 2026-07-08 with KPIs, topic breakdowns, pending approvals, and recent transitions. Day/night mode moved into the shell on 2026-07-10. The public SIndustries site became a Mission Control tab on 2026-07-13, and Content Scheduler shipped on 2026-07-16 with compose, approval, scheduling, and one-per-day publishing gates for X posts. A Feature Factory analytics panel shipped on 2026-07-26 with gate-failure trends, pull-request cycle times, evidence-type distribution, and per-task lifecycle replay. The Bookmarks tab added a 7-day rolling Compounding % KPI on 2026-08-13, giving curation quality a visible trend rather than a point-in-time count.",
+    "updatedAt": "2026-08-13",
     "links": [],
     "image": "/brand/systems/mission-control-hero.jpg",
     "visibility": "published"
