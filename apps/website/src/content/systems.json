@@ -50,7 +50,7 @@
     "problem": "A product studio needs visual consistency without slowing down small experiments.",
     "howItWorks": "Shared tokens, components, and design constraints keep new surfaces coherent while remaining easy to ship.",
     "proof": "The Pencil design token package, sync checks, and shared UI integration are shipped, with day/night theme support enabled. The website, task app, and Mission Control render from the same component and token source; Mission Control now hosts the design-system viewer and owns the shared day/night preference that synchronises across embedded workspace surfaces.",
-    "updatedAt": "2026-07-10",
+    "updatedAt": "2026-08-15",
     "links": [],
     "image": "/brand/systems/design-system-hero.png",
     "visibility": "published"
