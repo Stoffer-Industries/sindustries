@@ -25,7 +25,17 @@ Any agent can use this. No campaign logic, no theme picking, no arc drafting —
 - **`scheduledFor`** (ISO 8601 datetime) — when the tweet should publish. Must be a valid ISO string with the correct `Pacific/Auckland` offset (see timezone note below).
 - **`source`** (enum, optional, default `manual`) — one of `ops_notes`, `cto_craft`, `manual`, `other`. Use `ops_notes` when the tweet came from a weekly review or an ops signal.
 - **`sourceRef`** (string, optional) — a URL or file path pointing back to the source signal (e.g. `brain/content/sindustries-weekly-content/YYYY-MM-DD.md`).
-- **`actor`** (string, default = the calling agent's name) — sent as the `x-actor` header for audit attribution.
+- **`actor`** (string, default = the calling agent's name) — sent as the `x-actor` header for audit attribution. It must match the actor bound to the caller's Tasks API credential.
+
+## Authentication
+
+`TASKS_API_APPROVAL_TOKEN` is mandatory and must be the calling agent's own workspace-scoped credential. Never borrow another agent's token. The Tasks API derives the authoritative actor from the bearer credential; `x-actor` remains an audit signal and must match it.
+
+Fail before making a request when the token is missing:
+
+```bash
+: "${TASKS_API_APPROVAL_TOKEN:?calling agent Tasks API credential is required}"
+```
 
 ## Output
 
@@ -47,7 +57,10 @@ Compute the ISO in `Pacific/Auckland` with the correct NZST (+12:00) / NZDT (+13
 ### 3. POST to the scheduler
 
 ```bash
+: "${TASKS_API_APPROVAL_TOKEN:?calling agent Tasks API credential is required}"
+
 curl -sS -X POST http://localhost:4001/api/v1/content-scheduler/items \
+  -H "Authorization: Bearer ${TASKS_API_APPROVAL_TOKEN}" \
   -H 'content-type: application/json' \
   -H "x-actor: ${actor}" \
   -d '{
@@ -65,6 +78,7 @@ Endpoint: `http://localhost:4001/api/v1/content-scheduler/items`. Route is docum
 
 - **`200`/`201`** → parse the returned JSON, capture the `id`, return it to the caller.
 - **`4xx`** with a structured `{ error: { code, message } }` body → return the error code to the caller. Common codes:
+  - `AUTH_REQUIRED` — missing, stale, or invalid agent bearer credential.
   - `body_too_long` — 281+ chars.
   - `invalid_scheduled_for` — bad ISO or missing offset.
 - **`5xx`** or connection failure → escalate via `agents/skills/ops/notify-soft-fail/SKILL.md`. Do not silently retry.
@@ -73,6 +87,7 @@ Endpoint: `http://localhost:4001/api/v1/content-scheduler/items`. Route is docum
 
 - **Only `status: queued`.** Never send `status: published` from this skill. Publishing is a separate gated route.
 - **One tweet per call.** No batching. Callers that need multiple tweets call this skill in a loop.
+- **Use the calling agent's credential.** Never use Quinn's token as a fallback for another agent.
 - **Do not post traceability comments here.** That is the caller's responsibility — a traceability comment scope depends on the context (a single-tweet caller may not need one; a weekly-campaign caller posts `[ivy-tweets-queued]`).
 - **Do not write to `~/.openclaw/`.**
 

@@ -125,7 +125,7 @@ Mission Control surfaces the new drafts through the existing Content Scheduler l
 
 ## API surface
 
-All routes are mounted under `/api/v1` from `services/tasks-api/src/app.ts`. CORS allows `x-actor` so the Mission Control client can send the operator identity.
+All routes are mounted under `/api/v1` from `services/tasks-api/src/app.ts`. CORS allows `x-actor` so the Mission Control client can send the operator identity. All mutation routes require a valid Tasks API session or `Authorization: Bearer <agent credential>` header; automated callers must use their own workspace-scoped `TASKS_API_APPROVAL_TOKEN`. The authenticated credential is authoritative for actor attribution, while `x-actor` remains an audit signal and must match it.
 
 | Method | Path | Purpose |
 |---|---|---|
