@@ -14,8 +14,21 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-_env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
-WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[3]
+def default_workspace(script_path: Path | None = None) -> Path:
+    """Resolve the OpenClaw workspace containing the canonical brain directory."""
+    path = (script_path or Path(__file__)).resolve()
+    repo_root = path.parents[3]
+    if repo_root.parent.name in {"codebases", "worktrees"}:
+        return repo_root.parent.parent
+    return repo_root
+
+
+def workspace_from_environment(script_path: Path | None = None) -> Path:
+    explicit = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
+    return Path(explicit).expanduser().resolve() if explicit else default_workspace(script_path)
+
+
+WORKSPACE = workspace_from_environment()
 WIKI_ROOT = WORKSPACE / "brain" / "wiki"
 INDEX_PATH = WIKI_ROOT / "index.md"
 LOG_PATH = WIKI_ROOT / "log.md"

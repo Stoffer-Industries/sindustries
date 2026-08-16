@@ -5,7 +5,8 @@ This is a **daily, read-only** integrity check over the wiki catalog. It must ne
 ## Command
 
 ```sh
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py lint --json
+OPENCLAW_WORKSPACE=/Users/quinnstoffer/.openclaw/workspace \
+  python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py lint --json
 ```
 
 ## Mandatory flow
