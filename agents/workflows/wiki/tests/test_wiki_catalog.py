@@ -37,6 +37,28 @@ class WikiCatalogTests(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         return path
 
+    def test_default_workspace_resolves_parent_of_codebases_checkout(self):
+        canonical = self.workspace / "openclaw-workspace"
+        script = canonical / "codebases/sindustries/agents/workflows/wiki/wiki_catalog.py"
+
+        self.assertEqual(self.mod.default_workspace(script), canonical.resolve())
+
+        worktree_script = canonical / "worktrees/task-fix/agents/workflows/wiki/wiki_catalog.py"
+        self.assertEqual(self.mod.default_workspace(worktree_script), canonical.resolve())
+
+    def test_explicit_workspace_environment_overrides_checkout_default(self):
+        explicit = self.workspace / "icloud-workspace"
+        script = self.workspace / "checkout/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py"
+        previous = os.environ.get("OPENCLAW_WORKSPACE")
+        try:
+            os.environ["OPENCLAW_WORKSPACE"] = str(explicit)
+            self.assertEqual(self.mod.workspace_from_environment(script), explicit.resolve())
+        finally:
+            if previous is None:
+                os.environ.pop("OPENCLAW_WORKSPACE", None)
+            else:
+                os.environ["OPENCLAW_WORKSPACE"] = previous
+
     def test_upsert_creates_index_and_dedupes_ingest_log_by_event_key(self):
         source = "brain/bookmarks/summaries/example-abc.md"
         self._write_source(source)

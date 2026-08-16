@@ -13,7 +13,8 @@ Use Vara when the task is to answer from existing workspace knowledge with expli
 2. Log the query through the helper:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py \
+OPENCLAW_WORKSPACE=/Users/quinnstoffer/.openclaw/workspace \
+  python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py \
   log --action query --artifact "<normalized question>" \
   --detail "Result: <supported|no-supported-source|dead-link|unsupported>" --json
 ```
@@ -22,7 +23,8 @@ python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/wor
 4. Read only indexed sources with the helper:
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py \
+OPENCLAW_WORKSPACE=/Users/quinnstoffer/.openclaw/workspace \
+  python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py \
   read-source --source "<exact-indexed-path>" --json
 ```
 
@@ -54,7 +56,8 @@ python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/wor
 ## Ingest allowed sources
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py \
+OPENCLAW_WORKSPACE=/Users/quinnstoffer/.openclaw/workspace \
+  python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py \
   upsert --kind <bookmark|summary|spec|memory|daily-memory> \
   --source "<allowed-workspace-relative-path>" \
   --title "<title>" \
@@ -64,7 +67,8 @@ python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/wor
 ## Lint
 
 ```bash
-python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py lint --json
+OPENCLAW_WORKSPACE=/Users/quinnstoffer/.openclaw/workspace \
+  python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/wiki/wiki_catalog.py lint --json
 ```
 
 ## Never do this
