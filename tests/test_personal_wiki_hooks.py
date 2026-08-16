@@ -134,7 +134,12 @@ class PersonalWikiHookTests(unittest.TestCase):
                         {
                             "bookmarkKey": "k1",
                             "requestType": "new",
-                            "specs": [{"title": "Example", "specDoc": spec_rel}],
+                            "specs": [{
+                                "title": "Example",
+                                "specDoc": spec_rel,
+                                "classification": "feature",
+                                "classification_rationale": "Example spec for grounded recall path — product-facing feature work.",
+                            }],
                         }
                     ]
                 }
@@ -175,7 +180,12 @@ class PersonalWikiHookTests(unittest.TestCase):
                         {
                             "bookmarkKey": "k1",
                             "requestType": "new",
-                            "specs": [{"title": "Example", "specDoc": spec_rel}],
+                            "specs": [{
+                                "title": "Example",
+                                "specDoc": spec_rel,
+                                "classification": "feature",
+                                "classification_rationale": "Example spec — needs Tom approval before any task exists.",
+                            }],
                         }
                     ]
                 }

@@ -591,6 +591,8 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/spec.md",
+                "classification": "feature",
+                "classification_rationale": "Happy-path fixture: spec shape is valid and feature-typed.",
             }],
         }])
         out = self._run()
@@ -610,6 +612,8 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/specs/does/not/exist.md",
+                "classification": "feature",
+                "classification_rationale": "Fixture focuses on missing-file path; shape is otherwise valid.",
             }],
         }])
         out = self._run()
@@ -628,6 +632,8 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/spec.md",
+                "classification": "feature",
+                "classification_rationale": "Fixture focuses on unknown-key path; shape is otherwise valid.",
             }],
         }])
 
@@ -650,6 +656,8 @@ class ValidateSpecOutputTests(unittest.TestCase):
             "specs": [{
                 "title": "Spec",
                 "specDoc": "brain/spec.md",
+                "classification": "feature",
+                "classification_rationale": "Fixture focuses on wrong-state path; shape is otherwise valid.",
             }],
         }])
 
