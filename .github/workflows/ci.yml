@@ -62,6 +62,48 @@ jobs:
           python -m unittest discover -s agents/skills/ops/tasks-api/tests -p 'test_*.py'
           python -m unittest discover -s agents/skills/ops/tasks-api/scripts -p 'test_*.py'
 
+  cto-craft-tweet-drafts-tests:
+    # W34 audit QW1: the cto-craft-tweet-drafts LangGraph pipeline holds
+    # the most safety-relevant new code in this workflow (SSRF-safe fetcher,
+    # advisory-lock durability, graph wiring). The package's pytest suite
+    # (`test_safe_fetch.py`, `test_durability.py`, `test_graph.py`, plus
+    # extraction/angle-model/issue-source tests) was never wired into CI,
+    # which is why the SSRF rebinding gap and the ingest-secret auth
+    # collision landed silently. Adding this job so PRs touching
+    # `agents/workflows/cto-craft-tweet-drafts/**` are validated against
+    # the existing pytest+respx+pytest-asyncio suite.
+    #
+    # Mirrors the W33 gymtrack-mcp-tests pattern (parallel dedicated job)
+    # rather than folding into `python-workflow-tests` because:
+    #   1. This suite is pytest-based with fixture-parametrized tests,
+    #      `respx`, and `pytest-asyncio`; adding it to the existing
+    #      `python -m unittest discover` step would error mid-discover.
+    #   2. The workflow pins `requires-python = ">=3.11,<3.13"`; 3.12
+    #      satisfies that range.
+    #   3. Deps are pinned in `uv.lock`, so `uv sync --frozen --extra dev`
+    #      installs reproducibly from the lockfile (no network lock step).
+    name: cto-craft-tweet-drafts tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install workflow dependencies
+        working-directory: agents/workflows/cto-craft-tweet-drafts
+        run: uv sync --frozen --extra dev
+
+      - name: Run pytest
+        working-directory: agents/workflows/cto-craft-tweet-drafts
+        run: uv run --frozen --extra dev pytest
+
   otel-node-tests:
     name: otel-node unit tests
     runs-on: ubuntu-latest
