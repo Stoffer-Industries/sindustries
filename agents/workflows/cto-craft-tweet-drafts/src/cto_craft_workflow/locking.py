@@ -18,7 +18,6 @@ and the workflow's own stable key.
 
 from __future__ import annotations
 
-import hashlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator
@@ -43,22 +42,6 @@ class LockHandle:
 
     connection: object
     acquired: bool
-
-
-def _stable_namespace_key(component: str) -> int:
-    """Map a stable component string into a 63-bit signed integer.
-
-    PostgreSQL's ``pg_try_advisory_lock(key bigint)`` takes a single
-    signed 64-bit integer. We hash the component into a positive 64-bit
-    value and then collapse it into a signed 63-bit range to be safe
-    across platforms.
-    """
-
-    digest = hashlib.sha256(component.encode("utf-8")).digest()
-    value = int.from_bytes(digest[:8], byteorder="big", signed=False)
-    # Mask to signed 63-bit range (PostgreSQL's ``bigint`` is signed 64-bit
-    # but we want a positive, safe key).
-    return value & 0x7FFF_FFFF_FFFF_FFFF
 
 
 def _check_connection(conn) -> None:
@@ -91,23 +74,22 @@ def workflow_lock(
         sql = "SELECT pg_try_advisory_lock(%s, %s)"
 
     cursor = connection.cursor()
+    acquired = False
     try:
         cursor.execute(sql, (LOCK_NAMESPACE, LOCK_KEY))
-        row = cursor.fetchone()
         if wait:
             acquired = True
         else:
+            row = cursor.fetchone()
             acquired = bool(row and row[0])
         yield LockHandle(connection=connection, acquired=acquired)
     finally:
-        try:
-            if wait:
+        if acquired:
+            try:
                 cursor.execute("SELECT pg_advisory_unlock(%s, %s)", (LOCK_NAMESPACE, LOCK_KEY))
-            else:
-                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", (LOCK_NAMESPACE, LOCK_KEY))
-        except Exception:
-            # Best-effort release; the connection will close on exit.
-            pass
+            except Exception:
+                # Best-effort release; the connection will close on exit.
+                pass
         try:
             cursor.close()
         except Exception:
@@ -120,5 +102,4 @@ __all__ = [
     "LOCK_NAMESPACE",
     "LOCK_KEY",
     "workflow_lock",
-    "_stable_namespace_key",
 ]
