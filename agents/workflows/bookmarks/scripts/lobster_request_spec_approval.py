@@ -5,9 +5,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from common import (
     STATE_PATH,
+    STATE_ROOT,
     WORKSPACE,
     dump_json,
     load_state,
@@ -22,6 +24,17 @@ from bookmark_state_machine import (
     is_task_linked,
     reconcile_tasked_item,
 )
+
+# Triage queue for ambiguous-classified bookmarks (task 536e04fc WS3).
+# Appended to on every run that emits ambiguous events. Consumed by the
+# WS4 recurring cron (Quinn-owned registration) that surfaces them as a
+# Telegram report when older than 7 days.
+TRIAGE_QUEUE_PATH = STATE_ROOT / "bookmark-triage-queue.json"
+
+# Routing decision values for the WS3 classification contract.
+ROUTE_FEATURE = "feature"
+ROUTE_DIRECT = "direct"
+ROUTE_AMBIGUOUS = "ambiguous"
 
 # Compact preview helpers — keeps payload under lobster's 2000-char preview cap.
 _ITEM_KEEP = {"bookmarkKey", "specDocs", "topic", "approvalTopic", "title"}
@@ -62,6 +75,123 @@ def _build_item_summary(item: dict) -> dict:
     }
 
 
+def _resolve_route(state_item: dict, item_input: dict) -> tuple[str, list[dict]]:
+    """Return (route, per_spec_data) for the implement item.
+
+    route is one of:
+    - ROUTE_FEATURE: keep today's flow (Tom reviews + approval)
+    - ROUTE_DIRECT: skip approval, downstream calls Tasks API create with
+      type=classification
+    - ROUTE_AMBIGUOUS: no approval, no task; emit bookmark-triage-needed
+      event so WS4 cron can surface it for manual triage
+
+    per_spec_data is a list of classification records keyed by specDoc.
+
+    The routing priority is: ambiguous > feature > direct. If no
+    classifications are present (state pre-dates WS3 contract), the item
+    falls back to feature to preserve today's flow.
+    """
+    classifications = (
+        list(state_item.get("classifications") or [])
+        or list(item_input.get("classifications") or [])
+    )
+
+    if not classifications:
+        return ROUTE_FEATURE, []
+
+    per_spec: list[dict] = []
+    has_ambiguous = False
+    has_feature = False
+    has_direct = False
+    for c in classifications:
+        cls = c.get("classification")
+        per_spec.append({
+            "specDoc": c.get("specDoc"),
+            "classification": cls,
+            "classification_rationale": c.get("classification_rationale"),
+            "classificationError": c.get("classificationError"),
+        })
+        if cls == "ambiguous" or cls is None or c.get("classificationError"):
+            has_ambiguous = True
+        elif cls == "feature":
+            has_feature = True
+        elif cls in ("code", "research"):
+            has_direct = True
+        else:
+            # Unknown enum value — treat as ambiguous so the pipeline never
+            # silently coerces to a wrong route.
+            has_ambiguous = True
+
+    if has_ambiguous:
+        return ROUTE_AMBIGUOUS, per_spec
+    if has_feature:
+        return ROUTE_FEATURE, per_spec
+    if has_direct:
+        return ROUTE_DIRECT, per_spec
+    return ROUTE_FEATURE, per_spec  # unreachable in practice
+
+
+def _append_triage_events(events: list[dict], path: Path | None = None) -> int:
+    """Append triage events to bookmark-triage-queue.json. Returns the new size.
+
+    Queue file is a JSON list. Malformed or missing files are treated as
+    empty. Parent directories are created on first write.
+
+    The default path is read from the module-level `TRIAGE_QUEUE_PATH` at
+    call time (not import time) so tests can monkey-patch the target.
+    """
+    target = path if path is not None else TRIAGE_QUEUE_PATH
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            if not isinstance(existing, list):
+                existing = []
+        except (json.JSONDecodeError, OSError):
+            existing = []
+    else:
+        existing = []
+    existing.extend(events)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    return len(existing)
+
+
+def _build_direct_create_item(
+    item: dict, per_spec: list[dict]
+) -> dict:
+    """Build a directCreateItems entry from an implement item + per-spec data.
+
+    Each spec becomes a proposed task with type=classification. The downstream
+    caller (lobster or tasks-api client) reads this and creates one task per
+    entry. The proposedTasks field carries the actual task list so the
+    downstream doesn't need to re-parse the spec docs.
+    """
+    spec_titles = {
+        s.get("specDoc"): s.get("title")
+        for s in (item.get("specProposals") or [])
+    }
+    tasks = []
+    for spec in per_spec:
+        cls = spec.get("classification")
+        spec_doc = spec.get("specDoc")
+        if cls not in ("code", "research"):
+            continue  # direct route only emits code/research tasks
+        tasks.append({
+            "title": spec_titles.get(spec_doc) or Path(spec_doc or "").stem,
+            "type": cls,
+            "specDoc": spec_doc,
+            "bookmarkKey": item.get("bookmarkKey"),
+            "classification_rationale": spec.get("classification_rationale"),
+        })
+    return {
+        "bookmarkKey": item.get("bookmarkKey"),
+        "topic": item.get("topic"),
+        "title": item.get("title"),
+        "specDocs": [s.get("specDoc") for s in per_spec if s.get("specDoc")],
+        "tasks": tasks,
+    }
+
+
 def _update_item(state_items: dict, bookmark_key: str, reason: str, state_path: Path, **fields: object) -> bool:
     item = state_items.get(bookmark_key)
     if not item:
@@ -91,6 +221,45 @@ def main() -> int:
     state_items = state.get("items", {})
     state_path = Path(STATE_PATH)
 
+    # --- Phase 0: WS3 classification routing (task 536e04fc) ---
+    # Divert items before the approval flow so ambiguous and direct-create
+    # items never appear in readyPackages. The implement bucket is split
+    # into three sub-buckets:
+    #   - ambiguous: emit bookmark-triage-needed event, skip approval
+    #   - direct: skip approval, output for downstream Tasks API create
+    #   - feature: continue to the existing approval flow (Phase 1)
+    routed_implement: list[dict] = []
+    direct_create_items: list[dict] = []
+    triage_events: list[dict] = []
+    for item in data.get("implement", []):
+        bookmark_key = item.get("bookmarkKey")
+        state_item = state_items.get(bookmark_key, {})
+        route, per_spec = _resolve_route(state_item, item)
+        if route == ROUTE_AMBIGUOUS:
+            triage_events.append({
+                "bookmarkKey": bookmark_key,
+                "title": item.get("title"),
+                "topic": item.get("topic"),
+                "specDocs": [s.get("specDoc") for s in per_spec],
+                "classificationRationales": [
+                    s.get("classification_rationale") for s in per_spec
+                ],
+                "classificationErrors": [
+                    s.get("classificationError") for s in per_spec
+                ],
+                "emittedAt": now_iso(),
+            })
+            continue
+        if route == ROUTE_DIRECT:
+            direct_create_items.append(_build_direct_create_item(item, per_spec))
+            continue
+        # ROUTE_FEATURE: fall through to the existing approval flow
+        routed_implement.append({**item, "_classifications": per_spec})
+
+    # Persist triage events. WS4 cron (Quinn-owned) reads this queue.
+    if triage_events:
+        _append_triage_events(triage_events)
+
     # --- Phase 1: prepare packages (was lobster_prepare_topic_approval) ---
     pending_topics = {
         get_approval_topic(item)
@@ -101,7 +270,7 @@ def main() -> int:
     candidate_packages: list[dict] = []
     blocked_packages: list[dict] = []
 
-    for item in data.get("implement", []):
+    for item in routed_implement:
         bookmark_key = item.get("bookmarkKey")
         state_item = state_items.get(bookmark_key, {})
         # get_approval_topic reads curation.topic first — the authoritative source.
@@ -234,7 +403,12 @@ def main() -> int:
             base = {k: v for k, v in package.items() if k in _PACKAGE_KEEP}
             compact_ready.append({**base, "items": items_with_specs})
 
-    json.dump({"readyPackages": compact_ready, "blockedPackages": compact_blocked}, sys.stdout)
+    json.dump({
+        "readyPackages": compact_ready,
+        "blockedPackages": compact_blocked,
+        "directCreateItems": direct_create_items,
+        "triageEvents": triage_events,
+    }, sys.stdout)
     sys.stdout.write("\n")
     return 0
 

@@ -59,12 +59,26 @@ steps:
     stdin: $generate_specs.stdout
     approval: required
 
+  # WS3 direct-create route (task 536e04fc) — runs unconditionally because
+  # code/research specs do not require Tom's approval. Splits the
+  # request_spec_approval payload by direct vs. approval buckets so the
+  # approval flow above can still gate on $request_spec_approval.approved
+  # without dragging direct items in with it.
+  - id: create_tasks_from_direct
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_create_tasks_from_direct.py
+      --base-url ${TASKS_API_BASE_URL}
+      --json
+    stdin: >-
+      {"directCreateItems": $request_spec_approval.directCreateItems}
+
   - id: create_tasks_from_proposals
     command: >-
       python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py
       --base-url ${TASKS_API_BASE_URL}
       --json
-    stdin: $request_spec_approval.stdout
+    stdin: >-
+      {"readyPackages": $request_spec_approval.readyPackages, "blockedPackages": $request_spec_approval.blockedPackages}
     condition: $request_spec_approval.approved
 
   - id: resolve_spec_request
