@@ -177,13 +177,25 @@ If the caller expects pipeline-consumable output, print JSON after writing:
     {
       "title": "Spec title",
       "specDoc": "brain/tasks/specs/open/<slug>.md",
-      "specType": "infra workflow"
+      "specType": "infra workflow",
+      "classification": "feature",
+      "classification_rationale": "One sentence: why this is feature-typed and not code/research."
     }
   ]
 }
 ```
 
 For bookmark-origin specs, `specDoc` should point at `brain/bookmarks/specs/...`.
+
+### Classification (required per spec, task 536e04fc WS3)
+
+Every spec in the returned bundle MUST carry a `classification` of `feature`, `code`, or `research` plus a one-sentence `classification_rationale`. The bookmark pipeline uses this to decide whether Tom's spec approval is required:
+
+- `feature` — work that needs Tom's spec approval before tasks are created. Default for product/feature work touching the Sindustries stack or product surface.
+- `code` — engineering work that has no product surface (tooling, infra, refactors, internal-only). Skips Tom's approval; tasks are created directly with `type: code`.
+- `research` — investigation/spike work. Skips Tom's approval; tasks are created directly with `type: research`.
+
+Do NOT return `ambiguous` — that value is reserved for the validator when LLM output is malformed (malformed JSON, missing field, wrong enum). If you genuinely cannot classify a spec, return the value you most lean toward plus a rationale that names the alternative; the pipeline will surface it for manual triage if the rationale reads as hedging. The four-value enum is enforced downstream by `agents/workflows/bookmarks/classification_schema.py::parse_classification_payload` — invalid output maps to `ambiguous` and routes to the bookmark-triage queue.
 
 ## Quality Bar
 

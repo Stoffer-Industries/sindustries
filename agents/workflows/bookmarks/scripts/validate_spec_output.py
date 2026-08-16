@@ -61,6 +61,20 @@ from wiki_catalog import (
     upsert_entry as wiki_upsert_entry,
 )
 
+# Task 536e04fc WS3 — pipeline routing on LLM-driven classification.
+# validate_entry_shape below uses Classification as the single source of
+# truth for the four-value enum (`feature | code | research | ambiguous`).
+# WS2's parse_classification_payload validates raw LLM output and is not
+# re-applied here — by the time validate_spec_output runs, the spec
+# markdown is on disk and the per-spec classification metadata has
+# already passed the enum check, so passing the values through is the
+# correct shape.
+CLASSIFICATION_SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+if str(CLASSIFICATION_SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(CLASSIFICATION_SCRIPT_ROOT))
+
+from classification_schema import Classification  # noqa: E402
+
 H1_RE = re.compile(r"^#\s+(?:Spec\s*[—–-]+\s*)?(.*\S)\s*$", re.MULTILINE)
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
@@ -79,15 +93,33 @@ def validate_entry_shape(entry: dict[str, Any]) -> list[str]:
         errors.append("specs must be a non-empty list")
         return errors
     for i, spec in enumerate(specs):
+        if not isinstance(spec, dict):
+            errors.append(f"specs[{i}] must be an object")
+            continue
         missing = REQUIRED_SPEC_KEYS - set(spec.keys())
         if missing:
             errors.append(f"specs[{i}] missing keys: {sorted(missing)}")
+        classification = spec.get("classification")
+        if classification not in {c.value for c in Classification}:
+            errors.append(
+                f"specs[{i}].classification must be one of "
+                f"{{feature, code, research, ambiguous}}, got {classification!r}"
+            )
+        rationale = spec.get("classification_rationale")
+        if classification != Classification.AMBIGUOUS.value and (
+            not isinstance(rationale, str) or not rationale.strip()
+        ):
+            errors.append(
+                f"specs[{i}].classification_rationale must be a non-empty string "
+                f"when classification is {classification!r}"
+            )
     return errors
 
 
-def build_proposals(entry: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
+def build_proposals(entry: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]]]:
     spec_docs: list[str] = []
     spec_proposals: list[dict[str, Any]] = []
+    classifications: list[dict[str, Any]] = []
     for spec in entry["specs"]:
         spec_doc = spec["specDoc"]
         spec_docs.append(spec_doc)
@@ -95,7 +127,20 @@ def build_proposals(entry: dict[str, Any]) -> tuple[list[str], list[dict[str, An
             "title": spec["title"],
             "specDoc": spec_doc,
         })
-    return spec_docs, spec_proposals
+        # validate_entry_shape has already enforced the four-value enum
+        # and the non-empty rationale for non-ambiguous values, so we
+        # pass the values through as-authoritative. We do NOT re-run
+        # parse_classification_payload here: that validator is for raw
+        # LLM output and refuses empty spec_markdown, which we do not
+        # have on this code path — the spec markdown is already on disk
+        # by the time validate_spec_output runs.
+        classifications.append({
+            "specDoc": spec_doc,
+            "classification": spec.get("classification"),
+            "classification_rationale": spec.get("classification_rationale", ""),
+            "classificationError": None,
+        })
+    return spec_docs, spec_proposals, classifications
 
 
 
@@ -256,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
             })
             continue
 
-        spec_docs, spec_proposals = build_proposals(entry)
+        spec_docs, spec_proposals, classifications = build_proposals(entry)
 
         # Spec files must exist on disk before we mark spec_created.
         missing_files = [
@@ -291,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
             "reviewStatus": "spec_created",
             "specDocs": spec_docs,
             "specProposals": spec_proposals,
+            "classifications": classifications,
             "lastUpdatedAt": now_iso(),
         })
         items[bookmark_key] = item
@@ -305,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
             "bookmarkKey": bookmark_key,
             "previousStatus": previous_status,
             "specDocs": spec_docs,
+            "classifications": classifications,
             "requestType": entry.get("requestType", "new"),
         })
 
