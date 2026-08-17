@@ -17,6 +17,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import time
 from typing import Any
 
@@ -466,6 +467,37 @@ def _fetch_github_pr_detail(
     return detail
 
 
+def _fetch_reviews_tolerant(
+    config_dir: str, token_env: str, number: int
+) -> list[dict[str, Any]]:
+    """Fetch a PR's reviews, tolerating GitHub's REST->GraphQL bridge regression.
+
+    The ``/pulls/{n}/reviews`` endpoint has intermittently returned a
+    GraphQL-shaped 404 ("Could not resolve to a node") for otherwise-valid PRs
+    since 2026-08-17 (see infra/runbooks/github-api-reviews-endpoint-404-regression.md).
+    Other PR endpoints are unaffected. Treating the failure as "no reviews yet"
+    degrades gracefully: every downstream consumer already handles an empty
+    reviews list, and a PR just won't classify as a merge candidate while the
+    upstream regression is active.
+    """
+    endpoint = f"repos/{REPO}/pulls/{number}/reviews?per_page=100"
+    try:
+        return _gh_api(config_dir, token_env, endpoint)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "") + (exc.stdout or "")
+        if "Could not resolve to a node" in stderr:
+            print(
+                f"[agent_task_queue] WARN: GitHub /reviews endpoint unavailable "
+                f"for PR #{number}; treating as no reviews (REST->GraphQL bridge "
+                f"regression). See "
+                f"infra/runbooks/github-api-reviews-endpoint-404-regression.md",
+                file=sys.stderr,
+                flush=True,
+            )
+            return []
+        raise
+
+
 def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
     """Read open PR state with the agent's own GitHub credentials; never mutate."""
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
@@ -482,9 +514,7 @@ def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
             continue
         number = summary["number"]
         detail = _fetch_github_pr_detail(config_dir, token_env, number)
-        detail["reviews"] = _gh_api(
-            config_dir, token_env, f"repos/{REPO}/pulls/{number}/reviews?per_page=100"
-        )
+        detail["reviews"] = _fetch_reviews_tolerant(config_dir, token_env, number)
         checks = _gh_api(
             config_dir,
             token_env,
@@ -516,9 +546,7 @@ def fetch_linked_delivery_prs(
         if pr_number is None:
             continue
         detail = _fetch_github_pr_detail(config_dir, token_env, pr_number)
-        detail["reviews"] = _gh_api(
-            config_dir, token_env, f"repos/{REPO}/pulls/{pr_number}/reviews?per_page=100"
-        )
+        detail["reviews"] = _fetch_reviews_tolerant(config_dir, token_env, pr_number)
         checks = _gh_api(
             config_dir,
             token_env,
