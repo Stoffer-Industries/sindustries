@@ -9,6 +9,20 @@ import sys
 import threading
 from pathlib import Path
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_popen, safe_run
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = SCRIPT_DIR / "scripts"
 PIPELINE = SCRIPT_DIR / "content-task.lobster.yaml"
@@ -50,7 +64,7 @@ def run_workflow(task_id: str, capacity_limit: int) -> dict:
                     break
         except Exception:
             pass
-    proc = subprocess.Popen(
+    proc = safe_popen(
         cmd,
         text=True,
         stdout=subprocess.PIPE,

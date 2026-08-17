@@ -9,6 +9,20 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path.home() / ".openclaw" / "workspace"
 SCRIPT = Path(__file__).resolve().parent / "x" / "run.cjs"
@@ -64,7 +78,7 @@ def main() -> int:
     env.setdefault("OPENCLAW_WORKSPACE", str(WORKSPACE))
 
     before = _md_snapshot()
-    result = subprocess.run(cmd, cwd=str(WORKSPACE), env=env)
+    result = safe_run(cmd, cwd=str(WORKSPACE), env=env)
 
     if result.returncode == 0:
         after = _md_snapshot()

@@ -16,6 +16,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 # Resolve the bookmark workflow dir so `common` can be imported from here.
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 _ws = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
@@ -59,7 +73,7 @@ def fetch_messages(channel: str, limit: int, trigger_text: str = "", trigger_sen
         return [msg]
     args = ["openclaw", "messages", "list", "--channel", channel, "--limit", str(limit), "--json"]
     try:
-        result = subprocess.run(args, check=True, capture_output=True, text=True, cwd=str(WORKSPACE))
+        result = safe_run(args, check=True, capture_output=True, text=True, cwd=str(WORKSPACE))
     except (FileNotFoundError, subprocess.CalledProcessError):
         return []
     raw = (result.stdout or "").strip()
@@ -144,7 +158,7 @@ def run_lobster_resume(token: str, approve: bool) -> tuple[dict | None, str | No
     env["PYTHONPATH"] = f"{tasks_api_path}:{existing}" if existing else tasks_api_path
     env.setdefault("TASKS_API_BASE_URL", "http://localhost:4000/api/v1")
     try:
-        result = subprocess.run(args, check=True, capture_output=True, text=True, cwd=str(WORKSPACE), env=env)
+        result = safe_run(args, check=True, capture_output=True, text=True, cwd=str(WORKSPACE), env=env)
     except FileNotFoundError:
         return None, "lobster CLI not found"
     except subprocess.CalledProcessError as exc:
@@ -232,7 +246,7 @@ def force_clear_approval_lock(state: dict, approval_id: str, approved: bool) -> 
 
 def rebuild_revised_approval(bookmark_key: str) -> dict | None:
     script = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "scripts" / "rebuild_revised_approval.py"
-    proc = subprocess.run(
+    proc = safe_run(
         [sys.executable, str(script), "--bookmark-key", bookmark_key, "--json"],
         text=True,
         capture_output=True,

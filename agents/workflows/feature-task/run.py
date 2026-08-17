@@ -12,6 +12,20 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_popen, safe_run
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 FEATURE_TASK_PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
 CODE_TASK_PIPELINE = SCRIPT_DIR / "code-task.lobster.yaml"
@@ -135,7 +149,7 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool, pipeline: Path) -> 
         }
     )
     cmd = ["lobster", "run", "--mode", "tool", str(pipeline), "--args-json", args_json]
-    proc = subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=workflow_env())
+    proc = safe_popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=workflow_env())
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     threads = [
@@ -175,7 +189,7 @@ def run_brain_spec_approval_reconciliation(base_url: str, dry_run: bool) -> dict
         "--workspace-root",
         str(WORKSPACE_ROOT),
     ]
-    proc = subprocess.run(cmd, text=True, capture_output=True, env=workflow_env())
+    proc = safe_run(cmd, text=True, capture_output=True, env=workflow_env())
     result: dict[str, Any] = {
         "returncode": proc.returncode,
         "stdout": proc.stdout,

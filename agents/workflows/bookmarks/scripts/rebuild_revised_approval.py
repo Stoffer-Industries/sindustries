@@ -9,6 +9,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
 _BOOKMARK_WF = WORKSPACE / 'codebases' / 'sindustries' / 'agents' / 'workflows' / 'bookmarks' / 'scripts'
@@ -19,7 +33,7 @@ REQUEST_TOPIC_APPROVAL = _BOOKMARK_WF / 'request_topic_approval.py'
 
 
 def run_json(cmd: list[str], stdin_data: dict | None = None, env: dict[str, str] | None = None) -> dict:
-    proc = subprocess.run(
+    proc = safe_run(
         cmd,
         cwd=str(WORKSPACE),
         input=(json.dumps(stdin_data) if stdin_data is not None else None),
