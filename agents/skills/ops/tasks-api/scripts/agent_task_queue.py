@@ -362,6 +362,7 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
         capture_output=True,
         text=True,
         env=env,
+        timeout=30,
     )
     return json.loads(result.stdout)
 
