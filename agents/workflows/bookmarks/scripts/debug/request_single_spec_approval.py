@@ -7,6 +7,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 WORKSPACE = Path(__file__).resolve().parents[7]
 BOOKMARKS_DIR = Path(__file__).resolve().parent.parent
 if str(BOOKMARKS_DIR) not in sys.path:
@@ -19,7 +33,7 @@ GENERATE_SPECS = BOOKMARKS_DIR / "lobster_generate_specs.py"
 
 
 def run_json(args: list[str], stdin_payload: dict | None = None) -> dict:
-    completed = subprocess.run(
+    completed = safe_run(
         args,
         input=(json.dumps(stdin_payload) if stdin_payload is not None else None),
         text=True,

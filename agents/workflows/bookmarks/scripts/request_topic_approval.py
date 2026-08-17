@@ -10,6 +10,20 @@ import fcntl
 from pathlib import Path
 from typing import Any
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 from common import STATE_PATH, WORKSPACE, dump_json, get_approval_topic, load_state, log_transition, now_iso, save_state, transition_log_path
 
 
@@ -329,7 +343,7 @@ def deliver_approval_message(message: str, delivery: dict) -> dict:
 
     cli_failed = False
     try:
-        completed = subprocess.run(
+        completed = safe_run(
             args,
             capture_output=True,
             text=True,

@@ -15,6 +15,20 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 _env_ws = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
 WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().parents[6]
 # brain is a symlink to iCloud - don't resolve it to avoid cross-device paths
@@ -580,7 +594,7 @@ def invoke_llm_json(prompt: str, input_payload: dict[str, Any], schema: dict[str
         "-",
     ])
     try:
-        completed = subprocess.run(
+        completed = safe_run(
             args,
             check=True,
             capture_output=True,
@@ -684,7 +698,7 @@ def invoke_llm_json_via_agent(prompt: str, input_payload: dict[str, Any], schema
         "--json",
     ]
     try:
-        completed = subprocess.run(
+        completed = safe_run(
             args,
             check=True,
             capture_output=True,

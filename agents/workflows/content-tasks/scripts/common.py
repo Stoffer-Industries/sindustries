@@ -13,6 +13,20 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 # Compute repo-owned paths relative to this file so cron runs do not depend on
 # OPENCLAW_WORKSPACE_ROOT being set. Keep WORKSPACE as the OpenClaw workspace root for
 # consumers such as format_transition.py that resolve brain/ source paths against it.
@@ -372,12 +386,12 @@ def parse_pr_url(url: str) -> tuple[str, str, str] | None:
 
 
 def _run_gh_json(cmd: list[str]) -> Any:
-    proc = subprocess.run(cmd, text=True, capture_output=True, timeout=30)
+    proc = safe_run(cmd, text=True, capture_output=True)
     error = (proc.stderr or proc.stdout or "").strip()
     if proc.returncode != 0 and os.environ.get("GITHUB_TOKEN") and ("HTTP 401" in error or "Bad credentials" in error):
         env = dict(os.environ)
         env.pop("GITHUB_TOKEN", None)
-        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=30, env=env)
+        proc = safe_run(cmd, text=True, capture_output=True, env=env)
         error = (proc.stderr or proc.stdout or "").strip()
     if proc.returncode != 0:
         raise RuntimeError(error or "gh command failed")

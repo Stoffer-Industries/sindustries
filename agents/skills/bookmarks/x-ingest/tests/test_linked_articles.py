@@ -7,6 +7,20 @@ from pathlib import Path
 
 import pytest
 
+# Bootstrap `agents.lib` so `from agents.lib import safe_run` works under plain
+# `python3 <this>.py` invocations. Walks up from `__file__` looking for a
+# directory containing `agents/lib/`.
+import sys as _sys
+from pathlib import Path as _p
+_w = next(
+    (a for a in [_p(__file__).resolve().parent, *_p(__file__).resolve().parents]
+     if (a / "agents" / "lib").is_dir()), None)
+if _w is not None and str(_w) not in _sys.path:
+    _sys.path.insert(0, str(_w))
+del _sys, _p, _w
+
+from agents.lib import safe_run
+
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 PROCESS_SCRIPT = REPO_ROOT / "agents/skills/bookmarks/x-ingest/scripts/x/process.cjs"
@@ -64,7 +78,7 @@ def article_server():
 
 
 def run_node(source, *, env=None):
-    result = subprocess.run(
+    result = safe_run(
         ["node", "-e", source],
         cwd=REPO_ROOT,
         env={**os.environ, **(env or {})},
