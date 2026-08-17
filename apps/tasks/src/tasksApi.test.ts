@@ -136,6 +136,7 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks',
         expect.objectContaining({
           method: 'POST',
+          credentials: 'include',
           body: JSON.stringify({ title: 'New Task' })
         })
       );
@@ -179,10 +180,24 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks/1',
         expect.objectContaining({
           method: 'PATCH',
+          credentials: 'include',
           body: JSON.stringify({ title: 'Updated', status: 'done', dependsOnIds: ['dep-1'] })
         })
       );
       expect(result).toEqual(task);
+    });
+
+    // Regression: the Tasks API and Tasks app run on different ports, so this
+    // is a cross-origin request. Without credentials: 'include' the browser
+    // session cookie set by login() is never sent, and requireAuthenticatedUser
+    // rejects the mutation with a 401 that the UI shows as "Failed to update task".
+    it('sends the browser session cookie so mutations survive requireAuthenticatedUser', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse({ id: 1 }));
+
+      await updateTask(1, { status: 'done' });
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.credentials).toBe('include');
     });
   });
 
@@ -220,7 +235,7 @@ describe('tasksApi', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:4001/api/v1/tasks/1',
-        expect.objectContaining({ method: 'DELETE' })
+        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
       );
       expect(result).toBeNull();
     });
@@ -301,6 +316,7 @@ describe('tasksApi', () => {
         'http://localhost:4001/api/v1/tasks/1/comments',
         expect.objectContaining({
           method: 'POST',
+          credentials: 'include',
           body: JSON.stringify({ author: 'John', text: 'Comment' })
         })
       );
