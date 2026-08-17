@@ -12,6 +12,7 @@ services/tasks-api/.env.dev
 services/tasks-api/.env.dev.local
 services/tasks-api/.env.prodlike
 services/tasks-api/.env.prodlike.local
+services/tasks-api/*.bak*
 services/tasks-api/src/generated/
 services/tasks-api/generated/
 services/budget-api/.env.dev
