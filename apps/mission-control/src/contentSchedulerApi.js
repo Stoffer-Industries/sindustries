@@ -29,6 +29,7 @@ async function request(path, { method = 'GET', body, actor } = {}) {
       'content-type': 'application/json',
       ...(actor ? { 'x-actor': actor } : {})
     },
+    credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined
   });
   let parsed = null;
