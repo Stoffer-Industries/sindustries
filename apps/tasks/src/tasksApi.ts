@@ -146,6 +146,7 @@ const API_BASE =
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { 'content-type': 'application/json', ...(options?.headers ?? {}) },
+    credentials: 'include',
     ...options
   });
 
