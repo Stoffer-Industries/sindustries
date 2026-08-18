@@ -139,6 +139,69 @@ def list_tasks(
     return []
 
 
+def remove_self_from_attention_owners(
+    task_id: str, name: str, *, base_url: str | None = None, token: str | None = None
+) -> dict:
+    """Fetch task → drop `name` from attentionOwners → PATCH the remainder.
+
+    Preserves any other names already attached (e.g. ``["Lox"]``) — never
+    uses ``--clear-attention-owners`` semantics. No-op when ``name`` is not
+    currently attached; returns the task dict unchanged in that case.
+
+    The fetch → mutate → PATCH round-trip is the canonical safe-clear path
+    because ``attentionOwners`` is a full-replacement set on the API side
+    (task ``d8fbe750``). A bare PATCH-with-omitted-field would either drop
+    all owners (the ``--clear-attention-owners`` path) or leave them all in
+    place — neither preserves siblings.
+
+    Returns the updated task dict from the API, or the unchanged task if
+    ``name`` was not attached.
+    """
+    base = base_url or get_base_url()
+    task = get_task(task_id, base_url=base)
+    current = list(task.get("attentionOwners") or [])
+    if name not in current:
+        return task
+    remainder = [n for n in current if n != name]
+    resp = api_request(
+        "PATCH",
+        base,
+        f"/tasks/{task_id}",
+        {"attentionOwners": remainder},
+        token=token,
+    )
+    if isinstance(resp, dict) and "data" in resp:
+        return resp["data"]
+    return resp if isinstance(resp, dict) else task
+
+
+def add_self_to_attention_owners(
+    task_id: str, name: str, *, base_url: str | None = None, token: str | None = None
+) -> dict:
+    """Fetch task → ensure ``name`` is in ``attentionOwners`` → PATCH.
+
+    Idempotent: no-op when ``name`` is already attached (preserves existing
+    order). When added, ``name`` is prepended so the new attention request
+    surfaces first in UI ordering. Returns the updated task dict.
+    """
+    base = base_url or get_base_url()
+    task = get_task(task_id, base_url=base)
+    current = list(task.get("attentionOwners") or [])
+    if name in current:
+        return task
+    next_owners = [name] + current
+    resp = api_request(
+        "PATCH",
+        base,
+        f"/tasks/{task_id}",
+        {"attentionOwners": next_owners},
+        token=token,
+    )
+    if isinstance(resp, dict) and "data" in resp:
+        return resp["data"]
+    return resp if isinstance(resp, dict) else task
+
+
 def _blocking_comment(task: dict) -> str | None:
     """Return the text of the latest [feature-task-progress-checklist] comment, if any."""
     for comment in reversed(task.get("comments") or []):
