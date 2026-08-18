@@ -554,11 +554,12 @@ describe('explicit workflow handoffs', () => {
     expect(buildWorkflowGateOwnerWhere('Nobody')).toEqual([]);
   });
 
-  it('PATCH persists an explicit handoff and returns its resolved owner', async () => {
+  it('PATCH persists an explicit handoff and returns its resolved owner via derived gates', async () => {
     const updated = baseTaskFixture({ workflowHandoffRoleId: 'qa_verifier', workflowHandoffGate: 'qa' });
+    const txTaskUpdate = vi.fn();
     prismaMock.task.findFirst.mockResolvedValueOnce(baseTaskFixture());
     prismaMock.$transaction.mockImplementation(async (fn) => fn({
-      task: { update: vi.fn(), findFirst: vi.fn().mockResolvedValue(updated) },
+      task: { update: txTaskUpdate, findFirst: vi.fn().mockResolvedValue(updated) },
       taskApproval: prismaMock.taskApproval, taskComment: prismaMock.taskComment,
       taskTag: prismaMock.taskTag, taskDependency: prismaMock.taskDependency,
       taskAttentionOwner: prismaMock.taskAttentionOwner
@@ -566,9 +567,28 @@ describe('explicit workflow handoffs', () => {
     const response = await authedRequest(createApp()).patch(`/api/v1/tasks/${TASK_ID}`)
       .send({ workflowHandoff: { roleId: 'qa_verifier', gate: 'qa' } });
     expect(response.status).toBe(200);
-    expect(response.body.data.workflowGates).toEqual([{
-      roleId: 'qa_verifier', owner: 'Tom', gate: 'qa', reason: null, state: 'outstanding'
-    }]);
+    // The explicit handoff write is still applied to the task row, even
+    // though the route's response surface is now derived from the
+    // required-approvals config (PR #2 of task f6a4d56a). The column is
+    // preserved so the lobster's per-iteration current-attention handoff
+    // continues to work; only `mapTask.workflowGates` changes shape.
+    expect(txTaskUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: TASK_ID },
+      data: expect.objectContaining({
+        workflowHandoffRoleId: 'qa_verifier',
+        workflowHandoffGate: 'qa'
+      })
+    }));
+    // The response derives workflowGates from the required-approvals
+    // config for this task's `taskType`; with no approvals set, the four
+    // feature gates (spec / tech_design / qa_agent / accepted) are all
+    // outstanding, each owned by the type's configured owner.
+    expect(response.body.data.workflowGates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ gate: 'spec', owner: 'Tom', state: 'outstanding' }),
+      expect.objectContaining({ gate: 'tech_design', owner: 'Quinn', state: 'outstanding' }),
+      expect.objectContaining({ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }),
+      expect.objectContaining({ gate: 'accepted', owner: 'Tom', state: 'outstanding' })
+    ]));
   });
 
   it('rejects unknown role ids before writing', async () => {
