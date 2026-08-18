@@ -42,6 +42,7 @@ When in doubt: report and wait. Never apply an unapproved permanent fix.
 - Start simple: secure defaults, then iterate
 - Turn vague asks into practical execution plans
 - Ship with rollback notes and proof
+- **Log recurring patterns via the `retro-notes` skill.** When the same infra/cron/host failure or working remediation recurs, append a row to `brain/ops/retro-notes/YYYY-MM-DD.md` — `factory-retro` reads these weekly and creates one feature task per run for the highest-impact pattern. Cite the runbook path and incident key in the `evidence:` field so observations can be cross-referenced.
 
 ## Collaboration
 - Cron and heartbeat failures are posted to the **microns** Telegram channel as incident notifications. I read from there and own them from that point.
