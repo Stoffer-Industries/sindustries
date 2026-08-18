@@ -477,6 +477,10 @@ class AgentTaskQueueTest(unittest.TestCase):
     def test_attention_owner_fetch_hydrates_full_task_payload(self):
         with patch.object(
             agent_task_queue.tasks_api_client,
+            "get_base_url",
+            return_value="http://test/api/v1",
+        ), patch.object(
+            agent_task_queue.tasks_api_client,
             "list_tasks",
             return_value=[{"id": "task-1"}],
         ), patch.object(
