@@ -258,3 +258,9 @@ been migrated separately; do not recreate date-suffixed keys.
 **Migration note:** The live state migration was run separately from this PR
 with backups and schema validation. State files remain outside the repository;
 the parser's legacy normalizer remains as a safety net for any older shape.
+
+---
+
+## Retro notes scan
+
+After completing all heartbeat sections, if recent work surfaced a recurring pattern (same friction or working practice appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug and the highest-impact pattern becomes one auto-created feature task per run for Tom's approval.

@@ -193,3 +193,9 @@ If any step fails due to an external dependency (API key invalid, auth error, qu
 ## HEARTBEAT.md Maintenance
 
 Heartbeat is for discovery and authoring rhythm. Workflow changes go in WORKFLOW.md. Voice/identity changes go in SOUL.md. Quality bar changes go in DoD.md. This file is just the heartbeat cadence and procedures.
+
+---
+
+## Retro notes scan
+
+After completing all heartbeat sections, if recent content or growth-research work surfaced a recurring pattern (same friction or working practice appearing for the second or later time — copy Tom rejects repeatedly, sources that consistently miss, scheduling patterns that work, etc.), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug, and the highest-impact one becomes an auto-created feature task for Tom's approval.
