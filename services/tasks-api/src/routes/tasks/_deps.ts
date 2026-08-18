@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.ts';
 import { badRequest } from '../../lib/http.ts';
 import { workflowHandoffRolesForOwner } from '../../config/workflowHandoffs.ts';
 import { loadRequiredApprovalsConfig } from '../../config/requiredApprovals.ts';
-import { buildMapTaskOptions, type MapTaskOptions } from './tasks/_mapper.ts';
+import { buildMapTaskOptions, type MapTaskOptions } from './_mapper.ts';
 
 // Tag/dependency helpers extracted from tasks.ts. These touch the DB and
 // signal errors via the response object so the caller short-circuits.
