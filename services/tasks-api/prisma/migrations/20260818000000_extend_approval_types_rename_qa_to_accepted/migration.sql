@@ -1,11 +1,18 @@
 -- Extend the `ApprovalType` enum with two new values (`qa_agent` for Ash's
 -- mechanical-verification gate, `accepted` for Tom's renamed human sign-off
 -- gate) and rename all existing `qa` rows to `accepted` in the same
--- migration. The legacy `qa` enum value is dropped at the end so the data
--- model only ever holds the new vocabulary.
+-- migration. The legacy `qa` enum value is dropped so the data model only
+-- ever holds the new vocabulary.
 --
 -- See docs/specs/add-ash-qa-agent-verifier-gate-tech-design.md (task
 -- f6a4d56a) for the AC mapping and the rollback story.
+--
+-- Implementation note: `ALTER TYPE ... DROP VALUE` is not allowed inside a
+-- transaction block, but Prisma wraps every migration in a transaction.
+-- The recreate-enum pattern below achieves the same result (rename + drop
+-- the legacy value, add the new values) inside the Prisma transaction.
+-- Steps 1 and 2 use `ADD VALUE IF NOT EXISTS` so they remain a no-op if
+-- re-applied after a partial rollout.
 --
 -- Preflight (run before applying):
 --   SELECT type, count(*) FROM "TaskApproval" GROUP BY type;
@@ -16,18 +23,17 @@
 -- Expected: empty `qa` and `qa_agent` buckets; `accepted` count equals the
 -- pre-migration `qa` count.
 --
--- Rollback (if the migration must be reversed):
---   ALTER TYPE "ApprovalType" ADD VALUE 'qa';
+-- Rollback (if the migration must be reversed on a fresh database):
+--   -- Re-add the legacy enum value, restore the renamed rows.
+--   ALTER TYPE "ApprovalType" ADD VALUE IF NOT EXISTS 'qa' BEFORE 'accepted';
 --   UPDATE "TaskApproval" SET type = 'qa' WHERE type = 'accepted';
--- Postgres 12+ supports `ALTER TYPE ... ADD VALUE` to re-add a dropped
--- value; the UPDATE above restores the original rows. The broader revert
--- (touching Tom-approved `accepted` rows that were never `qa`) is the
--- explicit trade-off documented in the tech design.
+-- The broader revert (touching Tom-approved `accepted` rows that were
+-- never `qa`) is the explicit trade-off documented in the tech design.
 
--- Step 1: add the new enum values BEFORE renaming rows so the UPDATE
--- destination type is valid.
-ALTER TYPE "ApprovalType" ADD VALUE 'qa_agent';
-ALTER TYPE "ApprovalType" ADD VALUE 'accepted';
+-- Step 1: add the new enum values BEFORE renaming rows so the new type
+-- we create below already includes them.
+ALTER TYPE "ApprovalType" ADD VALUE IF NOT EXISTS 'qa_agent';
+ALTER TYPE "ApprovalType" ADD VALUE IF NOT EXISTS 'accepted';
 
 -- Step 2: rename existing `qa` rows to `accepted`. This is the single
 -- irreversible point of the migration — once `qa` rows become `accepted`,
@@ -36,7 +42,11 @@ ALTER TYPE "ApprovalType" ADD VALUE 'accepted';
 -- rollback section.
 UPDATE "TaskApproval" SET type = 'accepted' WHERE type = 'qa';
 
--- Step 3: drop the legacy `qa` enum value. Postgres requires no rows
--- reference the value at drop time, which is why the UPDATE in step 2
--- runs first. Requires Postgres 12+ for `ALTER TYPE ... DROP VALUE`.
-ALTER TYPE "ApprovalType" DROP VALUE 'qa';
+-- Step 3: recreate the enum without the legacy `qa` value. The
+-- recreate-enum pattern (CREATE new → ALTER COLUMN → DROP old → RENAME)
+-- is required because `ALTER TYPE ... DROP VALUE` cannot run inside a
+-- transaction block (Prisma wraps every migration in one).
+CREATE TYPE "ApprovalType_new" AS ENUM ('spec', 'tech_design', 'qa_agent', 'accepted');
+ALTER TABLE "TaskApproval" ALTER COLUMN type TYPE "ApprovalType_new" USING type::text::"ApprovalType_new";
+DROP TYPE "ApprovalType";
+ALTER TYPE "ApprovalType_new" RENAME TO "ApprovalType";
