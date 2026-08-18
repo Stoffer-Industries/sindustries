@@ -16,9 +16,11 @@ if str(WIKI_SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(WIKI_SCRIPT_ROOT))
 
 from wiki_catalog import (
+    CatalogError,
     configure_workspace as configure_wiki_workspace,
     event_key_for_payload,
     retarget_entry as wiki_retarget_entry,
+    upsert_entry as wiki_upsert_entry,
 )
 
 SCRIPT_ROOT = WORKSPACE / "codebases" / "sindustries" / "agents" / "skills" / "ops" / "tasks-api"
@@ -151,6 +153,37 @@ def _extract_section(text: str, heading: str) -> str:
     return (section[:next_h.start()] if next_h else section).strip()
 
 
+def _wiki_seed_fields(doc_path: str) -> tuple[str, str]:
+    """Derive a title + short summary from a spec file for a fresh wiki entry."""
+    text = (WORKSPACE / doc_path).read_text(encoding='utf-8')
+    title_match = re.search(r'^#\s+Spec\s*[—–-]+\s*(.+)$', text, re.MULTILINE)
+    title = title_match.group(1).strip() if title_match else Path(doc_path).stem.replace('-', ' ').title()
+    excerpt_source = _extract_section(text, 'Outcome') or text
+    lines = [line.strip() for line in excerpt_source.splitlines() if line.strip() and not line.strip().startswith('#')]
+    summary = re.sub(r'\s+', ' ', ' '.join(lines)).strip()
+    if len(summary) > 220:
+        summary = summary[:219].rstrip() + '…'
+    return title, summary or 'Spec catalog entry'
+
+
+def retarget_or_seed_wiki_entry(old_source: str, new_source: str, event_key: str) -> None:
+    """Retarget the wiki entry from old_source to new_source.
+
+    Specs created before the wiki catalog was wired into
+    validate_spec_output.py (2026-08-14) were never indexed under
+    old_source, so a strict retarget hard-fails even though the task and
+    file move have already succeeded by the time this runs. Fall back to
+    seeding a fresh entry for new_source instead of losing that work.
+    """
+    try:
+        wiki_retarget_entry(old_source, new_source, event_key=event_key)
+    except CatalogError as exc:
+        if not str(exc).startswith('source is not indexed:'):
+            raise
+        title, summary = _wiki_seed_fields(new_source)
+        wiki_upsert_entry('spec', new_source, title, summary, event_key=event_key)
+
+
 def build_task_from_spec(spec_doc: str, task_spec_doc: str, bookmark_key: str, topic: str) -> dict | None:
     """Read a spec markdown file and build a task dict (title + description)."""
     spec_path = WORKSPACE / spec_doc
@@ -203,7 +236,7 @@ def create_task_for_spec(
             moved_doc, moved = move_bookmark_spec_to_task_in_progress(spec_doc)
             patch_task_spec_line(base_url, str(existing['id']), spec_doc, moved_doc, existing)
             if spec_doc != moved_doc:
-                wiki_retarget_entry(
+                retarget_or_seed_wiki_entry(
                     spec_doc,
                     moved_doc,
                     event_key=event_key_for_payload(
@@ -270,7 +303,7 @@ def create_task_for_spec(
         if moved_doc != task_spec_doc:
             patch_task_spec_line(base_url, str(task_id), task_spec_doc, moved_doc, task if isinstance(task, dict) else None)
         if spec_doc != moved_doc:
-            wiki_retarget_entry(
+            retarget_or_seed_wiki_entry(
                 spec_doc,
                 moved_doc,
                 event_key=event_key_for_payload(
