@@ -77,6 +77,14 @@ export function guardPublish(
  */
 export interface XClient {
   createTweet(input: { text: string; in_reply_to_tweet_id?: string }): Promise<{ url: string; postedAt: Date }>;
+  /**
+   * Resolve the @handle of a tweet's author from its numeric status id.
+   * Returns null when the tweet doesn't exist / isn't visible (e.g. deleted,
+   * protected). Used to reply to bookmarks whose saved link is a generic
+   * `x.com/i/web/status/<id>` share URL that doesn't carry the author's
+   * handle in the path.
+   */
+  getTweetAuthor(tweetId: string): Promise<{ handle: string } | null>;
 }
 
 /**
@@ -98,6 +106,13 @@ export class FakeXClient implements XClient {
       postedAt: new Date()
     };
   }
+
+  async getTweetAuthor(tweetId: string): Promise<{ handle: string } | null> {
+    const { createHash } = await import('node:crypto');
+    // Deterministic fake handle so dev/test flows have stable assertions.
+    const digest = createHash('sha256').update(tweetId).digest('hex').slice(0, 8);
+    return { handle: `fake_author_${digest}` };
+  }
 }
 
 /**
@@ -115,7 +130,15 @@ export class RealXClient implements XClient {
     private readonly timeoutMs: number = 10_000
   ) {}
 
-  private async oauthHeader(method: string, url: string, bodyParams: Record<string, string>): Promise<string> {
+  // `signedParams` are the OAuth1.0a "request parameters" that get folded
+  // into the signature base string alongside the oauth_* params — i.e.
+  // the URL query string (GET) or an application/x-www-form-urlencoded
+  // body (POST). Per the OAuth1.0a spec, parameters from a *non*
+  // form-urlencoded body (our POSTs are JSON) are NOT request parameters
+  // and must NOT be signed. Callers with a JSON body must pass {} here;
+  // passing the JSON payload's fields breaks the signature and X returns
+  // a generic 401 Unauthorized with no indication the body caused it.
+  private async oauthHeader(method: string, url: string, signedParams: Record<string, string>): Promise<string> {
     const { createHmac } = await import('node:crypto');
 
     const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -130,7 +153,7 @@ export class RealXClient implements XClient {
       oauth_version: '1.0'
     };
 
-    const allParams = { ...oauthParams, ...bodyParams };
+    const allParams = { ...oauthParams, ...signedParams };
     const paramString = Object.keys(allParams)
       .sort()
       .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`)
@@ -151,15 +174,12 @@ export class RealXClient implements XClient {
 
   async createTweet(input: { text: string; in_reply_to_tweet_id?: string }): Promise<{ url: string; postedAt: Date }> {
     const url = 'https://api.twitter.com/2/tweets';
-    const body: Record<string, string> = { text: input.text };
+    const body: { text: string; reply?: { in_reply_to_tweet_id: string } } = { text: input.text };
     if (input.in_reply_to_tweet_id) {
-      body.reply = JSON.stringify({ in_reply_to_tweet_id: input.in_reply_to_tweet_id });
+      body.reply = { in_reply_to_tweet_id: input.in_reply_to_tweet_id };
     }
-    const bodyParams: Record<string, string> = {};
-    if (input.in_reply_to_tweet_id) {
-      bodyParams.reply = body.reply;
-    }
-    const authorization = await this.oauthHeader('POST', url, bodyParams);
+    // JSON body — no signed params (see oauthHeader comment above).
+    const authorization = await this.oauthHeader('POST', url, {});
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -185,6 +205,43 @@ export class RealXClient implements XClient {
         url: `https://x.com/${this.handle}/status/${id}`,
         postedAt: new Date()
       };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async getTweetAuthor(tweetId: string): Promise<{ handle: string } | null> {
+    const url = `https://api.twitter.com/2/tweets/${encodeURIComponent(tweetId)}`;
+    // GET query-string params are OAuth1.0a "request parameters" and must
+    // be signed, unlike a JSON POST body (see oauthHeader comment above).
+    const queryParams: Record<string, string> = {
+      expansions: 'author_id',
+      'user.fields': 'username'
+    };
+    const authorization = await this.oauthHeader('GET', url, queryParams);
+    const query = Object.entries(queryParams)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(`${url}?${query}`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { authorization }
+      });
+      if (res.status === 404) {
+        return null;
+      }
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`X API ${res.status}: ${body.slice(0, 200)}`);
+      }
+      const json = (await res.json()) as {
+        includes?: { users?: Array<{ username?: string }> };
+      };
+      const username = json?.includes?.users?.[0]?.username;
+      return username ? { handle: username } : null;
     } finally {
       clearTimeout(timer);
     }
