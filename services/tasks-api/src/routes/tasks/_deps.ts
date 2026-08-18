@@ -1,23 +1,28 @@
 import { prisma } from '../../lib/prisma.ts';
 import { badRequest } from '../../lib/http.ts';
 import { workflowHandoffRolesForOwner } from '../../config/workflowHandoffs.ts';
+import { loadRequiredApprovalsConfig } from '../../config/requiredApprovals.ts';
+import { buildMapTaskOptions, type MapTaskOptions } from './tasks/_mapper.ts';
 
 // Tag/dependency helpers extracted from tasks.ts. These touch the DB and
 // signal errors via the response object so the caller short-circuits.
 
 /**
- * Resolve the workflow-gate context for a task: the ordered list of
- * approval types required for the task's `taskType`, plus the configured
- * owner per approval type. Pass both to `mapTask` via `MapTaskOptions` so
- * the response can expose a derived `workflowGates` field without
- * duplicating the policy in the UI (per task 66054ab4 WS1).
+ * Resolve the `MapTaskOptions` for a single task: reads the global
+ * `RequiredApprovalsConfig` snapshot, then delegates to
+ * `buildMapTaskOptions` so the response can expose a derived
+ * `workflowGates` field (added in PR #2 of task `f6a4d56a`).
  *
- * Reads the global `RequiredApprovalsConfig` snapshot each call; the loader
- * is a cheap file read with memoization in tests, and policy drift is a
- * startup-time concern. When `taskType` is null/empty the resolved lists
- * are empty — no required approvals, no configured owners — which mirrors
- * `requiredApprovalsFor`'s semantics.
+ * The config loader is memoised at module load (`loadRequiredApprovalsConfig`),
+ * so calling this helper on every request is cheap. When `task.taskType`
+ * is null/empty the resolved lists are empty — no required approvals, no
+ * derived gates — which mirrors `requiredApprovalsFor`'s semantics.
  */
+export function mapTaskOptionsFor(task): MapTaskOptions {
+  const config = loadRequiredApprovalsConfig();
+  return buildMapTaskOptions(config, task?.taskType ?? null);
+}
+
 /**
  * Build a Prisma `where` fragment for `?workflowGateOwner=OWNER` discovery
  * filtering. A task matches when its `taskType` requires at least one
