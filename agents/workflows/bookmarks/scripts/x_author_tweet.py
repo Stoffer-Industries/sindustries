@@ -9,6 +9,10 @@ underlying approval transition (AC3 best-effort contract).
 
 Module surface:
     - parse_x_link(url)                       -> (handle, status_id) | None
+    - parse_x_status_id(url)                  -> status_id | None (no handle required;
+                                                 also matches `x.com/i/web/status/<id>`)
+    - resolve_tweet_author(status_id, ...)    -> handle | None (best-effort GET via
+                                                 tasks-api `/x/tweets/:id/author`)
     - compose_author_tweet(state_item)        -> str   (≤280 chars; raises TweetComposeError)
     - call_x_tweets_route(text, status_id)    -> {"url", "postedAt"} | raises XApiError
                                                  | CredentialsMissingError
@@ -93,6 +97,32 @@ def parse_x_link(url: str | None) -> tuple[str, str] | None:
     if not handle or not status_id:
         return None
     return (handle, status_id)
+
+
+# x.com host + any /status/<id> segment, regardless of what comes before it.
+# Superset of _X_STATUS_RE: also matches X's generic web-intent share links
+# like `x.com/i/web/status/<id>`, which don't carry the author's handle in
+# the path at all (parse_x_link returns None for those).
+_X_HOST_RE = re.compile(r"^https?://(?:www\.|mobile\.)?(?:twitter|x)\.com/", re.IGNORECASE)
+_X_STATUS_ID_ONLY_RE = re.compile(r"/status(?:es)?/(?P<status_id>\d+)(?:/|\?|#|$)", re.IGNORECASE)
+
+
+def parse_x_status_id(url: str | None) -> str | None:
+    """Extract just the numeric status id from any x.com/twitter.com URL.
+
+    Unlike ``parse_x_link``, this does not require a handle segment before
+    ``/status/`` — it also matches generic share-link formats such as
+    ``x.com/i/web/status/<id>`` where the author isn't in the URL at all.
+    Callers that need the author must resolve it separately (see
+    ``resolve_tweet_author``).
+    """
+    if not isinstance(url, str):
+        return None
+    cleaned = url.strip()
+    if not cleaned or not _X_HOST_RE.match(cleaned):
+        return None
+    match = _X_STATUS_ID_ONLY_RE.search(cleaned)
+    return match.group("status_id") if match else None
 
 
 # --- Tweet composition ---------------------------------------------------
@@ -223,6 +253,26 @@ def call_x_tweets_route(
         raise TasksApiUnreachableError(f"tasks_api_unreachable:{reason}") from exc
 
 
+def resolve_tweet_author(status_id: str, *, base_url: str | None = None) -> str | None:
+    """Best-effort GET of a tweet's author handle via tasks-api.
+
+    Returns ``None`` on any failure (missing credentials, tweet not found,
+    X API error, tasks-api unreachable) rather than raising — callers use
+    this to fill in a handle for links like `x.com/i/web/status/<id>` that
+    don't carry one, and fall back to the existing `missing_x_link` skip
+    when resolution doesn't produce a usable handle.
+    """
+    url = f"{_tasks_api_base_url(base_url)}/x/tweets/{status_id}/author"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            handle = (payload.get("data") or {}).get("handle")
+            return handle if isinstance(handle, str) and handle else None
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+        return None
+
+
 # --- Integration entry point ---------------------------------------------
 
 def _skipped(reason: str) -> dict[str, Any]:
@@ -263,9 +313,19 @@ def try_post_author_tweet(
         return _skipped("non_x_source")
 
     parsed = parse_x_link(state_item.get("link"))
-    if parsed is None:
-        return _skipped("missing_x_link")
-    _handle, status_id = parsed
+    if parsed is not None:
+        _handle, status_id = parsed
+    else:
+        # Handle-less share links (e.g. `x.com/i/web/status/<id>`) still
+        # carry a resolvable status id — look up the author instead of
+        # skipping outright.
+        status_id = parse_x_status_id(state_item.get("link"))
+        if status_id is None:
+            return _skipped("missing_x_link")
+        resolved_handle = resolve_tweet_author(status_id, base_url=tasks_api_base_url)
+        if not resolved_handle:
+            return _skipped("missing_x_link")
+        state_item = {**state_item, "authorHandle": resolved_handle}
 
     try:
         text = compose_author_tweet(state_item)
@@ -308,7 +368,9 @@ __all__ = [
     "XApiError",
     "TasksApiUnreachableError",
     "parse_x_link",
+    "parse_x_status_id",
     "compose_author_tweet",
     "call_x_tweets_route",
+    "resolve_tweet_author",
     "try_post_author_tweet",
 ]

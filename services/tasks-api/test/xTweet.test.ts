@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // `vi.hoisted` runs before `vi.mock` factories, which Vitest also hoists.
 // We need the spy/mock fn handles available when the factory for
 // contentSchedulerPublish.ts runs.
-const { createTweetSpy, getXClientMock } = vi.hoisted(() => {
+const { createTweetSpy, getTweetAuthorSpy, getXClientMock } = vi.hoisted(() => {
   return {
     createTweetSpy: vi.fn(),
+    getTweetAuthorSpy: vi.fn(),
     getXClientMock: vi.fn()
   };
 });
@@ -54,8 +55,10 @@ beforeEach(() => {
     url: 'https://x.com/sindustries/status/abc123',
     postedAt: new Date('2026-07-19T00:00:00.000Z')
   });
+  getTweetAuthorSpy.mockResolvedValue({ handle: 'polydao' });
   getXClientMock.mockReturnValue({
-    createTweet: createTweetSpy
+    createTweet: createTweetSpy,
+    getTweetAuthor: getTweetAuthorSpy
   });
 });
 
@@ -170,5 +173,51 @@ describe('POST /api/v1/x/tweets', () => {
     expect(res.status).toBe(502);
     expect(res.body.error.code).toBe('X_API_ERROR');
     expect(typeof res.body.error.message).toBe('string');
+  });
+});
+
+// --- GET /api/v1/x/tweets/:id/author --------------------------------------
+
+describe('GET /api/v1/x/tweets/:id/author', () => {
+  it('returns 200 with the resolved handle', async () => {
+    const app = createApp();
+    const res = await request(app).get('/api/v1/x/tweets/2087089133156208803/author');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ handle: 'polydao' });
+    expect(getTweetAuthorSpy).toHaveBeenCalledWith('2087089133156208803');
+  });
+
+  it('returns 400 INVALID_TWEET_ID for a non-numeric id', async () => {
+    const app = createApp();
+    const res = await request(app).get('/api/v1/x/tweets/not-a-number/author');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_TWEET_ID');
+    expect(getTweetAuthorSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 TWEET_NOT_FOUND when the client resolves null', async () => {
+    getTweetAuthorSpy.mockResolvedValue(null);
+    const app = createApp();
+    const res = await request(app).get('/api/v1/x/tweets/999/author');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('TWEET_NOT_FOUND');
+  });
+
+  it('returns 503 MISSING_CREDENTIALS when getXClient() returns null', async () => {
+    getXClientMock.mockReturnValue(null);
+    const app = createApp();
+    const res = await request(app).get('/api/v1/x/tweets/999/author');
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('MISSING_CREDENTIALS');
+    expect(getTweetAuthorSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns 502 X_API_ERROR when client.getTweetAuthor throws', async () => {
+    getTweetAuthorSpy.mockRejectedValue(new Error('X API 500: boom'));
+    const app = createApp();
+    const res = await request(app).get('/api/v1/x/tweets/999/author');
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe('X_API_ERROR');
+    expect(res.body.error.message).toMatch(/X API 500/);
   });
 });

@@ -7,11 +7,22 @@
 // task 55ac9240-d54a-4b2c-88c4-8bb8af85d2b2 (Bookmark approval — author
 // tweet notification).
 //
-// Endpoint:
+// Endpoints:
 //   POST /api/v1/x/tweets
 //     body: { text: string, in_reply_to_tweet_id?: string }
 //     200:  { data: { url: string, postedAt: ISO-8601 } }
 //     400:  TWEET_TOO_LONG | INVALID_BODY
+//     502:  X_API_ERROR
+//     503:  MISSING_CREDENTIALS
+//
+//   GET /api/v1/x/tweets/:id/author
+//     Resolves the @handle of a tweet's author from its numeric id. Added
+//     so the bookmark approval flow can reply to bookmarks whose saved
+//     link is a generic `x.com/i/web/status/<id>` share URL (no handle in
+//     the path) instead of silently skipping the author-reply step.
+//     200:  { data: { handle: string } }
+//     400:  INVALID_TWEET_ID
+//     404:  TWEET_NOT_FOUND
 //     502:  X_API_ERROR
 //     503:  MISSING_CREDENTIALS
 //
@@ -92,6 +103,42 @@ export function xTweetRouter(): Router {
       // a useful error reason in tweetLog.error, but never leak secrets.
       const safeMessage = message.slice(0, 200);
       console.error('[xTweet] client.createTweet failed:', safeMessage);
+      res.status(502).json({
+        error: { code: 'X_API_ERROR', message: safeMessage }
+      });
+    }
+  });
+
+  router.get('/x/tweets/:id/author', async (req, res) => {
+    const id = req.params.id;
+    if (!/^\d+$/.test(id)) {
+      res.status(400).json({
+        error: { code: 'INVALID_TWEET_ID', message: '`id` must be a numeric tweet id' }
+      });
+      return;
+    }
+
+    const client = getXClient();
+    if (client === null) {
+      res.status(503).json({
+        error: { code: 'MISSING_CREDENTIALS', message: 'X credentials are not configured' }
+      });
+      return;
+    }
+
+    try {
+      const author = await client.getTweetAuthor(id);
+      if (author === null) {
+        res.status(404).json({
+          error: { code: 'TWEET_NOT_FOUND', message: `no author found for tweet ${id}` }
+        });
+        return;
+      }
+      res.status(200).json({ data: { handle: author.handle } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown X client error';
+      const safeMessage = message.slice(0, 200);
+      console.error('[xTweet] client.getTweetAuthor failed:', safeMessage);
       res.status(502).json({
         error: { code: 'X_API_ERROR', message: safeMessage }
       });

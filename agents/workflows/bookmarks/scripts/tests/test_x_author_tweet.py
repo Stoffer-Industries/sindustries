@@ -30,6 +30,8 @@ from x_author_tweet import (  # noqa: E402  (import after sys.path tweak)
     call_x_tweets_route,
     compose_author_tweet,
     parse_x_link,
+    parse_x_status_id,
+    resolve_tweet_author,
     try_post_author_tweet,
 )
 
@@ -106,6 +108,71 @@ class ParseXLinkTests(unittest.TestCase):
     def test_malformed_handle_empty(self):
         # The regex requires a non-empty handle; this won't match.
         self.assertIsNone(parse_x_link("https://x.com//status/1234567890"))
+
+
+# --- parse_x_status_id ----------------------------------------------------
+
+class ParseXStatusIdTests(unittest.TestCase):
+    def test_web_intent_share_link(self):
+        # No author handle in the path at all — this is the format that
+        # made parse_x_link return None for a real bookmark (2026-08-18).
+        self.assertEqual(
+            parse_x_status_id("https://x.com/i/web/status/2087089133156208803"),
+            "2087089133156208803",
+        )
+
+    def test_still_matches_handle_form(self):
+        self.assertEqual(parse_x_status_id("https://x.com/somebody/status/1234567890"), "1234567890")
+
+    def test_statuses_alias(self):
+        self.assertEqual(parse_x_status_id("https://twitter.com/i/web/statuses/42"), "42")
+
+    def test_non_x_url_returns_none(self):
+        self.assertIsNone(parse_x_status_id("https://example.com/i/web/status/123"))
+
+    def test_no_status_segment_returns_none(self):
+        self.assertIsNone(parse_x_status_id("https://x.com/somebody"))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(parse_x_status_id(""))
+
+    def test_none_returns_none(self):
+        self.assertIsNone(parse_x_status_id(None))
+
+
+# --- resolve_tweet_author --------------------------------------------------
+
+class ResolveTweetAuthorTests(unittest.TestCase):
+    def test_happy_path_returns_handle(self):
+        fake_response = mock.MagicMock()
+        fake_response.read.return_value = json.dumps({"data": {"handle": "polydao"}}).encode("utf-8")
+        fake_response.__enter__ = lambda s: s
+        fake_response.__exit__ = lambda s, *a: None
+        with mock.patch("x_author_tweet.urllib.request.urlopen", return_value=fake_response):
+            self.assertEqual(resolve_tweet_author("999"), "polydao")
+
+    def test_404_returns_none(self):
+        http_err = urllib_error("HTTP Error 404", code=404)
+        with mock.patch("x_author_tweet.urllib.request.urlopen", side_effect=http_err):
+            self.assertIsNone(resolve_tweet_author("999"))
+
+    def test_missing_credentials_returns_none(self):
+        http_err = urllib_error("HTTP Error 503", code=503)
+        with mock.patch("x_author_tweet.urllib.request.urlopen", side_effect=http_err):
+            self.assertIsNone(resolve_tweet_author("999"))
+
+    def test_tasks_api_unreachable_returns_none(self):
+        with mock.patch("x_author_tweet.urllib.request.urlopen",
+                        side_effect=ConnectionRefusedError("refused")):
+            self.assertIsNone(resolve_tweet_author("999"))
+
+    def test_empty_handle_returns_none(self):
+        fake_response = mock.MagicMock()
+        fake_response.read.return_value = json.dumps({"data": {"handle": ""}}).encode("utf-8")
+        fake_response.__enter__ = lambda s: s
+        fake_response.__exit__ = lambda s, *a: None
+        with mock.patch("x_author_tweet.urllib.request.urlopen", return_value=fake_response):
+            self.assertIsNone(resolve_tweet_author("999"))
 
 
 # --- compose_author_tweet ------------------------------------------------
@@ -286,6 +353,38 @@ class TryPostAuthorTweetTests(unittest.TestCase):
             "link": "not-a-url",
             "title": "x",
         })
+        self.assertEqual(result, {"status": SKIPPED, "error": "missing_x_link"})
+
+    def test_web_intent_link_resolves_author_and_posts(self):
+        # x.com/i/web/status/<id> has no handle in the path; try_post_author_tweet
+        # must fall back to resolve_tweet_author instead of skipping outright.
+        with mock.patch(
+            "x_author_tweet.resolve_tweet_author",
+            return_value="polydao",
+        ) as resolve_mock, mock.patch(
+            "x_author_tweet.compose_author_tweet",
+            return_value="@polydao nice thread",
+        ) as compose_mock, mock.patch(
+            "x_author_tweet.call_x_tweets_route",
+            return_value={"url": "https://x.com/sindustries/status/1", "postedAt": "now"},
+        ):
+            result = try_post_author_tweet({
+                "source": "x",
+                "link": "https://x.com/i/web/status/2087089133156208803",
+                "title": "x",
+            })
+        resolve_mock.assert_called_once_with("2087089133156208803", base_url=None)
+        # compose_author_tweet must see the resolved handle via authorHandle.
+        self.assertEqual(compose_mock.call_args[0][0]["authorHandle"], "polydao")
+        self.assertEqual(result["status"], POSTED)
+
+    def test_web_intent_link_skipped_when_author_unresolvable(self):
+        with mock.patch("x_author_tweet.resolve_tweet_author", return_value=None):
+            result = try_post_author_tweet({
+                "source": "x",
+                "link": "https://x.com/i/web/status/2087089133156208803",
+                "title": "x",
+            })
         self.assertEqual(result, {"status": SKIPPED, "error": "missing_x_link"})
 
     def test_llm_failure_records_error(self):

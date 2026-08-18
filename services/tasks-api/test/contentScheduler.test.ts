@@ -139,6 +139,134 @@ describe('FakeXClient', () => {
     expect(a.url).not.toBe(c.url);
     expect(a.postedAt).toBeInstanceOf(Date);
   });
+
+  it('getTweetAuthor returns a deterministic fake handle', async () => {
+    const client = new FakeXClient();
+    const a = await client.getTweetAuthor('123');
+    const b = await client.getTweetAuthor('123');
+    const c = await client.getTweetAuthor('456');
+    expect(a).toEqual(b);
+    expect(a?.handle).not.toEqual(c?.handle);
+    expect(a?.handle).toMatch(/^fake_author_[0-9a-f]{8}$/);
+  });
+});
+
+// --- RealXClient ------------------------------------------------------------
+//
+// createTweet's JSON body previously double-stringified the `reply` field
+// (`{reply: JSON.stringify({...})}` sent inside a JSON.stringify'd outer
+// body, producing `"reply": "{\"in_reply_to_tweet_id\":...}"` — an escaped
+// string, not the nested object X's API expects) and signed that same
+// stringified value as an OAuth1.0a request parameter even though the
+// request body is JSON, not form-urlencoded. Per the OAuth1.0a spec, only
+// oauth_* params and (for GET) the query string belong in the signature
+// base string for a non-form body — including body content there produces
+// a signature X rejects with a generic 401. Both bugs were confirmed live
+// against api.twitter.com on 2026-08-18 (a real reply attempt 401'd, and a
+// corrected request with the same credentials succeeded through to X's own
+// business-rule check). These tests guard the request *shape*; the
+// signature math itself isn't independently re-derived here.
+describe('RealXClient', () => {
+  const client = new RealXClient('key', 'secret', 'token', 'tokenSecret', 'sindustries');
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('createTweet sends a properly-nested JSON body for a reply', async () => {
+    let capturedBody: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        capturedBody = init?.body as string;
+        return {
+          ok: true,
+          json: async () => ({ data: { id: '999' } })
+        } as Response;
+      })
+    );
+
+    await client.createTweet({ text: 'hello', in_reply_to_tweet_id: '2087089133156208803' });
+
+    expect(capturedBody).toBeDefined();
+    const parsed = JSON.parse(capturedBody as string);
+    // The bug produced `reply` as an escaped JSON *string*; it must be a
+    // nested object per X API v2's documented shape.
+    expect(parsed).toEqual({
+      text: 'hello',
+      reply: { in_reply_to_tweet_id: '2087089133156208803' }
+    });
+  });
+
+  it('createTweet omits reply entirely for a non-reply tweet', async () => {
+    let capturedBody: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        capturedBody = init?.body as string;
+        return { ok: true, json: async () => ({ data: { id: '1' } }) } as Response;
+      })
+    );
+
+    await client.createTweet({ text: 'no reply' });
+
+    expect(JSON.parse(capturedBody as string)).toEqual({ text: 'no reply' });
+  });
+
+  it('getTweetAuthor resolves the handle from a v2 tweets-lookup response', async () => {
+    let capturedUrl: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: { id: '2087089133156208803', text: '...' },
+            includes: { users: [{ username: 'polydao' }] }
+          })
+        } as Response;
+      })
+    );
+
+    const result = await client.getTweetAuthor('2087089133156208803');
+
+    expect(result).toEqual({ handle: 'polydao' });
+    expect(capturedUrl).toContain('/2/tweets/2087089133156208803');
+    expect(capturedUrl).toContain('expansions=author_id');
+    expect(capturedUrl).toContain('user.fields=username');
+  });
+
+  it('getTweetAuthor returns null on a 404 (deleted / not found)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 404, text: async () => '' }) as unknown as Response)
+    );
+    const result = await client.getTweetAuthor('999');
+    expect(result).toBeNull();
+  });
+
+  it('getTweetAuthor returns null when the response has no users', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { id: '999' }, includes: {} })
+      }) as unknown as Response)
+    );
+    const result = await client.getTweetAuthor('999');
+    expect(result).toBeNull();
+  });
+
+  it('getTweetAuthor throws on a non-404 error status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 500, text: async () => 'server error' }) as unknown as Response)
+    );
+    await expect(client.getTweetAuthor('999')).rejects.toThrow(/X API 500/);
+  });
 });
 
 // --- getXClient selection -------------------------------------------------
