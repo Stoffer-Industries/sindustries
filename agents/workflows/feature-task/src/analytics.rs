@@ -5,20 +5,7 @@
 // feature-task) into the Tasks API analytics surface (POST /api/v1/
 // feature-task-analytics/events).
 //
-// Event types emitted by this module:
-//   - `gate_failure`        — emitted on every gate block via `emit_gate_failure_events`
-//   - `terminal_summary`    — emitted on every done/accepted transition via `emit_terminal_summary_event`
-//   - `evidence_mismatch`   — emitted when an AC's evidence annotation doesn't match verified
-//                             state (e.g. cited test file does not exist, cited PR # is not
-//                             merged). Stub emitter at `emit_evidence_mismatch_event`; full
-//                             verification logic added in a follow-up PR.
-//   - `mechanism_unwired`   — emitted by periodic audits (factory-retro's weekly pass, future
-//                             schema/doc drift scans) when a built capability has no exercise
-//                             signal. Stub emitter at `emit_mechanism_unwired_event`; the audit
-//                             itself runs outside the lobster and calls into this module to
-//                             persist the event.
-//
-// Responsibilities:
+// Three responsibilities:
 //   1. `classify_failure(gate, failure_text)` — capacity vs quality split.
 //   2. `emit_gate_failure_events(args, task, gate, failures)` — best-effort
 //      POST of one event per failure, called after the workflow writes its
@@ -29,12 +16,6 @@
 //      terminal state is introduced). The summary counts gate failures by
 //      cause and computes PR cycle time + evidence distribution from
 //      merged PRs.
-//   4. `emit_evidence_mismatch_event(args, task_id, evidence_text, reason)` — stub
-//      for the evidence-verification gap that Ash (Principal Quality Engineer) is built
-//      to close. Emits one event per AC whose cited evidence doesn't match verified state.
-//   5. `emit_mechanism_unwired_event(args, capability_slug, reason)` — stub for the
-//      dead/unwired capability signal that surfaces "feature exists but no exercise" gaps.
-//      Called from factory-retro's weekly audit (see agents/skills/ops/factory-retro/SKILL.md).
 //
 // Routing is best-effort: errors are logged to stderr and swallowed. The
 // existing pattern (`add_comment` and `write_state`) treats analytics
@@ -376,74 +357,6 @@ fn chrono_like_parse_to_unix(s: &str) -> Option<i64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
     Some(((days * 24 + hour) * 60 + minute) * 60 + second)
-}
-
-/// Emit an `evidence_mismatch` event when an AC's cited evidence doesn't
-/// match verified state (e.g. the cited test file doesn't exist, the cited
-/// PR # is not merged, the cited commit isn't in the repo). Called from
-/// Ash's QA verification step (per task f6a4d56a) and from any future
-/// lobster check that does independent verification of evidence claims.
-/// One event per AC whose cited evidence doesn't match.
-///
-/// Best-effort: errors are logged and swallowed. This is observability,
-/// not a workflow gate — the actual gate (blocking vs passing) lives in
-/// the caller's verification logic, which uses this event as one of its
-/// inputs.
-pub fn emit_evidence_mismatch_event(
-    args: &StageArgs,
-    task_id: &str,
-    ac_label: &str,
-    evidence_text: &str,
-    reason: &str,
-) {
-    let evidence_hash = sha256_hex(evidence_text.as_bytes());
-    let event_key = format!(
-        "feature-task:{}:evidence-mismatch:{}:{}",
-        task_id,
-        ac_label,
-        evidence_hash
-    );
-    let payload = json!({
-        "taskId": task_id,
-        "eventKey": event_key,
-        "eventType": "evidence_mismatch",
-        "ac": ac_label,
-        "evidenceText": evidence_text,
-        "reason": reason,
-    });
-    post_event_best_effort(args, payload);
-}
-
-/// Emit a `mechanism_unwired` event when a built capability has no exercise
-/// signal. Called from periodic audits (factory-retro's weekly pass — see
-/// `agents/skills/ops/factory-retro/SKILL.md`, Quinn's heartbeat sweep).
-/// One event per (capability, observation) pair — re-emits of the same
-/// observation are deduplicated by the (capability, reason-hash) key.
-///
-/// Best-effort: errors are logged and swallowed. This is observability,
-/// not a workflow gate. The capability slug should be a stable kebab-case
-/// identifier so observations across time and agents can be grouped.
-pub fn emit_mechanism_unwired_event(
-    args: &StageArgs,
-    capability_slug: &str,
-    reason: &str,
-) {
-    let slug_hash = sha256_hex(capability_slug.as_bytes());
-    let reason_hash = sha256_hex(reason.as_bytes());
-    let event_key = format!(
-        "mechanism-unwired:{}:{}:{}",
-        capability_slug,
-        slug_hash,
-        reason_hash
-    );
-    let payload = json!({
-        "eventKey": event_key,
-        "eventType": "mechanism_unwired",
-        "capability": capability_slug,
-        "reason": reason,
-        "observedAt": chrono_like_now_iso(),
-    });
-    post_event_best_effort(args, payload);
 }
 
 /// Emit the terminal summary event. Called after the workflow successfully
