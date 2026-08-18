@@ -596,7 +596,13 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `doing`.",
     )
+    // Note: `qa_agent` gate creation (AC1 of task f6a4d56a) is handled by
+    // the ensure_qa_agent_gate call at the top of verify_delivery, which
+    // covers both the "task enters doing" trigger (verify_delivery runs
+    // shortly after the transition completes) and the "PR merges while in
+    // doing" trigger (verify_delivery sweeps every iteration).
 }
+
 
 // ---- Code-task stages (task f77b7a60) ----
 //
@@ -748,6 +754,16 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_doing".to_string();
         return Ok(env);
     }
+    // AC1 of task f6a4d56a: ensure the `qa_agent` TaskApproval row exists
+    // for this task. Idempotent — also covers the "PR merges while the
+    // task is in `doing`" trigger (ready_checks already ran once when the
+    // task entered `doing`, but the PR may have merged after). After
+    // creating (or finding) the row, re-fetch the task so the predicate
+    // check below sees the updated `approvals[]` set.
+    if !args.dry_run {
+        let _ = ensure_qa_agent_gate(&args, &env);
+        env.task = api_get_task(&args.base_url, &env.task.id)?;
+    }
     let mut failures = Vec::new();
     let pr_urls = implementer_pr_urls(&env.task);
     if pr_urls.is_empty() {
@@ -824,6 +840,33 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     if openclaw_needed(&env.task) && !openclaw_done(&env.task) {
         failures
             .push("`[openclaw-needed]` is present but `[openclaw-done]` is missing.".to_string());
+    }
+    // AC1 of task f6a4d56a: short-circuit on `qa_agent` outstanding with a
+    // dedicated `[qa-agent-blocked]` comment so Ash's verification gap is
+    // visibly distinct from the generic `[feature-task-progress-checklist]`
+    // failures. The fingerprint dedup reuses the same pattern as
+    // `transition_or_block` so the comment is only posted on the first
+    // transition into "blocked" for a given failure string — re-runs of
+    // verify_delivery while Ash is still outstanding do not spam comments.
+    let qa_agent_failures = qa_agent_verified_failures(&env.task);
+    if !qa_agent_failures.is_empty() {
+        if !args.dry_run {
+            let qa_fingerprint = qa_agent_failures.join("\n");
+            if env.lobster_state.failure_fingerprint.as_deref() != Some(&qa_fingerprint) {
+                env.lobster_state.failure_fingerprint = Some(qa_fingerprint.clone());
+                add_comment(
+                    &args.base_url,
+                    &env.task.id,
+                    &format!("[qa-agent-blocked]\n{}", qa_agent_failures.join("\n")),
+                )?;
+                write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+            }
+        }
+        env.criteria_met = false;
+        env.action_taken = "verify_delivery_qa_agent_blocked".to_string();
+        env.failures = qa_agent_failures;
+        analytics::emit_gate_failure_events(&args, &env.task, "verify_delivery", &env.failures);
+        return Ok(env);
     }
     transition_or_block(
         &args,
@@ -975,6 +1018,114 @@ fn accepted_structured_failures(task: &Task) -> Vec<String> {
     } else {
         vec!["Structured accepted approval is missing or not approved; Tom must approve the `accepted` TaskApproval before closing.".to_string()]
     }
+}
+
+// ---- qa_agent gate (AC1 of task f6a4d56a, "Add Ash: QA-verifier gate") ----
+//
+// The `qa_agent` workflow gate is Ash's mechanical verification gate. It is
+// created when a task enters `doing` (or when its PR merges while in `doing`)
+// and gates the `doing → acceptance` transition. The lobster reads the
+// structured `TaskApproval` row via `task_approval_granted` and refuses to
+// promote a task until Ash approves the gate.
+
+/// True when the structured `qa_agent` TaskApproval row is `state: approved`.
+/// Used to gate the `doing -> acceptance` transition in `verify_delivery`.
+/// Distinct from `accepted_structured` above (Tom's human sign-off); both
+/// rows must be approved before the task can reach `done`.
+fn qa_agent_verified(task: &Task) -> bool {
+    task_approval_granted(task, "qa_agent")
+}
+
+/// Failure strings for the `qa_agent` gate. Empty when the gate is satisfied.
+/// Used by `verify_delivery` to short-circuit the transition with a
+/// `[qa-agent-blocked]` comment.
+fn qa_agent_verified_failures(task: &Task) -> Vec<String> {
+    if qa_agent_verified(task) {
+        vec![]
+    } else {
+        vec!["Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.".to_string()]
+    }
+}
+
+/// Idempotently ensure a `qa_agent` TaskApproval row exists for this task.
+///
+/// Strategy: uses the POST + DELETE (revoke-as-outstanding) pattern from
+/// the PR #2 tech design's open-question #1 fallback path. The Tasks API
+/// only persists `approved` rows on POST; the "outstanding" state for the
+/// gate is represented as a `revoked` row (`task_approval_granted` reads
+/// `state == "approved"`, so `revoked` correctly evaluates as
+/// "not satisfied"). Ash's later POST updates the row back to `state:
+/// approved` via the existing upsert branch in `taskApprovals.ts` POST.
+///
+/// Returns `true` when a new row was created in this call, `false` when a
+/// row already existed or the POST failed (auth not yet provisioned for
+/// the actor — see below). Auth failures are non-fatal: the function logs
+/// to stderr and continues, leaving the gate absent. The next sweep retry
+/// succeeds once Quinn provisions Ash's `ASH_TASKS_API_APPROVAL_TOKEN`
+/// (per the [openclaw-needed] comment).
+///
+/// Why non-fatal auth handling: until Quinn provisions Ash's
+/// TASKS_API_APPROVAL_SERVICE_CREDENTIALS entry, the lobster runs as the
+/// actor that owns the shared `TASKS_API_APPROVAL_TOKEN` (Rotated to
+/// `Rowan` on 2026-08-16), and `approvalAuth.ts:ACTOR_PERMISSIONS` only
+/// grants `qa_agent` write to `Ash`. The POST will return 403 — we log
+/// and continue so the lobster doesn't error out; `verify_delivery`'s
+/// qa_agent check then surfaces the missing row as `[qa-agent-blocked]`
+/// for human visibility.
+fn ensure_qa_agent_gate(args: &StageArgs, env: &Envelope) -> Result<bool> {
+    // Already have a row — no-op.
+    if env
+        .task
+        .approvals
+        .iter()
+        .any(|a| a.approval_type == "qa_agent")
+    {
+        return Ok(false);
+    }
+    let token = match std::env::var("TASKS_API_APPROVAL_TOKEN")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        Some(t) => t,
+        None => {
+            eprintln!(
+                "[lobster] ensure_qa_agent_gate skipped: TASKS_API_APPROVAL_TOKEN env var is not set"
+            );
+            return Ok(false);
+        }
+    };
+    let base = args.base_url.trim_end_matches('/');
+    let post_url = format!("{base}/tasks/{}/approvals", env.task.id);
+    let post_body = json!({
+        "type": "qa_agent",
+        "note": "[lobster] initial qa_agent gate (revoke-as-outstanding proxy)"
+    });
+    let post_result = ureq::post(&post_url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .send_json(post_body)
+        .map(|_| ())
+        .map_err(|err| anyhow!("POST {post_url} failed: {err}"));
+    if let Err(err) = post_result {
+        eprintln!(
+            "[lobster] ensure_qa_agent_gate POST failed (non-fatal; will surface as `[qa-agent-blocked]`): {err}"
+        );
+        return Ok(false);
+    }
+    // DELETE flips the row to `state: revoked`. Predicate correctly
+    // evaluates `revoked` rows as "not satisfied". A later Ash POST
+    // updates the row back to `state: approved` via the upsert.
+    let delete_url = format!("{post_url}/qa_agent");
+    if let Err(err) = ureq::delete(&delete_url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map(|_| ())
+    {
+        eprintln!(
+            "[lobster] ensure_qa_agent_gate DELETE failed (non-fatal; row may stay approved=blocking): {err}"
+        );
+    }
+    Ok(true)
 }
 
 fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
@@ -7353,5 +7504,79 @@ detached
         assert_eq!(percent_encode_assignee("a+b"), "a%2Bb");
         assert_eq!(percent_encode_assignee("a&b"), "a%26b");
         assert_eq!(percent_encode_assignee("a#b"), "a%23b");
+    }
+
+    // ---- AC1 of task f6a4d56a ("Add Ash: QA-verifier gate") ----
+    // The qa_agent predicate is the source-of-truth gate on the
+    // `doing → acceptance` transition. These tests pin the contract:
+    //   * absent row / revoked row → predicate false, transition blocked
+    //   * approved row              → predicate true, transition allowed
+    //   * cross-check with the (existing) accepted_structured predicate
+    //     so PR #1's rename is regression-protected.
+    // The transition itself is exercised end-to-end in a follow-up PR
+    // (services/tasks-api integration test, see tech-design §10 AC4).
+
+    fn qa_test_task_with_approvals(rows: Vec<(&str, &str)>) -> Task {
+        Task {
+            id: "f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47".to_string(),
+            title: "AC1 unit test fixture".to_string(),
+            description: None,
+            status: "doing".to_string(),
+            assignee: Some("Rowan".to_string()),
+            blocked: false,
+            dependency_blocked: false,
+            task_type: Some("code".to_string()),
+            spec_checksum: None,
+            tags: Vec::new(),
+            comments: Vec::new(),
+            approvals: rows
+                .into_iter()
+                .map(|(approval_type, state)| TaskApproval {
+                    approval_type: approval_type.to_string(),
+                    state: state.to_string(),
+                    ..TaskApproval::default()
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn ac1_qa_agent_verified_returns_false_with_no_approval_row() {
+        let task = qa_test_task_with_approvals(vec![]);
+        assert!(!qa_agent_verified(&task));
+        let failures = qa_agent_verified_failures(&task);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("`qa_agent`"));
+    }
+
+    #[test]
+    fn ac1_qa_agent_verified_returns_false_when_approval_revoked() {
+        // A revoked row is the revoke-as-outstanding proxy (per tech-design
+        // open-question #1): predicate must read it as "not satisfied".
+        let task = qa_test_task_with_approvals(vec![("qa_agent", "revoked")]);
+        assert!(!qa_agent_verified(&task));
+        assert_eq!(qa_agent_verified_failures(&task).len(), 1);
+    }
+
+    #[test]
+    fn ac1_qa_agent_verified_returns_true_when_approval_approved() {
+        let task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        assert!(qa_agent_verified(&task));
+        assert!(qa_agent_verified_failures(&task).is_empty());
+    }
+
+    #[test]
+    fn ac1_qa_agent_state_does_not_affect_accepted_structured() {
+        // Cross-check the predicates that PR #1 already shipped
+        // (renamed from qa_ac_verified_structured). They read distinct
+        // approval types so a qa_agent row should never short-circuit
+        // Tom's `accepted` gate and vice-versa.
+        let task = qa_test_task_with_approvals(vec![
+            ("qa_agent", "approved"),
+            ("accepted", "revoked"),
+        ]);
+        assert!(qa_agent_verified(&task));
+        assert!(!accepted_structured(&task));
+        assert!(!accepted_structured_failures(&task).is_empty());
     }
 }

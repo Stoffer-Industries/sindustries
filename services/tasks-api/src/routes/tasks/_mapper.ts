@@ -1,5 +1,6 @@
 import { taskTypeTitlePrefixes } from './_constants.ts';
 import { workflowHandoffOwnerFor } from '../../config/workflowHandoffs.ts';
+import { gateOwnerFor, requiredApprovalsFor, type RequiredApprovalsConfig } from '../../config/requiredApprovals.ts';
 
 // Response mappers extracted from tasks.ts. These shape Prisma rows into the
 // public API contract; no validation, no DB calls.
@@ -40,19 +41,65 @@ export function mapTaskAttentionOwner(attentionOwners) {
 
 /**
  * Options for `mapTask` that drive the derived `workflowGates` response
- * field. Both fields are optional; when omitted the response simply omits
- * the `workflowGates` field rather than carrying a placeholder, because
- * legacy callers (e.g. the WS1a foundation PR's mapper tests) don't need
- * it and we want to keep the mapper unit-testable in isolation.
+ * field (added in PR #2 of task `f6a4d56a`, "Add Ash: automated
+ * QA-verifier agent gate").
+ *
+ * Both fields are optional; when omitted the response omits the
+ * `workflowGates` field rather than carrying a placeholder, because legacy
+ * callers (e.g. the WS1a foundation PR's mapper tests) don't need it and
+ * we want to keep the mapper unit-testable in isolation.
  *
  * `requiredApprovalTypes` is the ordered list of approval types required
  * for this task's `taskType` (from the resolved `RequiredApprovalsConfig`).
- * `gateOwnersByType` maps each approval type to its configured owner so
- * the gate can be surfaced even when no `TaskApproval` row has been
- * created yet — the natural source of truth, instead of hard-coding
- * `spec → Tom` / `tech_design → Quinn` / `qa → Tom` in the UI.
+ * `gateOwnersByType` provides the configured owner per approval type so the
+ * gate can be surfaced even when no `TaskApproval` row has been created
+ * yet — the natural source of truth, instead of hard-coding
+ * `spec → Tom` / `tech_design → Quinn` / `qa_agent → Ash` / `accepted →
+ * Tom` in the UI. When the config is supplied, the mapper uses it to look
+ * up owners via `gateOwnerFor`; otherwise it falls back to the per-type
+ * `DEFAULT_APPROVAL_OWNERS`.
+ *
+ * Generalisation rationale (PR #2 f6a4d56a): the legacy single-source
+ * shape derived `workflowGates` from the singular `task.workflowHandoffRoleId`
+ * column — only one outstanding gate could be surfaced at a time, which
+ * forces the lobster and the UI to model two distinct gates (Ash's
+ * mechanical verification + Tom's human sign-off) as a single attention
+ * queue. PR #2 derives `workflowGates` from ALL required approval types for
+ * the task's `taskType`, so the UI can show both `qa_agent` (Ash) and
+ * `accepted` (Tom) as simultaneous outstanding gates on a task in
+ * `acceptance`.
+ *
+ * The `task.workflowHandoffRoleId` / `workflowHandoffGate` /
+ * `workflowHandoffReason` columns remain populated (they still drive the
+ * lobster's per-iteration current-attention handoff via
+ * `tasksRouter.patch('/tasks/:id')` and `taskApprovals.ts`), but they no
+ * longer drive the `mapTask.workflowGates` response surface.
  */
-export function mapTask(task) {
+export interface MapTaskOptions {
+  requiredApprovalTypes?: readonly string[];
+  gateOwnersByType?: Readonly<Record<string, string>>;
+}
+
+export function buildMapTaskOptions(
+  config: RequiredApprovalsConfig,
+  taskType: string | null | undefined
+): MapTaskOptions {
+  // Delegate the type→required list lookup to `requiredApprovalsFor` so the
+  // policy resolution stays a single source of truth; we then materialise a
+  // gateOwnersByType map here so `mapTask` stays a pure function of
+  // (task, options) and never reaches back into the config loader. `gateOwnerFor`
+  // already falls back to `DEFAULT_APPROVAL_OWNERS` when the config doesn't
+  // override a type.
+  const required = requiredApprovalsFor(config, taskType);
+  const gateOwnersByType: Record<string, string> = {};
+  for (const approvalType of required) {
+    const owner = gateOwnerFor(config, approvalType);
+    if (owner) gateOwnersByType[approvalType] = owner;
+  }
+  return { requiredApprovalTypes: required, gateOwnersByType };
+}
+
+export function mapTask(task, options) {
 
   const dependsOn = task.dependencies
     ?.map((dependency) => dependency.dependsOn)
@@ -71,13 +118,44 @@ export function mapTask(task) {
   const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
   const workflowHandoffOwner = workflowHandoffOwnerFor(task.workflowHandoffRoleId);
-  const workflowGates = task.workflowHandoffRoleId && workflowHandoffOwner ? [{
-    roleId: task.workflowHandoffRoleId,
-    owner: workflowHandoffOwner,
-    gate: task.workflowHandoffGate ?? null,
-    reason: task.workflowHandoffReason ?? null,
-    state: 'outstanding' as const
-  }] : [];
+  // PR #2 (f6a4d56a) generalisation: derive `workflowGates` from the
+  // required approval types configured for this task's `taskType`, joined
+  // with the configured owner per type and the task's structured approval
+  // rows. Any required approval type whose row is not in `state: approved`
+  // (including missing rows and `revoked` rows) is surfaced as an
+  // outstanding gate. This is what makes Ash's `qa_agent` gate and Tom's
+  // `accepted` gate simultaneously visible on a task in `acceptance`.
+  const requiredApprovalTypes = options?.requiredApprovalTypes ?? [];
+  const gateOwnersByType = options?.gateOwnersByType ?? {};
+  const approvedTypes = new Set(
+    (task.approvals ?? [])
+      .filter((a) => a?.state === 'approved' && !a.revokedAt)
+      .map((a) => a.type)
+  );
+  const derivedGates = requiredApprovalTypes
+    .filter((approvalType) => !approvedTypes.has(approvalType))
+    .map((approvalType) => ({
+      roleId: `${approvalType}_gate`,
+      owner: gateOwnersByType[approvalType] ?? null,
+      gate: approvalType,
+      reason: null,
+      state: 'outstanding' as const
+    }));
+  // The legacy single-source shape is preserved only when `options` is
+  // omitted AND `workflowHandoffRoleId` is populated — keeps the legacy
+  // unit tests and any unported caller on the old surface. New callers
+  // always pass `options`, so the new derivation wins; the legacy shape
+  // is a transitional shape that disappears once all routes pass options.
+  const legacyGates = task.workflowHandoffRoleId && workflowHandoffOwner && !options
+    ? [{
+        roleId: task.workflowHandoffRoleId,
+        owner: workflowHandoffOwner,
+        gate: task.workflowHandoffGate ?? null,
+        reason: task.workflowHandoffReason ?? null,
+        state: 'outstanding' as const
+      }]
+    : [];
+  const workflowGates = options ? derivedGates : legacyGates;
 
   return {
     id: task.id,

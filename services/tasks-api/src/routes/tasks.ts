@@ -27,6 +27,7 @@ import { descriptionHasSpecDrift } from './tasks/_spec.ts';
 import {
   buildWorkflowGateOwnerWhere,
   connectTags,
+  mapTaskOptionsFor,
   validateDependsOnIds
 } from './tasks/_deps.ts';
 
@@ -229,7 +230,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
 
     return res.status(200).json({
       data: pageTasks.map((task) => {
-        return mapTask(task);
+        return mapTask(task, mapTaskOptionsFor(task));
       }),
       page: {
         limit,
@@ -268,13 +269,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
       return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
     }
 
-    return res.status(200).json({ data: mapTask(task) });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-tasksRouter.post('/tasks', async (req, res, next) => {
+    return res.status(200).json({ data: mapTask(task, mapTaskOptionsFor(task)) });
   try {
     const rawTitle = normalizeString(req.body?.title);
     const description = normalizeString(req.body?.description) || null;
@@ -336,7 +331,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
       }
     });
 
-    return res.status(201).json({ data: mapTask(created) });
+    return res.status(201).json({ data: mapTask(created, mapTaskOptionsFor(created)) });
   } catch (error) {
     return next(error);
   }
@@ -549,13 +544,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       });
     });
 
-    return res.status(200).json({ data: mapTask(task) });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
+    return res.status(200).json({ data: mapTask(task, mapTaskOptionsFor(task)) });
   try {
     const id = parseTaskId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
