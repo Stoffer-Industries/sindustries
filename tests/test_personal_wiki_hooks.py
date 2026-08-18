@@ -123,7 +123,7 @@ class PersonalWikiHookTests(unittest.TestCase):
         spec_path = self.root / spec_rel
         spec_path.parent.mkdir(parents=True, exist_ok=True)
         spec_path.write_text(
-            "# Spec — Example\n\n## Outcome\n\nShip the grounded recall path.\n\n## Acceptance Criteria\n\n- [ ] AC1\n",
+            "# Spec — Example\n\n- [ ] **Approved by Tom**\n\n## Outcome\n\nShip the grounded recall path.\n\n## Acceptance Criteria\n\n- [ ] AC1\n",
             encoding="utf-8",
         )
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,7 +171,10 @@ class PersonalWikiHookTests(unittest.TestCase):
         spec_rel = "brain/bookmarks/specs/example-k1.md"
         spec_path = self.root / spec_rel
         spec_path.parent.mkdir(parents=True, exist_ok=True)
-        spec_path.write_text("# Spec — Example\n\n## Outcome\n\nShip it.\n", encoding="utf-8")
+        spec_path.write_text(
+            "# Spec — Example\n\n- [ ] **Approved by Tom**\n\n## Outcome\n\nShip it.\n",
+            encoding="utf-8",
+        )
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.output_path.write_text(
             json.dumps(
