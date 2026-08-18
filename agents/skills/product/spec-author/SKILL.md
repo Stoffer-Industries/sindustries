@@ -72,6 +72,7 @@ Before drafting:
 3. **Scope:** Default to one spec. Split only when the work naturally separates into tracks with independent delivery value.
 4. **Source honesty:** If source material includes roadmap/sequencing but Tom excluded it, keep it out and list it as a Non-Goal.
 5. **Implementation leakage:** Remove technical design details from ACs.
+6. **External API feasibility:** If the Outcome depends on a specific capability of a third-party API (posting/writing on someone's behalf, replying to or mentioning another account, a particular endpoint behaviour, a permission or pricing tier), verify that capability with a live call against the real API before drafting the spec — do not rely on cached knowledge or documentation alone, since providers change these silently. Use whatever live access is already available (existing service credentials, a read-only lookup call, a minimal real request) to confirm the capability actually behaves the way the spec is about to assume. This check happens now, as part of assessing the spec — it is not a separate gate before or after writing it, and it does not wait on Rowan or a spike. If verification shows the capability doesn't work as assumed, write the spec to reflect what's actually possible, not what was originally imagined. Only fall back to noting an explicit, named open risk in Notes when no live access exists at all to check it — that's the exception, not the default.
 
 ## Step 4 — Write the Spec
 
@@ -224,3 +225,4 @@ Do NOT return `ambiguous` — that value is reserved for the validator when LLM 
 - Treating roadmap/sequencing as in scope after Tom excludes it.
 - Splitting specs to match AC count rather than delivery boundaries.
 - Notes longer than one paragraph — if it needs more than that, it is leaking into tech design.
+- Speccing a third-party API capability (posting, replying, mentioning, a pricing tier) as settled fact without a live call confirming it still works — API providers change these without notice, and a spec built on a stale assumption ships something that silently fails in production.
