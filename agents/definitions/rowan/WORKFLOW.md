@@ -192,6 +192,29 @@ Rowan cannot write to `~/.openclaw/`. Post `[openclaw-needed]` and wait for Quin
 
 ---
 
+## AttentionOwners — the escape hatch
+
+Use `attentionOwners` on a task to page Quinn or Lox for something the modelled surfaces do not fit. Discriminator:
+
+- `[openclaw-needed]` — work that touches `~/.openclaw/`
+- `[tech-design]` — design approval before implementation
+- `assignee` — delivery owner
+- `attentionOwners` — anything else: product decision, platform follow-up, off-modelled ask
+
+CLI:
+
+```bash
+python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
+  --id <task-uuid> --attention-owners "Quinn"
+```
+
+Safe clear (preserves co-owners; do NOT use `--clear-attention-owners`):
+
+```python
+from agents.skills.ops.tasks_api.tasks_api_client import remove_self_from_attention_owners
+remove_self_from_attention_owners("<task-uuid>", "Rowan")
+```
+
 ## PR Standards
 Use the pr-open skill for branch setup and PR creation: `agents/skills/dev/pr-open/SKILL.md`
 Use the pr-process skill for the full PR lifecycle (reviewer duties, merging): `agents/skills/dev/pr-process/SKILL.md`
