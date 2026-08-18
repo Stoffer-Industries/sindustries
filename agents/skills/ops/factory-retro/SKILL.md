@@ -9,8 +9,8 @@ Summarise feature-task gate health for the last 7 days using the analytics event
 (`/api/v1/feature-task-analytics/*`, task f170e344), and produce up to 3 concrete,
 data-backed suggestions to reduce gate fails.
 
-Run this manually when asked. Not currently wired to a cron — run on request until a
-scheduled cadence is explicitly approved.
+Runs weekly via the "Factory Retro - Weekly" cron (Mon 9am NZST). Can also be run manually
+on request between scheduled runs.
 
 **Why events, not comments/PRs:** the feature-task lobster (`agents/workflows/feature-task/src/analytics.rs`)
 now emits a `gate_failure` event on every gate block and a `terminal_summary` event on every
@@ -268,6 +268,6 @@ and "Auto-created feature task" blocks entirely rather than printing empty ones.
 
 ## Step 8 — Deliver
 
-Output the report and let Quinn decide whether to message Tom. The cron wiring is Quinn's
-post-merge action — once registered, this skill fires weekly on a fixed cadence and Quinn
-delivers the digest. Until the cron is wired, run on request.
+Output the report and let Quinn decide whether to message Tom. The "Factory Retro - Weekly"
+cron fires this skill weekly on a fixed cadence and Quinn delivers the digest. Can also be
+triggered manually on request between scheduled runs.
