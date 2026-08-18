@@ -99,6 +99,8 @@ Bookmark pipeline specs go here:
 
 Use this only for bookmark/review pipeline items. Do not write direct/manual specs to `brain/bookmarks/specs/`.
 
+The unchecked `- [ ] **Approved by Tom**` marker (see Format below) is **required** on every bookmark-origin spec — `handle_approval_reply.py`'s `set_spec_approval_checkbox` toggles that exact line when Tom approves, and hard-fails if it is missing. Never omit it from a bookmark-origin spec.
+
 #### Completed specs
 
 Do not move specs to `done/` from this skill unless explicitly asked. Completion/archive movement belongs to task lifecycle cleanup.
@@ -131,6 +133,7 @@ For manual task specs in `brain/tasks/specs/open/`:
 - **Created:** <YYYY-MM-DD>
 
 **Status:** Draft
+- [ ] **Approved by Tom**
 
 ---
 
