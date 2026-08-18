@@ -57,24 +57,73 @@ The unauthenticated `POST /mcp` must respond with `401` **and** a `WWW-Authentic
 
 ### Supabase OAuth clients
 
+Static clients are seeded by migrations and live in `public.gymtrack_oauth_clients` with `registration_type='static'`. Dynamic clients are registered at runtime via `POST /oauth/register` (RFC 7591) and land in the same table with `registration_type='dynamic'`.
+
+#### Static clients
+
 Migration `apps/gymtrack/supabase/migrations/20260804070000_mcp_oauth.sql` seeds these exact allowlist values:
 
 | Provider | Client ID | Allowed redirect URI |
 | --- | --- | --- |
 | Claude | `claude-desktop` | `https://claude.ai/api/mcp/auth_callback` |
 | ChatGPT | `chatgpt` | `https://chatgpt.com/connector_platform_oauth_redirect` |
+| Local dev | `local-dev` | `http://localhost:8788/callback` |
+
+Migration `apps/gymtrack/supabase/migrations/20260815070000_openclaw_oauth_client.sql` adds the OpenClaw static row (task `30251df0`):
+
+| Provider | Client ID | Allowed redirect URI |
+| --- | --- | --- |
 | OpenClaw | `openclaw` | `http://127.0.0.1:8789/callback` |
 
-The third row is added by `apps/gymtrack/supabase/migrations/20260815070000_openclaw_oauth_client.sql` (task `30251df0`). `127.0.0.1:8789` is the loopback redirect OpenClaw binds for the duration of the OAuth dance (RFC 8252 §7.3 / OAuth 2.1 §10.2); it is one port above `local-dev`'s `8788` so no two seeded clients collide. If port `8789` is unavailable on a host, surface an actionable error to the user — do not silently bind a different port.
+`127.0.0.1:8789` is the loopback redirect OpenClaw binds for the duration of the OAuth dance (RFC 8252 §7.3 / OAuth 2.1 §10.2); it is one port above `local-dev`'s `8788` so no two seeded clients collide. If port `8789` is unavailable on a host, surface an actionable error to the user — do not silently bind a different port.
 
 Confirm the production rows have not drifted:
 
 ```sql
-select client_id, client_name, redirect_uris
+select client_id, client_name, redirect_uris, registration_type, registered_at
 from public.gymtrack_oauth_clients
-where client_id in ('claude-desktop', 'chatgpt', 'openclaw')
+where registration_type = 'static'
 order by client_id;
 ```
+
+#### Dynamic clients (RFC 7591 DCR)
+
+Any RFC 7591-conformant MCP client (including OpenClaw's spec-following OAuth client) can self-register against `POST /oauth/register`. The endpoint is public-only — it does not issue `client_secret`, and `token_endpoint_auth_method` is restricted to `'none'`. Static and dynamic clients share the same consent gate (`/agent-consent` → `getConsent(...).revoked_at` on `/oauth/token`), so dynamic clients cannot bypass user approval.
+
+Discover the endpoint via `GET /.well-known/oauth-authorization-server`; the response advertises `registration_endpoint` and `registration_endpoint_auth_methods_supported: ["none"]`.
+
+Example registration (OpenClaw or any other MCP client):
+
+```bash
+curl -fsS https://gymtrack-mcp.fly.dev/oauth/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "redirect_uris": ["http://127.0.0.1:8789/callback"],
+    "client_name": "OpenClaw",
+    "token_endpoint_auth_method": "none"
+  }'
+```
+
+Response (201 Created):
+
+```json
+{
+  "client_id": "<uuid v4>",
+  "client_id_issued_at": 1755475200
+}
+```
+
+The issued `client_id` then flows into the same `/oauth/authorize` → `/agent-consent` → `/oauth/token` dance as a static client. `client_secret` is intentionally omitted because GymTrack only supports public PKCE clients.
+
+Operator query to inspect both static and dynamic registrations side-by-side:
+
+```sql
+select client_id, registration_type, client_name, registered_at
+from public.gymtrack_oauth_clients
+order by registration_type, registered_at desc nulls last, client_id;
+```
+
+**Out of scope for v1:** confidential-client support, initial-access-tokens, per-IP rate limiting, and admin list/revoke endpoint. See the tech design (`docs/specs/gymtrack-mcp-oauth-dcr-tech-design.md`, §Out of scope) for the rationale. If registration abuse is observed in logs, the first escalation is to add per-IP rate limiting at the Fly edge, then file a follow-up task to bundle the rest.
 
 If any provider reports a redirect mismatch, capture the exact `redirect_uri` it sent, verify it against that provider's current documentation, and update only that client's allowlist. Do not add wildcard redirect URIs.
 
