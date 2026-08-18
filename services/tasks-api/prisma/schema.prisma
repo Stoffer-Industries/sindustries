@@ -173,7 +173,8 @@ model FeatureTaskAnalyticsEvent {
 enum ApprovalType {
   spec
   tech_design
-  qa
+  qa_agent
+  accepted
 }
 
 enum ApprovalState {
@@ -182,9 +183,9 @@ enum ApprovalState {
 }
 
 /// First-class approval state for a task. Each row represents one approval
-/// type (spec / tech_design / qa) for one task. A revoked approval is
-/// represented by `state=revoked` with `revokedAt` set; the row is kept so
-/// the audit trail of who approved and revoked when is preserved.
+/// type (spec / tech_design / qa_agent / accepted) for one task. A revoked
+/// approval is represented by `state=revoked` with `revokedAt` set; the row
+/// is kept so the audit trail of who approved and revoked when is preserved.
 ///
 /// `owner` is a free-text field (matches `Task.assignee`) — humans and
 /// agents both post approvals, and the field is informational, not a

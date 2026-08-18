@@ -4,17 +4,17 @@
 // reads `.openclaw/tasks-api/required-approvals.yaml` on startup; if the file
 // is missing or malformed, the loader falls back to a built-in default and
 // logs a WARN. The default values match the task spec defaults:
-//   feature: [spec, tech_design, qa]
-//   code:    [tech_design, qa]
-//   content: [spec, qa]
+//   feature: [spec, tech_design, qa_agent, accepted]
+//   code:    [tech_design, qa_agent, accepted]
+//   content: [spec, qa_agent, accepted]
 //   research: []
 //
 // Each approval type also has a configured owner used by the workflow-gate
 // ownership surface (task 66054ab4 WS1). The owner is global per approval
 // type — `spec` is always Tom's gate regardless of the task type it gates.
-// Defaults: spec → Tom, tech_design → Quinn, qa → Tom. A free-form override
-// is allowed in the YAML `owners:` block; unknown approval types are skipped
-// so a typo doesn't take down the loader.
+// Defaults: spec → Tom, tech_design → Quinn, qa_agent → Ash, accepted → Tom.
+// A free-form override is allowed in the YAML `owners:` block; unknown
+// approval types are skipped so a typo doesn't take down the loader.
 //
 // The file format is intentionally narrow — a top-level `version:` line, an
 // indented `mappings:` block, and an indented `owners:` block. The loader is
@@ -68,7 +68,8 @@ export interface RequiredApprovalsConfig {
 export const DEFAULT_APPROVAL_OWNERS: Record<string, string> = {
   spec: 'Tom',
   tech_design: 'Quinn',
-  qa: 'Tom'
+  qa_agent: 'Ash',
+  accepted: 'Tom'
 };
 
 function canonicalConfigFingerprint(
@@ -90,11 +91,11 @@ function canonicalConfigFingerprint(
 }
 
 export const DEFAULT_REQUIRED_APPROVALS: RequiredApprovalsConfig = (() => {
-  const version = 1;
+  const version = 2;
   const mappings = {
-    feature: ['spec', 'tech_design', 'qa'],
-    code: ['tech_design', 'qa'],
-    content: ['spec', 'qa'],
+    feature: ['spec', 'tech_design', 'qa_agent', 'accepted'],
+    code: ['tech_design', 'qa_agent', 'accepted'],
+    content: ['spec', 'qa_agent', 'accepted'],
     research: []
   };
   const owners = { ...DEFAULT_APPROVAL_OWNERS };
