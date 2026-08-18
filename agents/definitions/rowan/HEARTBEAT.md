@@ -59,3 +59,9 @@ If any step fails due to an external dependency or operational issue (GitHub aut
 2. Note which step failed and what the error was
 3. Read and follow `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md` — escalate to Lox's main session
 4. Continue only if the remaining heartbeat steps are safe and independent; otherwise stop after the Lox escalation
+
+---
+
+## Retro notes scan
+
+After completing all heartbeat sections, if recent build/infra/CI/PR work surfaced a recurring pattern (same friction or working practice appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug, and the highest-impact one becomes an auto-created feature task for Tom's approval. Use stable kebab-case `pattern-slug`s so observations group cleanly across the week.

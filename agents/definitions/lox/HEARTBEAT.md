@@ -220,3 +220,9 @@ brctl status brain/  # may return error 30 even when brain is fully readable
 ```
 
 Tom confirmed brain operational on 2026-07-25 (Telegram msg #3897) while `brctl status` was still returning error 30. The `icloud-client-zone-dead-2026-07-22` incident was reclassified `false_positive` on that basis. Only re-open an iCloud brain incident if the direct read probe itself fails.
+
+---
+
+## Retro notes scan
+
+After completing all heartbeat sections, if recent infra/cron/host work surfaced a recurring pattern (same failure or remediation appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Cite the runbook path and incident key in the `evidence:` field so observations can be cross-referenced. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug, and the highest-impact one becomes an auto-created feature task for Tom's approval.
