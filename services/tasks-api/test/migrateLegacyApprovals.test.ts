@@ -182,7 +182,7 @@ describe('runWrite — pagination, per-row failure, snapshot creation, retry', (
     expect(parsed.rolledBack).toBe(false);
     expect(parsed.rows).toEqual([
       { taskId: 'task-1', type: 'spec' },
-      { taskId: 'task-2', type: 'qa' }
+      { taskId: 'task-2', type: 'accepted' }
     ]);
   });
 
@@ -290,7 +290,7 @@ describe('runRollback', () => {
       rolledBack: false,
       rows: [
         { taskId: 'task-1', type: 'spec' },
-        { taskId: 'task-2', type: 'qa' },
+        { taskId: 'task-2', type: 'accepted' },
         { taskId: 'task-3', type: 'tech_design' }
       ]
     };
@@ -306,7 +306,7 @@ describe('runRollback', () => {
     expect(summary.snapshotPath).toBe('/tmp/snap.json');
     expect(deps.deleteApproval).toHaveBeenCalledTimes(3);
     expect(deps.deleteApproval).toHaveBeenNthCalledWith(1, 'task-1', 'spec' as ApprovalType);
-    expect(deps.deleteApproval).toHaveBeenNthCalledWith(2, 'task-2', 'qa' as ApprovalType);
+    expect(deps.deleteApproval).toHaveBeenNthCalledWith(2, 'task-2', 'accepted' as ApprovalType);
     expect(deps.deleteApproval).toHaveBeenNthCalledWith(3, 'task-3', 'tech_design' as ApprovalType);
   });
 

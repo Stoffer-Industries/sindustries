@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // transitively imports approvalAuth.ts) so the module-load-time parse
 // in approvalAuth captures the test credentials instead of an empty value.
 process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
-  { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'qa'] },
+  { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'accepted'] },
   { token: 'quinn-service-token-long-enough', actor: 'Quinn', approvalTypes: ['tech_design'] }
 ]);
 
@@ -69,7 +69,7 @@ describe('task approval boundary', () => {
     expect(res.status).toBe(200); expect(prismaMock.taskApproval.upsert).toHaveBeenCalled();
   });
 
-  it('enforces Tom-only spec/qa and Quinn-only tech_design', async () => {
+  it('enforces Tom-only spec/accepted and Quinn-only tech_design', async () => {
     const app = createApp();
     const tomTech = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'tech_design' });
     const quinnSpec = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(QUINN_TOKEN)).send({ type: 'spec' });
@@ -222,7 +222,7 @@ describe('TASKS_API_APPROVAL_SERVICE_CREDENTIALS module-load validation', () => 
   });
 
   it('loads cleanly when credentials env is a valid array', async () => {
-    const valid = JSON.stringify([{ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec', 'qa'] }]);
+    const valid = JSON.stringify([{ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec', 'accepted'] }]);
     await expect(importApprovalAuthWith(valid)).resolves.toBeDefined();
   });
 });

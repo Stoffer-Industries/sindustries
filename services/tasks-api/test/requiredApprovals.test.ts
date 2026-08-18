@@ -44,21 +44,21 @@ const {
 describe('parseRequiredApprovalsYaml', () => {
   it('parses the canonical config shape', () => {
     const yaml = [
-      'version: 1',
+      'version: 2',
       'mappings:',
-      '  feature: [spec, tech_design, qa]',
-      '  code: [tech_design, qa]',
-      '  content: [spec, qa]',
+      '  feature: [spec, tech_design, qa_agent, accepted]',
+      '  code: [tech_design, qa_agent, accepted]',
+      '  content: [spec, qa_agent, accepted]',
       '  research: []'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
 
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.mappings).toEqual({
-      feature: ['spec', 'tech_design', 'qa'],
-      code: ['tech_design', 'qa'],
-      content: ['spec', 'qa'],
+      feature: ['spec', 'tech_design', 'qa_agent', 'accepted'],
+      code: ['tech_design', 'qa_agent', 'accepted'],
+      content: ['spec', 'qa_agent', 'accepted'],
       research: []
     });
     expect(parsed.source).toBe('config-file');
@@ -67,23 +67,26 @@ describe('parseRequiredApprovalsYaml', () => {
   it('ignores end-of-line comments and blank lines', () => {
     const yaml = [
       '# top of file',
-      'version: 1 # trailing comment',
+      'version: 2 # trailing comment',
       '',
       'mappings: # header',
       '  # nested comment',
-      '  feature: [spec, tech_design, qa]',
-      '  code: [tech_design, qa]'
+      '  feature: [spec, tech_design, qa_agent, accepted]',
+      '  code: [tech_design, qa_agent, accepted]'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
 
-    expect(parsed.version).toBe(1);
-    expect(parsed.mappings.feature).toEqual(['spec', 'tech_design', 'qa']);
-    expect(parsed.mappings.code).toEqual(['tech_design', 'qa']);
+    expect(parsed.version).toBe(2);
+    expect(parsed.mappings.feature).toEqual(['spec', 'tech_design', 'qa_agent', 'accepted']);
+    expect(parsed.mappings.code).toEqual(['tech_design', 'qa_agent', 'accepted']);
   });
 
   it('throws when version is missing', () => {
-    expect(() => parseRequiredApprovalsYaml('mappings:\n  feature: [qa]')).toThrow(
+    // Use a valid approval type so the parser reaches the version check; the
+    // `qa`-removal from `validApprovalTypes` would otherwise short-circuit
+    // this assertion with an `unknown approval type` error.
+    expect(() => parseRequiredApprovalsYaml('mappings:\n  feature: [spec]')).toThrow(
       /missing top-level `version: <number>` directive/
     );
   });
@@ -99,16 +102,16 @@ describe('parseRequiredApprovalsYaml', () => {
     // newer release understands) still parses. Unknown keys must not throw;
     // they just exit the mappings block.
     const yaml = [
-      'version: 1',
+      'version: 2',
       'extra_header: anything',
       'mappings:',
-      '  feature: [spec, tech_design, qa]'
+      '  feature: [spec, tech_design, qa_agent, accepted]'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
 
-    expect(parsed.version).toBe(1);
-    expect(parsed.mappings).toEqual({ feature: ['spec', 'tech_design', 'qa'] });
+    expect(parsed.version).toBe(2);
+    expect(parsed.mappings).toEqual({ feature: ['spec', 'tech_design', 'qa_agent', 'accepted'] });
   });
 
   it('silently skips mapping entries whose shape does not match `<taskType>: [...]`', () => {
@@ -117,17 +120,17 @@ describe('parseRequiredApprovalsYaml', () => {
     // approval type are rejected. Stray prose or scalar entries are skipped
     // so a partial config file remains usable.
     const yaml = [
-      'version: 1',
+      'version: 2',
       'mappings:',
-      '  feature: [spec, tech_design, qa]',
+      '  feature: [spec, tech_design, qa_agent, accepted]',
       '  not_an_entry: oops',
       '  free_text: should be skipped'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
 
-    expect(parsed.version).toBe(1);
-    expect(parsed.mappings).toEqual({ feature: ['spec', 'tech_design', 'qa'] });
+    expect(parsed.version).toBe(2);
+    expect(parsed.mappings).toEqual({ feature: ['spec', 'tech_design', 'qa_agent', 'accepted'] });
   });
 
   it('lets the last duplicate task-type entry win without throwing', () => {
@@ -138,16 +141,16 @@ describe('parseRequiredApprovalsYaml', () => {
     // `loadRequiredApprovalsConfig` for deltas; a literal duplicate inside a
     // single file is the operator\'s last write winning.
     const yaml = [
-      'version: 1',
+      'version: 2',
       'mappings:',
-      '  feature: [qa]',
-      '  feature: [spec, tech_design, qa]'
+      '  feature: [accepted]',
+      '  feature: [spec, tech_design, qa_agent, accepted]'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
 
-    expect(parsed.version).toBe(1);
-    expect(parsed.mappings.feature).toEqual(['spec', 'tech_design', 'qa']);
+    expect(parsed.version).toBe(2);
+    expect(parsed.mappings.feature).toEqual(['spec', 'tech_design', 'qa_agent', 'accepted']);
   });
 });
 
@@ -176,17 +179,17 @@ describe('loadRequiredApprovalsConfig', () => {
     const path = join(tmpDir, 'required-approvals.yaml');
     writeFileSync(
       path,
-      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      ['version: 2', 'mappings:', '  feature: [accepted]'].join('\n'),
       'utf8'
     );
 
     const config = loadRequiredApprovalsConfig(path);
 
     expect(config.source).toBe('config-file');
-    expect(config.mappings.feature).toEqual(['qa']);
+    expect(config.mappings.feature).toEqual(['accepted']);
     // Untouched task types keep their default values.
-    expect(config.mappings.code).toEqual(['tech_design', 'qa']);
-    expect(config.mappings.content).toEqual(['spec', 'qa']);
+    expect(config.mappings.code).toEqual(['tech_design', 'qa_agent', 'accepted']);
+    expect(config.mappings.content).toEqual(['spec', 'qa_agent', 'accepted']);
     expect(config.mappings.research).toEqual([]);
     expect(config.path).toBe(path);
     expect(config.hash).toMatch(/^[0-9a-f]{64}$/);
@@ -237,7 +240,7 @@ describe('loadRequiredApprovalsConfig', () => {
     const path = join(tmpDir, 'required-approvals.yaml');
     writeFileSync(
       path,
-      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      ['version: 2', 'mappings:', '  feature: [accepted]'].join('\n'),
       'utf8'
     );
 
@@ -260,7 +263,7 @@ describe('loadRequiredApprovalsConfig', () => {
     const basePath = join(tmpDir, 'base.yaml');
     writeFileSync(
       basePath,
-      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      ['version: 2', 'mappings:', '  feature: [accepted]'].join('\n'),
       'utf8'
     );
     const baseConfig = loadRequiredApprovalsConfig(basePath);
@@ -268,7 +271,7 @@ describe('loadRequiredApprovalsConfig', () => {
     const overridePath = join(tmpDir, 'override.yaml');
     writeFileSync(
       overridePath,
-      ['version: 1', 'mappings:', '  feature: [spec, qa]'].join('\n'),
+      ['version: 2', 'mappings:', '  feature: [spec, accepted]'].join('\n'),
       'utf8'
     );
     const overrideConfig = loadRequiredApprovalsConfig(overridePath);
@@ -281,7 +284,7 @@ describe('loadRequiredApprovalsConfig', () => {
     const path = join(tmpDir, 'required-approvals.yaml');
     writeFileSync(
       path,
-      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      ['version: 2', 'mappings:', '  feature: [accepted]'].join('\n'),
       'utf8'
     );
 
@@ -292,7 +295,7 @@ describe('loadRequiredApprovalsConfig', () => {
       const message = String(infoSpy.mock.calls[0]?.[0] ?? '');
       expect(message).toMatch(/\[required-approvals\] resolved policy/);
       expect(message).toMatch(/source=config-file/);
-      expect(message).toMatch(/version=1/);
+      expect(message).toMatch(/version=2/);
       // Hash prefix is the first 12 chars of a 64-char SHA-256 hex digest.
       expect(message).toMatch(/hash=[0-9a-f]{12}…/);
       expect(message).toContain(`path=${path}`);
@@ -318,7 +321,7 @@ describe('loadRequiredApprovalsConfig', () => {
     const path = join(tmpDir, 'required-approvals.yaml');
     writeFileSync(
       path,
-      ['version: 1', 'mappings:', '  feature: [qa]'].join('\n'),
+      ['version: 2', 'mappings:', '  feature: [accepted]'].join('\n'),
       'utf8'
     );
 
@@ -338,9 +341,9 @@ describe('requiredApprovalsFor', () => {
   const config = DEFAULT_REQUIRED_APPROVALS;
 
   it('returns the configured list for known task types', () => {
-    expect(requiredApprovalsFor(config, 'feature')).toEqual(['spec', 'tech_design', 'qa']);
-    expect(requiredApprovalsFor(config, 'content')).toEqual(['spec', 'qa']);
-    expect(requiredApprovalsFor(config, 'code')).toEqual(['tech_design', 'qa']);
+    expect(requiredApprovalsFor(config, 'feature')).toEqual(['spec', 'tech_design', 'qa_agent', 'accepted']);
+    expect(requiredApprovalsFor(config, 'content')).toEqual(['spec', 'qa_agent', 'accepted']);
+    expect(requiredApprovalsFor(config, 'code')).toEqual(['tech_design', 'qa_agent', 'accepted']);
     expect(requiredApprovalsFor(config, 'research')).toEqual([]);
   });
 
@@ -360,8 +363,8 @@ describe('GET /api/v1/task-types/:taskType/required-approvals', () => {
     expect(response.body).toEqual({
       data: {
         taskType: 'feature',
-        requiredApprovals: ['spec', 'tech_design', 'qa'],
-        version: 1,
+        requiredApprovals: ['spec', 'tech_design', 'qa_agent', 'accepted'],
+        version: 2,
         source: 'builtin-default',
         path: null,
         hash: expect.stringMatching(/^[0-9a-f]{64}$/)

@@ -8,7 +8,7 @@ import {
 function taskFixture(overrides: Partial<{
   id: string;
   description: string | null;
-  approvals: Array<{ type: 'spec' | 'tech_design' | 'qa' }>;
+  approvals: Array<{ type: 'spec' | 'tech_design' | 'accepted' }>;
   comments: Array<{ author: string; text: string }>;
 }> = {}) {
   return {
@@ -72,7 +72,7 @@ describe('detectLegacyApprovals', () => {
     );
     expect(detected).toEqual([
       {
-        type: 'qa',
+        type: 'accepted',
         owner: 'Tom',
         note: 'Migrated from `[qa-ac-verified] true` comment.'
       }
@@ -91,7 +91,7 @@ describe('detectLegacyApprovals', () => {
       })
     );
 
-    expect(detected.map((a) => a.type)).toEqual(['spec', 'tech_design', 'qa']);
+    expect(detected.map((a) => a.type)).toEqual(['spec', 'tech_design', 'accepted']);
   });
 
   it('returns an empty list when no legacy signals are present', () => {
@@ -110,10 +110,10 @@ describe('existingApprovalKeys', () => {
     const keys = existingApprovalKeys(
       taskFixture({
         id: 'task-1',
-        approvals: [{ type: 'spec' }, { type: 'qa' }]
+        approvals: [{ type: 'spec' }, { type: 'accepted' }]
       })
     );
-    expect([...keys].sort()).toEqual(['task-1:qa', 'task-1:spec']);
+    expect([...keys].sort()).toEqual(['task-1:accepted', 'task-1:spec']);
   });
 });
 
@@ -141,7 +141,7 @@ describe('summarizeMigration', () => {
     expect(summary.skippedExisting).toBe(1);
     expect(summary.breakdownByType).toEqual([
       { type: 'spec', created: 1, skippedExisting: 1 },
-      { type: 'qa', created: 1, skippedExisting: 0 }
+      { type: 'accepted', created: 1, skippedExisting: 0 }
     ]);
   });
 
