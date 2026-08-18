@@ -162,6 +162,9 @@ model FeatureTaskAnalyticsEvent {
   /// Free-form per-event payload (e.g. PR URLs, failure context).
   details                Json?
   createdAt              DateTime @default(now())
+  /// Auto-updated on every row write. Used by the route handler to
+  /// distinguish UPSERT inserts from UPSERT updates without an extra query.
+  updatedAt              DateTime @updatedAt
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
