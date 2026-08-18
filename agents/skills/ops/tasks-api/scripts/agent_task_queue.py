@@ -53,6 +53,7 @@ QUEUE_KIND_ORDER = {
     "reviewRequest": 2,
     "techDesignApproval": 3,
     "task": 4,
+    "attentionPage": 5,
 }
 TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 URL_RE = re.compile(r"https?://[^\s)>]+")
@@ -351,6 +352,56 @@ def fetch_agent_tasks(assignee: str, base_url: str | None = None) -> list[dict[s
     return [tasks_api_client.get_task(task["id"], base_url=base) for task in summaries]
 
 
+def fetch_attention_owner_tasks(name: str, base_url: str | None = None) -> list[dict[str, Any]]:
+    """Fetch active tasks where ``name`` is a current attention owner.
+
+    Returns the full task dict per match. The list is independent of the
+    assignee query — callers must dedup against the assignee bucket before
+    merging into the heartbeat queue (task ``d8fbe750``).
+    """
+    base = base_url or tasks_api_client.get_base_url()
+    summaries = tasks_api_client.list_tasks(
+        limit=200,
+        status=["open", "ready", "doing", "acceptance"],
+        attention_owner=name,
+        base_url=base,
+    )
+    return [tasks_api_client.get_task(task["id"], base_url=base) for task in summaries]
+
+
+def _build_attention_page_items(
+    attention_owner: str,
+    tasks: list[dict[str, Any]],
+    seen_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Normalise attention-owner-fetched tasks into queue items.
+
+    A task already surfaced via the assignee bucket is skipped; the assignee
+    surface is always the primary signal. New entries carry ``kind:
+    ``attentionPage```, are always ``actionable``, and carry a reason that
+    identifies the page owner.
+    """
+    items: list[dict[str, Any]] = []
+    for task in tasks:
+        task_id = str(task.get("id") or "")
+        if not task_id or task_id in seen_ids:
+            continue
+        items.append(
+            {
+                "kind": "attentionPage",
+                "actionable": True,
+                "id": task_id,
+                "title": task.get("title"),
+                "taskType": task.get("taskType"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "classification": "ACTIONABLE",
+                "reason": f"paged to {attention_owner} as attention owner",
+            }
+        )
+    return items
+
+
 def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     env = os.environ.copy()
     env["GH_CONFIG_DIR"] = os.path.expanduser(config_dir)
@@ -562,6 +613,7 @@ def build_unified_queue(
     task_items: list[dict[str, Any]],
     tech_design_approvals: list[dict[str, Any]],
     github_queue: dict[str, list[dict[str, Any]]],
+    attention_pages: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalize every read-only heartbeat input into one deterministic queue."""
     items: list[dict[str, Any]] = []
@@ -591,6 +643,8 @@ def build_unified_queue(
                 **item,
             }
         )
+    for item in attention_pages or []:
+        items.append({**item, "kind": "attentionPage", "actionable": True})
 
     def sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         actionable_rank = 0 if item.get("actionable") else 1
@@ -613,6 +667,8 @@ def build_work_queue(
     github_prs: list[dict[str, Any]] | None = None,
     tech_design_approvals: list[dict[str, Any]] | None = None,
     delivery_prs: dict[str, dict[str, Any]] | None = None,
+    attention_owner_tasks: list[dict[str, Any]] | None = None,
+    attention_owner: str | None = None,
 ) -> dict[str, Any]:
     task_queue = build_queue(
         tasks,
@@ -620,7 +676,15 @@ def build_work_queue(
     )
     approvals = tech_design_approvals or []
     github_queue = classify_github_prs(agent, github_prs or [])
-    queue = build_unified_queue(task_queue["items"], approvals, github_queue)
+    seen_ids = {str(item.get("id") or "") for item in task_queue["items"] if item.get("id")}
+    attention_items: list[dict[str, Any]] = []
+    if attention_owner and attention_owner_tasks:
+        attention_items = _build_attention_page_items(
+            attention_owner, attention_owner_tasks, seen_ids
+        )
+    queue = build_unified_queue(
+        task_queue["items"], approvals, github_queue, attention_items
+    )
     return {
         "queue": queue,
         "topCandidate": next((item for item in queue if item["actionable"]), None),
@@ -628,6 +692,8 @@ def build_work_queue(
         "actionableTaskCount": task_queue["actionableCount"],
         "techDesignApprovals": approvals,
         **github_queue,
+        "attentionOwner": attention_owner,
+        "attentionPages": attention_items,
     }
 
 
@@ -643,6 +709,14 @@ def print_human(queue: dict[str, Any], assignee: str) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--assignee", required=True, help="Tasks API assignee name, e.g. Rowan")
+    parser.add_argument(
+        "--attention-owner",
+        dest="attention_owner",
+        default=None,
+        help="Also surface tasks where <Name> is a current attention owner (the "
+        "escape-hatch paging mechanism, task d8fbe750). Tasks already returned via "
+        "--assignee are deduped; the assignee surface remains primary.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     return parser
 
@@ -656,12 +730,17 @@ def main() -> None:
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
     github_prs = fetch_github_prs(args.assignee)
     delivery_prs = fetch_linked_delivery_prs(args.assignee, tasks, github_prs)
+    attention_owner_tasks: list[dict[str, Any]] = []
+    if args.attention_owner:
+        attention_owner_tasks = fetch_attention_owner_tasks(args.attention_owner)
     queue = build_work_queue(
         tasks,
         args.assignee,
         github_prs,
         approvals,
         delivery_prs,
+        attention_owner_tasks=attention_owner_tasks,
+        attention_owner=args.attention_owner,
     )
     if args.json:
         print(json.dumps(queue, indent=2))
@@ -677,6 +756,8 @@ def main() -> None:
         print(f"Review requests: {len(queue['reviewRequests'])}")
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
+        if args.attention_owner:
+            print(f"Attention pages for {args.attention_owner}: {len(queue['attentionPages'])}")
 
 
 if __name__ == "__main__":

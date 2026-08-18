@@ -274,6 +274,8 @@ class AgentTaskQueueTest(unittest.TestCase):
                 "reviewRequests",
                 "authoredPrFeedback",
                 "mergeCandidates",
+                "attentionOwner",
+                "attentionPages",
             },
         )
 
@@ -449,6 +451,135 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         queue = agent_task_queue.classify_github_prs("Quinn", [pr])
         self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["blockingApprovals"])
+
+
+    # ---- attentionOwners paging (task d8fbe750) ----
+
+    def test_attention_owner_tasks_calls_list_with_attention_owner_filter(self):
+        with patch.object(
+            agent_task_queue.tasks_api_client,
+            "list_tasks",
+            return_value=[],
+        ) as list_tasks, patch.object(
+            agent_task_queue.tasks_api_client,
+            "get_base_url",
+            return_value="http://test/api/v1",
+        ):
+            agent_task_queue.fetch_attention_owner_tasks("Quinn")
+
+        kwargs = list_tasks.call_args.kwargs
+        self.assertEqual(kwargs["attention_owner"], "Quinn")
+        self.assertEqual(
+            kwargs["status"], ["open", "ready", "doing", "acceptance"]
+        )
+        self.assertEqual(kwargs["limit"], 200)
+
+    def test_attention_owner_fetch_hydrates_full_task_payload(self):
+        with patch.object(
+            agent_task_queue.tasks_api_client,
+            "list_tasks",
+            return_value=[{"id": "task-1"}],
+        ), patch.object(
+            agent_task_queue.tasks_api_client,
+            "get_task",
+            return_value={"id": "task-1", "attentionOwners": ["Quinn"]},
+        ):
+            tasks = agent_task_queue.fetch_attention_owner_tasks("Quinn")
+        self.assertEqual([{"id": "task-1", "attentionOwners": ["Quinn"]}], tasks)
+
+    def test_attention_page_dedups_against_assignee_bucket(self):
+        # Same task id returned through both surfaces must surface ONCE.
+        shared_task = implementation_task(
+            id="00000000-0000-0000-0000-000000000099",
+            title="Already in my queue",
+        )
+        page_only = implementation_task(
+            id="00000000-0000-0000-0000-0000000000aa",
+            title="New attention page",
+        )
+        task_queue = agent_task_queue.build_queue([shared_task])
+        seen = {str(item.get("id") or "") for item in task_queue["items"]}
+        items = agent_task_queue._build_attention_page_items(
+            "Quinn",
+            [
+                {**shared_task, "title": "Already in my queue"},
+                {**page_only, "title": "New attention page"},
+            ],
+            seen,
+        )
+        self.assertEqual(1, len(items))
+        self.assertEqual("New attention page", items[0]["title"])
+
+    def test_attention_page_items_carry_actionable_flag_and_owner(self):
+        task = implementation_task(
+            id="00000000-0000-0000-0000-0000000000bb",
+            title="Paged task",
+        )
+        items = agent_task_queue._build_attention_page_items("Quinn", [task], set())
+        self.assertEqual(1, len(items))
+        item = items[0]
+        self.assertEqual("attentionPage", item["kind"])
+        self.assertTrue(item["actionable"])
+        self.assertEqual("ACTIONABLE", item["classification"])
+        self.assertIn("paged to Quinn", item["reason"])
+
+    def test_build_work_queue_includes_attention_pages_when_provided(self):
+        tasks = [implementation_task()]
+        attention_tasks = [
+            implementation_task(
+                id="00000000-0000-0000-0000-0000000000cc",
+                title="Paged to Quinn",
+            )
+        ]
+        queue = agent_task_queue.build_work_queue(
+            tasks,
+            "Rowan",
+            [],
+            [],
+            None,
+            attention_owner_tasks=attention_tasks,
+            attention_owner="Quinn",
+        )
+        self.assertEqual(1, len(queue["attentionPages"]))
+        self.assertEqual("attentionPage", queue["attentionPages"][0]["kind"])
+        self.assertEqual("Quinn", queue["attentionOwner"])
+        kinds = [item["kind"] for item in queue["queue"]]
+        self.assertIn("attentionPage", kinds)
+
+    def test_attention_pages_rank_below_assignee_tasks(self):
+        # The assignee task must be the topCandidate; the attentionPage
+        # surfaces in the same queue but below assignee work.
+        task = implementation_task(priority="urgent")
+        attention_task = implementation_task(
+            id="00000000-0000-0000-0000-0000000000dd",
+            priority="urgent",
+            title="Newly paged to Quinn",
+        )
+        queue = agent_task_queue.build_work_queue(
+            [task],
+            "Rowan",
+            [],
+            [],
+            None,
+            attention_owner_tasks=[attention_task],
+            attention_owner="Quinn",
+        )
+        self.assertEqual("task", queue["topCandidate"]["kind"])
+        idx_task = next(i for i, item in enumerate(queue["queue"]) if item["kind"] == "task")
+        idx_page = next(
+            i for i, item in enumerate(queue["queue"]) if item["kind"] == "attentionPage"
+        )
+        self.assertLess(idx_task, idx_page)
+
+    def test_build_work_queue_no_attention_pages_when_flag_unset(self):
+        queue = agent_task_queue.build_work_queue(
+            [implementation_task()],
+            "Rowan",
+            [],
+            [],
+        )
+        self.assertEqual(None, queue["attentionOwner"])
+        self.assertEqual([], queue["attentionPages"])
 
 
 if __name__ == "__main__":

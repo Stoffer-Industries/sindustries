@@ -161,6 +161,51 @@ Task responses include:
 - Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
 - Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
 
+**When to use it.** Attention ownership is the **escape hatch** for situations the other planes do not model. Reach for it only when none of `[openclaw-needed]`, `[tech-design]`, `assignee`, or a `TaskApproval` gate fits. Typical cases:
+
+- A task needs Quinn to make a product decision the workflow does not model (scope, priority, or "drop it").
+- A task needs Lox for a platform-lane follow-up nobody else has the context for.
+- A task needs Tom for an off-modelled product read.
+
+Do **not** use `attentionOwners` to mean `[openclaw-needed]`, `[tech-design]`, or `assignee`. The discriminator is whether the structured surface fits.
+
+**Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
+
+```python
+from agents.skills.ops.tasks_api.tasks_api_client import (
+    add_self_to_attention_owners,
+    remove_self_from_attention_owners,
+)
+
+# Idempotent add; re-adding when already present is a no-op.
+add_self_to_attention_owners("<task-uuid>", "Quinn")
+
+# Safe clear: preserves any other names already attached. No-op when
+# self is not currently attached.
+remove_self_from_attention_owners("<task-uuid>", "Quinn")
+```
+
+CLI equivalents (full replacement, not safe-clear):
+
+```bash
+# Set — REPLACES the full set; siblings are dropped if not repeated.
+python3 tasks_api_client.py patch --id <uuid> --attention-owners "Quinn"
+
+# Clear-all — drops every owner. Almost never what you want.
+python3 tasks_api_client.py patch --id <uuid> --clear-attention-owners
+```
+
+**Discovering paged tasks (recipient side).** The shared heartbeat queue
+(`agents/skills/ops/tasks-api/scripts/agent_task_queue.py`) accepts an
+optional `--attention-owner <Name>` flag that surfaces any task where
+`<Name>` is currently in `attentionOwners`, deduped against the
+`--assignee` bucket and ranked below assignee work in the unified queue.
+Each entry carries `kind: "attentionPage"`, `classification:
+"ACTIONABLE"`, and `reason: "paged to <Name> as attention owner"`. The
+flag is the supported way for Quinn's or Lox's heartbeat to find
+off-modelled pages without an ad hoc `tasks_api_client.py list
+--attention-owner <Name>` per pass.
+
 ### Required approvals policy
 
 The Tasks API reads `.openclaw/tasks-api/required-approvals.yaml` on startup to resolve which approval types each `taskType` requires and who owns each type. The file format is intentionally narrow:
@@ -786,6 +831,8 @@ The `409 SPEC_CHECKSUM_MISMATCH` response names the task id, the stored `specChe
 | Symptom | Cause | Fix |
 |---|---|---|
 | `ready → doing` blocked | Missing structured `tech_design` approval or `specChecksum` drift | Quinn grants `tech_design` through the authenticated API; for drift, follow the resync path |
+| `attentionOwners` PATCH silently drops a co-owner | Caller used `--attention-owners <name>` without re-listing siblings — the API treats the field as full-replacement | Use `remove_self_from_attention_owners(uuid, name)` (or its `add_self_to_attention_owners` mirror); both helpers do a GET → mutate → PATCH round-trip |
+| Heartbeat reports no tasks even though you "paged" someone | Either no `--attention-owner <Name>` flag was set on the run, or the page was set under a slightly different name (free-text field, case-insensitive exact match required) | Re-run with `--attention-owner Quinn` (exact match); double-check spelling in the original PATCH |
 | `[openclaw-needed]` never resolved | Quinn missed the heartbeat step | Quinn scans active tasks on the next heartbeat tick |
 | Spec checksum mismatch | ACs edited after spec approval | Hits `PATCH /tasks/:id` when the description ACs change. Treat as spec drift: Lobster unchecks `**Approved by Tom**`, waits for Tom to re-check, then performs the resync path. Comments are drift-tolerant and remain usable for progress/checklist/resync signals. |
 | Spec lifecycle layout failure | Unexpected direct subdirectory under `brain/tasks/specs/` | Remove or migrate the unexpected subdir so only `open/`, `in-progress/`, and `done/` remain. The lobster creates missing expected dirs automatically. |

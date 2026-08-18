@@ -13,6 +13,104 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(tasks_api_client)
 
 
+class TasksApiClientAttentionOwnersTest(unittest.TestCase):
+    """Task d8fbe750: attentionOwners round-trip helpers.
+
+    Both helpers use the same fetch → mutate → PATCH pattern with the
+    API's full-replacement semantics for ``attentionOwners`` (task 66054ab4)
+    so concurrent edits cannot silently drop a co-owner.
+    """
+
+    BASE_URL = "http://tasks.test/api/v1"
+
+    def _task(self, attention_owners):
+        return {
+            "id": "task-1",
+            "attentionOwners": list(attention_owners),
+        }
+
+    def test_remove_self_drops_only_self(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task(["Quinn", "Lox"])
+        ), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"attentionOwners": ["Lox"]}}
+        ) as api_request:
+            result = tasks_api_client.remove_self_from_attention_owners("task-1", "Quinn")
+        api_request.assert_called_once_with(
+            "PATCH",
+            self.BASE_URL,
+            "/tasks/task-1",
+            {"attentionOwners": ["Lox"]},
+            token=None,
+        )
+        self.assertEqual(result, {"attentionOwners": ["Lox"]})
+
+    def test_remove_self_is_noop_when_absent(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task(["Lox"])
+        ), patch.object(tasks_api_client, "api_request") as api_request:
+            result = tasks_api_client.remove_self_from_attention_owners("task-1", "Quinn")
+        api_request.assert_not_called()
+        self.assertEqual(result, {"id": "task-1", "attentionOwners": ["Lox"]})
+
+    def test_remove_self_handles_empty_attention_owners(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task([])
+        ), patch.object(tasks_api_client, "api_request") as api_request:
+            result = tasks_api_client.remove_self_from_attention_owners("task-1", "Quinn")
+        api_request.assert_not_called()
+        self.assertEqual(result, {"id": "task-1", "attentionOwners": []})
+
+    def test_remove_self_handles_missing_attention_owners_key(self):
+        # Defensive: a task loaded from a stale API cache or partial fetch may
+        # lack the key entirely. The helper must still no-op cleanly.
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value={"id": "task-1"}
+        ), patch.object(tasks_api_client, "api_request") as api_request:
+            result = tasks_api_client.remove_self_from_attention_owners("task-1", "Quinn")
+        api_request.assert_not_called()
+        self.assertEqual(result, {"id": "task-1"})
+
+    def test_add_self_prepends_when_absent(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task(["Lox"])
+        ), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"attentionOwners": ["Quinn", "Lox"]}}
+        ) as api_request:
+            result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+        api_request.assert_called_once_with(
+            "PATCH",
+            self.BASE_URL,
+            "/tasks/task-1",
+            {"attentionOwners": ["Quinn", "Lox"]},
+            token=None,
+        )
+        self.assertEqual(result, {"attentionOwners": ["Quinn", "Lox"]})
+
+    def test_add_self_is_noop_when_already_present(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task(["Quinn", "Lox"])
+        ), patch.object(tasks_api_client, "api_request") as api_request:
+            result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+        api_request.assert_not_called()
+        self.assertEqual(result, {"id": "task-1", "attentionOwners": ["Quinn", "Lox"]})
+
+    def test_add_self_to_empty_attention_owners(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task([])
+        ), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"attentionOwners": ["Quinn"]}}
+        ) as api_request:
+            tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+        api_request.assert_called_once_with(
+            "PATCH",
+            self.BASE_URL,
+            "/tasks/task-1",
+            {"attentionOwners": ["Quinn"]},
+            token=None,
+        )
+
+
 class TasksApiClientPatchTest(unittest.TestCase):
     def test_patch_depends_on_maps_to_depends_on_ids(self):
         parser = tasks_api_client.build_parser()
