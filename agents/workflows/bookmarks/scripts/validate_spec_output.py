@@ -14,6 +14,10 @@ Task proposals are read directly from the spec markdown at approval time
 
 Validations:
   - each `specDoc` must exist on disk before the state is updated
+  - each `specDoc` must contain the unchecked `- [ ] **Approved by Tom**`
+    marker `handle_approval_reply.py`'s `set_spec_approval_checkbox` toggles
+    on approval; specs missing it would otherwise pass this gate, reach
+    approval delivery, and only fail once Tom clicks Approve
 
 Idempotent:
   - rejects entries unless the existing bookmark is awaiting a spec
@@ -77,6 +81,11 @@ from classification_schema import Classification  # noqa: E402
 
 H1_RE = re.compile(r"^#\s+(?:Spec\s*[—–-]+\s*)?(.*\S)\s*$", re.MULTILINE)
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+# Mirrors handle_approval_reply.py's unchecked_re — kept in sync manually
+# since the two scripts don't share a module for this check.
+UNCHECKED_APPROVED_BY_TOM_RE = re.compile(
+    r"^\s*-\s*\[\s\]\s+\*\*Approved by Tom\*\*\s*$", re.MULTILINE
+)
 
 DEFAULT_OUTPUT = STATE_ROOT / "spec-output.json"
 REQUIRED_SPEC_KEYS = {"title", "specDoc"}
@@ -311,6 +320,21 @@ def main(argv: list[str] | None = None) -> int:
             invalid.append({
                 "bookmarkKey": bookmark_key,
                 "errors": [f"spec file(s) missing on disk: {missing_files}"],
+            })
+            continue
+
+        # Spec files must carry the unchecked approval marker before they can
+        # be offered to Tom — otherwise the toggle fails at approval time.
+        missing_marker = [
+            doc for doc in spec_docs
+            if not UNCHECKED_APPROVED_BY_TOM_RE.search((WORKSPACE / doc).read_text(encoding="utf-8"))
+        ]
+        if missing_marker:
+            invalid.append({
+                "bookmarkKey": bookmark_key,
+                "errors": [
+                    f"spec file(s) missing unchecked '- [ ] **Approved by Tom**' marker: {missing_marker}"
+                ],
             })
             continue
 
