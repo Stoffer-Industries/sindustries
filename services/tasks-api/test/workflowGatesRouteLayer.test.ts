@@ -111,6 +111,7 @@ describe('config — approval owners', () => {
     expect(DEFAULT_REQUIRED_APPROVALS.owners).toEqual({
       spec: 'Tom',
       tech_design: 'Quinn',
+      qa_agent: 'Ash',
       accepted: 'Tom'
     });
   });
@@ -118,6 +119,7 @@ describe('config — approval owners', () => {
   it('gateOwnerFor returns the configured owner for known approval types', () => {
     expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'spec')).toBe('Tom');
     expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'tech_design')).toBe('Quinn');
+    expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'qa_agent')).toBe('Ash');
     expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'accepted')).toBe('Tom');
   });
 
