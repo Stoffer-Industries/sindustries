@@ -111,14 +111,14 @@ describe('config — approval owners', () => {
     expect(DEFAULT_REQUIRED_APPROVALS.owners).toEqual({
       spec: 'Tom',
       tech_design: 'Quinn',
-      qa: 'Tom'
+      accepted: 'Tom'
     });
   });
 
   it('gateOwnerFor returns the configured owner for known approval types', () => {
     expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'spec')).toBe('Tom');
     expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'tech_design')).toBe('Quinn');
-    expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'qa')).toBe('Tom');
+    expect(gateOwnerFor(DEFAULT_REQUIRED_APPROVALS, 'accepted')).toBe('Tom');
   });
 
   it('gateOwnerFor returns null for unknown or empty approval types', () => {
@@ -131,18 +131,18 @@ describe('config — approval owners', () => {
     const yaml = [
       'version: 1',
       'mappings:',
-      '  feature: [spec, tech_design, qa]',
+      '  feature: [spec, tech_design, accepted]',
       'owners:',
       '  spec: Tom',
       '  tech_design: Quinn',
-      '  qa: Tom'
+      '  accepted: Tom'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
     expect(parsed.owners).toEqual({
       spec: 'Tom',
       tech_design: 'Quinn',
-      qa: 'Tom'
+      accepted: 'Tom'
     });
   });
 
@@ -150,7 +150,7 @@ describe('config — approval owners', () => {
     const yaml = [
       'version: 1',
       'mappings:',
-      '  feature: [spec, tech_design, qa]',
+      '  feature: [spec, tech_design, accepted]',
       'owners:',
       '  spec: Tom',
       '  tech_design: Quinn',
@@ -447,21 +447,21 @@ describe('parseRequiredApprovalsYaml — owners section isolation', () => {
     const yaml = [
       'version: 1',
       'mappings:',
-      '  feature: [spec, tech_design, qa]',
+      '  feature: [spec, tech_design, accepted]',
       'owners:',
       '  spec: Tom',
       '  tech_design: Quinn',
-      '  qa: Tom'
+      '  accepted: Tom'
     ].join('\n');
 
     const parsed = parseRequiredApprovalsYaml(yaml);
     expect(parsed.mappings).toEqual({
-      feature: ['spec', 'tech_design', 'qa']
+      feature: ['spec', 'tech_design', 'accepted']
     });
     expect(parsed.owners).toEqual({
       spec: 'Tom',
       tech_design: 'Quinn',
-      qa: 'Tom'
+      accepted: 'Tom'
     });
   });
 
@@ -478,11 +478,11 @@ describe('parseRequiredApprovalsYaml — owners section isolation', () => {
     const yamlMappingsOnly = [
       'version: 1',
       'mappings:',
-      '  feature: [spec, tech_design, qa]'
+      '  feature: [spec, tech_design, accepted]'
     ].join('\n');
     const parsedMappingsOnly = parseRequiredApprovalsYaml(yamlMappingsOnly);
     expect(parsedMappingsOnly.mappings).toEqual({
-      feature: ['spec', 'tech_design', 'qa']
+      feature: ['spec', 'tech_design', 'accepted']
     });
     expect(parsedMappingsOnly.owners).toEqual({});
   });
@@ -506,7 +506,7 @@ describe('loadRequiredApprovalsConfig — owners merge with defaults', () => {
     const result = loadRequiredApprovalsConfig('/nope.yaml');
     expect(result.owners.spec).toBe('Tom');
     expect(result.owners.tech_design).toBe('Quinn');
-    expect(result.owners.qa).toBe('Tom');
+    expect(result.owners.accepted).toBe('Tom');
   });
 });
 
