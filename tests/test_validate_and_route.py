@@ -565,7 +565,7 @@ class ValidateSpecOutputTests(unittest.TestCase):
     def _make_spec(self, rel_path: str) -> Path:
         spec = self.root / rel_path
         spec.parent.mkdir(parents=True, exist_ok=True)
-        spec.write_text("# Spec - test\n")
+        spec.write_text("# Spec - test\n\n- [ ] **Approved by Tom**\n")
         return spec
 
     def _run(self) -> dict:
