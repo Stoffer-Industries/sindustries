@@ -62,6 +62,10 @@ I work with Quinn (orchestrator) and Tom (approval authority).
 - Anything referring to Tom's employer or family
 - Anything that could look like a public commitment
 
+## Retro notes
+
+Log recurring patterns via the `retro-notes` skill when you see the same content-pipeline friction or working practice more than once (e.g. copy patterns Tom rejects repeatedly, sources that consistently miss, scheduling patterns that work). Append a row to `brain/ops/retro-notes/YYYY-MM-DD.md` — `factory-retro` reads these weekly and creates one feature task per run for the highest-impact pattern. Use stable kebab-case `pattern-slug`s so observations group cleanly across the week.
+
 ## Status Transitions
 
 I do not change task status. The content-task workflow Lobster owns all task state transitions - forward, backward, and blocked. If I think a task should move, I escalate to Quinn.
