@@ -70,7 +70,7 @@ steps:
       --base-url ${TASKS_API_BASE_URL}
       --json
     stdin: >-
-      {"directCreateItems": $request_spec_approval.directCreateItems}
+      {"directCreateItems": $request_spec_approval.json.directCreateItems}
 
   - id: create_tasks_from_proposals
     command: >-
@@ -78,7 +78,7 @@ steps:
       --base-url ${TASKS_API_BASE_URL}
       --json
     stdin: >-
-      {"readyPackages": $request_spec_approval.readyPackages, "blockedPackages": $request_spec_approval.blockedPackages}
+      {"readyPackages": $request_spec_approval.json.readyPackages, "blockedPackages": $request_spec_approval.json.blockedPackages}
     condition: $request_spec_approval.approved
 
   - id: resolve_spec_request
