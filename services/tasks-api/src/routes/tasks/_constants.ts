@@ -14,7 +14,7 @@ export const validTaskTypes = new Set(['content', 'code', 'research', 'feature']
 // and `ApprovalState` enums. Kept here as plain string sets so route-layer
 // validation stays a synchronous lookup against the same vocabulary that
 // the database enforces.
-export const validApprovalTypes = new Set(['spec', 'tech_design', 'qa']);
+export const validApprovalTypes = new Set(['spec', 'tech_design', 'qa_agent', 'accepted']);
 export const validApprovalStates = new Set(['approved', 'revoked']);
 
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -423,13 +423,13 @@ def build_parser():
 
     approve = sub.add_parser("approve", help="Grant a structured task approval as the authenticated service actor")
     approve.add_argument("--id", required=True, help="Full task UUID")
-    approve.add_argument("--type", required=True, choices=["spec", "tech_design", "qa"])
+    approve.add_argument("--type", required=True, choices=["spec", "tech_design", "qa_agent", "accepted"])
     approve.add_argument("--note", help="Optional approval rationale")
     approve.set_defaults(func=cmd_approve)
 
     revoke = sub.add_parser("revoke-approval", help="Revoke a structured task approval as the authenticated service actor")
     revoke.add_argument("--id", required=True, help="Full task UUID")
-    revoke.add_argument("--type", required=True, choices=["spec", "tech_design", "qa"])
+    revoke.add_argument("--type", required=True, choices=["spec", "tech_design", "qa_agent", "accepted"])
     revoke.set_defaults(func=cmd_revoke_approval)
 
     a = sub.add_parser("archive", help="Archive (soft-delete) a task")

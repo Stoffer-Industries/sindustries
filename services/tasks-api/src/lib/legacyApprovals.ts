@@ -9,7 +9,7 @@ const SPEC_DESCRIPTION_NEGATIVE_PATTERN = /^\s*-\s*\[ \]\s+\*\*Approved by Tom\*
 const TECH_DESIGN_COMMENT_PATTERN = /\[tech-design-approved\]\s+true/;
 const QA_COMMENT_PATTERN = /\[qa-ac-verified\]\s+true/;
 
-export type ApprovalType = 'spec' | 'tech_design' | 'qa';
+export type ApprovalType = 'spec' | 'tech_design' | 'accepted';
 
 export interface DetectedApproval {
   type: ApprovalType;
@@ -48,7 +48,7 @@ export function detectLegacyApprovals(task: TaskLikeForMigration): DetectedAppro
     }
     if (QA_COMMENT_PATTERN.test(comment.text)) {
       out.push({
-        type: 'qa',
+        type: 'accepted',
         owner: comment.author,
         note: 'Migrated from `[qa-ac-verified] true` comment.'
       });

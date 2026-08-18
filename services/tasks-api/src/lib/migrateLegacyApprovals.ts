@@ -23,7 +23,7 @@ import {
   existingApprovalKeys
 } from './legacyApprovals.ts';
 
-export type ApprovalType = 'spec' | 'tech_design' | 'qa';
+export type ApprovalType = 'spec' | 'tech_design' | 'accepted';
 
 export interface TaskApproval {
   id: string;

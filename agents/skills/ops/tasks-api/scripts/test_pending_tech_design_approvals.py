@@ -62,7 +62,7 @@ class TechDesignApprovedTest(unittest.TestCase):
         self.assertFalse(p.tech_design_approved(task))
 
     def test_other_approval_type_is_not_approval(self):
-        task = {"approvals": [{"type": "qa", "state": "approved"}]}
+        task = {"approvals": [{"type": "accepted", "state": "approved"}]}
         self.assertFalse(p.tech_design_approved(task))
 
     def test_no_approvals_is_not_approval(self):

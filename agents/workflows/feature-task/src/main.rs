@@ -966,14 +966,14 @@ fn task_approval_granted(task: &Task, approval_type: &str) -> bool {
 fn spec_check_should_skip_legacy_mutation(task: &Task) -> bool {
     task_approval_granted(task, "spec")
 }
-fn qa_ac_verified_structured(task: &Task) -> bool {
-    task_approval_granted(task, "qa")
+fn accepted_structured(task: &Task) -> bool {
+    task_approval_granted(task, "accepted")
 }
-fn qa_ac_verified_failures_structured(task: &Task) -> Vec<String> {
-    if qa_ac_verified_structured(task) {
+fn accepted_structured_failures(task: &Task) -> Vec<String> {
+    if accepted_structured(task) {
         vec![]
     } else {
-        vec!["Structured QA approval is missing or not approved; Tom must approve the `qa` TaskApproval before closing.".to_string()]
+        vec!["Structured accepted approval is missing or not approved; Tom must approve the `accepted` TaskApproval before closing.".to_string()]
     }
 }
 
@@ -1225,7 +1225,7 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
 
     // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
     // Require Tom's explicit sign-off before closing.
-    let qa_failures = qa_ac_verified_failures_structured(&env.task);
+    let qa_failures = accepted_structured_failures(&env.task);
     if is_past(&env.task, "acceptance") {
         if !qa_failures.is_empty() {
             if !args.dry_run {
@@ -4777,13 +4777,13 @@ mod tests {
             approvals: vec![
                 approval_row("spec", "approved"),
                 approval_row("tech_design", "approved"),
-                approval_row("qa", "approved"),
+                approval_row("accepted", "approved"),
             ],
             ..Default::default()
         };
         assert!(spec_is_approved(&approved));
         assert!(tech_design_approved_structured(&approved));
-        assert!(qa_ac_verified_structured(&approved));
+        assert!(accepted_structured(&approved));
         let legacy = Task {
             description: Some("- [x] **Approved by Tom**".into()),
             comments: vec![TaskComment {
@@ -4794,18 +4794,18 @@ mod tests {
         };
         assert!(!spec_is_approved(&legacy));
         assert!(!tech_design_approved_structured(&legacy));
-        assert!(!qa_ac_verified_structured(&legacy));
+        assert!(!accepted_structured(&legacy));
         let revoked = Task {
             approvals: vec![
                 approval_row("spec", "revoked"),
                 approval_row("tech_design", "revoked"),
-                approval_row("qa", "revoked"),
+                approval_row("accepted", "revoked"),
             ],
             ..legacy
         };
         assert!(!spec_is_approved(&revoked));
         assert!(!tech_design_approved_structured(&revoked));
-        assert!(!qa_ac_verified_structured(&revoked));
+        assert!(!accepted_structured(&revoked));
     }
 
     #[test]

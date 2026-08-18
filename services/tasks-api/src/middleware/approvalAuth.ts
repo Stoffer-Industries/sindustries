@@ -4,14 +4,14 @@ import { prisma } from '../lib/prisma.ts';
 import { sendError } from '../lib/http.ts';
 import { config } from '../config/index.ts';
 
-export type ApprovalType = 'spec' | 'tech_design' | 'qa';
+export type ApprovalType = 'spec' | 'tech_design' | 'qa_agent' | 'accepted';
 type ServiceCredential = { token: string; actor: string; approvalTypes: ApprovalType[] };
 export type ApprovalPrincipal = { actor: string; approvalTypes: ReadonlySet<ApprovalType>; kind: 'browser_session' | 'service' };
 
 declare global { namespace Express { interface Request { approvalPrincipal?: ApprovalPrincipal } } }
 
 const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
-  Tom: new Set(['spec', 'qa']), Quinn: new Set(['tech_design'])
+  Tom: new Set(['spec', 'accepted']), Quinn: new Set(['tech_design']), Ash: new Set(['qa_agent'])
 };
 
 function loadServiceCredentials(): ServiceCredential[] {
@@ -23,7 +23,7 @@ function loadServiceCredentials(): ServiceCredential[] {
   return parsed.map((value, index) => {
     const item = value as Partial<ServiceCredential>;
     if (typeof item?.token !== 'string' || item.token.length < 16 || typeof item.actor !== 'string' ||
-      !Array.isArray(item.approvalTypes) || item.approvalTypes.some((t) => !['spec', 'tech_design', 'qa'].includes(t as ApprovalType))) {
+      !Array.isArray(item.approvalTypes) || item.approvalTypes.some((t) => !['spec', 'tech_design', 'qa_agent', 'accepted'].includes(t as ApprovalType))) {
       throw new Error(`TASKS_API_APPROVAL_SERVICE_CREDENTIALS[${index}] is invalid`);
     }
     return item as ServiceCredential;
