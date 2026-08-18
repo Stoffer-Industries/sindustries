@@ -94,6 +94,45 @@ class BookmarkSpecLifecycleTests(unittest.TestCase):
             self.assertNotIn(f'`{source_rel}`', index_text)
             self.assertIn(f'`{dest_rel}`', index_text)
 
+    def test_bookmark_task_creation_seeds_wiki_entry_for_unindexed_legacy_spec(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            mod = load_module('lobster_create_tasks_legacy_wiki_test', 'lobster_create_tasks_from_proposals.py', workspace)
+            source_rel = 'brain/bookmarks/specs/example-abcd1234.md'
+            source = workspace / source_rel
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '# Spec — Example\n\n- [x] **Approved by Tom**\n\n## Outcome\nShip it.\n\n## Acceptance Criteria\n- [ ] AC1: Build it\n',
+                encoding='utf-8',
+            )
+            # Deliberately do NOT seed the wiki index for source_rel — this
+            # reproduces a spec created before validate_spec_output.py wired
+            # in wiki_upsert_entry (2026-08-14), so old_source was never
+            # indexed. retarget_entry alone would hard-fail here even though
+            # the task and file move below succeed.
+            load_module('wiki_catalog_legacy_wiki_test', '../../wiki/wiki_catalog.py', workspace)
+
+            def fake_api(method, base_url, path, payload=None, *, token=None):
+                if method == 'POST':
+                    return {'data': {'id': 'task-1', 'description': payload['description'], 'tags': payload['tags']}}
+                if method == 'PATCH':
+                    return {'data': {'id': 'task-1'}}
+                return {'data': {'id': 'task-1', 'description': ''}}
+
+            with mock.patch.object(mod, 'api_request', side_effect=fake_api):
+                result, error = mod.create_task_for_spec('http://tasks', 'agent-tools', 'abcd1234', source_rel, [source_rel], {})
+
+            self.assertIsNone(error)
+            self.assertIsNotNone(result)
+            dest_rel = 'brain/tasks/specs/in-progress/example-abcd1234.md'
+            self.assertEqual(result['specDoc'], dest_rel)
+            self.assertFalse(source.exists())
+            self.assertTrue((workspace / dest_rel).exists())
+            index_text = (workspace / 'brain/wiki/index.md').read_text(encoding='utf-8')
+            self.assertIn(f'`{dest_rel}`', index_text)
+            self.assertIn('Example', index_text)
+            self.assertIn('Ship it.', index_text)
+
     def test_bookmark_move_is_idempotent_and_repairs_stale_spec_line_for_existing_task(self):
         with tempfile.TemporaryDirectory() as td:
             workspace = Path(td)
