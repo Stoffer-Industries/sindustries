@@ -1,6 +1,6 @@
 ---
 name: factory-retro
-description: "Weekly retro on feature-task gate health. Reads the Post-Merge Feature Factory Analytics events (task f170e344) instead of re-scanning comments/PRs, and surfaces the top 3 suggestions to reduce gate fails."
+description: "Weekly retro on feature-task gate health and recurring patterns. Reads Post-Merge Feature Factory Analytics events (task f170e344), agent retro-notes (brain/ops/retro-notes/*.md), and auto-creates one feature task per run for the highest-impact pattern — Tom approves via the brain spec."
 ---
 
 # Feature Factory Retro
@@ -17,7 +17,20 @@ now emits a `gate_failure` event on every gate block and a `terminal_summary` ev
 `done`/`accepted` transition. That's a structured, queryable record of the same signal this
 skill used to reconstruct by re-parsing `[feature-task-progress-checklist]` comments and PR
 bodies. Prefer the event stream; only fall back to comment/PR scraping for the two things
-events don't cover (see Step 4).
+events don't cover (see Step 5).
+
+**Why also retro-notes:** agents append rows to `brain/ops/retro-notes/YYYY-MM-DD.md` whenever they
+notice the same shape of friction (or working practice) recur (`agents/skills/retro-notes/SKILL.md`).
+This catches friction the lobster can't see — undocumented workarounds, missing mechanisms, patterns
+that don't trip any tracked gate. Treat retro-notes as the **second signal source** alongside the
+analytics event stream; the two are merged in Step 4's ranking.
+
+**Why auto-create one feature task:** the actioning half of the loop is `pattern → note → auto-created
+task → Tom approves via brain spec`. Without this, factory-retro would only surface observations;
+tom still has to manually translate them into tasks. The auto-create puts the highest-impact pattern
+directly into the backlog as a `feature` task; Tom approves via the brain-spec flow the same way he
+approves every other feature task. One task per run is intentional: keeps the backlog signal density
+high without spamming.
 
 **Known gap:** there is no global aggregation endpoint yet (that's task 6a5783a7, still in
 `doing` — a Postgres rollup fed by these same events). Until it ships, per-task gate-failure
@@ -30,6 +43,29 @@ All data plumbing below lives in `agents/skills/ops/tasks-analytics/` — see th
 endpoint details, script args, and the supersession note for when task 6a5783a7's
 aggregation endpoint replaces the per-task loop. This skill only owns the report shape and
 the failure-message → suggestion lookup table (domain knowledge, not data plumbing).
+
+---
+
+## Step 0 — Retro notes this week
+
+```bash
+ls -1 /Users/quinnstoffer/.openclaw/workspace/brain/ops/retro-notes/*.md 2>/dev/null \
+  | tail -7 \
+  | xargs -I {} sh -c 'echo "=== {} ==="; cat {}' 2>/dev/null
+```
+
+Read the last 7 days of files. For each row, extract `pattern-slug`, `agent`, `good|bad`, and the
+one-line observation. Group by slug and count occurrences.
+
+Score each slug:
+- `bad` pattern: `count × 3` (highest weight — these are blockers, not signal)
+- `good` pattern: `count × 2` (lower weight — working practices are informational)
+- Patterns with no `suggested-action` field: skip from ranking (observation-only, surface in digest)
+
+Output: `{"patterns": [{"slug": "...", "agent": "...", "score": N, "occurrences": N, "suggestedAction": "..."}, ...]}`
+sorted by score descending.
+
+If the directory doesn't exist or contains no rows: output empty patterns list, proceed with events-only.
 
 ---
 
@@ -80,6 +116,11 @@ the most-common-first list Step 4 selects its top 3 from.
 If `total == 0`: skip Step 4 (Top 3 suggestions) — there's nothing to suggest against, even
 if the weekly bucket showed non-zero counts from a prior period.
 
+**Retro-notes merge:** retro-note patterns from Step 0 are added to the ranking as additional
+entries. A retro-note pattern with score `>= 6` (count × weight) is treated equivalently to a
+gate-failure message with count `>= 2`. Step 4 selects its top 3 from the combined list — both
+sources compete on the same score scale. This is the unified view factory-retro reports on.
+
 ---
 
 ## Step 4 — Top 3 suggestions to reduce gate fails
@@ -121,7 +162,46 @@ do not pad with generic filler.
 
 ---
 
-## Step 5 — Deep checks (still requires PR/comment scraping — not covered by events)
+## Step 5 — Auto-create one feature task (highest-impact pattern)
+
+This is the actioning half of the loop: `pattern → note → auto-created task → Tom approves via
+brain spec`. Without this step, factory-retro only surfaces observations; Tom still has to manually
+translate them into tasks.
+
+Take the highest-score entry from the combined Step 0 + Step 3 ranking (skip any entry that lacks a
+`suggested-action` field — those are observation-only).
+
+Build a feature task:
+
+```bash
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py create \
+    --title "<suggested-action, one line, title-case, max 80 chars>" \
+    --description "<observation + count + evidence links + pattern-slug>" \
+    --taskType feature \
+    --priority medium
+```
+
+Notes on what gets passed in:
+- **Title**: the pattern's `suggested-action` (one line, title-case). Truncate at 80 chars.
+- **Description**: includes the observation, the count ("3 occurrences this week"), the evidence
+  links (task IDs / PR numbers / file paths), and the original `pattern-slug` in a callout. Tom
+  approves via brain spec per the normal feature-task flow.
+- **taskType**: `feature` — so it lands in the brain-spec approval queue, not the ops queue.
+- **priority**: `medium` by default. Promote to `high` only if the top pattern's `bad` tag comes
+  with `severity: high` or equivalent in the retro-notes row.
+- **assignee**: leave unset — Tom picks during brain-spec approval.
+
+Skip this step entirely if the highest-score entry is already a `gate_failure` message that has
+created a task within the last 7 days. Check via `tally_events.py` for the most recent
+`task-created` comment on a task with the same `pattern-slug`. Don't duplicate.
+
+If Step 0 returned no patterns AND Step 3 returned `total == 0`: skip this step entirely. The
+weekly digest still gets sent (Step 7), but no task is created — there's nothing to act on.
+
+---
+
+## Step 6 — Deep checks (still requires PR/comment scraping — not covered by events)
 
 Two signals aren't in the analytics event schema yet. Only run these against Step 2's
 terminal-task list (small set, don't scale this to all active tasks):
@@ -147,7 +227,7 @@ Evidence-type mix (testID vs not-tested vs not-code) is already covered by Step 
 
 ---
 
-## Step 6 — Write the report
+## Step 7 — Write the report
 
 Plain text for Telegram.
 
@@ -157,11 +237,19 @@ Plain text for Telegram.
 Terminal tasks: <terminalTaskCount>  |  Gate failures: <gateFailureCount>  (<gateFailureRate as %>, prior week <prior rate>)
 Quality/Capacity split: <qualityFailureCount>/<capacityFailureCount>
 PR cycle time: median <medianPrCycleTimeSeconds>s, p90 <p90PrCycleTimeSeconds>s
+Retro notes: <retroNoteCount> rows, <uniquePatternCount> unique patterns
 
-Top 3 suggestions to reduce gate fails:
-1. [N] <suggestion>
-2. [N] <suggestion>
-3. [N] <suggestion>
+Auto-created feature task (highest impact):
+→ <taskTitle> — <taskId> — score <score> — <one-line description>
+→ Tom: approve via brain spec at brain/tasks/specs/open/<slug>.md
+
+Top 3 patterns (highest impact):
+1. [score N] <pattern-slug> — <observation> | evidence: <ids>
+   → action: <suggested-action>
+2. [score N] <pattern-slug> — <observation> | evidence: <ids>
+   → action: <suggested-action>
+3. [score N] <pattern-slug> — <observation> | evidence: <ids>
+   → action: <suggested-action>
 
 Findings:
 • [Task title] — <backfill-PR or system-spec-quality finding, if any>
@@ -173,13 +261,13 @@ Findings:
 If Step 1 already stopped (no signal): output just `"✅ No signal this week — no gate
 failures, no terminal tasks."` and skip the rest of this template.
 
-If Step 3 found `total == 0` but Step 1 had terminal tasks: omit the "Top 3 suggestions"
-block entirely rather than printing an empty one.
+If Step 3 found `total == 0` AND Step 0 returned no patterns: omit the "Top 3 patterns"
+and "Auto-created feature task" blocks entirely rather than printing empty ones.
 
 ---
 
-## Step 7 — Deliver
+## Step 8 — Deliver
 
-Output the report and let Quinn decide whether to message Tom. Not scheduled — run on
-request. (If a recurring cadence is wanted later, that's a separate explicit ask; don't
-add one speculatively.)
+Output the report and let Quinn decide whether to message Tom. The cron wiring is Quinn's
+post-merge action — once registered, this skill fires weekly on a fixed cadence and Quinn
+delivers the digest. Until the cron is wired, run on request.
