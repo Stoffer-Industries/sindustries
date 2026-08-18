@@ -270,6 +270,12 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
     }
 
     return res.status(200).json({ data: mapTask(task, mapTaskOptionsFor(task)) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+tasksRouter.post('/tasks', async (req, res, next) => {
   try {
     const rawTitle = normalizeString(req.body?.title);
     const description = normalizeString(req.body?.description) || null;
@@ -545,6 +551,12 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     });
 
     return res.status(200).json({ data: mapTask(task, mapTaskOptionsFor(task)) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+tasksRouter.post('/tasks/:id/comments', async (req, res, next) => {
   try {
     const id = parseTaskId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
