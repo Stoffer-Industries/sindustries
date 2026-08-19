@@ -5,9 +5,12 @@ by `agent-task-queue-gh-api-hang-2026-08-17` onto a single shared helper so the 
 script author cannot reintroduce the unguarded-`subprocess.run` class of bug.
 
 Public API:
-    DEFAULT_TIMEOUT_SECONDS: float = 30.0
-        Module-level default. Long enough to absorb normal GitHub-API tail latency,
-        short enough that the heartbeat's stuck state is bounded.
+    DEFAULT_TIMEOUT_SECONDS: float = 25.0
+        Module-level default. Set 5s below the heartbeat's 30s exec timeout so that
+        `subprocess.TimeoutExpired` raises (and python3 flushes stdout) before the
+        parent exec timeout fires — incident `agent-task-queue-script-subprocess-timeout-race-2026-08-20`.
+        Long enough for normal GitHub-API tail latency, short enough that the
+        heartbeat's stuck state is bounded.
 
     safe_run(cmd, *, timeout=DEFAULT_TIMEOUT_SECONDS, **kwargs) -> subprocess.CompletedProcess
         `subprocess.run` with a default timeout. **kwargs forwards verbatim, so
@@ -54,7 +57,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-DEFAULT_TIMEOUT_SECONDS: float = 30.0
+DEFAULT_TIMEOUT_SECONDS: float = 25.0
 
 
 def safe_run(
