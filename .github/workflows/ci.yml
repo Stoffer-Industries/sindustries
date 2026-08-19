@@ -212,6 +212,26 @@ jobs:
       - name: Run feature-task tests
         run: cargo test --manifest-path agents/workflows/feature-task/Cargo.toml
 
+  ash-tests:
+    name: ash verifier tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agents/ash/package-lock.json
+
+      - name: Install agents/ash dependencies
+        run: npm ci --prefix agents/ash
+
+      - name: Run ash verifier tests
+        run: npm test --prefix agents/ash
+
   budget-api-tests:
     name: budget-api tests (unit + db integration)
     runs-on: ubuntu-latest
