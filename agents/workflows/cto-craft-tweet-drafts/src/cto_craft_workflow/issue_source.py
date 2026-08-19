@@ -46,7 +46,28 @@ class LatestIssue:
 # The selector patterns below are deliberately specific to the current
 # public TMW archive. Anything that returns no match on a known fixture
 # is treated as a parse error, not a silent no-op.
-_ARCHIVE_HREF_PATTERN = re.compile(r"^/issues?/[\w\-/]+/?$|^https?://[^/]+/issues?/[\w\-/]+/?$")
+#
+# TMW's URL scheme has drifted at least once (was ``/issue/<slug>`` before
+# the 2026 redesign; is now ``/tmw-<id>/``). When it drifts again the
+# pattern below is the only line that needs to change — see the
+# ``tests/fixtures/archive.html`` snapshot date in the test docstring for
+# the latest known-good scheme.
+#
+# The absolute alternative is scoped to TMW's own host on purpose: the
+# bare ``/tmw-`` prefix collides with cross-host URLs such as
+# ``https://ctocraft.com/tmw-sponsorship/`` that appear earlier in the
+# archive document than the real issue anchors and would otherwise be
+# picked as the "latest issue". Relative paths resolve against the
+# archive URL (which is always TMW's host), so the relative alternative
+# does not need the same scoping.
+_ARCHIVE_HREF_PATTERN = re.compile(
+    r"^/tmw-[\w\-/]+/?$"
+    r"|^https?://(?:[^/]+\.)?techmanagerweekly\.com/tmw-[\w\-/]+/?$"
+)
+# Article anchors inside an issue page are absolute third-party URLs
+# (e.g. staysaasy.com, lethain.com, substack.com) — those hosts are
+# unaffected by TMW's own URL-scheme drift, so this pattern doesn't need
+# the ``tmw-`` prefix and is intentionally broad.
 _ARTICLE_HREF_PATTERN = re.compile(r"^https?://[^/]+/[\w\-/]+/?$")
 
 
