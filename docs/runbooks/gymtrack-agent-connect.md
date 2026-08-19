@@ -13,7 +13,12 @@ GymTrack's Workouts CTA hands the user to Claude or ChatGPT's connector setup. T
 | Protected-resource metadata | `https://gymtrack-mcp.fly.dev/.well-known/oauth-protected-resource` |
 | GymTrack consent page | `https://gymtrack-sigma-pied.vercel.app/agent-consent` |
 
-The CTA links to `https://claude.ai/settings/connectors` for Claude and `https://chatgpt.com/admin/ca` for ChatGPT. It displays the MCP endpoint and the static public OAuth client ID to enter in the provider UI.
+The CTA links to Claude and ChatGPT connector configuration:
+
+- **Claude:** `https://claude.ai/settings/connectors?modal=add-custom-connector&mcpName=GymTrack&mcpServerUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` — Claude's `modal=add-custom-connector` deep link (anthropics/claude-ai-mcp#74, closed completed 2026-05-13) opens the Add Custom Connector modal with the Name and Remote MCP server URL fields pre-filled from the query params.
+- **ChatGPT:** `https://chatgpt.com/settings/connectors` — the user-level custom-connector page. The previously-documented `/admin/ca` path is an admin console route that 404s to the ChatGPT home page for a normal/plus account; that URL is no longer in the source.
+
+The CTA also displays the MCP endpoint and the static public OAuth client ID to enter in the provider UI.
 
 ## Operator checklist
 
@@ -75,8 +80,8 @@ If any provider reports a redirect mismatch, capture the exact `redirect_uri` it
 
 ### Claude end-to-end
 
-- [ ] Open Claude **Settings → Connectors → Add custom connector**.
-- [ ] Name it `GymTrack` and enter `https://gymtrack-mcp.fly.dev/mcp`.
+- [ ] Open `https://claude.ai/settings/connectors?modal=add-custom-connector&mcpName=GymTrack&mcpServerUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` in Claude.
+- [ ] Verify the Add Custom Connector modal opens with the Name field pre-filled to `GymTrack` and the Remote MCP server URL field pre-filled to `https://gymtrack-mcp.fly.dev/mcp`. (This is the deep-link behavior added in anthropics/claude-ai-mcp#74, shipped 2026-05-13.)
 - [ ] In Advanced settings, enter OAuth Client ID `claude-desktop` and leave the client secret blank (public PKCE client).
 - [ ] Add/connect the connector. Claude should open GymTrack's `/agent-consent` page.
 - [ ] Approve access, return to Claude, and confirm `plan_workout`, `read_history`, and `read_exercise_progression` are discovered.
@@ -85,7 +90,8 @@ If any provider reports a redirect mismatch, capture the exact `redirect_uri` it
 
 ChatGPT custom MCP apps are plan- and role-gated. The current OpenAI flow requires a supported ChatGPT plan plus developer-mode/admin access.
 
-- [ ] Open ChatGPT workspace **Settings → Apps → Create** (the CTA opens `https://chatgpt.com/admin/ca`).
+- [ ] Open `https://chatgpt.com/settings/connectors` in ChatGPT.
+- [ ] Click **Add custom connector** (or the equivalent CTA on the current ChatGPT UI — these pages change independently of our code).
 - [ ] Enable developer mode if prompted.
 - [ ] Create `GymTrack` with endpoint `https://gymtrack-mcp.fly.dev/mcp` and OAuth authentication.
 - [ ] Configure OAuth Client ID `chatgpt` with no client secret if the provider UI accepts a public PKCE client.
@@ -101,7 +107,11 @@ If ChatGPT requires Client ID Metadata Documents, Dynamic Client Registration, a
 Use a GymTrack account with no active row in `gymtrack_oauth_consents`:
 
 1. Open `/workouts`; verify the **Connect to your agent** panel shows Claude and ChatGPT.
-2. Select each option; verify it opens the real provider connector configuration, not an in-app placeholder.
+2. Select each option; verify it opens the real provider connector configuration, not an in-app placeholder. For Claude, the Add Custom Connector modal should open with the Name and Remote MCP server URL fields pre-filled (deep-link prefill). For ChatGPT, the page should be the user-level Connectors page, not a 404 to the home page.
 3. Add the displayed MCP URL and public client ID in one provider.
 4. Verify the provider-originated OAuth request reaches GymTrack consent, approval returns to the provider, and an active consent appears under `/settings/agents`.
 5. Reload `/workouts`; verify the CTA is hidden now that an active consent exists.
+
+## Provider-URL drift
+
+The Claude and ChatGPT connector URLs above are owned by Anthropic and OpenAI respectively, and either provider can change them independently of GymTrack. When the page is broken on a fresh visit, run the smoke checks first and treat any provider-side URL change as a bug to be fixed in `apps/gymtrack/src/components/ConnectAgentCta.jsx` (and re-pinned in this runbook). The Playwright e2e test only covers the static CTA structure, not the live provider UI, so a manual smoke check after every GymTrack release is part of the acceptance test for this surface.

@@ -1,19 +1,39 @@
 import { mcpUrl } from '../lib/mcpConfig.js';
 
+// Claude's `modal=add-custom-connector` deep link was added in
+// anthropics/claude-ai-mcp#74 (closed completed 2026-05-13). With `mcpName`
+// and `mcpServerUrl` query params, the Add Custom Connector modal opens
+// with the Name and Remote MCP server URL fields pre-filled. The
+// `mcpServerUrl` value is URL-encoded so colons and slashes survive the
+// query string and Claude's parser decodes them back to a full URL.
+function buildClaudeHref(mcpEndpoint) {
+  const params = new URLSearchParams({
+    modal: 'add-custom-connector',
+    mcpName: 'GymTrack',
+    mcpServerUrl: mcpEndpoint
+  });
+  return `https://claude.ai/settings/connectors?${params.toString()}`;
+}
+
 export const AGENT_CONNECT_OPTIONS = [
   {
     id: 'claude',
     name: 'Claude',
     clientId: 'claude-desktop',
-    href: 'https://claude.ai/settings/connectors',
-    instructions: 'Add a custom connector, then approve GymTrack access.'
+    buildHref: buildClaudeHref,
+    instructions:
+      'Claude will open the Add Custom Connector modal with the GymTrack MCP URL pre-filled. In Advanced settings enter OAuth client ID claude-desktop (no secret — public PKCE client), then approve GymTrack access.'
   },
   {
     id: 'chatgpt',
     name: 'ChatGPT',
     clientId: 'chatgpt',
-    href: 'https://chatgpt.com/admin/ca',
-    instructions: 'Create an MCP app, scan its tools, then approve GymTrack access.'
+    // The previous `/admin/ca` path is an admin console route that 404s to
+    // the ChatGPT home page for a normal/plus account. The user-level
+    // custom-connector flow lives under Settings → Connectors.
+    href: 'https://chatgpt.com/settings/connectors',
+    instructions:
+      'In ChatGPT, open Settings → Connectors → Add custom connector, paste the MCP URL above, set OAuth client ID to chatgpt (no secret), then complete the GymTrack consent prompt. Custom MCP apps require a supported plan and developer-mode access.'
   }
 ];
 
@@ -40,24 +60,33 @@ export default function ConnectAgentCta() {
       </div>
 
       <div className="connect-agent-options">
-        {AGENT_CONNECT_OPTIONS.map((option) => (
-          <article className="connect-agent-option" key={option.id}>
-            <h3>{option.name}</h3>
-            <p>{option.instructions}</p>
-            <p className="connect-agent-client-id">
-              OAuth client ID: <code>{option.clientId}</code>
-            </p>
-            <a
-              className="btn-primary connect-agent-link"
-              href={option.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid={`connect-${option.id}`}
-            >
-              Connect {option.name}
-            </a>
-          </article>
-        ))}
+        {AGENT_CONNECT_OPTIONS.map((option) => {
+          // Each option either declares a static `href` or a `buildHref(mcpEndpoint)`
+          // builder. The Claude entry uses the builder because its deep link
+          // needs the live MCP URL encoded into a query parameter; ChatGPT
+          // links to a static page.
+          const href = option.buildHref
+            ? option.buildHref(endpoint)
+            : option.href;
+          return (
+            <article className="connect-agent-option" key={option.id}>
+              <h3>{option.name}</h3>
+              <p>{option.instructions}</p>
+              <p className="connect-agent-client-id">
+                OAuth client ID: <code>{option.clientId}</code>
+              </p>
+              <a
+                className="btn-primary connect-agent-link"
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid={`connect-${option.id}`}
+              >
+                Connect {option.name}
+              </a>
+            </article>
+          );
+        })}
       </div>
 
       <p className="connect-agent-footnote">
