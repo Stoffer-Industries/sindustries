@@ -1,0 +1,19 @@
+{
+  "name": "@sindustries/ash",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ash QA-verifier agent: mechanical verification script. Invoked by Quinn's Ash heartbeat/cron after the agent identity is provisioned at ~/.openclaw/workspace/agents/ash/.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "tsx src/verify.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.1",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.8"
+  }
+}
