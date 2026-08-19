@@ -30,7 +30,7 @@ from cto_craft_workflow.state import make_initial_state
 
 
 ARCHIVE_URL = "https://www.techmanagerweekly.com/"
-ISSUE_URL = "https://www.techmanagerweekly.com/issue/2026-08-04-slow-iteration"
+ISSUE_URL = "https://www.techmanagerweekly.com/tmw-495/"
 STRONG_URL = "https://staysaasy.com/p/slow-iteration"
 GENERIC_URL = "https://lethain.com/fluff-receipts/"
 BOUNDARY_URL = "https://lethain.com/boundaries/"
