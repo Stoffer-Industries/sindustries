@@ -26,7 +26,7 @@ Originating PR #464 was right-shaped: minimal, scoped, reversible. Bundling a 13
 
 ## Product summary
 
-Consolidate the systemic pattern surfaced by `agent-task-queue-gh-api-hang-2026-08-17` onto a single shared helper so the next script author cannot reintroduce the unguarded-`subprocess.run` class of bug. The originating symptom was an indefinite heartbeat hang; the helper bounds every subprocess call site under `agents/skills/` and `agents/workflows/` at a default of 30s and propagates `subprocess.TimeoutExpired` unchanged for callers to handle.
+Consolidate the systemic pattern surfaced by `agent-task-queue-gh-api-hang-2026-08-17` onto a single shared helper so the next script author cannot reintroduce the unguarded-`subprocess.run` class of bug. The originating symptom was an indefinite heartbeat hang; the helper bounds every subprocess call site under `agents/skills/` and `agents/workflows/` at a default of 25s and propagates `subprocess.TimeoutExpired` unchanged for callers to handle.
 
 ## Ownership boundary check
 
@@ -48,7 +48,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-DEFAULT_TIMEOUT_SECONDS: float = 30.0
+DEFAULT_TIMEOUT_SECONDS: float = 25.0
 
 
 def safe_run(
