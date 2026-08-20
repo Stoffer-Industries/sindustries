@@ -19,5 +19,10 @@ process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS =
       token: 'integration-test-token-long-enough',
       actor: 'IntegrationTest',
       approvalTypes: []
+    },
+    {
+      token: 'quinn-test-token-long-enough',
+      actor: 'Quinn',
+      approvalTypes: ['tech_design']
     }
   ]);

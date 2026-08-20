@@ -163,7 +163,7 @@ Task responses include:
 - Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
 - Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
 
-**How to use it.** A populated `attentionOwners` stack is authoritative for who acts next even when the task also has an assignee or structured gate. Those other planes remain separate role/context slots: assignee says who delivers, and approvals/workflow gates say who is eligible to decide a gate. They do not override position 0. When the attention stack is empty, the owner of the exact current outstanding gate is the actionable fallback (`doing → qa_agent` for Ash); stale, approved, and future-stage gates are dormant. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
+**How to use it.** `attentionOwners[0]` is the sole actionability source. Assignee says who delivers, while approvals and `workflowGates` are eligibility/informational context only; neither independently enqueues work. Lobster writes and reconciles the `tech_design`, `qa_agent`, and `accepted` workflow slots. The status-derived fallback is retained only for the lobster-independent `spec` gate. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
 Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. Both Rowan occurrences are meaningful across role slots; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
@@ -246,12 +246,12 @@ Task ownership is split into five **independent** planes. No plane silently deri
 The API surfaces each plane independently:
 
 - `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
-- `approvals` (raw rows) and `workflowGates` (compatibility-named view of the one explicit active handoff: `[{ roleId, owner, gate, reason, state: "outstanding" }]`). The persisted role ID is stable; `owner` is resolved when the API responds from central configuration. An absent handoff returns `[]`.
+- `approvals` (raw rows) and `workflowGates` (read-only informational metadata for the lobster-independent `spec` gate only). Lobster-managed `tech_design`, `qa_agent`, and `accepted` gates are intentionally omitted; their action routing lives exclusively in `attentionOwners`.
 - `attentionOwners` / `topAttentionOwner` / `attentionOwnerDetails` (ordered action/escalation).
 
 Discovery filters on `GET /tasks`:
 
-- `?workflowGateOwner=<name>` — tasks whose configured gate owner matches `<name>`, whose task type requires that gate, whose current status makes that gate actionable, and whose structured approval is still outstanding. The filter mirrors the derived `workflowGates` response; it does not use the legacy persisted handoff role.
+- `?workflowGateOwner=<name>` — compatibility discovery for the outstanding `spec` gate only. Lobster-managed gates must be discovered through `?attentionOwner=<name>`.
 - `?attentionOwner=<name>` — tasks whose position-0 `TaskAttentionOwner` matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
@@ -259,7 +259,7 @@ The two filters combine via AND: a UI can show "Quinn's outstanding gates AND th
 **Non-replacement guarantees** (enforced by the API and asserted by tests):
 
 - `attentionOwners` is fully independent of `task.blocked` and `dependencyBlocked`. Clearing attention owners does not declare the task unblocked.
-- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue surfaces the exact current outstanding gate through `workflowGateOwner` only when the attention stack is empty; it does not create duplicate attention requests. Any populated stack suppresses gate fallback and leaves position 0 authoritative.
+- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue uses `attentionOwners[0]` for Lobster-managed gates; only `spec` retains the legacy `workflowGateOwner` fallback.
 - Resolving one attention owner (PATCH replacement) does not affect other attention owners, workflow-gate ownership, dependencies, or `task.blocked`.
 - Changing `taskType` does not retroactively create or remove attention-owner rows; attention is decoupled from task-type policy.
 
@@ -315,7 +315,7 @@ Base path: `/api/v1`
 | `GET` | `/tags` | List tags with usage counts |
 | `GET` | `/health` | Health check |
 
-**Spec drift guard:** `PATCH /tasks/:id` with `description` change rejects with `409 SPEC_CHECKSUM_MISMATCH` if the task's stored `specChecksum` differs from the recomputed checksum of the new AC JSON (sorted keys). Marker-only edits (toggling `**Approved by Tom**` from `[x]` to `[ ]` or vice versa with no AC text change) are exempt via `descriptionsDifferOnlyByApprovalMarker` in `services/tasks-api/src/routes/tasks/_spec.ts`. The Comments endpoint (`POST /tasks/:id/comments`) does **not** apply the drift guard — comments are meta-discussion, not scope changes.
+**Spec drift guard:** ordinary `PATCH /tasks/:id` description changes preserve drift protection and revoke an approved spec row when ACs change. An intentional post-lock revision uses `PATCH { description, resyncSpecChecksum: true }`; only Tom or Quinn may call it, the server computes the new checksum, and description + checksum + audit comment commit in one transaction without revoking approvals. Clients never submit the replacement hash. The Comments endpoint (`POST /tasks/:id/comments`) does **not** apply the drift guard — comments are meta-discussion, not scope changes.
 
 **Cursor pagination:** `GET /tasks` returns a `nextCursor` token. Pass as `cursor=` to page. Default limit: 50.
 
