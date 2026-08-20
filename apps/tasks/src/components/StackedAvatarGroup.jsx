@@ -2,13 +2,8 @@ import { Avatar } from '@sindustries/ui/react';
 import { assigneeInitial } from '../utils/helpers.js';
 import { assigneeDisplayName, findAssigneeUser } from '../users/assignees.js';
 
-/**
- * Normalise a free-form owner label so duplicate people (e.g. `Quinn` and
- * `quinn `) collapse to the same visual entry without losing their multiple
- * roles. The dedupe key is the case-insensitive trimmed string so the
- * stacked avatar group is stable across server-rendered payload quirks.
- */
-function normalizeOwnerKey(owner) {
+/** Normalise only the owner portion of a per-role-slot React key. */
+function normalizeOwnerKeyPart(owner) {
   if (typeof owner !== 'string') return '';
   return owner.trim().toLowerCase();
 }
@@ -17,7 +12,7 @@ function normalizeOwnerKey(owner) {
  * Build the ordered owner layers used by the stacked avatar group. The
  * returned shape is stable: delivery assignee first, then workflow-gate
  * owners (outstanding only, in policy-defined order), then attention
- * owners (in insertion order). Each entry carries the role so the
+ * owners (in explicit escalation-slot order). Each entry carries the role so the
  * accessibility label and the task-details surface can render the distinct
  * responsibilities without re-deriving them.
  *
@@ -38,6 +33,13 @@ function normalizeOwnerKey(owner) {
  * communicates that the same person owns more than one ordered responsibility;
  * collapsing it would destroy the escalation path.
  */
+const ACTIONABLE_GATE_BY_STATUS = {
+  open: 'spec',
+  ready: 'tech_design',
+  doing: 'qa_agent',
+  acceptance: 'accepted'
+};
+
 export function buildStackedOwnerLayers(task) {
   const layers = [];
 
@@ -48,38 +50,41 @@ export function buildStackedOwnerLayers(task) {
     layers.push({
       role: 'delivery',
       owner: delivery,
-      key: `delivery:${normalizeOwnerKey(delivery)}`
+      key: `delivery:${normalizeOwnerKeyPart(delivery)}`
     });
   }
 
-  // Layer 2: outstanding workflow-gate owners. Approved gates are skipped
-  // so the stack never re-shows a gate that has already been satisfied.
+  // Layer 2: the one exact status-actionable workflow gate. The mapper owns
+  // this contract; the status check is defensive so stale/future payload rows
+  // can never leak into the card stack.
   const gates = Array.isArray(task?.workflowGates) ? task.workflowGates : [];
-  for (const gate of gates) {
+  const actionableGate = ACTIONABLE_GATE_BY_STATUS[task?.status];
+  for (const [gateIndex, gate] of gates.entries()) {
+    const gateType = gate?.gate ?? gate?.type;
     if (!gate || gate.state !== 'outstanding') continue;
-    if (!gate.owner) continue;
+    if (!gate.owner || gateType !== actionableGate) continue;
     layers.push({
       role: 'workflow-gate',
       owner: gate.owner,
-      gateType: gate.type,
-      key: `workflow-gate:${layers.length}:${normalizeOwnerKey(gate.owner)}`
+      gateType,
+      key: `workflow-gate:${gateIndex}:${normalizeOwnerKeyPart(gate.owner)}`
     });
   }
 
-  // Layer 3: attention owners. Insertion order matches the mapper output
-  // (stable, oldest-first per the attention-owner createdAt sort).
+  // Layer 3: attention owners in explicit escalation-slot order. Repeated
+  // people stay as separate entries; position 0 is the current actor.
   const attention = Array.isArray(task?.attentionOwners) ? task.attentionOwners : [];
-  for (const owner of attention) {
+  for (const [slot, owner] of attention.entries()) {
     if (!owner || typeof owner !== 'string') continue;
     layers.push({
       role: 'attention',
       owner,
-      key: `attention:${layers.length}:${normalizeOwnerKey(owner)}`
+      slot,
+      key: `attention:${slot}:${normalizeOwnerKeyPart(owner)}`
     });
   }
 
-  const roleCounts = new Map(layers.map((entry) => [entry.key, 1]));
-  return { entries: layers, roleCounts };
+  return { entries: layers };
 }
 
 /**
@@ -104,7 +109,7 @@ export function roleLabel(role) {
  * Build the combined accessibility label for a single avatar in the stack.
  * Repeated people retain one label per ordered role slot (AC5, AC6).
  */
-export function buildAvatarAriaLabel(entry, roleCounts) {
+export function buildAvatarAriaLabel(entry) {
   const displayName = assigneeDisplayName(entry.owner) || entry.owner;
   return `${roleLabel(entry.role)} ${displayName}`;
 }
@@ -119,7 +124,7 @@ export function buildAvatarAriaLabel(entry, roleCounts) {
  * already route the click to the title; the avatar stack is informational.
  */
 export function StackedAvatarGroup({ task, maxVisible = 4 }) {
-  const { entries, roleCounts } = buildStackedOwnerLayers(task);
+  const { entries } = buildStackedOwnerLayers(task);
   if (entries.length === 0) return null;
 
   const visible = entries.slice(0, maxVisible);
@@ -135,7 +140,7 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
         const user = findAssigneeUser(entry.owner);
         const displayName = assigneeDisplayName(entry.owner) || entry.owner;
         const initial = assigneeInitial(entry.owner);
-        const ariaLabel = buildAvatarAriaLabel(entry, roleCounts);
+        const ariaLabel = buildAvatarAriaLabel(entry);
         const roleDepth = entry.role === 'attention' ? 300 : entry.role === 'workflow-gate' ? 200 : 100;
         // The `data-role` attribute lets the task-details surface and the
         // accessibility script read the role without re-parsing the label.
