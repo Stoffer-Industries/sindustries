@@ -586,6 +586,28 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertEqual([], agent_task_queue._build_attention_page_items("Quinn", [task], set()))
 
+    def test_tom_is_actionable_only_when_terminal_position_zero(self):
+        terminal = implementation_task(
+            id="00000000-0000-0000-0000-0000000000f0",
+            attentionOwners=["Tom"],
+        )
+        dormant = implementation_task(
+            id="00000000-0000-0000-0000-0000000000f1",
+            attentionOwners=["Quinn", "Tom"],
+        )
+        items = agent_task_queue._build_attention_page_items("Tom", [terminal, dormant], set())
+        self.assertEqual([terminal["id"]], [item["id"] for item in items])
+        self.assertEqual("Tom", items[0]["topAttentionOwner"])
+        self.assertTrue(items[0]["actionable"])
+
+    def test_terminal_tom_queue_needs_no_dormant_fallback(self):
+        terminal = implementation_task(attentionOwners=["Tom"])
+        queue = agent_task_queue.build_work_queue(
+            [], "Tom", [], [], attention_owner_tasks=[terminal], attention_owner="Tom"
+        )
+        self.assertEqual("attentionPage", queue["topCandidate"]["kind"])
+        self.assertEqual("Tom", queue["topCandidate"]["topAttentionOwner"])
+
     def test_assignee_task_waits_when_another_agent_is_top_attention_owner(self):
         task = implementation_task(attentionOwners=["Quinn", "Tom"])
         queue = agent_task_queue.build_queue([task], agent="Rowan")

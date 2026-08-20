@@ -59,6 +59,9 @@ GITHUB_IDENTITIES = {
     "rowan": ("rowanstoffer", "~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN"),
     "ivy": ("ivystoffer", "~/.config/gh-ivy", "IVY_GITHUB_TOKEN"),
     "quinn": ("quinnstoffer", "~/.config/gh-quinn", "QUINN_GITHUB_TOKEN"),
+    # Tom is the terminal human attention owner. His queue remains read-only;
+    # the default gh config is used only to hydrate PR context.
+    "tom": ("stoff81", "~/.config/gh", "GITHUB_TOKEN"),
 }
 GREEN_CHECK_CONCLUSIONS = {"success", "skipped", "neutral"}
 QUEUE_KIND_ORDER = {
@@ -766,7 +769,7 @@ def main() -> None:
     args = build_parser().parse_args()
     agent_key = args.assignee.lower()
     if agent_key not in GITHUB_IDENTITIES:
-        raise SystemExit(f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, or Quinn")
+        raise SystemExit(f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, Quinn, or Tom")
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
     github_prs = fetch_github_prs(args.assignee)

@@ -76,6 +76,10 @@ When Quinn is top owner:
 4. Advance the ordered stack by removing the resolved first slot while
    preserving every later slot exactly, including repeated people. Never
    deduplicate the list or clear all owners.
+5. Quinn is the highest agent escalation. If Quinn cannot resolve the blocker,
+   set/advance Tom to position 0. `attentionOwners=["Tom"]` is valid: Tom is the
+   terminal human actor, no dormant fallback is required, and no escalation
+   exists beyond him. Tom appearing later in a tail is dormant context only.
 
 Delivery assignee and structured gate owner remain independent context. Ash may
 remain the QA gate owner while Quinn or Rowan is the top attention owner.
