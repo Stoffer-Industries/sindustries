@@ -266,7 +266,7 @@ describe('runAllAcChecks', () => {
 const task: TaskSummary = { id: 'f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47', status: 'doing' };
 
 function makeDeps(pr: PrSummary, posts: { approval: string[]; comments: string[] }) {
-  const postApproval = vi.fn(async (taskId: string, type: string, _owner: string) => {
+  const postApproval = vi.fn(async (taskId: string, type: string) => {
     posts.approval.push(`${taskId}:${type}`);
   });
   const postComment = vi.fn(async (_taskId: string, text: string) => {
@@ -398,7 +398,7 @@ describe('verify() — happy path', () => {
     const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
 
     expect(outcome.ok).toBe(true);
-    expect(postApproval).toHaveBeenCalledWith(task.id, 'qa_agent', 'Ash');
+    expect(postApproval).toHaveBeenCalledWith(task.id, 'qa_agent');
     expect(outcome.commentText.startsWith('[qa-agent-verified]')).toBe(true);
   });
 });

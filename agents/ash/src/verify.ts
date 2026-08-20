@@ -218,7 +218,7 @@ export type Deps = {
   fetchTask: (taskId: string) => Promise<TaskSummary>;
   fetchPr: (prUrl: string) => Promise<PrSummary>;
   postComment: (taskId: string, text: string) => Promise<void>;
-  postApproval: (taskId: string, type: string, owner: string) => Promise<void>;
+  postApproval: (taskId: string, type: string) => Promise<void>;
 };
 
 export type VerifyOutcome = {
@@ -282,7 +282,7 @@ export async function verify(
   }
 
   // All checks passed — satisfy the gate.
-  await deps.postApproval(taskId, 'qa_agent', 'Ash');
+  await deps.postApproval(taskId, 'qa_agent');
   return {
     ok: true,
     acResults,
@@ -364,11 +364,11 @@ async function defaultPostComment(taskId: string, baseUrl: string, token: string
   if (!res.ok) throw new Error(`post comment on ${taskId} failed: ${res.status} ${res.statusText}`);
 }
 
-async function defaultPostApproval(taskId: string, baseUrl: string, token: string, type: string, owner: string): Promise<void> {
+async function defaultPostApproval(taskId: string, baseUrl: string, token: string, type: string): Promise<void> {
   const res = await fetch(`${baseUrl}/tasks/${taskId}/approvals`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, owner }),
+    body: JSON.stringify({ type }),
   });
   if (!res.ok) throw new Error(`post approval ${type} on ${taskId} failed: ${res.status} ${res.statusText}`);
 }
@@ -402,7 +402,7 @@ async function runCli(): Promise<number> {
     fetchTask: (id) => defaultFetchTask(id, baseUrl, tasksToken),
     fetchPr: (url) => defaultFetchPr(url, githubToken),
     postComment: (id, text) => defaultPostComment(id, baseUrl, tasksToken, text),
-    postApproval: (id, type, owner) => defaultPostApproval(id, baseUrl, tasksToken, type, owner),
+    postApproval: (id, type) => defaultPostApproval(id, baseUrl, tasksToken, type),
   };
 
   try {
