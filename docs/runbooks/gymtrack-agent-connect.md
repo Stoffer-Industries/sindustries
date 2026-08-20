@@ -15,7 +15,7 @@ GymTrack's Workouts CTA hands the user to Claude or ChatGPT's connector setup. T
 
 The CTA links to Claude and ChatGPT connector configuration:
 
-- **Claude:** `https://claude.ai/settings/connectors?modal=add-custom-connector&mcpName=GymTrack&mcpServerUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` — Claude's `modal=add-custom-connector` deep link (anthropics/claude-ai-mcp#74, closed completed 2026-05-13) opens the Add Custom Connector modal with the Name and Remote MCP server URL fields pre-filled from the query params.
+- **Claude:** `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=GymTrack&connectorUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` — Claude's `modal=add-custom-connector` deep link (anthropics/claude-ai-mcp#74, closed completed 2026-05-13; per maintainer @localden's comment on that issue) opens the Add Custom Connector modal with the Name and Remote MCP server URL fields pre-filled from the query params. **The path is `/customize/connectors` and the param names are `connectorName` / `connectorUrl`** — the originally-proposed `/settings/connectors` + `mcpName` + `mcpServerUrl` shape from the issue's opener was *not* what shipped; do not regress to it.
 - **ChatGPT:** `https://chatgpt.com/settings/connectors` — the user-level custom-connector page. The previously-documented `/admin/ca` path is an admin console route that 404s to the ChatGPT home page for a normal/plus account; that URL is no longer in the source.
 
 The CTA also displays the MCP endpoint and the static public OAuth client ID to enter in the provider UI.
@@ -80,7 +80,7 @@ If any provider reports a redirect mismatch, capture the exact `redirect_uri` it
 
 ### Claude end-to-end
 
-- [ ] Open `https://claude.ai/settings/connectors?modal=add-custom-connector&mcpName=GymTrack&mcpServerUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` in Claude.
+- [ ] Open `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=GymTrack&connectorUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` in Claude.
 - [ ] Verify the Add Custom Connector modal opens with the Name field pre-filled to `GymTrack` and the Remote MCP server URL field pre-filled to `https://gymtrack-mcp.fly.dev/mcp`. (This is the deep-link behavior added in anthropics/claude-ai-mcp#74, shipped 2026-05-13.)
 - [ ] In Advanced settings, enter OAuth Client ID `claude-desktop` and leave the client secret blank (public PKCE client).
 - [ ] Add/connect the connector. Claude should open GymTrack's `/agent-consent` page.

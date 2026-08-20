@@ -108,13 +108,16 @@ describe('WorkoutsTab', () => {
     expect(await screen.findByText('Connect to your agent')).toBeInTheDocument();
     expect(screen.getByTestId('connect-agent-cta')).toBeInTheDocument();
     // Claude deep link uses modal=add-custom-connector with the GymTrack MCP
-    // URL URL-encoded as mcpServerUrl. The mcpName=GymTrack query param
-    // pre-fills the Name field; mcpServerUrl pre-fills the Remote MCP
-    // server URL field on the add-connector modal (anthropics/claude-ai-mcp#74,
-    // closed completed 2026-05-13).
+    // URL URL-encoded as connectorUrl. The connectorName=GymTrack query param
+    // pre-fills the Name field; connectorUrl pre-fills the Remote MCP
+    // server URL field on the add-connector modal. Path is `/customize/connectors`
+    // and param names are `connectorName` / `connectorUrl` per the maintainer
+    // (@localden) comment on anthropics/claude-ai-mcp#74, closed completed
+    // 2026-05-13 -- NOT the originally-proposed `/settings/connectors` +
+    // `mcpName` + `mcpServerUrl` shape, which never shipped.
     expect(screen.getByTestId('connect-claude')).toHaveAttribute(
       'href',
-      'https://claude.ai/settings/connectors?modal=add-custom-connector&mcpName=GymTrack&mcpServerUrl=http%3A%2F%2Flocalhost%3A8787%2Fmcp'
+      'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=GymTrack&connectorUrl=http%3A%2F%2Flocalhost%3A8787%2Fmcp'
     );
     // ChatGPT user-level custom-connector page; the old /admin/ca path 404s
     // to the ChatGPT home page for a normal/plus account.
