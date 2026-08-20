@@ -1,18 +1,25 @@
 import { mcpUrl } from '../lib/mcpConfig.js';
 
 // Claude's `modal=add-custom-connector` deep link was added in
-// anthropics/claude-ai-mcp#74 (closed completed 2026-05-13). With `mcpName`
-// and `mcpServerUrl` query params, the Add Custom Connector modal opens
-// with the Name and Remote MCP server URL fields pre-filled. The
-// `mcpServerUrl` value is URL-encoded so colons and slashes survive the
-// query string and Claude's parser decodes them back to a full URL.
+// anthropics/claude-ai-mcp#74 (closed completed 2026-05-13). Per the
+// maintainer (@localden) comment on that issue, the actual implemented
+// contract is:
+//   https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=<name>&connectorUrl=<url>
+// i.e. the path is `/customize/connectors` (not `/settings/connectors`)
+// and the query params are `connectorName` / `connectorUrl` (not the
+// originally-proposed `mcpName` / `mcpServerUrl`). With these params the
+// Add Custom Connector modal opens with the Name and Remote MCP server
+// URL fields pre-filled; claude.ai shows a notice asking the user to
+// verify the URL before proceeding. `connectorUrl` is URL-encoded so
+// colons and slashes survive the query string and Claude's parser
+// decodes them back to a full URL.
 function buildClaudeHref(mcpEndpoint) {
   const params = new URLSearchParams({
     modal: 'add-custom-connector',
-    mcpName: 'GymTrack',
-    mcpServerUrl: mcpEndpoint
+    connectorName: 'GymTrack',
+    connectorUrl: mcpEndpoint
   });
-  return `https://claude.ai/settings/connectors?${params.toString()}`;
+  return `https://claude.ai/customize/connectors?${params.toString()}`;
 }
 
 export const AGENT_CONNECT_OPTIONS = [
