@@ -196,10 +196,13 @@ Rowan cannot write to `~/.openclaw/`. Route Quinn at `attentionOwners[0]`; comme
 
 `attentionOwners` is the ordered action/escalation control plane. Position 0 is
 the next actionable agent; later slots are fallback escalation targets, with Tom
-last when human escalation is needed. Do not deduplicate repeated names: each
-entry is a role slot. For example, `Rowan / Ash / Rowan / Tom` means Rowan is the
-delivery assignee, Ash retains QA-gate context, Rowan is the current actor, and
-Tom is last resort.
+last while agent escalation remains possible. Do not deduplicate repeated names:
+each entry is a role slot. For example, `Rowan / Ash / Rowan / Tom` means Rowan
+is the delivery assignee, Ash retains QA-gate context, Rowan is the current
+actor, and Tom is a dormant last resort. Quinn is the highest agent escalation;
+if Quinn cannot resolve the blocker, Quinn advances Tom to position 0. Tom at
+position 0 is terminal human action, needs no later owner, and has no escalation
+beyond him.
 
 The planes remain separate:
 

@@ -1,6 +1,15 @@
 # Agent Operating Docs — Conventions
 
+This directory is the source of truth for agent definitions. CI syncs these
+tracked files into each agent's OpenClaw workspace; never treat a workspace-only
+copy as canonical. Ash is a first-class definition alongside Ivy, Lox, Quinn,
+Rowan, and Vara.
+
 Each agent under `agents/definitions/<name>/` uses a consistent set of markdown files. When editing any of these files, keep the split clean — every file has one purpose. If a change doesn't fit an existing file's purpose, that's a signal it belongs elsewhere (or the file's purpose has drifted).
+
+Every first-class agent directory, including `agents/definitions/ash/`, carries
+`SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `WORKFLOW.md`,
+and `DoD.md` as appropriate to its runtime role.
 
 ## The files and what each is for
 

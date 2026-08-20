@@ -131,7 +131,7 @@ See [Structured approval and authentication contract](#structured-approval-and-a
 
 ### TaskAttentionOwner
 
-Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are fallbacks, with Tom last when human escalation is required. Free-form owners mirror `Task.assignee`. Repeated people are intentional and are not deduplicated.
+Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional and are not deduplicated.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -165,7 +165,7 @@ Task responses include:
 
 **How to use it.** `attentionOwners` is authoritative for who acts next even when the task also has an assignee or structured gate. Those other planes remain separate role/context slots: assignee says who delivers, and approvals/workflow gates say who is eligible to decide a gate. They do not override position 0. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
-Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. Both Rowan occurrences are meaningful across role slots; Ash remains visible; Tom is last-resort escalation.
+Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. Both Rowan occurrences are meaningful across role slots; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
 

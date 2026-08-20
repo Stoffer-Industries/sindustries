@@ -7,7 +7,7 @@ BACKUP_ROOT=${OPENCLAW_AGENT_DEFS_BACKUP_ROOT:-"$HOME/.openclaw/backups/agent-de
 LOCK_DIR=${OPENCLAW_AGENT_DEFS_LOCK_DIR:-"${TMPDIR:-/tmp}/openclaw-agent-definitions-sync.lock"}
 SOURCE_ROOT=agents/definitions
 SOURCE_REF=${OPENCLAW_AGENT_DEFS_SOURCE_REF:-origin/main}
-AGENTS=(quinn rowan lox ivy vara)
+AGENTS=(quinn rowan lox ivy vara ash)
 # Non-quinn agents also need the canonical AGENTS.md copied from the
 # workspace root into their own workspace dir. It is not sourced from
 # agents/definitions/<agent>/ (it is shared, not per-agent) and previously

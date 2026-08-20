@@ -58,8 +58,11 @@ assignee/PR classification remains the fallback.
 `attentionOwners` is the primary blocker/handoff control plane. It is an ordered
 list of role slots, not a set: position 0 is the next actionable owner and later
 positions are escalation targets. Repeated names are meaningful and must be
-preserved. Tom belongs at the end as last resort, not at the top unless Tom must
-act now.
+preserved. Tom belongs later in the tail while agents can still act. Quinn is
+the highest agent escalation; if Quinn cannot resolve the blocker, Quinn moves
+Tom to position 0. `attentionOwners=["Tom"]` is the terminal human action state:
+no fallback slot is required and no escalation exists beyond Tom. Tom merely
+appearing later in a tail is dormant, not actionable.
 
 Delivery (`assignee`) and gate eligibility/context (`workflowGates` and
 structured approvals) remain independent. A normal stack can therefore be:
