@@ -414,25 +414,25 @@ describe('GET /api/v1/tasks — discovery filters', () => {
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
   });
 
-  it.each([
-    ['Quinn', ['tech_design_approver']],
-    ['Tom', ['product_spec_approver', 'qa_verifier']]
-  ])('?workflowGateOwner=%s filters directly by persisted role ids', async (owner, roleIds) => {
-    prismaMock.task.findMany.mockResolvedValue([]);
+  it.each(['Ash', 'Quinn', 'Tom'])(
+    '?workflowGateOwner=%s filters by the exact current outstanding derived gate',
+    async (owner) => {
+      prismaMock.task.findMany.mockResolvedValue([]);
 
-    await authedRequest(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: owner });
+      await authedRequest(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: owner });
 
-    const where = prismaMock.task.findMany.mock.calls[0][0].where;
-    expect(where.AND).toEqual([{ workflowHandoffRoleId: { in: roleIds } }]);
-  });
+      const where = prismaMock.task.findMany.mock.calls[0][0].where;
+      expect(where.AND).toEqual(buildWorkflowGateOwnerWhere(owner));
+    }
+  );
 
-  it('?workflowGateOwner with no configured roles returns zero tasks instead of broadening', async () => {
+  it('?workflowGateOwner with no configured gates returns zero tasks safely', async () => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
     await authedRequest(createApp()).get('/api/v1/tasks').query({ workflowGateOwner: 'Rowan' });
 
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
-    expect(where.AND).toEqual([{ id: { equals: '' } }]);
+    expect(where.AND).toEqual([{ id: { in: [] } }]);
   });
 
   it('?attentionOwner=Tom scopes to tasks where Tom is the top slot', async () => {
@@ -609,9 +609,29 @@ describe('explicit workflow handoffs', () => {
     expect(normalizeWorkflowHandoff({ roleId: 'qa_verifier', reason: '' })).toBeNull();
   });
 
-  it('filters owner queues by persisted role id, case-insensitively', () => {
-    expect(buildWorkflowGateOwnerWhere('quinn')).toEqual([{ workflowHandoffRoleId: { in: ['tech_design_approver'] } }]);
-    expect(buildWorkflowGateOwnerWhere('Tom')).toEqual([{ workflowHandoffRoleId: { in: ['product_spec_approver', 'qa_verifier'] } }]);
+  it('filters owner queues by exact current outstanding derived gate', () => {
+    expect(buildWorkflowGateOwnerWhere('ash')).toEqual([{ OR: [{
+      status: 'doing',
+      taskType: { in: ['feature', 'code', 'content'] },
+      approvals: { none: { type: 'qa_agent', state: 'approved', revokedAt: null } }
+    }] }]);
+    expect(buildWorkflowGateOwnerWhere('quinn')).toEqual([{ OR: [{
+      status: 'ready',
+      taskType: { in: ['feature', 'code'] },
+      approvals: { none: { type: 'tech_design', state: 'approved', revokedAt: null } }
+    }] }]);
+    expect(buildWorkflowGateOwnerWhere('Tom')).toEqual([{ OR: [
+      {
+        status: 'open',
+        taskType: { in: ['feature', 'content'] },
+        approvals: { none: { type: 'spec', state: 'approved', revokedAt: null } }
+      },
+      {
+        status: 'acceptance',
+        taskType: { in: ['feature', 'code', 'content'] },
+        approvals: { none: { type: 'accepted', state: 'approved', revokedAt: null } }
+      }
+    ] }]);
     expect(buildWorkflowGateOwnerWhere('Nobody')).toEqual([]);
   });
 

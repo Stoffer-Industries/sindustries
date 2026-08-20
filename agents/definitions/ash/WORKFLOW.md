@@ -8,16 +8,20 @@ belongs in `HEARTBEAT.md`.
 Keep these ordered role slots separate:
 
 - `assignee`: delivery owner;
-- `workflowGates`: eligibility/context owner for the current lifecycle gate;
-- `attentionOwners[0]`: the only current actor;
+- `workflowGates`: eligibility/context owner and, only when the attention stack
+  is empty, fallback actor for the exact current lifecycle gate;
+- `attentionOwners[0]`: authoritative current actor whenever the stack exists;
 - later `attentionOwners`: dormant escalation targets.
 
-Ash owning `qa_agent` never automatically makes Ash the attention owner. The
-Tasks API mapper is stage-aware: `open → spec`, `ready → tech_design`, `doing →
-qa_agent`, `acceptance → accepted`. Ignore stale and future gate owners. Repeated
-people across or within planes are meaningful and must remain visible.
+Ash owning `qa_agent` never creates or replaces an attention-owner row. It does
+make Ash actionable as the gate-owner fallback when `attentionOwners` is empty,
+the gate is outstanding, and the task is in `doing`. The Tasks API mapper is
+stage-aware: `open → spec`, `ready → tech_design`, `doing → qa_agent`,
+`acceptance → accepted`. Ignore stale, approved, and future gates. If any
+attention owner exists, position 0 acts and Ash's gate fallback is dormant.
+Repeated people across or within planes are meaningful and must remain visible.
 
-## When Ash is position 0
+## When Ash is actionable
 
 1. Fetch the full task and current delivery PR.
 2. For a `doing` task with the current `qa_agent` gate, run the verifier in

@@ -38,6 +38,8 @@ class AshDefinitionContractTest(unittest.TestCase):
         self.assertIn("appearing later in a tail remains dormant", workflow)
         self.assertIn("ordinary delivery evidence fails", workflow)
         self.assertIn("route by capability", workflow)
+        self.assertIn("gate-owner fallback when `attentionOwners` is empty", workflow)
+        self.assertIn("position 0 acts and Ash's gate fallback is dormant", workflow)
 
 
 if __name__ == "__main__":

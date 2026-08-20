@@ -59,18 +59,26 @@ GITHUB_IDENTITIES = {
     "rowan": ("rowanstoffer", "~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN"),
     "ivy": ("ivystoffer", "~/.config/gh-ivy", "IVY_GITHUB_TOKEN"),
     "quinn": ("quinnstoffer", "~/.config/gh-quinn", "QUINN_GITHUB_TOKEN"),
+    "ash": ("ashstoffer", "~/.config/gh-ash", "ASH_GITHUB_TOKEN"),
     # Tom is the terminal human attention owner. His queue remains read-only;
     # the default gh config is used only to hydrate PR context.
     "tom": ("stoff81", "~/.config/gh", "GITHUB_TOKEN"),
 }
 GREEN_CHECK_CONCLUSIONS = {"success", "skipped", "neutral"}
+CURRENT_GATE_BY_STATUS = {
+    "open": "spec",
+    "ready": "tech_design",
+    "doing": "qa_agent",
+    "acceptance": "accepted",
+}
 QUEUE_KIND_ORDER = {
     "authoredPrFeedback": 0,
     "mergeCandidate": 1,
     "reviewRequest": 2,
     "techDesignApproval": 3,
     "task": 4,
-    "attentionPage": 5,
+    "workflowGate": 5,
+    "attentionPage": 6,
 }
 TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 URL_RE = re.compile(r"https?://[^\s)>]+")
@@ -389,6 +397,75 @@ def fetch_agent_tasks(assignee: str, base_url: str | None = None) -> list[dict[s
     return [tasks_api_client.get_task(task["id"], base_url=base) for task in summaries]
 
 
+def fetch_workflow_gate_owner_tasks(name: str, base_url: str | None = None) -> list[dict[str, Any]]:
+    """Fetch active tasks whose current outstanding gate is owned by ``name``."""
+    base = base_url or tasks_api_client.get_base_url()
+    summaries = tasks_api_client.list_tasks(
+        limit=200,
+        status=["open", "ready", "doing", "acceptance"],
+        workflow_gate_owner=name,
+        base_url=base,
+    )
+    return [tasks_api_client.get_task(task["id"], base_url=base) for task in summaries]
+
+
+def _current_outstanding_gate_for_owner(
+    task: dict[str, Any], owner: str
+) -> dict[str, Any] | None:
+    """Return only the exact current-stage outstanding gate owned by ``owner``."""
+    expected_gate = CURRENT_GATE_BY_STATUS.get(str(task.get("status") or "").lower())
+    if expected_gate is None:
+        return None
+    owner_key = owner.strip().casefold()
+    return next(
+        (
+            gate
+            for gate in task.get("workflowGates") or []
+            if str(gate.get("state") or "").lower() == "outstanding"
+            and str(gate.get("gate") or "").lower() == expected_gate
+            and str(gate.get("owner") or "").strip().casefold() == owner_key
+        ),
+        None,
+    )
+
+
+def _build_workflow_gate_items(
+    gate_owner: str,
+    tasks: list[dict[str, Any]],
+    seen_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Surface gate-owner fallback only while the attention stack is empty."""
+    items: list[dict[str, Any]] = []
+    for task in tasks:
+        task_id = str(task.get("id") or "")
+        if not task_id or task_id in seen_ids:
+            continue
+        # Any populated attention stack is authoritative, even when Ash appears
+        # in the gate plane. Only position 0 acts until that stack is cleared.
+        if task.get("attentionOwners"):
+            continue
+        gate = _current_outstanding_gate_for_owner(task, gate_owner)
+        if gate is None:
+            continue
+        items.append(
+            {
+                "kind": "workflowGate",
+                "actionable": True,
+                "id": task_id,
+                "title": task.get("title"),
+                "taskType": task.get("taskType"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "classification": "ACTIONABLE",
+                "reason": f"current {gate['gate']} gate is owned by {gate_owner}",
+                "workflowGate": gate.get("gate"),
+                "workflowGateOwner": gate_owner,
+                "topAttentionOwner": None,
+            }
+        )
+    return items
+
+
 def fetch_attention_owner_tasks(name: str, base_url: str | None = None) -> list[dict[str, Any]]:
     """Fetch active tasks where ``name`` is a current attention owner.
 
@@ -656,7 +733,7 @@ def build_unified_queue(
     task_items: list[dict[str, Any]],
     tech_design_approvals: list[dict[str, Any]],
     github_queue: dict[str, list[dict[str, Any]]],
-    attention_pages: list[dict[str, Any]] | None = None,
+    routed_task_items: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalize every read-only heartbeat input into one deterministic queue."""
     items: list[dict[str, Any]] = []
@@ -686,8 +763,8 @@ def build_unified_queue(
                 **item,
             }
         )
-    for item in attention_pages or []:
-        items.append({**item, "kind": "attentionPage", "actionable": True})
+    for item in routed_task_items or []:
+        items.append({**item, "actionable": True})
 
     def sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         actionable_rank = 0 if item.get("actionable") else 1
@@ -712,6 +789,8 @@ def build_work_queue(
     delivery_prs: dict[str, dict[str, Any]] | None = None,
     attention_owner_tasks: list[dict[str, Any]] | None = None,
     attention_owner: str | None = None,
+    workflow_gate_owner_tasks: list[dict[str, Any]] | None = None,
+    workflow_gate_owner: str | None = None,
 ) -> dict[str, Any]:
     task_queue = build_queue(
         tasks,
@@ -726,8 +805,17 @@ def build_work_queue(
         attention_items = _build_attention_page_items(
             attention_owner, attention_owner_tasks, seen_ids
         )
+    routed_ids = seen_ids | {item["id"] for item in attention_items}
+    workflow_gate_items: list[dict[str, Any]] = []
+    if workflow_gate_owner and workflow_gate_owner_tasks:
+        workflow_gate_items = _build_workflow_gate_items(
+            workflow_gate_owner, workflow_gate_owner_tasks, routed_ids
+        )
     queue = build_unified_queue(
-        task_queue["items"], approvals, github_queue, attention_items
+        task_queue["items"],
+        approvals,
+        github_queue,
+        [*attention_items, *workflow_gate_items],
     )
     return {
         "queue": queue,
@@ -738,6 +826,8 @@ def build_work_queue(
         **github_queue,
         "attentionOwner": attention_owner,
         "attentionPages": attention_items,
+        "workflowGateOwner": workflow_gate_owner,
+        "workflowGateTasks": workflow_gate_items,
     }
 
 
@@ -769,13 +859,16 @@ def main() -> None:
     args = build_parser().parse_args()
     agent_key = args.assignee.lower()
     if agent_key not in GITHUB_IDENTITIES:
-        raise SystemExit(f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, Quinn, or Tom")
+        raise SystemExit(
+            f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, Quinn, Ash, or Tom"
+        )
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
     github_prs = fetch_github_prs(args.assignee)
     delivery_prs = fetch_linked_delivery_prs(args.assignee, tasks, github_prs)
     attention_owner = args.attention_owner or args.assignee
     attention_owner_tasks = fetch_attention_owner_tasks(attention_owner)
+    workflow_gate_owner_tasks = fetch_workflow_gate_owner_tasks(args.assignee)
     queue = build_work_queue(
         tasks,
         args.assignee,
@@ -784,6 +877,8 @@ def main() -> None:
         delivery_prs,
         attention_owner_tasks=attention_owner_tasks,
         attention_owner=attention_owner,
+        workflow_gate_owner_tasks=workflow_gate_owner_tasks,
+        workflow_gate_owner=args.assignee,
     )
     if args.json:
         print(json.dumps(queue, indent=2))
@@ -800,6 +895,10 @@ def main() -> None:
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
         print(f"Attention pages for {attention_owner}: {len(queue['attentionPages'])}")
+        print(
+            f"Current workflow gates for {args.assignee}: "
+            f"{len(queue['workflowGateTasks'])}"
+        )
 
 
 if __name__ == "__main__":

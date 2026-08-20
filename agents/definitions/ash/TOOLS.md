@@ -16,7 +16,9 @@ never write or rotate them from an ordinary QA pass.
 Use `agents/skills/ops/tasks-api/tasks_api_client.py` for task reads/writes.
 `attentionOwners` is a full ordered replacement, not a set:
 
-- index 0 acts now;
+- index 0 acts now whenever the stack is populated;
+- when the stack is empty, the exact current outstanding workflow-gate owner is
+  the fallback actor;
 - later slots are dormant escalation targets;
 - repeated names are intentional role slots and must not be deduplicated;
 - comments are audit/evidence only and never route work.

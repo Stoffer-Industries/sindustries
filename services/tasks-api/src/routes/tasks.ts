@@ -162,7 +162,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       ...(blocked !== undefined ? { blocked: blocked === 'true' } : {}),
       ...attentionOwnerFilter,
       ...(workflowGateOwnerRequested
-        ? { AND: workflowGateOwnerFilter.length > 0 ? workflowGateOwnerFilter : [{ id: { equals: '' } }] }
+        ? { AND: workflowGateOwnerFilter.length > 0 ? workflowGateOwnerFilter : [{ id: { in: [] } }] }
         : {})
     };
 

@@ -1,6 +1,5 @@
 import { prisma } from '../../lib/prisma.ts';
 import { badRequest } from '../../lib/http.ts';
-import { workflowHandoffRolesForOwner } from '../../config/workflowHandoffs.ts';
 import { loadRequiredApprovalsConfig } from '../../config/requiredApprovals.ts';
 import { buildMapTaskOptions, type MapTaskOptions } from './_mapper.ts';
 
@@ -24,23 +23,41 @@ export function mapTaskOptionsFor(task): MapTaskOptions {
 }
 
 /**
- * Build a Prisma `where` fragment for `?workflowGateOwner=OWNER` discovery
- * filtering. A task matches when its `taskType` requires at least one
- * approval type owned by OWNER (per the loaded config), AND no approved
- * row exists for any of those types — i.e. at least one of OWNER's gates
- * is still outstanding.
- *
- * Returned shape: an `AND: [...]` array suitable for merging into an
- * existing `where` clause. Returns an empty array when OWNER does not own
- * any approval type (no required gates, no discovery surface).
- *
- * Free-form owners that don't match `validAssignees` are still queried —
- * the discovery queue should not silently drop unknown names. Server-side
- * `console.warn` is acceptable noise; see the tech design.
+ * Build a Prisma `where` fragment for `?workflowGateOwner=OWNER` discovery.
+ * This mirrors `mapTask.workflowGates`: the task type must require the gate,
+ * the task must be at that gate's actionable status, and no active approval
+ * may satisfy it. The legacy persisted `workflowHandoffRoleId` is not the gate
+ * source and notably has no Ash role.
  */
 export function buildWorkflowGateOwnerWhere(owner: string): Array<Record<string, unknown>> {
-  const roleIds = workflowHandoffRolesForOwner(owner);
-  return roleIds.length > 0 ? [{ workflowHandoffRoleId: { in: roleIds } }] : [];
+  const config = loadRequiredApprovalsConfig();
+  const ownerKey = owner.trim().toLowerCase();
+  const actionableStatusByApprovalType: Record<string, string> = {
+    spec: 'open',
+    tech_design: 'ready',
+    qa_agent: 'doing',
+    accepted: 'acceptance'
+  };
+  const gates = Object.entries(config.owners)
+    .filter(([approvalType, configuredOwner]) =>
+      configuredOwner.trim().toLowerCase() === ownerKey
+      && actionableStatusByApprovalType[approvalType]
+    )
+    .map(([approvalType]) => {
+      const taskTypes = Object.entries(config.mappings)
+        .filter(([, required]) => required.includes(approvalType))
+        .map(([taskType]) => taskType);
+      return {
+        status: actionableStatusByApprovalType[approvalType],
+        taskType: { in: taskTypes },
+        approvals: {
+          none: { type: approvalType, state: 'approved', revokedAt: null }
+        }
+      };
+    })
+    .filter((clause) => clause.taskType.in.length > 0);
+
+  return gates.length > 0 ? [{ OR: gates }] : [];
 }
 
 export async function connectTags(tagNames) {

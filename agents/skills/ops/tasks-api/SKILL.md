@@ -50,8 +50,9 @@ This read-only adapter retrieves full active tasks and classifies them as
 `ACTIONABLE`, `WAITING_EXTERNAL`, `DEPENDENCY_BLOCKED`, or `BLOCKED`. Lobster
 remains the sole owner of capacity and state admission. When `attentionOwners` is populated, position 0 overrides comment-derived
 classification: only that owner sees actionable task work. Legacy delivery and
-checklist comments remain evidence. Without an attention stack, existing
-assignee/PR classification remains the fallback.
+checklist comments remain evidence. Without an attention stack, the exact
+current outstanding workflow-gate owner is actionable; assignee/PR
+classification remains the fallback when no current gate is outstanding.
 
 ### Attention owners: ordered action and escalation stack
 
@@ -77,9 +78,11 @@ python3 tasks_api_client.py patch --id <task-uuid> \
 
 OpenClaw/runtime blockers route to Quinn by putting Quinn first. Legacy
 `[openclaw-needed]`, checklist, and other bracketed comments are audit history;
-they are not routing state. The heartbeat queue automatically fetches the
-invoking agent's attention-owned tasks and only treats a task as actionable when
-that agent is position 0. Lower escalation slots remain dormant until advanced.
+they are not routing state. The heartbeat queue automatically fetches the invoking agent's attention-owned
+and current gate-owned tasks. A populated attention stack is authoritative and
+only position 0 acts. With an empty stack, the exact current outstanding gate
+owner is the fallback actor. Lower escalation slots and stale/future gates remain
+dormant.
 
 Safe helpers perform a fetch → mutate → PATCH round trip. Because duplicate
 slots are valid, callers must intentionally remove/advance the resolved slot,
