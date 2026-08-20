@@ -424,6 +424,44 @@ describe('tasks api endpoints', () => {
     expect(prismaMock.task.update.mock.calls[0][0].data.specChecksum).toBe(checksum);
   });
 
+  it('PATCH /api/v1/tasks/:id atomically revises description and relocks specChecksum for Quinn', async () => {
+    const storedDescription = '## Acceptance Criteria\n- [ ] AC1: Build it';
+    const revisedDescription = `${storedDescription}\n- [ ] AC2: Revise it`;
+    const revisedChecksum = checksumForAcceptanceCriteria(['AC1: Build it', 'AC2: Revise it']);
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task({ description: storedDescription, specChecksum: checksumForAcceptanceCriteria(['AC1: Build it']) }))
+      .mockResolvedValueOnce(task({ description: revisedDescription, specChecksum: revisedChecksum }));
+    prismaMock.task.update.mockResolvedValue(task({ description: revisedDescription, specChecksum: revisedChecksum }));
+
+    const response = await authedRequest(createApp())
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .set('Authorization', 'Bearer quinn-test-token-long-enough')
+      .send({ description: revisedDescription, resyncSpecChecksum: true });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.task.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ description: revisedDescription, specChecksum: revisedChecksum })
+    }));
+    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
+    expect(prismaMock.taskComment.create).toHaveBeenCalledWith({
+      data: {
+        taskId: '11111111-1111-1111-1111-111111111111',
+        author: 'Quinn',
+        body: 'Acceptance criteria intentionally revised and specChecksum atomically relocked by Quinn.'
+      }
+    });
+  });
+
+  it('rejects checksum relock from an unauthorised actor', async () => {
+    prismaMock.task.findFirst.mockResolvedValueOnce(task({ specChecksum: 'a'.repeat(64) }));
+    const response = await authedRequest(createApp())
+      .patch('/api/v1/tasks/11111111-1111-1111-1111-111111111111')
+      .send({ description: '## Acceptance Criteria\n- [ ] AC1: Revised', resyncSpecChecksum: true });
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('SPEC_CHECKSUM_RESYNC_FORBIDDEN');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
   it('PATCH /api/v1/tasks/:id passes description through verbatim and revokes structured approval on AC drift', async () => {
     // Per task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` WS1: the Tasks API no
     // longer auto-unchecks the legacy `- [x] **Approved by Tom**` marker on

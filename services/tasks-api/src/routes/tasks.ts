@@ -23,7 +23,7 @@ import {
 } from './tasks/_validation.ts';
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
-import { descriptionHasSpecDrift } from './tasks/_spec.ts';
+import { descriptionHasSpecDrift, specChecksumForDescription } from './tasks/_spec.ts';
 import {
   buildWorkflowGateOwnerWhere,
   connectTags,
@@ -356,6 +356,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     const dependsOnIds = hasDependencyUpdate ? normalizeDependsOnIds(req.body.dependsOnIds) : undefined;
     const title = normalizeString(req.body?.title);
     const description = req.body?.description === undefined ? undefined : normalizeString(req.body.description);
+    const resyncSpecChecksum = req.body?.resyncSpecChecksum === true;
     const assignee = req.body?.assignee === undefined ? undefined : normalizeString(req.body.assignee);
     if (req.body?.workflowHandoff !== undefined) {
       const handoff = normalizeWorkflowHandoff(req.body.workflowHandoff);
@@ -380,9 +381,22 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     // `TaskApproval` rows; the lobster revokes those rows on drift and Tom re-issues
     // approval via the structured endpoint. See task `e2aba106`.
     const nextDescription = description === undefined ? undefined : description || null;
-    const specApprovalRevocationRequired = description !== undefined
+    if (req.body?.resyncSpecChecksum !== undefined && req.body.resyncSpecChecksum !== true) {
+      return badRequest(res, 'INVALID_SPEC_CHECKSUM_RESYNC', 'resyncSpecChecksum must be true when supplied');
+    }
+    if (resyncSpecChecksum && description === undefined) {
+      return badRequest(res, 'DESCRIPTION_REQUIRED_FOR_SPEC_CHECKSUM_RESYNC', 'description is required when resyncSpecChecksum is true');
+    }
+    if (resyncSpecChecksum && !['Tom', 'Quinn'].includes(req.user?.actor ?? '')) {
+      return sendError(res, 403, 'SPEC_CHECKSUM_RESYNC_FORBIDDEN', 'Only Tom or Quinn may intentionally revise and relock acceptance criteria');
+    }
+    if (resyncSpecChecksum && req.body?.specChecksum !== undefined) {
+      return badRequest(res, 'SPEC_CHECKSUM_RESYNC_CONFLICT', 'Do not submit specChecksum when resyncSpecChecksum is true; the server computes it');
+    }
+    const specApprovalRevocationRequired = !resyncSpecChecksum && description !== undefined
       && descriptionHasSpecDrift(existing, nextDescription ?? '');
     if (nextDescription !== undefined) updates.description = nextDescription;
+    if (resyncSpecChecksum) updates.specChecksum = specChecksumForDescription(nextDescription ?? '');
     if (assignee !== undefined) {
       if (assignee && !validAssignees.has(assignee)) {
         return badRequest(res, 'INVALID_ASSIGNEE', 'Assignee must be one of: Tom, Quinn, Rowan, Lox, Ivy');
@@ -501,6 +515,16 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
             }
           });
         }
+      }
+
+      if (resyncSpecChecksum) {
+        await tx.taskComment.create({
+          data: {
+            taskId: id,
+            author: req.user.actor,
+            body: `Acceptance criteria intentionally revised and specChecksum atomically relocked by ${req.user.actor}.`
+          }
+        });
       }
 
       if (hasTagUpdate) {

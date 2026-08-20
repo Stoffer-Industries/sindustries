@@ -98,11 +98,8 @@ export function buildMapTaskOptions(
   return { requiredApprovalTypes: required, gateOwnersByType };
 }
 
-const ACTIONABLE_STATUS_BY_APPROVAL_TYPE: Readonly<Record<string, string>> = {
-  spec: 'open',
-  tech_design: 'ready',
-  qa_agent: 'doing',
-  accepted: 'acceptance'
+const INFORMATIONAL_STATUS_BY_APPROVAL_TYPE: Readonly<Record<string, string>> = {
+  spec: 'open'
 };
 
 export function mapTask(task, options) {
@@ -125,16 +122,10 @@ export function mapTask(task, options) {
   const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
   const workflowHandoffOwner = workflowHandoffOwnerFor(task.workflowHandoffRoleId);
-  // Derive `workflowGates` from required approval types, configured owners,
-  // structured approval rows, and the task's current workflow stage. A gate
-  // is actionable only on the transition it controls:
-  // open → spec, ready → tech_design, doing → qa_agent,
-  // acceptance → accepted. `done` has no actionable approval gate.
-  //
-  // This status scoping prevents future requirements (for example Tom's
-  // `accepted` sign-off) from appearing in the avatar stack while a task is
-  // still in `doing`, and prevents already-passed gates from reappearing when
-  // their approval row is missing or revoked on an inconsistent task record.
+  // `workflowGates` is retained only for the lobster-independent `spec` gate.
+  // Lobster owns routing for tech_design, qa_agent, and accepted by writing
+  // `attentionOwners`; exposing those here would recreate a second,
+  // status-derived actionability source.
   const requiredApprovalTypes = options?.requiredApprovalTypes ?? [];
   const gateOwnersByType = options?.gateOwnersByType ?? {};
   const approvedTypes = new Set(
@@ -143,7 +134,7 @@ export function mapTask(task, options) {
       .map((a) => a.type)
   );
   const derivedGates = requiredApprovalTypes
-    .filter((approvalType) => ACTIONABLE_STATUS_BY_APPROVAL_TYPE[approvalType] === task.status)
+    .filter((approvalType) => INFORMATIONAL_STATUS_BY_APPROVAL_TYPE[approvalType] === task.status)
     .filter((approvalType) => !approvedTypes.has(approvalType))
     .map((approvalType) => ({
       roleId: `${approvalType}_gate`,

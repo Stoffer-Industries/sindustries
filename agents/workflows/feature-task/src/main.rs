@@ -469,6 +469,7 @@ fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
 
 fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     bootstrap_task_spec_layout(workspace_root(&args))?;
     if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "spec_check")? {
         if !drift.criteria_met {
@@ -498,7 +499,11 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
         if !failures.is_empty() {
             if !args.dry_run {
-                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "open", "workflowHandoff": workflow_handoff("product_spec_approver", "spec", "Product spec approval is required")}))?;
+                api_patch::<Task>(
+                    &args.base_url,
+                    &env.task.id,
+                    json!({"status": "open", "workflowHandoff": workflow_handoff("product_spec_approver", "spec", "Product spec approval is required")}),
+                )?;
                 env.task = api_get_task(&args.base_url, &env.task.id)?;
                 let fingerprint = failures.join("\n");
                 if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
@@ -536,7 +541,11 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         "ready",
         "spec_check",
         failures,
-        Some(workflow_handoff("product_spec_approver", "spec", "Product spec approval is required")),
+        Some(workflow_handoff(
+            "product_spec_approver",
+            "spec",
+            "Product spec approval is required",
+        )),
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `ready`.",
     )
@@ -544,6 +553,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
 
 fn ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "ready_checks")? {
         if !drift.criteria_met {
             return Ok(drift);
@@ -595,7 +605,11 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
         "doing",
         "ready_checks",
         failures,
-        Some(workflow_handoff("tech_design_approver", "tech_design", "Tech design approval is required")),
+        Some(workflow_handoff(
+            "tech_design_approver",
+            "tech_design",
+            "Tech design approval is required",
+        )),
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `doing`.",
     )
@@ -605,7 +619,6 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     // shortly after the transition completes) and the "PR merges while in
     // doing" trigger (verify_delivery sweeps every iteration).
 }
-
 
 // ---- Code-task stages (task f77b7a60) ----
 //
@@ -631,6 +644,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 
 fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     env.lobster_state.workflow = workflow_for_task(&env.task);
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -670,7 +684,11 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
         "ready",
         "code_task_tech_design_check",
         failures,
-        Some(workflow_handoff("tech_design_approver", "tech_design", "Tech design approval is required")),
+        Some(workflow_handoff(
+            "tech_design_approver",
+            "tech_design",
+            "Tech design approval is required",
+        )),
         "[code-task-tech-design-checklist]",
         "Code task workflow moved task to `ready`.",
     )
@@ -678,6 +696,7 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
 
 fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     env.lobster_state.workflow = workflow_for_task(&env.task);
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -735,6 +754,7 @@ fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
 
 fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "verify_delivery")? {
         if !drift.criteria_met {
             return Ok(drift);
@@ -881,6 +901,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
 
 fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "feedback_aggregate")? {
         if !drift.criteria_met {
             return Ok(drift);
@@ -948,11 +969,7 @@ fn verify_delivery_review_failure(url: &str, review: ReviewState) -> Option<Stri
 /// superseded (same principle as `verify_delivery`'s latest-only filter) and
 /// do not block. The latest ClosedUnmerged still fails, as do open / review /
 /// unknown states on any listed PR.
-fn post_merge_pr_failure(
-    url: &str,
-    state: ReviewState,
-    all_pr_urls: &[String],
-) -> Option<String> {
+fn post_merge_pr_failure(url: &str, state: ReviewState, all_pr_urls: &[String]) -> Option<String> {
     match state {
         ReviewState::Merged => None,
         ReviewState::ClosedUnmerged if !is_latest_pr_url(url, all_pr_urls) => None,
@@ -1318,6 +1335,7 @@ fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult]) -> String 
 
 fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
+    reconcile_workflow_attention(&args, &mut env)?;
     // Spec drift is not blocked at post_merge: Tom owns the ACs during QA and may
     // legitimately refine them. The resync flow (unchecking "Approved by Tom" and
     // requiring explicit re-approval) handles drift tracking; see the spec-resync
@@ -1350,7 +1368,11 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
             let labels = needs_pr.join(", ");
             let fingerprint = format!("uncovered_acs:{labels}");
             if !args.dry_run {
-                api_patch::<Task>(&args.base_url, &env.task.id, json!({"status": "doing", "workflowHandoff": Value::Null}))?;
+                api_patch::<Task>(
+                    &args.base_url,
+                    &env.task.id,
+                    json!({"status": "doing", "workflowHandoff": Value::Null}),
+                )?;
                 env.task = api_get_task(&args.base_url, &env.task.id)?;
                 if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
                     env.lobster_state.failure_fingerprint = Some(fingerprint);
@@ -1441,7 +1463,11 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
         "done",
         "post_merge",
         failures,
-        Some(workflow_handoff("qa_verifier", "qa", "Acceptance criteria require QA verification")),
+        Some(workflow_handoff(
+            "qa_verifier",
+            "qa",
+            "Acceptance criteria require QA verification",
+        )),
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `done`.",
     )?;
@@ -1499,8 +1525,89 @@ fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Resul
     Ok(env)
 }
 
+fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
+    match task.status.as_str() {
+        "ready" if !tech_design_approved_structured(task) && !tech_design_waived(task) => {
+            Some("Quinn")
+        }
+        "doing" if !implementer_pr_urls(task).is_empty() && !qa_agent_verified(task) => Some("Ash"),
+        "acceptance" if !accepted_structured(task) => Some("Tom"),
+        _ => None,
+    }
+}
+
+fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
+    match owner {
+        "Quinn" => {
+            task.status != "ready"
+                || tech_design_approved_structured(task)
+                || tech_design_waived(task)
+        }
+        "Ash" => {
+            task.status != "doing"
+                || implementer_pr_urls(task).is_empty()
+                || qa_agent_verified(task)
+        }
+        "Tom" => task.status != "acceptance" || accepted_structured(task),
+        _ => false,
+    }
+}
+
+/// Reconcile only the workflow-owned head slot. Tail entries (including
+/// duplicate names) are copied byte-for-byte; when an unrelated head is
+/// present the managed owner is prepended rather than overwriting it.
+fn reconciled_attention_owners(task: &Task) -> Vec<String> {
+    let mut owners = task.attention_owners.clone();
+    if let Some(desired) = workflow_attention_owner(task) {
+        if owners
+            .first()
+            .is_some_and(|owner| owner.eq_ignore_ascii_case(desired))
+        {
+            return owners;
+        }
+        if owners.first().is_some_and(|owner| {
+            task.assignee
+                .as_deref()
+                .is_some_and(|assignee| owner.eq_ignore_ascii_case(assignee))
+                || matches!(owner.as_str(), "Quinn" | "Ash" | "Tom")
+        }) {
+            owners[0] = desired.to_string();
+        } else {
+            owners.insert(0, desired.to_string());
+        }
+    } else if owners
+        .first()
+        .is_some_and(|owner| managed_owner_reason_satisfied(task, owner))
+    {
+        owners.remove(0);
+    }
+    owners
+}
+
+fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<()> {
+    let desired = reconciled_attention_owners(&env.task);
+    if desired == env.task.attention_owners {
+        return Ok(());
+    }
+    if args.dry_run {
+        env.task.attention_owners = desired;
+        return Ok(());
+    }
+    api_patch::<Task>(
+        &args.base_url,
+        &env.task.id,
+        json!({"attentionOwners": desired}),
+    )?;
+    env.task = api_get_task(&args.base_url, &env.task.id)?;
+    Ok(())
+}
+
 fn workflow_handoff(role_id: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
-    ActiveWorkflowHandoff { role_id: role_id.to_string(), gate: Some(gate.to_string()), reason: Some(reason.to_string()) }
+    ActiveWorkflowHandoff {
+        role_id: role_id.to_string(),
+        gate: Some(gate.to_string()),
+        reason: Some(reason.to_string()),
+    }
 }
 
 /// `comment_tag` is the bracket tag written on the progress-checklist
@@ -1541,6 +1648,7 @@ fn transition_or_block(
                 return Err(err);
             }
             env.task = api_get_task(&args.base_url, &env.task.id)?;
+            reconcile_workflow_attention(args, &mut env)?;
             if let Err(err) = write_state(
                 &args.base_url,
                 &env.task.id,
@@ -1560,7 +1668,11 @@ fn transition_or_block(
         env.action_taken = format!("{action}_blocked");
         let fingerprint = failures.join("\n");
         if !args.dry_run {
-            api_patch::<Task>(&args.base_url, &env.task.id, json!({"workflowHandoff": handoff_on_block}))?;
+            api_patch::<Task>(
+                &args.base_url,
+                &env.task.id,
+                json!({"workflowHandoff": handoff_on_block}),
+            )?;
             env.task = api_get_task(&args.base_url, &env.task.id)?;
         }
         if !args.dry_run && env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
@@ -1891,19 +2003,12 @@ enum ArchiveSpecPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ArchiveOutcome {
     /// Spec was moved and the task description was rewritten.
-    Moved {
-        from_rel: String,
-        to_rel: String,
-    },
+    Moved { from_rel: String, to_rel: String },
     /// Spec was already in the done directory; description was rewritten.
-    AlreadyArchived {
-        to_rel: String,
-    },
+    AlreadyArchived { to_rel: String },
     /// No work to do: spec is missing, not a task spec, an open spec, or
     /// the parser could not extract a path from the Spec line.
-    NotApplicable {
-        reason: ArchiveSkipReason,
-    },
+    NotApplicable { reason: ArchiveSkipReason },
     /// Filesystem or path-resolution failure; the task should remain `done`
     /// and the next reconciliation sweep will retry. The caller is expected
     /// to surface a `[spec-archive-retryable]` task comment and an attention
@@ -1916,10 +2021,7 @@ enum ArchiveOutcome {
     /// Destination file exists with different content from the source. Both
     /// files are left in place; a `[spec-archive-conflict]` comment must be
     /// posted. Reconciliation sweep will not retry until a human resolves it.
-    Conflict {
-        from_rel: String,
-        to_rel: String,
-    },
+    Conflict { from_rel: String, to_rel: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2048,11 +2150,7 @@ fn move_approved_chat_spec_if_needed(args: &StageArgs, mut env: Envelope) -> Res
         Ok(text) => text,
         Err(_) => return Ok(env),
     };
-    let plan = plan_chat_spec_lifecycle_move(
-        &spec.path,
-        &spec_text,
-        spec_is_approved(&env.task),
-    );
+    let plan = plan_chat_spec_lifecycle_move(&spec.path, &spec_text, spec_is_approved(&env.task));
     let (from_rel, to_rel, should_move) = match plan {
         ChatApprovalMovePlan::Move { from_rel, to_rel } => (from_rel, to_rel, true),
         ChatApprovalMovePlan::AlreadyMoved { from_rel, to_rel } => (from_rel, to_rel, false),
@@ -2214,10 +2312,7 @@ fn rewrite_spec_line_in_description(
 /// Retryable errors (e.g. `fs::rename` failure due to permission/disk)
 /// surface as [`ArchiveOutcome::Retryable`] rather than panicking — the
 /// task must stay `done` and the next sweep will retry.
-fn archive_task_spec_for_done_task(
-    task: &Task,
-    workspace_root: &Path,
-) -> ArchiveOutcome {
+fn archive_task_spec_for_done_task(task: &Task, workspace_root: &Path) -> ArchiveOutcome {
     let Some(spec) = product_spec(task) else {
         return ArchiveOutcome::NotApplicable {
             reason: ArchiveSkipReason::UnparseableSpecLine,
@@ -2225,7 +2320,9 @@ fn archive_task_spec_for_done_task(
     };
     let plan = plan_task_spec_archive(Some(&spec.path));
     let (from_rel, to_rel) = match &plan {
-        ArchiveSpecPlan::Move { from_rel, to_rel, .. } => (from_rel.clone(), to_rel.clone()),
+        ArchiveSpecPlan::Move {
+            from_rel, to_rel, ..
+        } => (from_rel.clone(), to_rel.clone()),
         ArchiveSpecPlan::AlreadyArchived => {
             return ArchiveOutcome::AlreadyArchived {
                 to_rel: spec.path.clone(),
@@ -2259,9 +2356,7 @@ fn archive_task_spec_for_done_task(
         }
     };
     let ArchiveSpecPlan::Move {
-        from_abs,
-        to_abs,
-        ..
+        from_abs, to_abs, ..
     } = resolved
     else {
         return ArchiveOutcome::NotApplicable {
@@ -2371,11 +2466,13 @@ fn rewrite_description_and_refresh(
         &env.task.id,
         json!({"description": new_description}),
     ) {
-        env.failures.push(format!("description rewrite failed: {err}"));
+        env.failures
+            .push(format!("description rewrite failed: {err}"));
         return;
     }
     if let Err(err) = api_get_task(&args.base_url, &env.task.id).map(|t| env.task = t) {
-        env.failures.push(format!("refresh after rewrite failed: {err}"));
+        env.failures
+            .push(format!("refresh after rewrite failed: {err}"));
     }
 }
 
@@ -2388,7 +2485,8 @@ fn post_spec_archive_retryable(
 ) {
     env.action_taken = "post_merge_archive_retryable".to_string();
     env.criteria_met = false;
-    env.failures.push(format!("spec archive retryable: {reason}"));
+    env.failures
+        .push(format!("spec archive retryable: {reason}"));
     if args.dry_run {
         return;
     }
@@ -2404,12 +2502,7 @@ fn post_spec_archive_retryable(
     let _ = write_state(&args.base_url, &env.task.id, &env.lobster_state, None);
 }
 
-fn post_spec_archive_conflict(
-    args: &StageArgs,
-    env: &mut Envelope,
-    from_rel: &str,
-    to_rel: &str,
-) {
+fn post_spec_archive_conflict(args: &StageArgs, env: &mut Envelope, from_rel: &str, to_rel: &str) {
     env.action_taken = "post_merge_archive_conflict".to_string();
     env.criteria_met = false;
     env.failures
@@ -2440,7 +2533,11 @@ fn post_spec_archive_conflict(
 /// - `archive_sweep_summary: scanned=<n> moved=<n> already=<n> retryable=<n> conflict=<n> not_applicable=<n>`
 fn archive_done_task_specs_sweep(args: ArchiveDoneTaskSpecsSweepArgs) -> Result<Envelope> {
     let base_url = args.base_url.trim_end_matches('/').to_string();
-    let assignee_filter = args.assignee.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let assignee_filter = args
+        .assignee
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let tasks = list_done_tasks(&base_url, assignee_filter)?;
     let mut moved = 0usize;
@@ -2467,7 +2564,11 @@ fn archive_done_task_specs_sweep(args: ArchiveDoneTaskSpecsSweepArgs) -> Result<
         match &outcome {
             ArchiveOutcome::Moved { .. } => moved += 1,
             ArchiveOutcome::AlreadyArchived { .. } => already += 1,
-            ArchiveOutcome::Retryable { from_rel, to_rel, reason } => {
+            ArchiveOutcome::Retryable {
+                from_rel,
+                to_rel,
+                reason,
+            } => {
                 retryable += 1;
                 failures.push(format!(
                     "{} ({} -> {}): {}",
@@ -2992,7 +3093,8 @@ fn block_on_spec_drift_fluid(
         //       comments from previous episodes fall into the revoke branch.
         let fingerprint = drift_episode_fingerprint(&raw_failures);
         let we_actioned_episode = env.lobster_state.spec_drift_uncheck_applied == Some(true);
-        let api_reapproval_after_auto_revoke = structured_spec_reapproval_after_auto_revoke(&env.task);
+        let api_reapproval_after_auto_revoke =
+            structured_spec_reapproval_after_auto_revoke(&env.task);
         let fresh_resync_record = latest_resync_record_matches_drift(
             &env.task,
             &fingerprint,
@@ -3106,11 +3208,9 @@ fn block_on_spec_drift_fluid(
         // Hard-block until Tom approves via the structured API.
         env.criteria_met = false;
         env.action_taken = format!("{action}_blocked_spec_drift");
-        env.failures = vec![
-            "Structured `spec` TaskApproval is missing or revoked. \
+        env.failures = vec!["Structured `spec` TaskApproval is missing or revoked. \
              Approve via POST /tasks/:id/approvals (type=spec) before drift can be re-evaluated."
-                .to_string(),
-        ];
+            .to_string()];
         publish_spec_approval_handoff(args, &mut env)?;
         Ok(Some(env))
     }
@@ -3623,7 +3723,10 @@ fn extract_spec_path_from_line(raw: &str) -> Option<ProductSpecRef> {
 
 fn strip_trailing_annotation(s: &str) -> Option<&str> {
     let bytes = s.as_bytes();
-    if bytes.last().copied() != Some(b')') && bytes.last().copied() != Some(b']') && bytes.last().copied() != Some(b'`') {
+    if bytes.last().copied() != Some(b')')
+        && bytes.last().copied() != Some(b']')
+        && bytes.last().copied() != Some(b'`')
+    {
         return None;
     }
     let opener = match bytes.last().copied() {
@@ -3646,7 +3749,6 @@ fn brain_spec_approved_by_tom(text: &str) -> bool {
         .unwrap()
         .is_match(text)
 }
-
 
 /// True if any task comment starts with `[spec-resynced]`.
 ///
@@ -4033,7 +4135,15 @@ fn pr_body(url: &str) -> Result<String> {
 /// workflow gate state separately.
 fn pr_changed_files(url: &str) -> Vec<String> {
     let output = Command::new("gh")
-        .args(["pr", "view", url, "--json", "files", "--jq", ".files[].path"])
+        .args([
+            "pr",
+            "view",
+            url,
+            "--json",
+            "files",
+            "--jq",
+            ".files[].path",
+        ])
         .output();
     let output = match output {
         Ok(out) if out.status.success() => out,
@@ -4194,6 +4304,67 @@ mod tests {
                 fs::read_to_string(Path::new("agents/workflows/feature-task/fixtures").join(name))
             })
             .unwrap()
+    }
+
+    fn routing_task(status: &str, owner: &[&str]) -> Task {
+        Task {
+            id: "task-1".to_string(),
+            status: status.to_string(),
+            assignee: Some("Rowan".to_string()),
+            attention_owners: owner.iter().map(|value| (*value).to_string()).collect(),
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn routing_does_not_surface_ash_before_delivery_evidence() {
+        let task = routing_task("doing", &["Rowan", "Tom"]);
+        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan", "Tom"]);
+    }
+
+    #[test]
+    fn routing_replaces_implementer_with_ash_after_delivery() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        assert_eq!(reconciled_attention_owners(&task), vec!["Ash", "Tom"]);
+    }
+
+    #[test]
+    fn routing_advances_stale_implementer_to_tom_at_acceptance() {
+        let task = routing_task("acceptance", &["Rowan", "Ash", "Rowan", "Tom"]);
+        assert_eq!(
+            reconciled_attention_owners(&task),
+            vec!["Tom", "Ash", "Rowan", "Tom"]
+        );
+    }
+
+    #[test]
+    fn routing_removes_satisfied_managed_owner_and_is_idempotent() {
+        let mut task = routing_task("acceptance", &["Tom", "Rowan", "Tom"]);
+        task.approvals.push(TaskApproval {
+            approval_type: "accepted".to_string(),
+            state: "approved".to_string(),
+            ..TaskApproval::default()
+        });
+        let once = reconciled_attention_owners(&task);
+        assert_eq!(once, vec!["Rowan", "Tom"]);
+        task.attention_owners = once.clone();
+        assert_eq!(reconciled_attention_owners(&task), once);
+    }
+
+    #[test]
+    fn routing_preserves_unrelated_head_and_duplicate_tail_slots() {
+        let task = routing_task("acceptance", &["Lox", "Rowan", "Tom", "Tom"]);
+        assert_eq!(
+            reconciled_attention_owners(&task),
+            vec!["Tom", "Lox", "Rowan", "Tom", "Tom"]
+        );
     }
 
     #[test]
@@ -4418,8 +4589,6 @@ mod tests {
         assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
     }
 
-
-
     #[test]
     fn resolves_product_specs_relative_to_workspace_root() {
         let repo = tempdir().unwrap();
@@ -4491,7 +4660,8 @@ mod tests {
 
     #[test]
     fn legacy_approval_marker_is_not_an_acceptance_criterion() {
-        let with_marker = "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it";
+        let with_marker =
+            "- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Build it";
         let without_marker = "## Acceptance Criteria\n- [ ] AC1: Build it";
 
         assert_eq!(
@@ -4682,7 +4852,10 @@ mod tests {
             },
         ];
 
-        assert_eq!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").len(), 1);
+        assert_eq!(
+            implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").len(),
+            1
+        );
     }
 
     #[test]
@@ -5096,9 +5269,7 @@ mod tests {
         let urls = vec![closed.to_string(), later_closed.to_string()];
         assert_eq!(
             post_merge_pr_failure(later_closed, ReviewState::ClosedUnmerged, &urls),
-            Some(format!(
-                "PR {later_closed} is not merged: ClosedUnmerged."
-            ))
+            Some(format!("PR {later_closed} is not merged: ClosedUnmerged."))
         );
     }
 
@@ -5371,7 +5542,6 @@ mod tests {
     }
 
     // ---- unchecked_task_ac_labels / ac_labels_in_pr_body / ac_labels_needing_new_pr ----
-
 
     // ---- block_on_spec_drift_fluid ----
 
@@ -6354,11 +6524,7 @@ mod tests {
     fn spec_lifecycle_legacy_marker_still_moves_without_structured_approval() {
         let checked = "- [x] **Approved by Tom**\n";
         assert_eq!(
-            plan_chat_spec_lifecycle_move(
-                "brain/tasks/specs/open/example.md",
-                checked,
-                false,
-            ),
+            plan_chat_spec_lifecycle_move("brain/tasks/specs/open/example.md", checked, false,),
             ChatApprovalMovePlan::Move {
                 from_rel: "brain/tasks/specs/open/example.md".to_string(),
                 to_rel: "brain/tasks/specs/in-progress/example.md".to_string()
@@ -6389,11 +6555,7 @@ mod tests {
             }
         );
         assert_eq!(
-            plan_chat_spec_lifecycle_move(
-                "brain/tasks/specs/done/example.md",
-                unchecked,
-                true,
-            ),
+            plan_chat_spec_lifecycle_move("brain/tasks/specs/done/example.md", unchecked, true,),
             ChatApprovalMovePlan::Noop
         );
     }
@@ -7334,10 +7496,7 @@ detached
         // AC3: legacy inline annotation form must remain parseable.
         let desc = "Some prose.\n\n**Spec:** brain/tasks/specs/in-progress/example.md (legacy inline note)\n\nAC1: ...";
         let parsed = parse_product_spec_ref(desc).expect("must parse");
-        assert_eq!(
-            parsed.path,
-            "brain/tasks/specs/in-progress/example.md"
-        );
+        assert_eq!(parsed.path, "brain/tasks/specs/in-progress/example.md");
 
         // Backtick-wrapped path with trailing comma.
         let desc2 = "**Spec:** `brain/tasks/specs/in-progress/foo.md`,\n";
@@ -7364,7 +7523,9 @@ detached
     #[test]
     fn archive_spec_rejects_unparseable_spec_line() {
         // Multi-token path with whitespace -> reject (returns None).
-        assert!(parse_product_spec_ref("**Spec:** brain/tasks/specs/in-progress/foo bar.md").is_none());
+        assert!(
+            parse_product_spec_ref("**Spec:** brain/tasks/specs/in-progress/foo bar.md").is_none()
+        );
         // Bracket-only residue (no path component) -> reject.
         assert!(parse_product_spec_ref("**Spec:** (just a note)").is_none());
     }
@@ -7392,7 +7553,11 @@ detached
         assert!(done.exists());
         assert_eq!(fs::read_to_string(done).unwrap(), content);
         // Source no longer exists.
-        assert!(!workspace.path().join(TASK_SPECS_IN_PROGRESS_DIR).join(slug).exists());
+        assert!(!workspace
+            .path()
+            .join(TASK_SPECS_IN_PROGRESS_DIR)
+            .join(slug)
+            .exists());
     }
 
     #[test]
@@ -7401,9 +7566,8 @@ detached
         let slug = "inline-annotated-2026.md";
         write_in_progress_spec(workspace.path(), slug, "inline content\n");
 
-        let desc = format!(
-            "**Spec:** brain/tasks/specs/in-progress/{slug} (legacy annotation preserved)"
-        );
+        let desc =
+            format!("**Spec:** brain/tasks/specs/in-progress/{slug} (legacy annotation preserved)");
         let task = task_with_description(&desc);
         let outcome = archive_task_spec_for_done_task(&task, workspace.path());
         assert!(matches!(outcome, ArchiveOutcome::Moved { .. }));
@@ -7451,8 +7615,16 @@ detached
             other => panic!("expected Conflict, got {other:?}"),
         }
         // Both files left in place.
-        assert!(workspace.path().join(TASK_SPECS_IN_PROGRESS_DIR).join(slug).exists());
-        assert!(workspace.path().join(TASK_SPECS_DONE_DIR).join(slug).exists());
+        assert!(workspace
+            .path()
+            .join(TASK_SPECS_IN_PROGRESS_DIR)
+            .join(slug)
+            .exists());
+        assert!(workspace
+            .path()
+            .join(TASK_SPECS_DONE_DIR)
+            .join(slug)
+            .exists());
     }
 
     #[test]
@@ -7599,7 +7771,10 @@ detached
             Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
             None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
         }
-        assert_eq!(request.header("Authorization"), Some("Bearer test-service-token"));
+        assert_eq!(
+            request.header("Authorization"),
+            Some("Bearer test-service-token")
+        );
     }
 
     #[test]
@@ -7677,10 +7852,8 @@ detached
         // (renamed from qa_ac_verified_structured). They read distinct
         // approval types so a qa_agent row should never short-circuit
         // Tom's `accepted` gate and vice-versa.
-        let task = qa_test_task_with_approvals(vec![
-            ("qa_agent", "approved"),
-            ("accepted", "revoked"),
-        ]);
+        let task =
+            qa_test_task_with_approvals(vec![("qa_agent", "approved"), ("accepted", "revoked")]);
         assert!(qa_agent_verified(&task));
         assert!(!accepted_structured(&task));
         assert!(!accepted_structured_failures(&task).is_empty());

@@ -24,19 +24,15 @@ export function mapTaskOptionsFor(task): MapTaskOptions {
 
 /**
  * Build a Prisma `where` fragment for `?workflowGateOwner=OWNER` discovery.
- * This mirrors `mapTask.workflowGates`: the task type must require the gate,
- * the task must be at that gate's actionable status, and no active approval
- * may satisfy it. The legacy persisted `workflowHandoffRoleId` is not the gate
- * source and notably has no Ash role.
+ * Compatibility discovery for the lobster-independent `spec` gate. Lobster
+ * writes `attentionOwners` for tech_design, qa_agent, and accepted, so those
+ * gates must never be reconstructed from task status here.
  */
 export function buildWorkflowGateOwnerWhere(owner: string): Array<Record<string, unknown>> {
   const config = loadRequiredApprovalsConfig();
   const ownerKey = owner.trim().toLowerCase();
   const actionableStatusByApprovalType: Record<string, string> = {
-    spec: 'open',
-    tech_design: 'ready',
-    qa_agent: 'doing',
-    accepted: 'acceptance'
+    spec: 'open'
   };
   const gates = Object.entries(config.owners)
     .filter(([approvalType, configuredOwner]) =>
