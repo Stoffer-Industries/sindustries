@@ -1,5 +1,6 @@
 import importlib.util
 import pathlib
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -276,6 +277,8 @@ class AgentTaskQueueTest(unittest.TestCase):
                 "mergeCandidates",
                 "attentionOwner",
                 "attentionPages",
+                "workflowGateOwner",
+                "workflowGateTasks",
             },
         )
 
@@ -454,6 +457,93 @@ class AgentTaskQueueTest(unittest.TestCase):
 
 
     # ---- attentionOwners paging (task d8fbe750) ----
+
+    def test_workflow_gate_owner_tasks_calls_current_gate_filter(self):
+        with patch.object(
+            agent_task_queue.tasks_api_client, "list_tasks", return_value=[]
+        ) as list_tasks, patch.object(
+            agent_task_queue.tasks_api_client,
+            "get_base_url",
+            return_value="http://test/api/v1",
+        ):
+            agent_task_queue.fetch_workflow_gate_owner_tasks("Ash")
+
+        kwargs = list_tasks.call_args.kwargs
+        self.assertEqual("Ash", kwargs["workflow_gate_owner"])
+        self.assertEqual(
+            ["open", "ready", "doing", "acceptance"], kwargs["status"]
+        )
+        self.assertEqual(200, kwargs["limit"])
+
+    def test_empty_attention_current_ash_gate_is_actionable(self):
+        gated = implementation_task(
+            attentionOwners=[],
+            workflowGates=[
+                {"owner": "Ash", "state": "outstanding", "gate": "qa_agent"}
+            ],
+        )
+        queue = agent_task_queue.build_work_queue(
+            [],
+            "Ash",
+            [],
+            [],
+            workflow_gate_owner_tasks=[gated],
+            workflow_gate_owner="Ash",
+        )
+        self.assertEqual("workflowGate", queue["topCandidate"]["kind"])
+        self.assertEqual("qa_agent", queue["topCandidate"]["workflowGate"])
+        self.assertEqual(1, len(queue["workflowGateTasks"]))
+
+    def test_top_attention_owner_suppresses_gate_fallback(self):
+        gated = implementation_task(
+            attentionOwners=["Rowan", "Tom"],
+            workflowGates=[
+                {"owner": "Ash", "state": "outstanding", "gate": "qa_agent"}
+            ],
+        )
+        items = agent_task_queue._build_workflow_gate_items("Ash", [gated], set())
+        self.assertEqual([], items)
+
+    def test_stale_and_future_gates_are_suppressed(self):
+        stale = implementation_task(
+            id="stale",
+            status="doing",
+            attentionOwners=[],
+            workflowGates=[
+                {"owner": "Ash", "state": "outstanding", "gate": "tech_design"}
+            ],
+        )
+        future = implementation_task(
+            id="future",
+            status="doing",
+            attentionOwners=[],
+            workflowGates=[
+                {"owner": "Ash", "state": "outstanding", "gate": "accepted"}
+            ],
+        )
+        approved = implementation_task(
+            id="approved",
+            status="doing",
+            attentionOwners=[],
+            workflowGates=[
+                {"owner": "Ash", "state": "approved", "gate": "qa_agent"}
+            ],
+        )
+        self.assertEqual(
+            [],
+            agent_task_queue._build_workflow_gate_items(
+                "Ash", [stale, future, approved], set()
+            ),
+        )
+
+    def test_ash_cli_identity_is_supported(self):
+        self.assertEqual(
+            ("ashstoffer", "~/.config/gh-ash", "ASH_GITHUB_TOKEN"),
+            agent_task_queue.GITHUB_IDENTITIES["ash"],
+        )
+        with patch.object(sys, "argv", ["agent_task_queue.py", "--assignee", "Ash"]),              patch.object(agent_task_queue, "fetch_agent_tasks", return_value=[]),              patch.object(agent_task_queue, "fetch_github_prs", return_value=[]),              patch.object(agent_task_queue, "fetch_linked_delivery_prs", return_value={}),              patch.object(agent_task_queue, "fetch_attention_owner_tasks", return_value=[]),              patch.object(agent_task_queue, "fetch_workflow_gate_owner_tasks", return_value=[]),              patch.object(agent_task_queue, "print_human"), \
+             patch("builtins.print"):
+            agent_task_queue.main()
 
     def test_attention_owner_tasks_calls_list_with_attention_owner_filter(self):
         with patch.object(

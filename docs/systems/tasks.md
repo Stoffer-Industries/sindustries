@@ -163,7 +163,7 @@ Task responses include:
 - Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
 - Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
 
-**How to use it.** `attentionOwners` is authoritative for who acts next even when the task also has an assignee or structured gate. Those other planes remain separate role/context slots: assignee says who delivers, and approvals/workflow gates say who is eligible to decide a gate. They do not override position 0. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
+**How to use it.** A populated `attentionOwners` stack is authoritative for who acts next even when the task also has an assignee or structured gate. Those other planes remain separate role/context slots: assignee says who delivers, and approvals/workflow gates say who is eligible to decide a gate. They do not override position 0. When the attention stack is empty, the owner of the exact current outstanding gate is the actionable fallback (`doing → qa_agent` for Ash); stale, approved, and future-stage gates are dormant. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
 Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. Both Rowan occurrences are meaningful across role slots; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
@@ -251,7 +251,7 @@ The API surfaces each plane independently:
 
 Discovery filters on `GET /tasks`:
 
-- `?workflowGateOwner=<name>` — tasks whose persisted active handoff role currently resolves to `<name>`. This filter does not infer work from task type, status, lifecycle, or approval rows.
+- `?workflowGateOwner=<name>` — tasks whose configured gate owner matches `<name>`, whose task type requires that gate, whose current status makes that gate actionable, and whose structured approval is still outstanding. The filter mirrors the derived `workflowGates` response; it does not use the legacy persisted handoff role.
 - `?attentionOwner=<name>` — tasks whose position-0 `TaskAttentionOwner` matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
@@ -259,7 +259,7 @@ The two filters combine via AND: a UI can show "Quinn's outstanding gates AND th
 **Non-replacement guarantees** (enforced by the API and asserted by tests):
 
 - `attentionOwners` is fully independent of `task.blocked` and `dependencyBlocked`. Clearing attention owners does not declare the task unblocked.
-- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue surfaces gate-owned handoffs through `workflowGateOwner`; it does not also create duplicate attention requests for the same action.
+- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue surfaces the exact current outstanding gate through `workflowGateOwner` only when the attention stack is empty; it does not create duplicate attention requests. Any populated stack suppresses gate fallback and leaves position 0 authoritative.
 - Resolving one attention owner (PATCH replacement) does not affect other attention owners, workflow-gate ownership, dependencies, or `task.blocked`.
 - Changing `taskType` does not retroactively create or remove attention-owner rows; attention is decoupled from task-type policy.
 
