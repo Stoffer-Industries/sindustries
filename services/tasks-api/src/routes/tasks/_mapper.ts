@@ -61,13 +61,11 @@ export function mapTaskAttentionOwner(attentionOwners) {
  *
  * Generalisation rationale (PR #2 f6a4d56a): the legacy single-source
  * shape derived `workflowGates` from the singular `task.workflowHandoffRoleId`
- * column — only one outstanding gate could be surfaced at a time, which
- * forces the lobster and the UI to model two distinct gates (Ash's
- * mechanical verification + Tom's human sign-off) as a single attention
- * queue. PR #2 derives `workflowGates` from ALL required approval types for
- * the task's `taskType`, so the UI can show both `qa_agent` (Ash) and
- * `accepted` (Tom) as simultaneous outstanding gates on a task in
- * `acceptance`.
+ * column — only one outstanding gate could be surfaced at a time. The mapper
+ * now derives gates from the required approval types for the task's
+ * `taskType`, but scopes them to the current workflow transition so the UI
+ * shows only the owner whose approval is actionable at the task's current
+ * status.
  *
  * The `task.workflowHandoffRoleId` / `workflowHandoffGate` /
  * `workflowHandoffReason` columns remain populated (they still drive the
@@ -99,6 +97,13 @@ export function buildMapTaskOptions(
   return { requiredApprovalTypes: required, gateOwnersByType };
 }
 
+const ACTIONABLE_STATUS_BY_APPROVAL_TYPE: Readonly<Record<string, string>> = {
+  spec: 'open',
+  tech_design: 'ready',
+  qa_agent: 'doing',
+  accepted: 'acceptance'
+};
+
 export function mapTask(task, options) {
 
   const dependsOn = task.dependencies
@@ -118,13 +123,16 @@ export function mapTask(task, options) {
   const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
   const workflowHandoffOwner = workflowHandoffOwnerFor(task.workflowHandoffRoleId);
-  // PR #2 (f6a4d56a) generalisation: derive `workflowGates` from the
-  // required approval types configured for this task's `taskType`, joined
-  // with the configured owner per type and the task's structured approval
-  // rows. Any required approval type whose row is not in `state: approved`
-  // (including missing rows and `revoked` rows) is surfaced as an
-  // outstanding gate. This is what makes Ash's `qa_agent` gate and Tom's
-  // `accepted` gate simultaneously visible on a task in `acceptance`.
+  // Derive `workflowGates` from required approval types, configured owners,
+  // structured approval rows, and the task's current workflow stage. A gate
+  // is actionable only on the transition it controls:
+  // open → spec, ready → tech_design, doing → qa_agent,
+  // acceptance → accepted. `done` has no actionable approval gate.
+  //
+  // This status scoping prevents future requirements (for example Tom's
+  // `accepted` sign-off) from appearing in the avatar stack while a task is
+  // still in `doing`, and prevents already-passed gates from reappearing when
+  // their approval row is missing or revoked on an inconsistent task record.
   const requiredApprovalTypes = options?.requiredApprovalTypes ?? [];
   const gateOwnersByType = options?.gateOwnersByType ?? {};
   const approvedTypes = new Set(
@@ -133,6 +141,7 @@ export function mapTask(task, options) {
       .map((a) => a.type)
   );
   const derivedGates = requiredApprovalTypes
+    .filter((approvalType) => ACTIONABLE_STATUS_BY_APPROVAL_TYPE[approvalType] === task.status)
     .filter((approvalType) => !approvedTypes.has(approvalType))
     .map((approvalType) => ({
       roleId: `${approvalType}_gate`,

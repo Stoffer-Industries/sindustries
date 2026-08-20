@@ -512,6 +512,47 @@ describe('loadRequiredApprovalsConfig — owners merge with defaults', () => {
   });
 });
 
+describe('mapTask — status-scoped workflow gates', () => {
+  const options = {
+    requiredApprovalTypes: ['spec', 'tech_design', 'qa_agent', 'accepted'],
+    gateOwnersByType: {
+      spec: 'Tom',
+      tech_design: 'Quinn',
+      qa_agent: 'Ash',
+      accepted: 'Tom'
+    }
+  };
+
+  it.each([
+    ['open', 'spec', 'Tom'],
+    ['ready', 'tech_design', 'Quinn'],
+    ['doing', 'qa_agent', 'Ash'],
+    ['acceptance', 'accepted', 'Tom']
+  ])('shows only the gate actionable at status %s', (status, gate, owner) => {
+    expect(mapTask(baseTaskFixture({ status }), options).workflowGates).toEqual([{
+      roleId: `${gate}_gate`,
+      owner,
+      gate,
+      reason: null,
+      state: 'outstanding'
+    }]);
+  });
+
+  it('shows no workflow gate once the task is done', () => {
+    expect(mapTask(baseTaskFixture({ status: 'done' }), options).workflowGates).toEqual([]);
+  });
+
+  it('omits the current stage gate when its structured approval is active', () => {
+    expect(mapTask(baseTaskFixture({
+      status: 'doing',
+      approvals: [{
+        id: 'qa', type: 'qa_agent', owner: 'Ash', state: 'approved',
+        approvedAt: new Date(), revokedAt: null, createdAt: new Date(), updatedAt: new Date()
+      }]
+    }), options).workflowGates).toEqual([]);
+  });
+});
+
 describe('explicit workflow handoffs', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -579,16 +620,13 @@ describe('explicit workflow handoffs', () => {
         workflowHandoffGate: 'qa'
       })
     }));
-    // The response derives workflowGates from the required-approvals
-    // config for this task's `taskType`; with no approvals set, the four
-    // feature gates (spec / tech_design / qa_agent / accepted) are all
-    // outstanding, each owned by the type's configured owner.
-    expect(response.body.data.workflowGates).toEqual(expect.arrayContaining([
-      expect.objectContaining({ gate: 'spec', owner: 'Tom', state: 'outstanding' }),
-      expect.objectContaining({ gate: 'tech_design', owner: 'Quinn', state: 'outstanding' }),
-      expect.objectContaining({ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }),
-      expect.objectContaining({ gate: 'accepted', owner: 'Tom', state: 'outstanding' })
-    ]));
+    // The response derives workflowGates from the required-approvals config
+    // and scopes it to the task's current status. `baseTaskFixture` is in
+    // `doing`, so Ash's qa_agent gate is the only actionable approval; Tom's
+    // accepted gate remains hidden until the task reaches `acceptance`.
+    expect(response.body.data.workflowGates).toEqual([
+      expect.objectContaining({ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' })
+    ]);
   });
 
   it('rejects unknown role ids before writing', async () => {
