@@ -77,6 +77,84 @@ server are used in place of any external model or network call. CI does not
 need API keys. Durability coverage uses LangGraph's in-memory test
 checkpointer in CI; the live Postgres checkpointer remains the runtime backend.
 
+## Local Studio
+
+LangGraph Studio lets an operator inspect the CTO Craft graph topology
+and run a sample invocation interactively without ever reaching the
+production cron, Content Scheduler, or checkpointer database. The
+Studio entrypoint is `cto_craft_workflow.studio:build_studio_graph_factory`,
+wired through `langgraph.json` at the package root.
+
+### Prerequisites
+
+The Studio CLI is bundled with the `studio` extra, kept separate from
+the production runtime venv so cron / CI never installs it.
+
+```bash
+cd agents/workflows/cto-craft-tweet-drafts
+uv sync --extra studio
+```
+
+### Start Studio
+
+```bash
+uv run --frozen --extra studio langgraph dev
+```
+
+Open `http://localhost:8123` (the default Studio port). Select the
+`cto_craft` graph from the left pane. The topology visible in Studio is
+the *real* production graph:
+
+```
+discover_latest_issue → extract_public_links → fanout_articles
+  → fetch_and_score_article (×N via Send)
+  → collect_candidates → select_distinct_angles
+  → import_drafts → format_notification → END
+                            ↓
+                       complete_noop → END
+```
+
+### Run a safe sample invocation
+
+Studio uses deterministic stub dependencies:
+
+- **Fetcher** — `StubSafeFetcher` returns canned fixtures for the
+  TMW archive URL and refuses any other URL with `STUDIO_NO_FIXTURE`
+  before opening a socket.
+- **Model** — `FakeAngleModel` keyed off the canned article URLs. URLs
+  not in the canned set return `None`, exercising the no-op branch
+  naturally.
+- **Import** — `StudioImportFn` rejects the first call with
+  `STUDIO_IMPORT_FORBIDDEN`. **No HTTP request ever reaches Content
+  Scheduler.** The graph logs the refusal as a diagnostic and lands in
+  the `failed` branch — that red node is the signal that Studio is
+  read-only.
+- **Checkpointer** — `MemorySaver` (in-memory). Studio never reads or
+  writes the production Postgres checkpointer.
+
+Because every side-effect boundary is replaced with a stub, Studio is
+safe to run on a laptop with no secrets and no database. A passing
+run shows the fan-out, the no-op branch, and the `import_drafts` failure
+node — exactly the topology an operator needs to reason about before
+touching production.
+
+### Shut down
+
+Studio runs until you stop the `langgraph dev` process (`Ctrl-C`).
+Local Studio state under `.langgraph_api/` and `.studio_state/` is
+gitignored; nothing local is committed.
+
+### Troubleshooting
+
+- **Port in use.** Override with `LANGGRAPH_DEV_PORT=8124 langgraph dev`.
+- **`USE_RUNTIME_CONTEXT_API` crash on startup.** The pinned
+  `langgraph>=0.3.21,<0.4.0` + `langgraph-cli[inmem]>=0.3.6,<0.4.0`
+  pair resolves this. If a future bump re-introduces the crash,
+  re-pin both ends in `pyproject.toml` and re-run `uv sync`.
+- **Studio graph looks empty.** Confirm the Studio CLI is running
+  from this package root (where `langgraph.json` lives); Studio only
+  loads graphs declared in the local `langgraph.json`.
+
 ## Non-goals
 
 - Automatic approval, scheduling, or publication.

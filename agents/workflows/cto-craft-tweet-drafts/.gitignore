@@ -1,0 +1,7 @@
+# Local LangGraph Studio state. Never commit.
+.langgraph_api/
+.studio_state/
+*.pckl
+
+# Local overrides of the committed Studio env template.
+.env.studio
