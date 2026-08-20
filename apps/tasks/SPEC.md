@@ -29,7 +29,7 @@ A focused task management surface for Tom and the agent team. Supports capturing
 4. Rendered markdown description content wraps within the task card instead of overflowing horizontally
 5. User can navigate to a full-screen detail view via explicit action
 6. Changes persist on save
-7. An **Approvals** sub-section renders one row per required approval type for the task's type (`spec`, `tech_design`, `qa`):
+7. An **Approvals** sub-section renders one row per required approval type for the task's type (`spec`, `tech_design`, `qa_agent`, `accepted`):
    - An unchecked checkbox approves through structured `POST /tasks/:id/approvals` with `{ type }`; a checked checkbox revokes through `DELETE /tasks/:id/approvals/:type`.
    - The browser includes an HttpOnly-cookie session and never supplies an approval owner; the API derives ownership from the authenticated principal.
    - Tasks remain readable while signed out. On load the UI checks `GET /auth/session`; changing an approval while signed out opens a minimal username/password login gate backed by `POST /auth/session`. The password is held only in the form state, cleared after submission/cancel, and never stored in JavaScript storage.
@@ -102,7 +102,7 @@ detail-view composer land in WS3.
    task field untouched. Removing one row only removes that row.
 5. No UI affordance should generate an attention request when an
    explicit workflow gate already represents the action. When a user
-   opens a structured approval (spec / tech_design / qa), the
+   opens a structured approval (spec / tech_design / qa_agent / accepted), the
    approval-row UX is the only path; the attention-editor UX never
    surfaces for the same action.
 
@@ -115,7 +115,7 @@ composer for the new planes land in WS3.
 1. The backlog exposes two ownership filter chips:
    * "My outstanding gates" — toggles `?workflowGateOwner=<self>` to
      surface tasks where the signed-in user owns an outstanding
-     structured gate (spec / tech_design / qa).
+     structured gate (spec / tech_design / qa_agent / accepted).
    * "Needs my attention" — toggles `?attentionOwner=<self>` to surface
      tasks with an exceptional / unmodelled attention request for the
      signed-in user, visually labelled as exceptional so it never
