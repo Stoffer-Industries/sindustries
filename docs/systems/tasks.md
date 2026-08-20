@@ -131,25 +131,27 @@ See [Structured approval and authentication contract](#structured-approval-and-a
 
 ### TaskAttentionOwner
 
-Join table for **exceptional or otherwise unmodelled** attention requests on a task. One row per `(taskId, owner)` pair (case-insensitive uniqueness enforced at the database level via a `@@unique([taskId, owner])` constraint). Free-form `owner` strings mirror `Task.assignee`. `note` explains what needs attention and is preserved across PATCHes that re-include the same owner.
+Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are fallbacks, with Tom last when human escalation is required. Free-form owners mirror `Task.assignee`. Repeated people are intentional and are not deduplicated.
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | PK |
 | `taskId` | UUID | FK → Task, cascade delete |
-| `owner` | String | Required, case-insensitive unique per task, max 64 chars |
+| `owner` | String | Required, max 64 chars; repeats allowed |
+| `position` | Int | Zero-based action/escalation order; unique per task |
 | `addedBy` | String | Nullable, free-form |
 | `note` | String | Nullable, free-form |
 | `createdAt` | Timestamp | Insertion order, surfaced for stable UI ordering |
 
 Task responses include:
 
-- `attentionOwners` — insertion-ordered distinct owner strings
-- `attentionOwnerDetails` — full audit rows (`{ id, owner, addedBy, note, createdAt }`)
+- `attentionOwners` — ordered role slots; index 0 is actionable, repeats preserved
+- `topAttentionOwner` — `attentionOwners[0]` or `null`
+- `attentionOwnerDetails` — full audit rows (`{ id, owner, position, addedBy, note, createdAt }`)
 
 **Persistence rules:**
 
-- `PATCH /tasks/:id` accepts `attentionOwners` as a full-replacement array. Omission = no change. `[]` clears all rows. The server normalises (trim, case-insensitive dedup) and validates (max 16 entries, max 64 chars per name) before persisting.
+- `PATCH /tasks/:id` accepts `attentionOwners` as a full-replacement array. Omission = no change. `[]` clears all rows. The server trims without deduplicating and validates (max 16 entries, max 64 chars per name) before persisting.
 - Clearing attention owners never touches `task.blocked`, `dependencies`, `assignee`, or `approvals`.
 - Surviving rows keep their `note` and `addedBy` only when their `(taskId, owner)` pair reappears in the new array; the detail-level add/update endpoint (future work, not in WS1) is the right place to preserve per-row metadata across owner churn.
 
@@ -161,13 +163,9 @@ Task responses include:
 - Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
 - Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
 
-**When to use it.** Attention ownership is the **escape hatch** for situations the other planes do not model. Reach for it only when none of `[openclaw-needed]`, `[tech-design]`, `assignee`, or a `TaskApproval` gate fits. Typical cases:
+**How to use it.** `attentionOwners` is authoritative for who acts next even when the task also has an assignee or structured gate. Those other planes remain separate role/context slots: assignee says who delivers, and approvals/workflow gates say who is eligible to decide a gate. They do not override position 0. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
-- A task needs Quinn to make a product decision the workflow does not model (scope, priority, or "drop it").
-- A task needs Lox for a platform-lane follow-up nobody else has the context for.
-- A task needs Tom for an off-modelled product read.
-
-Do **not** use `attentionOwners` to mean `[openclaw-needed]`, `[tech-design]`, or `assignee`. The discriminator is whether the structured surface fits.
+Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. Both Rowan occurrences are meaningful across role slots; Ash remains visible; Tom is last-resort escalation.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
 
@@ -195,16 +193,14 @@ python3 tasks_api_client.py patch --id <uuid> --attention-owners "Quinn"
 python3 tasks_api_client.py patch --id <uuid> --clear-attention-owners
 ```
 
-**Discovering paged tasks (recipient side).** The shared heartbeat queue
-(`agents/skills/ops/tasks-api/scripts/agent_task_queue.py`) accepts an
-optional `--attention-owner <Name>` flag that surfaces any task where
-`<Name>` is currently in `attentionOwners`, deduped against the
-`--assignee` bucket and ranked below assignee work in the unified queue.
-Each entry carries `kind: "attentionPage"`, `classification:
-"ACTIONABLE"`, and `reason: "paged to <Name> as attention owner"`. The
-flag is the supported way for Quinn's or Lox's heartbeat to find
-off-modelled pages without an ad hoc `tasks_api_client.py list
---attention-owner <Name>` per pass.
+**Discovering actionable tasks (recipient side).** The shared heartbeat queue
+automatically queries the invoking assignee as an attention owner (the optional
+`--attention-owner` flag overrides that identity). Only a position-0 match
+creates an actionable `attentionPage`; lower positions are dormant escalation
+context. Assigned tasks whose top attention owner is someone else remain visible
+as `WAITING_EXTERNAL`, with `topAttentionOwner` naming the same person returned
+by the API mapper. Bracketed comments are never consulted for routing when the
+stack is populated.
 
 ### Required approvals policy
 
@@ -245,18 +241,18 @@ Task ownership is split into five **independent** planes. No plane silently deri
 | Task-to-task dependencies | `TaskDependency` (join) | Hard prerequisites between tasks. `dependencyBlocked` is computed, not stored. | — |
 | `Blocked` indicator | `Task.blocked` (stored bool) | Existing generic Blocked flag. Manual + lobster-managed. | — |
 | Outstanding workflow gates | `TaskApproval` rows + required-approvals policy (`~/.openclaw/tasks-api/required-approvals.yaml`) | Structured gates (`spec`, `tech_design`, `qa`) with a configured owner. A gate is **outstanding** when no `approved` row exists; an `approved` row satisfies the gate; a `revoked` row leaves it outstanding again. | — |
-| Exceptional attention | `TaskAttentionOwner` rows | Free-form "needs attention from" requests for situations the workflow does not yet model. | — |
+| Action / escalation | ordered `TaskAttentionOwner` rows | Primary blocker/handoff plane: position 0 acts now; later slots escalate. | — |
 
 The API surfaces each plane independently:
 
 - `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
 - `approvals` (raw rows) and `workflowGates` (compatibility-named view of the one explicit active handoff: `[{ roleId, owner, gate, reason, state: "outstanding" }]`). The persisted role ID is stable; `owner` is resolved when the API responds from central configuration. An absent handoff returns `[]`.
-- `attentionOwners` / `attentionOwnerDetails` (exceptional attention).
+- `attentionOwners` / `topAttentionOwner` / `attentionOwnerDetails` (ordered action/escalation).
 
 Discovery filters on `GET /tasks`:
 
 - `?workflowGateOwner=<name>` — tasks whose persisted active handoff role currently resolves to `<name>`. This filter does not infer work from task type, status, lifecycle, or approval rows.
-- `?attentionOwner=<name>` — tasks with at least one `TaskAttentionOwner` row whose owner matches (case-insensitive).
+- `?attentionOwner=<name>` — tasks whose position-0 `TaskAttentionOwner` matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
 

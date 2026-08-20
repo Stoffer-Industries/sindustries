@@ -81,8 +81,7 @@ WS1 introduces the data shape only; the stacked avatar rendering and
 detail-view composer land in WS3.
 
 1. Task responses include `workflowGates` (derived view of outstanding /
-   approved structured gates), `attentionOwners` (insertion-ordered
-   distinct owner strings), and `attentionOwnerDetails` (full audit
+   approved structured gates), `attentionOwners` (ordered action/escalation role slots; repeats preserved), and `attentionOwnerDetails` (full audit
    rows). The existing `Blocked` indicator, `dependencyBlocked`, and
    `blockedBy` dependency references remain unchanged.
 2. The detail view surfaces each plane in its own labelled section:
@@ -161,11 +160,8 @@ new planes is scoped separately.
      `state: "outstanding"` are included. Approved gates are excluded
      so the stack never re-shows a gate that has already been
      satisfied. Gate order matches the mapper's policy-defined order.
-   * **Layer 3 — attention owners.** Insertion order matches the
-     mapper output (oldest-first per `createdAt`).
-3. Visual dedupe uses a **case-insensitive trimmed string** as the
-   owner key. The first layer a person appears in wins visually;
-   duplicates in later layers are collapsed to that same avatar. The
+   * **Layer 3 — attention owners.** Explicit `position` order matches the mapper output; the first attention slot is the top/current actor. Attention layers paint above gate/delivery context, and position 0 paints above later escalation slots.
+3. Every role slot remains visible, including repeated people. Stable keys combine role, position, and a case-insensitive trimmed owner string; duplicates are never collapsed because order communicates escalation. The
    `findAssigneeUser` lookup uses the original (un-normalised)
    `owner` string so display name and avatar asset still resolve
    correctly for the visible entry.
@@ -173,10 +169,7 @@ new planes is scoped separately.
    * `delivery assignee <DisplayName>`
    * `workflow-gate owner <DisplayName>`
    * `attention owner <DisplayName>`
-   When a person wears multiple hats, the visible entry's label
-   appends `(also has other roles on this task)` so screen readers and
-   hover tooltips see the full responsibility breakdown without the
-   label becoming unbounded. The container wraps the stack in
+   When a person wears multiple hats, each role slot has its own label so assistive technology receives the same ordered responsibility stack. The container wraps the stack in
    `role="group"` with an `aria-label` that lists every visible
    owner using the same wording, comma-separated.
 5. Stable data attributes on each visible avatar span:
@@ -231,5 +224,5 @@ The list of reserved assignees and their display metadata (id → display name, 
 | blockedBy | UUID[] | Dependency references |
 | approvals | TaskApproval[] | Native approvals owned by the tasks-api (see `services/tasks-api/SPEC.md` for the authoritative schema). The Tasks UI mutates this collection only through the structured authenticated approval endpoints and then refreshes the task. |
 | workflowGates | `{ type, owner, state }[]` | Derived view: each required approval type for the task's `taskType`, with `state: "outstanding"` or `state: "approved"`. Computed server-side from `approvals` + the resolved required-approvals policy. Empty for tasks whose `taskType` requires no approvals. |
-| attentionOwners | `string[]` | Distinct owner strings (insertion order, case-insensitive dedup) for exceptional / unmodelled attention requests. Empty array means no requests. |
-| attentionOwnerDetails | `{ id, owner, addedBy, note, createdAt }[]` | Full audit rows for `attentionOwners`. Preserves order and per-row context for detail UI. |
+| attentionOwners | `string[]` | Ordered action/escalation role slots. Index 0 is the next actionable owner; later entries are escalation targets and repeated names are intentional. Empty means delivery falls back to the assignee/workflow. |
+| attentionOwnerDetails | `{ id, owner, position, addedBy, note, createdAt }[]` | Full audit rows for `attentionOwners`. Preserves order and per-row context for detail UI. |

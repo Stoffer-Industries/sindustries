@@ -142,33 +142,19 @@ def list_tasks(
 def remove_self_from_attention_owners(
     task_id: str, name: str, *, base_url: str | None = None, token: str | None = None
 ) -> dict:
-    """Fetch task → drop `name` from attentionOwners → PATCH the remainder.
+    """Advance the stack by removing ``name`` only when it is the top slot.
 
-    Preserves any other names already attached (e.g. ``["Lox"]``) — never
-    uses ``--clear-attention-owners`` semantics. No-op when ``name`` is not
-    currently attached; returns the task dict unchanged in that case.
-
-    The fetch → mutate → PATCH round-trip is the canonical safe-clear path
-    because ``attentionOwners`` is a full-replacement set on the API side
-    (task ``d8fbe750``). A bare PATCH-with-omitted-field would either drop
-    all owners (the ``--clear-attention-owners`` path) or leave them all in
-    place — neither preserves siblings.
-
-    Returns the updated task dict from the API, or the unchanged task if
-    ``name`` was not attached.
+    Later slots, including repeated occurrences of ``name``, are preserved
+    exactly. If another owner is currently on top this is a no-op: a dormant
+    escalation target must not mutate routing state.
     """
     base = base_url or get_base_url()
     task = get_task(task_id, base_url=base)
     current = list(task.get("attentionOwners") or [])
-    if name not in current:
+    if not current or str(current[0]).strip().casefold() != name.strip().casefold():
         return task
-    remainder = [n for n in current if n != name]
     resp = api_request(
-        "PATCH",
-        base,
-        f"/tasks/{task_id}",
-        {"attentionOwners": remainder},
-        token=token,
+        "PATCH", base, f"/tasks/{task_id}", {"attentionOwners": current[1:]}, token=token
     )
     if isinstance(resp, dict) and "data" in resp:
         return resp["data"]
@@ -178,24 +164,19 @@ def remove_self_from_attention_owners(
 def add_self_to_attention_owners(
     task_id: str, name: str, *, base_url: str | None = None, token: str | None = None
 ) -> dict:
-    """Fetch task → ensure ``name`` is in ``attentionOwners`` → PATCH.
+    """Put ``name`` on top while preserving every existing escalation slot.
 
-    Idempotent: no-op when ``name`` is already attached (preserves existing
-    order). When added, ``name`` is prepended so the new attention request
-    surfaces first in UI ordering. Returns the updated task dict.
+    This is idempotent only when ``name`` is already position 0. If the same
+    person appears later, prepending creates an intentional repeated role slot.
     """
     base = base_url or get_base_url()
     task = get_task(task_id, base_url=base)
     current = list(task.get("attentionOwners") or [])
-    if name in current:
+    if current and str(current[0]).strip().casefold() == name.strip().casefold():
         return task
     next_owners = [name] + current
     resp = api_request(
-        "PATCH",
-        base,
-        f"/tasks/{task_id}",
-        {"attentionOwners": next_owners},
-        token=token,
+        "PATCH", base, f"/tasks/{task_id}", {"attentionOwners": next_owners}, token=token
     )
     if isinstance(resp, dict) and "data" in resp:
         return resp["data"]

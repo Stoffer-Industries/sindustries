@@ -151,6 +151,10 @@ struct Task {
     /// as the sole approval gate source.
     #[serde(default)]
     approvals: Vec<TaskApproval>,
+    /// Ordered blocker/handoff stack. Position 0 is the next actionable owner;
+    /// later entries are escalation targets and repeated people are valid.
+    #[serde(default)]
+    attention_owners: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -837,10 +841,6 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     if workstreams(&env.task).is_empty() {
         failures.push("Task description must include at least one workstream.".to_string());
     }
-    if openclaw_needed(&env.task) && !openclaw_done(&env.task) {
-        failures
-            .push("`[openclaw-needed]` is present but `[openclaw-done]` is missing.".to_string());
-    }
     // AC1 of task f6a4d56a: short-circuit on `qa_agent` outstanding with a
     // dedicated `[qa-agent-blocked]` comment so Ash's verification gap is
     // visibly distinct from the generic `[feature-task-progress-checklist]`
@@ -1062,7 +1062,7 @@ fn qa_agent_verified_failures(task: &Task) -> Vec<String> {
 /// the actor — see below). Auth failures are non-fatal: the function logs
 /// to stderr and continues, leaving the gate absent. The next sweep retry
 /// succeeds once Quinn provisions Ash's `ASH_TASKS_API_APPROVAL_TOKEN`
-/// (per the [openclaw-needed] comment).
+/// (with Quinn routed through the task attention stack).
 ///
 /// Why non-fatal auth handling: until Quinn provisions Ash's
 /// TASKS_API_APPROVAL_SERVICE_CREDENTIALS entry, the lobster runs as the
@@ -3418,6 +3418,13 @@ fn task_implementer(task: &Task) -> Option<String> {
 /// to 2 for implementer in doing."
 const IMPLEMENTER_DOING_CAPACITY: usize = 2;
 
+fn is_actionable_for(task: &Task, implementer: &str) -> bool {
+    task.attention_owners
+        .first()
+        .map(|owner| owner.trim().eq_ignore_ascii_case(implementer.trim()))
+        .unwrap_or(true)
+}
+
 fn implementer_doing_capacity_failures(
     tasks: &[Task],
     current_id: &str,
@@ -3434,6 +3441,7 @@ fn implementer_doing_capacity_failures(
                 && !task.blocked
                 && !task.dependency_blocked
                 && task.assignee.as_deref() == Some(implementer)
+                && is_actionable_for(task, implementer)
         })
         .count();
     if active_doing >= IMPLEMENTER_DOING_CAPACITY {
@@ -3973,14 +3981,6 @@ where
         .into_iter()
         .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
         .collect()
-}
-
-fn openclaw_needed(task: &Task) -> bool {
-    !tagged_values(task, "[openclaw-needed]").is_empty()
-}
-
-fn openclaw_done(task: &Task) -> bool {
-    !tagged_values(task, "[openclaw-done]").is_empty()
 }
 
 fn inspect_pr(url: &str) -> Result<ReviewState> {
@@ -4629,6 +4629,50 @@ mod tests {
                     .to_string()
             ]
         );
+    }
+
+    #[test]
+    fn implementer_capacity_ignores_assigned_tasks_actioned_by_other_attention_owners() {
+        let tasks = vec![
+            Task {
+                id: "other-doing-1".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                attention_owners: vec!["Quinn".to_string(), "Tom".to_string()],
+                ..Task::default()
+            },
+            Task {
+                id: "other-doing-2".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                attention_owners: vec!["Ash".to_string(), "Rowan".to_string()],
+                ..Task::default()
+            },
+        ];
+
+        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+    }
+
+    #[test]
+    fn implementer_capacity_counts_repeated_assignee_when_they_are_top_owner() {
+        let tasks = vec![
+            Task {
+                id: "other-doing-1".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                attention_owners: vec!["Rowan".to_string(), "Ash".to_string(), "Rowan".to_string()],
+                ..Task::default()
+            },
+            Task {
+                id: "other-doing-2".to_string(),
+                status: "doing".to_string(),
+                assignee: Some("Rowan".to_string()),
+                attention_owners: vec!["rowan".to_string(), "Tom".to_string()],
+                ..Task::default()
+            },
+        ];
+
+        assert_eq!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").len(), 1);
     }
 
     #[test]
@@ -7537,6 +7581,7 @@ detached
                     ..TaskApproval::default()
                 })
                 .collect(),
+            attention_owners: Vec::new(),
         }
     }
 

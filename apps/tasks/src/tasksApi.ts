@@ -51,6 +51,10 @@ export interface Task {
   dependsOn?: DependencyReference[];
   dependsOnIds?: Array<string | number>;
   dependencyBlocked?: boolean;
+  workflowGates?: Array<{ type?: string; gate?: string; owner?: string | null; state: string }>;
+  attentionOwners?: string[];
+  topAttentionOwner?: string | null;
+  attentionOwnerDetails?: Array<{ id: string; owner: string; position: number; addedBy?: string | null; note?: string | null; createdAt: string }>;
 }
 
 export interface CreateTaskPayload {

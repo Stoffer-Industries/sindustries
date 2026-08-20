@@ -142,7 +142,7 @@ Before writing any code on a feature task, write the tech design:
 - Work on the same branch as the tech design; all changes come via PRs — no direct pushes to main
 - Open a **DRAFT PR** after the tech design is approved and implementation begins; this keeps the branch reviewable but signals work is in progress
 - Capacity: 1 unblocked implementation task per implementation state at a time. `open` tech-design work is the exception: if an assigned `open` feature or code task lacks a posted/approved tech design (or an explicit `[tech-design-not-required]` waiver), write and post that tech design ASAP even when another task is already in `doing`; then return to the active implementation task. Do not implement the `open` task until Quinn approves the design and Lobster promotes it to `ready`/`doing`.
-- When `.openclaw` changes are needed: post `[openclaw-needed]` task comment with exact file paths, proposed diff, validation command, and rollback note; do not touch `~/.openclaw/` yourself
+- When `.openclaw` changes are needed: put Quinn at `attentionOwners[0]` and preserve the escalation tail; an `[openclaw-needed]` comment may record exact paths/diff/validation/rollback as audit evidence only
 - **Do not post `[implementer-prs]`** until all task ACs are implemented and the PR is converted from draft to ready-for-review
 - When the PR is ready: convert draft → ready-for-review, then post `[implementer-prs] <url>` as a task comment
 
@@ -188,31 +188,35 @@ The lobster posts task comments that tell me what state the task is in and what'
 - **Before concluding "waiting on Tom" or "waiting on Quinn":** verify PR state is still open. For every PR referenced as my active PR, confirm with `gh pr view <number> --repo Stoffer-Industries/sindustries --json state,mergedAt`. If it has already merged, that PR is done — look at the lobster's latest `[feature-task-progress-checklist]` comment to determine what is still outstanding and act on it.
 
 ### `.openclaw` boundary
-Rowan cannot write to `~/.openclaw/`. Post `[openclaw-needed]` and wait for Quinn's `[openclaw-done]` confirmation before considering that work complete.
+Rowan cannot write to `~/.openclaw/`. Route Quinn at `attentionOwners[0]`; comments may record evidence, but the ordered stack is the only routing state.
 
 ---
 
-## AttentionOwners — the escape hatch
+## AttentionOwners — primary blocker and handoff stack
 
-Use `attentionOwners` on a task to page Quinn or Lox for something the modelled surfaces do not fit. Discriminator:
+`attentionOwners` is the ordered action/escalation control plane. Position 0 is
+the next actionable agent; later slots are fallback escalation targets, with Tom
+last when human escalation is needed. Do not deduplicate repeated names: each
+entry is a role slot. For example, `Rowan / Ash / Rowan / Tom` means Rowan is the
+delivery assignee, Ash retains QA-gate context, Rowan is the current actor, and
+Tom is last resort.
 
-- `[openclaw-needed]` — work that touches `~/.openclaw/`
-- `[tech-design]` — design approval before implementation
-- `assignee` — delivery owner
-- `attentionOwners` — anything else: product decision, platform follow-up, off-modelled ask
+The planes remain separate:
 
-CLI:
+- `assignee` — delivery owner; unchanged while work is handed off.
+- `workflowGates` / approvals — gate eligibility and context (for example Ash
+  owns `qa_agent`); a gate owner is not automatically the current actor.
+- `attentionOwners[0]` — current actionable owner. Following entries are the
+  escalation path.
+
+Set the whole ordered stack when action moves. OpenClaw/runtime blockers always
+put Quinn at position 0; `[openclaw-needed]` comments may remain as audit history
+but never route work. Remove or advance only the resolved top slot while
+preserving every later slot, including repeated people.
 
 ```bash
 python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
-  --id <task-uuid> --attention-owners "Quinn"
-```
-
-Safe clear (preserves co-owners; do NOT use `--clear-attention-owners`):
-
-```python
-from agents.skills.ops.tasks_api.tasks_api_client import remove_self_from_attention_owners
-remove_self_from_attention_owners("<task-uuid>", "Rowan")
+  --id <task-uuid> --attention-owners "Quinn" "Rowan" "Tom"
 ```
 
 ## PR Standards

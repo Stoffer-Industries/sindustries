@@ -58,44 +58,27 @@ Each heartbeat:
 
 ---
 
-OPENCLAW HANDOFFS (FEATURE FACTORY)
+OPENCLAW AND ATTENTION-OWNER HANDOFFS
 
-Quinn is the only agent that can write to `~/.openclaw/`. When a feature task has an unresolved `[openclaw-needed]` comment from Rowan, Quinn applies the change.
+The unified queue automatically fetches tasks where Quinn appears in
+`attentionOwners`; only Quinn at position 0 is actionable. Position 0 is the
+authoritative blocker/handoff owner, and later slots are the preserved
+escalation path. OpenClaw/runtime blockers must put Quinn first. Legacy
+`[openclaw-needed]` and `[openclaw-done]` comments remain useful audit evidence
+but never route work.
 
-Each heartbeat:
-1. List active feature tasks (status: doing or acceptance):
-   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --status doing --status acceptance`
-2. For each task, scan comments for `[openclaw-needed]` entries that do not yet have a matching `[openclaw-done]`.
-3. For each unresolved `[openclaw-needed]`:
-   - Read the comment: it must include exact file paths, proposed diff summary, validation command, and rollback note.
-   - If the change affects product behaviour, ask Tom before applying.
-   - Apply the change to `~/.openclaw/`.
-   - Validate using the command in the comment.
-   - Post a task comment: `[openclaw-done] <changed paths> | validated: <command output summary> | <any follow-up notes>`
-4. If `[openclaw-needed]` comments exist but are unclear or unsafe, mark the task blocked and post a comment explaining what is missing.
-5. **If no unresolved handoffs: skip this section entirely. No output.**
+When Quinn is top owner:
 
-Do not apply `.openclaw` changes speculatively. Only act on explicit `[openclaw-needed]` comments from Rowan.
+1. Read the task and its audit/context comments.
+2. Apply or decide the requested action. For `~/.openclaw/`, retain the normal
+   safety and product-behaviour approval checks.
+3. Post evidence as a task comment.
+4. Advance the ordered stack by removing the resolved first slot while
+   preserving every later slot exactly, including repeated people. Never
+   deduplicate the list or clear all owners.
 
----
-
-ATTENTION-OWNER PAGES (task d8fbe750)
-
-A task listing you as `attentionOwner` was paged via the escape hatch because the modelled surfaces (`[openclaw-needed]`, `[tech-design]`, `assignee`) didn't fit. The unified queue (`scripts/agent_task_queue.py --assignee Quinn --attention-owner Quinn`) surfaces these as `kind: "attentionPage"`, classification `ACTIONABLE`, `reason: "paged to Quinn as attention owner"`.
-
-When you see yourself listed as an attention owner:
-
-1. Read the task, decide or answer.
-2. Post the response / action as a task comment.
-3. Clear your own name without dropping co-owners (preserves siblings like `["Lox"]`):
-
-```bash
-python3 -c "from agents.skills.ops.tasks_api.tasks_api_client import remove_self_from_attention_owners; print(remove_self_from_attention_owners(\"<uuid>\", \"Quinn\"))"
-```
-
-Do NOT use `--clear-attention-owners` — that wipes every owner, not just yours.
-
-Done state: name removed, task continues to normal handoff surface. If the queue still surfaces the task after clear, the underlying cache hasn't refreshed — the next heartbeat pass will reflect the new state.
+Delivery assignee and structured gate owner remain independent context. Ash may
+remain the QA gate owner while Quinn or Rowan is the top attention owner.
 
 PR REVIEW
 

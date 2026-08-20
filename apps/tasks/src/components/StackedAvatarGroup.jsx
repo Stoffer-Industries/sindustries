@@ -34,9 +34,9 @@ function normalizeOwnerKey(owner) {
  * `TaskAttentionOwner` table. The full details (note, addedBy) are surfaced
  * in task details, not here, so the avatar stack stays compact.
  *
- * Duplicate people are deduplicated visually: the first layer a person
- * appears in wins. Their distinct responsibilities remain available in
- * task details and accessibility labels (AC5).
+ * Every role slot is rendered, including repeated people. A repeated avatar
+ * communicates that the same person owns more than one ordered responsibility;
+ * collapsing it would destroy the escalation path.
  */
 export function buildStackedOwnerLayers(task) {
   const layers = [];
@@ -48,7 +48,7 @@ export function buildStackedOwnerLayers(task) {
     layers.push({
       role: 'delivery',
       owner: delivery,
-      key: normalizeOwnerKey(delivery)
+      key: `delivery:${normalizeOwnerKey(delivery)}`
     });
   }
 
@@ -62,7 +62,7 @@ export function buildStackedOwnerLayers(task) {
       role: 'workflow-gate',
       owner: gate.owner,
       gateType: gate.type,
-      key: normalizeOwnerKey(gate.owner)
+      key: `workflow-gate:${layers.length}:${normalizeOwnerKey(gate.owner)}`
     });
   }
 
@@ -74,24 +74,12 @@ export function buildStackedOwnerLayers(task) {
     layers.push({
       role: 'attention',
       owner,
-      key: normalizeOwnerKey(owner)
+      key: `attention:${layers.length}:${normalizeOwnerKey(owner)}`
     });
   }
 
-  // Deduplicate by key while preserving first-seen order. The first layer a
-  // person appears in is the visible role; their additional roles are
-  // surfaced in the accessibility label so screen readers and the
-  // task-details surface still see the responsibility breakdown (AC5).
-  const seen = new Set();
-  const deduped = [];
-  const roleCounts = new Map();
-  for (const entry of layers) {
-    roleCounts.set(entry.key, (roleCounts.get(entry.key) ?? 0) + 1);
-    if (seen.has(entry.key)) continue;
-    seen.add(entry.key);
-    deduped.push(entry);
-  }
-  return { entries: deduped, roleCounts };
+  const roleCounts = new Map(layers.map((entry) => [entry.key, 1]));
+  return { entries: layers, roleCounts };
 }
 
 /**
@@ -114,32 +102,17 @@ export function roleLabel(role) {
 
 /**
  * Build the combined accessibility label for a single avatar in the stack.
- * When a person wears multiple hats, the label lists each role so the
- * distinct responsibilities remain available to assistive tech (AC5, AC6).
+ * Repeated people retain one label per ordered role slot (AC5, AC6).
  */
 export function buildAvatarAriaLabel(entry, roleCounts) {
   const displayName = assigneeDisplayName(entry.owner) || entry.owner;
-  const count = roleCounts.get(entry.key) ?? 1;
-  if (count <= 1) {
-    return `${roleLabel(entry.role)} ${displayName}`;
-  }
-  // Multiple roles: list the human roles in the visible order.
-  const roles = ['delivery', 'workflow-gate', 'attention']
-    .filter((role) => role !== entry.role)
-    .filter((role) => {
-      // Only include roles that actually appear in this task's stack.
-      return roleCounts.has(entry.key); // best-effort; the caller refines below
-    });
-  // Simpler: describe the role for the visible layer and append a note
-  // about additional roles.
-  return `${roleLabel(entry.role)} ${displayName} (also has other roles on this task)`;
+  return `${roleLabel(entry.role)} ${displayName}`;
 }
 
 /**
  * Stacked avatar group for task cards. Renders the delivery assignee first,
- * then outstanding workflow-gate owners, then attention owners. Duplicate
- * people are deduplicated visually while their distinct responsibilities
- * remain available in task details and accessibility labels (AC5, AC6).
+ * then outstanding workflow-gate owners, then the ordered attention stack.
+ * Repeated people remain visible as separate role slots (AC5, AC6).
  *
  * The component is read-only and consumes the mapper-derived task payload
  * directly. It does not own any focus or click behaviour — task cards
@@ -158,20 +131,22 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
       role="group"
       aria-label={`Task ownership: ${entries.map((e) => `${roleLabel(e.role)} ${assigneeDisplayName(e.owner) || e.owner}`).join(', ')}`}
     >
-      {visible.map((entry) => {
+      {visible.map((entry, index) => {
         const user = findAssigneeUser(entry.owner);
         const displayName = assigneeDisplayName(entry.owner) || entry.owner;
         const initial = assigneeInitial(entry.owner);
         const ariaLabel = buildAvatarAriaLabel(entry, roleCounts);
+        const roleDepth = entry.role === 'attention' ? 300 : entry.role === 'workflow-gate' ? 200 : 100;
         // The `data-role` attribute lets the task-details surface and the
         // accessibility script read the role without re-parsing the label.
         return (
           <span
-            key={`${entry.role}:${entry.key}`}
+            key={entry.key}
             className={`task-owner-stack-item task-owner-stack-${entry.role}`}
             data-role={entry.role}
             data-owner-key={entry.key}
             aria-label={ariaLabel}
+            style={{ zIndex: roleDepth - index }}
           >
             <Avatar
               src={user?.avatarSrc ?? undefined}
