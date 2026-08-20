@@ -2,20 +2,32 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
 
 # Workflow
 
-1. Run the workflow CLI once from the canonical repo checkout:
+1. Run the workflow CLI once from its own uv-managed workspace so
+   that the workflow's `uv.lock` + `.venv` (which has
+   `cto-craft-workflow` installed) is used:
 
    ```bash
-   cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
+   cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/cto-craft-tweet-drafts
    CTO_CRAFT_LANGGRAPH_DATABASE_URL="<from secrets>" \
    CONTENT_SCHEDULER_BASE_URL="https://api.sindustries.dev" \
    CONTENT_SCHEDULER_INGEST_SECRET="<from secrets>" \
-     uv run --frozen python agents/workflows/cto-craft-tweet-drafts/run.py run --json
+     uv run --frozen python run.py run --json
    ```
 
    The cron runtime provisions the three secrets above (the database URL
    for the LangGraph checkpointer, the Content Scheduler base URL, and
    the shared ingest secret). Local dev / CI may omit them for the
    `--dry-run` mode, which uses embedded fixtures and the FakeAngleModel.
+
+   **Why the `cd` lands inside the workflow directory, not the repo
+   root:** `cto-craft-workflow` is its own uv-managed workspace with a
+   separate `pyproject.toml` + `uv.lock` + `.venv`. Running `uv run`
+   from the parent repo root would resolve against the parent's
+   `uv.lock`, which does not include `cto-craft-workflow`, and the
+   `from cto_craft_workflow.cli import main` import in `run.py` would
+   fail with `ModuleNotFoundError`. The diff is reproducible:
+   `cd <workflow> && uv run --frozen python run.py --help` works,
+   `cd .. && uv run --frozen python <workflow>/run.py --help` fails.
 
 2. Parse the JSON envelope on stdout. It looks like:
 
