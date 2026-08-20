@@ -24,7 +24,7 @@ vi.mock('../tasksApi.ts', async () => {
 
 const { ApprovalsSection } = await import('./ApprovalsSection.jsx');
 
-const required = (types = ['spec', 'tech_design', 'qa']) => ({
+const required = (types = ['spec', 'tech_design', 'qa_agent', 'accepted']) => ({
   taskType: 'feature', requiredApprovals: types, version: 1, source: 'builtin-default'
 });
 const approved = {
@@ -45,7 +45,7 @@ describe('ApprovalsSection', () => {
     fetchRequiredApprovalsMock.mockReset();
     createTaskApprovalMock.mockReset();
     deleteTaskApprovalMock.mockReset();
-    fetchAuthSessionMock.mockReset().mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'qa'] });
+    fetchAuthSessionMock.mockReset().mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'qa_agent'] });
     loginMock.mockReset();
     logoutMock.mockReset();
   });
@@ -65,7 +65,7 @@ describe('ApprovalsSection', () => {
   it('prompts anonymous users to sign in, keeps credentials ephemeral, then performs the requested approval', async () => {
     fetchAuthSessionMock.mockRejectedValue(new Error('Unauthenticated'));
     fetchRequiredApprovalsMock.mockResolvedValue(required(['spec']));
-    loginMock.mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'qa'] });
+    loginMock.mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'qa_agent'] });
     createTaskApprovalMock.mockResolvedValue(approved);
     render(<ApprovalsSection task={{ id: 'task-1', taskType: 'feature', approvals: [] }} />);
 
@@ -99,12 +99,12 @@ describe('ApprovalsSection', () => {
   it('optimistically approves one row, disables only that row, and refreshes the parent', async () => {
     const mutation = deferred();
     const onTaskRefresh = vi.fn().mockResolvedValue(undefined);
-    fetchRequiredApprovalsMock.mockResolvedValue(required(['spec', 'qa']));
+    fetchRequiredApprovalsMock.mockResolvedValue(required(['spec', 'qa_agent']));
     createTaskApprovalMock.mockReturnValue(mutation.promise);
     render(<ApprovalsSection task={{ id: 'task-1', taskType: 'feature', approvals: [] }} onTaskRefresh={onTaskRefresh} />);
 
     const spec = await screen.findByRole('checkbox', { name: 'Spec approval' });
-    const qa = screen.getByRole('checkbox', { name: 'QA approval' });
+    const qa = screen.getByRole('checkbox', { name: 'QA (Ash) approval' });
     await userEvent.click(spec);
 
     expect(spec).toBeChecked();

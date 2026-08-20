@@ -85,7 +85,7 @@ export interface CreateCommentPayload {
   text: string;
 }
 
-export type ApprovalType = 'spec' | 'tech_design' | 'qa';
+export type ApprovalType = 'spec' | 'tech_design' | 'qa_agent' | 'accepted';
 export type ApprovalState = 'approved' | 'revoked';
 
 export interface TaskApproval {

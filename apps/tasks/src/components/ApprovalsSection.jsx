@@ -13,7 +13,8 @@ import { assigneeDisplayName, findAssigneeUser } from '../users/assignees.js';
 const APPROVAL_LABELS = {
   spec: 'Spec',
   tech_design: 'Tech Design',
-  qa: 'QA'
+  qa_agent: 'QA (Ash)',
+  accepted: 'Accepted'
 };
 
 function findApprovalForType(approvals, type) {
