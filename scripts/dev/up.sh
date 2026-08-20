@@ -101,7 +101,7 @@ append_env_local_overrides() {
     echo "# Local overrides from $(basename "$local_file")"
     # Only allow a small, explicit set of vars to be merged to avoid surprises.
     # (This is primarily for secrets that shouldn't be auto-generated.)
-    grep -E '^(AKAHU_CLIENT_ID|AKAHU_CLIENT_SECRET|AKAHU_REDIRECT_URI|AKAHU_DEV_USER_ACCESS_TOKEN|X_CLIENT|X_API_KEY|X_API_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET|X_HANDLE)=' "$local_file" || true
+    grep -E '^(AKAHU_CLIENT_ID|AKAHU_CLIENT_SECRET|AKAHU_REDIRECT_URI|AKAHU_DEV_USER_ACCESS_TOKEN|X_CLIENT|X_API_KEY|X_API_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET|X_HANDLE|TASKS_API_APPROVAL_USERS|TASKS_API_APPROVAL_SERVICE_CREDENTIALS)=' "$local_file" || true
   } >>"$env_file"
 }
 
