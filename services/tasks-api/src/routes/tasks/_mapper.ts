@@ -35,6 +35,7 @@ export function mapTaskAttentionOwner(attentionOwners) {
     owner: attentionOwners.owner,
     addedBy: attentionOwners.addedBy ?? null,
     note: attentionOwners.note ?? null,
+    position: attentionOwners.position,
     createdAt: attentionOwners.createdAt
   };
 }
@@ -116,10 +117,11 @@ export function mapTask(task, options) {
       completedAt: dependency.completedAt
     })) ?? [];
 
-  const attentionOwnerRows = task.attentionOwners ?? [];
-  // Stable insertion order is used for the attention layer of the avatar
-  // stack. Attention ownership is deliberately not interpreted as blocked
-  // state; `task.blocked` and `dependencyBlocked` retain their own semantics.
+  const attentionOwnerRows = [...(task.attentionOwners ?? [])].sort((a, b) =>
+    (a.position ?? 0) - (b.position ?? 0)
+  );
+  // Position 0 is the top of the action/escalation stack. Repeated owners are
+  // preserved because each row is a role slot, not a set membership record.
   const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
   const workflowHandoffOwner = workflowHandoffOwnerFor(task.workflowHandoffRoleId);
@@ -187,6 +189,7 @@ export function mapTask(task, options) {
     approvals: task.approvals?.map(mapTaskApproval) ?? [],
     workflowGates,
     attentionOwners,
+    topAttentionOwner: attentionOwners[0] ?? null,
     attentionOwnerDetails: attentionOwnerRows.map(mapTaskAttentionOwner),
     dependsOn,
     dependsOnIds: dependsOn.map((dependency) => dependency.id),

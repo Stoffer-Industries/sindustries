@@ -63,23 +63,23 @@ model Task {
 /// (task-to-task edges), `Task.assignee` (delivery), and `Task.blocked` (the
 /// existing generic Blocked indicator). None derives from or clears another.
 ///
-/// `owner` is free text, matching `Task.assignee`. `note` explains why the
-/// exceptional attention is needed. The route layer normalises and dedupes
-/// owners before replacement.
+/// `owner` is free text, matching `Task.assignee`. `position` is the ordered
+/// escalation slot: position 0 is the next actionable owner. Repeated owners
+/// are intentional because the same person may occupy multiple role slots.
 model TaskAttentionOwner {
   id        String   @id @default(uuid()) @db.Uuid
   taskId    String   @db.Uuid
   owner     String
   addedBy   String?
   note      String?
+  position  Int
   createdAt DateTime @default(now())
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  // One row per (task, owner). Upserts target this unique index.
-  @@unique([taskId, owner])
+  @@unique([taskId, position])
   @@index([owner])
-  @@index([taskId, createdAt])
+  @@index([taskId, position])
 }
 
 model TaskDependency {

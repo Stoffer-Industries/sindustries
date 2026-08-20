@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mirrors the route-layer prisma mock pattern from taskApprovals.test.ts:
 // every model the route layer touches needs a vi.fn() slot, even if the
 // test only exercises a subset. The WS1 changes touch a new model
-// (`taskAttentionOwner`) and add `attentionOwners: true` to the existing
+// (`taskAttentionOwner`) and add ordered `attentionOwners` includes to the existing
 // `task.findMany` / `task.findFirst` includes, so this mock set has to
 // cover both shapes.
 const prismaMock = {
@@ -171,14 +171,14 @@ describe('normalizeAttentionOwners', () => {
     expect(result).toEqual({ owners: [] });
   });
 
-  it('trims and dedupes case-insensitively', () => {
+  it('trims but preserves repeated role slots', () => {
     const result = normalizeAttentionOwners(['Tom', 'tom', '  Tom  ']);
-    expect(result).toEqual({ owners: ['Tom'] });
+    expect(result).toEqual({ owners: ['Tom', 'tom', 'Tom'] });
   });
 
-  it('preserves insertion order on dedup', () => {
-    const result = normalizeAttentionOwners(['Charlie', 'Bravo', 'Alpha', 'bravo']);
-    expect(result).toEqual({ owners: ['Charlie', 'Bravo', 'Alpha'] });
+  it('preserves ordered escalation slots', () => {
+    const result = normalizeAttentionOwners(['Rowan', 'Ash', 'Rowan', 'Tom']);
+    expect(result).toEqual({ owners: ['Rowan', 'Ash', 'Rowan', 'Tom'] });
   });
 
   it('rejects non-string entries', () => {
@@ -196,12 +196,12 @@ describe('normalizeAttentionOwners', () => {
     expect(normalizeAttentionOwners([tooLong])).toBeNull();
   });
 
-  it('rejects more than MAX_ATTENTION_OWNERS distinct entries', () => {
+  it('rejects more than MAX_ATTENTION_OWNERS entries', () => {
     const many = Array.from({ length: MAX_ATTENTION_OWNERS + 1 }, (_, i) => `p${i}`);
     expect(normalizeAttentionOwners(many)).toBeNull();
   });
 
-  it('accepts exactly MAX_ATTENTION_OWNERS distinct entries', () => {
+  it('accepts exactly MAX_ATTENTION_OWNERS entries', () => {
     const many = Array.from({ length: MAX_ATTENTION_OWNERS }, (_, i) => `p${i}`);
     const result = normalizeAttentionOwners(many);
     expect(result).not.toBeNull();
@@ -239,9 +239,29 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
     expect(response.status).toBe(200);
     expect(prismaMock.taskAttentionOwner.deleteMany).toHaveBeenCalledWith({ where: { taskId: TASK_ID } });
     expect(prismaMock.taskAttentionOwner.createMany).toHaveBeenCalledWith({
-      data: [{ taskId: TASK_ID, owner: 'Tom' }]
+      data: [{ taskId: TASK_ID, owner: 'Tom', position: 0 }]
     });
     expect(response.body.data.attentionOwners).toEqual(['Tom']);
+  });
+
+  it('persists repeated owners in distinct ordered slots', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce({ id: TASK_ID, taskType: 'feature', archivedAt: null })
+      .mockResolvedValueOnce(baseTaskFixture({ attentionOwners: [] }));
+
+    const response = await authedRequest(createApp())
+      .patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ attentionOwners: ['Rowan', 'Ash', 'Rowan', 'Tom'] });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskAttentionOwner.createMany).toHaveBeenCalledWith({
+      data: [
+        { taskId: TASK_ID, owner: 'Rowan', position: 0 },
+        { taskId: TASK_ID, owner: 'Ash', position: 1 },
+        { taskId: TASK_ID, owner: 'Rowan', position: 2 },
+        { taskId: TASK_ID, owner: 'Tom', position: 3 }
+      ]
+    });
   });
 
   it('clears all attention owners when given an empty array', async () => {
@@ -415,7 +435,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
     expect(where.AND).toEqual([{ id: { equals: '' } }]);
   });
 
-  it('?attentionOwner=Tom scopes to tasks with at least one matching row', async () => {
+  it('?attentionOwner=Tom scopes to tasks where Tom is the top slot', async () => {
     prismaMock.task.findMany.mockResolvedValue([]);
 
     const app = createApp();
@@ -423,7 +443,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
 
     const where = prismaMock.task.findMany.mock.calls[0][0].where;
     expect(where.attentionOwners).toEqual({
-      some: { owner: { equals: 'Tom', mode: 'insensitive' } }
+      some: { owner: { equals: 'Tom', mode: 'insensitive' }, position: 0 }
     });
   });
 
@@ -432,7 +452,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
     const app = createApp();
     await authedRequest(app).get('/api/v1/tasks');
     const include = prismaMock.task.findMany.mock.calls[0][0].include;
-    expect(include).toHaveProperty('attentionOwners', true);
+    expect(include).toHaveProperty('attentionOwners', { orderBy: { position: 'asc' } });
   });
 
   it('does not apply the workflow-gate filter when the param is empty', async () => {

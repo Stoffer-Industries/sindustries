@@ -328,13 +328,32 @@ def classify_task(
     return "WAITING_EXTERNAL", f"task state {status or 'unknown'} has no agent action rule"
 
 
+def top_attention_owner(task: dict[str, Any]) -> str | None:
+    """Return position 0: the only currently actionable attention slot."""
+    owners = task.get("attentionOwners") or []
+    if not isinstance(owners, list) or not owners:
+        return None
+    owner = owners[0]
+    if not isinstance(owner, str) or not owner.strip():
+        return None
+    return owner.strip()
+
+
 def build_queue(
     tasks: list[dict[str, Any]],
     delivery_prs: dict[str, dict[str, Any]] | None = None,
+    agent: str | None = None,
 ) -> dict[str, Any]:
     items = []
     for task in tasks:
-        classification, reason = classify_task(task, delivery_prs)
+        top_owner = top_attention_owner(task)
+        if top_owner and agent:
+            if top_owner.casefold() == agent.strip().casefold():
+                classification, reason = "ACTIONABLE", f"top attention owner is {top_owner}"
+            else:
+                classification, reason = "WAITING_EXTERNAL", f"routed to top attention owner {top_owner}"
+        else:
+            classification, reason = classify_task(task, delivery_prs)
         items.append(
             {
                 "id": task.get("id"),
@@ -344,6 +363,7 @@ def build_queue(
                 "priority": task.get("priority"),
                 "classification": classification,
                 "reason": reason,
+                "topAttentionOwner": top_owner,
             }
         )
 
@@ -398,7 +418,13 @@ def _build_attention_page_items(
     items: list[dict[str, Any]] = []
     for task in tasks:
         task_id = str(task.get("id") or "")
-        if not task_id or task_id in seen_ids:
+        top_owner = top_attention_owner(task)
+        if (
+            not task_id
+            or task_id in seen_ids
+            or not top_owner
+            or top_owner.casefold() != attention_owner.strip().casefold()
+        ):
             continue
         items.append(
             {
@@ -410,7 +436,8 @@ def _build_attention_page_items(
                 "status": task.get("status"),
                 "priority": task.get("priority"),
                 "classification": "ACTIONABLE",
-                "reason": f"paged to {attention_owner} as attention owner",
+                "reason": f"top attention owner is {top_owner}",
+                "topAttentionOwner": top_owner,
             }
         )
     return items
@@ -686,6 +713,7 @@ def build_work_queue(
     task_queue = build_queue(
         tasks,
         delivery_prs or {str(pr.get("html_url")): pr for pr in (github_prs or []) if pr.get("html_url")},
+        agent,
     )
     approvals = tech_design_approvals or []
     github_queue = classify_github_prs(agent, github_prs or [])
@@ -726,9 +754,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--attention-owner",
         dest="attention_owner",
         default=None,
-        help="Also surface tasks where <Name> is a current attention owner (the "
-        "escape-hatch paging mechanism, task d8fbe750). Tasks already returned via "
-        "--assignee are deduped; the assignee surface remains primary.",
+        help="Override the attention identity (defaults to --assignee). Only tasks "
+        "where that identity is attentionOwners[0] are actionable; lower slots are "
+        "dormant escalation context.",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     return parser
@@ -743,9 +771,8 @@ def main() -> None:
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
     github_prs = fetch_github_prs(args.assignee)
     delivery_prs = fetch_linked_delivery_prs(args.assignee, tasks, github_prs)
-    attention_owner_tasks: list[dict[str, Any]] = []
-    if args.attention_owner:
-        attention_owner_tasks = fetch_attention_owner_tasks(args.attention_owner)
+    attention_owner = args.attention_owner or args.assignee
+    attention_owner_tasks = fetch_attention_owner_tasks(attention_owner)
     queue = build_work_queue(
         tasks,
         args.assignee,
@@ -753,7 +780,7 @@ def main() -> None:
         approvals,
         delivery_prs,
         attention_owner_tasks=attention_owner_tasks,
-        attention_owner=args.attention_owner,
+        attention_owner=attention_owner,
     )
     if args.json:
         print(json.dumps(queue, indent=2))
@@ -769,8 +796,7 @@ def main() -> None:
         print(f"Review requests: {len(queue['reviewRequests'])}")
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
-        if args.attention_owner:
-            print(f"Attention pages for {args.attention_owner}: {len(queue['attentionPages'])}")
+        print(f"Attention pages for {attention_owner}: {len(queue['attentionPages'])}")
 
 
 if __name__ == "__main__":

@@ -115,7 +115,8 @@ tasksRouter.get('/tasks', async (req, res, next) => {
         ? {
             attentionOwners: {
               some: {
-                owner: { equals: attentionOwner.trim(), mode: 'insensitive' as const }
+                owner: { equals: attentionOwner.trim(), mode: 'insensitive' as const },
+                position: 0
               }
             }
           }
@@ -192,7 +193,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
           }
         },
         approvals: true,
-        attentionOwners: true,
+        attentionOwners: { orderBy: { position: 'asc' } },
         ...dependencyInclude
       },
       take: limit + 1
@@ -260,7 +261,7 @@ tasksRouter.get('/tasks/:id', async (req, res, next) => {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
         },
         approvals: true,
-        attentionOwners: true,
+        attentionOwners: { orderBy: { position: 'asc' } },
         ...dependencyInclude
       }
     });
@@ -332,7 +333,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
           }
         },
         approvals: true,
-        attentionOwners: true,
+        attentionOwners: { orderBy: { position: 'asc' } },
         ...dependencyInclude
       }
     });
@@ -524,17 +525,16 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
 
       if (hasAttentionUpdate) {
         // Full-replacement semantics: delete-then-create within the same
-        // transaction. Surviving rows keep their `note` and `addedBy` only
-        // when their (taskId, owner) pair appears in the new array; the
+        // transaction. Each array entry is a distinct ordered role slot;
+        // repeated owner names are intentionally retained. The
         // detail-level add/update endpoint (future work, not in WS1) will
         // be the right place to preserve per-row metadata. We delete by
-        // `taskId` because the unique constraint on (taskId, owner) is the
-        // source of truth; clearing by `taskId` is correct regardless of
-        // how many rows survive.
+        // `taskId`; clearing by `taskId` is correct regardless of how many
+        // rows survive.
         await tx.taskAttentionOwner.deleteMany({ where: { taskId: id } });
         if (attentionOwnersUpdate.length > 0) {
           await tx.taskAttentionOwner.createMany({
-            data: attentionOwnersUpdate.map((owner) => ({ taskId: id, owner }))
+            data: attentionOwnersUpdate.map((owner, position) => ({ taskId: id, owner, position }))
           });
         }
       }
@@ -544,7 +544,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         include: {
           tags: { include: { tag: true } },
           approvals: true,
-          attentionOwners: true,
+          attentionOwners: { orderBy: { position: 'asc' } },
           ...dependencyInclude
         }
       });

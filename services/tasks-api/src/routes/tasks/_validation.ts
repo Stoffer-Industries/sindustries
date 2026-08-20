@@ -86,26 +86,21 @@ export const MAX_ATTENTION_OWNER_LENGTH = 64;
  * Validate and normalize an `attentionOwners` PATCH body. Returns:
  *   - `null` when the body shape is invalid (not an array, or contains a
  *     non-string / empty / over-cap entry) so the caller can return 400;
- *   - `{ owners: string[] }` on success, with case-insensitive duplicates
- *     collapsed and original insertion order preserved.
+ *   - `{ owners: string[] }` on success, with whitespace trimmed and every
+ *     ordered role slot preserved. Repeated people are intentional.
  *
- * Caps and dedup rules match the system spec: max 16 entries, max 64 chars
+ * Caps match the system spec: max 16 entries, max 64 chars
  * per name, no empty strings. The returned array replaces the existing set
  * verbatim on success (full-replacement semantics — see the tech design).
  */
 export function normalizeAttentionOwners(value) {
   if (!Array.isArray(value)) return null;
   const normalized: string[] = [];
-  const seen = new Set<string>();
-
   for (const entry of value) {
     if (typeof entry !== 'string') return null;
     const trimmed = entry.trim();
     if (trimmed.length === 0) return null;
     if (trimmed.length > MAX_ATTENTION_OWNER_LENGTH) return null;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
     normalized.push(trimmed);
     if (normalized.length > MAX_ATTENTION_OWNERS) return null;
   }

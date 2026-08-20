@@ -48,71 +48,39 @@ python3 scripts/agent_task_queue.py --assignee Rowan --json
 
 This read-only adapter retrieves full active tasks and classifies them as
 `ACTIONABLE`, `WAITING_EXTERNAL`, `DEPENDENCY_BLOCKED`, or `BLOCKED`. Lobster
-remains the sole owner of capacity and state admission. For feature and code
-tasks, a missing `[implementer-prs]` is implementer work and therefore
-`ACTIONABLE`; a posted
-delivery is an external-wait candidate whose PR/review state must still be
-verified.
+remains the sole owner of capacity and state admission. When `attentionOwners` is populated, position 0 overrides comment-derived
+classification: only that owner sees actionable task work. Legacy delivery and
+checklist comments remain evidence. Without an attention stack, existing
+assignee/PR classification remains the fallback.
 
-### Attention-owners paging (the escape-hatch mechanism)
+### Attention owners: ordered action and escalation stack
 
-`attentionOwners` is for paging a specific person (Quinn, Lox, Tom) on a task
-when none of the structured surfaces fit: not `[openclaw-needed]`, not
-`[tech-design]`, not `assignee`. The most common cases are
-"Quinn needs to make a product decision this workflow doesn't model" or
-"Lox owes a platform-lane follow-up nobody else can pick up."
+`attentionOwners` is the primary blocker/handoff control plane. It is an ordered
+list of role slots, not a set: position 0 is the next actionable owner and later
+positions are escalation targets. Repeated names are meaningful and must be
+preserved. Tom belongs at the end as last resort, not at the top unless Tom must
+act now.
 
-**Setting a page (caller side):**
-
-```bash
-# Rowan when blocked on a product call nobody else can answer:
-python3 tasks_api_client.py patch \
-  --id <task-uuid> \
-  --attention-owners "Quinn"
-
-# Multiple pages in one call. Each call REPLACES the full set.
-python3 tasks_api_client.py patch \
-  --id <task-uuid> \
-  --attention-owners "Quinn" --attention-owners "Lox"
-```
-
-**Clearing only my own name (preserves siblings — the safe path):**
+Delivery (`assignee`) and gate eligibility/context (`workflowGates` and
+structured approvals) remain independent. A normal stack can therefore be:
+`assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
+Do not hide Ash and do not deduplicate Rowan across those roles.
 
 ```bash
-# Quinn / Lox / whoever wants to drop their own name while leaving any
-# other attention owners on the task intact. The CLI helper composes
-# fetch → mutate → PATCH for you; never use --clear-attention-owners
-# here because that wipes every owner, not just yours.
-python3 -c "
-from agents.skills.ops.tasks_api.tasks_api_client import remove_self_from_attention_owners
-print(remove_self_from_attention_owners('<task-uuid>', 'Quinn'))
-"
+# Full ordered replacement: Quinn acts now, then Rowan, then Tom.
+python3 tasks_api_client.py patch --id <task-uuid> \
+  --attention-owners "Quinn" "Rowan" "Tom"
 ```
 
-**Discovering paged tasks (recipient side):**
+OpenClaw/runtime blockers route to Quinn by putting Quinn first. Legacy
+`[openclaw-needed]`, checklist, and other bracketed comments are audit history;
+they are not routing state. The heartbeat queue automatically fetches the
+invoking agent's attention-owned tasks and only treats a task as actionable when
+that agent is position 0. Lower escalation slots remain dormant until advanced.
 
-```bash
-# Quinn's heartbeat — surfaces any task paged to her, as well as her
-# own assignee work. The assignee surface is always primary in the
-# unified queue; attention-page entries appear below it.
-python3 scripts/agent_task_queue.py \
-  --assignee Quinn \
-  --attention-owner Quinn
-
-# Lox running the same script — only the --attention-owner value
-# changes. The script accepts arbitrary names.
-python3 scripts/agent_task_queue.py \
-  --assignee Lox \
-  --attention-owner Lox
-```
-
-**Why this isn't `[openclaw-needed]` / `[tech-design]` / `assignee`:**
-those surfaces already mean specific things (workspace edit request,
-design approval, delivery owner). `attentionOwners` is the
-deliberately-unstructured name page; use it for one-off product or
-platform decisions that don't fit the modelled gates. See
-`docs/systems/tasks.md#taskattentionowner` for the data contract and
-fetch → mutate → patch round-trip recipe.
+Safe helpers perform a fetch → mutate → PATCH round trip. Because duplicate
+slots are valid, callers must intentionally remove/advance the resolved slot,
+not case-insensitively collapse the list.
 
 Raw agent task view (grouped by status):
 ```bash

@@ -10,6 +10,7 @@ function attentionOwnerFixture(overrides: Record<string, unknown> = {}) {
     owner: 'Tom',
     addedBy: 'Quinn',
     note: 'Needs eyes on the spec revision',
+    position: 0,
     createdAt: new Date('2026-08-10T01:00:00.000Z'),
     ...overrides
   };
@@ -50,6 +51,7 @@ describe('mapTaskAttentionOwner', () => {
       owner: 'Tom',
       addedBy: 'Quinn',
       note: 'Needs eyes on the spec revision',
+      position: 0,
       createdAt: row.createdAt
     });
   });
@@ -66,15 +68,31 @@ describe('mapTask — attention owners plane', () => {
   it('exposes attentionOwners and attentionOwnerDetails from a task with rows', () => {
     const task = baseTaskFixture({
       attentionOwners: [
-        attentionOwnerFixture({ id: 'ao-1', owner: 'Tom' }),
-        attentionOwnerFixture({ id: 'ao-2', owner: 'Quinn', note: null })
+        attentionOwnerFixture({ id: 'ao-2', owner: 'Quinn', note: null, position: 1 }),
+        attentionOwnerFixture({ id: 'ao-1', owner: 'Tom', position: 0 })
       ]
     });
     const result = mapTask(task);
     expect(result.attentionOwners).toEqual(['Tom', 'Quinn']);
+    expect(result.topAttentionOwner).toBe('Tom');
     expect(result.attentionOwnerDetails).toHaveLength(2);
     expect(result.attentionOwnerDetails[0]).toMatchObject({ id: 'ao-1', owner: 'Tom' });
     expect(result.attentionOwnerDetails[1]).toMatchObject({ id: 'ao-2', owner: 'Quinn', note: null });
+  });
+
+
+  it('preserves repeated owners as distinct ordered role slots', () => {
+    const task = baseTaskFixture({
+      attentionOwners: [
+        attentionOwnerFixture({ id: 'ao-3', owner: 'Tom', position: 2 }),
+        attentionOwnerFixture({ id: 'ao-1', owner: 'Rowan', position: 0 }),
+        attentionOwnerFixture({ id: 'ao-2', owner: 'Rowan', position: 1 })
+      ]
+    });
+    const result = mapTask(task);
+    expect(result.attentionOwners).toEqual(['Rowan', 'Rowan', 'Tom']);
+    expect(result.topAttentionOwner).toBe('Rowan');
+    expect(result.attentionOwnerDetails.map((row) => row.position)).toEqual([0, 1, 2]);
   });
 
   it('returns empty arrays for a task with no attention owners', () => {

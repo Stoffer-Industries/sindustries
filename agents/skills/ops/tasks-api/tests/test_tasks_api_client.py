@@ -87,13 +87,27 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
         )
         self.assertEqual(result, {"attentionOwners": ["Quinn", "Lox"]})
 
-    def test_add_self_is_noop_when_already_present(self):
+    def test_add_self_is_noop_when_already_top(self):
         with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
             tasks_api_client, "get_task", return_value=self._task(["Quinn", "Lox"])
         ), patch.object(tasks_api_client, "api_request") as api_request:
             result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
         api_request.assert_not_called()
         self.assertEqual(result, {"id": "task-1", "attentionOwners": ["Quinn", "Lox"]})
+
+    def test_remove_self_preserves_repeated_later_slot(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task(["Quinn", "Ash", "Quinn", "Tom"])
+        ), patch.object(tasks_api_client, "api_request", return_value={"data": {}}) as api_request:
+            tasks_api_client.remove_self_from_attention_owners("task-1", "Quinn")
+        self.assertEqual(api_request.call_args.args[3]["attentionOwners"], ["Ash", "Quinn", "Tom"])
+
+    def test_add_self_prepends_when_same_owner_is_only_a_later_slot(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "get_task", return_value=self._task(["Ash", "Quinn", "Tom"])
+        ), patch.object(tasks_api_client, "api_request", return_value={"data": {}}) as api_request:
+            tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+        self.assertEqual(api_request.call_args.args[3]["attentionOwners"], ["Quinn", "Ash", "Quinn", "Tom"])
 
     def test_add_self_to_empty_attention_owners(self):
         with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
