@@ -488,11 +488,10 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
             "[feature-task-blocked]",
         );
     }
-    // Structured approval is authoritative. Once any actor has an approved
-    // `spec` row, do not try to reconcile the legacy brain-spec path/marker:
-    // that mutation is both redundant and may run under a principal that is
-    // intentionally forbidden from owning spec approvals.
-    if !args.dry_run && !spec_check_should_skip_legacy_mutation(&env.task) {
+    // Spec lifecycle movement is independent from legacy approval/description
+    // reconciliation. An authoritative structured approval must still move a
+    // linked chat spec into in-progress; this helper patches only the Spec path.
+    if !args.dry_run {
         env = move_approved_chat_spec_if_needed(&args, env)?;
     }
     if is_past(&env.task, "open") {
@@ -1004,8 +1003,8 @@ fn task_approval_granted(task: &Task, approval_type: &str) -> bool {
 }
 
 /// The structured approval row is the source of truth regardless of actor.
-/// Spec-check may still advance the task and snapshot its checksum, but must
-/// not rewrite the linked brain spec or task description after approval.
+/// Legacy approval-marker and acceptance-criteria reconciliation must stop
+/// after approval; lifecycle path movement remains allowed separately.
 fn spec_check_should_skip_legacy_mutation(task: &Task) -> bool {
     task_approval_granted(task, "spec")
 }
@@ -1985,7 +1984,11 @@ fn normalize_rel_path(path: &str) -> String {
     path.trim().trim_start_matches("./").to_string()
 }
 
-fn plan_chat_spec_approval_move(spec_path: &str, spec_text: &str) -> ChatApprovalMovePlan {
+fn plan_chat_spec_lifecycle_move(
+    spec_path: &str,
+    spec_text: &str,
+    structured_approved: bool,
+) -> ChatApprovalMovePlan {
     let normalized = normalize_rel_path(spec_path);
     if !normalized.ends_with(".md") || normalized.contains("..") {
         return ChatApprovalMovePlan::Noop;
@@ -1993,7 +1996,10 @@ fn plan_chat_spec_approval_move(spec_path: &str, spec_text: &str) -> ChatApprova
     let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
     let in_progress_prefix = format!("{TASK_SPECS_IN_PROGRESS_DIR}/");
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
-        if suffix.is_empty() || suffix.contains('/') || !brain_spec_approved_by_tom(spec_text) {
+        if suffix.is_empty()
+            || suffix.contains('/')
+            || (!structured_approved && !brain_spec_approved_by_tom(spec_text))
+        {
             return ChatApprovalMovePlan::Noop;
         }
         let suffix = suffix.to_string();
@@ -2042,7 +2048,11 @@ fn move_approved_chat_spec_if_needed(args: &StageArgs, mut env: Envelope) -> Res
         Ok(text) => text,
         Err(_) => return Ok(env),
     };
-    let plan = plan_chat_spec_approval_move(&spec.path, &spec_text);
+    let plan = plan_chat_spec_lifecycle_move(
+        &spec.path,
+        &spec_text,
+        spec_is_approved(&env.task),
+    );
     let (from_rel, to_rel, should_move) = match plan {
         ChatApprovalMovePlan::Move { from_rel, to_rel } => (from_rel, to_rel, true),
         ChatApprovalMovePlan::AlreadyMoved { from_rel, to_rel } => (from_rel, to_rel, false),
@@ -6326,26 +6336,52 @@ mod tests {
     }
 
     #[test]
-    fn spec_lifecycle_chat_approval_move_only_moves_open_checked_specs() {
+    fn spec_lifecycle_moves_structured_approved_open_spec_without_legacy_marker() {
+        assert_eq!(
+            plan_chat_spec_lifecycle_move(
+                "brain/tasks/specs/open/example.md",
+                "- [ ] **Approved by Tom**\n",
+                true,
+            ),
+            ChatApprovalMovePlan::Move {
+                from_rel: "brain/tasks/specs/open/example.md".to_string(),
+                to_rel: "brain/tasks/specs/in-progress/example.md".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn spec_lifecycle_legacy_marker_still_moves_without_structured_approval() {
         let checked = "- [x] **Approved by Tom**\n";
         assert_eq!(
-            plan_chat_spec_approval_move("brain/tasks/specs/open/example.md", checked),
+            plan_chat_spec_lifecycle_move(
+                "brain/tasks/specs/open/example.md",
+                checked,
+                false,
+            ),
             ChatApprovalMovePlan::Move {
                 from_rel: "brain/tasks/specs/open/example.md".to_string(),
                 to_rel: "brain/tasks/specs/in-progress/example.md".to_string()
             }
         );
         assert_eq!(
-            plan_chat_spec_approval_move(
+            plan_chat_spec_lifecycle_move(
                 "brain/tasks/specs/open/example.md",
-                "- [ ] **Approved by Tom**\n"
+                "- [ ] **Approved by Tom**\n",
+                false,
             ),
             ChatApprovalMovePlan::Noop
         );
+    }
+
+    #[test]
+    fn spec_lifecycle_never_plans_reverse_move() {
+        let unchecked = "- [ ] **Approved by Tom**\n";
         assert_eq!(
-            plan_chat_spec_approval_move(
+            plan_chat_spec_lifecycle_move(
                 "brain/tasks/specs/in-progress/example.md",
-                "- [ ] **Approved by Tom**\n"
+                unchecked,
+                true,
             ),
             ChatApprovalMovePlan::AlreadyMoved {
                 from_rel: "brain/tasks/specs/open/example.md".to_string(),
@@ -6353,7 +6389,11 @@ mod tests {
             }
         );
         assert_eq!(
-            plan_chat_spec_approval_move("brain/tasks/specs/done/example.md", checked),
+            plan_chat_spec_lifecycle_move(
+                "brain/tasks/specs/done/example.md",
+                unchecked,
+                true,
+            ),
             ChatApprovalMovePlan::Noop
         );
     }
@@ -6415,6 +6455,27 @@ Whatever.
         .expect("rewrite should fire when paths differ");
         assert!(rewritten.contains("**Spec:** brain/tasks/specs/done/example-2026.md"));
         assert!(!rewritten.contains("**Spec:** brain/tasks/specs/in-progress/example-2026.md\n"));
+    }
+
+    #[test]
+    fn lifecycle_spec_path_rewrite_preserves_approval_marker_and_acceptance_criteria() {
+        let description = "\
+**Spec:** brain/tasks/specs/open/example-2026.md
+- [x] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] AC1: Keep this exact text
+";
+        let rewritten = rewrite_spec_line_in_description(
+            description,
+            "brain/tasks/specs/open/example-2026.md",
+            "brain/tasks/specs/in-progress/example-2026.md",
+        )
+        .expect("open spec path should be rewritten");
+        assert_eq!(
+            rewritten,
+            "**Spec:** brain/tasks/specs/in-progress/example-2026.md\n- [x] **Approved by Tom**\n\n## Acceptance Criteria\n- [ ] AC1: Keep this exact text\n"
+        );
     }
 
     #[test]

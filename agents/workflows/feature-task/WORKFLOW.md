@@ -47,13 +47,14 @@ for feature tasks. It then writes through the authenticated approval endpoint;
 the resulting `TaskApproval` row remains the sole workflow gate source.
 
 The sweep is idempotent: an already-approved row produces no API write or
-second audit comment. The per-task `spec-check` stage applies the same defensive
-guard before legacy brain-spec/task-description reconciliation: if any actor
-already owns an approved structured `spec` row, it skips that mutation entirely.
-The fluid drift guard applies the same rule when checksum drift is non-fatal:
-it does not revoke that authoritative approval through the workflow credential.
-This preserves approval ownership and avoids retrying mutations with a principal
-that cannot own `spec` approval, while continuing normal gate evaluation.
+second audit comment. The per-task `spec-check` stage keeps lifecycle movement
+separate from legacy approval reconciliation: an approved structured `spec` row
+still moves a linked chat spec from `open/` to `in-progress/` and patches only
+the task description's `**Spec:**` path. Approval markers and acceptance criteria
+are not rewritten. The fluid drift guard skips legacy mutation when any actor
+already owns an approved structured `spec` row, so it does not revoke that
+authoritative approval through the workflow credential. This preserves approval
+ownership while allowing normal lifecycle movement and gate evaluation.
 Unchecked markers, revoked API rows, missing or duplicate links, inaccessible
 files, code tasks, and specs outside the open task-spec directory never grant
 approval and are reported as diagnostics. A revoked API row is deliberately not
