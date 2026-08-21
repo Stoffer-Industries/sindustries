@@ -41,6 +41,8 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 ### Connect and authorize an external MCP client
 
 1. When `/workouts` finds no active OAuth consent, it shows **Connect to your agent** with explicit Claude and ChatGPT options, the remote MCP URL, and each seeded public client ID.
+   - **Claude deep link.** `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=<name>&connectorUrl=<url>` — the contract Anthropic actually shipped, per the maintainer's closing comment on [anthropics/claude-ai-mcp#74](https://github.com/anthropics/claude-ai-mcp/issues/74) (@localden, 2026-05-13). The path (`/customize/connectors`) and param names (`connectorName`, `connectorUrl`) are load-bearing: the earlier proposal in that issue's opener used `/settings/connectors?mcpName=...&mcpServerUrl=...`, which Anthropic did *not* ship. With the wrong shape the Add Custom Connector modal opens generically without pre-filling the Name and Remote MCP server URL fields. `connectorName` is the seeded OAuth client display name; `connectorUrl` is the GymTrack MCP base URL with `/mcp` appended (URL-encoded). The link opens Claude's Add Custom Connector modal with both fields pre-filled.
+   - **ChatGPT option.** Pending removal from the CTA entirely; tracked under task `5d3c5c57-c483-4d16-beeb-7f2b176d47ad`. OpenAI's custom MCP connector is documented for Business / Enterprise / Edu tiers only, not normal/plus accounts; the previously-linked `/admin/ca` path 404s to the ChatGPT home page for the users GymTrack targets. The ChatGPT option is intentionally left in place in this PR so the removal ships in a dedicated follow-up. See `docs/runbooks/gymtrack-agent-connect.md` § Provider-URL drift for the operator live-UI verification step on the Claude link.
 2. Selecting a provider opens its real MCP connector configuration. The user adds `https://gymtrack-mcp.fly.dev/mcp`; the external client generates OAuth state + a PKCE challenge and starts OAuth against `GET /oauth/authorize` on the GymTrack MCP server.
 3. The MCP server validates `client_id`, `redirect_uri`, requested `scope`, and PKCE (`code_challenge`, `code_challenge_method=S256`), then redirects the browser into GymTrack at `/agent-consent?...`.
 4. If the user is not signed in, `<AuthGate>` redirects them to `/login`, preserving the full consent URL. The user can continue with Google or email/password and lands back on `/agent-consent`.
@@ -106,7 +108,7 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 | `/agent-consent` | `AgentConsentPage` | Protected consent review screen for external MCP clients. |
 | `/workout` | `WorkoutLogger` | Date picker + exercise picker + pending sets; accepts `?date=YYYY-MM-DD`. |
 | `/history` | `HistoryList` | Last-30-days grouped history. |
-| `/workouts` | `WorkoutsTab` | Pending planned workouts, soonest-first, with Today/Overdue badges; users with no active consent also see real Claude/ChatGPT connector links. |
+| `/workouts` | `WorkoutsTab` | Pending planned workouts, soonest-first, with Today/Overdue badges; users with no active consent also see the Claude connector deep link. The ChatGPT option on the same CTA is pending removal (task `5d3c5c57-c483-4d16-beeb-7f2b176d47ad`) — see "Connect and authorize an external MCP client" §1. |
 | `/settings/agents` | `ConnectedAgentsPage` | Lists and revokes active MCP consents. |
 | `*` | redirect | → `/`. |
 
