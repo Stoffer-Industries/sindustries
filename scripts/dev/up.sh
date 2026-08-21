@@ -110,6 +110,13 @@ cat > "$ROOT_DIR/$TASKS_API_ENV_FILE" <<EOF
 PORT=$TASKS_API_PORT
 DATABASE_URL="$DATABASE_URL"
 CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
+# Content Scheduler auto-post — durable adapter. Without these, the
+# tasks-api process falls back to CONTENT_SCHEDULER_JOB_ADAPTER=in-process
+# (in-memory setTimeouts lost on restart; see task 1945f8a2). Set here
+# for every mode so the prodlike path is exercised by the same `make up`
+# workflow as dev.
+CONTENT_SCHEDULER_JOB_ADAPTER=bullmq
+CONTENT_SCHEDULER_REDIS_URL=redis://localhost:${REDIS_PORT}
 EOF
 
 if [[ "$OBSERVABILITY" == "1" ]]; then
