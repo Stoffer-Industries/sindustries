@@ -1,0 +1,61 @@
+// Content Scheduler service Prisma schema.
+//
+// Owns the `content_scheduler` Postgres schema. The `ContentSchedulerItem`
+// model + scheduler enums were extracted from `services/tasks-api` as part
+// of task 94d5e4fc (extraction PR #2 in the series). The task/work/workflow
+// domain remains in tasks-api's `tasks_api` schema; this service only
+// owns Content Scheduler state.
+//
+// See docs/specs/content-scheduler-service-extraction-tech-design.md for
+// the migration/backfill ownership story (3 migrations moved here from
+// tasks-api/prisma/migrations/).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ContentSchedulerItemStatus {
+  draft
+  queued
+  approved
+  published
+  removed
+}
+
+enum ContentSchedulerSource {
+  ops_notes
+  cto_craft
+  manual
+  other
+}
+
+model ContentSchedulerItem {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  body                     String                       @db.VarChar(1000)
+  source                   ContentSchedulerSource       @default(manual)
+  sourceRef                String?
+  status                   ContentSchedulerItemStatus   @default(queued)
+  scheduledFor             DateTime?
+  position                 Int                          @default(0)
+  approvedAt               DateTime?
+  approvedBy               String?
+  publishedAt              DateTime?
+  publishedUrl             String?
+  publishError             String?
+  autoPostJobId            String?
+  autoPostScheduleVersion  Int                          @default(0)
+  autoPostScheduledAt      DateTime?
+  autoPostLastEnqueuedAt   DateTime?
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  removedAt                DateTime?
+
+  @@index([status, position])
+  @@index([status, scheduledFor])
+  @@index([status, publishedAt])
+}
