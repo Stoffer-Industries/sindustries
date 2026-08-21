@@ -1,80 +1,27 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  parseEvidenceTag,
-  extractAcEvidence,
-  checkTestId,
-  checkNotTested,
-  checkPrReference,
-  checkAcEvidence,
-  runAllAcChecks,
-  verify,
+  verifySemantic,
+  extractAcLines,
+  defaultJudgeIntent,
   type AcEvidence,
   type Deps,
+  type JudgeIntentResult,
   type PrFile,
   type PrSummary,
-  type TaskSummary,
 } from '../src/verify.ts';
 
 // ---------------------------------------------------------------------------
-// parseEvidenceTag — quick anchors against the Rust regex at
-// agents/workflows/feature-task/src/ac_parsing.rs:86-115. Both emoji and
-// plain variants are accepted; truncated values without a closing `)`
-// return null. Note: the Rust regex uses `[^)]+` which stops at the first
-// inner `)` — TypeScript port uses non-greedy `[^)]*` to match the
-// closest closing paren and tolerate nested parens in values.
+// extractAcLines — minimal AC walker. Strips trailing evidence annotations
+// so the LLM judge prompt sees the bare AC description.
+//
+// The lobster's parse_evidence at agents/workflows/feature-task/src/ac_parsing.rs:86
+// is the canonical evidence-tag parser; here we only walk AC lines for
+// the semantic loop. The two implementations must agree on the
+// `(testID|not tested|not code|pr: <value>)` annotation shape.
 // ---------------------------------------------------------------------------
 
-describe('parseEvidenceTag', () => {
-  it('recognises testID with no emoji', () => {
-    expect(parseEvidenceTag('foo (testID: tests/foo.test.ts)')).toEqual({
-      type: 'testID',
-      value: 'tests/foo.test.ts',
-    });
-  });
-
-  it('recognises testID with the 🧪 emoji', () => {
-    expect(parseEvidenceTag('foo (🧪 testID: cal-10-day-render)')).toEqual({
-      type: 'testID',
-      value: 'cal-10-day-render',
-    });
-  });
-
-  it('recognises not tested with the ⚠️ emoji', () => {
-    expect(parseEvidenceTag('foo (⚠️ not tested: drag requires manual browser QA)')).toEqual({
-      type: 'not tested',
-      value: 'drag requires manual browser QA',
-    });
-  });
-
-  it('recognises not code with the 📄 emoji', () => {
-    expect(parseEvidenceTag('foo (📄 not code: updated docs/systems/content-scheduler.md)')).toEqual({
-      type: 'not code',
-      value: 'updated docs/systems/content-scheduler.md',
-    });
-  });
-
-  it('recognises pr with a # reference', () => {
-    expect(parseEvidenceTag('foo (pr: #471)')).toEqual({
-      type: 'pr',
-      value: '#471',
-    });
-  });
-
-  it('returns null when no evidence tag is present', () => {
-    expect(parseEvidenceTag('foo bar baz')).toBeNull();
-  });
-
-  it('returns null for unknown annotations like (file: ...)', () => {
-    expect(parseEvidenceTag('bar (file: apps/tasks/src/X.jsx:42)')).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// extractAcEvidence — pulls every checked AC line out of a PR body.
-// ---------------------------------------------------------------------------
-
-describe('extractAcEvidence', () => {
-  it('extracts all five ACs with evidence tags', () => {
+describe('extractAcLines', () => {
+  it('extracts all five ACs and strips trailing evidence', () => {
     const body = `
 Some preamble.
 
@@ -84,334 +31,174 @@ Some preamble.
 - [x] AC4: qux (pr: #471)
 - [x] AC5: zut (⚠️ not tested: drag requires manual browser QA)
     `;
-    const acs = extractAcEvidence(body);
+    const acs = extractAcLines(body);
     expect(acs).toHaveLength(5);
     expect(acs.map((a) => a.ac)).toEqual(['1', '2', '3', '4', '5']);
-    expect(acs[0].evidence).toEqual({ type: 'testID', value: 'tests/foo.test.ts' });
-    expect(acs[2].evidence).toEqual({ type: 'not code', value: 'doc update' });
-    expect(acs[3].evidence).toEqual({ type: 'pr', value: '#471' });
+    // Evidence stripped so the LLM judge doesn't see the testID tag.
+    expect(acs[0].description).toBe('foo');
+    expect(acs[2].description).toBe('baz');
+    expect(acs[3].description).toBe('qux');
+  });
+
+  it('returns the bare description when no evidence tag is present', () => {
+    const body = `
+- [x] AC1: standalone description
+- [x] AC2: another (testID: tests/foo.test.ts)
+    `;
+    const acs = extractAcLines(body);
+    expect(acs).toHaveLength(2);
+    expect(acs[0].description).toBe('standalone description');
+    expect(acs[1].description).toBe('another');
   });
 
   it('skips unchecked AC lines', () => {
     const body = `
-- [x] AC1: foo (testID: tests/foo.test.ts)
-- [ ] AC2: not done
+- [x] AC1: done (testID: tests/foo.test.ts)
+- [ ] AC2: not done (testID: tests/bar.test.ts)
     `;
-    const acs = extractAcEvidence(body);
+    const acs = extractAcLines(body);
     expect(acs).toHaveLength(1);
     expect(acs[0].ac).toBe('1');
   });
 
   it('returns an empty array when no AC lines are present', () => {
-    expect(extractAcEvidence('Just a description, no ACs.')).toEqual([]);
+    expect(extractAcLines('Just a description, no ACs.')).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// checkTestId — structural check on the cited test file path.
+// defaultJudgeIntent — placeholder behavior. Until Quinn implements the
+// LLM call, every AC fails so the task stays in `doing` rather than
+// reaching acceptance on a stub. This is the contract the semantic pin
+// tests below assume.
 // ---------------------------------------------------------------------------
 
-describe('checkTestId', () => {
-  const prFiles: PrFile[] = [
-    { filename: 'tests/foo.test.ts', status: 'added' },
-    { filename: 'src/main.ts', status: 'modified' },
-  ];
-
-  it('passes when the cited file is in the diff', () => {
-    expect(checkTestId('tests/foo.test.ts', prFiles)).toEqual({ ok: true });
-  });
-
-  it('fails when the cited file is NOT in the diff (missing-test case)', () => {
-    const result = checkTestId('tests/missing.test.ts', prFiles);
+describe('defaultJudgeIntent', () => {
+  it('returns ok: false with an explicit reason so tasks stay in `doing`', async () => {
+    const result = await defaultJudgeIntent(
+      { ac: '1', description: 'do the thing' },
+      'diff --git a/foo b/foo\n+added',
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toContain('tests/missing.test.ts');
-      expect(result.reason).toContain('not in the merged PR diff');
-    }
-  });
-
-  it('fails when the value does not look like a test file path', () => {
-    const result = checkTestId('some_test_name', prFiles);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('does not look like a test file path');
-    }
-  });
-
-  it('matches by suffix so packages/.../tests/foo.test.ts find tests/foo.test.ts', () => {
-    const deepFiles: PrFile[] = [
-      { filename: 'packages/foo/src/tests/foo.test.ts', status: 'added' },
-    ];
-    expect(checkTestId('tests/foo.test.ts', deepFiles)).toEqual({ ok: true });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkNotTested — file-path existence in the diff.
-// ---------------------------------------------------------------------------
-
-describe('checkNotTested', () => {
-  const prFiles: PrFile[] = [
-    { filename: 'agents/ash/src/verify.ts', status: 'added' },
-    { filename: 'services/tasks-api/src/config/requiredApprovals.ts', status: 'modified' },
-  ];
-
-  it('passes when the cited file is in the diff', () => {
-    expect(checkNotTested('agents/ash/src/verify.ts', prFiles)).toEqual({ ok: true });
-  });
-
-  it('fails when the cited file is NOT in the diff (missing-artifact case)', () => {
-    const result = checkNotTested('apps/tasks/src/newFeature.tsx', prFiles);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('apps/tasks/src/newFeature.tsx');
+      expect(result.reason).toContain('Quinn owns');
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// checkPrReference — accepts #N references and URLs verbatim; only
-// file-path values are checked against the diff.
+// Test fixtures — shared across the four semantic-contract pin tests.
 // ---------------------------------------------------------------------------
 
-describe('checkPrReference', () => {
-  const prFiles: PrFile[] = [
-    { filename: 'services/tasks-api/prisma/schema.prisma', status: 'modified' },
-  ];
+const taskId = 'f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47';
 
-  it('passes for a #N sibling PR reference', () => {
-    expect(checkPrReference('#471', prFiles)).toEqual({ ok: true });
+function makeDeps(opts: {
+  pr: PrSummary;
+  posts: { approval: string[]; comments: string[] };
+  judgeIntent: Deps['judgeIntent'];
+}) {
+  const postApproval = vi.fn(async (id: string, type: string) => {
+    opts.posts.approval.push(`${id}:${type}`);
   });
-
-  it('passes for a full URL sibling PR reference', () => {
-    expect(checkPrReference('https://github.com/foo/bar/pull/471', prFiles)).toEqual({ ok: true });
+  const postComment = vi.fn(async (_id: string, text: string) => {
+    opts.posts.comments.push(text);
   });
-
-  it('fails when a file path is cited but not in the diff (missing-artifact case)', () => {
-    const result = checkPrReference('services/tasks-api/src/newFile.ts', prFiles);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('not in the merged PR diff');
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkAcEvidence — routing by evidence type.
-// ---------------------------------------------------------------------------
-
-describe('checkAcEvidence', () => {
-  const prFiles: PrFile[] = [
-    { filename: 'tests/foo.test.ts', status: 'added' },
-  ];
-
-  it('returns a failure when evidence is null', () => {
-    const ac: AcEvidence = { ac: '1', description: 'no tag here', evidence: null };
-    const result = checkAcEvidence(ac, prFiles);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('AC1');
-      expect(result.reason).toContain('no evidence tag');
-    }
-  });
-
-  it('routes testID to checkTestId', () => {
-    const ac: AcEvidence = {
-      ac: '2',
-      description: 'foo (testID: tests/foo.test.ts)',
-      evidence: { type: 'testID', value: 'tests/foo.test.ts' },
-    };
-    expect(checkAcEvidence(ac, prFiles)).toEqual({ ok: true });
-  });
-
-  it('routes not code to a no-op success', () => {
-    const ac: AcEvidence = {
-      ac: '3',
-      description: 'foo (📄 not code: doc update)',
-      evidence: { type: 'not code', value: 'doc update' },
-    };
-    expect(checkAcEvidence(ac, prFiles)).toEqual({ ok: true });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// runAllAcChecks — collects per-AC results.
-// ---------------------------------------------------------------------------
-
-describe('runAllAcChecks', () => {
-  it('returns one result per AC, pass and fail', () => {
-    const body = `
-- [x] AC1: foo (testID: tests/foo.test.ts)
-- [x] AC2: bar (testID: tests/missing.test.ts)
-- [x] AC3: baz (📄 not code: doc update)
-    `;
-    const prFiles: PrFile[] = [{ filename: 'tests/foo.test.ts', status: 'added' }];
-    const results = runAllAcChecks(body, prFiles);
-    expect(results).toHaveLength(3);
-    expect(results[0].result.ok).toBe(true);
-    expect(results[1].result.ok).toBe(false);
-    expect(results[2].result.ok).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// verify() — the three AC3 test cases driven through the orchestrator
-// with injected I/O deps. Each case asserts:
-//   (a) the outcome is ok: false
-//   (b) the comment text begins with [qa-agent-blocked]
-//   (c) postApproval was NOT called
-//   (d) the failure reason names the specific claim that failed
-// ---------------------------------------------------------------------------
-
-const task: TaskSummary = { id: 'f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47', status: 'doing' };
-
-function makeDeps(pr: PrSummary, posts: { approval: string[]; comments: string[] }) {
-  const postApproval = vi.fn(async (taskId: string, type: string) => {
-    posts.approval.push(`${taskId}:${type}`);
-  });
-  const postComment = vi.fn(async (_taskId: string, text: string) => {
-    posts.comments.push(text);
-  });
-  const fetchPr = vi.fn(async (_url: string) => pr);
-  const fetchTask = vi.fn(async (_id: string) => task);
-  return { deps: { fetchTask, fetchPr, postComment, postApproval } satisfies Deps, postApproval, postComment };
+  const fetchPr = vi.fn(async (_url: string) => opts.pr);
+  return {
+    deps: { fetchPr, postComment, postApproval, judgeIntent: opts.judgeIntent } satisfies Deps,
+    postApproval,
+    postComment,
+  };
 }
 
-describe('verify() — AC3 missing-test case', () => {
-  it('posts [qa-agent-blocked] naming the missing test file and does NOT post approval', async () => {
-    const pr: PrSummary = {
-      number: 474,
-      state: 'merged',
-      merged: true,
-      body: `
-- [x] AC1: A new workflowGate is created (testID: tests/foo.test.ts)
-- [x] AC2: Missing test (testID: tests/missing.test.ts)
-- [x] AC3: Stub (📄 not code: doc update)
-      `,
-      files: [{ filename: 'tests/foo.test.ts', status: 'added' }],
-    };
+function makePr(body: string, files: PrFile[] = [], patch = ''): PrSummary {
+  return {
+    number: 474,
+    state: 'merged',
+    merged: true,
+    body,
+    files,
+    patch,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// verifySemantic — semantic-contract pin tests. These pin the I/O
+// contract (which comment shapes stay machine-parseable, when postApproval
+// fires) and don't depend on Quinn's actual judgment logic. Replace
+// the fake judgeIntent with a real impl when Quinn lands it.
+// ---------------------------------------------------------------------------
+
+describe('verifySemantic — judgeIntent returns ok: true for every AC', () => {
+  it('posts [qa-agent-verified] and satisfies the qa_agent gate', async () => {
+    const pr = makePr(
+      `- [x] AC1: do the thing (testID: tests/foo.test.ts)
+- [x] AC2: add a doc (📄 not code: README added)`,
+      [],
+      'diff --git a/foo b/foo\n+added',
+    );
     const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(pr, posts);
+    const fakeJudge: Deps['judgeIntent'] = vi.fn(
+      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
+    );
+    const { deps, postApproval } = makeDeps({ pr, posts, judgeIntent: fakeJudge });
 
-    const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText.startsWith('[qa-agent-blocked]')).toBe(true);
-    expect(outcome.commentText).toContain('tests/missing.test.ts');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-});
-
-describe('verify() — AC3 missing-artifact case', () => {
-  it('posts [qa-agent-blocked] naming the missing artifact and does NOT post approval', async () => {
-    const pr: PrSummary = {
-      number: 474,
-      state: 'merged',
-      merged: true,
-      body: `
-- [x] AC1: One passing AC (testID: tests/foo.test.ts)
-- [x] AC2: Missing artifact (pr: apps/tasks/src/newFeature.tsx)
-- [x] AC3: Adds something (testID: tests/bar.test.ts)
-      `,
-      files: [
-        { filename: 'tests/foo.test.ts', status: 'added' },
-        { filename: 'tests/bar.test.ts', status: 'added' },
-      ],
-    };
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(pr, posts);
-
-    const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText.startsWith('[qa-agent-blocked]')).toBe(true);
-    expect(outcome.commentText).toContain('apps/tasks/src/newFeature.tsx');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-});
-
-describe('verify() — AC3 fabricated-evidence case', () => {
-  it('posts [qa-agent-blocked] when the diff has no code changes despite a testID claim', async () => {
-    // PR body claims a test exists at agents/ash/test/verify.test.ts:50
-    // but the diff only adds a README. The testID value matches the
-    // *.test.ts shape, so the structural check sees the cited file
-    // IS in the diff — but the rest of the diff is missing the claimed
-    // code surface. We exercise the "fabricated claim" path by including
-    // a testID that points to a file that exists in the diff but with
-    // data that does not match the AC's stated claim.
-    //
-    // The deterministic structural check the design commits to (per
-    // design step 9 + open question #2) is "every cited test name/file
-    // exists in the repo and passes, every cited artifact/file path
-    // actually exists, AC evidence text cross-checked against the real
-    // diff for overstated or fabricated claims." The "passes" and
-    // "claim-vs-diff" axes are out of scope for the structural check;
-    // they land in the follow-up dynamic-test-execution pass. Here we
-    // assert the structural surface AC3 is wired to: the cited file
-    // exists in the diff, and any fabricated file path is named.
-    const pr: PrSummary = {
-      number: 474,
-      state: 'merged',
-      merged: true,
-      body: `
-- [x] AC1: Real test (testID: tests/foo.test.ts)
-- [x] AC2: Fabricated check (testID: tests/fabricated.test.ts)
-- [x] AC3: Doc-only (📄 not code: README only)
-      `,
-      files: [
-        // Only the README is in the diff — the test file is fabricated.
-        { filename: 'agents/ash/README.md', status: 'added' },
-      ],
-    };
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(pr, posts);
-
-    const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText.startsWith('[qa-agent-blocked]')).toBe(true);
-    // Both testIDs are missing from the diff — both should be named.
-    expect(outcome.commentText).toContain('tests/foo.test.ts');
-    expect(outcome.commentText).toContain('tests/fabricated.test.ts');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-});
-
-describe('verify() — happy path', () => {
-  it('posts approval and a [qa-agent-verified] comment when all ACs pass', async () => {
-    const pr: PrSummary = {
-      number: 474,
-      state: 'merged',
-      merged: true,
-      body: `
-- [x] AC1: Real test (testID: tests/foo.test.ts)
-- [x] AC2: Doc update (📄 not code: README added)
-      `,
-      files: [
-        { filename: 'tests/foo.test.ts', status: 'added' },
-        { filename: 'agents/ash/README.md', status: 'added' },
-      ],
-    };
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(pr, posts);
-
-    const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
+    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
 
     expect(outcome.ok).toBe(true);
-    expect(postApproval).toHaveBeenCalledWith(task.id, 'qa_agent');
     expect(outcome.commentText.startsWith('[qa-agent-verified]')).toBe(true);
+    expect(postApproval).toHaveBeenCalledWith(taskId, 'qa_agent');
+    // Both ACs passed through the fake — no failures reported.
+    expect(fakeJudge).toHaveBeenCalledTimes(2);
   });
 });
 
-describe('verify() — pre-conditions', () => {
+describe('verifySemantic — judgeIntent returns ok: false for one AC', () => {
+  it('posts [qa-agent-blocked] naming the failing AC and does NOT satisfy the gate', async () => {
+    const pr = makePr(
+      `- [x] AC1: happy path (testID: tests/foo.test.ts)
+- [x] AC2: error path (testID: tests/bar.test.ts)`,
+      [],
+      'diff --git a/foo b/foo\n+added only happy path',
+    );
+    const posts = { approval: [] as string[], comments: [] as string[] };
+    const fakeJudge: Deps['judgeIntent'] = vi.fn(
+      async (ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => {
+        if (ac.ac === '2') {
+          return {
+            ok: false,
+            reason:
+              'AC2 implementation handles the happy path but not the error case mentioned in the AC text',
+          };
+        }
+        return { ok: true };
+      },
+    );
+    const { deps, postApproval } = makeDeps({ pr, posts, judgeIntent: fakeJudge });
+
+    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.commentText.startsWith('[qa-agent-blocked]')).toBe(true);
+    expect(outcome.commentText).toContain('AC2');
+    expect(outcome.commentText).toContain('error case');
+    expect(postApproval).not.toHaveBeenCalled();
+  });
+});
+
+describe('verifySemantic — pre-conditions', () => {
   it('returns a no-PR-URL outcome when no PR URL is supplied', async () => {
     const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(
-      { number: 1, state: 'merged', merged: true, body: '', files: [] },
-      posts,
+    const fakeJudge: Deps['judgeIntent'] = vi.fn(
+      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
     );
+    const { deps, postApproval } = makeDeps({
+      pr: makePr('', [], ''),
+      posts,
+      judgeIntent: fakeJudge,
+    });
 
-    const outcome = await verify(task.id, '', deps);
+    const outcome = await verifySemantic(taskId, '', deps);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.commentText).toContain('No PR URL');
@@ -420,37 +207,68 @@ describe('verify() — pre-conditions', () => {
 
   it('returns a not-merged outcome when the PR is open', async () => {
     const pr: PrSummary = {
-      number: 474,
+      ...makePr('- [x] AC1: foo (testID: tests/foo.test.ts)'),
       state: 'open',
       merged: false,
-      body: '- [x] AC1: foo (testID: tests/foo.test.ts)',
-      files: [{ filename: 'tests/foo.test.ts', status: 'added' }],
     };
     const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(pr, posts);
+    const fakeJudge: Deps['judgeIntent'] = vi.fn(
+      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
+    );
+    const { deps, postApproval } = makeDeps({
+      pr,
+      posts,
+      judgeIntent: fakeJudge,
+    });
 
-    const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
+    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.commentText).toContain('not merged');
     expect(postApproval).not.toHaveBeenCalled();
   });
 
-  it('returns a no-evidence-tag outcome when the PR body has no AC tags', async () => {
-    const pr: PrSummary = {
-      number: 474,
-      state: 'merged',
-      merged: true,
-      body: 'Just a description, no ACs.',
-      files: [],
-    };
+  it('returns a no-AC-lines outcome when the PR body has no AC tags', async () => {
+    const pr = makePr('Just a description, no ACs.', [], '');
     const posts = { approval: [] as string[], comments: [] as string[] };
-    const { deps, postApproval } = makeDeps(pr, posts);
+    const fakeJudge: Deps['judgeIntent'] = vi.fn(
+      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
+    );
+    const { deps, postApproval } = makeDeps({
+      pr,
+      posts,
+      judgeIntent: fakeJudge,
+    });
 
-    const outcome = await verify(task.id, 'https://github.com/owner/repo/pull/474', deps);
+    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.commentText).toContain('No AC evidence tags');
     expect(postApproval).not.toHaveBeenCalled();
+  });
+});
+
+describe('verifySemantic — judgeIntent gets the AC description and patch text', () => {
+  it('forwards the bare AC description (without trailing evidence) and the PR patch', async () => {
+    const pr = makePr(
+      `- [x] AC1: wire the oauth route (testID: tests/auth.test.ts)`,
+      [],
+      'diff --git a/services/x.ts b/services/x.ts\n+export const oauth = () => { ... }',
+    );
+    const posts = { approval: [] as string[], comments: [] as string[] };
+    const fakeJudge: Deps['judgeIntent'] = vi.fn(
+      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
+    );
+    const { deps } = makeDeps({ pr, posts, judgeIntent: fakeJudge });
+
+    await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
+
+    expect(fakeJudge).toHaveBeenCalledTimes(1);
+    const mock = fakeJudge as unknown as { mock: { calls: Array<[AcEvidence, string]> } };
+    const firstCall = mock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [ac, patchText] = firstCall!;
+    expect(ac).toEqual({ ac: '1', description: 'wire the oauth route' });
+    expect(patchText).toContain('export const oauth');
   });
 });
