@@ -32,6 +32,15 @@ directly into the backlog as a `feature` task; Tom approves via the brain-spec f
 approves every other feature task. One task per run is intentional: keeps the backlog signal density
 high without spamming.
 
+**Relationship to `retro-daily-fix` (daily):** a separate daily cron already fixes the single
+highest-impact same-day retro-notes finding when it's a small, safely-scoped config/code fix
+(`agents/skills/ops/retro-daily-fix/SKILL.md`). That's the tactical loop — this skill is the
+strategic one. Assume some findings this week were already resolved same-day; focus this
+pass on **patterns that recur across multiple days or weeks**, and on findings the daily
+pass explicitly routed away as "not safely fixable" (infra, cross-agent, judgment calls) —
+those are exactly the ones that need a real root-cause writeup and a proper feature task
+rather than a one-line fix.
+
 **Known gap:** there is no global aggregation endpoint yet (that's task 6a5783a7, still in
 `doing` — a Postgres rollup fed by these same events). Until it ships, per-task gate-failure
 breakdown means iterating `GET /feature-task-analytics/tasks/:taskId/events` across the
@@ -139,6 +148,13 @@ Only run this step if Step 3's `total > 0`. Take the top 3 entries from `message
 suggestion. Do not write generic advice ("write better specs") — name the actual workflow
 rule, gate, and who owns the fix.
 
+**State the root cause, not just the symptom.** The failure message is the symptom (a gate
+blocked); the "Cause" column below is the root-cause category (quality vs capacity). For
+each of the 3 selected entries, write one sentence naming which category it is and why —
+"quality: task creation is producing incomplete descriptions" reads differently from
+"capacity: an approval queue is backed up," and the two need different fixes. A suggestion
+without a stated root cause is a guess dressed up as an action item.
+
 Use this lookup table for known failure patterns. If a top-3 message doesn't match anything
 below, write an ad-hoc suggestion referencing the literal gate + message text instead of
 forcing it into a bucket.
@@ -192,9 +208,10 @@ TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
 
 Notes on what gets passed in:
 - **Title**: the pattern's `suggested-action` (one line, title-case). Truncate at 80 chars.
-- **Description**: includes the observation, the count ("3 occurrences this week"), the evidence
-  links (task IDs / PR numbers / file paths), and the original `pattern-slug` in a callout. Tom
-  approves via brain spec per the normal feature-task flow.
+- **Description**: includes the observation, the count ("3 occurrences this week"), a stated
+  **root cause** line (quality vs capacity, per Step 4 — not just the symptom restated), the
+  evidence links (task IDs / PR numbers / file paths), and the original `pattern-slug` in a
+  callout. Tom approves via brain spec per the normal feature-task flow.
 - **taskType**: `feature` — so it lands in the brain-spec approval queue, not the ops queue.
 - **priority**: `medium` by default. Promote to `high` only if the top pattern's `bad` tag comes
   with `severity: high` or equivalent in the retro-notes row.
