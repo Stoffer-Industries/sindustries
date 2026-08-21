@@ -1,6 +1,8 @@
 import importlib.util
 import pathlib
+import subprocess
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -719,6 +721,161 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertEqual(None, queue["attentionOwner"])
         self.assertEqual([], queue["attentionPages"])
+
+
+class GhApiTimeoutTest(unittest.TestCase):
+    """WS1: per-call 10s timeout + graceful TimeoutExpired translation."""
+
+    def setUp(self) -> None:
+        agent_task_queue._VERBOSE = False
+
+    def test_gh_api_passes_explicit_timeout_to_safe_run(self):
+        with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
+            mock_safe_run.return_value.stdout = "[]"
+            agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+        self.assertEqual(
+            mock_safe_run.call_args.kwargs.get("timeout"),
+            agent_task_queue._GH_API_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(
+            mock_safe_run.call_args.kwargs.get("timeout"), 10.0
+        )
+
+    def test_gh_api_translates_timeout_to_sentinel(self):
+        with patch.object(
+            agent_task_queue,
+            "safe_run",
+            side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=10),
+        ):
+            with self.assertRaises(agent_task_queue._GhApiTimeout):
+                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+
+    def test_gh_api_does_not_swallow_called_process_error(self):
+        with patch.object(
+            agent_task_queue,
+            "safe_run",
+            side_effect=subprocess.CalledProcessError(
+                returncode=1, cmd="gh", stderr="boom"
+            ),
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+
+
+def _deliverable_task(pr_number):
+    """Build a task whose only comment posts `[implementer-prs] <url>` for `pr_number`."""
+    return {
+        "id": f"00000000-0000-0000-0000-{pr_number:012d}",
+        "title": f"task {pr_number}",
+        "taskType": "code",
+        "status": "doing",
+        "priority": "high",
+        "assignee": "Rowan",
+        "blocked": False,
+        "dependencyBlocked": False,
+        "comments": [
+            {
+                "text": "[implementer-prs] "
+                f"https://github.com/Stoffer-Industries/sindustries/pull/{pr_number}"
+            }
+        ],
+        "approvals": [],
+    }
+
+
+class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
+    """WS2 + WS1 integration: parallel fan-out + per-URL timeout tolerance."""
+
+    def setUp(self) -> None:
+        agent_task_queue._VERBOSE = False
+
+    def test_linked_urls_run_in_parallel(self):
+        per_call_delay = 0.2
+        url_count = 8
+        tasks = [_deliverable_task(100 + i) for i in range(url_count)]
+
+        def slow_detail(_config_dir, _token_env, _pr_number):
+            time.sleep(per_call_delay)
+            return {
+                "number": _pr_number,
+                "html_url": f"https://github.com/Stoffer-Industries/sindustries/pull/{_pr_number}",
+                "head": {"sha": f"sha-{_pr_number}"},
+                "user": {"login": "rowanstoffer"},
+                "mergeable": True,
+            }
+
+        def slow_reviews(_config_dir, _token_env, _pr_number):
+            time.sleep(per_call_delay)
+            return []
+
+        def slow_checks(_config_dir, _token_env, _endpoint):
+            time.sleep(per_call_delay)
+            return {"check_runs": []}
+
+        with patch.object(
+            agent_task_queue, "_fetch_github_pr_detail", side_effect=slow_detail
+        ), patch.object(
+            agent_task_queue, "_fetch_reviews_tolerant", side_effect=slow_reviews
+        ), patch.object(
+            agent_task_queue, "_gh_api", side_effect=slow_checks
+        ):
+            started = time.monotonic()
+            agent_task_queue.fetch_linked_delivery_prs("Rowan", tasks, [])
+            elapsed = time.monotonic() - started
+
+        # Sequential worst-case: 8 URLs * 3 calls * 0.2s = ~4.8s.
+        # Parallel target: 3 * 0.2s + ThreadPool overhead = well under 1.5s.
+        self.assertLess(
+            elapsed,
+            1.5,
+            f"Parallel fan-out took {elapsed:.2f}s; "
+            f"sequential would be ~{url_count * 3 * per_call_delay:.2f}s",
+        )
+
+    def test_linked_delivery_timeout_skips_url_not_aborts(self):
+        tasks = [_deliverable_task(200 + i) for i in range(3)]
+        call_count = {"n": 0}
+
+        def flaky_detail(_config_dir, _token_env, pr_number):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise agent_task_queue._GhApiTimeout("simulated 10s timeout")
+            return {
+                "number": pr_number,
+                "html_url": f"https://github.com/Stoffer-Industries/sindustries/pull/{pr_number}",
+                "head": {"sha": f"sha-{pr_number}"},
+                "user": {"login": "rowanstoffer"},
+                "mergeable": True,
+            }
+
+        with patch.object(
+            agent_task_queue, "_fetch_github_pr_detail", side_effect=flaky_detail
+        ), patch.object(
+            agent_task_queue, "_fetch_reviews_tolerant", return_value=[]
+        ), patch.object(
+            agent_task_queue, "_gh_api", return_value={"check_runs": []}
+        ):
+            out = agent_task_queue.fetch_linked_delivery_prs("Rowan", tasks, [])
+
+        # Two of three URLs hydrate; the first URL's timeout skips it cleanly.
+        self.assertEqual(len(out), 2)
+
+
+class VerboseFlagTest(unittest.TestCase):
+    """WS3: --verbose flag is registered on the parser and toggles the module flag."""
+
+    def setUp(self) -> None:
+        agent_task_queue._VERBOSE = False
+
+    def test_verbose_flag_registered(self):
+        parser = agent_task_queue.build_parser()
+        parsed = parser.parse_args(["--assignee", "Rowan", "--verbose"])
+        self.assertTrue(parsed.verbose)
+
+    def test_default_verbose_false(self):
+        parser = agent_task_queue.build_parser()
+        parsed = parser.parse_args(["--assignee", "Rowan"])
+        self.assertFalse(parsed.verbose)
 
 
 if __name__ == "__main__":
