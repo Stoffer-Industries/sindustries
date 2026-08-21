@@ -47,6 +47,11 @@ Ivy has different names in different systems — use the right one per system, n
 - **Tasks API `assignee` value:** `Ivy` (capitalized first name — NOT the GitHub login; e.g. `?assignee=Ivy`, not `?assignee=ivystoffer`)
 - **Telegram account:** not yet a dedicated bot account — if this changes, record it here
 
+## Tasks API
+
+- **Credential env:** `IVY_TASKS_API_APPROVAL_TOKEN`, stored in `~/.openclaw/.env`. Pass it as `token=` to `tasks_api_client.py`'s `api_request`/`service_token_env` helpers (or as the bearer token on raw `curl`/`httpx` calls) so comments and writes attribute to `Ivy`, not Quinn.
+- **Do not fall back to the shared `TASKS_API_APPROVAL_TOKEN`** for your own actions — that one authenticates as Quinn. It existed server-side (`TASKS_API_APPROVAL_SERVICE_CREDENTIALS`, actor `Ivy`) before this env var was added on 2026-08-21; if a session predates that, comments and writes will show up misattributed to Quinn — same bug class Rowan hit and logged in retro-notes (`tasks-api-actor-attribution-quinn-default`, 2026-08-21).
+
 ## GitHub
 
 - **Account:** ivystoffer
