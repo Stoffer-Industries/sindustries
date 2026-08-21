@@ -860,6 +860,35 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     if workstreams(&env.task).is_empty() {
         failures.push("Task description must include at least one workstream.".to_string());
     }
+    // AC1 of task 5e35dc25: mechanical evidence gate before `qa_agent`.
+    // The lobster runs the deterministic file-existence + test-execution
+    // checks first; only if those pass do we ask Ash for semantic judgment
+    // (AC2 of the same task). `PnpmTestRunner` shells out to
+    // `pnpm test --filter <name>` per AC3; unit tests in `ac_parsing`
+    // substitute `AlwaysPassTestRunner` / `AlwaysFailTestRunner`.
+    //
+    // Failures surface as `[feature-task-progress-checklist]` (the same
+    // pattern every other lobster gate uses) and short-circuit the qa_agent
+    // check below so Ash's heartbeat is not asked to verify a delivery that
+    // has not yet cleared the mechanical bar.
+    let mut mechanical_gate_failed = false;
+    if let Some(url) = &latest_pr_url {
+        let pr_files = pr_changed_files(url);
+        let body = pr_body(url).unwrap_or_default();
+        let mechanical_failures = ac_parsing::mechanical_evidence_failures(
+            &env.task.id,
+            &task_acs,
+            &body,
+            &pr_files,
+            &PnpmTestRunner,
+        );
+        if !mechanical_failures.is_empty() {
+            mechanical_gate_failed = true;
+            for failure in mechanical_failures {
+                failures.push(format!("PR {url} — {failure}"));
+            }
+        }
+    }
     // AC1 of task f6a4d56a: short-circuit on `qa_agent` outstanding with a
     // dedicated `[qa-agent-blocked]` comment so Ash's verification gap is
     // visibly distinct from the generic `[feature-task-progress-checklist]`
@@ -867,8 +896,13 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // `transition_or_block` so the comment is only posted on the first
     // transition into "blocked" for a given failure string — re-runs of
     // verify_delivery while Ash is still outstanding do not spam comments.
-    let qa_agent_failures = qa_agent_verified_failures(&env.task);
-    if !qa_agent_failures.is_empty() {
+    //
+    // AC2 of task 5e35dc25: skip this branch entirely when the mechanical
+    // gate has already failed — Ash's qa_agent is not requested until
+    // mechanical checks pass.
+    if !mechanical_gate_failed {
+        let qa_agent_failures = qa_agent_verified_failures(&env.task);
+        if !qa_agent_failures.is_empty() {
         if !args.dry_run {
             let qa_fingerprint = qa_agent_failures.join("\n");
             if env.lobster_state.failure_fingerprint.as_deref() != Some(&qa_fingerprint) {
@@ -886,6 +920,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         env.failures = qa_agent_failures;
         analytics::emit_gate_failure_events(&args, &env.task, "verify_delivery", &env.failures);
         return Ok(env);
+        }
     }
     transition_or_block(
         &args,
@@ -4125,6 +4160,35 @@ fn pr_body(url: &str) -> Result<String> {
     }
     let raw = String::from_utf8(output.stdout)?;
     Ok(decode_pr_body_output(&raw))
+}
+
+// ---------------------------------------------------------------------------
+// Mechanical evidence gate (task 5e35dc25 — migrate Ash's mechanical
+// verify.ts checks into the lobster).
+//
+// `PnpmTestRunner` is the production implementation of the `TestRunner`
+// trait declared in `ac_parsing`. It shells out to `pnpm test --filter
+// <name>` and surfaces the exit code + stdout/stderr as a `TestOutcome`.
+// Unit tests in `ac_parsing` substitute `AlwaysPassTestRunner` /
+// `AlwaysFailTestRunner` so they can exercise the mechanical-evidence
+// path without spawning `pnpm`.
+//
+// Mirrors Ash's `verify.ts` invocation closely; if the project's test
+// invocation diverges, this is the single place to update.
+struct PnpmTestRunner;
+
+impl ac_parsing::TestRunner for PnpmTestRunner {
+    fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        let output = std::process::Command::new("pnpm")
+            .args(["test", "--filter", test_name])
+            .output()
+            .map_err(|err| format!("spawn pnpm test: {err}"))?;
+        Ok(ac_parsing::TestOutcome {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
 }
 
 /// Fetch the list of files changed in a PR.
