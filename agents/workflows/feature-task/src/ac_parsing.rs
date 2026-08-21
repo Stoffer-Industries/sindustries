@@ -282,6 +282,160 @@ pub(crate) fn task_ac_vs_open_pr_failures(
     failures
 }
 
+// ---------------------------------------------------------------------------
+// Mechanical evidence checks (task 5e35dc25 PR #1).
+//
+// These run the deterministic file-existence + test-execution checks against
+// each per-task AC's parsed `Evidence`. Failures here surface as the
+// `[feature-task-progress-checklist]` failures that the existing
+// `verify_delivery` path already aggregates — Ash's `qa_agent` should not
+// run until these pass. The mechanical checks are deliberately a strict
+// superset of Ash's `verify.ts` behaviour so the lobster's gate is at
+// least as strict as the agent's was.
+
+// Test runner abstraction — injectable so unit tests can fake pass/fail
+// outcomes without shelling out to `pnpm`. The production impl
+// (`PnpmTestRunner` in `main.rs`) shells out to `pnpm test --filter <name>`.
+pub(crate) trait TestRunner {
+    fn run(&self, test_name: &str) -> Result<TestOutcome, String>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TestOutcome {
+    pub exit_code: i32,
+    #[allow(dead_code)]
+    pub stdout: String,
+    #[allow(dead_code)]
+    pub stderr: String,
+}
+
+/// Mechanical evidence check failures for the `doing -> acceptance` gate.
+///
+/// Returns one failure string per AC whose evidence is not mechanically
+/// satisfied (cited file not in the PR diff, cited test fails), or an
+/// empty Vec if every AC's evidence passes. Subsection scoping mirrors
+/// `task_ac_vs_open_pr_failures`: when the PR body contains
+/// `### Task <id>` subheadings, only the current task's subsection is
+/// checked. Sibling subsections are skipped.
+pub(crate) fn mechanical_evidence_failures(
+    task_id: &str,
+    task_acs: &[(String, String)],
+    body: &str,
+    pr_files: &[String],
+    test_runner: &dyn TestRunner,
+) -> Vec<String> {
+    if task_acs.is_empty() {
+        return vec![];
+    }
+    let section = extract_ac_section(body);
+    let subsection_re = Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
+    let ac_re = Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
+    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
+    let mut pr_ac_evidence: HashMap<String, Option<Evidence>> = HashMap::new();
+    let mut matching_section = true; // assume single-section until proven otherwise
+    let mut saw_any_subsection = false;
+    for line in section.lines() {
+        if let Some(cap) = subsection_re.captures(line) {
+            let captured = &cap[1];
+            matching_section = captured == task_id || captured == task_short_id;
+            saw_any_subsection = true;
+            continue;
+        }
+        if saw_any_subsection && !matching_section {
+            continue;
+        }
+        if let Some(cap) = ac_re.captures(line) {
+            let label = cap[1].to_string();
+            let raw = cap[2].trim().to_string();
+            pr_ac_evidence.insert(label, parse_evidence(&raw));
+        }
+    }
+
+    // File-path-shape detector for `TestId` values (matches Ash's
+    // `verify.ts:checkTestId` at line 101 ported verbatim).
+    let test_file_re = Regex::new(r"\.(test|spec)\.[mc]?[jt]sx?$").unwrap();
+    let path_in_pr = |path: &str, files: &[String]| -> bool {
+        files
+            .iter()
+            .any(|f| f == path || f.ends_with(&format!("/{path}")))
+    };
+
+    let mut failures = Vec::new();
+    for (label, _task_text) in task_acs {
+        let evidence = match pr_ac_evidence.get(label) {
+            Some(ev) => ev,
+            // AC missing from PR — handled by `task_ac_vs_open_pr_failures`.
+            None => continue,
+        };
+        let evidence = match evidence {
+            Some(e) => e,
+            // AC lacks evidence — handled by `verify_pr_acs_failures`.
+            None => continue,
+        };
+        match evidence {
+            Evidence::TestId(test_id) => {
+                if test_file_re.is_match(test_id) {
+                    // File path: must be in the PR diff.
+                    if !path_in_pr(test_id, pr_files) {
+                        failures.push(format!(
+                            "{label} cites test file \"{test_id}\" but that file is not in the merged PR diff."
+                        ));
+                    }
+                } else {
+                    // Test name: run it via the test runner.
+                    match test_runner.run(test_id) {
+                        Ok(outcome) => {
+                            if outcome.exit_code != 0 {
+                                failures.push(format!(
+                                    "{label} cites test \"{test_id}\" but the test failed (exit {}) \u{2014} fix the test before shipping.",
+                                    outcome.exit_code
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            failures.push(format!(
+                                "{label} cites test \"{test_id}\" but the test runner could not execute it: {e}"
+                            ));
+                        }
+                    }
+                }
+            }
+            Evidence::NotTested { reason } => {
+                // The reason may be a file path or free text. If it looks
+                // like a file path (contains a slash or has a test/spec
+                // extension), check it's in the diff. Otherwise pass.
+                if reason.contains('/') || test_file_re.is_match(reason) {
+                    if !path_in_pr(reason, pr_files) {
+                        failures.push(format!(
+                            "{label} cites not-tested file \"{reason}\" but that file is not in the merged PR diff."
+                        ));
+                    }
+                }
+                // Free-text reasons pass — no mechanical surface.
+            }
+            Evidence::NotCode { reason: _ } => {
+                // Non-code ACs always pass — no file or test surface.
+            }
+            Evidence::Pr { reference } => {
+                // PR reference: `#<n>` or URL is a sibling cross-reference
+                // and passes structurally. Anything else is treated as a
+                // file path and must be in the diff.
+                if reference.starts_with('#')
+                    || reference.starts_with("http://")
+                    || reference.starts_with("https://")
+                {
+                    // Sibling PR cross-reference — pass.
+                } else if !path_in_pr(&reference, pr_files) {
+                    failures.push(format!(
+                        "{label} cites pr reference \"{reference}\" but that file is not in the merged PR diff."
+                    ));
+                }
+            }
+        }
+    }
+    failures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -920,5 +1074,335 @@ Lead-in.
             failures.is_empty(),
             "expected full-UUID heading to match full-UUID task id, got: {failures:?}"
         );
+    }
+
+    // ---- mechanical_evidence_failures (task 5e35dc25 PR #1) ----
+
+    /// Test runner that reports every test as passing.
+    struct AlwaysPassTestRunner;
+    impl TestRunner for AlwaysPassTestRunner {
+        fn run(&self, _test_name: &str) -> Result<TestOutcome, String> {
+            Ok(TestOutcome {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    /// Test runner that reports every test as failing, with a configurable
+    /// error message so tests can assert error propagation.
+    struct AlwaysFailTestRunner {
+        msg: String,
+    }
+    impl TestRunner for AlwaysFailTestRunner {
+        fn run(&self, _test_name: &str) -> Result<TestOutcome, String> {
+            Ok(TestOutcome {
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: self.msg.clone(),
+            })
+        }
+    }
+
+    /// Test runner that records the names it was asked to run so tests can
+    /// assert the cited test name was actually dispatched.
+    struct RecordingTestRunner {
+        log: std::cell::RefCell<Vec<String>>,
+    }
+    impl TestRunner for RecordingTestRunner {
+        fn run(&self, test_name: &str) -> Result<TestOutcome, String> {
+            self.log.borrow_mut().push(test_name.to_string());
+            Ok(TestOutcome {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    fn single_ac(label: &str, text: &str) -> Vec<(String, String)> {
+        vec![(label.to_string(), text.to_string())]
+    }
+
+    #[test]
+    fn mechanical_evidence_testid_file_path_in_diff_passes() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Cited test file lives in the PR diff (\u{1f9ea} testID: tests/foo.test.ts)\n";
+        let files = vec!["tests/foo.test.ts".to_string()];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Cited test file lives in the PR diff"),
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_testid_file_path_not_in_diff_fails() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Cited test file lives in the PR diff (\u{1f9ea} testID: tests/foo.test.ts)\n";
+        let files = vec!["tests/bar.test.ts".to_string()];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Cited test file lives in the PR diff"),
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(
+            failures[0].contains("tests/foo.test.ts"),
+            "failure must name the cited file: {failures:?}"
+        );
+        assert!(
+            failures[0].contains("not in the merged PR diff"),
+            "failure must reference the diff: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_testid_suffix_path_match_passes() {
+        // PR file `apps/gymtrack/tests/foo.test.ts` should match the cited
+        // suffix `foo.test.ts` (path-equality on basename).
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Cited test file lives in the PR diff (\u{1f9ea} testID: foo.test.ts)\n";
+        let files = vec!["apps/gymtrack/tests/foo.test.ts".to_string()];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Cited test file lives in the PR diff"),
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected suffix match, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_testid_test_name_runs_through_test_runner() {
+        // Cited value is a test name (no `.test.` extension) — must be
+        // dispatched to the test runner, not diff-checked.
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Cited test name runs (\u{1f9ea} testID: my_test_name)\n";
+        let runner = RecordingTestRunner {
+            log: std::cell::RefCell::new(Vec::new()),
+        };
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Cited test name runs"),
+            body,
+            &[],
+            &runner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+        assert_eq!(
+            runner.log.borrow().as_slice(),
+            &["my_test_name".to_string()],
+            "test runner must be invoked with the cited test name"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_testid_test_name_failing_test_is_a_failure() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Cited test name runs (\u{1f9ea} testID: my_test_name)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Cited test name runs"),
+            body,
+            &[],
+            &AlwaysFailTestRunner {
+                msg: "boom".to_string(),
+            },
+        );
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(
+            failures[0].contains("my_test_name") && failures[0].contains("exit 1"),
+            "failure must name the test and exit code: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_not_tested_file_path_in_diff_passes() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Manual-only test (\u{26a0}\u{fe0f} not tested: apps/ash/src/verify.ts)\n";
+        let files = vec!["apps/ash/src/verify.ts".to_string()];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Manual-only test"),
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_not_tested_file_path_not_in_diff_fails() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Manual-only test (\u{26a0}\u{fe0f} not tested: apps/ash/src/verify.ts)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Manual-only test"),
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(
+            failures[0].contains("apps/ash/src/verify.ts"),
+            "failure must name the cited file"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_not_tested_free_text_reason_passes() {
+        // Free-text reason (no slash, no test extension) — mechanical
+        // surface treats it as a description, not a file path.
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Drag requires manual browser QA (\u{26a0}\u{fe0f} not tested: drag requires manual browser QA)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Drag requires manual browser QA"),
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_not_code_always_passes() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Spec only (\u{1f4c4} not code: updated docs/systems/ash.md)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Spec only"),
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_pr_reference_hash_passes() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Covered by sibling PR (\u{1f517} pr: #216)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Covered by sibling PR"),
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_pr_reference_url_passes() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Covered by external doc (pr: https://example.com/docs/foo.md)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Covered by external doc"),
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_pr_reference_file_path_not_in_diff_fails() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Covered by edited file (pr: apps/ash/src/verify.ts)\n";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Covered by edited file"),
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(
+            failures[0].contains("apps/ash/src/verify.ts"),
+            "failure must name the cited file"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_mixed_pass_fail_across_multiple_acs() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Cited test file lives in the PR diff (\u{1f9ea} testID: tests/foo.test.ts)\n\
+            - [x] AC2: Cited test file does NOT live in the PR diff (\u{1f9ea} testID: tests/missing.test.ts)\n\
+            - [x] AC3: Spec only (\u{1f4c4} not code: updated docs)\n";
+        let files = vec!["tests/foo.test.ts".to_string()];
+        let task_acs = vec![
+            (
+                "AC1".to_string(),
+                "Cited test file lives in the PR diff".to_string(),
+            ),
+            (
+                "AC2".to_string(),
+                "Cited test file does NOT live in the PR diff".to_string(),
+            ),
+            ("AC3".to_string(), "Spec only".to_string()),
+        ];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &task_acs,
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert_eq!(failures.len(), 1, "expected one failure, got: {failures:?}");
+        assert!(
+            failures[0].contains("AC2") && failures[0].contains("tests/missing.test.ts"),
+            "failure must pinpoint AC2"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_subsection_scoping_only_checks_current_task() {
+        // Sibling task's AC cites a file that is in the PR diff — but a
+        // different subsection should not be checked against this task.
+        let body = "## Acceptance Criteria\n\
+            ### Task 5e35dc25 \u{2014} Current task\n\
+            - [x] AC1: Cited test file lives in the PR diff (\u{1f9ea} testID: tests/foo.test.ts)\n\
+            ### Task aabbccdd \u{2014} Sibling task\n\
+            - [x] AC1: Sibling test file (\u{1f9ea} testID: tests/sibling.test.ts)\n";
+        let files = vec!["tests/foo.test.ts".to_string()];
+        let task_acs = vec![(
+            "AC1".to_string(),
+            "Cited test file lives in the PR diff".to_string(),
+        )];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &task_acs,
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert!(
+            failures.is_empty(),
+            "sibling AC must not be checked against this task: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn mechanical_evidence_no_task_acs_returns_empty() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: anything";
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &[],
+            body,
+            &[],
+            &AlwaysPassTestRunner,
+        );
+        assert!(failures.is_empty(), "no-task-ACs short-circuit failed");
     }
 }
