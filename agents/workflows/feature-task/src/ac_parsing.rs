@@ -14,6 +14,13 @@
 use regex::Regex;
 use std::collections::HashMap;
 
+/// A file entry in a PR's diff. Mirrors the shape of `gh pr view --json files`
+/// entries that `main.rs` surfaces to the gate layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PrFile {
+    pub(crate) filename: String,
+}
+
 /// Evidence annotation recognised on a feature-task PR AC line.
 ///
 /// Priority order: `TestId` (e2e/unit, always prefer this) → `NotTested`
