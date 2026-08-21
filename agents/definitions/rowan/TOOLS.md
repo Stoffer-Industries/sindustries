@@ -40,6 +40,11 @@ Rowan has different names in different systems — use the right one per system,
 - **Tasks API `assignee` value:** `Rowan` (capitalized first name — NOT the GitHub login; e.g. `?assignee=Rowan`, not `?assignee=rowanstoffer`)
 - **Telegram account:** `rowan` (`channels.telegram.accounts.rowan`)
 
+## Tasks API
+
+- **Credential env:** `ROWAN_TASKS_API_APPROVAL_TOKEN`, stored in `~/.openclaw/.env`. Pass it as `token=` to `tasks_api_client.py`'s `api_request`/`service_token_env` helpers (or as the bearer token on raw `curl`/`httpx` calls) so comments and writes attribute to `Rowan`, not Quinn.
+- **Do not fall back to the shared `TASKS_API_APPROVAL_TOKEN`** for your own actions — that one authenticates as Quinn. It existed server-side (`TASKS_API_APPROVAL_SERVICE_CREDENTIALS`, actor `Rowan`) before this env var was added on 2026-08-21; if a session predates that, `[implementer-prs]` comments and similar writes will show up misattributed to Quinn — same bug class as PR #497's comment on task `782d778e`.
+
 ## GitHub
 
 - **Account:** rowanstoffer
