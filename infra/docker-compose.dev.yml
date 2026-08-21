@@ -17,5 +17,24 @@ services:
       retries: 10
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    # Redis is the durable queue backing CONTENT_SCHEDULER_JOB_ADAPTER=bullmq
+    # (see services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts). The
+    # default config is fine for local dev; persistence is intentionally NOT
+    # enabled here — a wiped queue on `make down` matches dev expectations
+    # (the reconciliation sweep on every worker boot rebuilds queue state
+    # from the database, so a wiped queue is recoverable without manual
+    # operator action).
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+
 volumes:
   postgres-data:
