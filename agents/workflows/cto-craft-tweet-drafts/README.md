@@ -82,8 +82,13 @@ checkpointer in CI; the live Postgres checkpointer remains the runtime backend.
 LangGraph Studio lets an operator inspect the CTO Craft graph topology
 and run a sample invocation interactively without ever reaching the
 production cron, Content Scheduler, or checkpointer database. The
-Studio entrypoint is `cto_craft_workflow.studio:build_studio_graph_factory`,
-wired through `langgraph.json` at the package root.
+Studio entrypoint is `cto_craft_workflow.studio:build_studio_graph`,
+wired through `langgraph.json` at the package root. The entrypoint
+takes no required arguments and returns a fresh compiled graph on
+every call; the wiring contract is exercised by the test
+`tests/test_studio.py::test_langgraph_json_entrypoint_returns_compiled_graph`,
+which fails if the wired entrypoint returns anything other than a
+compiled graph (a closure, a builder, an uncompiled `StateGraph`).
 
 ### Prerequisites
 

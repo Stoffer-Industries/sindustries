@@ -1,6 +1,6 @@
 {
   "graphs": {
-    "cto_craft": "./src/cto_craft_workflow/studio.py:build_studio_graph_factory"
+    "cto_craft": "./src/cto_craft_workflow/studio.py:build_studio_graph"
   },
   "env": "./.env.studio.example"
 }

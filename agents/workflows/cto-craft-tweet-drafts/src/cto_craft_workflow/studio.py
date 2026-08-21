@@ -1,22 +1,30 @@
 """LangGraph Studio entrypoint for the CTO Craft workflow.
 
 This module is the *only* place LangGraph Studio talks to the graph. It
-exposes a Studio-compatible factory that wires the real production
-``build_graph`` factory with deterministic, side-effect-free stubs. The
-goal is to let an operator (Tom, primarily) open Studio, see the real
-graph topology, and run a sample invocation without ever reaching the
-production Content Scheduler, the production OpenClaw angle model, the
-network, or the PostgreSQL checkpointer.
+exposes a Studio-compatible factory function that wires the real
+production ``build_graph`` factory with deterministic, side-effect-free
+stubs. The goal is to let an operator (Tom, primarily) open Studio, see
+the real graph topology, and run a sample invocation without ever
+reaching the production Content Scheduler, the production OpenClaw
+angle model, the network, or the PostgreSQL checkpointer.
+
+The LangGraph Studio CLI loads the function declared in
+``langgraph.json`` and calls it with no arguments to obtain a compiled
+graph. ``build_studio_graph`` is the wired entrypoint: it takes no
+required arguments, returns a fresh compiled graph with fresh stubs
+and a fresh in-memory checkpointer on every call, and is invoked once
+per Studio session. The fresh-stubs-per-session invariant is preserved
+without a closure wrapper.
 
 Key invariants enforced here (each is covered by a test in
 ``tests/test_studio.py``):
 
-1. The Studio factory never instantiates :class:`ImportClient`.
-2. The Studio factory never instantiates
+1. The Studio entrypoint never instantiates :class:`ImportClient`.
+2. The Studio entrypoint never instantiates
    :class:`OpenClawStructuredAngleModel` (production adapter).
-3. The Studio factory never instantiates :class:`PostgresSaver`.
-4. The Studio factory never constructs an ``httpx.Client`` pointed at
-   the production Content Scheduler URL.
+3. The Studio entrypoint never instantiates :class:`PostgresSaver`.
+4. The Studio entrypoint never constructs an ``httpx.Client`` pointed
+   at the production Content Scheduler URL.
 5. The ``import_fn`` the Studio graph receives refuses the first call
    with the ``STUDIO_IMPORT_FORBIDDEN`` error so any accidental flow
    that reaches ``import_drafts`` fails closed without ever making an
@@ -27,14 +35,9 @@ Key invariants enforced here (each is covered by a test in
 7. The fetcher returns canned fixtures for known URLs and refuses
    anything else with ``STUDIO_NO_FIXTURE`` — it never opens a socket.
 
-The factory is intentionally simple: a closure the Studio CLI calls
-once per session. A fresh ``MemorySaver`` is created per call so
-checkpointer state does not leak across server restarts.
-
-The :func:`build_studio_graph` helper is provided for unit tests and
-for ad-hoc Python usage. The :func:`build_studio_graph_factory`
-closure is what the Studio CLI expects at the module path declared in
-``langgraph.json``.
+The wiring contract — that the function declared in ``langgraph.json``
+returns a compiled graph on direct call — is covered by
+``tests/test_studio.py::test_langgraph_json_entrypoint_returns_compiled_graph``.
 """
 
 from __future__ import annotations
@@ -291,6 +294,13 @@ def build_studio_graph(
 ) -> Any:
     """Build a compiled Studio graph with deterministic dependencies.
 
+    This is the entrypoint declared in ``langgraph.json``. The
+    LangGraph Studio CLI loads this function and calls it with no
+    arguments to obtain a compiled graph. Every call produces a fresh
+    compiled graph with fresh stubs and a fresh in-memory checkpointer,
+    so Studio sessions are isolated from one another and from any
+    in-process state.
+
     The returned object is the same compiled :class:`CompiledStateGraph`
     the production ``cli.py`` produces, with stubs in place of every
     external dependency. Operators can walk the graph interactively in
@@ -315,20 +325,6 @@ def build_studio_graph(
         import_fn=import_fn,
     )
     return build_graph(deps, checkpointer=checkpointer)
-
-
-def build_studio_graph_factory():
-    """Return a closure the LangGraph Studio CLI can call per session.
-
-    The closure captures *nothing*: every call constructs fresh stubs
-    and a fresh in-memory checkpointer. This keeps Studio sessions
-    isolated from one another and from any in-process state.
-    """
-
-    def _factory() -> Any:
-        return build_studio_graph()
-
-    return _factory
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +359,6 @@ __all__ = [
     "StudioImportFn",
     "StudioImportForbidden",
     "build_studio_graph",
-    "build_studio_graph_factory",
     "assert_no_production_side_effects",
     "STUDIO_IMPORT_FORBIDDEN_CODE",
     "STUDIO_NO_FIXTURE_CODE",

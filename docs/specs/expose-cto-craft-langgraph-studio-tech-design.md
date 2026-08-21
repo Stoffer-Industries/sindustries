@@ -73,8 +73,8 @@ All changes live under `agents/workflows/cto-craft-tweet-drafts/`.
 
 **New files**
 
-1. `src/cto_craft_workflow/studio.py` — exports `build_studio_graph()` and `build_studio_graph_factory()`. The factory wraps `build_graph` with deterministic stubs (see "Studio-safe dependencies" below).
-2. `langgraph.json` — Studio config. Declares `graphs.cto_craft` pointing at `cto_craft_workflow.studio:build_studio_graph_factory`, plus `env: ".env"` (optional, for Studio-side env overrides).
+1. `src/cto_craft_workflow/studio.py` — exports `build_studio_graph()`. The function takes no required arguments, wires the real production `build_graph` factory with deterministic stubs (see "Studio-safe dependencies" below), and returns a fresh compiled graph on every call. Every call also constructs fresh stubs and a fresh in-memory checkpointer, so Studio sessions are isolated without a closure wrapper.
+2. `langgraph.json` — Studio config. Declares `graphs.cto_craft` pointing at `cto_craft_workflow.studio:build_studio_graph`, plus `env: ".env"` (optional, for Studio-side env overrides). The wired entrypoint must be a no-arg function that returns a compiled graph; the contract is exercised by `tests/test_studio.py::test_langgraph_json_entrypoint_returns_compiled_graph`.
 3. `tests/test_studio.py` — automated verification (see "Test plan").
 4. `tests/fixtures/studio_archive.html` and `tests/fixtures/studio_issue.html` — canned fetch responses used by the Studio fetcher stub.
 5. `tests/fixtures/studio_articles/*.html` — canned article responses (one per fixture URL).
@@ -91,7 +91,7 @@ All changes live under `agents/workflows/cto-craft-tweet-drafts/`.
 
 ### Studio-safe dependencies
 
-`build_studio_graph_factory()` builds a closure that the Studio server calls once per session to obtain a compiled graph. The factory supplies:
+`build_studio_graph()` is the function the Studio server calls once per session to obtain a compiled graph. Each call constructs fresh stubs and a fresh in-memory checkpointer, so Studio sessions are isolated from one another. The function supplies:
 
 - **Fetcher:** a `StubSafeFetcher` (new, in `studio.py`) that returns canned `FetchedResource` for known URLs (the local archive, the latest issue, and one fixture article) and raises a `FetchError` with code `STUDIO_NO_FIXTURE` for unknown URLs. This matches `SafeFetcher`'s surface (`fetcher.fetch(url, kind=...)`) so `build_graph` accepts it without modification. The stub never opens a socket.
 - **Model:** the existing `FakeAngleModel` keyed off the canned article URLs. Returns the matching `AngleOutput` for the canonical URL of each stub article, `None` for everything else. Studio will exercise the full graph including the "no qualified candidates → no-op" path naturally because the stub fixture list is small.
@@ -105,7 +105,7 @@ All changes live under `agents/workflows/cto-craft-tweet-drafts/`.
 ```json
 {
   "graphs": {
-    "cto_craft": "./src/cto_craft_workflow/studio.py:build_studio_graph_factory"
+    "cto_craft": "./src/cto_craft_workflow/studio.py:build_studio_graph"
   },
   "env": "./.env.studio.example"
 }
@@ -142,14 +142,15 @@ None. Studio is a developer tool. The production cron prompt (`agents/workflows/
 
 - **Layer:** manual smoke test, plus a launch smoke check in CI.
 - **Procedure:** Run `uv sync --extra studio` then `langgraph dev` from the package root. Open `http://localhost:8123` in Studio. Verify the graph is listed and selectable.
-- **Automated coverage:** `tests/test_studio.py::test_studio_graph_compiles` calls `build_studio_graph_factory()` and asserts the returned graph compiles (i.e., `graph.get_graph()` returns a populated graph with the expected nodes). This is the closest unit-level proxy for "the Studio CLI can start the server".
+- **Automated coverage:** `tests/test_studio.py::test_studio_graph_compiles` calls `build_studio_graph()` and asserts the returned graph compiles (i.e., `graph.get_graph()` returns a populated graph with the expected nodes). This is the closest unit-level proxy for "the Studio CLI can start the server".
+- **Wiring contract coverage:** `tests/test_studio.py::test_langgraph_json_entrypoint_returns_compiled_graph` loads `langgraph.json`, resolves the declared entrypoint, calls it with no arguments, and asserts the result exposes `.invoke` (i.e., is a compiled graph). This catches the failure mode where the entrypoint is a closure-returning factory rather than a no-arg function returning the compiled graph — a wiring mismatch the existing factory-only tests cannot detect.
 - **Fallback if automated is impossible:** record the manual procedure in the PR description and README. Skip if the Studio CLI is unavailable in the local runner.
 
 ### AC2 — Studio exposes real topology with deterministic/mocked deps, no production side effects
 
 - **Layer:** automated unit test, plus a topology assertion.
 - **Procedure:** `tests/test_studio.py::test_studio_graph_has_real_topology` calls `graph.get_graph()` and asserts the node list contains the real production node names (`discover_latest_issue`, `extract_public_links`, `fetch_and_score_article`, `collect_candidates`, `select_distinct_angles`, `import_drafts`, `format_notification`, `complete_noop`), the fan-out edge from `extract_public_links` is present, and the `complete_noop` END edge exists.
-- **No-side-effects coverage:** `tests/test_studio.py::test_studio_factory_imports_no_production_adapters` inspects `studio.build_studio_graph_factory()` and asserts:
+- **No-side-effects coverage:** `tests/test_studio.py::test_studio_factory_imports_no_production_adapters` inspects `studio.build_studio_graph()` and asserts:
   - `ImportClient` was never instantiated (call counter is 0 after factory build).
   - `OpenClawStructuredAngleModel` was never instantiated.
   - `PostgresSaver` was never instantiated.

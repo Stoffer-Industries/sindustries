@@ -42,7 +42,6 @@ from cto_craft_workflow.studio import (
     StudioImportForbidden,
     assert_no_production_side_effects,
     build_studio_graph,
-    build_studio_graph_factory,
 )
 
 
@@ -73,18 +72,71 @@ def test_studio_graph_compiles() -> None:
     assert expected_nodes.issubset(nodes), f"missing nodes: {expected_nodes - nodes}"
 
 
-def test_studio_factory_returns_compiled_graph() -> None:
-    """The Studio closure returns a fresh compiled graph per call."""
+def test_studio_graph_returns_fresh_compiled_graph_per_call() -> None:
+    """``build_studio_graph`` returns a fresh compiled graph per call."""
 
-    factory = build_studio_graph_factory()
-    g1 = factory()
-    g2 = factory()
+    g1 = build_studio_graph()
+    g2 = build_studio_graph()
     # Each call returns a compiled graph with a populated topology.
     assert set(g1.get_graph().nodes.keys())
     assert set(g2.get_graph().nodes.keys())
     # Each call returns a fresh instance — Studio sessions must not
-    # share state through the factory.
+    # share state through repeated calls.
     assert g1 is not g2
+
+
+# ---------------------------------------------------------------------------
+# AC1 — wiring contract: the entrypoint declared in langgraph.json must
+# return a compiled graph on direct call. This is the contract the
+# LangGraph Studio CLI exercises at server startup; if the entrypoint
+# returns anything else (a closure, a builder, an uncompiled
+# StateGraph), the CLI fails at startup in a way the existing
+# factory-only tests cannot catch.
+
+
+def test_langgraph_json_entrypoint_returns_compiled_graph() -> None:
+    """Load ``langgraph.json`` and verify the wired entrypoint returns a compiled graph.
+
+    The LangGraph CLI loads the function declared in ``langgraph.json``,
+    calls it with no arguments, and uses the result as a compiled graph.
+    This test guards against the wiring bug where the entrypoint is a
+    factory returning a closure rather than a no-arg function returning
+    the compiled graph.
+    """
+
+    import json
+    from importlib import import_module
+    from pathlib import Path
+
+    config_path = Path(__file__).resolve().parents[1] / "langgraph.json"
+    config = json.loads(config_path.read_text())
+
+    assert "graphs" in config, f"langgraph.json must define 'graphs'; got {list(config)}"
+    assert "cto_craft" in config["graphs"], (
+        f"langgraph.json must define 'cto_craft' graph; got {list(config['graphs'])}"
+    )
+
+    entry = config["graphs"]["cto_craft"]
+    file_part, _, attr = entry.partition(":")
+    # Entry format: "./src/<module_path>.py:<function_name>"
+    assert file_part.startswith("./src/"), (
+        f"langgraph.json entry must use relative './src/...' form; got {file_part!r}"
+    )
+    module_path = (
+        file_part[len("./src/") :].replace("/", ".").removesuffix(".py")
+    )
+
+    module = import_module(module_path)
+    entrypoint = getattr(module, attr)
+
+    # Calling the entrypoint must yield a compiled graph with .invoke.
+    # If the entrypoint returns a closure or any other non-graph callable,
+    # this assertion fails before the CLI ever sees the result.
+    graph = entrypoint()
+    assert hasattr(graph, "invoke"), (
+        f"langgraph.json entrypoint {module_path}:{attr} must return a "
+        f"compiled graph (with .invoke); got {type(graph).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -139,14 +191,13 @@ def test_studio_factory_does_not_instantiate_postgres_saver() -> None:
     instance_count = sum(
         1 for v in gc_get_objects() if isinstance(v, PostgresSaver)
     )
-    factory = build_studio_graph_factory()
-    graph = factory()
+    graph = build_studio_graph()
     # The factory ran. Re-check: still no PostgresSaver instantiated.
     new_count = sum(
         1 for v in gc_get_objects() if isinstance(v, PostgresSaver)
     )
     assert new_count == instance_count, (
-        "build_studio_graph_factory instantiated PostgresSaver — "
+        "build_studio_graph instantiated PostgresSaver — "
         "Studio must use MemorySaver only"
     )
     # And the compiled graph's checkpointer is still a MemorySaver.
@@ -163,14 +214,13 @@ def gc_get_objects():
 def test_studio_factory_does_not_instantiate_import_client() -> None:
     """``ImportClient`` must not be instantiated by the Studio factory."""
 
-    # We count ImportClient instances before and after the factory call.
+    # We count ImportClient instances before and after the call.
     # If the factory wired up a real HTTP client, this counter would tick up.
     before = sum(1 for v in gc_get_objects() if isinstance(v, ImportClient))
-    factory = build_studio_graph_factory()
-    factory()
+    build_studio_graph()
     after = sum(1 for v in gc_get_objects() if isinstance(v, ImportClient))
     assert after == before, (
-        "build_studio_graph_factory instantiated ImportClient — "
+        "build_studio_graph instantiated ImportClient — "
         "Studio must not bind the production Content Scheduler client"
     )
 
@@ -181,13 +231,12 @@ def test_studio_factory_does_not_instantiate_openclaw_angle_model() -> None:
     before = sum(
         1 for v in gc_get_objects() if isinstance(v, OpenClawStructuredAngleModel)
     )
-    factory = build_studio_graph_factory()
-    factory()
+    build_studio_graph()
     after = sum(
         1 for v in gc_get_objects() if isinstance(v, OpenClawStructuredAngleModel)
     )
     assert after == before, (
-        "build_studio_graph_factory instantiated OpenClawStructuredAngleModel — "
+        "build_studio_graph instantiated OpenClawStructuredAngleModel — "
         "Studio must use FakeAngleModel only"
     )
 
@@ -197,8 +246,7 @@ def test_studio_factory_does_not_construct_httpx_client_against_production_url()
 
     import httpx
 
-    factory = build_studio_graph_factory()
-    factory()
+    build_studio_graph()
     for v in gc_get_objects():
         if isinstance(v, httpx.Client):
             # Inspect any URL-ish attributes we know about. ``httpx.Client``
@@ -361,10 +409,9 @@ def test_studio_runtime_context_api_compatible() -> None:
 def test_assert_no_production_side_effects_does_not_raise() -> None:
     """The defensive helper returns cleanly when no production adapter was used."""
 
-    # After a Studio factory call, this should still return without
+    # After a Studio entrypoint call, this should still return without
     # raising — the helper is a defense-in-depth probe, not a hard gate.
-    factory = build_studio_graph_factory()
-    factory()
+    build_studio_graph()
     assert_no_production_side_effects()  # does not raise
 
 
