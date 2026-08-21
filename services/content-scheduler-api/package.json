@@ -1,0 +1,40 @@
+{
+  "name": "@sindustries/content-scheduler-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "prisma generate",
+    "dev": "tsx watch src/server.ts",
+    "prestart": "prisma generate",
+    "start": "tsx --require @sindustries/otel-node/register src/server.ts",
+    "pretest": "prisma generate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:validate": "prisma validate"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "@sindustries/otel-node": "file:../../packages/otel-node",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.6.1",
+    "helmet": "^8.3.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.23",
+    "@types/node": "^22.13.10",
+    "prisma": "^5.20.0",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.8"
+  }
+}
