@@ -15,7 +15,11 @@ use regex::Regex;
 use std::collections::HashMap;
 
 /// A file entry in a PR's diff. Mirrors the shape of `gh pr view --json files`
-/// entries that `main.rs` surfaces to the gate layer.
+/// entries that `main.rs` surfaces to the gate layer. Step-2 scaffolding for
+/// task 5e35dc25 — the production wiring lands in a follow-up commit that
+/// has `pr_changed_files` return `Vec<PrFile>` so the gate layer can carry
+/// per-file metadata (additions/deletions) alongside the filename.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PrFile {
     pub(crate) filename: String,
@@ -411,12 +415,12 @@ pub(crate) fn mechanical_evidence_failures(
                 // The reason may be a file path or free text. If it looks
                 // like a file path (contains a slash or has a test/spec
                 // extension), check it's in the diff. Otherwise pass.
-                if reason.contains('/') || test_file_re.is_match(reason) {
-                    if !path_in_pr(reason, pr_files) {
-                        failures.push(format!(
-                            "{label} cites not-tested file \"{reason}\" but that file is not in the merged PR diff."
-                        ));
-                    }
+                if (reason.contains('/') || test_file_re.is_match(reason))
+                    && !path_in_pr(reason, pr_files)
+                {
+                    failures.push(format!(
+                        "{label} cites not-tested file \"{reason}\" but that file is not in the merged PR diff."
+                    ));
                 }
                 // Free-text reasons pass — no mechanical surface.
             }
@@ -432,7 +436,7 @@ pub(crate) fn mechanical_evidence_failures(
                     || reference.starts_with("https://")
                 {
                     // Sibling PR cross-reference — pass.
-                } else if !path_in_pr(&reference, pr_files) {
+                } else if !path_in_pr(reference, pr_files) {
                     failures.push(format!(
                         "{label} cites pr reference \"{reference}\" but that file is not in the merged PR diff."
                     ));
