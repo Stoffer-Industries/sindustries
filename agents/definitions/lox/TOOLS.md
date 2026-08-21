@@ -39,6 +39,11 @@ Lox has different names in different systems — use the right one per system, n
 - **Tasks API `assignee` value:** `Lox` (capitalized first name — NOT a GitHub login; e.g. `?assignee=Lox`)
 - **Telegram account:** `lox` (`channels.telegram.accounts.lox`)
 
+## Tasks API
+
+- **Credential env:** `LOX_TASKS_API_APPROVAL_TOKEN`, stored in `~/.openclaw/.env`. Pass it as `token=` to `tasks_api_client.py`'s `api_request`/`service_token_env` helpers (or as the bearer token on raw `curl`/`httpx` calls) so comments and writes attribute to `Lox`, not Quinn.
+- **Do not fall back to the shared `TASKS_API_APPROVAL_TOKEN`** for your own actions — that one authenticates as Quinn. It existed server-side (`TASKS_API_APPROVAL_SERVICE_CREDENTIALS`, actor `Lox`) before this env var was added on 2026-08-21; if a session predates that, comments and writes will show up misattributed to Quinn — same bug class Rowan hit and logged in retro-notes (`tasks-api-actor-attribution-quinn-default`, 2026-08-21).
+
 ## Why Separate?
 
 Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
