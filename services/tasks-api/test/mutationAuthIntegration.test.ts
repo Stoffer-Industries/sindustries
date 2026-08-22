@@ -28,13 +28,6 @@ const prismaMock: any = {
   taskApproval: { findMany: vi.fn(), findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
   approvalSession: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
   tag: { findMany: vi.fn(), upsert: vi.fn() },
-  contentSchedulerItem: {
-    findMany: vi.fn(),
-    findUnique: vi.fn(),
-    create: vi.fn(),
-    update: vi.fn(),
-    aggregate: vi.fn()
-  },
   featureTaskAnalyticsEvent: { findMany: vi.fn(), upsert: vi.fn() },
   $transaction: vi.fn()
 };
@@ -179,25 +172,6 @@ describe('mutation auth gate (task 0719a8e3)', () => {
     });
   });
 
-  describe('AC1: content-scheduler mutations require credentials', () => {
-    it('rejects an unauthenticated POST /content-scheduler/items', async () => {
-      const res = await request(createApp())
-        .post('/api/v1/content-scheduler/items')
-        .send({ body: 'hi' });
-      expect(res.status).toBe(401);
-    });
-
-    it('accepts POST /content-scheduler/items with a Bearer credential', async () => {
-      prismaMock.contentSchedulerItem.aggregate.mockResolvedValue({ _max: { position: null } });
-      prismaMock.contentSchedulerItem.create.mockResolvedValue({ id: 'c1', body: 'hi' });
-      const res = await request(createApp())
-        .post('/api/v1/content-scheduler/items')
-        .set(bearer(BOOKMARK_TOKEN))
-        .send({ body: 'hi' });
-      expect(res.status).toBe(201);
-    });
-  });
-
   describe('AC1: feature-task-analytics events require credentials', () => {
     it('rejects an unauthenticated POST /feature-task-analytics/events', async () => {
       const res = await request(createApp())
@@ -246,13 +220,12 @@ describe('mutation auth gate (task 0719a8e3)', () => {
       const res = await request(createApp()).get('/api/v1/tags');
       expect(res.status).toBe(200);
     });
-
-    it('GET /content-scheduler/items is accessible without credentials', async () => {
-      prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
-      const res = await request(createApp()).get('/api/v1/content-scheduler/items');
-      expect(res.status).toBe(200);
-    });
   });
+
+  // Note: content-scheduler route auth tests moved to services/content-scheduler-api
+  // when those routes were extracted from tasks-api (task 94d5e4fc PR #509).
+  // Content Scheduler no longer mounts under /api/v1/content-scheduler in tasks-api,
+  // so the equivalent auth coverage now lives in the scheduler service.
 
   // AC2 — comment author is derived from auth; body-supplied mismatch is 403.
 
