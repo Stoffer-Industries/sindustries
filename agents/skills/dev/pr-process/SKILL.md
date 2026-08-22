@@ -94,5 +94,6 @@ Concrete patterns in our workflows:
 - **Content tasks:** Assignee opens (`--assignee <self>`, `--reviewer quinn,Stoff81`, `--label content-task`). Quinn and Tom review. Assignee merges after the required approvals.
 - **Code-garden tasks:** Assignee opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Assignee merges after approval.
 - **Cross-repo PRs (workspace repo, infra scripts):** same pattern — assignee opens, reviewer reviews, assignee merges after approval.
+- **Direct-ask PRs (Tom asked in chat, bypassing the task queue):** the `direct-ask` label describes *origin*, not reviewer routing — it does not replace the blocking reviewer. Quinn is still the blocking reviewer (`--reviewer quinn`); add Tom too (`--reviewer quinn,Stoff81`) for visibility since he's the one who asked. Do not request only Tom — he's not in any agent's `reviewRequests` heartbeat queue, so a Tom-only review request means nobody's automation will ever pick it up, and it relies entirely on Tom manually noticing.
 
 The reviewer never merges. The assignee owns getting the PR accepted and merged.
