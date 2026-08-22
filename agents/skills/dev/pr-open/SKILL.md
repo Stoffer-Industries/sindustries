@@ -41,6 +41,8 @@ gh api user --jq '.login'
 
 If `gh pr create` fails with an auth/scope error (`Resource not accessible...`, `createPullRequest`, `Bad credentials`, etc.), fix the opener's GitHub token/config or escalate. Do **not** retry with another agent's token/account; that makes the PR unreviewable by that agent and breaks the opener-reviewer-merge split.
 
+**A PR with no requested reviewer is invisible to every heartbeat's review queue** — nobody's `reviewRequests` will ever surface it, no matter how long it sits open. Treat "reviewer(s) actually requested" as a checked postcondition of opening a PR, not just an intention: `--reviewer` can silently fail to register (typo'd login, self-request, revoked collaborator access) even when `gh pr create` itself exits 0.
+
 ```bash
 gh pr create \
   --repo Stoffer-Industries/sindustries \
@@ -67,6 +69,21 @@ No system spec change — <substantive reason, e.g. "CI-only fix, no user-facing
 EOF
 )"
 ```
+
+**Mandatory: verify the reviewer request actually registered, immediately after creating the PR.** Do not treat PR-open as complete until this check passes.
+
+```bash
+gh pr view <number> --repo Stoffer-Industries/sindustries --json reviewRequests \
+  --jq '.reviewRequests | length'
+```
+
+If this prints `0`, the PR is currently unreviewable by anyone's heartbeat queue. Fix it before moving on — re-add the intended reviewer(s) from the routing table in `agents/skills/dev/pr-process/SKILL.md`:
+
+```bash
+gh pr edit <number> --repo Stoffer-Industries/sindustries --add-reviewer <reviewer-github-username>
+```
+
+Then re-run the `reviewRequests` check above to confirm it's non-zero before considering the PR opened.
 
 **`## System Spec` is a documentation convention, not a lobster gate.** Note the path to the spec file you wrote or updated (`docs/systems/<file>.md`), or a short reason why none was touched. Nothing parses or blocks on this section — it's judgment-based, not automated, because doc content is too varied to check reliably in code.
 
