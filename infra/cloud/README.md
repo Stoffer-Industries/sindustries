@@ -26,8 +26,8 @@ CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this su
 
 | Fly app                       | Source                       | Notes                                                                                  |
 | ----------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `sindustries-tasks-api-staging`        | `services/tasks-api/`        | Tasks/approvals/tags/analytics/feature-task API. Healthz at `/healthz`. Port 4001.     |
-| `sindustries-budget-api-staging`       | `services/budget-api/`       | Budget + Akahu integration. Healthz at `/healthz`. Port 4002.                          |
+| `sindustries-tasks-api-staging`        | `services/tasks-api/`        | Tasks/approvals/tags/analytics/feature-task API. Health at `/health`. Port 4001.       |
+| `sindustries-budget-api-staging`       | `services/budget-api/`       | Budget + Akahu integration. Health at `/health`. Port 4002.                            |
 | `sindustries-auto-post-worker-staging` | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` | Long-running BullMQ consumer. **Not** HTTP-exposed. Same Fly machine isolation rationale as the `gymtrack-mcp` precedent. |
 
 The auto-post-worker source lives in `services/content-scheduler-api/` after the 94d5e4fc extraction — the design predates that move but Quinn's APPROVED review on PR #508 stated "implementation PRs can stack on top", so the worker Fly app builds from content-scheduler-api's source tree.
@@ -63,7 +63,7 @@ fly secrets set --app sindustries-tasks-api-staging \
 fly deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary
 ```
 
-The CI workflow runs `--strategy canary` for every deploy and curls `/healthz` as the post-deploy smoke check. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see [`docs/runbooks/cloud-deployment-rollback.md`](../../docs/runbooks/cloud-deployment-rollback.md)).
+The CI workflow runs `--strategy canary` for every deploy and curls `/health` as the post-deploy smoke check. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see [`docs/runbooks/cloud-deployment-rollback.md`](../../docs/runbooks/cloud-deployment-rollback.md)).
 
 ## First-time environment creation
 
