@@ -50,7 +50,10 @@ kill_timeout = '5s'
   timeout = '2s'
   grace_period = '20s'
   method = 'GET'
-  path = '/healthz'
+  # Tasks-api mounts the health route at `/health` (services/tasks-api/src/routes/health.ts
+  # + services/tasks-api/src/app.ts). The Fly http_check targets the actual route, not a
+  # separate `/healthz` endpoint — no application code change required.
+  path = '/health'
   protocol = 'http'
   tls_skip_verify = false
 
