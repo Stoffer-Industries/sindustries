@@ -388,5 +388,35 @@
     "links": [],
     "evidence": "The compounding-signal calculator and Mission Control KPI tile shipped on 2026-08-13.",
     "visibility": "published"
+  },
+  {
+    "title": "Tasks authenticate the person making the change",
+    "slug": "task-mutations-real-user-authentication",
+    "releasedAt": "2026-08-15",
+    "summary": "Task changes now use the triggering person's credentials instead of shared agent keys, giving every mutation a real identity.",
+    "type": "system",
+    "links": [],
+    "evidence": "Task create, update, and delete routes now require authenticated user credentials; the shared legacy agent keys have been retired.",
+    "visibility": "published"
+  },
+  {
+    "title": "Bookmark specs route by classification",
+    "slug": "bookmark-classification-routing",
+    "releasedAt": "2026-08-18",
+    "summary": "Each bookmark spec now routes to feature delivery, direct creation, or an explicit ambiguity queue, with a safe fallback for older inputs.",
+    "type": "system",
+    "links": [],
+    "evidence": "The bookmark workflow classifies incoming specs before selecting a downstream path and records ambiguous inputs for review.",
+    "visibility": "published"
+  },
+  {
+    "title": "Agent verification gates review handoffs",
+    "slug": "agent-qa-transition-gate",
+    "releasedAt": "2026-08-20",
+    "summary": "Work cannot move from delivery to review until a QA agent mechanically verifies the acceptance criteria.",
+    "type": "system",
+    "links": [],
+    "evidence": "The delivery workflow now requires a passing agent-owned verification result before the review transition.",
+    "visibility": "published"
   }
 ]
