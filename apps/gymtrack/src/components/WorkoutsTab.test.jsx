@@ -100,7 +100,7 @@ describe('WorkoutsTab', () => {
     expect(screen.queryByTestId('workout-cards')).not.toBeInTheDocument();
   });
 
-  it('shows real Claude and ChatGPT connector links when no agent is connected', async () => {
+  it('shows real Claude connector link when no agent is connected', async () => {
     mockListPendingPlannedWorkouts.mockResolvedValueOnce({ data: [], error: null });
     mockListConnectedAgents.mockResolvedValueOnce({ data: [], error: null });
     renderWorkoutsTab();
@@ -119,19 +119,15 @@ describe('WorkoutsTab', () => {
       'href',
       'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=GymTrack&connectorUrl=http%3A%2F%2Flocalhost%3A8787%2Fmcp'
     );
-    // ChatGPT user-level custom-connector page; the old /admin/ca path 404s
-    // to the ChatGPT home page for a normal/plus account.
-    expect(screen.getByTestId('connect-chatgpt')).toHaveAttribute(
-      'href',
-      'https://chatgpt.com/settings/connectors'
-    );
     expect(screen.getByTestId('connect-claude')).toHaveAttribute('target', '_blank');
-    expect(screen.getByTestId('connect-chatgpt')).toHaveAttribute('target', '_blank');
+    // ChatGPT connector option intentionally removed (task 91994011) — see
+    // docs/runbooks/gymtrack-agent-connect.md § "ChatGPT intentionally excluded".
+    expect(screen.queryByTestId('connect-chatgpt')).not.toBeInTheDocument();
     expect(screen.getByTestId('connect-agent-mcp-url')).toHaveTextContent(
       'http://localhost:8787/mcp'
     );
     expect(screen.getByText('claude-desktop')).toBeInTheDocument();
-    expect(screen.getByText('chatgpt')).toBeInTheDocument();
+    expect(screen.queryByText('chatgpt')).not.toBeInTheDocument();
   });
 
   it('hides the connect CTA when an active agent consent exists', async () => {

@@ -1,6 +1,6 @@
 # GymTrack agent connection rollout
 
-GymTrack's Workouts CTA hands the user to Claude or ChatGPT's connector setup. This is intentional: the agent client must generate the OAuth `state` and PKCE challenge before requesting `GET /oauth/authorize`; the GymTrack SPA cannot safely manufacture a provider request on its behalf.
+GymTrack's Workouts CTA hands the user to Claude's connector setup. This is intentional: the agent client must generate the OAuth `state` and PKCE challenge before requesting `GET /oauth/authorize`; the GymTrack SPA cannot safely manufacture a provider request on its behalf.
 
 ## Production values
 
@@ -13,10 +13,11 @@ GymTrack's Workouts CTA hands the user to Claude or ChatGPT's connector setup. T
 | Protected-resource metadata | `https://gymtrack-mcp.fly.dev/.well-known/oauth-protected-resource` |
 | GymTrack consent page | `https://gymtrack-sigma-pied.vercel.app/agent-consent` |
 
-The CTA links to Claude and ChatGPT connector configuration:
+The CTA links to Claude's connector configuration:
 
 - **Claude:** `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=GymTrack&connectorUrl=https%3A%2F%2Fgymtrack-mcp.fly.dev%2Fmcp` — Claude's `modal=add-custom-connector` deep link (anthropics/claude-ai-mcp#74, closed completed 2026-05-13; per maintainer @localden's comment on that issue) opens the Add Custom Connector modal with the Name and Remote MCP server URL fields pre-filled from the query params. **The path is `/customize/connectors` and the param names are `connectorName` / `connectorUrl`** — the originally-proposed `/settings/connectors` + `mcpName` + `mcpServerUrl` shape from the issue's opener was *not* what shipped; do not regress to it.
-- **ChatGPT:** `https://chatgpt.com/settings/connectors` — the user-level custom-connector page. The previously-documented `/admin/ca` path is an admin console route that 404s to the ChatGPT home page for a normal/plus account; that URL is no longer in the source.
+
+ChatGPT is intentionally excluded — see [ChatGPT intentionally excluded](#chatgpt-intentionally-excluded) below.
 
 The CTA also displays the MCP endpoint and the static public OAuth client ID to enter in the provider UI.
 
@@ -53,7 +54,7 @@ curl -i -X POST https://gymtrack-mcp.fly.dev/mcp \
   | grep -i '^www-authenticate'
 ```
 
-The unauthenticated `POST /mcp` must respond with `401` **and** a `WWW-Authenticate` header of the form `Bearer realm="gymtrack-mcp", resource_metadata="https://gymtrack-mcp.fly.dev/.well-known/oauth-protected-resource"`. This header is the discovery pre-requisite for ChatGPT's connector UI, OpenClaw clients, and any other MCP client following RFC 6750 / OAuth 2.1 — without it the OAuth dance cannot start.
+The unauthenticated `POST /mcp` must respond with `401` **and** a `WWW-Authenticate` header of the form `Bearer realm="gymtrack-mcp", resource_metadata="https://gymtrack-mcp.fly.dev/.well-known/oauth-protected-resource"`. This header is the discovery pre-requisite for any MCP client following RFC 6750 / OAuth 2.1 (including OpenClaw) — without it the OAuth dance cannot start.
 
 ### Supabase OAuth clients
 
@@ -135,32 +136,41 @@ If any provider reports a redirect mismatch, capture the exact `redirect_uri` it
 - [ ] Add/connect the connector. Claude should open GymTrack's `/agent-consent` page.
 - [ ] Approve access, return to Claude, and confirm `plan_workout`, `read_history`, and `read_exercise_progression` are discovered.
 
-### ChatGPT end-to-end
+## ChatGPT intentionally excluded
 
-ChatGPT custom MCP apps are plan- and role-gated. The current OpenAI flow requires a supported ChatGPT plan plus developer-mode/admin access.
+The ChatGPT connector option is intentionally absent from the GymTrack "Connect to your agent" CTA (task `91994011`, removed 2026-08-23). **Do not silently re-add it.**
 
-- [ ] Open `https://chatgpt.com/settings/connectors` in ChatGPT.
-- [ ] Click **Add custom connector** (or the equivalent CTA on the current ChatGPT UI — these pages change independently of our code).
-- [ ] Enable developer mode if prompted.
-- [ ] Create `GymTrack` with endpoint `https://gymtrack-mcp.fly.dev/mcp` and OAuth authentication.
-- [ ] Configure OAuth Client ID `chatgpt` with no client secret if the provider UI accepts a public PKCE client.
-- [ ] Scan tools and complete the GymTrack consent prompt.
-- [ ] Confirm all three tools are discovered.
+### Why it was removed
 
-If ChatGPT requires Client ID Metadata Documents, Dynamic Client Registration, an `offline_access` scope, or a confidential client secret rather than accepting the seeded public client, stop and capture the provider error. Those server capabilities are not implemented by the merged MCP service and need a follow-up design; do not invent a secret or weaken redirect validation.
+OpenAI's published docs ([Developer mode and MCP apps in ChatGPT](https://help.openai.com/en/articles/12512198-developer-mode-and-mcp-apps-in-chatgpt)) restrict custom MCP connectors with **write** actions — which GymTrack requires for `plan_workout`, `read_history`, and `read_exercise_progression` — to ChatGPT **Business / Enterprise / Edu** workspace plans. **Pro** is read-only custom MCP. **Plus / Free** are not listed as supported at all.
 
-**Regression signal:** ChatGPT surfaces a missing or malformed `WWW-Authenticate` header to the user as "automatic client registration is not supported". If the connector UI starts emitting that message after a deploy, the first place to look is the `curl -i` smoke check above — the response header must advertise the bearer scheme and protected-resource metadata URL.
+GymTrack's actual user base is personal / lower-tier ChatGPT accounts (Plus or below), not paid workspace seats. For those users, the ChatGPT option leads nowhere useful — the connector is not available to them regardless of the URL surfaced. Surfacing a CTA that points at a feature the user cannot enable is more harmful than not surfacing one. A conditional / disabled "check your plan" copy was considered and rejected because there is no reliable client-side signal for plan tier in a consumer SPA, and the copy would be more confusing than the absence.
+
+### What was kept
+
+- The seeded `chatgpt` OAuth client row in `apps/gymtrack/supabase/migrations/20260804070000_mcp_oauth.sql` is **retained**. The row is inert without a connector UI asking for it, and removing it is out of scope. If a future task adds a conditional ChatGPT option for Business / Enterprise / Edu users, the row is already in place.
+- The `chatgpt` redirect URI allowlist (`https://chatgpt.com/connector_platform_oauth_redirect`) is retained for the same reason.
+
+### When (if ever) to re-add it
+
+Only re-introduce a ChatGPT connector option if:
+
+1. There is a concrete product reason to support the small minority of users on Business / Enterprise / Edu plans, **and**
+2. There is a reliable client-side or server-side signal for the user's plan tier (e.g. a server-side probe that returns whether write-action MCP connectors are available for the authenticated user's account), **and**
+3. The conditional copy is justified by usage data showing real demand — not by symmetry with the Claude option.
+
+Until all three hold, leave the CTA Claude-only.
 
 ## Acceptance smoke test
 
 Use a GymTrack account with no active row in `gymtrack_oauth_consents`:
 
-1. Open `/workouts`; verify the **Connect to your agent** panel shows Claude and ChatGPT.
-2. Select each option; verify it opens the real provider connector configuration, not an in-app placeholder. For Claude, the Add Custom Connector modal should open with the Name and Remote MCP server URL fields pre-filled (deep-link prefill). For ChatGPT, the page should be the user-level Connectors page, not a 404 to the home page.
-3. Add the displayed MCP URL and public client ID in one provider.
+1. Open `/workouts`; verify the **Connect to your agent** panel shows Claude only (no ChatGPT option — see [ChatGPT intentionally excluded](#chatgpt-intentionally-excluded)).
+2. Select the Claude option; verify it opens Claude's connector configuration with the Add Custom Connector modal pre-filled (Name = `GymTrack`, Remote MCP server URL = `https://gymtrack-mcp.fly.dev/mcp`), not an in-app placeholder.
+3. Add the displayed MCP URL and public client ID in Claude.
 4. Verify the provider-originated OAuth request reaches GymTrack consent, approval returns to the provider, and an active consent appears under `/settings/agents`.
 5. Reload `/workouts`; verify the CTA is hidden now that an active consent exists.
 
 ## Provider-URL drift
 
-The Claude and ChatGPT connector URLs above are owned by Anthropic and OpenAI respectively, and either provider can change them independently of GymTrack. When the page is broken on a fresh visit, run the smoke checks first and treat any provider-side URL change as a bug to be fixed in `apps/gymtrack/src/components/ConnectAgentCta.jsx` (and re-pinned in this runbook). The Playwright e2e test only covers the static CTA structure, not the live provider UI, so a manual smoke check after every GymTrack release is part of the acceptance test for this surface.
+The Claude connector URL above is owned by Anthropic and can change independently of GymTrack. When the page is broken on a fresh visit, run the smoke checks first and treat any provider-side URL change as a bug to be fixed in `apps/gymtrack/src/components/ConnectAgentCta.jsx` (and re-pinned in this runbook). The Playwright e2e test only covers the static CTA structure, not the live provider UI, so a manual smoke check after every GymTrack release is part of the acceptance test for this surface.
