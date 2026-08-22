@@ -14,6 +14,7 @@ case "$MODE" in
     export TASKS_APP_PORT="5173"
     export MISSION_CONTROL_PORT="5176"
     export TILT_PORT="10350"
+    export REDIS_PORT="6379"
     export POSTGRES_DB="sindustries_dev"
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-dev"
     export TASKS_SCHEMA="tasks_api"
@@ -30,9 +31,6 @@ case "$MODE" in
     export TEMPO_PORT="3200"
     export OTLP_GRPC_PORT="4317"
     export OTLP_HTTP_PORT="4318"
-    # Redis (backing CONTENT_SCHEDULER_JOB_ADAPTER=bullmq; see
-    # infra/docker-compose.dev.yml and services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts).
-    export REDIS_PORT="6379"
     ;;
   prodlike)
     export MODE
@@ -44,6 +42,7 @@ case "$MODE" in
     export TASKS_APP_PORT="5174"
     export MISSION_CONTROL_PORT="5175"
     export TILT_PORT="10351"
+    export REDIS_PORT="6380"
     export POSTGRES_DB="sindustries_prodlike"
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-prodlike"
     export TASKS_SCHEMA="tasks_api"
@@ -60,10 +59,6 @@ case "$MODE" in
     export TEMPO_PORT="3201"
     export OTLP_GRPC_PORT="4327"
     export OTLP_HTTP_PORT="4328"
-    # Redis (backing CONTENT_SCHEDULER_JOB_ADAPTER=bullmq; same port as
-    # dev because docker-compose.dev.yml is shared between modes — only the
-    # project name changes so Redis containers don't actually collide).
-    export REDIS_PORT="6379"
     ;;
   *)
     echo "Unsupported MODE: $MODE (expected: dev | prodlike)" >&2
