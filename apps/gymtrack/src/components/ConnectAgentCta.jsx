@@ -30,18 +30,9 @@ export const AGENT_CONNECT_OPTIONS = [
     buildHref: buildClaudeHref,
     instructions:
       'Claude will open the Add Custom Connector modal with the GymTrack MCP URL pre-filled. In Advanced settings enter OAuth client ID claude-desktop (no secret — public PKCE client), then approve GymTrack access.'
-  },
-  {
-    id: 'chatgpt',
-    name: 'ChatGPT',
-    clientId: 'chatgpt',
-    // The previous `/admin/ca` path is an admin console route that 404s to
-    // the ChatGPT home page for a normal/plus account. The user-level
-    // custom-connector flow lives under Settings → Connectors.
-    href: 'https://chatgpt.com/settings/connectors',
-    instructions:
-      'In ChatGPT, open Settings → Connectors → Add custom connector, paste the MCP URL above, set OAuth client ID to chatgpt (no secret), then complete the GymTrack consent prompt. Custom MCP apps require a supported plan and developer-mode access.'
   }
+  // ChatGPT connector option intentionally removed — see
+  // docs/runbooks/gymtrack-agent-connect.md § "ChatGPT intentionally excluded".
 ];
 
 /**
@@ -70,8 +61,7 @@ export default function ConnectAgentCta() {
         {AGENT_CONNECT_OPTIONS.map((option) => {
           // Each option either declares a static `href` or a `buildHref(mcpEndpoint)`
           // builder. The Claude entry uses the builder because its deep link
-          // needs the live MCP URL encoded into a query parameter; ChatGPT
-          // links to a static page.
+          // needs the live MCP URL encoded into a query parameter.
           const href = option.buildHref
             ? option.buildHref(endpoint)
             : option.href;
@@ -95,10 +85,6 @@ export default function ConnectAgentCta() {
           );
         })}
       </div>
-
-      <p className="connect-agent-footnote">
-        ChatGPT custom MCP apps currently require a supported plan and developer-mode access.
-      </p>
     </section>
   );
 }
