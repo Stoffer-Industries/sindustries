@@ -19,6 +19,7 @@ case "$MODE" in
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-dev"
     export TASKS_SCHEMA="tasks_api"
     export BUDGET_SCHEMA="budget_api"
+    export CONTENT_SCHEDULER_SCHEMA="content_scheduler"
     export TASKS_API_BASE_URL="http://localhost:${TASKS_API_PORT}/api/v1"
     export TASKS_API_ENV_FILE="services/tasks-api/.env.dev"
     export BUDGET_API_BASE_URL="http://localhost:${BUDGET_API_PORT}/api/v1"
@@ -47,6 +48,7 @@ case "$MODE" in
     export POSTGRES_CONTAINER_NAME="sindustries-postgres-prodlike"
     export TASKS_SCHEMA="tasks_api"
     export BUDGET_SCHEMA="budget_api"
+    export CONTENT_SCHEDULER_SCHEMA="content_scheduler"
     export TASKS_API_BASE_URL="http://localhost:${TASKS_API_PORT}/api/v1"
     export TASKS_API_ENV_FILE="services/tasks-api/.env.prodlike"
     export BUDGET_API_BASE_URL="http://localhost:${BUDGET_API_PORT}/api/v1"
@@ -68,6 +70,7 @@ esac
 
 export TASKS_DATABASE_URL="postgresql://postgres:postgres@localhost:${POSTGRES_PORT}/${POSTGRES_DB}?schema=${TASKS_SCHEMA}"
 export BUDGET_DATABASE_URL="postgresql://postgres:postgres@localhost:${POSTGRES_PORT}/${POSTGRES_DB}?schema=${BUDGET_SCHEMA}"
+export CONTENT_SCHEDULER_DATABASE_URL="postgresql://postgres:postgres@localhost:${POSTGRES_PORT}/${POSTGRES_DB}?schema=${CONTENT_SCHEDULER_SCHEMA}"
 
 # Back-compat default used by existing tasks scripts.
 export DATABASE_URL="$TASKS_DATABASE_URL"

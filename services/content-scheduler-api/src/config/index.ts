@@ -1,3 +1,5 @@
+import { config } from './env.ts';
+
 export {
   config,
   loadEnv,

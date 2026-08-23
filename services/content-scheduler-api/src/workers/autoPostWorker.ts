@@ -13,12 +13,12 @@
 // See docs/specs/content-scheduler-auto-post-2026-07-16-tech-design.md.
 
 import { prisma } from '../lib/prisma.ts';
-import type { ContentSchedulerJob } from './contentSchedulerJobs.ts';
+import type { ContentSchedulerJob } from '../routes/contentSchedulerJobs.ts';
 import {
   decideAutoPostAction,
   getJobSchedulerAdapter
-} from './contentSchedulerJobs.ts';
-import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts';
+} from '../routes/contentSchedulerJobs.ts';
+import { publishContentSchedulerItem } from '../routes/contentSchedulerPublishService.ts';
 
 export type AutoPostJobOutcome =
   | 'published'

@@ -79,24 +79,24 @@ local_resource(
 )
 
 # Content Scheduler auto-post worker (long-lived process; the durable
-# BullMQ adapter side, see services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts).
+# BullMQ adapter side, see services/content-scheduler-api/src/routes/contentSchedulerJobs.bullmq.ts).
 # Runs reconciliation on boot (rebuilds queue state from the database if
 # Redis lost jobs) and then idles until jobs fire. Tilt restart replaces
 # the process; on host restart the worker is brought back by `make up`.
 local_resource(
-  'tasks-api-content-scheduler-worker',
-  serve_cmd='cd ../../services/tasks-api && DOTENV_CONFIG_PATH=../../{} npm run content-scheduler:worker'.format(
+  'content-scheduler-api-worker',
+  serve_cmd='cd ../../services/content-scheduler-api && DOTENV_CONFIG_PATH=../../{} DATABASE_URL="{}" npm run content-scheduler:worker'.format(
     tasks_api_env_file,
+    os.getenv('CONTENT_SCHEDULER_DATABASE_URL', ''),
   ),
   deps=[
-    '../../services/tasks-api/src',
-    '../../services/tasks-api/prisma',
-    '../../services/tasks-api/package.json',
-    '../../services/tasks-api/package-lock.json',
-    '../../services/tasks-api/.env.example',
+    '../../services/content-scheduler-api/src',
+    '../../services/content-scheduler-api/prisma',
+    '../../services/content-scheduler-api/package.json',
+    '../../services/content-scheduler-api/.env.example',
   ],
-  resource_deps=['tasks-api', 'redis'],
-  labels=['tasks', 'worker', mode],
+  resource_deps=['postgres', 'redis'],
+  labels=['content-scheduler', 'worker', mode],
   allow_parallel=False,
 )
 

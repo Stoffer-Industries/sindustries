@@ -5,7 +5,7 @@
 // register the same adapter and the same job handler, so the API can
 // enqueue and the worker can consume without sharing a runtime.
 //
-// Adapter selection (mirrors services/tasks-api/src/app.ts):
+// Adapter selection (mirrors services/content-scheduler-api/src/app.ts):
 //   - CONTENT_SCHEDULER_JOB_ADAPTER=bullmq → BullMQ + Redis (durable across
 //     restarts; required for production and cloud).
 //   - CONTENT_SCHEDULER_JOB_ADAPTER=in-process (default for dev / tests) →
@@ -18,7 +18,7 @@
 // runs on every boot — a Redis restart or a worker restart never leaves
 // approved items silently unscheduled.
 //
-// Run: `npm run content-scheduler:worker` (in services/tasks-api).
+// Run: `npm run content-scheduler:worker` (in services/content-scheduler-api).
 
 // ESM hoists static imports above any code in the module body, so we use
 // the side-effect import (`import 'dotenv/config'`) to guarantee that
@@ -29,13 +29,13 @@
 // config_validation_failed log line, not a missing .env hint.
 import 'dotenv/config';
 
-import { resolveRedisUrl } from './config/index.ts';
-import { config } from './config/index.ts';
-import { createInProcessJobSchedulerAdapter } from './routes/contentSchedulerJobs.inProcess.ts';
-import { createBullMqJobSchedulerAdapter } from './routes/contentSchedulerJobs.bullmq.ts';
-import { setJobSchedulerAdapter } from './routes/contentSchedulerJobs.ts';
-import { processAutoPostJob } from './routes/autoPostWorker.ts';
-import { reconcileAutoPostItems } from './routes/autoPostReconciliation.ts';
+import { resolveRedisUrl } from '../config/index.ts';
+import { config } from '../config/index.ts';
+import { createInProcessJobSchedulerAdapter } from '../routes/contentSchedulerJobs.inProcess.ts';
+import { createBullMqJobSchedulerAdapter } from '../routes/contentSchedulerJobs.bullmq.ts';
+import { setJobSchedulerAdapter } from '../routes/contentSchedulerJobs.ts';
+import { processAutoPostJob } from './autoPostWorker.ts';
+import { reconcileAutoPostItems } from '../routes/autoPostReconciliation.ts';
 
 type AdapterKind = 'in-process' | 'bullmq';
 
@@ -90,7 +90,7 @@ async function main() {
     shuttingDown = true;
     // eslint-disable-next-line no-console
     console.log(`[content-scheduler-worker] received ${signal}, shutting down`);
-    const adapter = (await import('./routes/contentSchedulerJobs.ts')).getJobSchedulerAdapter();
+    const adapter = (await import('../routes/contentSchedulerJobs.ts')).getJobSchedulerAdapter();
     if (adapter.close) await adapter.close();
     process.exit(0);
   }
@@ -110,12 +110,12 @@ async function bootstrapBullMqWorker(adapter: ReturnType<typeof createBullMqJobS
   // via dynamic import so the package is only loaded when the adapter
   // is bullmq.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const bullmq = (await import('bullmq')).default ?? (await import('bullmq'));
+  const { Worker } = await import('bullmq');
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const IORedis = (await import('ioredis')).default ?? (await import('ioredis'));
+  const { Redis } = await import('ioredis');
   const url = resolveRedisUrl();
-  const connection = new IORedis(url, { maxRetriesPerRequest: null });
-  const worker = new bullmq.Worker(
+  const connection = new Redis(url, { maxRetriesPerRequest: null });
+  const worker = new Worker(
     'content-scheduler-auto-post',
     async (job: any) => {
       const payload = {
@@ -128,7 +128,7 @@ async function bootstrapBullMqWorker(adapter: ReturnType<typeof createBullMqJobS
       console.log(`[content-scheduler-worker] job itemId=${payload.itemId} v${payload.scheduleVersion} -> ${outcome}`);
       return { outcome };
     },
-    { connection, attempts: 1 }
+    { connection }
   );
   worker.on('failed', (job: any, err: any) => {
     // eslint-disable-next-line no-console
