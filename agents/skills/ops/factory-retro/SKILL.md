@@ -57,6 +57,14 @@ ls -1 /Users/quinnstoffer/.openclaw/workspace/brain/ops/retro-notes/*.md 2>/dev/
 Read the last 7 days of files. For each row, extract `pattern-slug`, `agent`, `good|bad`, and the
 one-line observation. Group by slug and count occurrences.
 
+**Skip already-fixed patterns:** if a pattern's entry (row or `###` heading) carries a
+`**Status:** ✅ [PR #...]` line (see `agents/skills/retro-notes/SKILL.md` "Marking a pattern
+fixed"), exclude that slug from scoring/ranking and from Step 5's auto-create — it's already
+shipped. Still count it in `uniquePatternCount` for the weekly digest, but don't resurface it
+as a top-3 suggestion or spawn a duplicate task. If the status line calls out a specific
+sub-issue as still open (bundled pattern, partial fix), keep scoring the pattern but treat the
+observation text as only the still-open part.
+
 Score each slug:
 - `bad` pattern: `count × 3` (highest weight — these are blockers, not signal)
 - `good` pattern: `count × 2` (lower weight — working practices are informational)
