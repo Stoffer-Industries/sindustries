@@ -11,6 +11,7 @@ role-specific PR skills for every mutation.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 import os
@@ -81,6 +82,40 @@ QUEUE_KIND_ORDER = {
     "attentionPage": 6,
 }
 TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
+# Per-call budget for `_gh_api`. Down from `safe_run`'s 25s default; bounded so
+# a single stuck or slow GitHub response can't blow past the heartbeat slot.
+# Cumulative time was the actual hang (12 URLs x 3 calls = 36 sequential ~4s
+# calls = ~144s); parallelization handles cumulative wall-time, this handles
+# pathological single-call latency. See
+# docs/specs/agent-task-queue-cumulative-fetch-hang-2026-08-20-tech-design.md.
+_GH_API_TIMEOUT_SECONDS = 10.0
+# Cap the parallel fan-out in `fetch_linked_delivery_prs`. 8 is generous for
+# the current workload (12 URLs); `min(len, MAX_WORKERS)` is used at call sites.
+_MAX_PARALLEL_PR_FETCH_WORKERS = 8
+# Module-level flag toggled by the --verbose CLI flag. Tests reset this in
+# setUp/tearDown so they don't leak verbosity across cases.
+_VERBOSE = False
+
+
+class _GhApiTimeout(Exception):
+    """Raised when an individual `gh api` call exceeds `_GH_API_TIMEOUT_SECONDS`.
+
+    Callers translate this into "data unavailable" (empty reviews, no
+    check_runs, skip the URL) so the script continues with partial data instead
+    of aborting the heartbeat pass.
+    """
+
+
+def _log(msg: str, *, verbose_only: bool = False) -> None:
+    """Stderr log gated by `_VERBOSE` when `verbose_only=True`. Always logs otherwise."""
+    if verbose_only and not _VERBOSE:
+        return
+    print(f"[agent_task_queue] {msg}", file=sys.stderr, flush=True)
+
+
+# Module-level counter for `_gh_api` calls. Surfaced in the --verbose exit summary
+# (AC4). Tests reset this in setUp so counts don't leak across cases.
+_GH_API_CALL_COUNT = 0
 URL_RE = re.compile(r"https?://[^\s)>]+")
 GITHUB_PR_URL_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/(\d+)(?:[/?#].*)?$")
 
@@ -524,18 +559,47 @@ def _build_attention_page_items(
 
 
 def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
+    """Run `gh api <endpoint>` and parse JSON. Wraps `_GH_API_TIMEOUT_SECONDS`.
+
+    Raises:
+        _GhApiTimeout — when the underlying `gh api` call exceeds the per-call
+            timeout. Callers handle this as "data unavailable" instead of
+            propagating, so a single slow endpoint can't kill the heartbeat pass.
+        subprocess.CalledProcessError — `gh api` exited non-zero with `check=True`.
+    """
+    global _GH_API_CALL_COUNT
+    _GH_API_CALL_COUNT += 1
     env = os.environ.copy()
     env["GH_CONFIG_DIR"] = os.path.expanduser(config_dir)
     token = env.get(token_env)
     if token:
         env["GH_TOKEN"] = token
-    result = safe_run(
-        ["gh", "api", endpoint],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    started = time.monotonic()
+    try:
+        result = safe_run(
+            ["gh", "api", endpoint],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_GH_API_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        if _VERBOSE:
+            _log(
+                f"[gh api #{_GH_API_CALL_COUNT}] timeout {elapsed:.2f}s {endpoint}",
+                verbose_only=True,
+            )
+        raise _GhApiTimeout(
+            f"gh api {endpoint} exceeded {_GH_API_TIMEOUT_SECONDS:.0f}s"
+        ) from exc
+    elapsed = time.monotonic() - started
+    if _VERBOSE:
+        _log(
+            f"[gh api #{_GH_API_CALL_COUNT}] {elapsed:.2f}s {endpoint}",
+            verbose_only=True,
+        )
     return json.loads(result.stdout)
 
 
@@ -710,22 +774,54 @@ def fetch_linked_delivery_prs(
         for task in tasks
         for url in _delivery_urls(_comment_texts(task))
     }
-    for url in sorted(linked_urls):
-        if url in prs_by_url:
-            continue
+
+    def _hydrate_one_pr(url: str) -> tuple[str, dict[str, Any] | None]:
+        """Hydrate one delivery URL's PR (detail + reviews + check-runs).
+
+        Returns `(url, detail_or_None)`. `None` is returned (and a WARN line is
+        printed) on per-URL `_GhApiTimeout`; the caller continues hydrating
+        other URLs in the fan-out rather than aborting the whole call.
+        """
         pr_number = _pull_number_from_url(url)
         if pr_number is None:
-            continue
-        detail = _fetch_github_pr_detail(config_dir, token_env, pr_number)
-        detail["reviews"] = _fetch_reviews_tolerant(config_dir, token_env, pr_number)
-        checks = _gh_api(
-            config_dir,
-            token_env,
-            f"repos/{REPO}/commits/{detail['head']['sha']}/check-runs?per_page=100",
+            return url, None
+        try:
+            detail = _fetch_github_pr_detail(config_dir, token_env, pr_number)
+            detail["reviews"] = _fetch_reviews_tolerant(config_dir, token_env, pr_number)
+            checks = _gh_api(
+                config_dir,
+                token_env,
+                f"repos/{REPO}/commits/{detail['head']['sha']}/check-runs?per_page=100",
+            )
+            detail["check_runs"] = checks.get("check_runs") or []
+        except _GhApiTimeout as exc:
+            _log(
+                f"gh api timeout hydrating PR #{pr_number} ({url}); skipping: {exc}",
+                verbose_only=False,
+            )
+            return url, None
+        return url, detail
+
+    missing_urls = sorted(
+        url for url in linked_urls if url not in prs_by_url
+    )
+    if missing_urls:
+        started = time.monotonic()
+        workers = min(len(missing_urls), _MAX_PARALLEL_PR_FETCH_WORKERS)
+        _log(
+            f"fetch_linked_delivery_prs: hydrating {len(missing_urls)} PR(s) "
+            f"with {workers} parallel worker(s)",
+            verbose_only=True,
         )
-        detail["check_runs"] = checks.get("check_runs") or []
-        if detail.get("html_url"):
-            prs_by_url[str(detail["html_url"])] = detail
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pr-hydrate") as pool:
+            for url, detail in pool.map(_hydrate_one_pr, missing_urls):
+                if detail is not None and detail.get("html_url"):
+                    prs_by_url[str(detail["html_url"])] = detail
+        _log(
+            f"fetch_linked_delivery_prs: hydrated in {time.monotonic() - started:.2f}s",
+            verbose_only=True,
+        )
+
     return prs_by_url
 
 
@@ -852,11 +948,20 @@ def build_parser() -> argparse.ArgumentParser:
         "dormant escalation context.",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Emit per-stage wall-time + fan-out diagnostics on stderr. "
+        "Used by AC4 instrumentation; production runs stay quiet.",
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    global _VERBOSE, _GH_API_CALL_COUNT
+    _VERBOSE = args.verbose
+    _GH_API_CALL_COUNT = 0
     agent_key = args.assignee.lower()
     if agent_key not in GITHUB_IDENTITIES:
         raise SystemExit(
@@ -894,11 +999,14 @@ def main() -> None:
         print(f"Review requests: {len(queue['reviewRequests'])}")
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
-        print(f"Attention pages for {attention_owner}: {len(queue['attentionPages'])}")
+        if args.attention_owner:
+            print(f"Attention pages for {args.attention_owner}: {len(queue['attentionPages'])}")
         print(
             f"Current workflow gates for {args.assignee}: "
             f"{len(queue['workflowGateTasks'])}"
         )
+        if args.verbose:
+            print(f"_gh_api call count: {_GH_API_CALL_COUNT}")
 
 
 if __name__ == "__main__":

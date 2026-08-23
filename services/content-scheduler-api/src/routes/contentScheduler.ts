@@ -5,11 +5,13 @@
 // (Event-Driven Auto-Post):
 //  - GET    /items               list non-removed items, optional status filter
 //  - POST   /items               create
-//  - PATCH  /items/:id           edit body / scheduledFor / source / sourceRef
-//  - POST   /items/:id/approve   mark approved (AC6 — explicit gate) + enqueue
-//  - POST   /items/:id/unapprove clear approval + cancel auto-post
-//  - POST   /items/:id/publish   publish (guarded; X integration via shared service)
-//  - POST   /items/:id/remove    soft-delete + cancel auto-post
+//  - PATCH  /items/:id                  edit body / scheduledFor / source / sourceRef / kind / linksToItemId
+//  - POST   /items/:id/approve          mark approved (AC6 — explicit gate) + enqueue
+//  - POST   /items/:id/unapprove        clear approval + cancel auto-post
+//  - POST   /items/:id/publish          publish (guarded; X integration via shared service)
+//                                        — refuses kind=manual_reply rows with MANUAL_REPLY_NOT_PUBLISHABLE
+//  - PATCH  /items/:id/posted-url       capture manualPostedUrl for kind=manual_reply rows (task 5279b310 AC5)
+//  - POST   /items/:id/remove           soft-delete + cancel auto-post
 //  - POST   /reorder             rewrite positions from an id list
 //  - GET    /today-status        daily cap (Pacific/Auckland)
 //
@@ -40,6 +42,9 @@ import {
   uuidPattern,
   validateBody,
   validateImportItems,
+  validateKind,
+  validateLinksToItemId,
+  validateManualPostedUrl,
   validSources,
   validStatuses
 } from './contentSchedulerValidation.ts';
@@ -78,8 +83,9 @@ async function applyAutoPostSchedule(
     scheduledFor: Date | null;
     autoPostJobId: string | null;
     autoPostScheduleVersion: number;
+    kind?: 'scheduled' | 'manual_reply';
   },
-  next: { status: typeof TERMINAL_STATUSES[number] | 'draft' | 'queued' | 'approved'; scheduledFor: Date | null }
+  next: { status: typeof TERMINAL_STATUSES[number] | 'draft' | 'queued' | 'approved'; scheduledFor: Date | null; kind?: 'scheduled' | 'manual_reply' }
 ): Promise<void> {
   const decision = decideAutoPostAction({ prior, next });
   const adapter = getJobSchedulerAdapter();
@@ -144,7 +150,7 @@ contentSchedulerRouter.get('/content-scheduler/items', async (req, res, next) =>
 
 contentSchedulerRouter.post('/content-scheduler/items', async (req, res, next) => {
   try {
-    const { body, source, sourceRef, scheduledFor } = req.body ?? {};
+    const { body, source, sourceRef, scheduledFor, kind, manualPostedUrl, manualPostedAt, linksToItemId } = req.body ?? {};
 
     const bodyError = validateBody(body);
     if (bodyError) return badRequest(res, 'INVALID_BODY', bodyError);
@@ -153,12 +159,58 @@ contentSchedulerRouter.post('/content-scheduler/items', async (req, res, next) =
       return badRequest(res, 'INVALID_SOURCE', 'Invalid source value');
     }
 
+    const kindError = validateKind(kind);
+    if (kindError) return badRequest(res, 'INVALID_KIND', kindError);
+
     const schedParsed = parseDate(scheduledFor);
     if (schedParsed === 'invalid') {
       return badRequest(res, 'INVALID_SCHEDULED_FOR', 'Invalid scheduledFor value');
     }
 
+    // manual_reply items never auto-publish — a scheduledFor is rejected
+    // outright because there is nothing to schedule. The bookmark approval
+    // hook creates manual_reply items with no scheduledFor by design.
+    if (kind === 'manual_reply' && schedParsed) {
+      return badRequest(
+        res,
+        'INVALID_SCHEDULED_FOR',
+        'manual_reply items must not have a scheduledFor (they are never auto-published)'
+      );
+    }
+
+    // linksToItemId is only meaningful on manual_reply items; reject
+    // setting it on a scheduled item to keep the surface unambiguous.
+    if (linksToItemId !== undefined && linksToItemId !== null && kind !== 'manual_reply') {
+      return badRequest(
+        res,
+        'INVALID_LINKS_TO_ITEM_ID',
+        'linksToItemId may only be set on kind=manual_reply items'
+      );
+    }
+    const linksToItemIdError = validateLinksToItemId(linksToItemId);
+    if (linksToItemIdError) return badRequest(res, 'INVALID_LINKS_TO_ITEM_ID', linksToItemIdError);
+
+    // manualPostedUrl/manualPostedAt are only set via the dedicated
+    // PATCH /items/:id/posted-url endpoint (AC5); reject setting them on
+    // create so the capture flow stays the single source of truth.
+    if (manualPostedUrl !== undefined && manualPostedUrl !== null) {
+      return badRequest(
+        res,
+        'INVALID_MANUAL_POSTED_URL',
+        'manualPostedUrl may only be set via PATCH /items/:id/posted-url'
+      );
+    }
+    if (manualPostedAt !== undefined && manualPostedAt !== null) {
+      return badRequest(
+        res,
+        'INVALID_MANUAL_POSTED_AT',
+        'manualPostedAt may only be set via PATCH /items/:id/posted-url'
+      );
+    }
+
     // Position: append after the current max within status=queued.
+    // manual_reply items still occupy a position so the UI renders them
+    // alongside scheduled items in the same ordered list.
     const maxPosition = await prisma.contentSchedulerItem.aggregate({
       where: { status: 'queued' },
       _max: { position: true }
@@ -172,7 +224,9 @@ contentSchedulerRouter.post('/content-scheduler/items', async (req, res, next) =
         sourceRef: typeof sourceRef === 'string' ? sourceRef : null,
         scheduledFor: schedParsed ?? null,
         status: 'queued',
-        position: nextPosition
+        position: nextPosition,
+        kind: kind ?? 'scheduled',
+        linksToItemId: typeof linksToItemId === 'string' ? linksToItemId : null
       }
     });
 
@@ -193,7 +247,7 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
       return sendError(res, 409, 'TERMINAL_STATUS', `Cannot edit item in status ${existing.status}`);
     }
 
-    const { body, source, sourceRef, scheduledFor } = req.body ?? {};
+    const { body, source, sourceRef, scheduledFor, kind, linksToItemId } = req.body ?? {};
     const updates: Record<string, unknown> = {};
 
     if (body !== undefined) {
@@ -215,7 +269,38 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
       if (schedParsed === 'invalid') {
         return badRequest(res, 'INVALID_SCHEDULED_FOR', 'Invalid scheduledFor value');
       }
+      // The PATCH endpoint never transitions kind, so an existing manual_reply
+      // item can still have its (already-null) scheduledFor cleared, but it
+      // cannot gain a new one. Reading `existing.kind` is sufficient.
+      if (schedParsed && existing.kind === 'manual_reply') {
+        return badRequest(
+          res,
+          'INVALID_SCHEDULED_FOR',
+          'manual_reply items must not have a scheduledFor (they are never auto-published)'
+        );
+      }
       updates.scheduledFor = schedParsed ?? null;
+    }
+    if (kind !== undefined) {
+      const kindError = validateKind(kind);
+      if (kindError) return badRequest(res, 'INVALID_KIND', kindError);
+      updates.kind = kind;
+    }
+    if (linksToItemId !== undefined) {
+      const linksToItemIdError = validateLinksToItemId(linksToItemId);
+      if (linksToItemIdError) return badRequest(res, 'INVALID_LINKS_TO_ITEM_ID', linksToItemIdError);
+      // linksToItemId is meaningful only for manual_reply rows; the kind
+      // may have been set in this same PATCH (above) so re-read from
+      // updates first, then existing.
+      const effectiveKind = (updates.kind as string | undefined) ?? existing.kind;
+      if (linksToItemId !== null && effectiveKind !== 'manual_reply') {
+        return badRequest(
+          res,
+          'INVALID_LINKS_TO_ITEM_ID',
+          'linksToItemId may only be set on kind=manual_reply items'
+        );
+      }
+      updates.linksToItemId = typeof linksToItemId === 'string' ? linksToItemId : null;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -238,9 +323,14 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
             status: existing.status as any,
             scheduledFor: existing.scheduledFor,
             autoPostJobId: existing.autoPostJobId,
-            autoPostScheduleVersion: existing.autoPostScheduleVersion
+            autoPostScheduleVersion: existing.autoPostScheduleVersion,
+            kind: existing.kind as 'scheduled' | 'manual_reply'
           },
-          { status: updated.status as any, scheduledFor: updated.scheduledFor }
+          {
+            status: updated.status as any,
+            scheduledFor: updated.scheduledFor,
+            kind: (updates.kind as 'scheduled' | 'manual_reply' | undefined) ?? (existing.kind as 'scheduled' | 'manual_reply')
+          }
         );
         // Re-read so the response reflects the latest autoPost* fields.
         const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
@@ -290,9 +380,14 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/approve', async (req, 
             status: existing.status as any,
             scheduledFor: existing.scheduledFor,
             autoPostJobId: existing.autoPostJobId,
-            autoPostScheduleVersion: existing.autoPostScheduleVersion
+            autoPostScheduleVersion: existing.autoPostScheduleVersion,
+            kind: existing.kind as 'scheduled' | 'manual_reply'
           },
-          { status: 'approved', scheduledFor: updated.scheduledFor }
+          {
+            status: 'approved',
+            scheduledFor: updated.scheduledFor,
+            kind: existing.kind as 'scheduled' | 'manual_reply'
+          }
         );
         const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
         if (refreshed) return res.json({ data: refreshed });
@@ -335,9 +430,14 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/unapprove', async (req
           status: existing.status as any,
           scheduledFor: existing.scheduledFor,
           autoPostJobId: existing.autoPostJobId,
-          autoPostScheduleVersion: existing.autoPostScheduleVersion
+          autoPostScheduleVersion: existing.autoPostScheduleVersion,
+          kind: existing.kind as 'scheduled' | 'manual_reply'
         },
-        { status: 'queued', scheduledFor: null }
+        {
+          status: 'queued',
+          scheduledFor: null,
+          kind: existing.kind as 'scheduled' | 'manual_reply'
+        }
       );
     } catch (err) {
       // Best-effort; the worker stale-version check covers missed cancels.
@@ -409,6 +509,60 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/publish', async (req, 
   }
 });
 
+// PATCH /content-scheduler/items/:id/posted-url
+//
+// AC5 from task 5279b310: once Tom posts the manual reply and supplies
+// its resulting URL, that URL is stored against the draft and the draft's
+// state reflects that it has been posted.
+//
+// Only `kind = "manual_reply"` items are accepted; scheduled items must
+// flow through POST /items/:id/publish (their `publishedUrl` is the
+// authoritative capture). The endpoint is idempotent on the same URL
+// (returns 200 with the existing timestamp; does NOT update manualPostedAt
+// on a re-PATCH of the same URL — that preserves the original "posted at"
+// timestamp as the source of truth).
+contentSchedulerRouter.patch('/content-scheduler/items/:id/posted-url', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
+
+    const { manualPostedUrl } = req.body ?? {};
+    const urlError = validateManualPostedUrl(manualPostedUrl);
+    if (urlError) return badRequest(res, 'INVALID_MANUAL_POSTED_URL', urlError);
+
+    const existing = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+    if (!existing) return notFound(res, 'NOT_FOUND', 'Item not found');
+
+    if (existing.kind !== 'manual_reply') {
+      return sendError(
+        res,
+        409,
+        'NOT_MANUAL_REPLY',
+        'This endpoint only accepts items with kind=manual_reply; scheduled items must use POST /items/:id/publish'
+      );
+    }
+
+    // Idempotency: re-PATCHing the same URL returns 200 with the existing
+    // manualPostedAt untouched.
+    if (existing.manualPostedUrl === manualPostedUrl) {
+      return res.json({ data: existing, manualPostedAtUpdated: false });
+    }
+
+    const manualPostedAt = new Date();
+    const updated = await prisma.contentSchedulerItem.update({
+      where: { id },
+      data: {
+        manualPostedUrl,
+        manualPostedAt
+      }
+    });
+
+    res.json({ data: updated, manualPostedAtUpdated: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 contentSchedulerRouter.post('/content-scheduler/items/:id/remove', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
@@ -436,9 +590,14 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/remove', async (req, r
           status: existing.status as any,
           scheduledFor: existing.scheduledFor,
           autoPostJobId: existing.autoPostJobId,
-          autoPostScheduleVersion: existing.autoPostScheduleVersion
+          autoPostScheduleVersion: existing.autoPostScheduleVersion,
+          kind: existing.kind as 'scheduled' | 'manual_reply'
         },
-        { status: 'removed', scheduledFor: null }
+        {
+          status: 'removed',
+          scheduledFor: null,
+          kind: existing.kind as 'scheduled' | 'manual_reply'
+        }
       );
     } catch (err) {
       // best-effort

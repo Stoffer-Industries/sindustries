@@ -33,6 +33,189 @@ function oauthJsonError(res, status, error, description) {
   return res.status(status).json({ error, error_description: description });
 }
 
+// RFC 7591 §2 client metadata validation. Returns { ok: true, value } or
+// { ok: false, error, description }. Unknown fields are silently dropped by
+// the caller per RFC 7591 §2 — we do not reject extra metadata.
+const MAX_REDIRECT_URIS = 16;
+const MAX_REDIRECT_URI_LENGTH = 2000;
+const MAX_CLIENT_NAME_LENGTH = 200;
+const MAX_URL_LENGTH = 2000;
+const MAX_CONTACTS = 10;
+const MAX_SOFTWARE_ID_LENGTH = 64;
+const MAX_SOFTWARE_VERSION_LENGTH = 32;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SEMVERISH_REGEX = /^[A-Za-z0-9.\-+]+$/;
+
+function isValidRedirectUri(value) {
+  if (typeof value !== 'string') return false;
+  if (value.length === 0 || value.length > MAX_REDIRECT_URI_LENGTH) return false;
+  if (value.includes('#')) return false;
+  if (value.includes('*')) return false;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  return true;
+}
+
+function isValidHttpsUrl(value, maxLength) {
+  if (typeof value !== 'string') return false;
+  if (value.length === 0 || value.length > maxLength) return false;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'https:';
+}
+
+function validateRegistrationRequest(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return {
+      ok: false,
+      error: 'invalid_request',
+      description: 'Body is not a JSON object.'
+    };
+  }
+
+  const redirectUris = body.redirect_uris;
+  if (redirectUris == null) {
+    return {
+      ok: false,
+      error: 'invalid_request',
+      description: 'redirect_uris is required.'
+    };
+  }
+  if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+    return {
+      ok: false,
+      error: 'invalid_redirect_uri',
+      description: 'redirect_uris must be a non-empty array.'
+    };
+  }
+  if (redirectUris.length > MAX_REDIRECT_URIS) {
+    return {
+      ok: false,
+      error: 'invalid_redirect_uri',
+      description: `redirect_uris must contain at most ${MAX_REDIRECT_URIS} entries.`
+    };
+  }
+  for (const entry of redirectUris) {
+    if (!isValidRedirectUri(entry)) {
+      return {
+        ok: false,
+        error: 'invalid_redirect_uri',
+        description: 'redirect_uris must not contain wildcards, fragments, or non-http(s) schemes.'
+      };
+    }
+  }
+
+  if (body.token_endpoint_auth_method != null && body.token_endpoint_auth_method !== 'none') {
+    return {
+      ok: false,
+      error: 'invalid_client_metadata',
+      description: "token_endpoint_auth_method must be 'none'."
+    };
+  }
+
+  if (body.client_name != null) {
+    if (typeof body.client_name !== 'string' || body.client_name.length > MAX_CLIENT_NAME_LENGTH) {
+      return {
+        ok: false,
+        error: 'invalid_client_metadata',
+        description: `client_name must be a string of at most ${MAX_CLIENT_NAME_LENGTH} characters.`
+      };
+    }
+  }
+
+  for (const field of ['client_uri', 'logo_uri', 'policy_uri', 'tos_uri']) {
+    if (body[field] != null && !isValidHttpsUrl(body[field], MAX_URL_LENGTH)) {
+      return {
+        ok: false,
+        error: 'invalid_client_metadata',
+        description: `${field} must be an https URL of at most ${MAX_URL_LENGTH} characters.`
+      };
+    }
+  }
+
+  if (body.contacts != null) {
+    if (!Array.isArray(body.contacts) || body.contacts.length > MAX_CONTACTS) {
+      return {
+        ok: false,
+        error: 'invalid_client_metadata',
+        description: `contacts must be an array of at most ${MAX_CONTACTS} entries.`
+      };
+    }
+    for (const contact of body.contacts) {
+      if (typeof contact !== 'string' || contact.length === 0 || contact.length > 320) {
+        return {
+          ok: false,
+          error: 'invalid_client_metadata',
+          description: 'contacts entries must be non-empty strings of at most 320 characters.'
+        };
+        }
+      if (!EMAIL_REGEX.test(contact)) {
+        return {
+          ok: false,
+          error: 'invalid_client_metadata',
+          description: 'contacts entries must be email-shaped strings.'
+        };
+      }
+    }
+  }
+
+  if (body.software_id != null) {
+    if (
+      typeof body.software_id !== 'string' ||
+      body.software_id.length === 0 ||
+      body.software_id.length > MAX_SOFTWARE_ID_LENGTH
+    ) {
+      return {
+        ok: false,
+        error: 'invalid_client_metadata',
+        description: `software_id must be a string of at most ${MAX_SOFTWARE_ID_LENGTH} characters.`
+      };
+    }
+  }
+
+  if (body.software_version != null) {
+    if (
+      typeof body.software_version !== 'string' ||
+      body.software_version.length === 0 ||
+      body.software_version.length > MAX_SOFTWARE_VERSION_LENGTH ||
+      !SEMVERISH_REGEX.test(body.software_version)
+    ) {
+      return {
+        ok: false,
+        error: 'invalid_client_metadata',
+        description: `software_version must be a semver-ish string of at most ${MAX_SOFTWARE_VERSION_LENGTH} characters.`
+      };
+    }
+  }
+
+  // Whitelist the metadata fields we persist; drop anything else silently
+  // per RFC 7591 §2. The endpoint never echoes client_secret because we
+  // never issue secrets (public-only clients).
+  const clientName = typeof body.client_name === 'string' ? body.client_name : null;
+  const value = {
+    redirectUris,
+    clientName: clientName ? clientName.slice(0, MAX_CLIENT_NAME_LENGTH) : null,
+    clientUri: body.client_uri ?? null,
+    logoUri: body.logo_uri ?? null,
+    contacts: body.contacts ?? null,
+    policyUri: body.policy_uri ?? null,
+    tosUri: body.tos_uri ?? null,
+    softwareId: body.software_id ?? null,
+    softwareVersion: body.software_version ?? null
+  };
+
+  return { ok: true, value };
+}
+
 // Strip token-shaped strings, Bearer-prefixed values, and Supabase URLs from
 // error text before returning it to clients. Bounded to 80 characters so the
 // response shape stays predictable. Original detail is still available via
@@ -151,12 +334,49 @@ export function createApp({
       authorization_endpoint: `${config.issuer}/oauth/authorize`,
       token_endpoint: `${config.issuer}/oauth/token`,
       revocation_endpoint: `${config.issuer}/oauth/revoke`,
+      registration_endpoint: `${config.issuer}/oauth/register`,
       response_types_supported: ['code'],
       code_challenge_methods_supported: ['S256'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
       token_endpoint_auth_methods_supported: ['none'],
+      registration_endpoint_auth_methods_supported: ['none'],
       scopes_supported: SUPPORTED_SCOPES
     });
+  });
+
+  app.post('/oauth/register', async (req, res) => {
+    try {
+      if (req.body == null || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return oauthJsonError(res, 400, 'invalid_request', 'Body is not a JSON object.');
+      }
+
+      const validation = validateRegistrationRequest(req.body);
+      if (!validation.ok) {
+        return oauthJsonError(res, 400, validation.error, validation.description);
+      }
+
+      const clientId = randomUUID();
+      await repo.createDynamicOAuthClient({
+        clientId,
+        clientName: validation.value.clientName,
+        redirectUris: validation.value.redirectUris,
+        clientUri: validation.value.clientUri,
+        logoUri: validation.value.logoUri,
+        contacts: validation.value.contacts,
+        policyUri: validation.value.policyUri,
+        tosUri: validation.value.tosUri,
+        softwareId: validation.value.softwareId,
+        softwareVersion: validation.value.softwareVersion,
+        registeredAt: now()
+      });
+
+      return res.status(201).json({
+        client_id: clientId,
+        client_id_issued_at: Math.floor(now().getTime() / 1000)
+      });
+    } catch (error) {
+      return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(error.message));
+    }
   });
 
   app.get('/.well-known/oauth-protected-resource', (_req, res) => {

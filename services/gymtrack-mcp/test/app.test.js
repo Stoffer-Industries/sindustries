@@ -43,6 +43,25 @@ class FakeRepo {
     return this.clients.find((client) => client.client_id === clientId) ?? null;
   }
 
+  async createDynamicOAuthClient(record) {
+    const row = {
+      client_id: record.clientId,
+      client_name: record.clientName,
+      redirect_uris: record.redirectUris,
+      registration_type: 'dynamic',
+      registered_at: record.registeredAt.toISOString(),
+      client_uri: record.clientUri ?? null,
+      logo_uri: record.logoUri ?? null,
+      contacts: record.contacts ?? null,
+      policy_uri: record.policyUri ?? null,
+      tos_uri: record.tosUri ?? null,
+      software_id: record.softwareId ?? null,
+      software_version: record.softwareVersion ?? null
+    };
+    this.clients.push(row);
+    return structuredClone(row);
+  }
+
   async getConsent(consentId) {
     return this.consents.find((consent) => consent.id === consentId) ?? null;
   }
@@ -753,5 +772,298 @@ describe('GymTrack MCP OAuth server', () => {
     expect(response.body.error_description).toBe(
       'redirect_uri is not registered for this client.'
     );
+  });
+
+  it('advertises registration_endpoint and registration_endpoint_auth_methods_supported in discovery', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app).get('/.well-known/oauth-authorization-server');
+
+    expect(response.status).toBe(200);
+    expect(response.body.registration_endpoint).toBe('https://mcp.example/oauth/register');
+    expect(response.body.registration_endpoint_auth_methods_supported).toEqual(['none']);
+  });
+
+  it('registers a valid dynamic client and stores the metadata (no client_secret issued)', async () => {
+    const { app, repo } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({
+        redirect_uris: ['http://127.0.0.1:8789/callback'],
+        client_name: 'Test MCP',
+        token_endpoint_auth_method: 'none',
+        software_id: 'test-mcp',
+        software_version: '1.0.0'
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.client_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+    expect(response.body.client_id_issued_at).toBe(
+      Math.floor(new Date('2026-08-03T00:00:00.000Z').getTime() / 1000)
+    );
+    expect(response.body).not.toHaveProperty('client_secret');
+    expect(response.body).not.toHaveProperty('client_secret_expires_at');
+
+    const stored = repo.clients.find((client) => client.client_id === response.body.client_id);
+    expect(stored).toBeDefined();
+    expect(stored.registration_type).toBe('dynamic');
+    expect(stored.client_name).toBe('Test MCP');
+    expect(stored.redirect_uris).toEqual(['http://127.0.0.1:8789/callback']);
+    expect(stored.software_id).toBe('test-mcp');
+    expect(stored.software_version).toBe('1.0.0');
+    expect(stored.registered_at).toBe('2026-08-03T00:00:00.000Z');
+  });
+
+  it('rejects registration when redirect_uris is missing', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({ client_name: 'Test MCP' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_request');
+    expect(response.body.error_description).toMatch(/redirect_uris is required/i);
+  });
+
+  it('rejects registration when redirect_uris is empty', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({ redirect_uris: [] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_redirect_uri');
+  });
+
+  it('rejects registration when a redirect_uri contains a wildcard', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({ redirect_uris: ['https://*.example.com/cb'] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_redirect_uri');
+    expect(response.body.error_description).toMatch(/wildcards/i);
+  });
+
+  it('rejects registration when a redirect_uri contains a fragment', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({ redirect_uris: ['https://example.com/cb#foo'] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_redirect_uri');
+  });
+
+  it('rejects registration when a redirect_uri uses javascript: scheme', async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({ redirect_uris: ["javascript:alert('xss')"] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_redirect_uri');
+  });
+
+  it("rejects registration when token_endpoint_auth_method is not 'none'", async () => {
+    const { app } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({
+        redirect_uris: ['https://example.com/cb'],
+        token_endpoint_auth_method: 'client_secret_basic'
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_client_metadata');
+    expect(response.body.error_description).toMatch(/token_endpoint_auth_method/);
+  });
+
+  it('silently drops unknown fields on registration per RFC 7591 §2', async () => {
+    const { app, repo } = makeApp();
+
+    const response = await request(app)
+      .post('/oauth/register')
+      .send({
+        redirect_uris: ['https://example.com/cb'],
+        client_name: 'Test MCP',
+        extra_unknown_field: 'foo',
+        another_extra: { nested: 'bar' }
+      });
+
+    expect(response.status).toBe(201);
+    const stored = repo.clients.find((client) => client.client_id === response.body.client_id);
+    expect(stored.extra_unknown_field).toBeUndefined();
+    expect(stored.another_extra).toBeUndefined();
+  });
+
+  it('blocks dynamic clients from token exchange without an active consent (AC5)', async () => {
+    const { app, repo } = makeApp();
+
+    const registration = await request(app)
+      .post('/oauth/register')
+      .send({
+        redirect_uris: ['http://127.0.0.1:8789/cb'],
+        client_name: 'MCP-Unconsented'
+      });
+    expect(registration.status).toBe(201);
+    const clientId = registration.body.client_id;
+
+    // Manually write an authorization code that points at a consent_id which
+    // does not exist in the repo. Mirrors the regression test for the openclaw
+    // static row, but for a freshly-registered dynamic client.
+    const code = 'dynamic-orphan-consent-code';
+    const verifier = 'dynamic-orphan-verifier';
+    await repo.createAuthorizationCode({
+      consentId: 'consent-does-not-exist',
+      userId: 'user-1',
+      clientId,
+      codeHash: sha256Hex(code),
+      redirectUri: 'http://127.0.0.1:8789/cb',
+      scope: 'history:read progression:read workouts:write',
+      codeChallenge: pkceChallengeForVerifier(verifier),
+      codeChallengeMethod: 'S256',
+      expiresAt: new Date('2026-08-15T01:00:00.000Z')
+    });
+
+    const exchange = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:8789/cb',
+        code,
+        code_verifier: verifier
+      });
+
+    expect(exchange.status).toBe(400);
+    expect(exchange.body.error).toBe('invalid_grant');
+    expect(exchange.body.error_description).toMatch(/consent/i);
+    expect(repo.tokens).toHaveLength(0);
+  });
+
+  it('exchanges a code for a dynamic client and serves MCP tools/list after consent is granted', async () => {
+    const { app, repo } = makeApp();
+
+    const registration = await request(app)
+      .post('/oauth/register')
+      .send({
+        redirect_uris: ['http://127.0.0.1:8789/cb'],
+        client_name: 'MCP-Happy'
+      });
+    expect(registration.status).toBe(201);
+    const clientId = registration.body.client_id;
+
+    const decision = await request(app)
+      .post('/oauth/authorize/decision')
+      .set('Authorization', 'Bearer supabase-user-token')
+      .send({
+        approve: true,
+        client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:8789/cb',
+        scope: 'history:read progression:read workouts:write',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    expect(decision.status).toBe(200);
+    const verifier = 'dynamic-happy-verifier';
+    repo.codes[0].code_challenge = pkceChallengeForVerifier(verifier);
+    const code = new URL(decision.body.redirectTo).searchParams.get('code');
+
+    const exchange = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:8789/cb',
+        code,
+        code_verifier: verifier
+      });
+
+    expect(exchange.status).toBe(200);
+    expect(exchange.body.token_type).toBe('Bearer');
+
+    const list = await request(app)
+      .post('/mcp')
+      .set('Authorization', `Bearer ${exchange.body.access_token}`)
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+
+    expect(list.status).toBe(200);
+    expect(list.body.result.tools.map((tool) => tool.name)).toEqual([
+      'plan_workout',
+      'read_history',
+      'read_exercise_progression'
+    ]);
+  });
+
+  it('revokes dynamic-client tokens across the family via /oauth/revoke', async () => {
+    const { app, repo } = makeApp();
+
+    const registration = await request(app)
+      .post('/oauth/register')
+      .send({
+        redirect_uris: ['http://127.0.0.1:8789/cb'],
+        client_name: 'MCP-Revoke'
+      });
+    const clientId = registration.body.client_id;
+
+    const decision = await request(app)
+      .post('/oauth/authorize/decision')
+      .set('Authorization', 'Bearer supabase-user-token')
+      .send({
+        approve: true,
+        client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:8789/cb',
+        scope: 'history:read progression:read workouts:write',
+        state: 'opaque-state',
+        code_challenge: 'dmVyLWNoYWxsZW5nZQ',
+        code_challenge_method: 'S256'
+      });
+
+    const verifier = 'dynamic-revoke-verifier';
+    repo.codes[0].code_challenge = pkceChallengeForVerifier(verifier);
+    const code = new URL(decision.body.redirectTo).searchParams.get('code');
+
+    const exchange = await request(app)
+      .post('/oauth/token')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:8789/cb',
+        code,
+        code_verifier: verifier
+      });
+
+    expect(exchange.status).toBe(200);
+
+    const revoke = await request(app)
+      .post('/oauth/revoke')
+      .type('form')
+      .send({ token: exchange.body.refresh_token });
+
+    expect(revoke.status).toBe(200);
+
+    const list = await request(app)
+      .post('/mcp')
+      .set('Authorization', `Bearer ${exchange.body.access_token}`)
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+
+    expect(list.status).toBe(401);
+    expect(repo.consents[0].revoked_at).toBe('2026-08-03T00:00:00.000Z');
   });
 });

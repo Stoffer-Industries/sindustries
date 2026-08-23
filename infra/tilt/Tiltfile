@@ -28,6 +28,12 @@ dc_resource(
   labels=['infra', 'db', mode],
 )
 
+dc_resource(
+  'redis',
+  project_name=compose_project,
+  labels=['infra', 'queue', mode],
+)
+
 local_resource(
   'tasks-api',
   serve_cmd='cd ../../services/tasks-api && DOTENV_CONFIG_PATH=../../{} PORT={} DATABASE_URL="{}" CORS_ALLOWED_ORIGINS="{}" npm run dev'.format(
@@ -69,6 +75,28 @@ local_resource(
   ],
   resource_deps=['postgres'],
   labels=['budget', 'api', mode],
+  allow_parallel=False,
+)
+
+# Content Scheduler auto-post worker (long-lived process; the durable
+# BullMQ adapter side, see services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts).
+# Runs reconciliation on boot (rebuilds queue state from the database if
+# Redis lost jobs) and then idles until jobs fire. Tilt restart replaces
+# the process; on host restart the worker is brought back by `make up`.
+local_resource(
+  'tasks-api-content-scheduler-worker',
+  serve_cmd='cd ../../services/tasks-api && DOTENV_CONFIG_PATH=../../{} npm run content-scheduler:worker'.format(
+    tasks_api_env_file,
+  ),
+  deps=[
+    '../../services/tasks-api/src',
+    '../../services/tasks-api/prisma',
+    '../../services/tasks-api/package.json',
+    '../../services/tasks-api/package-lock.json',
+    '../../services/tasks-api/.env.example',
+  ],
+  resource_deps=['tasks-api', 'redis'],
+  labels=['tasks', 'worker', mode],
   allow_parallel=False,
 )
 

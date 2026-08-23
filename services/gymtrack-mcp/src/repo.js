@@ -16,6 +16,29 @@ export function createSupabaseRepo({ client = supabaseAdminClient() } = {}) {
       return data;
     },
 
+    async createDynamicOAuthClient(record) {
+      const { data, error } = await client
+        .from('gymtrack_oauth_clients')
+        .insert({
+          client_id: record.clientId,
+          client_name: record.clientName,
+          redirect_uris: record.redirectUris,
+          registration_type: 'dynamic',
+          registered_at: iso(record.registeredAt),
+          client_uri: record.clientUri ?? null,
+          logo_uri: record.logoUri ?? null,
+          contacts: record.contacts ?? null,
+          policy_uri: record.policyUri ?? null,
+          tos_uri: record.tosUri ?? null,
+          software_id: record.softwareId ?? null,
+          software_version: record.softwareVersion ?? null
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+
     async getConsent(consentId) {
       const { data, error } = await client
         .from('gymtrack_oauth_consents')
