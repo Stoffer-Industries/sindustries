@@ -28,7 +28,9 @@ RUN corepack enable
 WORKDIR /app
 
 # Workspace manifests — install-time only; pruned in the runtime stage.
-COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+# No pnpm-workspace.yaml: this repo uses npm-style `workspaces` in root
+# package.json (apps/*, packages/*, services/*); pnpm reads that directly.
+COPY pnpm-lock.yaml package.json ./
 COPY packages/otel-node/package.json ./packages/otel-node/
 COPY services/tasks-api/package.json ./services/tasks-api/
 
