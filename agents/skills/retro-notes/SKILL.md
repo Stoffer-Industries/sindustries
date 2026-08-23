@@ -98,8 +98,32 @@ print(f"Appended note to {notes_path}")
 
 ---
 
+## Marking a pattern fixed
+
+When a PR lands that addresses a logged pattern, mark it — same convention as
+`agents/skills/dev/code-garden/SKILL.md` uses for audit findings.
+
+Append a `**Status:** ✅ [PR #<n>](<url>) (merged <date>)` line directly under the pattern's
+`###` heading (or after the row, if it's still in the compact one-line format). If the PR only
+fixes part of a bundled pattern, say so and name what's still open — don't mark the whole
+pattern done if a sub-issue remains:
+
+```markdown
+### `some-pattern-slug`
+
+**Status:** ✅ [PR #517](https://github.com/Stoffer-Industries/sindustries/pull/517) (merged 2026-08-23).
+```
+
+Whoever opens the fix PR (or Quinn, if she's the one who actioned a direct-ask fix) is
+responsible for coming back and adding this line — it's part of closing the loop, not a
+separate task. `agents/skills/ops/factory-retro/SKILL.md` Step 0 skips any pattern already
+carrying a `✅ [PR #...]` status line when scoring/ranking, so a fixed pattern doesn't keep
+generating new auto-created tasks.
+
+---
+
 ## Consumption
 
-Nothing reads this automatically yet. `agents/skills/ops/factory-retro/SKILL.md` is the
-natural weekly consumer alongside its gate-failure analytics — wiring that in is a
-separate follow-up, not part of this skill.
+`agents/skills/ops/factory-retro/SKILL.md` is the weekly consumer, alongside its
+gate-failure analytics (see Step 0 there for scoring, and the "Marking a pattern fixed"
+section above for how already-fixed patterns get excluded).
