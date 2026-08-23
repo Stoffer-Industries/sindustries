@@ -34,6 +34,19 @@ enum ContentSchedulerSource {
   other
 }
 
+// Discriminates scheduled/auto-published items from manual-reply drafts
+// (task 5279b310). A `manual_reply` row is created by the bookmark
+// approval hook and is intentionally never auto-published: it surfaces in
+// the Mission Control UI under "Reply drafts (manual)" for Tom to copy
+// and post himself, with the resulting URL captured via
+// PATCH /content-scheduler/items/:id/posted-url. Default `scheduled`
+// preserves backwards compatibility for every existing row — no data
+// migration needed.
+enum ContentSchedulerItemKind {
+  scheduled
+  manual_reply
+}
+
 model ContentSchedulerItem {
   id                       String                       @id @default(uuid()) @db.Uuid
   body                     String                       @db.VarChar(1000)
@@ -55,7 +68,19 @@ model ContentSchedulerItem {
   updatedAt                DateTime                     @updatedAt
   removedAt                DateTime?
 
+  // Manual-reply draft metadata (task 5279b310). Null for ordinary
+  // scheduled items.
+  kind                 ContentSchedulerItemKind @default(scheduled)
+  manualPostedUrl      String?
+  manualPostedAt       DateTime?
+  // Cross-link from a manual_reply item to its standalone "build in
+  // public" tweet item. Renamed from `linksToDraftId` to match the
+  // post-extraction `items/` terminology (the standalone tweet is also
+  // a ContentSchedulerItem, not a separate draft entity).
+  linksToItemId        String?
+
   @@index([status, position])
   @@index([status, scheduledFor])
   @@index([status, publishedAt])
+  @@index([kind])
 }

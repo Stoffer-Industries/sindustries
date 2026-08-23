@@ -26,6 +26,7 @@ export type PublishGuardCode =
   | 'ALREADY_PUBLISHED'
   | 'DAY_CAP_REACHED'
   | 'SCHEDULED_IN_FUTURE'
+  | 'MANUAL_REPLY_NOT_PUBLISHABLE'
   | 'MISSING_CREDENTIALS'
   | 'NO_X_CLIENT';
 
@@ -36,6 +37,9 @@ export type PublishGuardResult =
 /**
  * Pure guard. Returns ok=false with a code if the item is not eligible
  * to publish right now. Reasons the guard can refuse:
+ *  - kind === 'manual_reply' → MANUAL_REPLY_NOT_PUBLISHABLE (task 5279b310;
+ *    manual-reply drafts are never auto-published and must be posted by
+ *    Tom manually with the URL captured via PATCH /items/:id/posted-url)
  *  - status !== 'approved' → NOT_APPROVED (also covers already-published / removed)
  *  - scheduledFor > now + 60s → SCHEDULED_IN_FUTURE
  *  - today.publishedCount >= 1 (and the item isn't the existing one) → DAY_CAP_REACHED
@@ -44,10 +48,17 @@ export type PublishGuardResult =
  * function from a unit-test perspective.
  */
 export function guardPublish(
-  item: Pick<ContentSchedulerItem, 'status' | 'scheduledFor' | 'approvedAt'>,
+  item: Pick<ContentSchedulerItem, 'status' | 'scheduledFor' | 'approvedAt' | 'kind'>,
   today: { publishedCount: number; publishedItemId?: string | null },
   now: Date = new Date()
 ): PublishGuardResult {
+  // kind is non-nullable with a schema default of 'scheduled', so legacy
+  // callers that pre-date the manual_reply addition always see 'scheduled'
+  // via Prisma's column default. Treat undefined defensively in case a test
+  // fixture still builds an item without the field.
+  if ((item.kind ?? 'scheduled') === 'manual_reply') {
+    return { ok: false, code: 'MANUAL_REPLY_NOT_PUBLISHABLE' };
+  }
   if (item.status === 'published') {
     return { ok: false, code: 'ALREADY_PUBLISHED' };
   }
