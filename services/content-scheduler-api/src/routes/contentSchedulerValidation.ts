@@ -5,6 +5,15 @@ export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 export const validSources = new Set(['ops_notes', 'cto_craft', 'manual', 'other']);
 export const validStatuses = new Set(['draft', 'queued', 'approved', 'published', 'removed']);
+// Manual-reply discriminator (task 5279b310). `manual_reply` rows are never
+// auto-published and are surfaced under the Mission Control "Reply drafts
+// (manual)" section for Tom to copy + post himself.
+export const validKinds = new Set(['scheduled', 'manual_reply']);
+// Permitted shapes for `manualPostedUrl` — only X/Twitter canonical tweet
+// URLs are accepted so a typo can't silently land in the DB. The PATCH
+// /items/:id/posted-url route validates more strictly because it is the
+// sole surface for AC5's posted-URL capture.
+const MANUAL_POSTED_URL_PATTERN = /^https:\/\/(?:x\.com|twitter\.com)\/[A-Za-z0-9_/]+\/status\/\d+/;
 
 export function parseId(raw: string): string | null {
   return uuidPattern.test(raw) ? raw : null;
@@ -21,6 +30,49 @@ export function validateBody(body: unknown): string | null {
   const trimmed = body.trim();
   if (trimmed.length === 0) return 'body must not be empty';
   if (body.length > MAX_BODY) return `body must be <= ${MAX_BODY} characters`;
+  return null;
+}
+
+/**
+ * Validate the `kind` discriminator on POST/PATCH /content-scheduler/items.
+ * Returns null on success, error message on failure. Null/undefined are
+ * accepted (the schema default `'scheduled'` applies); only set-but-invalid
+ * values are rejected so existing clients that don't pass `kind` continue
+ * to work.
+ */
+export function validateKind(kind: unknown): string | null {
+  if (kind === undefined || kind === null) return null;
+  if (typeof kind !== 'string') return 'kind must be a string';
+  if (!validKinds.has(kind)) return `kind must be one of: ${Array.from(validKinds).join(', ')}`;
+  return null;
+}
+
+/**
+ * Validate `manualPostedUrl` on PATCH /items/:id/posted-url. The endpoint
+ * is the only surface for AC5's posted-URL capture, so the regex is
+ * stricter than a generic URL check. Empty / null / undefined is rejected
+ * — this endpoint requires a non-empty URL (it is the entire purpose of
+ * the call). Returns null on success, error message on failure.
+ */
+export function validateManualPostedUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return 'manualPostedUrl must be a string';
+  if (value.trim().length === 0) return 'manualPostedUrl must not be empty';
+  if (value.length > 2048) return 'manualPostedUrl must be <= 2048 characters';
+  if (!MANUAL_POSTED_URL_PATTERN.test(value)) {
+    return 'manualPostedUrl must be an https://x.com/.../status/<id> or https://twitter.com/.../status/<id> URL';
+  }
+  return null;
+}
+
+/**
+ * Validate `linksToItemId` on POST/PATCH. Same UUID shape as `parseId` but
+ * null/undefined are accepted (the field is optional and applies only to
+ * manual_reply items). Returns null on success, error message on failure.
+ */
+export function validateLinksToItemId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return 'linksToItemId must be a string';
+  if (!uuidPattern.test(value)) return 'linksToItemId must be a UUID';
   return null;
 }
 
