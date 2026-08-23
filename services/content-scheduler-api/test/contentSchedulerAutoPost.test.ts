@@ -186,6 +186,84 @@ describe('decideAutoPostAction', () => {
       expect(decision.job.scheduleVersion).toBe(2);
     }
   });
+
+  // --- kind discriminator (task 5279b310 PR 1 follow-up) ----------------
+  //
+  // Quinn's PR #515 review noted: decideAutoPostAction must look at kind.
+  // manual_reply items never auto-post — a stale job from a prior kind is
+  // cancelled and no new job is scheduled.
+
+  it('cancels prior job when kind changes from scheduled to manual_reply on an approved item', () => {
+    const when = new Date('2026-07-17T09:00:00Z');
+    const decision = decideAutoPostAction({
+      prior: {
+        id: 'i1',
+        status: 'approved',
+        scheduledFor: when,
+        autoPostJobId: 'in-process:i1:1',
+        autoPostScheduleVersion: 1,
+        kind: 'scheduled'
+      },
+      next: { status: 'approved', scheduledFor: when, kind: 'manual_reply' }
+    });
+    expect(decision).toEqual({ kind: 'cancel', jobId: 'in-process:i1:1' });
+  });
+
+  it('noops when next.kind=manual_reply with no prior job', () => {
+    const decision = decideAutoPostAction({
+      prior: {
+        id: 'i1',
+        status: 'approved',
+        scheduledFor: null,
+        autoPostJobId: null,
+        autoPostScheduleVersion: 0,
+        kind: 'manual_reply'
+      },
+      next: { status: 'approved', scheduledFor: null, kind: 'manual_reply' }
+    });
+    expect(decision).toEqual({ kind: 'noop' });
+  });
+
+  it('cancels prior job when prior.kind=manual_reply (defensive: stale job cleanup)', () => {
+    // Defensive: even when next.kind is unset, if the prior row is a
+    // manual_reply with a stale job, we must cancel. validation rejects
+    // creating manual_reply with a scheduledFor, so this combination is
+    // anomalous in practice — but the function must still behave correctly.
+    const when = new Date('2026-07-17T09:00:00Z');
+    const decision = decideAutoPostAction({
+      prior: {
+        id: 'i1',
+        status: 'approved',
+        scheduledFor: when,
+        autoPostJobId: 'in-process:i1:1',
+        autoPostScheduleVersion: 1,
+        kind: 'manual_reply'
+      },
+      next: { status: 'approved', scheduledFor: when }
+    });
+    expect(decision).toEqual({ kind: 'cancel', jobId: 'in-process:i1:1' });
+  });
+
+  it('falls through to the scheduled-kind path when kind=scheduled explicitly', () => {
+    // Regression guard: kind=scheduled in next should not change the
+    // existing decision shape for an approved item with a schedule.
+    const when = new Date('2026-07-17T09:00:00Z');
+    const decision = decideAutoPostAction({
+      prior: {
+        id: 'i1',
+        status: 'queued',
+        scheduledFor: when,
+        autoPostJobId: null,
+        autoPostScheduleVersion: 0,
+        kind: 'scheduled'
+      },
+      next: { status: 'approved', scheduledFor: when, kind: 'scheduled' }
+    });
+    expect(decision.kind).toBe('schedule');
+    if (decision.kind === 'schedule') {
+      expect(decision.job.scheduleVersion).toBe(1);
+    }
+  });
 });
 
 // --- in-process adapter --------------------------------------------------

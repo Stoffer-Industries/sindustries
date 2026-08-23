@@ -281,6 +281,18 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
       }
       updates.scheduledFor = schedParsed ?? null;
     }
+    // kind: null would pass validateKind (which treats null/undefined as
+    // "not provided") but then set updates.kind = null, bypassing the
+    // kind discriminator. Reject explicitly: PATCH cannot clear kind
+    // (the field is required as a discriminator — omit to leave unchanged,
+    // pass a valid kind value to change).
+    if (kind === null) {
+      return badRequest(
+        res,
+        'INVALID_KIND',
+        'kind may not be null; omit the field to leave unchanged, or pass a valid kind value'
+      );
+    }
     if (kind !== undefined) {
       const kindError = validateKind(kind);
       if (kindError) return badRequest(res, 'INVALID_KIND', kindError);
