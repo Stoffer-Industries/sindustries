@@ -27,7 +27,6 @@ on:
       - 'packages/otel-node/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
       - 'infra/cloud/**'
       - '.github/workflows/deploy-staging-tasks-api.yml'
   workflow_dispatch:
