@@ -82,8 +82,36 @@ jobs:
     #      satisfies that range.
     #   3. Deps are pinned in `uv.lock`, so `uv sync --frozen --extra dev`
     #      installs reproducibly from the lockfile (no network lock step).
+    #
+    # W35 audit follow-up (task 60971f78): the cto-craft-tweet-drafts
+    # production cron now uses a real `langgraph.checkpoint.postgres.
+    # PostgresSaver` against `CTO_CRAFT_LANGGRAPH_DATABASE_URL`. A
+    # regression test that exercises the actual Postgres checkpoint
+    # path (rather than the in-memory stub used elsewhere in the suite)
+    # is in `tests/test_postgres_saver_send_serialization.py`; it
+    # `pytest.skip`s locally when the env var is unset and only runs in
+    # CI under this job's `services.postgres`. Without this services
+    # block the new test would always skip and the Send-serialization
+    # regression that motivated task 60971f78 would land silently again.
     name: cto-craft-tweet-drafts tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: cto_craft_langgraph
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cto_craft_langgraph"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      CTO_CRAFT_LANGGRAPH_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cto_craft_langgraph
+      OTEL_SDK_DISABLED: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

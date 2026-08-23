@@ -20,7 +20,6 @@ from typing import Any, Callable
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
 
 from cto_craft_workflow.angle_model import (
     AngleOutput,
@@ -150,18 +149,6 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
     return {"article_links": links[:MAX_ELIGIBLE_LINKS]}
 
 
-def fanout_articles(state: PipelineState) -> list[Send]:
-    """Conditional edge function: emit one Send per article link.
-
-    The fanout is implemented as a conditional edge from
-    ``extract_public_links`` rather than a regular node, because
-    LangGraph only accepts a ``list[Send]`` from ``add_conditional_edges``
-    path functions, not from node return values.
-    """
-
-    return [Send("fetch_and_score_article", {"_article_link": link}) for link in state.get("article_links", [])]
-
-
 def _build_angle_user_message(extracted: ExtractedArticle) -> str:
     body = extracted.text
     if len(body) > 18000:
@@ -177,33 +164,34 @@ def _build_angle_user_message(extracted: ExtractedArticle) -> str:
     )
 
 
-def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
-    """Per-article branch: fetch, extract, score, append one candidate."""
+def _score_one_article(state: PipelineState, deps: GraphDeps, link: dict) -> dict | None:
+    """Score a single article link. Returns the candidate dict or None on any failure.
 
-    link = state.get("_article_link")  # type: ignore[typeddict-item]
-    if not isinstance(link, dict):
-        return {"candidates": []}
-
+    Pulled out of fetch_and_score_article so the fan-out loop can reuse
+    it for each link in ``state["article_links"]``. Failures are logged
+    via ``_emit_diagnostic`` and surface as a no-candidate slot rather
+    than aborting the whole run.
+    """
     url = link.get("url") or ""
     if not url:
-        return {"candidates": []}
+        return None
 
     fetch_article = deps.fetch_article or (lambda u: deps.fetcher.fetch(u, kind="article"))
     try:
         resource = fetch_article(url)
     except FetchError as exc:
         _emit_diagnostic(state, node="fetch_and_score_article", code=exc.code, message=exc.message, url=exc.url)
-        return {"candidates": []}
+        return None
 
     try:
         extracted = extract_article(resource.url, resource.body, fallback_title=link.get("title"))
     except Exception as exc:  # defensive
         _emit_diagnostic(state, node="fetch_and_score_article", code="EXTRACT_FAILED", message=str(exc), url=url)
-        return {"candidates": []}
+        return None
 
     if extracted.char_count < 200:
         _emit_diagnostic(state, node="fetch_and_score_article", code="ARTICLE_TOO_SHORT", message="article below minimum usable text", url=url)
-        return {"candidates": []}
+        return None
 
     user_message = _build_angle_user_message(extracted)
     system_prompt = deps.system_prompt.rstrip()
@@ -219,15 +207,42 @@ def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
         )
     except Exception as exc:  # defensive
         _emit_diagnostic(state, node="fetch_and_score_article", code="MODEL_ERROR", message=str(exc), url=url)
-        return {"candidates": []}
+        return None
 
     if out is None:
-        return {"candidates": []}
+        return None
     candidate = out.model_dump()
     if not is_valid_candidate_shape(candidate):
         _emit_diagnostic(state, node="fetch_and_score_article", code="MODEL_OUTPUT_INVALID", message="model output failed shape check", url=url)
-        return {"candidates": []}
-    return {"candidates": [candidate]}
+        return None
+    return candidate
+
+
+def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
+    """Score every article link extracted from the issue and emit one candidate per scored article.
+
+    Path B of task 60971f78 (cto-craft-tweet-drafts LangGraph Send
+    serialization). The original implementation returned a
+    ``list[langgraph.types.Send]`` from a conditional edge so each
+    article was scored in its own branch invocation. That crashed the
+    PostgresSaver checkpointer with ``TypeError: Object of type Send is
+    not JSON serializable`` on langgraph 0.3.x and is not actually fixed
+    on langgraph 0.4.x either (the upstream Send-serializer registration
+    did not land in 0.4.10). To keep the checkpointer path clean we now
+    iterate over ``state["article_links"]`` inside a single node
+    invocation. The ``candidates`` field is still an
+    ``Annotated[list[AngleCandidate], operator.add]`` reducer, so the
+    downstream ``collect_candidates`` node is unchanged.
+    """
+
+    candidates: list[dict] = []
+    for link in state.get("article_links", []) or []:
+        if not isinstance(link, dict):
+            continue
+        scored = _score_one_article(state, deps, link)
+        if scored is not None:
+            candidates.append(scored)
+    return {"candidates": candidates}
 
 
 def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
@@ -424,14 +439,14 @@ def build_graph(
         _route_after_discover,
         {"extract_public_links": "extract_public_links", COMPLETE_NOOP: COMPLETE_NOOP},
     )
-    # The conditional edge from extract_public_links either terminates
-    # the run (no-op / failed) or fans out one Send per article link.
-    # The path function returns ``list[Send]`` directly; LangGraph accepts
-    # that as a conditional-edge return value.
+    # After Path B of task 60971f78: the Send-based fanout is gone.
+    # fetch_and_score_article iterates over state["article_links"]
+    # internally, so the conditional edge just routes to either
+    # COMPLETE_NOOP or fetch_and_score_article as a plain node.
     workflow.add_conditional_edges(
         "extract_public_links",
-        _route_after_extract_with_fanout,
-        [COMPLETE_NOOP, "fetch_and_score_article"],
+        _route_after_extract,
+        {COMPLETE_NOOP: COMPLETE_NOOP, "fetch_and_score_article": "fetch_and_score_article"},
     )
     workflow.add_edge("fetch_and_score_article", COLLECT)
     workflow.add_conditional_edges(
@@ -458,12 +473,17 @@ def build_graph(
     )
 
 
-def _route_after_extract_with_fanout(state: PipelineState) -> str | list[Send]:
-    """Conditional edge: either terminate or fan out."""
+def _route_after_extract(state: PipelineState) -> str:
+    """Conditional edge from extract_public_links: terminate or score.
+
+    Was a Send-list fanout until task 60971f78. Now a plain branch into
+    the fetch_and_score_article node, which iterates over
+    state["article_links"] internally.
+    """
 
     if state.get("outcome") in ("failed", "noop"):
         return COMPLETE_NOOP
-    return [Send("fetch_and_score_article", {"_article_link": link}) for link in state.get("article_links", [])]
+    return "fetch_and_score_article"
 
 
 __all__ = [
