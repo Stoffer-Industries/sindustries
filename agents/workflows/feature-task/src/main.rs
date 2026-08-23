@@ -3998,10 +3998,11 @@ fn parse_workstreams(text: &str) -> Vec<Workstream> {
     let heading = Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(.+?)\s*$").unwrap();
     let mut matches: Vec<_> = heading.find_iter(text).collect();
     matches.retain(|m| m.as_str().to_lowercase().contains("workstream"));
+    let strip_workstream_word = Regex::new(r"(?i)workstreams?").unwrap();
     matches
         .iter()
         .enumerate()
-        .map(|(idx, m)| {
+        .flat_map(|(idx, m)| {
             let start = m.end();
             let end = matches
                 .get(idx + 1)
@@ -4012,19 +4013,23 @@ fn parse_workstreams(text: &str) -> Vec<Workstream> {
                 .and_then(|cap| cap.get(1))
                 .map(|m| m.as_str().trim())
                 .unwrap_or("Implementer");
-            let owner = title
-                .replace("Workstream", "")
-                .replace("workstream", "")
+            let owner = strip_workstream_word
+                .replace_all(title, "")
                 .trim_matches(|c: char| c.is_whitespace() || c == ':' || c == '-' || c == '/')
                 .trim()
                 .to_string();
-            Workstream {
-                owner: if owner.is_empty() {
-                    "Implementer".to_string()
-                } else {
-                    owner
-                },
-                body: text[start..end].trim().to_string(),
+            let body_text = text[start..end].trim();
+            // A titled heading ("## Workstream: Rowan") names one workstream
+            // directly. A bare plural heading ("## Workstreams") introduces a
+            // bulleted list underneath, one workstream per top-level bullet —
+            // same shape as the bold `**Workstreams**` section below.
+            if owner.is_empty() {
+                parse_bulleted_workstream_items(body_text)
+            } else {
+                vec![Workstream {
+                    owner,
+                    body: body_text.to_string(),
+                }]
             }
         })
         .collect()
@@ -4043,26 +4048,45 @@ fn parse_owner_workstreams(text: &str) -> Vec<Workstream> {
         .map(|m| start + m.start())
         .unwrap_or(text.len());
     let section = &text[start..end];
-    let owner_re = Regex::new(r"(?m)^-\s+Owner:\s*(.+?)\s*$").unwrap();
-    let owners: Vec<_> = owner_re.find_iter(section).collect();
-    owners
+    parse_bulleted_workstream_items(section)
+}
+
+/// Parse a workstreams section body into one `Workstream` per top-level
+/// bullet (`- ...`). Handles both the legacy `- Owner: <name>` shape (owner
+/// at the start of the bullet, often followed by indented `key: value`
+/// continuation lines) and the `- **WS<N> — <title>** ... Owner: <name>; ...`
+/// shape (owner anywhere in the bullet, or omitted entirely). Bullets with no
+/// `Owner:` tag default to "Implementer".
+fn parse_bulleted_workstream_items(section: &str) -> Vec<Workstream> {
+    let item_re = Regex::new(r"(?m)^-\s+.*$").unwrap();
+    let items: Vec<_> = item_re.find_iter(section).collect();
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let owner_re = Regex::new(r"(?i)Owner:\s*([^;\n]+)").unwrap();
+    items
         .iter()
         .enumerate()
-        .map(|(idx, owner_match)| {
-            let body_start = owner_match.start();
-            let body_end = owners
+        .map(|(idx, item_match)| {
+            let body_start = item_match.start();
+            let body_end = items
                 .get(idx + 1)
                 .map(|next| next.start())
                 .unwrap_or(section.len());
+            let body = section[body_start..body_end].trim().to_string();
             let owner = owner_re
-                .captures(owner_match.as_str())
+                .captures(&body)
                 .and_then(|cap| cap.get(1))
-                .map(|m| m.as_str().trim().to_string())
+                .map(|m| {
+                    m.as_str()
+                        .trim()
+                        .trim_end_matches(['.', ','])
+                        .trim()
+                        .to_string()
+                })
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "Implementer".to_string());
-            Workstream {
-                owner,
-                body: section[body_start..body_end].trim().to_string(),
-            }
+            Workstream { owner, body }
         })
         .collect()
 }
@@ -5035,6 +5059,62 @@ mod tests {
         assert_eq!(streams[0].owner, "Implementer");
         assert!(streams[0].body.contains("task-456c92a8-depends-on"));
         assert_eq!(streams[1].owner, "Quinn");
+    }
+
+    #[test]
+    fn parses_bold_workstreams_section_with_owner_at_end_of_bullet() {
+        // Real-world format: 782d778e / 1945f8a2 / 5e35dc25 / de19b186 /
+        // 94d5e4fc / 4f046565 / b2f62c36 all shipped with this shape, and the
+        // old `- Owner: <name>`-prefix-only regex returned zero workstreams
+        // for every one of them (2026-08-21/22 incidents).
+        let text = r#"**Workstreams**
+- **WS1 — Platform artifacts** (`infra/cloud/`): Fly.io app specs. — Owner: Rowan; Status: doing (AC1)
+- **WS2 — Cloud data environment** (`infra/cloud/scripts/`): provision Postgres. — Owner: Rowan; Status: doing (AC2)
+
+**Type:** feature
+"#;
+        let streams = parse_workstreams(text);
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].owner, "Rowan");
+        assert!(streams[0].body.contains("WS1"));
+        assert_eq!(streams[1].owner, "Rowan");
+        assert!(streams[1].body.contains("WS2"));
+    }
+
+    #[test]
+    fn parses_bold_workstreams_bullets_with_no_owner_tag_at_all() {
+        // b2f62c36's original bullets had no `Owner:` tag anywhere — bullets
+        // are scoped by workstream number, not by owner name. Must default
+        // to "Implementer" per bullet rather than returning empty.
+        let text = r#"**Workstreams**
+- **WS1 — Platform and deployment artifacts** (`infra/cloud/`): Fly.io app specs, Dockerfiles. (AC1)
+- **WS2 — Cloud data environment** (`infra/cloud/scripts/`): Postgres and Redis. (AC2)
+- **WS3 — Health checks** (`.github/workflows/`): healthz endpoints. (AC3)
+"#;
+        let streams = parse_workstreams(text);
+        assert_eq!(streams.len(), 3);
+        assert!(streams.iter().all(|s| s.owner == "Implementer"));
+        assert!(streams[2].body.contains("WS3"));
+    }
+
+    #[test]
+    fn parses_generic_workstreams_heading_with_bulleted_items() {
+        // A bare "## Workstreams" heading (no ": Owner" suffix, unlike the
+        // legacy "## Workstream: Rowan" shape) introduces a bulleted list —
+        // previously collapsed into a single bogus workstream with owner "s"
+        // (from stripping "Workstream" out of "Workstreams").
+        let text = r#"## Workstreams
+
+- **WS1 — Platform artifacts**: Fly.io app specs. — Owner: Rowan; Status: doing (AC1)
+- **WS2 — Cloud data environment**: Postgres and Redis. (AC2)
+
+## Type
+feature
+"#;
+        let streams = parse_workstreams(text);
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].owner, "Rowan");
+        assert_eq!(streams[1].owner, "Implementer");
     }
 
     #[test]
