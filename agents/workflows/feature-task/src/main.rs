@@ -1111,18 +1111,15 @@ fn qa_agent_verified_failures(task: &Task) -> Vec<String> {
 /// Returns `true` when a new row was created in this call, `false` when a
 /// row already existed or the POST failed (auth not yet provisioned for
 /// the actor — see below). Auth failures are non-fatal: the function logs
-/// to stderr and continues, leaving the gate absent. The next sweep retry
-/// succeeds once Quinn provisions Ash's `ASH_TASKS_API_APPROVAL_TOKEN`
-/// (with Quinn routed through the task attention stack).
+/// to stderr and continues, leaving the gate absent.
 ///
-/// Why non-fatal auth handling: until Quinn provisions Ash's
-/// TASKS_API_APPROVAL_SERVICE_CREDENTIALS entry, the lobster runs as the
-/// actor that owns the shared `TASKS_API_APPROVAL_TOKEN` (Rotated to
-/// `Rowan` on 2026-08-16), and `approvalAuth.ts:ACTOR_PERMISSIONS` only
-/// grants `qa_agent` write to `Ash`. The POST will return 403 — we log
-/// and continue so the lobster doesn't error out; `verify_delivery`'s
-/// qa_agent check then surfaces the missing row as `[qa-agent-blocked]`
-/// for human visibility.
+/// The POST/DELETE pair authenticates as the `feature_task_lobster` service
+/// actor via `FEATURE_TASK_LOBSTER_TOKEN` (same credential `add_comment`
+/// uses), never as `Ash`. `approvalAuth.ts:ACTOR_PERMISSIONS` grants
+/// `feature_task_lobster` write access to `qa_agent` specifically for this
+/// bootstrap pattern — the call always ends with the row in `state:
+/// revoked`, so it can never itself leave a task looking QA-approved. Ash's
+/// later POST (her own token) is what flips the row to `state: approved`.
 fn ensure_qa_agent_gate(args: &StageArgs, env: &Envelope) -> Result<bool> {
     // Already have a row — no-op.
     if env
@@ -1133,15 +1130,11 @@ fn ensure_qa_agent_gate(args: &StageArgs, env: &Envelope) -> Result<bool> {
     {
         return Ok(false);
     }
-    let token = match std::env::var("TASKS_API_APPROVAL_TOKEN")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
+    let token = match lobster_service_token() {
         Some(t) => t,
         None => {
             eprintln!(
-                "[lobster] ensure_qa_agent_gate skipped: TASKS_API_APPROVAL_TOKEN env var is not set"
+                "[lobster] ensure_qa_agent_gate skipped: neither FEATURE_TASK_LOBSTER_TOKEN nor TASKS_API_APPROVAL_TOKEN env var is set"
             );
             return Ok(false);
         }
@@ -3438,18 +3431,13 @@ fn api_delete(base_url: &str, path: &str) -> Result<Value> {
     )
 }
 
-fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
-    let url = format!(
-        "{}/tasks/{task_id}/comments",
-        base_url.trim_end_matches('/')
-    );
-    // The comment author is now derived from the authenticated session
-    // (task 0719a8e3). Body-supplied author is rejected with 403 if it
-    // disagrees with the authenticated actor, so we never set it here.
-    // We authenticate with FEATURE_TASK_LOBSTER_TOKEN (preferred) or fall
-    // back to TASKS_API_APPROVAL_TOKEN (Quinn actor) when the per-agent
-    // token is not provisioned yet.
-    let token = std::env::var("FEATURE_TASK_LOBSTER_TOKEN")
+/// Token used for the lobster's own service-identity calls (comments, the
+/// `qa_agent` bootstrap gate): prefers the per-agent `FEATURE_TASK_LOBSTER_TOKEN`
+/// (actor `feature_task_lobster`), falling back to the shared
+/// `TASKS_API_APPROVAL_TOKEN` (actor `Rowan`) when the per-agent token isn't
+/// provisioned yet.
+fn lobster_service_token() -> Option<String> {
+    std::env::var("FEATURE_TASK_LOBSTER_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -3459,9 +3447,19 @@ fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
-        .ok_or_else(|| {
-            anyhow!("FEATURE_TASK_LOBSTER_TOKEN (or TASKS_API_APPROVAL_TOKEN) is required to post comments")
-        })?;
+}
+
+fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
+    let url = format!(
+        "{}/tasks/{task_id}/comments",
+        base_url.trim_end_matches('/')
+    );
+    // The comment author is now derived from the authenticated session
+    // (task 0719a8e3). Body-supplied author is rejected with 403 if it
+    // disagrees with the authenticated actor, so we never set it here.
+    let token = lobster_service_token().ok_or_else(|| {
+        anyhow!("FEATURE_TASK_LOBSTER_TOKEN (or TASKS_API_APPROVAL_TOKEN) is required to post comments")
+    })?;
     handle_api_result(
         ureq::post(&url)
             .set("Authorization", &format!("Bearer {token}"))
@@ -7919,6 +7917,46 @@ detached
             request.header("Authorization"),
             Some("Bearer test-service-token")
         );
+    }
+
+    #[test]
+    fn lobster_service_token_prefers_feature_task_lobster_token() {
+        let previous_lobster = std::env::var_os("FEATURE_TASK_LOBSTER_TOKEN");
+        let previous_shared = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
+        std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", "lobster-token");
+        std::env::set_var("TASKS_API_APPROVAL_TOKEN", "shared-token");
+
+        let token = lobster_service_token();
+
+        match previous_lobster {
+            Some(value) => std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", value),
+            None => std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN"),
+        }
+        match previous_shared {
+            Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
+            None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
+        }
+        assert_eq!(token.as_deref(), Some("lobster-token"));
+    }
+
+    #[test]
+    fn lobster_service_token_falls_back_to_shared_token() {
+        let previous_lobster = std::env::var_os("FEATURE_TASK_LOBSTER_TOKEN");
+        let previous_shared = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
+        std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN");
+        std::env::set_var("TASKS_API_APPROVAL_TOKEN", "shared-token");
+
+        let token = lobster_service_token();
+
+        match previous_lobster {
+            Some(value) => std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", value),
+            None => std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN"),
+        }
+        match previous_shared {
+            Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
+            None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
+        }
+        assert_eq!(token.as_deref(), Some("shared-token"));
     }
 
     #[test]
