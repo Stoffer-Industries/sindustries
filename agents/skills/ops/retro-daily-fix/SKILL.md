@@ -99,9 +99,16 @@ the check that would have caught the original problem).
 2. Make the minimal change that resolves the specific finding. Don't use this pass to also
    clean up adjacent things you notice — one fix, one PR, matching the row's actual scope.
 3. Commit as `quinnstoffer`, push, open a PR with Tom as the reviewer (`gh pr create ...
-   --reviewer Stoff81`). Reference the retro-notes finding and evidence in the PR body.
+   --reviewer Stoff81 --label retro-fix`). Reference the retro-notes finding and evidence in
+   the PR body.
 4. **Never merge or self-approve.** This skill's job ends at "PR is open and correct" — same
    rule as every other Quinn-authored PR.
+5. Once the PR merges (check on the next run, or same run if Tom approves quickly), mark the
+   row fixed per `agents/skills/retro-notes/SKILL.md` "Marking a pattern fixed" — append
+   `**Status:** ✅ [PR #<n>](<url>) (merged <date>)` under the pattern's entry in the
+   `brain/ops/retro-notes/YYYY-MM-DD.md` it came from (a direct file edit, not part of the
+   sindustries repo). This keeps `factory-retro`'s weekly scoring from re-surfacing a pattern
+   this skill already closed.
 
 **Not safely fixable by Quinn** (infra changes that are Lox's domain, another agent's runtime
 or credentials, anything where the "fix" requires a judgment call beyond mechanically

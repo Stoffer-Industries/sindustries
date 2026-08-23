@@ -79,6 +79,7 @@ Every PR must carry at least one label identifying its origin. Apply labels at `
 |---|---|
 | `workflow-garden` | Proactive fixes or improvements Quinn opens on her own initiative (no task, no direct ask) |
 | `direct-ask` | PR requested directly by Tom in chat — include the original ask in the PR body |
+| `retro-fix` | Same-day fix opened by the `retro-daily-fix` skill for the top `bad` pattern in yesterday's retro notes |
 
 Labels are not mutually exclusive. A PR can be both `workflow-garden` and `direct-ask` if Tom spotted an issue in chat and Quinn fixed it.
 
