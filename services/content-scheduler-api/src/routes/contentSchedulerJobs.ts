@@ -86,6 +86,11 @@ export type AutoPostScheduleAction =
  * the queue provider.
  *
  * Rules:
+ *  - `kind === "manual_reply"` (either prior or next): never auto-post.
+ *    A stale job from a prior kind is cancelled. manual_reply rows are
+ *    surfaced under the Mission Control "Reply drafts (manual)" section
+ *    for Tom to copy + post himself, so the auto-post path is not the
+ *    place to publish them.
  *  - Terminal states (`published`, `removed`) cancel any prior job and
  *    bump the version.
  *  - Non-approved states cancel any prior job.
@@ -96,13 +101,33 @@ export type AutoPostScheduleAction =
  */
 export function decideAutoPostAction(args: {
   prior:
-    | Pick<ContentSchedulerItem, 'id' | 'status' | 'scheduledFor' | 'autoPostJobId' | 'autoPostScheduleVersion'>
+    | (Pick<ContentSchedulerItem, 'id' | 'status' | 'scheduledFor' | 'autoPostJobId' | 'autoPostScheduleVersion'> & {
+        kind?: 'scheduled' | 'manual_reply';
+      })
     | null;
-  next: { status: ContentSchedulerItem['status']; scheduledFor: Date | null };
+  next: {
+    status: ContentSchedulerItem['status'];
+    scheduledFor: Date | null;
+    kind?: 'scheduled' | 'manual_reply';
+  };
   now?: Date;
 }): AutoPostScheduleAction {
   const prior = args.prior;
   const priorVersion = prior?.autoPostScheduleVersion ?? 0;
+
+  // The effective kind is the new value if provided, else the prior value.
+  // manual_reply items never auto-post — even if a stale job exists from a
+  // prior kind, we cancel it and return. This handles both the
+  // kind-change PATCH path (prior=scheduled, next=manual_reply with a job
+  // to cancel) and the defensive case (prior=manual_reply with a stale
+  // job, no kind change in next).
+  const effectiveKind = args.next.kind ?? prior?.kind;
+  if (effectiveKind === 'manual_reply') {
+    if (prior?.autoPostJobId) {
+      return { kind: 'cancel', jobId: prior.autoPostJobId };
+    }
+    return { kind: 'noop' };
+  }
 
   // Terminal states — no auto-post.
   if (args.next.status === 'published' || args.next.status === 'removed') {

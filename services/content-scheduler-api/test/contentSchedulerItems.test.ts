@@ -330,4 +330,39 @@ describe('PATCH /content-scheduler/items/:id — kind discrimination', () => {
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_LINKS_TO_ITEM_ID');
   });
+
+  it('rejects PATCH kind: null as INVALID_KIND (cannot clear the discriminator)', async () => {
+    // Quinn PR #515 follow-up: validateKind treats null as "not provided" so
+    // the bare validateKind check would let it through and then updates.kind
+    // = null would silently bypass the kind discriminator. Reject explicitly.
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValueOnce(
+      itemFixture({ kind: 'scheduled' })
+    );
+
+    const res = await authedRequest(await createApp())
+      .patch(`/api/v1/content-scheduler/items/${ITEM_ID}`)
+      .send({ kind: null });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_KIND');
+    // The DB must NOT be touched on a rejected PATCH.
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+  });
+
+  it('allows PATCH kind: undefined (no change to discriminator)', async () => {
+    // Mirrors the POST path: undefined is treated as "field omitted", so
+    // the PATCH must still apply other updates (here: body) without
+    // touching kind.
+    const before = itemFixture({ kind: 'scheduled' });
+    const after = { ...before, body: 'Updated body text' };
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValueOnce(before);
+    prismaMock.contentSchedulerItem.update.mockResolvedValueOnce(after);
+
+    const res = await authedRequest(await createApp())
+      .patch(`/api/v1/content-scheduler/items/${ITEM_ID}`)
+      .send({ body: 'Updated body text', kind: undefined });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.kind).toBe('scheduled');
+  });
 });
