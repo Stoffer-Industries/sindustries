@@ -29,6 +29,7 @@ Always set `--assignee` to the implementation owner/opener and `--reviewer` to t
 - Task-driven PRs: `feature-task`, `content-task`, or `code-task` (match `taskType`)
 - Quinn proactive fix with no task: `workflow-garden`
 - Tom asked in chat: `direct-ask`
+- Same-day fix from the `retro-daily-fix` skill: `retro-fix`
 - Labels are not mutually exclusive — apply all that apply.
 
 For feature-task PRs, the opener is the task implementer/assignee. Reviewers are the blocking reviewer plus any visibility-only reviewers defined by the workflow. The reviewer must not open the implementer's PR on their own account.
