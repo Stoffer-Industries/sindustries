@@ -9,7 +9,7 @@
 // Task: 115e8d89-be43-4b81-9e0e-9ab422810f5f
 // Tech design: docs/specs/content-scheduler-tab-tech-design.md
 
-import type { ContentSchedulerItem } from '../../generated/prisma/index.js';
+import type { ContentSchedulerItem } from '@prisma/client';
 
 /**
  * Status values that block edits/removes/reorder. Mirrors the route-level

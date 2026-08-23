@@ -18,7 +18,7 @@
 //
 // See docs/specs/content-scheduler-auto-post-2026-07-16-tech-design.md.
 
-import type { ContentSchedulerItem } from '../../generated/prisma/index.js';
+import type { ContentSchedulerItem } from '@prisma/client';
 
 /**
  * A single delayed auto-post job. Carries the minimum payload needed for
