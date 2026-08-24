@@ -246,7 +246,15 @@ def fetch_and_score_article(state: PipelineState, deps: GraphDeps) -> dict:
 
 
 def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
-    """Normalize scored candidates and dedupe by canonical URL."""
+    """Normalize scored candidates and dedupe by canonical URL.
+
+    Writes the deduped set to the non-reducer field
+    ``deduped_candidates`` so the ``candidates`` reducer does not append
+    this already-deduped list on top of the raw scored list still held in
+    state. Pre-fix, the reducer caused a doubled-length state (task
+    402d39fe). The ``candidates`` reducer boundary is preserved for any
+    future parallel producer of raw scored candidates.
+    """
 
     raw = state.get("candidates", []) or []
     seen: set[str] = set()
@@ -263,15 +271,26 @@ def collect_candidates(state: PipelineState, deps: GraphDeps) -> dict:
         cleaned.append(candidate)
 
     if len(cleaned) < MIN_QUALIFIED_CANDIDATES:
-        return {"candidates": cleaned, "outcome": "noop"}
+        return {"deduped_candidates": cleaned, "outcome": "noop"}
 
-    return {"candidates": cleaned}
+    return {"deduped_candidates": cleaned}
 
 
 def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
-    """Pick 3–5 distinct candidates using deterministic ordering."""
+    """Pick 3–5 distinct candidates using deterministic ordering.
 
-    candidates = list(state.get("candidates", []) or [])
+    Reads from ``deduped_candidates`` (the deduped set produced by
+    ``collect_candidates``) rather than from the reducer-managed
+    ``candidates`` field. Pre-fix, the reducer caused
+    ``state["candidates"]`` to contain both the raw scored list AND the
+    deduped set appended on top (task 402d39fe); selection's own
+    ``picked_urls`` dedupe hid the bug at the ``selected_angles`` output
+    layer, but downstream code that reads ``state["candidates"]`` saw
+    duplicates. Selection's ``picked_urls`` set is retained as defence
+    in depth.
+    """
+
+    candidates = list(state.get("deduped_candidates", []) or state.get("candidates", []) or [])
     if not candidates:
         return {"selected_angles": [], "outcome": "noop"}
 
