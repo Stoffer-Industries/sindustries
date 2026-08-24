@@ -130,8 +130,19 @@ class PipelineState(TypedDict, total=False):
 
     article_links: list[ArticleLink]
 
-    # Reducer boundary: parallel `Send` branches append here.
+    # Reducer boundary: parallel `Send` branches append here. Kept as the
+    # contract for any future parallel producer of raw scored candidates;
+    # downstream selection reads from `deduped_candidates` instead so the
+    # reducer does not double-accumulate on top of an already-deduped
+    # writeback from `collect_candidates` (see task 402d39fe).
     candidates: Annotated[list[AngleCandidate], operator.add]
+
+    # Overwrite field: `collect_candidates` writes the deduped set here.
+    # Selection reads from this key, NOT from `candidates`, to avoid the
+    # reducer-writeback-collision bug surfaced after PR #523 (task
+    # 60971f78). Pre-existing latent issue masked by the prior Send
+    # crash; now visible because the cron completes.
+    deduped_candidates: list[AngleCandidate]
 
     selected_angles: list[SelectedAngle]
     import_result: ImportResult | None
@@ -158,6 +169,7 @@ def make_initial_state(
         issue_published_at=None,
         article_links=[],
         candidates=[],
+        deduped_candidates=[],
         selected_angles=[],
         import_result=None,
         outcome=None,
