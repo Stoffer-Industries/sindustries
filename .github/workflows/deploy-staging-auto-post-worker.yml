@@ -1,0 +1,117 @@
+# GitHub Actions: deploy auto-post-worker to Fly.io staging.
+#
+# Mirror of .github/workflows/deploy-staging-budget-api.yml adapted for
+# the auto-post-worker Fly app. The worker is a non-HTTP service, so the
+# post-deploy smoke check uses `fly status` + a log-line grep instead of
+# a /health curl — there is no HTTP route to hit.
+#
+# Quinn-approved design (PR #508): FLY_API_TOKEN referenced as a repo
+# secret; the workflow YAML itself stays secret-name-only. Path filter
+# scopes the workflow to content-scheduler-api source + otel-node +
+# its infra/cloud deploy artefacts + the workflow itself, so unrelated
+# pushes don't redeploy.
+#
+# `fly deploy --strategy canary` matches the rollback story in
+# docs/runbooks/cloud-deployment-rollback.md (Fly's image flag plus the
+# canary strategy; planned in WS3). The post-deploy smoke check looks
+# for the worker's structured startup log line ("[content-scheduler-worker]
+# starting (adapter=bullmq)") in `fly logs` — Quinn's pattern for
+# non-HTTP Fly apps where PID liveness is the only available signal.
+#
+# Quinn-owned: FLY_API_TOKEN must be registered once as a repo secret.
+# DATABASE_URL (Neon) and REDIS_URL (Upstash) must be registered once
+# per Fly app via `fly secrets set`. Rowan references them by name only
+# — no value is hardcoded in this file.
+
+name: Deploy auto-post-worker (Fly.io staging)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/content-scheduler-api/**'
+      - 'packages/otel-node/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'infra/cloud/**'
+      - '.github/workflows/deploy-staging-auto-post-worker.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-auto-post-worker-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  FLY_APP: sindustries-auto-post-worker-staging
+  FLY_CONFIG: infra/cloud/fly/auto-post-worker.fly.toml
+
+jobs:
+  deploy:
+    name: Deploy auto-post-worker to Fly.io staging
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate fly.toml
+        working-directory: .
+        run: flyctl config validate --config ${{ env.FLY_CONFIG }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy (canary)
+        working-directory: .
+        run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Smoke check (worker boot log line)
+        id: smoke
+        run: |
+          set -euo pipefail
+          APP="${{ env.FLY_APP }}"
+          echo "Checking $APP startup log line via fly logs"
+          # fly logs tails historical + new entries. We grep for the
+          # worker's structured startup line, which only appears after a
+          # successful boot (Prisma connect + BullMQ worker registration).
+          # Retry up to 10 times with a 5s sleep — Fly logs can take a
+          # few seconds to surface after a canary promote.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if flyctl logs --app "$APP" --no-tail 2>/dev/null \
+                | grep -q '\[content-scheduler-worker\] starting (adapter=bullmq)'; then
+              echo "Smoke OK on attempt $i — worker boot line present in fly logs"
+              exit 0
+            fi
+            echo "Smoke attempt $i: startup line not yet visible; retrying in 5s"
+            sleep 5
+          done
+          echo "Smoke check failed after 10 attempts — worker did not boot cleanly" >&2
+          echo "Hint: fly logs --app $APP" >&2
+          exit 1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Comment on PR with deployed app reference
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: deploy-auto-post-worker-staging
+          message: |
+            Deployed auto-post-worker to Fly.io staging: https://${{ env.FLY_APP }}.fly.dev (no public HTTP — Fly dashboard URL)
+            Commit: ${{ github.sha }}
+            Workflow run: ${{ github.run_id }}
+            Smoke check: worker boot log line `[content-scheduler-worker] starting (adapter=bullmq)` visible in `fly logs`.

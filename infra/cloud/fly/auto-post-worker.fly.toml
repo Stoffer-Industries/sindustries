@@ -1,0 +1,65 @@
+# fly.toml — auto-post-worker staging.
+#
+# Long-running BullMQ queue consumer. NOT an HTTP service — Quinn's
+# APPROVED review on PR #508 (docs/specs/cloud-deployment-foundation-tech-design.md)
+# confirmed the worker gets a SEPARATE Fly app process (no sidecar in
+# tasks-api), with no [http_service] section and no http_checks. Fly
+# monitors the process via the entrypoint's liveness; a clean exit
+# triggers a restart per Fly's process supervisor.
+#
+# The build context is set to the repo root (`../../`) so the
+# Dockerfile's `COPY services/content-scheduler-api/` references resolve
+# cleanly. The worker is sourced from services/content-scheduler-api/
+# (file: src/workers/autoPostWorkerMain.ts) — Quinn's review explicitly
+# approved "implementation PRs can stack on top" of the 94d5e4fc content
+# scheduler extraction, so this Fly app spec does NOT depend on the
+# worker being extracted to a standalone service.
+#
+# Quinn-owned answers from PR #508 (locked):
+#   - Worker placement: SEPARATE Fly app process (this file).
+#   - REDIS_URL: stays as the env-var contract — Upstash credentials
+#     (Sydney, TLS) are Quinn-supplied and referenced by secret name only.
+#   - .openclaw boundary: Quinn owns Fly.io API token, Neon connection
+#     string, Upstash credentials, and the DNS provider token. This file
+#     references secret names only — no live values committed.
+#
+# When invoking from CI: `fly deploy --config infra/cloud/fly/auto-post-worker.fly.toml`
+# from the repo root.
+
+app = 'sindustries-auto-post-worker-staging'
+primary_region = 'syd'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
+
+[build]
+  context = '../../'
+  dockerfile = 'infra/cloud/docker/auto-post-worker.Dockerfile'
+
+[env]
+  NODE_ENV = 'production'
+  # BullMQ is the production adapter per Quinn-approved PR #508 and the
+  # task 1945f8a2 prodlike flip. CONTENT_SCHEDULER_JOB_ADAPTER=in-process
+  # would survive the worker's lifetime but not restart — unfit for cloud.
+  CONTENT_SCHEDULER_JOB_ADAPTER = 'bullmq'
+  # Reconciliation sweep + the BullMQ adapter use Prisma; DATABASE_URL is
+  # supplied at deploy time via `fly secrets set` (Quinn-owned).
+
+[processes]
+  # Single-process worker. Scaling horizontally (more workers) is a future
+  # concern — BullMQ handles concurrent job dispatch across replicas when
+  # we get there. For staging, one worker is enough.
+  worker = 'node --require @sindustries/otel-node/register --import tsx services/content-scheduler-api/src/workers/autoPostWorkerMain.ts'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
+
+[deploy]
+  # canary matches the WS1 baseline (tasks-api, budget-api). The worker
+  # has no http_service so the canary strategy manifests as a single
+  # new machine brought up alongside the prior release; Fly promotes it
+  # once it's healthy. For rollback: `fly releases rollback <v>` (see
+  # docs/runbooks/cloud-deployment-rollback.md, planned in WS3).
+  strategy = 'canary'
