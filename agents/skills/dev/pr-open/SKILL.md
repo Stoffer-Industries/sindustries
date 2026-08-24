@@ -73,10 +73,16 @@ EOF
 
 **Mandatory: verify the reviewer request actually registered, immediately after creating the PR.** Do not treat PR-open as complete until this check passes.
 
+Use the REST endpoint for this check so repo-only agent tokens do not need
+GraphQL's `read:org` / `read:discussion` scopes:
+
 ```bash
-gh pr view <number> --repo Stoffer-Industries/sindustries --json reviewRequests \
-  --jq '.reviewRequests | length'
+gh api repos/Stoffer-Industries/sindustries/pulls/<number>/requested_reviewers \
+  --jq '(.users | length) + (.teams | length)'
 ```
+
+Do not use `gh pr view --json reviewRequests`; resolving reviewer/team identity
+fields requires scopes that agent tokens intentionally do not have.
 
 If this prints `0`, the PR is currently unreviewable by anyone's heartbeat queue. Fix it before moving on — re-add the intended reviewer(s) from the routing table in `agents/skills/dev/pr-process/SKILL.md`:
 
@@ -84,7 +90,7 @@ If this prints `0`, the PR is currently unreviewable by anyone's heartbeat queue
 gh pr edit <number> --repo Stoffer-Industries/sindustries --add-reviewer <reviewer-github-username>
 ```
 
-Then re-run the `reviewRequests` check above to confirm it's non-zero before considering the PR opened.
+Then re-run the REST `requested_reviewers` check above to confirm it's non-zero before considering the PR opened.
 
 **`## System Spec` is a documentation convention, not a lobster gate.** Note the path to the spec file you wrote or updated (`docs/systems/<file>.md`), or a short reason why none was touched. Nothing parses or blocks on this section — it's judgment-based, not automated, because doc content is too varied to check reliably in code.
 
