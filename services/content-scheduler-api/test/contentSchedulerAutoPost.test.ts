@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decideAutoPostAction } from '../src/routes/contentSchedulerJobs.ts';
 import { createInProcessJobSchedulerAdapter } from '../src/routes/contentSchedulerJobs.inProcess.ts';
 import { setJobSchedulerAdapter } from '../src/routes/contentSchedulerJobs.ts';
-import { processAutoPostJob } from '../src/routes/autoPostWorker.ts';
+import { processAutoPostJob } from '../src/workers/autoPostWorker.ts';
 import { publishContentSchedulerItem } from '../src/routes/contentSchedulerPublishService.ts';
 
 // --- Prisma mock (hoisted so the autoPostWorker import does not blow up) -
