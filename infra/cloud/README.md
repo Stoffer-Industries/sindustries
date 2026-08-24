@@ -10,9 +10,11 @@ This subtree is the **single source of truth** for how to recreate the SIndustri
 infra/cloud/
 ├── README.md                   # this file
 ├── fly/                        # Fly.io app specs (one per Fly app)
-│   └── tasks-api.fly.toml
+│   ├── tasks-api.fly.toml
+│   └── budget-api.fly.toml
 ├── docker/                     # Service Dockerfiles (referenced by the fly.toml files)
-│   └── tasks-api.Dockerfile
+│   ├── tasks-api.Dockerfile
+│   └── budget-api.Dockerfile
 ├── env/                        # Env-var contracts (no live values — owner-supplied)
 │   ├── .env.example            # cross-service env contract
 │   └── tasks-api.env.example

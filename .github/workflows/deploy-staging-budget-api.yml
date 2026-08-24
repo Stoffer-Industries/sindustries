@@ -1,0 +1,102 @@
+# GitHub Actions: deploy budget-api to Fly.io staging.
+#
+# Mirror of .github/workflows/deploy-staging-tasks-api.yml adapted for
+# budget-api. Quinn-approved design (PR #508): FLY_API_TOKEN referenced as
+# a repo secret; the workflow YAML itself stays secret-name-only. Path filter
+# scopes the workflow to budget-api source + its infra/cloud deploy artefacts
+# + the workflow itself, so unrelated pushes don't redeploy.
+#
+# `fly deploy --strategy canary` matches the rollback story in
+# docs/runbooks/cloud-deployment-rollback.md (Fly's image flag plus the
+# canary strategy). The post-deploy `/health` curl is the smoke check
+# referenced in docs/specs/cloud-deployment-foundation-tech-design.md
+# (test plan: automated tests → smoke test). The route is `/health` —
+# budget-api mounts the health route at `/health` in src/app.ts; we hit
+# the real route rather than introducing a `/healthz` alias.
+#
+# Quinn-owned: FLY_API_TOKEN must be registered once as a repo secret.
+# Rowan references it by name only — no value is hardcoded in this file.
+
+name: Deploy budget-api (Fly.io staging)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/budget-api/**'
+      - 'packages/budget-domain/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'infra/cloud/**'
+      - '.github/workflows/deploy-staging-budget-api.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-budget-api-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  FLY_APP: sindustries-budget-api-staging
+  FLY_CONFIG: infra/cloud/fly/budget-api.fly.toml
+
+jobs:
+  deploy:
+    name: Deploy budget-api to Fly.io staging
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate fly.toml
+        working-directory: .
+        run: flyctl config validate --config ${{ env.FLY_CONFIG }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy (canary)
+        working-directory: .
+        run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Smoke check (/health)
+        id: smoke
+        run: |
+          set -euo pipefail
+          URL="https://${{ env.FLY_APP }}.fly.dev/health"
+          echo "Checking $URL"
+          # Fly assigns *.fly.dev by default; replace once sindustries.dev DNS lands.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error --max-time 10 "$URL"; then
+              echo "Smoke OK on attempt $i"
+              exit 0
+            fi
+            echo "Smoke attempt $i failed; retrying in 5s"
+            sleep 5
+          done
+          echo "Smoke check failed after 10 attempts" >&2
+          exit 1
+
+      - name: Comment on PR with deployed URL
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: deploy-budget-api-staging
+          message: |
+            Deployed budget-api to Fly.io staging: https://${{ env.FLY_APP }}.fly.dev/health
+            Commit: ${{ github.sha }}
+            Workflow run: ${{ github.run_id }}
