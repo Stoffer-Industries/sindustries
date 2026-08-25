@@ -91,12 +91,7 @@ jobs:
           echo "Smoke check failed after 10 attempts" >&2
           exit 1
 
-      - name: Comment on PR with deployed URL
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: deploy-budget-api-staging
-          message: |
-            Deployed budget-api to Fly.io staging: https://${{ env.FLY_APP }}.fly.dev/health
-            Commit: ${{ github.sha }}
-            Workflow run: ${{ github.run_id }}
+      # No PR-comment step: this workflow only triggers on push to main and
+      # workflow_dispatch, so `github.event_name == 'pull_request'` is never
+      # true here. Quinn raised this as a non-blocking nit on PR #528
+      # (auto-post-worker mirror) — removed in PR #4 (task b2f62c36).
