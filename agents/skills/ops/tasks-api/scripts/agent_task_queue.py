@@ -649,7 +649,7 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
             and pr.get("mergeable") is True
             and not changes_requested_by
         ):
-            merge_candidates.append({**summary, "blockingApprovals": blocking})
+            merge_candidates.append({**summary, "approvedBy": blocking})
 
     return {
         "reviewRequests": review_requests,
