@@ -539,6 +539,31 @@ jobs:
       - name: Run no-absolute-paths lint unit tests
         run: node --test scripts/test/check-no-absolute-paths.test.mjs
 
+  infra-cloud-bootstrap-staging-tests:
+    # Task 5baf6809 (Fix Fly staging deploy infra blockers). Three shell
+    # tests that gate AC1 (bootstrap-staging.sh `fly apps create` arg shape
+    # + substring-match rejection), AC2 (fly.toml `context` paths under
+    # infra/cloud/fly), and AC3 (root package.json `packageManager` pin).
+    # Tests stage a stub `flyctl` in PATH that records argv; no live Fly
+    # auth or Docker daemon required, so this job runs in seconds.
+    name: infra/cloud bootstrap + fly.toml + pnpm-pin tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run bootstrap-staging.sh AC1 tests
+        # Stub flyctl must precede the real one on PATH. The test sources
+        # a flyctl stub from its own $TMP/bin, so we don't need anything
+        # beyond bash + python3 here.
+        run: bash infra/cloud/scripts/tests/bootstrap-staging.test.sh
+
+      - name: Run fly.toml context path AC2 test
+        run: bash infra/cloud/scripts/tests/fly-toml-context.test.sh
+
+      - name: Run package.json pnpm pin AC3 test
+        run: bash infra/cloud/scripts/tests/package-json-pnpm-pin.test.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest

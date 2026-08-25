@@ -23,7 +23,11 @@ kill_signal = 'SIGINT'
 kill_timeout = '5s'
 
 [build]
-  context = '../../'
+  # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
+  # so `../../..` is the repo root. The previous `../../` resolved to
+  # `infra/` — silently wrong. Pin to repo root so the `dockerfile` path
+  # below resolves under all invocation forms.
+  context = '../../..'
   dockerfile = 'infra/cloud/docker/tasks-api.Dockerfile'
 
 [env]

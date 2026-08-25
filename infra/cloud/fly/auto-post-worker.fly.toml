@@ -7,7 +7,7 @@
 # monitors the process via the entrypoint's liveness; a clean exit
 # triggers a restart per Fly's process supervisor.
 #
-# The build context is set to the repo root (`../../`) so the
+# The build context is set to the repo root (`../../..`) so the
 # Dockerfile's `COPY services/content-scheduler-api/` references resolve
 # cleanly. The worker is sourced from services/content-scheduler-api/
 # (file: src/workers/autoPostWorkerMain.ts) — Quinn's review explicitly
@@ -32,7 +32,10 @@ kill_signal = 'SIGINT'
 kill_timeout = '5s'
 
 [build]
-  context = '../../'
+  # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
+  # so `../../..` is the repo root. Pin to repo root so the `dockerfile`
+  # path below resolves under all invocation forms.
+  context = '../../..'
   dockerfile = 'infra/cloud/docker/auto-post-worker.Dockerfile'
 
 [env]
