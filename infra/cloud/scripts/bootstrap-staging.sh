@@ -158,12 +158,26 @@ info "  auto-post-worker:    $FLY_APP_AUTO_POST_WORKER"
 
 create_app_if_missing() {
   local app="$1"
-  if "$FLY" apps list --json 2>/dev/null | grep -q "\"Name\":\"$app\""; then
+  local apps_json
+  apps_json=$("$FLY" apps list --json 2>/dev/null) \
+    || fail "unable to list Fly apps (is the fly CLI authenticated?)" 2
+  # Exact-name match via python3 (the prior `grep -q "\"Name\":\"$app\""` form
+  # is a substring match — an app named `$app-extra` would falsely match).
+  # Fly's `apps list --json` schema uses `Name`; some sandboxed CLIs return
+  # lowercase `name`. Tolerate both rather than coupling to one upstream.
+  if APP_NAME="$app" python3 -c '
+import json, os, sys
+target = os.environ["APP_NAME"]
+apps = json.load(sys.stdin)
+sys.exit(0 if any((a.get("Name") or a.get("name")) == target for a in apps) else 1)
+' <<<"$apps_json"; then
     ok "app exists: $app"
     return 0
   fi
   info "creating app: $app"
-  "$FLY" apps create --app "$app" --org personal >/dev/null
+  # `fly apps create --app <name>` is rejected by current fly releases; the
+  # accepted form is positional. `--yes` is required for non-interactive use.
+  "$FLY" apps create "$app" --org personal --yes >/dev/null
   ok "created app: $app"
 }
 

@@ -23,7 +23,15 @@ kill_signal = 'SIGINT'
 kill_timeout = '5s'
 
 [build]
-  context = '../../'
+  # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
+  # so `../../..` is the repo root. The previous `../../` resolved to
+  # `infra/` — which happened to work only because Fly was then asked to
+  # read `infra/cloud/docker/budget-api.Dockerfile` from inside `infra/`,
+  # i.e. `infra/infra/cloud/docker/budget-api.Dockerfile` (silently wrong
+  # when the parent CI runner's working dir rescued it). Pin to the repo
+  # root so `dockerfile = 'infra/cloud/docker/budget-api.Dockerfile'`
+  # resolves the published path under all invocation forms.
+  context = '../../..'
   dockerfile = 'infra/cloud/docker/budget-api.Dockerfile'
 
 [env]
