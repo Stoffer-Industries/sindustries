@@ -34,3 +34,7 @@ apps/tasks/test-results/.last-run.json
 apps/budget-mobile/dist-ios/
 
 services/budget-api/.env.prodlike
+
+# Quinn-owned staging env file consumed by infra/cloud/scripts/bootstrap-staging.sh.
+# infra/cloud/.env.local — Quinn keeps real values here, never committed.
+infra/cloud/.env.local

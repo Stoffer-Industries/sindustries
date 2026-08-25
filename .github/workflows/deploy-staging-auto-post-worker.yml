@@ -105,13 +105,7 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - name: Comment on PR with deployed app reference
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: deploy-auto-post-worker-staging
-          message: |
-            Deployed auto-post-worker to Fly.io staging: https://${{ env.FLY_APP }}.fly.dev (no public HTTP — Fly dashboard URL)
-            Commit: ${{ github.sha }}
-            Workflow run: ${{ github.run_id }}
-            Smoke check: worker boot log line `[content-scheduler-worker] starting (adapter=bullmq)` visible in `fly logs`.
+      # No PR-comment step: this workflow only triggers on push to main and
+      # workflow_dispatch, so `github.event_name == 'pull_request'` is never
+      # true here. Quinn raised this as a non-blocking nit on PR #528 review
+      # — removed in PR #4 (task b2f62c36).

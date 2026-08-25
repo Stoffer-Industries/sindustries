@@ -18,8 +18,10 @@ infra/cloud/
 │   ├── budget-api.Dockerfile
 │   └── auto-post-worker.Dockerfile
 ├── env/                        # Env-var contracts (no live values — owner-supplied)
-│   ├── .env.example            # cross-service env contract
-│   └── tasks-api.env.example
+│   ├── .env.example            # cross-service env contract + per-service reference index
+│   ├── tasks-api.env.example
+│   ├── budget-api.env.example
+│   └── auto-post-worker.env.example
 └── scripts/                    # Owner-supplied operational scripts (Quinn runs locally)
     └── bootstrap-staging.sh
 ```
