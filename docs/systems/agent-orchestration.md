@@ -76,6 +76,13 @@ flowchart TB
 3. X bookmark or web link → ingest → curate → spec → task → Rowan → PR
 4. Recall question → Quinn delegates to Vara → grounded answer with exact wiki citations
 
+The morning brief also includes a dedicated **Tom's attention** section for every
+active task where Tom appears in the ordered `attentionOwners` stack. Position 0
+is labelled as action needed now; later positions are shown as escalation context.
+This keeps the brief aligned with the same attention-owner routing surface used by
+the heartbeat and Lobsters, rather than relying on assignee or legacy workflow-gate
+fields.
+
 ---
 
 ## 1. Bookmark Workflow

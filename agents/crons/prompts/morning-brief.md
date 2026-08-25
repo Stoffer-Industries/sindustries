@@ -28,7 +28,34 @@ except Exception as e:
     print('[]')
 "
 
-4) Pull active tasks from the Tasks API:
+4) Pull tasks where Tom is an attention owner from the Tasks API:
+   python3 -c "
+import sys, json
+sys.path.insert(0, '/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api')
+try:
+    from tasks_api_client import list_tasks
+    attention = []
+    seen = set()
+    for status in ['open', 'ready', 'doing', 'acceptance']:
+        for t in list_tasks(limit=100, status=status, attention_owner='Tom'):
+            task_id = str(t.get('id', ''))
+            if task_id and task_id not in seen:
+                seen.add(task_id)
+                owners = t.get('attentionOwners') or []
+                attention.append({
+                    'id': task_id[:8],
+                    'title': t.get('title', '')[:60],
+                    'status': status,
+                    'assignee': t.get('assignee', ''),
+                    'position': owners.index('Tom') if 'Tom' in owners else None,
+                    'actionable': bool(owners) and owners[0] == 'Tom',
+                })
+    print(json.dumps(attention))
+except Exception as e:
+    print(json.dumps({'error': str(e), 'tasks': []}))
+"
+
+5) Pull active tasks from the Tasks API:
    python3 -c "
 import sys, json, urllib.request, os
 sys.path.insert(0, '/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api')
@@ -45,7 +72,7 @@ except Exception as e:
     print(json.dumps({'error': str(e), 'in_progress': [], 'blocked': []}))
 "
 
-5) Check MEMORY.md for focus context.
+6) Check MEMORY.md for focus context.
 
 Output format:
 🌅 Good morning Tom!
@@ -55,6 +82,9 @@ Output format:
 
 🧠 OVERNIGHT
 [What happened since yesterday — agent activity, workflow milestones, things resolved. Do NOT include ops/infra incidents or outages — those are surfaced in real-time by Lox and don't need replaying here.]
+
+👤 TOM'S ATTENTION
+[Every active task where Tom appears in attentionOwners. Mark the position-0 task(s) as [ACTION NEEDED NOW]; mark later slots as [ESCALATION]. Include assignee, title, status, and the 8-character task id. Skip this section entirely if none.]
 
 ⚠️ PENDING APPROVALS
 [Only if pending bookmark approvals exist. For each: topic | title ~50 chars | #ap<id>]
