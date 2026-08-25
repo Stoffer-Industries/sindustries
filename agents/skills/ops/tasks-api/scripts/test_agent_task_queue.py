@@ -426,7 +426,7 @@ class AgentTaskQueueTest(unittest.TestCase):
             ],
         )
         queue = agent_task_queue.classify_github_prs("Ivy", [pr])
-        self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["blockingApprovals"])
+        self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["approvedBy"])
 
     def test_quinn_cannot_self_approve_a_merge_candidate(self):
         pr = pull_request(
@@ -455,7 +455,7 @@ class AgentTaskQueueTest(unittest.TestCase):
             ],
         )
         queue = agent_task_queue.classify_github_prs("Quinn", [pr])
-        self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["blockingApprovals"])
+        self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["approvedBy"])
 
 
     # ---- attentionOwners paging (task d8fbe750) ----

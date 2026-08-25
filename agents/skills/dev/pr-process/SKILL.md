@@ -35,9 +35,12 @@ Read and follow: `agents/skills/dev/pr-address-feedback/SKILL.md`
 
 ### Merging after approval
 
-Poll for review state in your heartbeat. Use the unified queue's REST-hydrated
-`blockingApprovals` to verify the designated blocking reviewers; do not re-query
-reviewer identities through GraphQL. Then verify the aggregate decision, CI, and
+Poll for review state in your heartbeat. If a PR appears in the unified queue's
+`mergeCandidates`, its designated blocking reviewers have **already approved** —
+that's a precondition for appearing in the list at all, not a pending
+requirement. The `approvedBy` field on each entry names who gave that approval;
+do not re-query reviewer identities through GraphQL. A PR in `mergeCandidates`
+is actionable now — do not defer it. Then verify the aggregate decision, CI, and
 merge state with scope-safe scalar fields:
 
 ```bash
@@ -47,8 +50,9 @@ gh pr view <number> --repo Stoffer-Industries/sindustries \
 
 Avoid `--json reviews,reviewRequests`: those identity/team fields require
 `read:org` / `read:discussion`, which repo-only agent tokens intentionally do not
-have. Merge when the queue has verified all blocking approvals,
-`reviewDecision` is `APPROVED`, `mergeStateStatus` is `CLEAN`, and CI passes:
+have. Merge when the queue confirms the required approval(s) are in
+(`approvedBy` populated), `reviewDecision` is `APPROVED`, `mergeStateStatus` is
+`CLEAN`, and CI passes:
 
 ```bash
 gh pr merge <number> --repo Stoffer-Industries/sindustries --rebase --delete-branch
