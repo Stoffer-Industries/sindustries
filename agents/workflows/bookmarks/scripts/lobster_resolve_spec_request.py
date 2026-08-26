@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from common import STATE_PATH, dump_json, load_state, log_transition, now_iso, save_state, transition_log_path, get_approval_topic
+from x_author_mention_tweets import queue_bookmark_mention_drafts
 from x_author_tweet import try_post_author_tweet
 
 logger = logging.getLogger("bookmark.lobster_resolve_spec_request")
@@ -16,6 +17,16 @@ logger = logging.getLogger("bookmark.lobster_resolve_spec_request")
 # uses internally. Override via TASKS_API_BASE_URL env var when the
 # lobster runs against a non-local tasks-api (CI, prod).
 _TASKS_API_BASE_URL = os.getenv("TASKS_API_BASE_URL", "http://localhost:4001/api/v1")
+
+# Default content-scheduler-api base URL — port 4003 in the prodlike stack
+# (matches `apps/mission-control/src/contentSchedulerApi.js`
+# `DEFAULT_API_BASE_BY_PORT['5176']`). Override via
+# CONTENT_SCHEDULER_API_BASE_URL when the lobster runs against a non-local
+# content-scheduler-api (CI, prod).
+_CONTENT_SCHEDULER_API_BASE_URL = os.getenv(
+    "CONTENT_SCHEDULER_API_BASE_URL",
+    "http://localhost:4003/api/v1",
+)
 
 
 def task_ids_for_bookmark(created: list[dict], bookmark_key: str) -> list[str]:
@@ -153,6 +164,53 @@ def main() -> int:
                     if parsed and "authorHandle" not in tweet_log:
                         tweet_log["authorHandle"] = parsed[0]
                     state_item["tweetLog"] = tweet_log
+
+            # AC1 / AC2 / AC4 / AC6: best-effort queuing of TWO Content
+            # Scheduler drafts (standalone "build in public" + manual-reply)
+            # when the bookmark was X-sourced AND landed in `tasked` AND
+            # produced at least one task ID. Same gate as the author-tweet
+            # step above. The helper NEVER raises; the hook adds a
+            # defense-in-depth try/except around the call so any unexpected
+            # error still resolves the approval cleanly (AC6). Failure
+            # isolation: `queue_bookmark_mention_drafts` records per-step
+            # errors in its returned payload, which we persist under
+            # `state_item["contentDrafts"]` for ops visibility.
+            if next_status == "tasked" and (state_item.get("source") or "").lower() == "x":
+                try:
+                    content_drafts = queue_bookmark_mention_drafts(
+                        state_item,
+                        content_scheduler_api_base_url=_CONTENT_SCHEDULER_API_BASE_URL,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    logger.warning("content-drafts step raised for %s: %s", bookmark_key, exc)
+                    content_drafts = {
+                        "queuedDraftIds": [],
+                        "errors": [{
+                            "status": "error",
+                            "step": "queue_bookmark_mention_drafts",
+                            "error": f"unexpected:{exc}",
+                        }],
+                        "skipped": [],
+                    }
+                # Persist `contentDrafts` only when something actually happened:
+                #   - queuedDraftIds non-empty → at least one draft landed
+                #   - errors non-empty         → the helper recorded a
+                #                                structured failure that
+                #                                ops should see
+                # Pure-skip outcomes (non_x_source, missing_x_link,
+                # invalid_state_item) are NOT persisted — those bookmarks
+                # should look identical to a bookmark that never triggered
+                # the helper. The helper itself already filters on
+                # `source == "x"`; the persisted payload only appears when
+                # work was attempted.
+                persist_drafts = bool(content_drafts.get("queuedDraftIds")) or bool(content_drafts.get("errors"))
+                if persist_drafts:
+                    state_item["contentDrafts"] = {
+                        "queuedDraftIds": list(content_drafts.get("queuedDraftIds") or []),
+                        "errors": list(content_drafts.get("errors") or []),
+                        "skipped": list(content_drafts.get("skipped") or []),
+                        "generatedAt": timestamp,
+                    }
 
             resolved_items.append({
                 "bookmarkKey": bookmark_key,
