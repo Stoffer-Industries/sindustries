@@ -228,8 +228,40 @@ jobs:
         run: npm run test:integration --workspace services/tasks-api
 
   content-scheduler-api-tests:
+    # W35 audit QW1: the content-scheduler-api service owns the
+    # `content_scheduler` Postgres schema plus the in-process + BullMQ
+    # auto-post adapters. The package's `npm test` script (vitest, six
+    # files) was never wired into CI, which is why several extraction
+    # readiness gaps landed silently. Adding this job so
+    # `services/content-scheduler-api/**` changes are validated against
+    # the existing vitest suite on every PR. Mirrors the
+    # tasks-api-tests / budget-api-tests pattern: postgres service
+    # container, DATABASE_URL pinned to `?schema=content_scheduler`,
+    # `prisma:migrate deploy` to materialise the schema before the
+    # supertest-instantiated app boots. Prisma is still mocked per-test
+    # via `vi.mock('../src/lib/prisma.ts')`, so no DB integration step
+    # is required — the schema just needs to exist so the Prisma
+    # client can construct at module load.
     name: content-scheduler-api tests (vitest)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sindustries_content_scheduler
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sindustries_content_scheduler"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sindustries_content_scheduler?schema=content_scheduler
+      OTEL_SDK_DISABLED: '1'
+      X_CLIENT: fake
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -246,6 +278,9 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace services/content-scheduler-api
+
+      - name: Apply DB migrations
+        run: npm run prisma:migrate --workspace services/content-scheduler-api
 
       - name: Run vitest suite
         run: npm test --workspace services/content-scheduler-api
