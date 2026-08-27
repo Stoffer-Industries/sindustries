@@ -1,9 +1,9 @@
 # tasks-api Dockerfile — staging.
 #
-# Mirror of services/gymtrack-mcp/Dockerfile adapted for the pnpm-workspace
+# Mirror of services/gymtrack-mcp/Dockerfile adapted for the npm-workspace
 # layout and the TypeScript/tsx runtime. node:22-alpine base matches the
-# existing precedent; pnpm is the workspace package manager (repo root
-# pnpm-lock.yaml).
+# existing precedent; npm is the workspace package manager (repo root
+# package-lock.json + `workspaces` field in root package.json).
 #
 # Workspace deps: @sindustries/otel-node is referenced as
 # `file:../../packages/otel-node` from services/tasks-api/package.json, so we
@@ -22,22 +22,20 @@
 
 FROM node:22-alpine AS base
 
-# pnpm via corepack (matches the repo's workspace package manager).
-RUN corepack enable
-
 WORKDIR /app
 
 # Workspace manifests — install-time only; pruned in the runtime stage.
-# No pnpm-workspace.yaml: this repo uses npm-style `workspaces` in root
-# package.json (apps/*, packages/*, services/*); pnpm reads that directly.
-COPY pnpm-lock.yaml package.json ./
+# Repo uses npm-style `workspaces` in root package.json (apps/*, packages/*,
+# services/*); `npm ci --workspace ... --include-workspace-root` resolves
+# them deterministically from package-lock.json.
+COPY package-lock.json package.json ./
 COPY packages/otel-node/package.json ./packages/otel-node/
 COPY services/tasks-api/package.json ./services/tasks-api/
 
 # Install tasks-api + its workspace deps with a frozen lockfile.
-# The trailing `...` after the filter installs the package AND its
-# workspace dependencies (per pnpm docs).
-RUN pnpm install --frozen-lockfile --filter @sindustries/tasks-api...
+# `--include-workspace-root` is required so npm also installs the root
+# devDependencies (jsdom).
+RUN npm ci --workspace services/tasks-api --workspace packages/otel-node --include-workspace-root
 
 # Runtime source — workspace package + service.
 COPY packages/otel-node ./packages/otel-node
@@ -55,7 +53,7 @@ ENV ALLOW_PORT_DB_MISMATCH=1
 
 EXPOSE 4001
 
-# Start: `pnpm --filter @sindustries/tasks-api start` runs the service's
+# Start: `npm run start --workspace services/tasks-api` runs the service's
 # `prestart` (`prisma generate`) then `start`
 # (`tsx --require @sindustries/otel-node/register src/server.ts`).
-CMD ["pnpm", "--filter", "@sindustries/tasks-api", "start"]
+CMD ["npm", "run", "start", "--workspace", "services/tasks-api"]

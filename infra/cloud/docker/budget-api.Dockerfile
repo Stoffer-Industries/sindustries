@@ -20,22 +20,18 @@
 
 FROM node:22-alpine AS base
 
-# pnpm via corepack (matches the repo's workspace package manager).
-RUN corepack enable
-
 WORKDIR /app
 
 # Workspace manifests — install-time only; pruned in the runtime stage.
-# No pnpm-workspace.yaml: this repo uses npm-style `workspaces` in root
-# package.json (apps/*, packages/*, services/*); pnpm reads that directly.
-COPY pnpm-lock.yaml package.json ./
+# Repo uses npm-style `workspaces` in root package.json (apps/*, packages/*,
+# services/*); `npm ci --workspace ... --include-workspace-root` resolves
+# them deterministically from package-lock.json.
+COPY package-lock.json package.json ./
 COPY packages/budget-domain/package.json ./packages/budget-domain/
 COPY services/budget-api/package.json ./services/budget-api/
 
 # Install budget-api + its workspace deps with a frozen lockfile.
-# The trailing `...` after the filter installs the package AND its
-# workspace dependencies (per pnpm docs).
-RUN pnpm install --frozen-lockfile --filter @sindustries/budget-api...
+RUN npm ci --workspace services/budget-api --workspace packages/budget-domain --include-workspace-root
 
 # Runtime source — workspace package + service.
 COPY packages/budget-domain ./packages/budget-domain
@@ -48,6 +44,6 @@ ENV PORT=4002
 
 EXPOSE 4002
 
-# Start: `pnpm --filter @sindustries/budget-api start` runs the service's
+# Start: `npm run start --workspace services/budget-api` runs the service's
 # `prestart` (`prisma generate`) then `start` (`tsx src/server.ts`).
-CMD ["pnpm", "--filter", "@sindustries/budget-api", "start"]
+CMD ["npm", "run", "start", "--workspace", "services/budget-api"]

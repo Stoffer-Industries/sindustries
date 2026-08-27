@@ -601,10 +601,11 @@ jobs:
     # Task 5baf6809 (Fix Fly staging deploy infra blockers). Three shell
     # tests that gate AC1 (bootstrap-staging.sh `fly apps create` arg shape
     # + substring-match rejection), AC2 (fly.toml `context` paths under
-    # infra/cloud/fly), and AC3 (root package.json `packageManager` pin).
+    # infra/cloud/fly), and AC3 (repo is npm-only — no pnpm pin in root
+    # package.json, per Quinn [quinn-decision] 8d35d4e1 on 2026-08-27).
     # Tests stage a stub `flyctl` in PATH that records argv; no live Fly
     # auth or Docker daemon required, so this job runs in seconds.
-    name: infra/cloud bootstrap + fly.toml + pnpm-pin tests
+    name: infra/cloud bootstrap + fly.toml + no-pnpm-pin tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -619,8 +620,8 @@ jobs:
       - name: Run fly.toml context path AC2 test
         run: bash infra/cloud/scripts/tests/fly-toml-context.test.sh
 
-      - name: Run package.json pnpm pin AC3 test
-        run: bash infra/cloud/scripts/tests/package-json-pnpm-pin.test.sh
+      - name: Run package.json no-pnpm-pin AC3 test
+        run: bash infra/cloud/scripts/tests/package-json-no-pnpm-pin.test.sh
 
   gitleaks:
     name: gitleaks secret scan

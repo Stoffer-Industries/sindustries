@@ -23,13 +23,13 @@ of task `94d5e4fc-1b31-4d04-a13b-4f69a7ec297a` (see
 
 ```bash
 # 1. Install deps from the repo root.
-pnpm install
+npm ci
 
 # 2. Copy the env template.
 cp services/content-scheduler-api/.env.example services/content-scheduler-api/.env
 
 # 3. Run the bootstrap smoke (no DB yet — only /health).
-pnpm --filter @sindustries/content-scheduler-api dev
+npm run dev --workspace services/content-scheduler-api
 ```
 
 Port defaults to `4003` (dev) so it does not collide with `tasks-api` (4000)

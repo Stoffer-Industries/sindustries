@@ -1,7 +1,6 @@
 {
   "name": "sindustries",
   "private": true,
-  "packageManager": "pnpm@10.14.0",
   "scripts": {
     "sync:budgeting-pen": "node scripts/design/sync-budgeting-pen.mjs",
     "sync:design-systems-pen": "node scripts/design/sync-design-systems-pen.mjs",
