@@ -1566,17 +1566,16 @@ fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
 
 fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
     match owner {
-        "Quinn" => {
-            task.status != "ready"
-                || tech_design_approved_structured(task)
-                || tech_design_waived(task)
-        }
-        "Ash" => {
-            task.status != "doing"
-                || implementer_pr_urls(task).is_empty()
-                || qa_agent_verified(task)
-        }
-        "Tom" => task.status != "acceptance" || accepted_structured(task),
+        // Removal is gated on this owner's *own* structured closeout landing,
+        // not on the status happening to be one where their named gate is
+        // inert. The status-mismatch clauses used to return true on a `doing`
+        // task for all three managed owners simultaneously, which let a single
+        // sweep drain a multi-entry array across multiple stage calls.
+        // `workflow_attention_owner` already handles replacement of a stale
+        // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
+        "Quinn" => tech_design_approved_structured(task) || tech_design_waived(task),
+        "Ash" => qa_agent_verified(task),
+        "Tom" => accepted_structured(task),
         _ => false,
     }
 }
@@ -4450,6 +4449,54 @@ mod tests {
         assert_eq!(
             reconciled_attention_owners(&task),
             vec!["Tom", "Lox", "Rowan", "Tom", "Tom"]
+        );
+    }
+
+    /// Regression for task `e67c8835` (2026-08-27 incident): a `doing`-status
+    /// task whose `attentionOwners` is `[Tom, Quinn, Ash]` and whose only
+    /// closed gate is `qa_agent` must not have the array drained across
+    /// multiple reconcile calls in a single sweep. Pre-fix, every managed
+    /// name's OR-clause returned `true` on status `doing`, so each call
+    /// popped one head and the 3-entry array reached `[]`. Post-fix,
+    /// removal is gated on each owner's own structured closeout: Tom is
+    /// head, Tom has not been accepted, so nothing is popped and the
+    /// result is idempotent.
+    #[test]
+    fn routing_does_not_drain_managed_owners_when_only_ash_gate_closed() {
+        let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
+        task.comments.push(TaskComment {
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        task.approvals.push(TaskApproval {
+            approval_type: "qa_agent".to_string(),
+            state: "approved".to_string(),
+            ..TaskApproval::default()
+        });
+        let once = reconciled_attention_owners(&task);
+        assert_eq!(once, vec!["Tom", "Quinn", "Ash"]);
+        task.attention_owners = once.clone();
+        assert_eq!(reconciled_attention_owners(&task), once);
+    }
+
+    /// Regression for task `e67c8835` (2026-08-27 incident): Quinn's tech-design
+    /// closeout landing must not be enough to pop a Tom head entry, even when
+    /// `task.status` is `doing` (where Tom's gate clause is trivially inert).
+    /// Tom's removal is gated on `accepted_structured` only.
+    #[test]
+    fn routing_keeps_tom_head_until_accepted_even_when_status_is_doing() {
+        let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
+        task.approvals.push(TaskApproval {
+            approval_type: "tech_design".to_string(),
+            state: "approved".to_string(),
+            ..TaskApproval::default()
+        });
+        assert_eq!(
+            reconciled_attention_owners(&task),
+            vec!["Tom", "Quinn", "Ash"]
         );
     }
 
