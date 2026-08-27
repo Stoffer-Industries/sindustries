@@ -90,8 +90,8 @@ invoked.
 ## Tests
 
 ```bash
-pnpm install   # one-time, installs vitest + tsx
-pnpm test      # runs the semantic-contract pin tests
+npm ci          # one-time, installs vitest + tsx
+npm test        # runs the semantic-contract pin tests
 ```
 
 The test fixtures pin the comment-shape contract that the lobster and
