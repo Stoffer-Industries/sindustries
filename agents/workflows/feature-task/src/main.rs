@@ -4241,18 +4241,61 @@ impl ac_parsing::TestRunner for CargoTestRunner {
         // guaranteeing any particular CWD, and `cargo test` for this crate's
         // own unit tests runs with CWD = crate root, not repo root).
         let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        // No `--exact`: cited AC names are bare function names (e.g.
+        // `some_test`), but cargo reports module-qualified paths (e.g.
+        // `tests::some_test`), and `--exact` requires the full path to
+        // match. That combination previously ran 0 tests and exited 0 for
+        // *every* citation, real or typo'd — a silent pass, not a check
+        // (caught in review on PR #541). The substring filter here is just
+        // a coarse candidate selection; `cargo_test_leaf_outcome` below does
+        // the actual exact-match verdict against the parsed output.
         let output = std::process::Command::new("cargo")
             .arg("test")
             .arg("--manifest-path")
             .arg(&manifest_path)
-            .args(["--bin", "feature-task", test_name, "--", "--exact"])
+            .args(["--bin", "feature-task", test_name])
             .output()
             .map_err(|err| format!("spawn cargo test: {err}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let exit_code = cargo_test_leaf_outcome(&stdout, test_name);
         Ok(ac_parsing::TestOutcome {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code,
+            stdout,
+            stderr,
         })
+    }
+}
+
+/// Determine pass/fail for `test_name` from `cargo test` stdout by matching
+/// the leaf (post-`::`) segment of each `test <path> ... <status>` line.
+///
+/// cargo's own process exit code cannot be used directly: it is 0 both when
+/// the named test ran and passed, AND when the filter matched zero tests
+/// (nonexistent or typo'd name) — see PR #541 review. Returns `0` only if at
+/// least one matching test ran and every match reports `ok`; returns `1` if
+/// no test matched `test_name` at all, or if any match failed.
+fn cargo_test_leaf_outcome(stdout: &str, test_name: &str) -> i32 {
+    let mut found = false;
+    for line in stdout.lines() {
+        let Some(rest) = line.strip_prefix("test ") else {
+            continue;
+        };
+        let Some((path, status)) = rest.rsplit_once(" ... ") else {
+            continue;
+        };
+        if path.rsplit("::").next().unwrap_or(path) != test_name {
+            continue;
+        }
+        found = true;
+        if status.trim() != "ok" {
+            return 1;
+        }
+    }
+    if found {
+        0
+    } else {
+        1
     }
 }
 
@@ -4454,6 +4497,62 @@ mod tests {
             "expected passing test to report exit 0\nstdout: {}\nstderr: {}",
             outcome.stdout, outcome.stderr
         );
+        // Guards against the exact bug caught in PR #541 review: `--exact`
+        // against a bare (non-module-qualified) name matched zero tests and
+        // still exited 0, so `exit_code == 0` alone does not prove the test
+        // actually ran. Confirm the target line is present and reports `ok`.
+        assert!(
+            outcome.stdout.contains(
+                "test tests::routing_advances_stale_implementer_to_tom_at_acceptance ... ok"
+            ),
+            "expected the target test to actually run, got:\n{}",
+            outcome.stdout
+        );
+    }
+
+    #[test]
+    fn cargo_test_runner_reports_failure_for_a_nonexistent_test_name() {
+        // A cited AC test that doesn't exist (typo, renamed, never written)
+        // must be a hard failure, not a silent pass. Before this fix, cargo
+        // exits 0 when a filter matches zero tests, which the old
+        // `output.status.code()`-only implementation reported as success.
+        let outcome = ac_parsing::TestRunner::run(
+            &CargoTestRunner,
+            "this_test_definitely_does_not_exist_in_this_crate_xyz",
+        )
+        .expect("spawn cargo test");
+        assert_ne!(
+            outcome.exit_code, 0,
+            "expected a nonexistent test citation to fail, got exit 0\nstdout: {}",
+            outcome.stdout
+        );
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_matches_bare_name_against_qualified_path() {
+        let stdout = "\nrunning 1 test\ntest tests::some_module::my_test ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "my_test"), 0);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_fails_on_zero_matching_tests() {
+        let stdout = "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 248 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "typo_d_name"), 1);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_fails_when_matching_test_failed() {
+        let stdout = "\nrunning 1 test\ntest tests::my_test ... FAILED\n\nfailures:\n\n---- tests::my_test stdout ----\nassertion failed\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "my_test"), 1);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_does_not_falsely_match_a_substring_prefix() {
+        // A citation of `my_test` must not match an unrelated test whose
+        // name merely contains it as a substring (e.g. `my_test_extended`)
+        // — only an exact leaf-segment match counts.
+        let stdout = "\nrunning 1 test\ntest tests::my_test_extended ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "my_test"), 1);
     }
 
     fn routing_task(status: &str, owner: &[&str]) -> Task {
