@@ -864,8 +864,11 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // The lobster runs the deterministic file-existence + test-execution
     // checks first; only if those pass do we ask Ash for semantic judgment
     // (AC2 of the same task). `PnpmTestRunner` shells out to
-    // `pnpm test --filter <name>` per AC3; unit tests in `ac_parsing`
-    // substitute `AlwaysPassTestRunner` / `AlwaysFailTestRunner`.
+    // `pnpm test --filter <name>` per AC3; `CargoTestRunner` shells out to
+    // `cargo test --bin feature-task <name>` for PRs touching this crate
+    // (task e67c8835 fix — pnpm has no manifest to filter against here, so
+    // it misreported every passing Rust test as a failure). Unit tests in
+    // `ac_parsing` substitute `AlwaysPassTestRunner` / `AlwaysFailTestRunner`.
     //
     // Failures surface as `[feature-task-progress-checklist]` (the same
     // pattern every other lobster gate uses) and short-circuit the qa_agent
@@ -875,12 +878,23 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     if let Some(url) = &latest_pr_url {
         let pr_files = pr_changed_files(url);
         let body = pr_body(url).unwrap_or_default();
+        // Rust crates (this binary included) have no pnpm manifest to
+        // filter against, so `PnpmTestRunner` always fails on their ACs
+        // regardless of the cited test's real outcome. Dispatch to
+        // `CargoTestRunner` whenever the PR touches this crate (same
+        // predicate the clippy evidence gate above already uses).
+        let test_runner: Box<dyn ac_parsing::TestRunner> =
+            if touches_rust_feature_workflow(&pr_files) {
+                Box::new(CargoTestRunner)
+            } else {
+                Box::new(PnpmTestRunner)
+            };
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
             &task_acs,
             &body,
             &pr_files,
-            &PnpmTestRunner,
+            test_runner.as_ref(),
         );
         if !mechanical_failures.is_empty() {
             mechanical_gate_failed = true;
@@ -4212,6 +4226,36 @@ impl ac_parsing::TestRunner for PnpmTestRunner {
     }
 }
 
+// `CargoTestRunner` is the production `TestRunner` for ACs whose cited test
+// lives in this Rust crate rather than a JS workspace (dispatched by
+// `pr_changed_files` prefix in `verify_delivery` — see task e67c8835, where
+// `PnpmTestRunner` mis-diagnosed a passing `cargo test` as a failure because
+// pnpm has no manifest to filter against here).
+struct CargoTestRunner;
+
+impl ac_parsing::TestRunner for CargoTestRunner {
+    fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        // Resolved at compile time to this crate's own directory, so this
+        // works regardless of the runtime CWD (the lobster pipeline invokes
+        // the binary via `cargo run --manifest-path <abs-path>` without
+        // guaranteeing any particular CWD, and `cargo test` for this crate's
+        // own unit tests runs with CWD = crate root, not repo root).
+        let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let output = std::process::Command::new("cargo")
+            .arg("test")
+            .arg("--manifest-path")
+            .arg(&manifest_path)
+            .args(["--bin", "feature-task", test_name, "--", "--exact"])
+            .output()
+            .map_err(|err| format!("spawn cargo test: {err}"))?;
+        Ok(ac_parsing::TestOutcome {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
+
 /// Fetch the list of files changed in a PR.
 ///
 /// Returns an empty Vec if the PR has no diff or the `gh` call fails for a
@@ -4389,6 +4433,27 @@ mod tests {
                 fs::read_to_string(Path::new("agents/workflows/feature-task/fixtures").join(name))
             })
             .unwrap()
+    }
+
+    #[test]
+    fn cargo_test_runner_reports_success_for_a_real_passing_test() {
+        // Regression test for task e67c8835: `CargoTestRunner` must resolve
+        // its own manifest via `CARGO_MANIFEST_DIR` (compile-time constant)
+        // rather than a CWD-relative path, since `cargo test` runs this test
+        // with CWD = crate root while the production binary is invoked via
+        // `cargo run --manifest-path <abs>` with no guaranteed CWD. Targets
+        // a real, side-effect-free test in this same file so a genuine
+        // `cargo test` round-trip exercises the full runner, not a stub.
+        let outcome = ac_parsing::TestRunner::run(
+            &CargoTestRunner,
+            "routing_advances_stale_implementer_to_tom_at_acceptance",
+        )
+        .expect("spawn cargo test");
+        assert_eq!(
+            outcome.exit_code, 0,
+            "expected passing test to report exit 0\nstdout: {}\nstderr: {}",
+            outcome.stdout, outcome.stderr
+        );
     }
 
     fn routing_task(status: &str, owner: &[&str]) -> Task {
