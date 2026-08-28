@@ -878,17 +878,17 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     if let Some(url) = &latest_pr_url {
         let pr_files = pr_changed_files(url);
         let body = pr_body(url).unwrap_or_default();
-        // Rust crates (this binary included) have no pnpm manifest to
-        // filter against, so `PnpmTestRunner` always fails on their ACs
-        // regardless of the cited test's real outcome. Dispatch to
-        // `CargoTestRunner` whenever the PR touches this crate (same
-        // predicate the clippy evidence gate above already uses).
-        let test_runner: Box<dyn ac_parsing::TestRunner> =
-            if touches_rust_feature_workflow(&pr_files) {
-                Box::new(CargoTestRunner)
-            } else {
-                Box::new(PnpmTestRunner)
-            };
+        // A single PR can cite Rust, shell, and Python tests across
+        // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
+        // same underlying bug: `PnpmTestRunner` was the only runner and
+        // has no manifest to filter shell/pytest citations against
+        // either). `DispatchingTestRunner` picks a runner per citation by
+        // the test_id's own shape; `is_rust_pr` remains the disambiguator
+        // for bare Rust test names only (same predicate the clippy
+        // evidence gate above already uses — task e67c8835).
+        let test_runner: Box<dyn ac_parsing::TestRunner> = Box::new(DispatchingTestRunner {
+            is_rust_pr: touches_rust_feature_workflow(&pr_files),
+        });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
             &task_acs,
@@ -4299,6 +4299,216 @@ fn cargo_test_leaf_outcome(stdout: &str, test_name: &str) -> i32 {
     }
 }
 
+/// Absolute path to the repository root, derived from this crate's own
+/// compile-time location (`agents/workflows/feature-task`) rather than the
+/// runtime CWD — the lobster pipeline invokes this binary via `cargo run
+/// --manifest-path <abs-path>` without guaranteeing any particular CWD
+/// (same reasoning as `CargoTestRunner`'s `manifest_path` above).
+fn repo_root_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("CARGO_MANIFEST_DIR is agents/workflows/feature-task under the repo root")
+        .to_path_buf()
+}
+
+/// Directories skipped during `resolve_repo_file_by_name`'s search — build
+/// artefacts and dependency trees that are large, irrelevant, and (for
+/// `.git`) not meaningful to search.
+const SEARCH_EXCLUDE_DIRS: &[&str] = &[".git", "target", "node_modules", ".venv", "dist", "build"];
+
+/// Resolve a bare filename (e.g. `package-json-no-pnpm-pin.test.sh`) or a
+/// repo-relative path cited in an AC's `testID` evidence to an absolute
+/// path under `repo_root`.
+///
+/// Cited shell test names observed in practice (task 5baf6809) are bare
+/// filenames, not paths, so a direct join isn't enough — this walks the
+/// repo tree once and matches on file name. Returns an error (rather than
+/// silently picking one) if zero or more than one file matches, so a
+/// typo'd or ambiguous citation surfaces as a mechanical-evidence failure
+/// instead of silently resolving to the wrong script — the same
+/// no-silent-pass discipline `cargo_test_leaf_outcome` applies (PR #541
+/// review).
+fn resolve_repo_file_by_name(repo_root: &Path, name: &str) -> Result<PathBuf, String> {
+    let direct = repo_root.join(name);
+    if direct.is_file() {
+        return Ok(direct);
+    }
+    if name.contains('/') {
+        return Err(format!("{name} not found under {}", repo_root.display()));
+    }
+    let mut matches = Vec::new();
+    let mut stack = vec![repo_root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = entry.file_name();
+            let file_name_str = file_name.to_string_lossy();
+            if path.is_dir() {
+                if !SEARCH_EXCLUDE_DIRS.contains(&file_name_str.as_ref()) {
+                    stack.push(path);
+                }
+            } else if file_name_str == name {
+                matches.push(path);
+            }
+        }
+    }
+    match matches.len() {
+        0 => Err(format!(
+            "no file named \"{name}\" found under {}",
+            repo_root.display()
+        )),
+        1 => Ok(matches.remove(0)),
+        n => Err(format!(
+            "{n} files named \"{name}\" found under {} \u{2014} ambiguous citation",
+            repo_root.display()
+        )),
+    }
+}
+
+/// `ShellTestRunner` executes ACs whose cited test is a bash test script
+/// (e.g. `infra/cloud/scripts/tests/*.test.sh`). These scripts are not JS
+/// (so `ac_parsing`'s `.test.jsx`-style file-citation regex never matches
+/// them, meaning they fall to the test-runner branch, not the file-diff
+/// branch) and are not Rust, so before this runner existed every such
+/// citation fell through to `PnpmTestRunner`, which always failed with
+/// `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND` regardless of whether the script
+/// itself passed (task 5baf6809, 2026-08-28).
+struct ShellTestRunner;
+
+impl ShellTestRunner {
+    fn run_in(&self, repo_root: &Path, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        let script_path = resolve_repo_file_by_name(repo_root, test_name)?;
+        let output = std::process::Command::new("bash")
+            .arg(&script_path)
+            .current_dir(repo_root)
+            .output()
+            .map_err(|err| format!("spawn bash {}: {err}", script_path.display()))?;
+        Ok(ac_parsing::TestOutcome {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
+
+impl ac_parsing::TestRunner for ShellTestRunner {
+    fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        self.run_in(&repo_root_dir(), test_name)
+    }
+}
+
+/// Nearest ancestor of `start_file` (inclusive of its parent, exclusive
+/// above `repo_root`) containing a `pyproject.toml`. Python test suites in
+/// this repo live under per-workflow subprojects (e.g.
+/// `agents/workflows/cto-craft-tweet-drafts/`), each with its own `uv`
+/// environment, so `uv run pytest` must execute from that subproject
+/// directory rather than the repo root.
+fn nearest_pyproject_dir(repo_root: &Path, start_file: &Path) -> Option<PathBuf> {
+    let mut dir = start_file.parent()?;
+    loop {
+        if dir.join("pyproject.toml").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        if dir == repo_root {
+            return None;
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// `PytestTestRunner` executes ACs whose cited test is a pytest nodeid
+/// (`path/to/test_file.py::test_function`, task 60971f78's citation
+/// shape). Same underlying bug as the shell case: `PnpmTestRunner` has no
+/// pnpm manifest to filter a Python nodeid against and always fails. `uv`
+/// is this repo's Python package manager for these workflows (see
+/// `agents/workflows/*/pyproject.toml` + `uv.lock`).
+struct PytestTestRunner;
+
+impl PytestTestRunner {
+    fn run_in(&self, repo_root: &Path, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        let (file_part, _func_part) = test_name
+            .split_once("::")
+            .ok_or_else(|| format!("not a pytest nodeid (missing '::'): {test_name}"))?;
+        let file_abs = repo_root.join(file_part);
+        let project_dir = nearest_pyproject_dir(repo_root, &file_abs)
+            .ok_or_else(|| format!("no pyproject.toml found above {}", file_abs.display()))?;
+        let rel_file = file_abs.strip_prefix(&project_dir).map_err(|err| {
+            format!(
+                "compute pytest path relative to {}: {err}",
+                project_dir.display()
+            )
+        })?;
+        let nodeid_rel = format!("{}::{_func_part}", rel_file.display());
+        let output = std::process::Command::new("uv")
+            .args(["run", "pytest", &nodeid_rel])
+            .current_dir(&project_dir)
+            .output()
+            .map_err(|err| format!("spawn uv run pytest {nodeid_rel}: {err}"))?;
+        Ok(ac_parsing::TestOutcome {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
+
+impl ac_parsing::TestRunner for PytestTestRunner {
+    fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        self.run_in(&repo_root_dir(), test_name)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TestRunnerKind {
+    Shell,
+    Pytest,
+    Cargo,
+    Pnpm,
+}
+
+/// Choose which runner should execute a cited `testID` based on the shape
+/// of the name itself, not just which crate/workspace the PR happened to
+/// touch. A single PR can mix Rust, shell, Python, and JS ACs, so
+/// dispatch looks at each citation independently rather than picking one
+/// runner for the whole PR (tasks 5baf6809 / 60971f78).
+fn select_test_runner_kind(test_name: &str, is_rust_pr: bool) -> TestRunnerKind {
+    if test_name.contains(".py::") {
+        TestRunnerKind::Pytest
+    } else if test_name.ends_with(".sh") {
+        TestRunnerKind::Shell
+    } else if is_rust_pr {
+        TestRunnerKind::Cargo
+    } else {
+        TestRunnerKind::Pnpm
+    }
+}
+
+/// Dispatches each AC's cited test to the runner matching its shape (see
+/// `select_test_runner_kind`) instead of a single runner chosen once per
+/// PR. `is_rust_pr` remains the disambiguator for bare Rust test names —
+/// by shape alone those are indistinguishable from a pnpm test-suite name,
+/// so the PR-touches-this-crate signal (task e67c8835) is still needed for
+/// that one case.
+struct DispatchingTestRunner {
+    is_rust_pr: bool,
+}
+
+impl ac_parsing::TestRunner for DispatchingTestRunner {
+    fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
+        match select_test_runner_kind(test_name, self.is_rust_pr) {
+            TestRunnerKind::Shell => ShellTestRunner.run(test_name),
+            TestRunnerKind::Pytest => PytestTestRunner.run(test_name),
+            TestRunnerKind::Cargo => CargoTestRunner.run(test_name),
+            TestRunnerKind::Pnpm => PnpmTestRunner.run(test_name),
+        }
+    }
+}
+
 /// Fetch the list of files changed in a PR.
 ///
 /// Returns an empty Vec if the PR has no diff or the `gh` call fails for a
@@ -4553,6 +4763,200 @@ mod tests {
         // — only an exact leaf-segment match counts.
         let stdout = "\nrunning 1 test\ntest tests::my_test_extended ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
         assert_eq!(cargo_test_leaf_outcome(stdout, "my_test"), 1);
+    }
+
+    #[test]
+    fn select_test_runner_kind_picks_pytest_for_py_nodeid() {
+        assert_eq!(
+            select_test_runner_kind("agents/workflows/x/tests/test_y.py::test_z", true),
+            TestRunnerKind::Pytest
+        );
+        assert_eq!(
+            select_test_runner_kind("agents/workflows/x/tests/test_y.py::test_z", false),
+            TestRunnerKind::Pytest
+        );
+    }
+
+    #[test]
+    fn select_test_runner_kind_picks_shell_for_dot_sh_name() {
+        assert_eq!(
+            select_test_runner_kind("package-json-no-pnpm-pin.test.sh", true),
+            TestRunnerKind::Shell
+        );
+        assert_eq!(
+            select_test_runner_kind("package-json-no-pnpm-pin.test.sh", false),
+            TestRunnerKind::Shell
+        );
+    }
+
+    #[test]
+    fn select_test_runner_kind_falls_back_to_cargo_or_pnpm_by_pr_flag() {
+        assert_eq!(
+            select_test_runner_kind("routing_does_not_drain_managed_owners", true),
+            TestRunnerKind::Cargo
+        );
+        assert_eq!(
+            select_test_runner_kind("routing_does_not_drain_managed_owners", false),
+            TestRunnerKind::Pnpm
+        );
+    }
+
+    #[test]
+    fn resolve_repo_file_by_name_finds_unique_bare_name_match() {
+        let root = tempdir().unwrap();
+        let nested = root.path().join("infra/cloud/scripts/tests");
+        fs::create_dir_all(&nested).unwrap();
+        let target = nested.join("package-json-no-pnpm-pin.test.sh");
+        fs::write(&target, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+
+        let resolved =
+            resolve_repo_file_by_name(root.path(), "package-json-no-pnpm-pin.test.sh").unwrap();
+        assert_eq!(resolved, target);
+    }
+
+    #[test]
+    fn resolve_repo_file_by_name_resolves_direct_relative_path() {
+        let root = tempdir().unwrap();
+        let nested = root.path().join("infra/cloud/scripts/tests");
+        fs::create_dir_all(&nested).unwrap();
+        let target = nested.join("foo.test.sh");
+        fs::write(&target, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+
+        let resolved =
+            resolve_repo_file_by_name(root.path(), "infra/cloud/scripts/tests/foo.test.sh")
+                .unwrap();
+        assert_eq!(resolved, target);
+    }
+
+    #[test]
+    fn resolve_repo_file_by_name_errors_when_not_found() {
+        let root = tempdir().unwrap();
+        let err = resolve_repo_file_by_name(root.path(), "does-not-exist.test.sh").unwrap_err();
+        assert!(err.contains("no file named"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn resolve_repo_file_by_name_errors_when_ambiguous() {
+        let root = tempdir().unwrap();
+        let dir_a = root.path().join("a");
+        let dir_b = root.path().join("b");
+        fs::create_dir_all(&dir_a).unwrap();
+        fs::create_dir_all(&dir_b).unwrap();
+        fs::write(dir_a.join("dup.test.sh"), "exit 0\n").unwrap();
+        fs::write(dir_b.join("dup.test.sh"), "exit 0\n").unwrap();
+
+        let err = resolve_repo_file_by_name(root.path(), "dup.test.sh").unwrap_err();
+        assert!(err.contains("ambiguous"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn resolve_repo_file_by_name_skips_excluded_dirs() {
+        let root = tempdir().unwrap();
+        let decoy = root.path().join("node_modules/some-pkg");
+        fs::create_dir_all(&decoy).unwrap();
+        fs::write(decoy.join("decoy.test.sh"), "exit 0\n").unwrap();
+
+        let err = resolve_repo_file_by_name(root.path(), "decoy.test.sh").unwrap_err();
+        assert!(err.contains("no file named"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn shell_test_runner_reports_success_for_a_real_passing_script() {
+        let root = tempdir().unwrap();
+        let script = root.path().join("pass.test.sh");
+        fs::write(&script, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+
+        let outcome = ShellTestRunner.run_in(root.path(), "pass.test.sh").unwrap();
+        assert_eq!(outcome.exit_code, 0);
+    }
+
+    #[test]
+    fn shell_test_runner_reports_failure_for_a_real_failing_script() {
+        let root = tempdir().unwrap();
+        let script = root.path().join("fail.test.sh");
+        fs::write(&script, "#!/usr/bin/env bash\nexit 1\n").unwrap();
+
+        let outcome = ShellTestRunner.run_in(root.path(), "fail.test.sh").unwrap();
+        assert_ne!(outcome.exit_code, 0);
+    }
+
+    #[test]
+    fn shell_test_runner_errors_for_a_nonexistent_citation() {
+        let root = tempdir().unwrap();
+        let err = ShellTestRunner
+            .run_in(root.path(), "typo_d_name.test.sh")
+            .unwrap_err();
+        assert!(err.contains("no file named"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn nearest_pyproject_dir_walks_up_to_the_subproject_root() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("agents/workflows/x");
+        let tests_dir = project.join("tests");
+        fs::create_dir_all(&tests_dir).unwrap();
+        fs::write(project.join("pyproject.toml"), "[project]\n").unwrap();
+        let test_file = tests_dir.join("test_y.py");
+        fs::write(&test_file, "def test_z(): pass\n").unwrap();
+
+        let found = nearest_pyproject_dir(root.path(), &test_file).unwrap();
+        assert_eq!(found, project);
+    }
+
+    #[test]
+    fn nearest_pyproject_dir_returns_none_when_absent() {
+        let root = tempdir().unwrap();
+        let tests_dir = root.path().join("agents/workflows/x/tests");
+        fs::create_dir_all(&tests_dir).unwrap();
+        let test_file = tests_dir.join("test_y.py");
+        fs::write(&test_file, "def test_z(): pass\n").unwrap();
+
+        assert!(nearest_pyproject_dir(root.path(), &test_file).is_none());
+    }
+
+    #[test]
+    fn pytest_test_runner_reports_success_for_a_real_passing_test() {
+        if Command::new("uv").arg("--version").output().is_err() {
+            eprintln!("skipping: uv not installed in this environment");
+            return;
+        }
+        let root = tempdir().unwrap();
+        let project = root.path().join("agents/workflows/x");
+        let tests_dir = project.join("tests");
+        fs::create_dir_all(&tests_dir).unwrap();
+        fs::write(
+            project.join("pyproject.toml"),
+            "[project]\nname = \"tmp-pytest-fixture\"\nversion = \"0.0.0\"\nrequires-python = \">=3.11\"\ndependencies = [\"pytest\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            tests_dir.join("test_sample.py"),
+            "def test_pass():\n    assert True\n\n\ndef test_fail():\n    assert False\n",
+        )
+        .unwrap();
+
+        let pass_outcome = PytestTestRunner
+            .run_in(
+                root.path(),
+                "agents/workflows/x/tests/test_sample.py::test_pass",
+            )
+            .expect("spawn uv run pytest");
+        assert_eq!(
+            pass_outcome.exit_code, 0,
+            "expected passing pytest to report exit 0\nstdout: {}\nstderr: {}",
+            pass_outcome.stdout, pass_outcome.stderr
+        );
+
+        let fail_outcome = PytestTestRunner
+            .run_in(
+                root.path(),
+                "agents/workflows/x/tests/test_sample.py::test_fail",
+            )
+            .expect("spawn uv run pytest");
+        assert_ne!(
+            fail_outcome.exit_code, 0,
+            "expected failing pytest to report a nonzero exit"
+        );
     }
 
     fn routing_task(status: &str, owner: &[&str]) -> Task {
