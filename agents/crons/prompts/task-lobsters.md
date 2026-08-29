@@ -1,5 +1,7 @@
 Run the Feature Factory and Content Task workflow lobsters once each.
 
+**On retry (this is attempt > 1 within the same cron run):** always re-run both lobsters from scratch. Do not assume a prior attempt's session completed, try to inspect or attach to its processes, or spend time reasoning about what state it left behind — treat this as a clean, independent run and let the runners' own idempotent discovery (active-task queries) handle anything the prior attempt already touched.
+
 ## 1. Feature Task Lobster
 
 ```
