@@ -17,62 +17,23 @@ Process (fail-soft):
    The --all flag shows ALL calendars shared with quinnstoffer@gmail.com including Tom's calendars.
 
 3) Check pending bookmark approvals:
-   python3 -c "
-import json
-try:
-    with open('/Users/quinnstoffer/.openclaw/workspace/brain/state/bookmark-review-state.json') as f:
-        state = json.load(f)
-    pending = [{'id': '#' + v['approvalId'], 'title': v.get('title','')[:60], 'topic': v.get('approvalTopic','')} for v in state.get('items', {}).values() if v.get('approvalStatus') == 'pending' and v.get('approvalId')]
-    print(json.dumps(pending))
-except Exception as e:
-    print('[]')
-"
+   jq -r '[.items | to_entries[] | select(.value.approvalStatus == "pending") | {id: ("#" + .value.approvalId), title: (.value.title // "" | .[:60]), topic: .value.approvalTopic}]' \
+     /Users/quinnstoffer/.openclaw/workspace/brain/state/bookmark-review-state.json 2>/dev/null \
+     || echo "[]"
 
 4) Pull tasks where Tom is an attention owner from the Tasks API:
-   python3 -c "
-import sys, json
-sys.path.insert(0, '/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api')
-try:
-    from tasks_api_client import list_tasks
-    attention = []
-    seen = set()
-    for status in ['open', 'ready', 'doing', 'acceptance']:
-        for t in list_tasks(limit=100, status=status, attention_owner='Tom'):
-            task_id = str(t.get('id', ''))
-            if task_id and task_id not in seen:
-                seen.add(task_id)
-                owners = t.get('attentionOwners') or []
-                attention.append({
-                    'id': task_id[:8],
-                    'title': t.get('title', '')[:60],
-                    'status': status,
-                    'assignee': t.get('assignee', ''),
-                    'position': owners.index('Tom') if 'Tom' in owners else None,
-                    'actionable': bool(owners) and owners[0] == 'Tom',
-                })
-    print(json.dumps(attention))
-except Exception as e:
-    print(json.dumps({'error': str(e), 'tasks': []}))
-"
+   TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+     python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list \
+       --attention-owner Tom --status open --status ready --status doing --status acceptance --json
 
-5) Pull active tasks from the Tasks API:
-   python3 -c "
-import sys, json, urllib.request, os
-sys.path.insert(0, '/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api')
-try:
-    from tasks_api_client import list_tasks
-    active = []
-    for status in ['doing', 'acceptance']:
-        for t in list_tasks(limit=50, status=status):
-            active.append({'id': str(t.get('id',''))[:8], 'title': t.get('title','')[:60], 'status': status, 'assignee': t.get('assignee',''), 'blocked': t.get('blocked', False)})
-    blocked = [t for t in active if t['blocked']]
-    in_progress = [t for t in active if not t['blocked']]
-    print(json.dumps({'in_progress': in_progress, 'blocked': blocked}))
-except Exception as e:
-    print(json.dumps({'error': str(e), 'in_progress': [], 'blocked': []}))
-"
+5) Pull active tasks from the Tasks API (team status):
+   TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+     python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list \
+       --status doing --status acceptance --summary
 
 6) Check MEMORY.md for focus context.
+
+(Steps 4 and 5 use the ops-tasks skill at `agents/skills/ops/tasks-api/SKILL.md` for parameter patterns — do not inline ad-hoc Python in this prompt.)
 
 Output format:
 🌅 Good morning Tom!
@@ -89,7 +50,7 @@ Output format:
 ⚠️ PENDING APPROVALS
 [Only if pending bookmark approvals exist. For each: topic | title ~50 chars | #ap<id>]
 [Reply: approve #apXXXXXXXX or decline #apXXXXXXXX]
-[Skip this section entirely if none]
+[Skip this section entirely if none.]
 
 🏗️ TEAM STATUS
 [Active tasks — one line each: Assignee · title · status (doing/acceptance) · [BLOCKED] if blocked]
