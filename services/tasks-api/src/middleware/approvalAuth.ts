@@ -17,11 +17,21 @@ declare global { namespace Express { interface Request { approvalPrincipal?: App
 // ends the call in `state: revoked`. Ash remains the only actor whose POST can
 // leave the row `state: approved`, since only Ash's identity carries semantic
 // approval intent; the audit trail (`owner`) distinguishes the two.
+//
+// `brain_spec_reconciler` is a separate, narrowly-scoped identity used only by
+// `reconcile-brain-spec-approvals` (`agents/workflows/feature-task/src/main.rs`).
+// It never exercises judgment: it only mirrors a `- [x] **Approved by Tom**`
+// marker Tom already wrote into a `brain/tasks/specs/**/*.md` file into a
+// structured `spec` approval, and only when that spec has exactly one
+// unambiguous `**Spec:**` link from an active feature task. The resulting
+// approval's `owner` is `brain_spec_reconciler`, not `Tom` — the audit trail
+// always shows this was a mechanical reconciliation, never a live Tom action.
 const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
   Tom: new Set(['spec', 'accepted']),
   Quinn: new Set(['tech_design']),
   Ash: new Set(['qa_agent']),
-  feature_task_lobster: new Set(['qa_agent'])
+  feature_task_lobster: new Set(['qa_agent']),
+  brain_spec_reconciler: new Set(['spec'])
 };
 
 function loadServiceCredentials(): ServiceCredential[] {

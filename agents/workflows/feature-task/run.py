@@ -70,13 +70,18 @@ def workflow_env() -> dict[str, str]:
         token = _load_dotenv_token("LOBSTER_GITHUB_TOKEN")
         if token:
             env["GH_TOKEN"] = token
-    # The reconciliation command acts only on Tom's explicit checked marker,
-    # using Tom's server-scoped spec credential. The API still derives actor
-    # and permissions and remains the authoritative gate store.
-    if not env.get("TASKS_API_APPROVAL_TOKEN"):
-        token = _load_dotenv_token("TASKS_API_APPROVAL_TOKEN")
+    # The reconciliation command acts only on Tom's explicit checked marker
+    # in a brain spec file, using the dedicated `brain_spec_reconciler`
+    # service credential (server-scoped to `spec` only, never `Tom` — see
+    # ACTOR_PERMISSIONS in services/tasks-api/src/middleware/approvalAuth.ts).
+    # The API still derives actor/permissions and remains the authoritative
+    # gate store; this is not the same token as TASKS_API_APPROVAL_TOKEN
+    # (Quinn's tech_design-only credential), which the server rejects with
+    # APPROVAL_TYPE_FORBIDDEN for `spec` mutations.
+    if not env.get("TASKS_API_BRAIN_SPEC_RECONCILER_TOKEN"):
+        token = _load_dotenv_token("TASKS_API_BRAIN_SPEC_RECONCILER_TOKEN")
         if token:
-            env["TASKS_API_APPROVAL_TOKEN"] = token
+            env["TASKS_API_BRAIN_SPEC_RECONCILER_TOKEN"] = token
     return env
 
 

@@ -1861,12 +1861,20 @@ fn feature_policy_requires_spec(base_url: &str) -> Result<bool> {
 }
 
 fn grant_reconciled_spec_approval(base_url: &str, task_id: &str, spec_path: &str) -> Result<()> {
-    let token = std::env::var("TASKS_API_APPROVAL_TOKEN")
+    // Deliberately not `TASKS_API_APPROVAL_TOKEN` (Quinn's tech_design-only
+    // credential) — the server's ACTOR_PERMISSIONS table only grants `spec`
+    // to `Tom` and to the dedicated `brain_spec_reconciler` service identity
+    // (`services/tasks-api/src/middleware/approvalAuth.ts`). Reusing Quinn's
+    // token here 403s every time (`APPROVAL_TYPE_FORBIDDEN`), which is why
+    // this reconciliation silently never succeeded before.
+    let token = std::env::var("TASKS_API_BRAIN_SPEC_RECONCILER_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            anyhow!("TASKS_API_APPROVAL_TOKEN is required to reconcile checked brain specs")
+            anyhow!(
+                "TASKS_API_BRAIN_SPEC_RECONCILER_TOKEN is required to reconcile checked brain specs"
+            )
         })?;
     let url = format!(
         "{}/tasks/{task_id}/approvals",
@@ -1881,10 +1889,14 @@ fn grant_reconciled_spec_approval(base_url: &str, task_id: &str, spec_path: &str
     Ok(())
 }
 
-/// Scan only `brain/tasks/specs/open/*.md`, map checked specs to one active
-/// feature task, and grant the structured spec approval through the Tasks API.
-/// The API row remains the gate source; revoked rows, missing links, and
-/// ambiguous links are diagnostics and never trigger a write.
+/// Scan `brain/tasks/specs/open/*.md` and `brain/tasks/specs/in-progress/*.md`,
+/// map checked specs to one active feature task, and grant the structured
+/// spec approval through the Tasks API. Both directories hold specs a task
+/// can still legitimately reference (`a5a4ed8f` moves specs to `in-progress`
+/// once implementation starts, well before Tom has necessarily approved them),
+/// so scanning `open` alone silently stops reconciling a spec the moment work
+/// begins on it. The API row remains the gate source; revoked rows, missing
+/// links, and ambiguous links are diagnostics and never trigger a write.
 fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Result<Envelope> {
     if !feature_policy_requires_spec(&args.base_url)? {
         return Ok(output(
@@ -1898,24 +1910,23 @@ fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Resu
     }
 
     let tasks = list_all_active_tasks(&args.base_url)?;
-    let open_dir = args.workspace_root.join(TASK_SPECS_OPEN_DIR);
-    let entries = fs::read_dir(&open_dir)
-        .with_context(|| format!("reading open task specs directory `{}`", open_dir.display()))?;
     let mut paths = Vec::new();
-    for entry in entries {
-        let entry = entry.with_context(|| format!("reading entry in `{}`", open_dir.display()))?;
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("md") {
-            continue;
-        }
-        if !entry
-            .file_type()
-            .map(|kind| kind.is_file())
-            .unwrap_or(false)
-        {
-            paths.push((path, false));
-        } else {
-            paths.push((path, true));
+    for spec_dir_const in [TASK_SPECS_OPEN_DIR, TASK_SPECS_IN_PROGRESS_DIR] {
+        let dir = args.workspace_root.join(spec_dir_const);
+        let entries = fs::read_dir(&dir)
+            .with_context(|| format!("reading task specs directory `{}`", dir.display()))?;
+        for entry in entries {
+            let entry =
+                entry.with_context(|| format!("reading entry in `{}`", dir.display()))?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("md") {
+                continue;
+            }
+            let accessible_file = entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false);
+            paths.push((path, spec_dir_const, accessible_file));
         }
     }
     paths.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1925,14 +1936,14 @@ fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Resu
     let mut already = 0usize;
     let mut unchecked = 0usize;
     let mut failures = Vec::new();
-    for (path, accessible_file) in paths {
+    for (path, spec_dir_const, accessible_file) in paths {
         let file_name = path
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("<invalid>");
-        let spec_rel = format!("{TASK_SPECS_OPEN_DIR}/{file_name}");
+        let spec_rel = format!("{spec_dir_const}/{file_name}");
         if !accessible_file {
-            failures.push(format!("Open task spec `{spec_rel}` is not an accessible regular file; no approval granted."));
+            failures.push(format!("Task spec `{spec_rel}` is not an accessible regular file; no approval granted."));
             continue;
         }
         let text = match fs::read_to_string(&path) {
@@ -1968,11 +1979,11 @@ fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Resu
             }
             BrainSpecApprovalPlan::MissingLink => {
                 checked += 1;
-                failures.push(format!("Checked open task spec `{spec_rel}` has no exact, unambiguous `**Spec:**` link from an active feature task requiring `spec`; no approval granted."));
+                failures.push(format!("Checked task spec `{spec_rel}` has no exact, unambiguous `**Spec:**` link from an active feature task requiring `spec`; no approval granted."));
             }
             BrainSpecApprovalPlan::Ambiguous { task_ids } => {
                 checked += 1;
-                failures.push(format!("Checked open task spec `{spec_rel}` is linked by multiple active feature tasks ({}); no approval granted.", task_ids.join(", ")));
+                failures.push(format!("Checked task spec `{spec_rel}` is linked by multiple active feature tasks ({}); no approval granted.", task_ids.join(", ")));
             }
         }
     }
