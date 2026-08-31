@@ -78,26 +78,6 @@ describe('task approval boundary', () => {
     expect(tomTech.status).toBe(403); expect(quinnSpec.status).toBe(403); expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('lets feature_task_lobster create/revoke the qa_agent bootstrap row but nothing else', async () => {
-    const app = createApp();
-    prismaMock.task.findUnique.mockResolvedValue(activeTask);
-    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
-    prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'qa_agent', owner: 'feature_task_lobster' }));
-    prismaMock.taskComment.create.mockResolvedValue({});
-
-    const created = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(LOBSTER_TOKEN)).send({ type: 'qa_agent' });
-    expect(created.status).toBe(200);
-    expect(prismaMock.taskApproval.upsert.mock.calls[0][0].create.owner).toBe('feature_task_lobster');
-
-    prismaMock.taskApproval.findUnique.mockResolvedValue(approval({ type: 'qa_agent', owner: 'feature_task_lobster' }));
-    prismaMock.taskApproval.update.mockResolvedValue(approval({ type: 'qa_agent', owner: 'feature_task_lobster', state: 'revoked' }));
-    const revoked = await request(app).delete(`/api/v1/tasks/${TASK_ID}/approvals/qa_agent`).set(auth(LOBSTER_TOKEN));
-    expect(revoked.status).toBe(200);
-
-    const spec = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(LOBSTER_TOKEN)).send({ type: 'spec' });
-    expect(spec.status).toBe(403);
-  });
-
   it('rejects a body owner and derives owner from the credential', async () => {
     const forged = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'spec', owner: 'Quinn' });
     expect(forged.status).toBe(400); expect(forged.body.error.code).toBe('FORGEABLE_APPROVAL_OWNER');

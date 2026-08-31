@@ -347,27 +347,35 @@ tasksRouter.post('/tasks', async (req, res, next) => {
 
       if (requiredApprovalTypes.length > 0) {
         const config = loadRequiredApprovalsConfig();
-        await tx.taskApproval.createMany({
-          data: requiredApprovalTypes.map((approvalType) => {
-            const configuredOwner = gateOwnerFor(config, approvalType)
-              ?? DEFAULT_APPROVAL_OWNERS[approvalType]
-              ?? null;
-            return {
+        // One `create` per required gate rather than `createMany` — the
+        // task-creation use case only has 1-3 required gates per task,
+        // and per-row `create` keeps the call portable across test mocks
+        // (which mirror the Prisma client model-by-model and don't all
+        // stub `createMany`). Same transactional semantics: any failure
+        // rolls back the whole task creation including the pending rows.
+        // The (taskId, type) unique index in the schema would surface a
+        // race as P2002; taskId is a fresh UUID so this branch only runs
+        // once per task, never in a hot loop.
+        for (const approvalType of requiredApprovalTypes) {
+          const configuredOwner = gateOwnerFor(config, approvalType)
+            ?? DEFAULT_APPROVAL_OWNERS[approvalType]
+            ?? null;
+          await tx.taskApproval.create({
+            data: {
               taskId: task.id,
               type: approvalType as never,
               owner: configuredOwner ?? 'Unknown',
-              state: 'pending' as const,
+              state: 'pending' as const
               // approvedAt / revokedAt intentionally omitted (null defaults).
               // `note` intentionally omitted — task creation is a system
               // event with no decision to record; audit trail lives on
               // transitions, not on the initial materialisation.
-            };
-          }),
-          skipDuplicates: true
-        });
+            }
+          });
+        }
       }
 
-      return tx.task.findFirstOrThrow({
+      const reloaded = await tx.task.findFirst({
         where: { id: task.id },
         include: {
           tags: {
@@ -380,6 +388,13 @@ tasksRouter.post('/tasks', async (req, res, next) => {
           ...dependencyInclude
         }
       });
+      // `task.create` above just succeeded with this id, so a missing
+      // row here would only be possible if a concurrent transaction
+      // deleted it — fail loud rather than returning a partial record.
+      if (!reloaded) {
+        throw new Error(`Task ${task.id} not found immediately after creation`);
+      }
+      return reloaded;
     });
 
     return res.status(201).json({ data: mapTask(created, mapTaskOptionsFor(created)) });
