@@ -22,12 +22,12 @@ Do not use for:
 ## Procedure
 
 1. **Identify the owning initiative.**
-   - Search `brain/initiatives/` for the product or project named by the user.
+   - Search `brain/sindustries/initiatives/` for the product or project named by the user.
    - Read that initiative's `index.md` before writing.
    - If there is no unambiguous initiative, ask one concise clarifying question rather than inventing a new top-level location.
 
 2. **Resolve the canonical feedback file.**
-   - Prefer `brain/initiatives/<initiative>/product-feedback.md`.
+   - Prefer `brain/sindustries/initiatives/<initiative>/product-feedback.md`.
    - If it exists, read it before editing and append to it.
    - If it does not exist, create it with the structure below and add a `Product feedback` link to the initiative's `index.md` under `Artifacts`.
    - Always use the workspace `brain/` symlink path, never a git worktree's `brain/` path.

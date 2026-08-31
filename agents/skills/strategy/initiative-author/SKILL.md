@@ -5,13 +5,13 @@ description: "Create and maintain hypothesis-first initiative index documents wi
 
 # Initiative Author
 
-Use this skill when creating or reviewing an initiative at `brain/initiatives/<slug>/`.
+Use this skill when creating or reviewing an initiative at `brain/sindustries/initiatives/<slug>/`.
 
 ## Purpose
 
 An initiative is a bounded business hypothesis with a concrete output. Its `index.md` is the stable front door for the initiative; it is not a task list, campaign plan, market-research log, or scorecard.
 
-The strategy graph at `brain/strategy/strategy-graph.md` remains the source of truth for initiative relationships, Impact tags, status, and WSJF inputs/scores. Never copy WSJF values into `index.md`.
+The strategy graph at `brain/sindustries/strategy/strategy-graph.md` remains the source of truth for initiative relationships, Impact tags, status, and WSJF inputs/scores. Never copy WSJF values into `index.md`.
 
 ## When to use
 
@@ -24,9 +24,9 @@ The strategy graph at `brain/strategy/strategy-graph.md` remains the source of t
 
 Read, in order:
 
-1. `brain/strategy/strategy-graph.md` — canonical initiative name, hypothesis, output, Impact relationships, and status.
+1. `brain/sindustries/strategy/strategy-graph.md` — canonical initiative name, hypothesis, output, Impact relationships, and status.
 2. `brain/README.md` — folder and output conventions.
-3. Existing `brain/initiatives/<slug>/index.md`, if present.
+3. Existing `brain/sindustries/initiatives/<slug>/index.md`, if present.
 4. Existing initiative artifacts (`market-research.md`, `campaign.md`, `feature-ideas.md`, `prospects/`) for links and open questions.
 5. Relevant task-board records when populating the Tasks section.
 
@@ -34,7 +34,7 @@ If the graph and an existing index disagree, do not silently choose. Preserve th
 
 ## Index shape
 
-Create `brain/initiatives/<slug>/index.md` with this structure:
+Create `brain/sindustries/initiatives/<slug>/index.md` with this structure:
 
 ```md
 # Initiative — <Name>
