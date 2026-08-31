@@ -11,12 +11,12 @@ export type ApprovalPrincipal = { actor: string; approvalTypes: ReadonlySet<Appr
 declare global { namespace Express { interface Request { approvalPrincipal?: ApprovalPrincipal } } }
 
 // `feature_task_lobster` is the automated feature-task workflow itself, not
-// a human/agent identity. It may only create/revoke the mechanical `qa_agent`
-// placeholder row (`ensure_qa_agent_gate`'s POST + DELETE bootstrap pattern in
-// `agents/workflows/feature-task/src/main.rs`) — the row it can write always
-// ends the call in `state: revoked`. Ash remains the only actor whose POST can
-// leave the row `state: approved`, since only Ash's identity carries semantic
-// approval intent; the audit trail (`owner`) distinguishes the two.
+// a human/agent identity. As of task d9cd8a83 it no longer writes approval
+// rows — `POST /tasks` materialises pending rows directly, so the lobster
+// no longer needs the `qa_agent` write grant that the now-removed
+// `ensure_qa_agent_gate` bootstrap required. The lobster still uses its
+// service credential for `add_comment` and other non-approval routes
+// (which are gated by separate middleware).
 //
 // `brain_spec_reconciler` is a separate, narrowly-scoped identity used only by
 // `reconcile-brain-spec-approvals` (`agents/workflows/feature-task/src/main.rs`).
@@ -30,7 +30,7 @@ const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
   Tom: new Set(['spec', 'accepted']),
   Quinn: new Set(['tech_design']),
   Ash: new Set(['qa_agent']),
-  feature_task_lobster: new Set(['qa_agent']),
+  feature_task_lobster: new Set([]),
   brain_spec_reconciler: new Set(['spec'])
 };
 

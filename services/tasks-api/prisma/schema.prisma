@@ -38,16 +38,16 @@ model Task {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  taskType        String?      // content | code | research | feature
-  specChecksum    String?
+  taskType              String? // content | code | research | feature
+  specChecksum          String?
   workflowHandoffRoleId String?
   workflowHandoffGate   String?
   workflowHandoffReason String?
 
   tags            TaskTag[]
   comments        TaskComment[]
-  dependencies    TaskDependency[] @relation("TaskDependsOn")
-  dependedOnBy    TaskDependency[] @relation("TaskDependedOnBy")
+  dependencies    TaskDependency[]            @relation("TaskDependsOn")
+  dependedOnBy    TaskDependency[]            @relation("TaskDependedOnBy")
   analyticsEvents FeatureTaskAnalyticsEvent[]
   approvals       TaskApproval[]
   attentionOwners TaskAttentionOwner[]
@@ -96,13 +96,13 @@ model TaskDependency {
 
 model TaskComment {
   id        String   @id @default(uuid()) @db.Uuid
-  taskId     String   @db.Uuid
+  taskId    String   @db.Uuid
   author    String
   body      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId, createdAt])
 }
@@ -112,15 +112,15 @@ model Tag {
   name      String   @unique
   createdAt DateTime @default(now())
 
-  tasks     TaskTag[]
+  tasks TaskTag[]
 }
 
 model TaskTag {
   taskId String @db.Uuid
   tagId  String @db.Uuid
 
-  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([taskId, tagId])
   @@index([tagId])
@@ -132,39 +132,39 @@ model TaskTag {
 /// routes below, the Mission Control flow dashboard, and the replay CLI.
 /// See docs/specs/post-merge-feature-factory-analytics-tech-design.md.
 model FeatureTaskAnalyticsEvent {
-  id                     String   @id @default(uuid()) @db.Uuid
-  taskId                 String   @db.Uuid
+  id                       String    @id @default(uuid()) @db.Uuid
+  taskId                   String    @db.Uuid
   /// Stable idempotency key. Gate failure shape:
   ///   `feature-task:{taskId}:{gate}:{sha256(failureText)}:{failureOrdinal}`
   /// Terminal summary shape:
   ///   `feature-task:{taskId}:terminal:{terminalStatus}`
-  eventKey               String   @unique
+  eventKey                 String    @unique
   /// `gate_failure` | `terminal_summary`
-  eventType              String
+  eventType                String
   /// `spec_check` | `ready_checks` | `verify_delivery` | `feedback_aggregate` | `post_merge`
-  gate                   String?
+  gate                     String?
   /// `capacity` | `quality`
-  cause                  String?
-  message                String?
-  occurredAt             DateTime @default(now())
+  cause                    String?
+  message                  String?
+  occurredAt               DateTime  @default(now())
   /// `done` | `accepted`. Null for gate_failure events.
-  terminalStatus         String?
+  terminalStatus           String?
   /// ISO timestamp of the task's terminal transition. Null for gate_failure events.
-  completionTimestamp    DateTime?
+  completionTimestamp      DateTime?
   /// Terminal summary fields. Null for gate_failure events.
-  totalGateFailureCount  Int?
-  capacityBlockCount     Int?
-  qualityFailureCount    Int?
-  prCycleTimeSeconds     Int?
+  totalGateFailureCount    Int?
+  capacityBlockCount       Int?
+  qualityFailureCount      Int?
+  prCycleTimeSeconds       Int?
   /// Aggregated evidence-type counts from merged PR bodies, e.g.
   /// `{ "unit": 2, "integration": 1, "e2e": 1, "manual": 1 }`. Null for gate_failure events.
   evidenceTypeDistribution Json?
   /// Free-form per-event payload (e.g. PR URLs, failure context).
-  details                Json?
-  createdAt              DateTime @default(now())
+  details                  Json?
+  createdAt                DateTime  @default(now())
   /// Auto-updated on every row write. Used by the route handler to
   /// distinguish UPSERT inserts from UPSERT updates without an extra query.
-  updatedAt              DateTime @updatedAt
+  updatedAt                DateTime  @updatedAt
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
@@ -181,6 +181,7 @@ enum ApprovalType {
 }
 
 enum ApprovalState {
+  pending
   approved
   revoked
 }
@@ -195,17 +196,17 @@ enum ApprovalState {
 /// foreign key. See the Tasks API Native Approvals tech design for the
 /// rationale.
 model TaskApproval {
-  id          String        @id @default(uuid()) @db.Uuid
-  taskId      String        @db.Uuid
-  type        ApprovalType
-  owner       String
-  state       ApprovalState @default(approved)
-  approvedAt  DateTime      @default(now())
-  revokedAt   DateTime?
+  id         String        @id @default(uuid()) @db.Uuid
+  taskId     String        @db.Uuid
+  type       ApprovalType
+  owner      String
+  state      ApprovalState @default(approved)
+  approvedAt DateTime      @default(now())
+  revokedAt  DateTime?
   /// Optional note from the approver — why this was approved or revoked.
-  note        String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  note       String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
@@ -224,5 +225,3 @@ model ApprovalSession {
   @@index([actor, expiresAt])
   @@index([expiresAt, revokedAt])
 }
-
-
