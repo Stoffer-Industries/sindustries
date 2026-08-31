@@ -78,11 +78,11 @@ WSJF favours small-but-valuable work over big-but-valuable work per unit of effo
 
 **How this reaches Tasks:** Tasks tag themselves with one or more Impacts (unchanged — no new tagging behaviour). A Task's derived strategic-fit badge is the score of the highest-WSJF `active` Initiative backing any of its tagged Impacts. This is computed, not stored by hand, and re-derives automatically when Initiative status or WSJF inputs change. `urgent` on the Task always overrides the derived badge.
 
-**Where the live numbers live:** the reasoning framework (this file) defines *how* to score. The actual Impacts, Initiatives, and their current weights/status/WSJF inputs live in `brain/strategy/strategy-graph.md` — that file is the instance data, this skill is the method.
+**Where the live numbers live:** the reasoning framework (this file) defines *how* to score. The actual Impacts, Initiatives, and their current weights/status/WSJF inputs live in `brain/sindustries/strategy/strategy-graph.md` — that file is the instance data, this skill is the method.
 
 That instance file also names each Initiative's kind — permanent **Capability Theme** (never graduates, serves everything) vs temporary **Products bucket** entry (unranked against siblings until it proves real usage and can graduate into its own Value Stream) — and the graduation rule between them. This skill's Theme/Value Stream/ART vocabulary above is the SAFe-derived reasoning shape; the Capability/Products split is how Sindustries currently maps its own initiatives onto that shape, kept in the instance file, not duplicated here.
 
-Every Initiative also has a per-initiative folder at `brain/initiatives/<slug>/` (folder structure and conventions: `brain/README.md`; authoring/validation rules and the `index.md` format, including the living hypothesis, exec owner, and success-metrics fields: the `initiative-author` skill). Do not duplicate that shape here — this skill covers *scoring and traversal*, `initiative-author` covers *how the initiative's own document is written and kept current*.
+Every Initiative also has a per-initiative folder at `brain/sindustries/initiatives/<slug>/` (folder structure and conventions: `brain/README.md`; authoring/validation rules and the `index.md` format, including the living hypothesis, exec owner, and success-metrics fields: the `initiative-author` skill). Do not duplicate that shape here — this skill covers *scoring and traversal*, `initiative-author` covers *how the initiative's own document is written and kept current*.
 
 ---
 
@@ -153,7 +153,7 @@ Sindustries currently has one ART and one Value Stream. Treat these as "the whol
 | **Value Stream** | End-to-end flow of value to a customer segment |
 | **ART** | Cross-functional team aligned to a value stream |
 | **Impact** | A specific customer outcome — the bridge between strategy and delivery. Carries a `weight` (default 1). |
-| **Initiative** | A bounded hypothesis contributing to one or more impacts, with a dedicated folder at `brain/initiatives/<slug>/` (see `initiative-author` skill). Carries `status` (active/parked/blocked) and WSJF inputs (value/time criticality/risk enablement/job size) → derived `score`, both tracked in this skill's instance file, not in the initiative's own folder. |
+| **Initiative** | A bounded hypothesis contributing to one or more impacts, with a dedicated folder at `brain/sindustries/initiatives/<slug>/` (see `initiative-author` skill). Carries `status` (active/parked/blocked) and WSJF inputs (value/time criticality/risk enablement/job size) → derived `score`, both tracked in this skill's instance file, not in the initiative's own folder. |
 | **Feature** | A deliverable (software, marketing, sales, ops) that implements an initiative |
 | **Phase** | A time-boxed slice of feature delivery |
 | **Story** | A granular unit of work within a phase |
