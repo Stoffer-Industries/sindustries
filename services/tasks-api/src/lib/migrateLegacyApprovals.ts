@@ -30,7 +30,7 @@ export interface TaskApproval {
   taskId: string;
   type: ApprovalType;
   owner: string;
-  state: 'approved' | 'revoked';
+  state: 'pending' | 'approved' | 'revoked';
   approvedAt: string;
   revokedAt: string | null;
   note: string | null;

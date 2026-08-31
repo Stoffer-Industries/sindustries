@@ -30,6 +30,12 @@ import {
   mapTaskOptionsFor,
   validateDependsOnIds
 } from './tasks/_deps.ts';
+import {
+  DEFAULT_APPROVAL_OWNERS,
+  gateOwnerFor,
+  loadRequiredApprovalsConfig,
+  requiredApprovalsFor
+} from '../config/requiredApprovals.ts';
 
 export const tasksRouter = Router();
 
@@ -309,33 +315,71 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     const now = new Date();
     const title = formatTaskTitle(rawTitle, taskType);
 
-    const created = await prisma.task.create({
-      data: {
-        title,
-        description,
-        status,
-        priority,
-        assignee,
-        dueAt,
-        statusChangedAt: now,
-        completedAt: status === 'done' ? now : null,
-        blocked,
-        taskType,
-        specChecksum,
-        tags: {
-          create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
-        }
-      },
-      include: {
-        tags: {
-          include: {
-            tag: true
+    // Resolve the required approvals for the task type so we can materialise
+    // `pending` rows for each required gate in the same transaction as the
+    // task row (task d9cd8a83). Empty list → no rows created, matching the
+    // pre-existing behaviour for `taskType: null` and research tasks.
+    const requiredApprovalTypes = requiredApprovalsFor(
+      loadRequiredApprovalsConfig(),
+      taskType
+    );
+
+    const created = await prisma.$transaction(async (tx) => {
+      const task = await tx.task.create({
+        data: {
+          title,
+          description,
+          status,
+          priority,
+          assignee,
+          dueAt,
+          statusChangedAt: now,
+          completedAt: status === 'done' ? now : null,
+          blocked,
+          taskType,
+          specChecksum,
+          tags: {
+            create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
           }
         },
-        approvals: true,
-        attentionOwners: { orderBy: { position: 'asc' } },
-        ...dependencyInclude
+        select: { id: true }
+      });
+
+      if (requiredApprovalTypes.length > 0) {
+        const config = loadRequiredApprovalsConfig();
+        await tx.taskApproval.createMany({
+          data: requiredApprovalTypes.map((approvalType) => {
+            const configuredOwner = gateOwnerFor(config, approvalType)
+              ?? DEFAULT_APPROVAL_OWNERS[approvalType]
+              ?? null;
+            return {
+              taskId: task.id,
+              type: approvalType as never,
+              owner: configuredOwner ?? 'Unknown',
+              state: 'pending' as const,
+              // approvedAt / revokedAt intentionally omitted (null defaults).
+              // `note` intentionally omitted — task creation is a system
+              // event with no decision to record; audit trail lives on
+              // transitions, not on the initial materialisation.
+            };
+          }),
+          skipDuplicates: true
+        });
       }
+
+      return tx.task.findFirstOrThrow({
+        where: { id: task.id },
+        include: {
+          tags: {
+            include: {
+              tag: true
+            }
+          },
+          approvals: true,
+          attentionOwners: { orderBy: { position: 'asc' } },
+          ...dependencyInclude
+        }
+      });
     });
 
     return res.status(201).json({ data: mapTask(created, mapTaskOptionsFor(created)) });

@@ -613,11 +613,11 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `doing`.",
     )
-    // Note: `qa_agent` gate creation (AC1 of task f6a4d56a) is handled by
-    // the ensure_qa_agent_gate call at the top of verify_delivery, which
-    // covers both the "task enters doing" trigger (verify_delivery runs
-    // shortly after the transition completes) and the "PR merges while in
-    // doing" trigger (verify_delivery sweeps every iteration).
+    // Note: `qa_agent` gate rows are now created by `POST /tasks` itself
+    // (task d9cd8a83) as `state: pending` rows. The previous
+    // `ensure_qa_agent_gate` POST-then-DELETE bootstrap is gone — see the
+    // d9cd8a83 tech design for the migration story and the rollout
+    // rationale.
 }
 
 // ---- Code-task stages (task f77b7a60) ----
@@ -777,16 +777,10 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_doing".to_string();
         return Ok(env);
     }
-    // AC1 of task f6a4d56a: ensure the `qa_agent` TaskApproval row exists
-    // for this task. Idempotent — also covers the "PR merges while the
-    // task is in `doing`" trigger (ready_checks already ran once when the
-    // task entered `doing`, but the PR may have merged after). After
-    // creating (or finding) the row, re-fetch the task so the predicate
-    // check below sees the updated `approvals[]` set.
-    if !args.dry_run {
-        let _ = ensure_qa_agent_gate(&args, &env);
-        env.task = api_get_task(&args.base_url, &env.task.id)?;
-    }
+    // AC1 of task f6a4d56a: the `qa_agent` TaskApproval row is now created
+    // by `POST /tasks` as a `state: pending` row (task d9cd8a83), so no
+    // bootstrap is needed here. The previous `ensure_qa_agent_gate`
+    // POST-then-DELETE pattern was removed — see the d9cd8a83 tech design.
     let mut failures = Vec::new();
     let pr_urls = implementer_pr_urls(&env.task);
     if pr_urls.is_empty() {
@@ -1110,80 +1104,6 @@ fn qa_agent_verified_failures(task: &Task) -> Vec<String> {
     } else {
         vec!["Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.".to_string()]
     }
-}
-
-/// Idempotently ensure a `qa_agent` TaskApproval row exists for this task.
-///
-/// Strategy: uses the POST + DELETE (revoke-as-outstanding) pattern from
-/// the PR #2 tech design's open-question #1 fallback path. The Tasks API
-/// only persists `approved` rows on POST; the "outstanding" state for the
-/// gate is represented as a `revoked` row (`task_approval_granted` reads
-/// `state == "approved"`, so `revoked` correctly evaluates as
-/// "not satisfied"). Ash's later POST updates the row back to `state:
-/// approved` via the existing upsert branch in `taskApprovals.ts` POST.
-///
-/// Returns `true` when a new row was created in this call, `false` when a
-/// row already existed or the POST failed (auth not yet provisioned for
-/// the actor — see below). Auth failures are non-fatal: the function logs
-/// to stderr and continues, leaving the gate absent.
-///
-/// The POST/DELETE pair authenticates as the `feature_task_lobster` service
-/// actor via `FEATURE_TASK_LOBSTER_TOKEN` (same credential `add_comment`
-/// uses), never as `Ash`. `approvalAuth.ts:ACTOR_PERMISSIONS` grants
-/// `feature_task_lobster` write access to `qa_agent` specifically for this
-/// bootstrap pattern — the call always ends with the row in `state:
-/// revoked`, so it can never itself leave a task looking QA-approved. Ash's
-/// later POST (her own token) is what flips the row to `state: approved`.
-fn ensure_qa_agent_gate(args: &StageArgs, env: &Envelope) -> Result<bool> {
-    // Already have a row — no-op.
-    if env
-        .task
-        .approvals
-        .iter()
-        .any(|a| a.approval_type == "qa_agent")
-    {
-        return Ok(false);
-    }
-    let token = match lobster_service_token() {
-        Some(t) => t,
-        None => {
-            eprintln!(
-                "[lobster] ensure_qa_agent_gate skipped: neither FEATURE_TASK_LOBSTER_TOKEN nor TASKS_API_APPROVAL_TOKEN env var is set"
-            );
-            return Ok(false);
-        }
-    };
-    let base = args.base_url.trim_end_matches('/');
-    let post_url = format!("{base}/tasks/{}/approvals", env.task.id);
-    let post_body = json!({
-        "type": "qa_agent",
-        "note": "[lobster] initial qa_agent gate (revoke-as-outstanding proxy)"
-    });
-    let post_result = ureq::post(&post_url)
-        .set("Authorization", &format!("Bearer {token}"))
-        .send_json(post_body)
-        .map(|_| ())
-        .map_err(|err| anyhow!("POST {post_url} failed: {err}"));
-    if let Err(err) = post_result {
-        eprintln!(
-            "[lobster] ensure_qa_agent_gate POST failed (non-fatal; will surface as `[qa-agent-blocked]`): {err}"
-        );
-        return Ok(false);
-    }
-    // DELETE flips the row to `state: revoked`. Predicate correctly
-    // evaluates `revoked` rows as "not satisfied". A later Ash POST
-    // updates the row back to `state: approved` via the upsert.
-    let delete_url = format!("{post_url}/qa_agent");
-    if let Err(err) = ureq::delete(&delete_url)
-        .set("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map(|_| ())
-    {
-        eprintln!(
-            "[lobster] ensure_qa_agent_gate DELETE failed (non-fatal; row may stay approved=blocking): {err}"
-        );
-    }
-    Ok(true)
 }
 
 fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
@@ -8652,6 +8572,19 @@ detached
         let task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
         assert!(qa_agent_verified(&task));
         assert!(qa_agent_verified_failures(&task).is_empty());
+    }
+
+    #[test]
+    fn ac1_qa_agent_verified_returns_false_when_approval_pending() {
+        // Task d9cd8a83: `POST /tasks` materialises required gates as
+        // `state: pending` rows. The predicate must read them as
+        // "not satisfied" identically to a missing/revoked row — no
+        // observable change to any gate pass/fail outcome.
+        let task = qa_test_task_with_approvals(vec![("qa_agent", "pending")]);
+        assert!(!qa_agent_verified(&task));
+        let failures = qa_agent_verified_failures(&task);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("`qa_agent`"));
     }
 
     #[test]
