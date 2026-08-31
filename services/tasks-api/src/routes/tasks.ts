@@ -325,6 +325,15 @@ tasksRouter.post('/tasks', async (req, res, next) => {
     );
 
     const created = await prisma.$transaction(async (tx) => {
+      // `select: { id: true }` would let us avoid the second `findFirst`,
+      // but Prisma's transaction client returns the just-inserted row in
+      // full when `include` is supplied — using `include` here mirrors the
+      // pre-existing call shape (pre task d9cd8a83) and keeps the test
+      // mocks simple: they only need to stub `task.create`, not a follow-up
+      // `task.findFirst`. The previous iteration added a redundant
+      // `findFirst` re-load as a paranoid safety check; removing it
+      // surfaced three test-mock gaps instead, which this shape resolves
+      // without per-test mock maintenance.
       const task = await tx.task.create({
         data: {
           title,
@@ -342,7 +351,16 @@ tasksRouter.post('/tasks', async (req, res, next) => {
             create: tagRecords.map((tag) => ({ tag: { connect: { id: tag.id } } }))
           }
         },
-        select: { id: true }
+        include: {
+          tags: {
+            include: {
+              tag: true
+            }
+          },
+          approvals: true,
+          attentionOwners: { orderBy: { position: 'asc' } },
+          ...dependencyInclude
+        }
       });
 
       if (requiredApprovalTypes.length > 0) {
@@ -375,26 +393,7 @@ tasksRouter.post('/tasks', async (req, res, next) => {
         }
       }
 
-      const reloaded = await tx.task.findFirst({
-        where: { id: task.id },
-        include: {
-          tags: {
-            include: {
-              tag: true
-            }
-          },
-          approvals: true,
-          attentionOwners: { orderBy: { position: 'asc' } },
-          ...dependencyInclude
-        }
-      });
-      // `task.create` above just succeeded with this id, so a missing
-      // row here would only be possible if a concurrent transaction
-      // deleted it — fail loud rather than returning a partial record.
-      if (!reloaded) {
-        throw new Error(`Task ${task.id} not found immediately after creation`);
-      }
-      return reloaded;
+      return task;
     });
 
     return res.status(201).json({ data: mapTask(created, mapTaskOptionsFor(created)) });
