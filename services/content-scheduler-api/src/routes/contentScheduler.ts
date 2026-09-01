@@ -25,6 +25,7 @@
 // Tech design: docs/specs/content-scheduler-tab-tech-design.md
 //              docs/specs/content-scheduler-auto-post-2026-07-16-tech-design.md
 
+import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
@@ -724,7 +725,6 @@ function checkContentIngestSecret(providedHeader: string | undefined | null): {
   if (expectedBuf.length !== providedBuf.length) {
     return { ok: false, configured: true, reason: 'MISMATCH' };
   }
-  const { timingSafeEqual } = require('node:crypto') as typeof import('node:crypto');
   const equal = timingSafeEqual(expectedBuf, providedBuf);
   if (!equal) {
     return { ok: false, configured: true, reason: 'MISMATCH' };
