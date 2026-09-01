@@ -9,7 +9,7 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
    ```bash
    cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/cto-craft-tweet-drafts
    CTO_CRAFT_LANGGRAPH_DATABASE_URL="<from secrets>" \
-   CONTENT_SCHEDULER_BASE_URL="https://api.sindustries.dev" \
+   CONTENT_SCHEDULER_BASE_URL="<from secrets>" \
    CONTENT_SCHEDULER_INGEST_SECRET="<from secrets>" \
      uv run --frozen python run.py run --json
    ```
