@@ -8,11 +8,14 @@
 //  - PATCH  /items/:id                  edit body / scheduledFor / source / sourceRef / kind / linksToItemId
 //  - POST   /items/:id/approve          mark approved (AC6 — explicit gate) + enqueue
 //  - POST   /items/:id/unapprove        clear approval + cancel auto-post
-//  - POST   /items/:id/publish          publish (guarded; X integration via shared service)
-//                                        — refuses kind=manual_reply rows with MANUAL_REPLY_NOT_PUBLISHABLE
 //  - PATCH  /items/:id/posted-url       capture manualPostedUrl for kind=manual_reply rows (task 5279b310 AC5)
 //  - POST   /items/:id/remove           soft-delete + cancel auto-post
 //  - POST   /reorder             rewrite positions from an id list
+//
+// Service-to-service routes (POST /items/:id/publish, POST /imports/cto-craft)
+// moved to ./contentSchedulerService.ts and mounted BEFORE the auth middleware
+// in createApp (see ../app.ts) so they bypass requireAuthenticatedUser.
+// Tech design: docs/specs/content-scheduler-auth-tech-design.md (task bd755ad4 / W36 A1).
 //  - GET    /today-status        daily cap (Pacific/Auckland)
 //
 // All write endpoints accept an `x-actor` header that defaults to "unknown"
@@ -25,16 +28,12 @@
 // Tech design: docs/specs/content-scheduler-tab-tech-design.md
 //              docs/specs/content-scheduler-auto-post-2026-07-16-tech-design.md
 
-import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
 import { config } from '../config/index.ts';
 import {
-  guardPublish,
   getAucklandTodayParts,
-  getXClient,
-  checkActorSecret,
   TERMINAL_STATUSES
 } from './contentSchedulerPublish.ts';
 import {
@@ -42,7 +41,6 @@ import {
   parseId,
   uuidPattern,
   validateBody,
-  validateImportItems,
   validateKind,
   validateLinksToItemId,
   validateManualPostedUrl,
@@ -53,7 +51,6 @@ import {
   decideAutoPostAction,
   getJobSchedulerAdapter
 } from './contentSchedulerJobs.ts';
-import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts';
 
 
 function actor(req: any): string {
@@ -464,76 +461,6 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/unapprove', async (req
   }
 });
 
-contentSchedulerRouter.post('/content-scheduler/items/:id/publish', async (req, res, next) => {
-  try {
-    const id = parseId(req.params.id);
-    if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
-
-    // Cloud-readiness gate (task 38d2ee65): when X_ACTOR_SECRET is
-    // configured, require an `x-actor-secret` header that matches before
-    // any X API call is attempted. When unset, dev/local/CI stays usable.
-    const rawHeader = req.headers['x-actor-secret'];
-    const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const actorGuard = checkActorSecret(headerValue);
-    if (actorGuard.ok === false) {
-      return sendError(
-        res,
-        401,
-        'UNAUTHORIZED',
-        actorGuard.reason === 'MISSING_HEADER'
-          ? 'Missing x-actor-secret header (X_ACTOR_SECRET is configured)'
-          : 'Invalid x-actor-secret header'
-      );
-    }
-
-    const result = await publishContentSchedulerItem(id, 'manual');
-
-    if (!result.ok) {
-      if (result.code === 'NOT_FOUND') return notFound(res, 'NOT_FOUND', result.message);
-      if (result.code === 'MISSING_CREDENTIALS')
-        return sendError(res, 503, 'MISSING_CREDENTIALS', result.message);
-      if (result.code === 'PUBLISH_FAILED')
-        return sendError(res, 502, 'PUBLISH_FAILED', result.message);
-      return sendError(res, 409, result.code, result.message);
-    }
-
-    // On successful manual publish, cancel any in-flight auto-post job and
-    // bump the schedule version so a stale delayed job exits cleanly.
-    if (result.item?.autoPostJobId) {
-      try {
-        await getJobSchedulerAdapter().cancelAutoPost(result.item.autoPostJobId);
-      } catch (err) {
-        // Stale-version check is the safety net.
-      }
-      await prisma.contentSchedulerItem.update({
-        where: { id },
-        data: {
-          autoPostJobId: null,
-          autoPostScheduleVersion: (result.item.autoPostScheduleVersion ?? 0) + 1,
-          autoPostLastEnqueuedAt: new Date()
-        }
-      });
-    }
-
-    const { date } = getAucklandTodayParts();
-    res.json({ data: result.item, today: date });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// PATCH /content-scheduler/items/:id/posted-url
-//
-// AC5 from task 5279b310: once Tom posts the manual reply and supplies
-// its resulting URL, that URL is stored against the draft and the draft's
-// state reflects that it has been posted.
-//
-// Only `kind = "manual_reply"` items are accepted; scheduled items must
-// flow through POST /items/:id/publish (their `publishedUrl` is the
-// authoritative capture). The endpoint is idempotent on the same URL
-// (returns 200 with the existing timestamp; does NOT update manualPostedAt
-// on a re-PATCH of the same URL — that preserves the original "posted at"
-// timestamp as the source of truth).
 contentSchedulerRouter.patch('/content-scheduler/items/:id/posted-url', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
@@ -691,120 +618,3 @@ contentSchedulerRouter.get('/content-scheduler/today-status', async (_req, res, 
   }
 });
 
-// ---------------------------------------------------------------------------
-// Trusted internal batch import for the CTO Craft LangGraph pipeline
-// (task 9dfe56e4). The endpoint is intentionally narrow:
-//
-//   - 1–5 items per batch, each item validated by validateImportItems.
-//   - Always creates with status='draft', source='cto_craft',
-//     scheduledFor=null, position=0. Callers cannot bypass.
-//   - Auth: x-content-ingest-secret header is required when
-//     CONTENT_SCHEDULER_INGEST_SECRET is configured. When unset
-//     (dev/local/CI), the gate is pass-through.
-//   - Idempotency: the (source, sourceRef) partial unique index enforces
-//     dedup at the database layer. We use createMany({ skipDuplicates: true })
-//     so duplicates in the batch or against pre-existing rows are silently
-//     skipped and reported via skippedDuplicateCount.
-//   - Never approve, schedule, or publish imported items.
-// ---------------------------------------------------------------------------
-
-function checkContentIngestSecret(providedHeader: string | undefined | null): {
-  ok: boolean;
-  configured: boolean;
-  reason?: 'MISSING_HEADER' | 'MISMATCH';
-} {
-  const expected = process.env.CONTENT_SCHEDULER_INGEST_SECRET;
-  if (!expected || expected.length === 0) {
-    return { ok: true, configured: false };
-  }
-  if (typeof providedHeader !== 'string' || providedHeader.length === 0) {
-    return { ok: false, configured: true, reason: 'MISSING_HEADER' };
-  }
-  const expectedBuf = Buffer.from(expected, 'utf8');
-  const providedBuf = Buffer.from(providedHeader, 'utf8');
-  if (expectedBuf.length !== providedBuf.length) {
-    return { ok: false, configured: true, reason: 'MISMATCH' };
-  }
-  const equal = timingSafeEqual(expectedBuf, providedBuf);
-  if (!equal) {
-    return { ok: false, configured: true, reason: 'MISMATCH' };
-  }
-  return { ok: true, configured: true };
-}
-
-contentSchedulerRouter.post('/content-scheduler/imports/cto-craft', async (req, res, next) => {
-  try {
-    const rawHeader = req.headers['x-content-ingest-secret'];
-    const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const guard = checkContentIngestSecret(headerValue);
-    if (!guard.ok) {
-      return sendError(
-        res,
-        401,
-        'UNAUTHORIZED',
-        guard.reason === 'MISSING_HEADER'
-          ? 'Missing x-content-ingest-secret header (CONTENT_SCHEDULER_INGEST_SECRET is configured)'
-          : 'Invalid x-content-ingest-secret header'
-      );
-    }
-
-    const { items } = req.body ?? {};
-    const itemsError = validateImportItems(items);
-    if (itemsError) {
-      return badRequest(res, 'INVALID_ITEMS', itemsError);
-    }
-
-    const now = new Date();
-    const rows = (items as Array<{ body: string; sourceRef: string; issueRef?: string; evidenceExcerpt?: string }>).map(
-      (item) => ({
-        body: item.body.trim(),
-        source: 'cto_craft' as const,
-        sourceRef: item.sourceRef,
-        status: 'draft' as const,
-        scheduledFor: null,
-        position: 0,
-        approvedAt: null,
-        approvedBy: null,
-        publishedAt: null,
-        publishedUrl: null,
-        publishError: null,
-        createdAt: now,
-        updatedAt: now,
-        removedAt: null
-      })
-    );
-
-    const result = await prisma.contentSchedulerItem.createMany({
-      data: rows,
-      skipDuplicates: true
-    });
-
-    // createMany({ skipDuplicates: true }) returns only the count of rows
-    // actually inserted. Duplicates within the batch (or against
-    // pre-existing rows with the same (source, sourceRef)) are silently
-    // skipped. We re-read the affected sourceRefs to expose IDs and the
-    // canonical sourceRef list — note this list may include pre-existing
-    // rows, so we cannot derive skippedDuplicateCount from
-    // rows.length - persisted.length.
-    const refs = rows.map((r) => r.sourceRef);
-    const persisted = await prisma.contentSchedulerItem.findMany({
-      where: { source: 'cto_craft', sourceRef: { in: refs } },
-      select: { id: true, sourceRef: true }
-    });
-    const createdCount = result.count;
-    const skippedDuplicateCount = rows.length - createdCount;
-    const createdIds = persisted.map((p) => p.id);
-    const createdSourceRefs = persisted.map((p) => p.sourceRef);
-
-    res.status(201).json({
-      data: {
-        createdCount,
-        skippedDuplicateCount,
-        createdIds,
-        sourceRefs: createdSourceRefs
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
