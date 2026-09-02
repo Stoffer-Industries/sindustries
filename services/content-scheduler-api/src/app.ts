@@ -13,7 +13,7 @@ import {
 } from './routes/contentSchedulerJobs.ts';
 import { processAutoPostJob } from './workers/autoPostWorker.ts';
 import { createRateLimit } from './middleware/rateLimit.ts';
-import { requireAuthenticatedUser } from './middleware/requireAuth.ts';
+import { methodGate, requireAuthenticatedUser } from './middleware/requireAuth.ts';
 import { healthRouter } from './routes/health.ts';
 
 // Adapter selection mirrors the worker entrypoint:
@@ -113,14 +113,28 @@ export function createApp() {
   // user-facing mutation surface only.
   app.use('/api/v1', contentSchedulerServiceRouter);
 
-  // Gate every mutation (POST/PATCH/DELETE) under /api/v1/content-scheduler/items*
+  // Gate every mutation (POST/PATCH/DELETE) under
+  // /api/v1/content-scheduler/items* and /api/v1/content-scheduler/reorder
   // on either an authenticated browser session (tasks_api_session cookie)
-  // or a Bearer service credential (CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS).
-  // GET routes stay public so the tasks-app Content Scheduler tab and any
-  // future dashboard ship without friction. Tech design:
+  // or a Bearer service credential
+  // (CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS).
+  //
+  // The gate is method-scoped via methodGate(): `app.use(path, mw)` fires
+  // the middleware on EVERY method under that path prefix, which would
+  // 401 the public GETs the tech design keeps open. methodGate(WRITE_METHODS, ...)
+  // restricts the middleware to mutation methods so the GET surface
+  // (/items, /items/:id, /today-status, /health) stays public per the
+  // Phase-1 Auth matrix in
   // docs/specs/content-scheduler-auth-tech-design.md (task bd755ad4 / W36 A1).
-  app.use('/api/v1/content-scheduler/items', requireAuthenticatedUser);
-  app.use('/api/v1/content-scheduler/reorder', requireAuthenticatedUser);
+  const WRITE_METHODS = new Set(['POST', 'PATCH', 'DELETE']);
+  app.use(
+    '/api/v1/content-scheduler/items',
+    methodGate(WRITE_METHODS, requireAuthenticatedUser)
+  );
+  app.use(
+    '/api/v1/content-scheduler/reorder',
+    methodGate(WRITE_METHODS, requireAuthenticatedUser)
+  );
 
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', contentSchedulerRouter);

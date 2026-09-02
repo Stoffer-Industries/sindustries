@@ -663,3 +663,101 @@ describe('contentScheduler routes', () => {
     expect(typeof res.body.data.date).toBe('string');
   });
 });
+
+// --- Public-GET regression guards (audit 2026-W36 A1, pr-deep-review) ---
+//
+// `app.use('/api/v1/content-scheduler/items', requireAuthenticatedUser)`
+// gates every method at that path prefix — including GETs. That broke the
+// Phase-1 GETs-stay-public contract in docs/specs/content-scheduler-auth-tech-design.md
+// §"Auth matrix (Phase-1)". The fix wraps requireAuthenticatedUser in
+// methodGate(WRITE_METHODS, ...) so only POST/PATCH/DELETE go through
+// auth, while GETs skip the gate and remain public.
+//
+// These tests assert the GETs return 200 without any Authorization header
+// (or session cookie). Without them, every CI run shaped like the existing
+// `authedRequest(app)` suite would stay green even if the gate regressed
+// to bare app.use(...) — the auto-reactivate marker audit 2026-W35 T1.2
+// called out.
+describe('public GET routes stay reachable without auth (methodGate scope guard)', () => {
+  it('GET /api/v1/content-scheduler/items returns 200 without Authorization header', async () => {
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    const app = createApp();
+    const res = await request(app).get('/api/v1/content-scheduler/items');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it('GET /api/v1/content-scheduler/items/:id returns 200 without Authorization header when the route exists (Phase-1 auth matrix)', async () => {
+    // GET /items/:id is part of the Phase-1 public GET contract even
+    // though the current implementation only mounts PATCH/POST
+    // sub-routes. We assert that no auth middleware sits in the path
+    // by hitting the *fallback 404 handler* — its response confirms
+    // requireAuthenticatedUser did not fire first (which would have
+    // returned 401 instead of 404).
+    const app = createApp();
+    const res = await request(app).get(
+      '/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111'
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('NotFound');
+  });
+
+  it('GET /api/v1/content-scheduler/today-status returns 200 without Authorization header', async () => {
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValue([]);
+    const app = createApp();
+    const res = await request(app).get('/api/v1/content-scheduler/today-status');
+    expect(res.status).toBe(200);
+    expect(res.body.data.cap).toBe(1);
+  });
+});
+
+// --- Write-route gate enforcement (audit 2026-W36 A1) ---
+//
+// Counterpart to the GET regression guards above: these tests assert the
+// `methodGate(WRITE_METHODS, requireAuthenticatedUser)` wrapper actually
+// gates POST/PATCH/DELETE under /api/v1/content-scheduler/items and
+// /api/v1/content-scheduler/reorder. Without them the methodGate could
+// silently no-op (e.g. by being removed from the import) and CI would
+// stay green.
+describe('write routes under /items and /reorder are gated by requireAuthenticatedUser', () => {
+  it('POST /api/v1/content-scheduler/items returns 401 without Authorization header', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post('/api/v1/content-scheduler/items')
+      .send({ body: 'should be gated' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('AUTH_REQUIRED');
+    // Gate fires before any DB load — prisma.create is never called.
+    expect(prismaMock.contentSchedulerItem.create).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /api/v1/content-scheduler/items/:id returns 401 without Authorization header', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .patch('/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111')
+      .send({ body: 'edit' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('AUTH_REQUIRED');
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/v1/content-scheduler/items/:id/approve returns 401 without Authorization header', async () => {
+    const app = createApp();
+    const res = await request(app).post(
+      '/api/v1/content-scheduler/items/11111111-1111-1111-1111-111111111111/approve'
+    );
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('AUTH_REQUIRED');
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/v1/content-scheduler/reorder returns 401 without Authorization header', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post('/api/v1/content-scheduler/reorder')
+      .send({ ids: ['11111111-1111-1111-1111-111111111111'] });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('AUTH_REQUIRED');
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalled();
+  });
+});
