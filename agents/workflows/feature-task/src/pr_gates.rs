@@ -85,7 +85,19 @@ pub(crate) fn clippy_evidence_failures(url: &str) -> Vec<String> {
     if !clippy_enforce_enabled() {
         return Vec::new();
     }
-    let files = pr_changed_files(url);
+    let files = match pr_changed_files(url) {
+        Ok(f) => f,
+        Err(err) => {
+            // Fail closed on `gh` errors: a merge gate that cannot read its
+            // evidence must block, matching the `pr_body` Err discipline
+            // (W36 audit finding A2). The empty-diff path (Ok(vec![])) is
+            // intentionally NOT a failure — a label-only PR with no file
+            // changes legitimately does not touch the Rust workflow.
+            return vec![format!(
+                "Could not list changed files for clippy evidence check ({url}): {err}."
+            )];
+        }
+    };
     if !touches_rust_feature_workflow(&files) {
         return Vec::new();
     }
@@ -99,10 +111,14 @@ pub(crate) fn clippy_evidence_failures(url: &str) -> Vec<String> {
 }
 
 /// Return the list of changed files for a PR via `gh pr view --json files`.
-/// Returns an empty `Vec` if `gh` fails or the response cannot be decoded —
-/// callers treat that as "no files touched" rather than a hard error so the
-/// gate degrades gracefully on transient gh failures.
-pub(crate) fn pr_changed_files(url: &str) -> Vec<String> {
+/// Returns `Ok(Vec)` with the file paths on a successful read (the Vec is
+/// empty when the PR legitimately has no file changes), or `Err` with a
+/// caller-actionable message when the `gh` invocation fails or its output
+/// cannot be decoded. Callers that treat an empty diff as "doesn't touch
+/// Rust" preserve that behaviour by matching on `Ok(files)` and reading
+/// `.is_empty()`; `Err(_)` is reserved for the fail-closed path so a
+/// transient `gh` blip cannot silently bypass a merge gate.
+pub(crate) fn pr_changed_files(url: &str) -> Result<Vec<String>, String> {
     let output = Command::new("gh")
         .args([
             "pr",
@@ -116,13 +132,25 @@ pub(crate) fn pr_changed_files(url: &str) -> Vec<String> {
         .output();
     let output = match output {
         Ok(out) if out.status.success() => out,
-        _ => return Vec::new(),
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            return Err(format!(
+                "gh pr view {url} --json files --jq .files\\[\\].path exited {}: {stderr}",
+                out.status
+            ));
+        }
+        Err(err) => {
+            return Err(format!(
+                "failed to spawn `gh pr view` for {url}: {err}"
+            ));
+        }
     };
     let raw = String::from_utf8(output.stdout).unwrap_or_default();
-    raw.lines()
+    Ok(raw
+        .lines()
         .map(|line| line.trim().to_string())
         .filter(|line| !line.is_empty())
-        .collect()
+        .collect())
 }
 
 /// gh 2.87.3 sometimes emits a JSON-encoded string (quote-wrapped, with
@@ -216,6 +244,115 @@ pub(crate) fn body_has_checked_acceptance(body: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- W36 audit finding A2: clippy gate fails closed on `gh` errors ----
+
+    /// Mutex serialising tests that mutate process-global state (PATH, the
+    /// CLIPPY_ENFORCE env var). Cargo runs unit tests in parallel by
+    /// default; without serialisation, two tests can both rewrite PATH and
+    /// the second one's restore overwrites the first's view of "the
+    /// previous PATH" — leaving the test environment permanently broken.
+    /// The existing `clippy_enforce_enabled_respects_env_flag` shares the
+    /// same hazard; lock contention is cheap (tests run fast) so we just
+    /// serialise all env-var tests behind this one lock.
+    static CLIPPY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Write a temporary directory containing a `gh` shell shim that exits
+    /// non-zero with the given stderr, prepend that directory to PATH for
+    /// the duration of `body`, then restore PATH. Used to simulate a
+    /// transient `gh` API failure without mocking the entire Rust
+    /// subprocess layer.
+    fn with_failing_gh_shim<F: FnOnce() -> R, R>(stderr_msg: &str, body: F) -> R {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("gh");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\necho '{stderr_msg}' 1>&2\nexit 1\n"),
+        )
+        .expect("write gh shim");
+        let mut perm = std::fs::metadata(&script).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script, perm).unwrap();
+
+        let prev = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!(
+            "{}:{}",
+            dir.path().display(),
+            if prev.is_empty() {
+                "/usr/bin:/bin".to_string()
+            } else {
+                prev.clone()
+            }
+        );
+        std::env::set_var("PATH", &new_path);
+        let result = body();
+        std::env::set_var("PATH", &prev);
+        result
+    }
+
+    #[test]
+    fn pr_changed_files_gh_failure_returns_err() {
+        // AC1: signature change from Vec<String> to Result<Vec<String>, String>
+        // so callers can distinguish "no files" from "`gh` failed".
+        let result = with_failing_gh_shim("simulated transient gh failure", || {
+            pr_changed_files("https://github.com/Stoffer-Industries/sindustries/pull/1")
+        });
+        let err = result.expect_err("expected Err when gh exits non-zero");
+        assert!(
+            err.contains("simulated transient gh failure"),
+            "expected stderr in Err, got: {err}"
+        );
+        assert!(
+            err.contains("exit"),
+            "expected 'exit' status word in Err, got: {err}"
+        );
+    }
+
+    #[test]
+    fn clippy_evidence_failures_gh_failure_blocks_rust_pr() {
+        // AC2 + AC4: when CLIPPY_ENFORCE=true and `gh` fails, the gate
+        // records a failure (fail-closed, matching pr_body Err discipline)
+        // instead of silently passing.
+        let _guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let result = with_failing_gh_shim("gh api timeout", || {
+            std::env::set_var("CLIPPY_ENFORCE", "true");
+            let failures = clippy_evidence_failures("https://github.com/foo/bar/pull/42");
+            std::env::remove_var("CLIPPY_ENFORCE");
+            failures
+        });
+        assert!(
+            !result.is_empty(),
+            "expected non-empty failures when gh errors and CLIPPY_ENFORCE=true"
+        );
+        assert!(
+            result
+                .iter()
+                .any(|f| f.contains("Could not list changed files")),
+            "expected 'Could not list changed files' in failures, got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|f| f.contains("pull/42")),
+            "expected the PR URL to be retained in the failure message, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn clippy_evidence_failures_gh_failure_ignored_when_enforce_disabled() {
+        // AC5-adjacent: when CLIPPY_ENFORCE is unset the gate short-circuits
+        // BEFORE invoking gh — both today's contract (don't run the gate
+        // unless explicitly opted in) and today's behaviour (silent pass on
+        // unset). Verifies the new Result plumbing does not regress this.
+        let _guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let result = with_failing_gh_shim("gh api timeout", || {
+            std::env::remove_var("CLIPPY_ENFORCE");
+            clippy_evidence_failures("https://github.com/foo/bar/pull/99")
+        });
+        assert!(
+            result.is_empty(),
+            "expected empty failures when CLIPPY_ENFORCE unset, got: {result:?}"
+        );
+    }
 
     #[test]
     fn clippy_evidence_matches_canonical_command() {
