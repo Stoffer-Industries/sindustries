@@ -14,6 +14,7 @@ use std::{
 
 mod ac_parsing;
 mod analytics;
+mod pr_gates;
 
 // Comment author is derived from the authenticated actor at the API
 // boundary (task 0719a8e3); this workflow no longer carries a literal
@@ -258,16 +259,6 @@ struct Workstream {
     body: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReviewState {
-    Approved,
-    Required,
-    ChangesRequested,
-    CommentsPresent,
-    Merged,
-    ClosedUnmerged,
-}
-
 #[derive(Debug)]
 struct ApiStatusError {
     status: u16,
@@ -459,6 +450,19 @@ fn format_evidence(map: &serde_json::Map<String, Value>) -> String {
         .collect();
     parts.sort();
     format!("{{{}}}", parts.join(","))
+}
+
+fn pr_body(url: &str) -> Result<String> {
+    let output = Command::new("gh")
+        .args(["pr", "view", url, "--json", "body", "--jq", ".body"])
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_string()));
+    }
+    let raw = String::from_utf8(output.stdout)?;
+    Ok(pr_gates::decode_pr_body_output(&raw))
 }
 
 fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
@@ -818,7 +822,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
         if let Ok(body) = pr_body(url) {
-            if !body_has_checked_acceptance(&body) {
+            if !pr_gates::body_has_checked_acceptance(&body) {
                 failures.push(format!(
                     "PR {url} does not show checked acceptance criteria in its body."
                 ));
@@ -849,7 +853,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // `latest_pr_url` principle used above for AC text). Non-Rust /
     // content-only PRs are skipped outright.
     if let Some(url) = &latest_pr_url {
-        failures.extend(clippy_evidence_failures(url));
+        failures.extend(pr_gates::clippy_evidence_failures(url));
     }
     if workstreams(&env.task).is_empty() {
         failures.push("Task description must include at least one workstream.".to_string());
@@ -870,7 +874,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // has not yet cleared the mechanical bar.
     let mut mechanical_gate_failed = false;
     if let Some(url) = &latest_pr_url {
-        let pr_files = pr_changed_files(url);
+        let pr_files = pr_gates::pr_changed_files(url);
         let body = pr_body(url).unwrap_or_default();
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
@@ -881,7 +885,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // for bare Rust test names only (same predicate the clippy
         // evidence gate above already uses — task e67c8835).
         let test_runner: Box<dyn ac_parsing::TestRunner> = Box::new(DispatchingTestRunner {
-            is_rust_pr: touches_rust_feature_workflow(&pr_files),
+            is_rust_pr: pr_gates::touches_rust_feature_workflow(&pr_files),
         });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
@@ -999,10 +1003,10 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     Ok(env)
 }
 
-fn verify_delivery_review_failure(url: &str, review: ReviewState) -> Option<String> {
+fn verify_delivery_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
     match review {
-        ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
-        ReviewState::ClosedUnmerged => Some(format!("PR {url} is closed without merge.")),
+        pr_gates::ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
+        pr_gates::ReviewState::ClosedUnmerged => Some(format!("PR {url} is closed without merge.")),
         _ => None,
     }
 }
@@ -1012,10 +1016,10 @@ fn verify_delivery_review_failure(url: &str, review: ReviewState) -> Option<Stri
 /// superseded (same principle as `verify_delivery`'s latest-only filter) and
 /// do not block. The latest ClosedUnmerged still fails, as do open / review /
 /// unknown states on any listed PR.
-fn post_merge_pr_failure(url: &str, state: ReviewState, all_pr_urls: &[String]) -> Option<String> {
+fn post_merge_pr_failure(url: &str, state: pr_gates::ReviewState, all_pr_urls: &[String]) -> Option<String> {
     match state {
-        ReviewState::Merged => None,
-        ReviewState::ClosedUnmerged if !is_latest_pr_url(url, all_pr_urls) => None,
+        pr_gates::ReviewState::Merged => None,
+        pr_gates::ReviewState::ClosedUnmerged if !is_latest_pr_url(url, all_pr_urls) => None,
         other => Some(format!("PR {url} is not merged: {other:?}.")),
     }
 }
@@ -1046,10 +1050,10 @@ fn is_latest_pr_url(candidate: &str, all_pr_urls: &[String]) -> bool {
     max_num == candidate_num
 }
 
-fn feedback_review_failure(url: &str, review: ReviewState) -> Option<String> {
+fn feedback_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
     match review {
-        ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
-        ReviewState::CommentsPresent => Some(format!("Open review comments remain on {url}.")),
+        pr_gates::ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
+        pr_gates::ReviewState::CommentsPresent => Some(format!("Open review comments remain on {url}.")),
         _ => None,
     }
 }
@@ -4088,15 +4092,15 @@ fn implementer_pr_urls(task: &Task) -> Vec<String> {
 )]
 fn implementer_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
 where
-    F: Fn(&str) -> Result<ReviewState>,
+    F: Fn(&str) -> Result<pr_gates::ReviewState>,
 {
     implementer_pr_urls(task)
         .into_iter()
-        .filter(|url| !matches!(inspect(url), Ok(ReviewState::Merged)))
+        .filter(|url| !matches!(inspect(url), Ok(pr_gates::ReviewState::Merged)))
         .collect()
 }
 
-fn inspect_pr(url: &str) -> Result<ReviewState> {
+fn inspect_pr(url: &str) -> Result<pr_gates::ReviewState> {
     let output = Command::new("gh")
         .args([
             "pr",
@@ -4112,20 +4116,7 @@ fn inspect_pr(url: &str) -> Result<ReviewState> {
             .trim()
             .to_string()));
     }
-    parse_github_review_state(&String::from_utf8(output.stdout)?)
-}
-
-fn pr_body(url: &str) -> Result<String> {
-    let output = Command::new("gh")
-        .args(["pr", "view", url, "--json", "body", "--jq", ".body"])
-        .output()?;
-    if !output.status.success() {
-        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string()));
-    }
-    let raw = String::from_utf8(output.stdout)?;
-    Ok(decode_pr_body_output(&raw))
+    pr_gates::parse_github_review_state(&String::from_utf8(output.stdout)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -4446,166 +4437,8 @@ impl ac_parsing::TestRunner for DispatchingTestRunner {
 /// non-fatal reason (e.g. merged PR with no accessible diff). Callers that
 /// need an authoritative empty result should consult the surrounding
 /// workflow gate state separately.
-fn pr_changed_files(url: &str) -> Vec<String> {
-    let output = Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            url,
-            "--json",
-            "files",
-            "--jq",
-            ".files[].path",
-        ])
-        .output();
-    let output = match output {
-        Ok(out) if out.status.success() => out,
-        _ => return Vec::new(),
-    };
-    let raw = String::from_utf8(output.stdout).unwrap_or_default();
-    raw.lines()
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.is_empty())
-        .collect()
-}
-
-/// Sentinel substring identifying the canonical clippy command for the
-/// feature-task workflow. Anchoring on this exact string (rather than parsing
-/// markdown structure) keeps the matching stable across PR body template
-/// changes — if the canonical command changes, the matching string is
-/// updated in lockstep.
-const CLIPPY_EVIDENCE_COMMAND: &str =
-    "cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings";
-
-/// Path prefix identifying a PR that touches the Rust feature-task workflow.
-const FEATURE_TASK_RUST_PREFIX: &str = "agents/workflows/feature-task/";
-
-/// True iff the PR body contains the canonical clippy command. Matches the
-/// exact command string on any line (inside or outside a code fence) so
-/// authors can place the evidence anywhere in the PR body.
-fn body_has_clippy_evidence(body: &str) -> bool {
-    body.lines()
-        .any(|line| line.contains(CLIPPY_EVIDENCE_COMMAND))
-}
-
-/// True iff the PR's changed files touch the Rust feature-task workflow.
-fn touches_rust_feature_workflow(files: &[String]) -> bool {
-    files
-        .iter()
-        .any(|path| path.starts_with(FEATURE_TASK_RUST_PREFIX))
-}
-
-/// Build the clippy-evidence blocker failure string. Kept centralised so the
-/// message stays consistent across the lobster's checks and tests.
-fn clippy_evidence_missing_failure() -> String {
-    format!(
-        "[feature-task-progress-checklist] missing clippy evidence for Rust workflow PR. \
-         Run: {CLIPPY_EVIDENCE_COMMAND}"
-    )
-}
-
-/// Returns true when the clippy-evidence gate is enabled.
-///
-/// The gate ships disabled by default; flip `CLIPPY_ENFORCE=true` once the
-/// feature-task clippy CI gate (`cbe3333a`) has been green for ≥1 week.
-fn clippy_enforce_enabled() -> bool {
-    std::env::var("CLIPPY_ENFORCE")
-        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
-}
-
-/// Check a PR for clippy evidence and append a failure if the PR touches
-/// the Rust feature-task workflow but the PR body lacks the canonical
-/// clippy command. Returns the failure list for the caller to push into
-/// the gate's `failures` vec.
-fn clippy_evidence_failures(url: &str) -> Vec<String> {
-    if !clippy_enforce_enabled() {
-        return Vec::new();
-    }
-    let files = pr_changed_files(url);
-    if !touches_rust_feature_workflow(&files) {
-        return Vec::new();
-    }
-    match pr_body(url) {
-        Ok(body) if body_has_clippy_evidence(&body) => Vec::new(),
-        Ok(_) => vec![clippy_evidence_missing_failure()],
-        Err(err) => vec![format!(
-            "Could not read PR body for clippy evidence check ({url}): {err}."
-        )],
-    }
-}
-
-/// Decode the raw stdout of `gh pr view --jq .body` into a PR body string.
-///
-/// gh 2.87.3 sometimes emits a JSON-encoded string (quote-wrapped, with
-/// escaped newlines) when the body contains non-ASCII Unicode. Fall back to
-/// raw passthrough if decoding fails so unexpected gh output preserves the
-/// previous behaviour.
-fn decode_pr_body_output(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.starts_with('"') {
-        if let Ok(Value::String(decoded)) = serde_json::from_str(trimmed) {
-            return decoded;
-        }
-    }
-    raw.to_string()
-}
-
-fn parse_github_review_state(raw: &str) -> Result<ReviewState> {
-    let value: Value = serde_json::from_str(raw)?;
-    if value
-        .get("mergedAt")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .is_some()
-    {
-        return Ok(ReviewState::Merged);
-    }
-    if value.get("state").and_then(Value::as_str) == Some("CLOSED") {
-        return Ok(ReviewState::ClosedUnmerged);
-    }
-    let decision = value
-        .get("reviewDecision")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if decision == "CHANGES_REQUESTED" {
-        return Ok(ReviewState::ChangesRequested);
-    }
-    let comments = value
-        .get("comments")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let review_comments = value
-        .get("reviews")
-        .and_then(Value::as_array)
-        .map_or(0, |reviews| {
-            reviews
-                .iter()
-                .filter(|review| {
-                    !review
-                        .get("body")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .trim()
-                        .is_empty()
-                })
-                .count()
-        });
-    if comments + review_comments > 0 && decision != "APPROVED" {
-        return Ok(ReviewState::CommentsPresent);
-    }
-    if decision == "APPROVED" {
-        return Ok(ReviewState::Approved);
-    }
-    Ok(ReviewState::Required)
-}
-
-fn body_has_checked_acceptance(body: &str) -> bool {
-    Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+.+")
-        .unwrap()
-        .is_match(body)
-}
-
+// PR-gate helpers (pr_changed_files, clippy-evidence gate, parse_github_review_state,
+// body_has_checked_acceptance, ReviewState) live in src/pr_gates.rs (W36 A3+A4).
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5722,9 +5555,9 @@ feature
         };
         let active = implementer_active_pr_urls_with(&task, |url| {
             if url.ends_with("/120") {
-                Ok(ReviewState::Merged)
+                Ok(pr_gates::ReviewState::Merged)
             } else {
-                Ok(ReviewState::Approved)
+                Ok(pr_gates::ReviewState::Approved)
             }
         });
         assert_eq!(
@@ -5924,15 +5757,15 @@ feature
     #[test]
     fn verify_delivery_review_gate_allows_pending_review() {
         let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
-        assert!(verify_delivery_review_failure(url, ReviewState::Required).is_none());
-        assert!(verify_delivery_review_failure(url, ReviewState::CommentsPresent).is_none());
-        assert!(verify_delivery_review_failure(url, ReviewState::Merged).is_none());
+        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::Required).is_none());
+        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::CommentsPresent).is_none());
+        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::Merged).is_none());
         assert_eq!(
-            verify_delivery_review_failure(url, ReviewState::ChangesRequested),
+            verify_delivery_review_failure(url, pr_gates::ReviewState::ChangesRequested),
             Some(format!("Changes requested on {url}."))
         );
         assert_eq!(
-            verify_delivery_review_failure(url, ReviewState::ClosedUnmerged),
+            verify_delivery_review_failure(url, pr_gates::ReviewState::ClosedUnmerged),
             Some(format!("PR {url} is closed without merge."))
         );
     }
@@ -5944,10 +5777,10 @@ feature
         let merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
         let urls = vec![closed.to_string(), merged.to_string()];
         assert!(
-            post_merge_pr_failure(closed, ReviewState::ClosedUnmerged, &urls).is_none(),
+            post_merge_pr_failure(closed, pr_gates::ReviewState::ClosedUnmerged, &urls).is_none(),
             "superseded closed PR must not block acceptance → done"
         );
-        assert!(post_merge_pr_failure(merged, ReviewState::Merged, &urls).is_none());
+        assert!(post_merge_pr_failure(merged, pr_gates::ReviewState::Merged, &urls).is_none());
     }
 
     #[test]
@@ -5956,7 +5789,7 @@ feature
         let later_closed = "https://github.com/Stoffer-Industries/sindustries/pull/368";
         let urls = vec![closed.to_string(), later_closed.to_string()];
         assert_eq!(
-            post_merge_pr_failure(later_closed, ReviewState::ClosedUnmerged, &urls),
+            post_merge_pr_failure(later_closed, pr_gates::ReviewState::ClosedUnmerged, &urls),
             Some(format!("PR {later_closed} is not merged: ClosedUnmerged."))
         );
     }
@@ -5968,10 +5801,10 @@ feature
         let later_merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
         let urls = vec![earlier_open.to_string(), later_merged.to_string()];
         assert_eq!(
-            post_merge_pr_failure(earlier_open, ReviewState::Approved, &urls),
+            post_merge_pr_failure(earlier_open, pr_gates::ReviewState::Approved, &urls),
             Some(format!("PR {earlier_open} is not merged: Approved."))
         );
-        assert!(post_merge_pr_failure(later_merged, ReviewState::Merged, &urls).is_none());
+        assert!(post_merge_pr_failure(later_merged, pr_gates::ReviewState::Merged, &urls).is_none());
     }
 
     #[test]
@@ -6066,9 +5899,9 @@ feature
         assert_eq!(
             implementer_active_pr_urls_with(&task, |url| {
                 if url == merged_url {
-                    Ok(ReviewState::Merged)
+                    Ok(pr_gates::ReviewState::Merged)
                 } else {
-                    Ok(ReviewState::Approved)
+                    Ok(pr_gates::ReviewState::Approved)
                 }
             }),
             vec![open_url]
@@ -6078,30 +5911,10 @@ feature
     #[test]
     fn feedback_aggregate_waits_on_required_review_without_failure() {
         let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
-        assert!(feedback_review_failure(url, ReviewState::Required).is_none());
+        assert!(feedback_review_failure(url, pr_gates::ReviewState::Required).is_none());
         assert_eq!(
-            feedback_review_failure(url, ReviewState::ChangesRequested),
+            feedback_review_failure(url, pr_gates::ReviewState::ChangesRequested),
             Some(format!("Changes requested on {url}."))
-        );
-    }
-
-    #[test]
-    fn parses_github_review_states() {
-        assert_eq!(
-            parse_github_review_state(&fixture("github_approved.json")).unwrap(),
-            ReviewState::Approved
-        );
-        assert_eq!(
-            parse_github_review_state(&fixture("github_changes_requested.json")).unwrap(),
-            ReviewState::ChangesRequested
-        );
-        assert_eq!(
-            parse_github_review_state(&fixture("github_merged.json")).unwrap(),
-            ReviewState::Merged
-        );
-        assert_eq!(
-            parse_github_review_state(&fixture("github_required.json")).unwrap(),
-            ReviewState::Required
         );
     }
 
@@ -8073,92 +7886,6 @@ detached
             results[0].outcome,
             WorktreeCleanupOutcome::AlreadyAbsent
         ));
-    }
-
-    // ---- clippy evidence gate helpers (task 55c98158) ----
-
-    #[test]
-    fn clippy_evidence_matches_canonical_command() {
-        let body = "## Test plan\n\
-                    - [x] run `cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings`\n";
-        assert!(body_has_clippy_evidence(body));
-    }
-
-    #[test]
-    fn clippy_evidence_matches_command_outside_fence() {
-        let body = "Verified locally with: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings\n";
-        assert!(body_has_clippy_evidence(body));
-    }
-
-    #[test]
-    fn clippy_evidence_rejects_unrelated_clippy_command() {
-        // Different manifest path — should not match the feature-task gate.
-        let body = "cargo clippy --manifest-path services/budget-api/Cargo.toml --all-targets -- -D warnings\n";
-        assert!(!body_has_clippy_evidence(body));
-    }
-
-    #[test]
-    fn clippy_evidence_rejects_missing_command() {
-        let body = "## Test plan\n- [x] AC1: ran unit tests\n";
-        assert!(!body_has_clippy_evidence(body));
-    }
-
-    #[test]
-    fn touches_rust_feature_workflow_matches_prefix() {
-        let files = vec![
-            "agents/workflows/feature-task/src/main.rs".to_string(),
-            "agents/workflows/feature-task/Cargo.toml".to_string(),
-        ];
-        assert!(touches_rust_feature_workflow(&files));
-    }
-
-    #[test]
-    fn touches_rust_feature_workflow_rejects_other_paths() {
-        let files = vec![
-            "agents/workflows/code-task/src/main.rs".to_string(),
-            "docs/specs/feature-task.md".to_string(),
-        ];
-        assert!(!touches_rust_feature_workflow(&files));
-    }
-
-    #[test]
-    fn touches_rust_feature_workflow_rejects_empty_list() {
-        let files: Vec<String> = vec![];
-        assert!(!touches_rust_feature_workflow(&files));
-    }
-
-    #[test]
-    fn clippy_evidence_failure_includes_canonical_command() {
-        let failure = clippy_evidence_missing_failure();
-        assert!(failure.contains(CLIPPY_EVIDENCE_COMMAND));
-        assert!(failure.contains("missing clippy evidence"));
-    }
-
-    #[test]
-    fn clippy_enforce_enabled_respects_env_flag() {
-        // Default is disabled
-        std::env::remove_var("CLIPPY_ENFORCE");
-        assert!(!clippy_enforce_enabled());
-
-        // Explicit truthy values
-        for v in ["1", "true", "TRUE", "yes", "YES", "on", "On"] {
-            std::env::set_var("CLIPPY_ENFORCE", v);
-            assert!(
-                clippy_enforce_enabled(),
-                "CLIPPY_ENFORCE={v} should enable gate"
-            );
-        }
-
-        // Falsy values stay disabled
-        for v in ["0", "false", "no", "off", "", "anything-else"] {
-            std::env::set_var("CLIPPY_ENFORCE", v);
-            assert!(
-                !clippy_enforce_enabled(),
-                "CLIPPY_ENFORCE={v} should leave gate disabled"
-            );
-        }
-
-        std::env::remove_var("CLIPPY_ENFORCE");
     }
 
     // ---- AC1/AC2/AC3/AC4/AC5/AC6: archive_task_spec_for_done_task outcomes ----
