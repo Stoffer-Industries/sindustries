@@ -413,6 +413,8 @@ Note: prior versions of this workflow ran an equivalent AC text check at the `po
 
 **PR AC evidence formats:** the canonical process lives in `agents/skills/dev/pr-open/SKILL.md`. Do not duplicate the accepted-format list here; the Lobster parser and `pr-open` skill are the source of truth. Historical note: `file:` evidence was removed because agents used it to cite implementation files rather than tests.
 
+**Clippy-evidence gate (W36 audit A2, task afe39f3d):** an opt-in merge gate (`CLIPPY_ENFORCE=true`, default disabled until the clippy CI gate has been green for ≥1 week per task `55c98158`) checks every PR that touches `agents/workflows/feature-task/**` for the canonical `cargo clippy` command in its PR body. Implementation lives in `clippy_evidence_failures` (`agents/workflows/feature-task/src/main.rs:4521`). **Fail-closed on `gh` errors (A2):** the file-list query (`pr_changed_files`) returns `Result<Vec<String>, String>` and a `gh` failure surfaces as a recorded `[feature-task-progress-checklist]` failure with the exit code and stderr — matching the existing `pr_body` Err discipline in the same function. The mechanical-evidence dispatch site (`verify_delivery`) additionally defaults `is_rust_pr: true` on `Err` so bare-Rust citations are over-checked (cargo runner) rather than under-checked (pnpm runner) during a transient `gh` blip. Empty-diff PRs (`Ok(vec![])`) preserve the existing label-only-PR contract — they do not touch the Rust workflow and do not fail the gate.
+
 **`done` — terminal**
 
 - Lobster writes `done` after `post-merge` checks pass
