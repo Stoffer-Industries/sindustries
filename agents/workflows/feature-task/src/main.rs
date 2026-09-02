@@ -875,7 +875,26 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // has not yet cleared the mechanical bar.
     let mut mechanical_gate_failed = false;
     if let Some(url) = &latest_pr_url {
-        let pr_files = pr_gates::pr_changed_files(url);
+        // Pull the changed file list once and let both the runner
+        // disambiguator and the mechanical-evidence check consume it. On
+        // `gh` errors we surface the failure to the gate AND default
+        // `is_rust_pr: true` so citations are over-checked rather than
+        // under-checked during a transient blip (W36 audit finding A2:
+        // false positives — shell citation routed to cargo — are less
+        // harmful than false negatives — Rust citation silently routed to
+        // pnpm).
+        let pr_files_result = pr_gates::pr_changed_files(url);
+        let is_rust_pr = match &pr_files_result {
+            Ok(files) => pr_gates::touches_rust_feature_workflow(files),
+            Err(_) => true,
+        };
+        if let Err(err) = &pr_files_result {
+            failures.push(format!(
+                "Could not list changed files for mechanical evidence check ({url}): {err}; \
+                 defaulting to Rust citation runner."
+            ));
+        }
+        let pr_files = pr_files_result.unwrap_or_default();
         let body = pr_body(url).unwrap_or_default();
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
@@ -884,9 +903,11 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // either). `DispatchingTestRunner` picks a runner per citation by
         // the test_id's own shape; `is_rust_pr` remains the disambiguator
         // for bare Rust test names only (same predicate the clippy
-        // evidence gate above already uses — task e67c8835).
+        // evidence gate above already uses — task e67c8835). When the
+        // file list is unknown we keep `is_rust_pr: true` so bare-Rust
+        // citations stay on the cargo runner.
         let test_runner: Box<dyn ac_parsing::TestRunner> = Box::new(DispatchingTestRunner {
-            is_rust_pr: pr_gates::touches_rust_feature_workflow(&pr_files),
+            is_rust_pr,
         });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
@@ -4356,11 +4377,6 @@ impl ac_parsing::TestRunner for DispatchingTestRunner {
 }
 
 /// Fetch the list of files changed in a PR.
-///
-/// Returns an empty Vec if the PR has no diff or the `gh` call fails for a
-/// non-fatal reason (e.g. merged PR with no accessible diff). Callers that
-/// need an authoritative empty result should consult the surrounding
-/// workflow gate state separately.
 // PR-gate helpers (pr_changed_files, clippy-evidence gate, parse_github_review_state,
 // body_has_checked_acceptance, ReviewState) live in src/pr_gates.rs (W36 A3+A4).
 #[cfg(test)]
@@ -7728,6 +7744,9 @@ detached
         ));
     }
 
+    // ---- clippy evidence gate helpers (task 55c98158) ----
+    // These tests moved to `pr_gates.rs` (W36 audit A3+A4 — module
+    // extraction); the W36 A2 fail-closed tests live there too.
     // ---- AC1/AC2/AC3/AC4/AC5/AC6: archive_task_spec_for_done_task outcomes ----
 
     fn task_with_description(desc: &str) -> Task {
