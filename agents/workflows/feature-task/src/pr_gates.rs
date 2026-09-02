@@ -262,8 +262,18 @@ mod tests {
     /// the duration of `body`, then restore PATH. Used to simulate a
     /// transient `gh` API failure without mocking the entire Rust
     /// subprocess layer.
+    ///
+    /// Holds `CLIPPY_ENV_LOCK` for the full critical section (PATH set →
+    /// body → PATH restore) so the helper, the body's `CLIPPY_ENFORCE`
+    /// mutations, and any sibling env-var test cannot interleave. Without
+    /// this lock, two `gh` shims can race on PATH and `remove_var` /
+    /// `set_var` calls from sibling tests can be observed mid-flight by
+    /// `clippy_enforce_enabled()`. See commit history on PR #562 (afe39f3d
+    /// follow-up) for the failure mode this addresses.
     fn with_failing_gh_shim<F: FnOnce() -> R, R>(stderr_msg: &str, body: F) -> R {
         use std::os::unix::fs::PermissionsExt;
+        let _env_guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("gh");
         std::fs::write(
@@ -287,7 +297,15 @@ mod tests {
         );
         std::env::set_var("PATH", &new_path);
         let result = body();
-        std::env::set_var("PATH", &prev);
+        // Restore PATH: if it was unset, unset it again; otherwise restore
+        // the captured value. Setting PATH to "" leaves the process with an
+        // empty PATH, which is not the same as unset and breaks downstream
+        // Command::new("...") lookups in sibling tests.
+        match prev.is_empty() {
+            true => std::env::remove_var("PATH"),
+            false => std::env::set_var("PATH", &prev),
+        }
+        drop(_env_guard);
         result
     }
 
@@ -295,6 +313,8 @@ mod tests {
     fn pr_changed_files_gh_failure_returns_err() {
         // AC1: signature change from Vec<String> to Result<Vec<String>, String>
         // so callers can distinguish "no files" from "`gh` failed".
+        // `with_failing_gh_shim` acquires CLIPPY_ENV_LOCK for the full
+        // critical section — no extra guard needed here.
         let result = with_failing_gh_shim("simulated transient gh failure", || {
             pr_changed_files("https://github.com/Stoffer-Industries/sindustries/pull/1")
         });
@@ -314,7 +334,9 @@ mod tests {
         // AC2 + AC4: when CLIPPY_ENFORCE=true and `gh` fails, the gate
         // records a failure (fail-closed, matching pr_body Err discipline)
         // instead of silently passing.
-        let _guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // `with_failing_gh_shim` already holds CLIPPY_ENV_LOCK for the
+        // whole critical section, so the body's CLIPPY_ENFORCE mutations
+        // are serialised with PATH setup and any sibling env-var test.
         let result = with_failing_gh_shim("gh api timeout", || {
             std::env::set_var("CLIPPY_ENFORCE", "true");
             let failures = clippy_evidence_failures("https://github.com/foo/bar/pull/42");
@@ -343,7 +365,8 @@ mod tests {
         // BEFORE invoking gh — both today's contract (don't run the gate
         // unless explicitly opted in) and today's behaviour (silent pass on
         // unset). Verifies the new Result plumbing does not regress this.
-        let _guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // `with_failing_gh_shim` already holds CLIPPY_ENV_LOCK — no extra
+        // guard needed.
         let result = with_failing_gh_shim("gh api timeout", || {
             std::env::remove_var("CLIPPY_ENFORCE");
             clippy_evidence_failures("https://github.com/foo/bar/pull/99")
@@ -413,6 +436,11 @@ mod tests {
 
     #[test]
     fn clippy_enforce_enabled_respects_env_flag() {
+        // This test mutates CLIPPY_ENFORCE directly (no `with_failing_gh_shim`
+        // helper), so it must hold CLIPPY_ENV_LOCK for the full body — see
+        // the lock's doc comment for the rationale.
+        let _env_guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         // Default is disabled
         std::env::remove_var("CLIPPY_ENFORCE");
         assert!(!clippy_enforce_enabled());
