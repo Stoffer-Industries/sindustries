@@ -2,6 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import { config, resolveRedisUrl } from './config/index.ts';
 import { contentSchedulerRouter } from './routes/contentScheduler.ts';
+import { contentSchedulerServiceRouter } from './routes/contentSchedulerService.ts';
 import { contentSchedulerAutoPostRouter } from './routes/contentSchedulerAutoPost.ts';
 import { xTweetRouter } from './routes/xTweet.ts';
 import { createInProcessJobSchedulerAdapter } from './routes/contentSchedulerJobs.inProcess.ts';
@@ -12,6 +13,7 @@ import {
 } from './routes/contentSchedulerJobs.ts';
 import { processAutoPostJob } from './workers/autoPostWorker.ts';
 import { createRateLimit } from './middleware/rateLimit.ts';
+import { requireAuthenticatedUser } from './middleware/requireAuth.ts';
 import { healthRouter } from './routes/health.ts';
 
 // Adapter selection mirrors the worker entrypoint:
@@ -103,6 +105,22 @@ export function createApp() {
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', service: 'content-scheduler-api' });
   });
+
+  // Service-to-service routes (x-actor-secret + x-content-ingest-secret
+  // gates) must be mounted BEFORE the auth middleware so the Fly headless
+  // worker and the CTO Craft LangGraph pipeline can call the API without
+  // a Bearer token or session cookie. The auth middleware gates the
+  // user-facing mutation surface only.
+  app.use('/api/v1', contentSchedulerServiceRouter);
+
+  // Gate every mutation (POST/PATCH/DELETE) under /api/v1/content-scheduler/items*
+  // on either an authenticated browser session (tasks_api_session cookie)
+  // or a Bearer service credential (CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS).
+  // GET routes stay public so the tasks-app Content Scheduler tab and any
+  // future dashboard ship without friction. Tech design:
+  // docs/specs/content-scheduler-auth-tech-design.md (task bd755ad4 / W36 A1).
+  app.use('/api/v1/content-scheduler/items', requireAuthenticatedUser);
+  app.use('/api/v1/content-scheduler/reorder', requireAuthenticatedUser);
 
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', contentSchedulerRouter);

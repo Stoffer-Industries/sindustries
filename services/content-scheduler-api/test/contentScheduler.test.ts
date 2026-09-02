@@ -434,7 +434,7 @@ describe('contentScheduler routes', () => {
   // landed 149/150 tests green. This one test is left as `.skip` so it
   // auto-reactivates when T1.2 lands; un-skip is mechanical (remove the
   // `.skip` modifier and confirm the assertion holds).
-  it.skip('POST /content-scheduler/items/:id/approve sets approvedAt + approvedBy [gated on audit 2026-W35 T1.2 requireAuthenticatedUser]', async () => {
+  it('POST /content-scheduler/items/:id/approve sets approvedAt + approvedBy [gated on audit 2026-W35 T1.2 requireAuthenticatedUser]', async () => {
     prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(itemFixture({ status: 'queued' }));
     prismaMock.contentSchedulerItem.update.mockResolvedValue(itemFixture({ status: 'approved', approvedAt: new Date(), approvedBy: 'IntegrationTest' }));
     const app = createApp();

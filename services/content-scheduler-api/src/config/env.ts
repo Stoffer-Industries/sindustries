@@ -35,6 +35,18 @@ const envSchema = z.object({
     .transform((s) => Number.parseInt(s, 10))
     .pipe(z.number().int().positive()),
 
+  // Content Scheduler — service credentials for the user-facing mutation
+  // surface (POST/PATCH/DELETE /api/v1/content-scheduler/items*). Parsed as
+  // a JSON array of { token, actor, approvalTypes } at module load with
+  // fail-fast semantics on malformed input. Optional so dev / local /
+  // CI can run with the gate pass-through (matches the Phase-1 trade-off
+  // in docs/specs/content-scheduler-auth-tech-design.md: an empty
+  // credential set disables the gate; the HTTP service is not
+  // Fly-deployed today, so this is latent — A1 in repo-audit-2026-W36).
+  CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS: z
+    .string()
+    .optional(),
+
   // Content Scheduler — X (Twitter) publishing.
   X_CLIENT: z.enum(['fake', 'real']).default('fake'),
   X_API_KEY: z.string().min(1).optional(),
