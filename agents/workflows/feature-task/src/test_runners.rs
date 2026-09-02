@@ -95,21 +95,36 @@ impl ac_parsing::TestRunner for CargoTestRunner {
     }
 }
 
-/// Determine pass/fail for `test_name` from `cargo test` stdout by matching
-/// the leaf (post-`::`) segment of each `test <path> ... <status>` line.
+/// Determine pass/fail for `test_name` from `cargo test` stdout.
 ///
-/// cargo's own process exit code cannot be used directly: it is 0 both when
-/// the named test ran and passed, AND when the filter matched zero tests
-/// (nonexistent or typo'd name) — see PR #541 review. Returns `0` only if at
-/// least one matching test ran and every match reports `ok`; returns `1` if
-/// no test matched `test_name` at all, or if any match failed.
+/// **Matching rules (W36 A4 fix, task `d578e547` PR-D, audit T3.1):**
+/// - If `test_name` is qualified (contains `::`), match the full cited
+///   path against each `test <path> ... <status>` line's path segment.
+///   This is the unambiguous resolution path: two tests like
+///   `unit::works` and `tests::works` are distinguished by citing
+///   `unit::works` or `tests::works` explicitly.
+/// - If `test_name` is a bare leaf (no `::`), match the leaf segment of
+///   each path. Multiple distinct paths sharing the cited leaf
+///   constitute an **ambiguous citation** and resolve to exit code `1`,
+///   mirroring the no-silent-pass + ambiguity discipline that
+///   `resolve_repo_file_by_name` (in `test_resolution.rs`) applies to
+///   shell test scripts. This prevents a same-leaf test in a different
+///   module from silently satisfying an AC that intended a different
+///   one — the bug class caught in audit T3.1 (W36 A4).
 ///
-/// **Note (W36 A4):** this currently uses leaf-only matching. The
-/// `tests::works` vs `unit::works` ambiguity hardening (audit T3.1) lands
-/// in PR-D immediately after PR-C merges. The function signature and call
-/// sites stay unchanged; only the matcher body changes.
+/// cargo's own process exit code cannot be used directly: it is 0 both
+/// when the named test ran and passed, AND when the filter matched zero
+/// tests (nonexistent or typo'd name) — see PR #541 review. Returns `0`
+/// only if exactly the right path matched and reports `ok`; returns `1`
+/// otherwise (no match / ambiguous citation / matched-and-failed).
+///
+/// The function signature and call sites are unchanged from PR-A..PR-C;
+/// only the matcher body changed (see `docs/specs/feature-task-main-rs-split-tech-design.md`
+/// Open Question 2).
 pub(crate) fn cargo_test_leaf_outcome(stdout: &str, test_name: &str) -> i32 {
-    let mut found = false;
+    let use_full_path = test_name.contains("::");
+    let mut matched_paths: Vec<&str> = Vec::new();
+    let mut matched_failed = false;
     for line in stdout.lines() {
         let Some(rest) = line.strip_prefix("test ") else {
             continue;
@@ -117,19 +132,38 @@ pub(crate) fn cargo_test_leaf_outcome(stdout: &str, test_name: &str) -> i32 {
         let Some((path, status)) = rest.rsplit_once(" ... ") else {
             continue;
         };
-        if path.rsplit("::").next().unwrap_or(path) != test_name {
+        let matches = if use_full_path {
+            path == test_name
+        } else {
+            path.rsplit("::").next().unwrap_or(path) == test_name
+        };
+        if !matches {
             continue;
         }
-        found = true;
+        if !matched_paths.contains(&path) {
+            matched_paths.push(path);
+        }
         if status.trim() != "ok" {
-            return 1;
+            matched_failed = true;
         }
     }
-    if found {
-        0
-    } else {
-        1
+    if matched_paths.is_empty() {
+        return 1;
     }
+    // Ambiguity discipline: a bare leaf citation must resolve to a single
+    // distinct path. Two modules defining the same leaf (e.g. `unit::works`
+    // and `tests::works`) make a bare citation of `works` ambiguous and
+    // must not silently pass — same discipline `resolve_repo_file_by_name`
+    // applies to shell script citations. Qualified citations use exact
+    // full-path matching, so `matched_paths.len()` is at most 1 and no
+    // ambiguity check is needed there.
+    if !use_full_path && matched_paths.len() > 1 {
+        return 1;
+    }
+    if matched_failed {
+        return 1;
+    }
+    0
 }
 
 /// Absolute path to the repository root, derived from this crate's own
@@ -360,6 +394,74 @@ mod tests {
         // — only an exact leaf-segment match counts.
         let stdout = "\nrunning 1 test\ntest tests::my_test_extended ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
         assert_eq!(cargo_test_leaf_outcome(stdout, "my_test"), 1);
+    }
+
+    // ---- W36 A4 hardening (task `d578e547` PR-D, audit T3.1) ----
+    // cargo_test_leaf_outcome now distinguishes qualified citations
+    // (full-path match) from bare leaf citations (leaf match with
+    // ambiguity discipline), mirroring resolve_repo_file_by_name.
+
+    #[test]
+    fn cargo_test_leaf_outcome_errors_on_ambiguous_same_leaf_across_modules() {
+        // AC5: deterministic behavior on a multi-module same-leaf scenario.
+        // Two tests share the leaf `works` in different modules. Citing
+        // bare `works` is ambiguous and must return 1, not silently pass —
+        // the bug class caught in audit T3.1.
+        let stdout = "\nrunning 2 tests\n\
+                      test unit::works ... ok\n\
+                      test tests::works ... ok\n\
+                      \n\
+                      test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "works"), 1);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_resolves_qualified_citation_to_exact_path() {
+        // AC3: qualified citation `unit::works` strictly matches
+        // `unit::works`, not `tests::works`, even when both are present.
+        let stdout = "\nrunning 2 tests\n\
+                      test unit::works ... ok\n\
+                      test tests::works ... ok\n\
+                      \n\
+                      test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "unit::works"), 0);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_qualified_citation_fails_when_intended_path_missing() {
+        // AC3: when a qualified citation does not appear in stdout, no
+        // fallback to leaf match is attempted — that would reintroduce
+        // the leaf-ambiguity bug the A4 hardening closes.
+        let stdout = "\nrunning 1 test\n\
+                      test tests::works ... ok\n\
+                      \n\
+                      test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "unit::works"), 1);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_qualified_citation_fails_when_intended_path_failed() {
+        // AC3: when the exact qualified path matches but the test reports
+        // FAILED, return 1 — same as the leaf-match failure path.
+        let stdout = "\nrunning 2 tests\n\
+                      test unit::works ... ok\n\
+                      test tests::works ... FAILED\n\
+                      \n\
+                      test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "tests::works"), 1);
+    }
+
+    #[test]
+    fn cargo_test_leaf_outcome_unambiguous_bare_leaf_still_succeeds() {
+        // AC4 regression guard: bare leaf citation still resolves when
+        // exactly one path matches the leaf, even with other modules
+        // present whose leaves do not collide.
+        let stdout = "\nrunning 2 tests\n\
+                      test unit::works ... ok\n\
+                      test tests::other_test ... ok\n\
+                      \n\
+                      test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out\n";
+        assert_eq!(cargo_test_leaf_outcome(stdout, "works"), 0);
     }
 
     #[test]
