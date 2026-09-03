@@ -1,0 +1,72 @@
+# fly.toml — mission-control staging.
+#
+# Sibling of `tasks-api.fly.toml` (sindustries-tasks-api-staging) with
+# the staging-specific app name. Mirrors the existing Fly pattern:
+#   - `primary_region = 'syd'` matches tasks-api + gymtrack-mcp
+#   - `internal_port = 8080` is the nginx:alpine default in the Dockerfile
+#   - `context = '../../..'` resolves to the repo root from
+#     `infra/cloud/fly/mission-control.fly.toml`. Pin is enforced by
+#     infra/cloud/scripts/tests/fly-toml-context.test.sh.
+#
+# When invoking from CI:
+#   fly deploy \
+#     --config infra/cloud/fly/mission-control.fly.toml \
+#     --build-arg VITE_TASKS_API_BASE_URL=https://sindustries-tasks-api-staging.fly.dev/api/v1 \
+#     --build-arg VITE_TASKS_APP_URL=https://sindustries-tasks-app-staging.fly.dev
+#
+# `--build-arg` is required because Vite inlines import.meta.env at
+# build time — there is no runtime env-var override for SPA bundles.
+#
+# Tasks app URL is the staging Tasks app Fly deployment (see
+# tasks-app.fly.toml in this same directory). It is NOT the production
+# tasks.app subdomain — Mission Control staging should embed staging
+# Tasks app, not production Tasks app.
+
+app = 'sindustries-mission-control-staging'
+primary_region = 'syd'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
+
+[build]
+  # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
+  # so `../../..` is the repo root (matches tasks-api.fly.toml).
+  context = '../../..'
+  dockerfile = 'infra/cloud/docker/mission-control.Dockerfile'
+
+[env]
+  # Static SPA — no runtime env, but Fly requires an [env] section.
+  # All real config is baked into the bundle via --build-arg.
+  NODE_ENV = 'production'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
+
+[[services.http_checks]]
+  interval = '15s'
+  timeout = '2s'
+  grace_period = '20s'
+  method = 'GET'
+  # SPA nginx config serves /healthz with 200 "ok\n". Fly's http_check
+  # targets this path; if nginx is up but the SPA bundle is missing the
+  # root still returns 200 (because /healthz is independent of /index.html),
+  # so we ALSO verify the bundle separately via `curl https://…/index.html`
+  # from the runbook deploy procedure.
+  path = '/healthz'
+  protocol = 'http'
+  tls_skip_verify = false
+
+[deploy]
+  # Canary mirrors tasks-api.fly.toml. Rollback via `fly releases rollback
+  # <version>` is the documented revert path (see infra/runbooks/mission-control-staging.md).
+  strategy = 'canary'
