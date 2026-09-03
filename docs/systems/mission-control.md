@@ -2,7 +2,7 @@
 
 **Type:** Architecture decision record (system reference)
 **Status:** Accepted
-**Last updated:** 2026-07-25
+**Last updated:** 2026-09-04
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** `apps/mission-control/`
@@ -140,26 +140,71 @@ authentication lands.
 
 ## Production
 
-Mission Control is not yet deployed to production. The MVP target is the
-Sindustries Tailnet. Two deployment shapes are under consideration;
-this document records the decision once it lands.
+Mission Control is now deployed to **cloud-hosted staging** as two
+independent Fly apps. The decision was recorded by PR
+[#565](https://github.com/Stoffer-Industries/sindustries/pull/565) (task
+`dd232b99`, merged 2026-09-03); this section documents the chosen shape
+and the reasoning, replacing the prior Options A/B placeholder.
 
-**Option A — reverse proxy.** Mission Control and Tasks are deployed as separate
-Vite apps behind one URL. The Tasks app is mounted at a path prefix
-(`/tasks` or similar), Mission Control is mounted at `/`, and the proxy passes
-through the iframe `src` unchanged. Authentication and CSP are
-configured at the proxy. This is the cheapest deploy and the most
-likely first production shape.
+### Chosen shape — separate Fly apps, iframe architecture preserved
 
-**Option B — bundle Tasks into Mission Control.** Mission Control imports `@sindustries/tasks-app`
-as a workspace library and mounts the Tasks React tree directly
-instead of via iframe. Loses the loose-coupling benefit above but
-eliminates the iframe / auth / CSP questions entirely. Reserved for
-if Option A turns out to be unworkable (e.g., Tasks app gains state
-that has to be shared with Mission Control siblings).
+| Fly app                                | Purpose                                                    |
+| -------------------------------------- | ---------------------------------------------------------- |
+| `sindustries-mission-control-staging`  | Mission Control shell (Pulse UI); embeds Tasks via iframe  |
+| `sindustries-tasks-app-staging`        | Tasks app SPA, served standalone and iframeable            |
 
-The option chosen here will be reflected in a follow-up commit and a
-new section below; until then this is the placeholder.
+Each app has its own `infra/cloud/fly/<app>.fly.toml`,
+`infra/cloud/docker/<app>.Dockerfile`, and `infra/cloud/env/<app>.env.example`.
+The shared SPA nginx config (`infra/cloud/docker/spa-nginx.conf`)
+provides SPA fallback plus a `/healthz` endpoint that Fly's `http_check`
+hits every 15s.
+
+The iframe contract from [Decision](#decision) is preserved unchanged:
+Mission Control still loads the Tasks app via `<iframe>`. The build
+bakes in the cross-origin URL pair — `VITE_TASKS_APP_URL` on Mission
+Control and `VITE_SHELL_ORIGIN` on Tasks — so the iframe `src` and the
+embedded app's CORS posture are pinned at build time, not runtime. The
+two deploys must be coordinated on first rollout (Tasks first, then
+Mission Control); afterwards they can ship independently because the
+URL pair is stable.
+
+### Why this shape, not the prior Options A and B
+
+- **Not Option A (reverse proxy).** A reverse proxy in front of the two
+  apps gives one URL, but it forces the iframe embed to be same-origin
+  (or behind an authenticated proxy path) and pushes auth + CSP into
+  the proxy layer. For staging that adds operational surface for no
+  real benefit — the staging URL doesn't yet need authenticated users
+  (non-goal in the spec).
+- **Not Option B (bundle Tasks into Mission Control).** That eliminates
+  the iframe question entirely but throws away the independent-deploy
+  cadence that justified the iframe decision in the first place.
+  Mission Control UI work and Tasks-app feature work would need
+  coordinated releases again, and a Mission Control regression could
+  no longer be reverted without reverting an unrelated Tasks change.
+- **Separate Fly apps keep the loose coupling** the [Decision](#decision)
+  section argues for, while still giving each app its own stable HTTPS
+  URL. Per-app revert (`fly releases rollback <version>`) is one command
+  and matches AC3's revert requirement directly. DNS, TLS certs, and
+  health checks are owned per-app.
+
+### Operational artefacts
+
+- **Runbook:** `infra/runbooks/mission-control-staging.md` — deploy
+  procedure, DNS handover checklist, smoke checks, health-check
+  contract, revert procedure.
+- **DNS targets (proposed):** `mc-staging.sindustries.dev` →
+  `sindustries-mission-control-staging.fly.dev`; `tasks-staging.sindustries.dev` →
+  `sindustries-tasks-app-staging.fly.dev`. TLS cert issuance via
+  `fly certs create` runs after the first deploy lands and the DNS
+  records are confirmed live (handover pending with Tom — see runbook
+  § DNS).
+- **Production cutover** is a separate workstream (task `020f423e`,
+  spec `brain/tasks/specs/in-progress/sindustries-cloud-migration.md`).
+  This ADR only commits to the staging shape; production decisions
+  (custom domain strategy, prod Tasks API URL, prod Content Scheduler
+  URL, prod observability hooks) inherit the same two-app shape but
+  are not finalised here.
 
 ---
 
