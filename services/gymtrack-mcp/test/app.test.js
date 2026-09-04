@@ -804,6 +804,9 @@ describe('GymTrack MCP OAuth server', () => {
     expect(response.body.client_id_issued_at).toBe(
       Math.floor(new Date('2026-08-03T00:00:00.000Z').getTime() / 1000)
     );
+    // RFC 7591 §3.2.1 — the registration response MUST echo the registered
+    // redirect_uris so the client can confirm what the server stored.
+    expect(response.body.redirect_uris).toEqual(['http://127.0.0.1:8789/callback']);
     expect(response.body).not.toHaveProperty('client_secret');
     expect(response.body).not.toHaveProperty('client_secret_expires_at');
 
@@ -815,6 +818,51 @@ describe('GymTrack MCP OAuth server', () => {
     expect(stored.software_id).toBe('test-mcp');
     expect(stored.software_version).toBe('1.0.0');
     expect(stored.registered_at).toBe('2026-08-03T00:00:00.000Z');
+  });
+
+  it('returns 202 with no body for `notifications/initialized` (no JSON-RPC response)', async () => {
+    const { app, repo } = makeApp();
+    const consent = await repo.upsertConsent({
+      userId: 'user-1',
+      clientId: 'claude-desktop',
+      scope: 'history:read progression:read workouts:write',
+      grantedAt: new Date('2026-08-03T00:00:00.000Z')
+    });
+    await repo.createToken({
+      consentId: consent.id,
+      userId: 'user-1',
+      clientId: 'claude-desktop',
+      scope: consent.scope,
+      familyId: 'family-1',
+      accessTokenHash: sha256Hex('oauth-access-token'),
+      refreshTokenHash: sha256Hex('oauth-refresh-token'),
+      accessTokenExpiresAt: new Date('2026-08-03T01:00:00.000Z'),
+      refreshTokenExpiresAt: new Date('2026-11-01T00:00:00.000Z')
+    });
+
+    // The notification has no `id` and no `result`; the server MUST NOT send
+    // a JSON-RPC response. We acknowledge it with HTTP 202 + empty body so
+    // the client can move on to `tools/list` on the same bearer token.
+    const initialized = await request(app)
+      .post('/mcp')
+      .set('Authorization', 'Bearer oauth-access-token')
+      .send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+
+    expect(initialized.status).toBe(202);
+    expect(initialized.text).toBe('');
+    expect(initialized.headers['content-length']).toBe('0');
+
+    // And the follow-up `tools/list` still works on the same bearer token.
+    const list = await request(app)
+      .post('/mcp')
+      .set('Authorization', 'Bearer oauth-access-token')
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    expect(list.status).toBe(200);
+    expect(list.body.result.tools.map((tool) => tool.name)).toEqual([
+      'plan_workout',
+      'read_history',
+      'read_exercise_progression'
+    ]);
   });
 
   it('rejects registration when redirect_uris is missing', async () => {

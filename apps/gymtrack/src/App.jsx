@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AgentConsentPage from './components/AgentConsentPage.jsx';
+import AgentOAuthCallbackPage from './components/AgentOAuthCallbackPage.jsx';
 import AuthGate from './components/AuthGate.jsx';
 import ConnectedAgentsPage from './components/ConnectedAgentsPage.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
@@ -61,6 +62,14 @@ export default function App() {
           </AuthGate>
         }
       />
+      {/* Hosted OAuth callback — intentionally NOT wrapped in <AuthGate>.
+          The user lands here from the external MCP client after a redirect,
+          possibly on a different device than the one that started the flow.
+          The page is stateless (no server callback); the connecting app is
+          responsible for exchanging the code at /oauth/token. See
+          docs/runbooks/gymtrack-agent-connect.md for the loopback-vs-hosted
+          split rationale. */}
+      <Route path="/oauth/callback" element={<AgentOAuthCallbackPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
