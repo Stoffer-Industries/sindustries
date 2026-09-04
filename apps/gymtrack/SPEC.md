@@ -46,11 +46,11 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 2. Selecting a provider opens its real MCP connector configuration. The user adds `https://gymtrack-mcp.fly.dev/mcp`; the external client generates OAuth state + a PKCE challenge and starts OAuth against `GET /oauth/authorize` on the GymTrack MCP server.
 3. **Redirect target depends on the device.** If the connecting app registered a loopback `redirect_uri` and can actually receive the redirect on this device (e.g. a desktop listener on `http://127.0.0.1:8789/callback`), the browser returns there and the connecting app exchanges the code silently. Otherwise the redirect lands on the hosted page at `https://<gymtrack-app-host>/oauth/callback` — see "Hosted OAuth callback page" below.
 4. The MCP server validates `client_id`, `redirect_uri`, requested `scope`, and PKCE (`code_challenge`, `code_challenge_method=S256`), then redirects the browser into GymTrack at `/agent-consent?...`.
-4. If the user is not signed in, `<AuthGate>` redirects them to `/login`, preserving the full consent URL. The user can continue with Google or email/password and lands back on `/agent-consent`.
-5. `/agent-consent` shows the client name, redirect URI, and requested scopes.
-6. Approve → GymTrack POSTs the decision to the MCP server with the signed-in Supabase access token; the MCP server verifies the user session, creates/updates the consent row, stores a hashed authorization code, and returns the client redirect URL with `code` and `state`.
-7. Cancel → the user is redirected back with `error=access_denied`.
-8. The external client exchanges the code at `POST /oauth/token` with a PKCE verifier. GymTrack returns a short-lived bearer access token plus a rotated refresh token. Plaintext tokens are never stored in Supabase.
+5. If the user is not signed in, `<AuthGate>` redirects them to `/login`, preserving the full consent URL. The user can continue with Google or email/password and lands back on `/agent-consent`.
+6. `/agent-consent` shows the client name, redirect URI, and requested scopes.
+7. Approve → GymTrack POSTs the decision to the MCP server with the signed-in Supabase access token; the MCP server verifies the user session, creates/updates the consent row, stores a hashed authorization code, and returns the client redirect URL with `code` and `state`.
+8. Cancel → the user is redirected back with `error=access_denied`.
+9. The external client exchanges the code at `POST /oauth/token` with a PKCE verifier. GymTrack returns a short-lived bearer access token plus a rotated refresh token. Plaintext tokens are never stored in Supabase.
 
 ### Hosted OAuth callback page
 
