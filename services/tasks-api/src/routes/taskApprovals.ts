@@ -6,7 +6,7 @@ import { parseTaskId } from './tasks/_validation.ts';
 import { mapTaskApproval } from './tasks/_mapper.ts';
 import { validApprovalTypes } from './tasks/_constants.ts';
 import { loadRequiredApprovalsConfig, requiredApprovalsFor } from '../config/requiredApprovals.ts';
-import { workflowHandoffForApproval } from '../config/workflowHandoffs.ts';
+import { attentionOwnerForApproval, workflowHandoffForApproval } from '../config/workflowHandoffs.ts';
 
 export const taskApprovalsRouter = Router();
 
@@ -29,24 +29,87 @@ function immutableTask(res) {
 
 function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'revoked') {
   const handoff = workflowHandoffForApproval(type);
-  if (!handoff) return null;
+  const currentAttentionOwners = (task.attentionOwners ?? []).map((row) => row.owner);
+  const desiredAttentionOwners = attentionOwnersForApproval(currentAttentionOwners, type, action);
 
-  if (action === 'approved') {
-    if (task.workflowHandoffGate !== type) return null;
-    return {
-      workflowHandoffRoleId: null,
-      workflowHandoffGate: null,
-      workflowHandoffReason: null
+  const update: Record<string, unknown> = {};
+
+  if (handoff) {
+    if (action === 'approved') {
+      if (task.workflowHandoffGate === type) {
+        update.workflowHandoffRoleId = null;
+        update.workflowHandoffGate = null;
+        update.workflowHandoffReason = null;
+      }
+    } else {
+      const required = requiredApprovalsFor(loadRequiredApprovalsConfig(), task.taskType);
+      if (required.includes(type)) {
+        update.workflowHandoffRoleId = handoff.roleId;
+        update.workflowHandoffGate = type;
+        update.workflowHandoffReason = handoff.reason;
+      }
+    }
+  }
+
+  if (desiredAttentionOwners) {
+    // Full-replacement via Prisma nested write — same atomicity as the
+    // PATCH endpoint's deleteMany + createMany, but in a single statement.
+    // The PATCH endpoint (routes/tasks.ts lines 615-622) uses the explicit
+    // two-call form; the nested-write form here is equivalent inside one
+    // $transaction.
+    update.attentionOwners = {
+      deleteMany: {},
+      createMany: {
+        data: desiredAttentionOwners.map((owner, position) => ({ owner, position }))
+      }
     };
   }
 
-  const required = requiredApprovalsFor(loadRequiredApprovalsConfig(), task.taskType);
-  if (!required.includes(type)) return null;
-  return {
-    workflowHandoffRoleId: handoff.roleId,
-    workflowHandoffGate: type,
-    workflowHandoffReason: handoff.reason
-  };
+  return Object.keys(update).length > 0 ? update : null;
+}
+
+/**
+ * Compute the desired `attentionOwners[]` array after a structured approval
+ * write, mirroring the lobster's `reconciled_attention_owners` else-branch
+ * for the head-slot-pop / head-slot-prepend path.
+ *
+ * Returns:
+ *   - `null` when the approval type has no attention-owner mapping, when the
+ *     current head is unrelated (e.g. the assignee is at position 0 and the
+ *     just-recorded approval satisfies a different gate), or when no change
+ *     is needed (idempotent). The caller treats `null` as "leave the array
+ *     alone; let the lobster's next sweep handle the broader reconciliation."
+ *   - The new array otherwise.
+ *
+ * Behaviour:
+ *   - approved + head matches type's owner → remove the head (single pop).
+ *     Tail slots (including duplicates) are preserved byte-for-byte.
+ *   - revoked + head does NOT match type's owner (and owner is absent) →
+ *     prepend the owner. This keeps the gate-owner on the routing stack
+ *     while their gate is open.
+ *   - revoked + head already matches → no-op (idempotent).
+ *   - anything else (head doesn't match on approve, owner already present on
+ *     revoke, no owner for this type) → null.
+ *
+ * Case-insensitive comparison mirrors the lobster's `eq_ignore_ascii_case`
+ * so a task created with `"tom"` at the head behaves identically to `"Tom"`.
+ */
+function attentionOwnersForApproval(
+  current: string[],
+  type: ApprovalType,
+  action: 'approved' | 'revoked'
+): string[] | null {
+  const owner = attentionOwnerForApproval(type);
+  if (!owner) return null;
+  const matchesOwner = (o: string) => o.trim().toLowerCase() === owner.toLowerCase();
+  const head = current[0];
+  if (action === 'approved') {
+    return head !== undefined && matchesOwner(head) ? current.slice(1) : null;
+  }
+  // action === 'revoked'
+  if (head !== undefined && matchesOwner(head)) return null;
+  if (current.some(matchesOwner)) return null;
+  return [owner, ...current];
 }
 
 export function approvalAuditBody(type: ApprovalType, action: 'approved' | 'revoked', actor: string) {
@@ -71,7 +134,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     const id = parseTaskId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const type = normalizeApprovalType(req.body?.type);
-    if (!type) return badRequest(res, 'INVALID_APPROVAL_TYPE', 'type must be one of: spec, tech_design, qa');
+    if (!type) return badRequest(res, 'INVALID_APPROVAL_TYPE', `type must be one of: ${Array.from(validApprovalTypes).sort().join(', ')}`);
     if (!authorizeApprovalType(req, res, type)) return;
     if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'owner')) {
       return badRequest(res, 'FORGEABLE_APPROVAL_OWNER', 'owner is server-derived and must not be supplied');
@@ -90,7 +153,8 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
           taskType: true,
           workflowHandoffRoleId: true,
           workflowHandoffGate: true,
-          workflowHandoffReason: true
+          workflowHandoffReason: true,
+          attentionOwners: { orderBy: { position: 'asc' } }
         }
       });
       if (!task) return { kind: 'missing' } as const;
@@ -123,7 +187,7 @@ taskApprovalsRouter.delete('/tasks/:id/approvals/:type', requireApprovalPrincipa
     const id = parseTaskId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const type = normalizeApprovalType(req.params.type);
-    if (!type) return badRequest(res, 'INVALID_APPROVAL_TYPE', 'type must be one of: spec, tech_design, qa');
+    if (!type) return badRequest(res, 'INVALID_APPROVAL_TYPE', `type must be one of: ${Array.from(validApprovalTypes).sort().join(', ')}`);
     if (!authorizeApprovalType(req, res, type)) return;
     const actor = req.approvalPrincipal!.actor;
 
@@ -137,7 +201,8 @@ taskApprovalsRouter.delete('/tasks/:id/approvals/:type', requireApprovalPrincipa
           taskType: true,
           workflowHandoffRoleId: true,
           workflowHandoffGate: true,
-          workflowHandoffReason: true
+          workflowHandoffReason: true,
+          attentionOwners: { orderBy: { position: 'asc' } }
         }
       });
       if (!task) return { kind: 'missing' } as const;
