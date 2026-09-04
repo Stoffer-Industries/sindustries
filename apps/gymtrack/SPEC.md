@@ -44,12 +44,20 @@ The user-facing app surfaces planned workouts (created via either agent surface)
    - **Claude deep link.** `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=<name>&connectorUrl=<url>` — the contract Anthropic actually shipped, per the maintainer's closing comment on [anthropics/claude-ai-mcp#74](https://github.com/anthropics/claude-ai-mcp/issues/74) (@localden, 2026-05-13). The path (`/customize/connectors`) and param names (`connectorName`, `connectorUrl`) are load-bearing: the earlier proposal in that issue's opener used `/settings/connectors?mcpName=...&mcpServerUrl=...`, which Anthropic did *not* ship. With the wrong shape the Add Custom Connector modal opens generically without pre-filling the Name and Remote MCP server URL fields. `connectorName` is the seeded OAuth client display name; `connectorUrl` is the GymTrack MCP base URL with `/mcp` appended (URL-encoded). The link opens Claude's Add Custom Connector modal with both fields pre-filled.
    - **ChatGPT option (intentionally absent).** OpenAI's custom MCP connector is documented for Business / Enterprise / Edu tiers only; Pro is read-only and Plus/Free are unsupported. GymTrack's user base is personal / lower-tier accounts, so a ChatGPT option on the CTA leads nowhere useful for them. Removed under task `91994011-5c34-4af5-8ef4-40daac604e64` (2026-08-23). The seeded `chatgpt` OAuth client row in `public.gymtrack_oauth_clients` is retained — it is inert without a UI asking for it. See `docs/runbooks/gymtrack-agent-connect.md` § "ChatGPT intentionally excluded" for the rationale and re-introduction criteria.
 2. Selecting a provider opens its real MCP connector configuration. The user adds `https://gymtrack-mcp.fly.dev/mcp`; the external client generates OAuth state + a PKCE challenge and starts OAuth against `GET /oauth/authorize` on the GymTrack MCP server.
-3. The MCP server validates `client_id`, `redirect_uri`, requested `scope`, and PKCE (`code_challenge`, `code_challenge_method=S256`), then redirects the browser into GymTrack at `/agent-consent?...`.
+3. **Redirect target depends on the device.** If the connecting app registered a loopback `redirect_uri` and can actually receive the redirect on this device (e.g. a desktop listener on `http://127.0.0.1:8789/callback`), the browser returns there and the connecting app exchanges the code silently. Otherwise the redirect lands on the hosted page at `https://<gymtrack-app-host>/oauth/callback` — see "Hosted OAuth callback page" below.
+4. The MCP server validates `client_id`, `redirect_uri`, requested `scope`, and PKCE (`code_challenge`, `code_challenge_method=S256`), then redirects the browser into GymTrack at `/agent-consent?...`.
 4. If the user is not signed in, `<AuthGate>` redirects them to `/login`, preserving the full consent URL. The user can continue with Google or email/password and lands back on `/agent-consent`.
 5. `/agent-consent` shows the client name, redirect URI, and requested scopes.
 6. Approve → GymTrack POSTs the decision to the MCP server with the signed-in Supabase access token; the MCP server verifies the user session, creates/updates the consent row, stores a hashed authorization code, and returns the client redirect URL with `code` and `state`.
 7. Cancel → the user is redirected back with `error=access_denied`.
 8. The external client exchanges the code at `POST /oauth/token` with a PKCE verifier. GymTrack returns a short-lived bearer access token plus a rotated refresh token. Plaintext tokens are never stored in Supabase.
+
+### Hosted OAuth callback page
+
+1. When the redirect target above is the hosted `https://<gymtrack-app-host>/oauth/callback` route (i.e. the user's device cannot receive a loopback redirect), GymTrack renders `AgentOAuthCallbackPage` with the OAuth `code` / `state` / `error` / `error_description` query parameters.
+2. `?code=…&state=…` → success view: the page displays the one-time authorization code in a labelled `<output>` and provides a copy-to-clipboard button. The page itself never calls back to any server — the connecting app exchanges the code at `POST /oauth/token` with its PKCE verifier.
+3. `?error=…&error_description=…` → denial view: the page surfaces the OAuth error and `error_description` (falling back to the bare error code when no description is supplied) inside a `role="alert"` banner so a screen reader announces it.
+4. Neither parameter present → the page renders an "no authorization code was returned" fallback so the route is never blank. The page is intentionally NOT wrapped in `<AuthGate>` — the user lands here from the external MCP client, possibly on a different device than the one that started the flow.
 
 ### Manage connected agents
 
@@ -109,6 +117,7 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 | `/workout` | `WorkoutLogger` | Date picker + exercise picker + pending sets; accepts `?date=YYYY-MM-DD`. |
 | `/history` | `HistoryList` | Last-30-days grouped history. |
 | `/workouts` | `WorkoutsTab` | Pending planned workouts, soonest-first, with Today/Overdue badges; users with no active consent also see the Claude connector deep link. ChatGPT was intentionally removed from the same CTA under task `91994011-5c34-4af5-8ef4-40daac604e64` — see "Connect and authorize an external MCP client" §1. |
+| `/oauth/callback` | `AgentOAuthCallbackPage` | Hosted OAuth callback page; renders the one-time authorization code on success (with copy-to-clipboard) and the OAuth error / `error_description` on denial. NOT wrapped in `<AuthGate>` — see "Hosted OAuth callback page". |
 | `/settings/agents` | `ConnectedAgentsPage` | Lists and revokes active MCP consents. |
 | `*` | redirect | → `/`. |
 
@@ -155,7 +164,8 @@ Every route authenticates with `Authorization: Bearer <oauth access token>` and 
 
 `services/gymtrack-mcp` exposes:
 
-- `POST /mcp` — JSON-RPC endpoint supporting `initialize`, `tools/list`, and `tools/call`.
+- `POST /mcp` — JSON-RPC endpoint supporting `initialize`, `notifications/initialized`, `tools/list`, and `tools/call`. A `notifications/initialized` JSON-RPC notification (no `id`, no response expected by the spec) is acknowledged with `HTTP 202 Accepted` and an empty body so standards-conformant MCP clients can move on to `tools/list` on the same bearer token. The dispatcher explicitly guards on `!Object.hasOwn(rpc, 'id')` so an `initialize`-shaped body cannot accidentally match this branch.
+- `POST /oauth/register` — RFC 7591 Dynamic Client Registration. The response always includes the registered `redirect_uris` so a client can confirm what was stored server-side. The response never includes a `client_secret` — GymTrack only supports `token_endpoint_auth_method: 'none'` (public clients using PKCE).
 - `GET /.well-known/oauth-authorization-server`
 - `GET /.well-known/oauth-protected-resource`
 - `GET /oauth/authorize`
@@ -180,6 +190,8 @@ The MCP server always derives the acting `user_id` from the validated OAuth acce
 | Connected agents list + revoke UI | `src/components/ConnectedAgentsPage.test.jsx` |
 | OAuth-protected REST handlers | `src/lib/oauthAuth.test.js`, `src/lib/plannedWorkoutsHandler.test.js`, `src/lib/historyHandler.test.js`, `src/lib/progressionHandler.test.js` |
 | MCP OAuth flow, PKCE exchange, refresh rotation, tool discovery | `services/gymtrack-mcp/test/app.test.js` |
+| DCR response shape (RFC 7591 §3.2.1 — `redirect_uris` echoed, no `client_secret`) and `notifications/initialized` 202 acknowledgement | `services/gymtrack-mcp/test/app.test.js` |
+| Hosted OAuth callback page — success with copy, denial with `error_description`, empty-state fallback | `apps/gymtrack/src/components/AgentOAuthCallbackPage.test.jsx` |
 
 Playwright still runs against the Vite dev server on port 5179 with `iPhone 13` device emulation. There is still no end-to-end Playwright spec that drives a real external MCP client through OAuth against a live Supabase project; the current branch covers that surface with service integration tests instead.
 
