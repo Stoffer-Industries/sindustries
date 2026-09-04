@@ -85,6 +85,41 @@ if ! colima status >/dev/null 2>&1; then
   colima start
 fi
 
+# Preflight: confirm dockerd is actually reachable. `colima status` only
+# checks the Colima metadata; it returns OK even when the underlying
+# Lima VM has died and dockerd is gone. Detect that case and try to
+# recover via `colima restart --runtime docker` before continuing.
+ensure_docker_daemon() {
+  if docker info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Docker daemon unreachable. Attempting Colima restart to recover..."
+
+  # Best-effort cleanup of stale state, then a clean start.
+  colima stop 2>/dev/null || true
+  if ! colima start --runtime docker; then
+    echo "ERROR: colima start failed. Run 'colima restart --runtime docker' manually and retry." >&2
+    exit 1
+  fi
+
+  # Wait up to ~30s for dockerd to come back up.
+  local attempts=0
+  while (( attempts < 30 )); do
+    if docker info >/dev/null 2>&1; then
+      echo "Docker daemon recovered."
+      return 0
+    fi
+    sleep 1
+    attempts=$((attempts + 1))
+  done
+
+  echo "ERROR: Docker daemon still unreachable after colima restart. Run 'colima restart --runtime docker' manually and retry." >&2
+  exit 1
+}
+
+ensure_docker_daemon
+
 # Preflight: clear stale local listeners for this mode before Tilt boots.
 cleanup_mode_ports
 
@@ -113,7 +148,7 @@ CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS"
 # Content Scheduler auto-post — durable adapter. Without these, the
 # tasks-api process falls back to CONTENT_SCHEDULER_JOB_ADAPTER=in-process
 # (in-memory setTimeouts lost on restart; see task 1945f8a2). Set here
-# for every mode so the prodlike path is exercised by the same `make up`
+# for every mode so the prodlike path is exercised by the same 'make up'
 # workflow as dev.
 CONTENT_SCHEDULER_JOB_ADAPTER=bullmq
 CONTENT_SCHEDULER_REDIS_URL=redis://localhost:${REDIS_PORT}
