@@ -67,21 +67,95 @@ Some preamble.
 });
 
 // ---------------------------------------------------------------------------
-// defaultJudgeIntent — placeholder behavior. Until Quinn implements the
-// LLM call, every AC fails so the task stays in `doing` rather than
-// reaching acceptance on a stub. This is the contract the semantic pin
-// tests below assume.
+// defaultJudgeIntent — Quinn's deterministic v1 (token-overlap heuristic).
+// Strict on presence, conservative on `ok: false`. False negatives bounce
+// back to the implementer with a precise reason; false positives are
+// the dangerous direction so the heuristic errs strict.
 // ---------------------------------------------------------------------------
 
 describe('defaultJudgeIntent', () => {
-  it('returns ok: false with an explicit reason so tasks stay in `doing`', async () => {
+  it('returns ok: true when every meaningful token from the AC description appears in the patch', async () => {
     const result = await defaultJudgeIntent(
-      { ac: '1', description: 'do the thing' },
+      { ac: '1', description: 'oauth callback handler' },
+      'diff --git a/services/oauth.ts b/services/oauth.ts\n+// OAuth callback handler — wired into the router.\n+export const oauthCallback = () => { ... }',
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns ok: true with case-insensitive matching', async () => {
+    const result = await defaultJudgeIntent(
+      { ac: '1', description: 'OPENCLAW PKCE handshake' },
+      'diff --git a/x.ts b/x.ts\n+// OpenClaw now completes the PKCE handshake end-to-end.',
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('splits camelCase identifiers so each piece is checked independently', async () => {
+    const result = await defaultJudgeIntent(
+      { ac: '1', description: 'oauthClientCredentials grant' },
+      // Realistic patch: an explanatory comment plus the camelCase identifier.
+      'diff --git a/x.ts b/x.ts\n+// OAuth client credentials grant type\n+const oauthClientCredentials = ...',
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns ok: false when a meaningful token from the AC is missing from the patch', async () => {
+    const result = await defaultJudgeIntent(
+      { ac: '3', description: 'the MCP handshake' },
+      'diff --git a/x.ts b/x.ts\n+// initialize() is wired but the handshake state is missing',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('AC3');
+      // 'mcp' is the discriminator — the patch has "handshake" but not "MCP".
+      expect(result.reason).toContain('mcp');
+    }
+  });
+
+  it('returns ok: false when the patch is empty (defensive)', async () => {
+    const result = await defaultJudgeIntent(
+      { ac: '1', description: 'oauth callback handler' },
+      '',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('empty');
+    }
+  });
+
+  it('returns ok: false when the AC description has no meaningful tokens (stopwords only)', async () => {
+    const result = await defaultJudgeIntent(
+      { ac: '1', description: 'add it' },
       'diff --git a/foo b/foo\n+added',
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toContain('Quinn owns');
+      expect(result.reason).toContain('no meaningful tokens');
+    }
+  });
+
+  it('returns ok: false with an explicit reason when the AC description is empty', async () => {
+    const result = await defaultJudgeIntent({ ac: '1', description: '' }, 'diff\n+added');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('no meaningful tokens');
+    }
+  });
+
+  it('truncates the missing-token list at 5 entries in the reason', async () => {
+    const result = await defaultJudgeIntent(
+      {
+        ac: '7',
+        description: 'alpha bravo charlie delta echo foxtrot golf',
+      },
+      // None of the meaningful tokens appear in this patch.
+      'diff --git a/x.ts b/x.ts\n+// unrelated change',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('AC7');
+      // 5 tokens listed + an ellipsis indicator.
+      expect(result.reason).toMatch(/\[.+, .+, .+, .+, .+, …\]/);
     }
   });
 });

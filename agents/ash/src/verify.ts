@@ -127,7 +127,7 @@ function stripTrailingEvidence(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Semantic judgment — placeholder for Quinn's implementation.
+// Semantic judgment — Quinn's deterministic v1 (token-overlap heuristic).
 //
 // The lobster's mechanical-evidence gate already verified that the
 // cited file exists, the cited test passes, and the evidence text
@@ -135,32 +135,162 @@ function stripTrailingEvidence(text: string): string {
 // actually satisfies the AC's *intent* — not just whether the cited
 // surface is present.
 //
-// Recommended approach (Quinn): an LLM call against the AC's bare
-// description + the PR's patch text with a strict
-// `{ ok: true } | { ok: false; reason: string }` JSON response,
-// deterministically reproducible by setting temperature=0 and
-// recording the model + prompt version.
+// v1 is a deterministic, zero-LLM token-overlap heuristic so the
+// semantic gate has *some* non-stub signal while we wait for the
+// eventual LLM judge (recommended approach: `temperature=0` call
+// against AC description + PR patch). The heuristic extracts
+// meaningful content tokens from the AC's bare description and
+// checks every token appears in the PR patch (case-insensitive
+// substring). Any missing token ⇒ `ok: false` with a reason naming
+// the missing tokens.
 //
-// Alternative deterministic approaches (e.g. extracted function/class
-// symbols compared against AC claim keywords) are acceptable when LLM
-// budget is a concern. See the design's "Open questions / risks" for
-// the trade-off table.
+// Trade-off: deliberately conservative on `ok: false`. False
+// negatives bounce back to the implementer with a precise reason
+// (Tom or the implementer can correct the AC text, fix the missing
+// symbol, or override the gate manually). False positives are the
+// dangerous direction (silent approval of an unimplemented AC), so
+// the heuristic errs strict.
 //
-// Until Quinn's implementation is wired, the placeholder returns
-// `ok: false` with an explicit reason so the task stays in `doing`
-// rather than reaching acceptance on a stub. The lobster's mechanical
-// gate still runs — it just doesn't transition the task to acceptance
-// without a semantic pass.
+// Limitations (acceptable for v1, will be replaced by the LLM
+// judge): does not handle synonyms or paraphrases, does not parse
+// code structure, treats hyphenated compounds as separate tokens,
+// counts camelCase identifiers as one token (lowercased), and has
+// no notion of negative claims ("without X" reads as just "X").
+// When in doubt the heuristic returns `ok: false` and surfaces the
+// reason so a human can intervene.
 // ---------------------------------------------------------------------------
 
+/**
+ * English stopwords + generic verbs / nouns that appear in nearly
+ * every PR patch and carry no AC-specific signal. Conservative
+ * filter — anything left in the token set must be backed by a
+ * patch substring or the AC fails judgment.
+ */
+const STOPWORDS: ReadonlySet<string> = new Set([
+  // Articles, determiners, pronouns
+  'a', 'an', 'the', 'this', 'that', 'these', 'those',
+  'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves',
+  'you', 'your', 'yours', 'yourself', 'yourselves',
+  'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
+  'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves',
+  'what', 'which', 'who', 'whom', 'whose',
+  // Conjunctions, prepositions, particles
+  'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where', 'while',
+  'until', 'than', 'as', 'so', 'because', 'since', 'unless', 'although',
+  'though', 'even', 'whether', 'either', 'neither', 'both', 'not',
+  'only', 'also', 'too', 'very', 'quite', 'rather', 'almost', 'just',
+  'still', 'yet', 'already', 'always', 'never', 'sometimes', 'often',
+  'usually', 'at', 'by', 'for', 'with', 'about', 'against', 'between',
+  'into', 'through', 'during', 'before', 'after', 'above', 'below',
+  'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under',
+  'again', 'further', 'once', 'here', 'there', 'why', 'how', 'now',
+  // Be / have / do forms
+  'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'having',
+  'do', 'does', 'did', 'doing',
+  // Modal / auxiliary
+  'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
+  'need', 'needs', 'needed', 'dare',
+  // Generic verbs (too common in PR patches to be discriminative).
+  // Most ACs use imperative voice ("implement X", "add Y") so the
+  // imperative verbs carry no signal — only the object nouns matter.
+  'use', 'used', 'uses', 'using', 'make', 'makes', 'made', 'making',
+  'add', 'adds', 'added', 'adding', 'include', 'includes', 'included',
+  'including', 'support', 'supports', 'supported', 'supporting',
+  'allow', 'allows', 'allowed', 'allowing', 'provide', 'provides',
+  'provided', 'providing', 'ensure', 'ensures', 'ensured', 'ensuring',
+  'require', 'requires', 'required', 'requiring', 'contain', 'contains',
+  'contained', 'containing', 'return', 'returns', 'returned', 'returning',
+  'call', 'calls', 'called', 'calling', 'set', 'sets', 'setting',
+  'create', 'creates', 'created', 'creating', 'read', 'reads', 'reading',
+  'write', 'writes', 'wrote', 'writing', 'run', 'runs', 'running',
+  'implement', 'implements', 'implemented', 'implementing',
+  'wire', 'wires', 'wired', 'wiring',
+  'expose', 'exposes', 'exposed', 'exposing',
+  'build', 'builds', 'built', 'building',
+  'configure', 'configures', 'configured', 'configuring',
+  'register', 'registers', 'registered', 'registering',
+  'define', 'defines', 'defined', 'defining',
+  'replace', 'replaces', 'replaced', 'replacing',
+  'validate', 'validates', 'validated', 'validating',
+  'verify', 'verifies', 'verified', 'verifying',
+  'check', 'checks', 'checked', 'checking',
+  'test', 'tests', 'tested', 'testing',
+  'complete', 'completes', 'completed', 'completing',
+  'discover', 'discovers', 'discovered', 'discovering',
+  'retain', 'retains', 'retained', 'retaining',
+  'land', 'lands', 'landed', 'landing',
+  'present', 'presents', 'presented', 'presenting',
+  'display', 'displays', 'displayed', 'displaying',
+  'show', 'shows', 'showed', 'showing',
+  'cover', 'covers', 'covered', 'covering',
+  // Generic nouns
+  'code', 'file', 'files', 'test', 'tests', 'function', 'functions',
+  'method', 'methods', 'class', 'classes', 'module', 'modules',
+  'value', 'values', 'name', 'names', 'type', 'types',
+  // Generic adjectives / quantifiers
+  'no', 'nor', 'same', 'such', 'own', 'whole', 'entire', 'particular',
+  'specific', 'general', 'different', 'similar', 'various', 'single',
+  'multiple', 'several', 'many', 'few', 'most', 'more', 'less', 'much',
+  'new', 'old', 'first', 'last', 'next', 'previous', 'current', 'other',
+  // Misc common tokens that slip through normalization
+  'via', 'per', 'any', 'all', 'each', 'some', 'anywhere', 'everywhere',
+]);
+
+/**
+ * Lowercase, split on non-alphanumeric boundaries, drop tokens
+ * shorter than 3 chars and stopwords. Returns a deduped array.
+ *
+ * `camelCase` / `PascalCase` identifiers are kept whole because the
+ * regex splits on boundaries between letter↔digit and letter↔letter
+ * only when followed by an uppercase letter (via the look-ahead
+ * fallback below). Hyphenated compounds like `method-not-found` are
+ * split into their parts; `PKCE` survives because it has no
+ * lower↔upper boundary and no internal punctuation.
+ */
+function tokenizeDescription(description: string): string[] {
+  // Insert a space at every camelCase boundary: "methodNotFound" →
+  // "method Not Found", "OAuthClient" → "OAuth Client", "PKCE" → "PKCE".
+  const spaced = description.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  const raw = spaced
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3)
+    .filter((t) => !STOPWORDS.has(t));
+  return Array.from(new Set(raw));
+}
+
 export async function defaultJudgeIntent(
-  _ac: AcEvidence,
-  _patchText: string,
+  ac: AcEvidence,
+  patchText: string,
 ): Promise<JudgeIntentResult> {
+  if (!patchText || patchText.trim().length === 0) {
+    return {
+      ok: false,
+      reason: `AC${ac.ac}: PR patch is empty — nothing to verify against`,
+    };
+  }
+
+  const tokens = tokenizeDescription(ac.description);
+  if (tokens.length === 0) {
+    return {
+      ok: false,
+      reason: `AC${ac.ac}: no meaningful tokens extracted from description "${ac.description}" — cannot verify`,
+    };
+  }
+
+  const patchLower = patchText.toLowerCase();
+  const missingTokens = tokens.filter((t) => !patchLower.includes(t));
+
+  if (missingTokens.length === 0) {
+    return { ok: true };
+  }
+
+  const preview = missingTokens.slice(0, 5).join(', ');
+  const ellipsis = missingTokens.length > 5 ? ', …' : '';
   return {
     ok: false,
-    reason:
-      'semantic judgment not yet implemented (Quinn owns) — see agents/ash/src/verify.ts:defaultJudgeIntent',
+    reason: `AC${ac.ac}: tokens [${preview}${ellipsis}] from AC description not found in PR patch`,
   };
 }
 
