@@ -1,6 +1,5 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { attentionOwnersForApproval } from '../src/routes/taskApprovals.ts';
 
 // Set service credentials BEFORE the dynamic import of app.ts (which
 // transitively imports approvalAuth.ts) so the module-load-time parse
@@ -22,6 +21,11 @@ const prismaMock = {
 };
 vi.mock('../src/lib/prisma.ts', () => ({ prisma: prismaMock }));
 const { createApp } = await import('../src/app.ts');
+// `attentionOwnersForApproval` is a pure helper exported from taskApprovals.ts
+// for direct AC3 unit coverage. Dynamic-imported alongside `createApp` above
+// so the top-level `prismaMock` binding has been initialised by the time
+// taskApprovals.ts transitively pulls the mocked prisma module.
+const { attentionOwnersForApproval } = await import('../src/routes/taskApprovals.ts');
 
 const TASK_ID = '11111111-1111-1111-1111-111111111111';
 const TOM_TOKEN = 'tom-service-token-long-enough';
