@@ -241,6 +241,68 @@ pub(crate) fn body_has_checked_acceptance(body: &str) -> bool {
         .is_match(body)
 }
 
+/// Return the list of label names for a PR via `gh pr view --json labels`.
+/// Returns `Ok(Vec)` of label names on a successful read (the Vec is empty
+/// when the PR legitimately has no labels), or `Err` with a
+/// caller-actionable message when the `gh` invocation fails or its output
+/// cannot be decoded. The fail-closed contract matches `pr_changed_files`:
+/// callers that treat an empty label list as "not docs-only" preserve
+/// that behaviour by matching on `Ok(labels)`; `Err(_)` is reserved for
+/// the gate-fail path so a transient `gh` blip cannot silently bypass
+/// the docs-only skip.
+pub(crate) fn pr_labels(url: &str) -> Result<Vec<String>, String> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            url,
+            "--json",
+            "labels",
+            "--jq",
+            ".labels[].name",
+        ])
+        .output();
+    let output = match output {
+        Ok(out) if out.status.success() => out,
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            return Err(format!(
+                "gh pr view {url} --json labels --jq .labels\\[\\].name exited {}: {stderr}",
+                out.status
+            ));
+        }
+        Err(err) => {
+            return Err(format!(
+                "failed to spawn `gh pr view` for {url}: {err}"
+            ));
+        }
+    };
+    let raw = String::from_utf8(output.stdout).unwrap_or_default();
+    Ok(raw
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect())
+}
+
+/// The canonical label name that marks a PR as a docs-only follow-up
+/// (system-spec ADR, ADR correction, runbook update, audit-ledger PR)
+/// and exempts it from the AC-checkbox and AC-text-match checks in
+/// `verify_delivery`. Documented in `docs/systems/tasks.md` (see
+/// "PR convention — docs-only follow-up PRs" section added in d1ea4812).
+pub(crate) const DOCS_ONLY_LABEL: &str = "docs-only";
+
+/// True iff the PR's labels include the docs-only marker (case-insensitive
+/// match against `DOCS_ONLY_LABEL`). A `gh` error propagates to the caller
+/// as `Err(_)` so the caller can fail-closed rather than silently bypass
+/// the docs-only skip on a transient `gh` blip.
+pub(crate) fn is_docs_only_pr(url: &str) -> Result<bool, String> {
+    let labels = pr_labels(url)?;
+    Ok(labels
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(DOCS_ONLY_LABEL)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +371,51 @@ mod tests {
         result
     }
 
+    /// Write a temporary `gh` shell shim that prints each label in
+    /// `labels` (one per line, matching `--jq .labels[].name` output) and
+    /// exits 0. Used to simulate a successful label read without network
+    /// access. Holds `CLIPPY_ENV_LOCK` for the full critical section (same
+    /// rationale as `with_failing_gh_shim`).
+    fn with_gh_labels_shim<F: FnOnce() -> R, R>(labels: &[&str], body: F) -> R {
+        use std::os::unix::fs::PermissionsExt;
+        let _env_guard = CLIPPY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("gh");
+        let echo_lines = labels
+            .iter()
+            .map(|label| format!("echo '{label}'"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\n{echo_lines}\nexit 0\n"),
+        )
+        .expect("write gh shim");
+        let mut perm = std::fs::metadata(&script).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script, perm).unwrap();
+
+        let prev = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!(
+            "{}:{}",
+            dir.path().display(),
+            if prev.is_empty() {
+                "/usr/bin:/bin".to_string()
+            } else {
+                prev.clone()
+            }
+        );
+        std::env::set_var("PATH", &new_path);
+        let result = body();
+        match prev.is_empty() {
+            true => std::env::remove_var("PATH"),
+            false => std::env::set_var("PATH", &prev),
+        }
+        drop(_env_guard);
+        result
+    }
+
     #[test]
     fn pr_changed_files_gh_failure_returns_err() {
         // AC1: signature change from Vec<String> to Result<Vec<String>, String>
@@ -326,6 +433,105 @@ mod tests {
         assert!(
             err.contains("exit"),
             "expected 'exit' status word in Err, got: {err}"
+        );
+    }
+
+    #[test]
+    fn pr_labels_returns_labels_for_successful_gh_read() {
+        let result = with_gh_labels_shim(&["bug", "docs-only", "priority-high"], || {
+            pr_labels("https://github.com/Stoffer-Industries/sindustries/pull/566")
+        });
+        let labels = result.expect("expected Ok when gh succeeds");
+        assert_eq!(
+            labels,
+            vec!["bug".to_string(), "docs-only".to_string(), "priority-high".to_string()]
+        );
+    }
+
+    #[test]
+    fn pr_labels_returns_empty_for_pr_with_no_labels() {
+        let result = with_gh_labels_shim(&[], || {
+            pr_labels("https://github.com/Stoffer-Industries/sindustries/pull/1")
+        });
+        let labels = result.expect("expected Ok when gh returns empty label list");
+        assert!(labels.is_empty(), "expected empty Vec, got: {labels:?}");
+    }
+
+    #[test]
+    fn pr_labels_gh_failure_returns_err() {
+        // Fail-closed contract: a transient `gh` blip must surface as Err,
+        // not as a silent empty Vec that the caller would treat as
+        // "not docs-only" and bypass the docs-only skip.
+        let result = with_failing_gh_shim("gh api timeout", || {
+            pr_labels("https://github.com/Stoffer-Industries/sindustries/pull/1")
+        });
+        let err = result.expect_err("expected Err when gh exits non-zero");
+        assert!(
+            err.contains("gh api timeout"),
+            "expected stderr in Err, got: {err}"
+        );
+        assert!(
+            err.contains("exit"),
+            "expected 'exit' status word in Err, got: {err}"
+        );
+    }
+
+    #[test]
+    fn is_docs_only_pr_returns_true_when_label_matches() {
+        let result = with_gh_labels_shim(&["bug", "docs-only"], || {
+            is_docs_only_pr("https://github.com/Stoffer-Industries/sindustries/pull/566")
+        });
+        assert!(result.expect("expected Ok from is_docs_only_pr"));
+    }
+
+    #[test]
+    fn is_docs_only_pr_returns_false_when_label_absent() {
+        let result = with_gh_labels_shim(&["bug", "priority-high"], || {
+            is_docs_only_pr("https://github.com/Stoffer-Industries/sindustries/pull/565")
+        });
+        assert!(
+            !result.expect("expected Ok from is_docs_only_pr"),
+            "expected false when no docs-only label"
+        );
+    }
+
+    #[test]
+    fn is_docs_only_pr_returns_false_when_pr_has_no_labels() {
+        let result = with_gh_labels_shim(&[], || {
+            is_docs_only_pr("https://github.com/Stoffer-Industries/sindustries/pull/1")
+        });
+        assert!(
+            !result.expect("expected Ok from is_docs_only_pr"),
+            "expected false when PR has no labels"
+        );
+    }
+
+    #[test]
+    fn is_docs_only_pr_matches_label_case_insensitively() {
+        // GitHub normalises label names at the API layer but is
+        // case-preserving on display; an implementer who typed `Docs-Only`
+        // at PR-open time should still get the exemption. Case-insensitive
+        // comparison at the call site is the documented mitigation.
+        let result = with_gh_labels_shim(&["Docs-Only"], || {
+            is_docs_only_pr("https://github.com/Stoffer-Industries/sindustries/pull/2")
+        });
+        assert!(
+            result.expect("expected Ok from is_docs_only_pr"),
+            "expected case-insensitive match for Docs-Only"
+        );
+    }
+
+    #[test]
+    fn is_docs_only_pr_gh_failure_returns_err() {
+        // Fail-closed: callers (verify_delivery) treat Err as a blocker
+        // failure rather than as "not docs-only". Verifies the contract.
+        let result = with_failing_gh_shim("gh api timeout", || {
+            is_docs_only_pr("https://github.com/Stoffer-Industries/sindustries/pull/1")
+        });
+        let err = result.expect_err("expected Err when gh fails");
+        assert!(
+            err.contains("gh api timeout"),
+            "expected stderr in Err, got: {err}"
         );
     }
 

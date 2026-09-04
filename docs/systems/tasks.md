@@ -681,6 +681,10 @@ The three workflows share the same Rust binary (feature + code). Gate approvals 
 
 `blocked` is not a separate workflow status — it is an annotation in the lobster state comment that explains why the transition is being held. The task record `status` remains `ready` / `doing` / `acceptance`; only the lobster state carries the blocking reason.
 
+### PR convention — docs-only follow-up PRs
+
+When a follow-up PR is opened after the task's delivery PR and intentionally carries no `- [x] AC<N>` lines (system-spec ADRs, ADR corrections, runbook updates, audit-ledger PRs), apply the `docs-only` label at PR-open time. The label exempts the PR from the lobster's `verify_delivery` AC-checkbox and AC-text-match checks; review-state and merge-status checks still apply. The label is opt-in — a delivery PR must still carry its own AC checkboxes. Without the label, a docs-only follow-up PR becomes the "latest" PR by number and the lobster fires a structural false-positive (`PR … does not show checked acceptance criteria in its body`), blocking the task from advancing to `acceptance` even after Ash's `qa_agent` approval has landed. Implemented by task `d1ea4812` (PR #<docs-only-PR>).
+
 ### Structured approval and authentication contract
 
 `TaskApproval` is the only source of truth for `spec`, `tech_design`, and `qa` gates. Missing or revoked rows fail closed. Legacy `[tech-design-approved] true` and `[qa-ac-verified] true` comments remain historical data only. One narrow human-write projection is supported for feature specs: the feature-task runner reconciles the exact checked marker `- [x] **Approved by Tom**` from `brain/tasks/specs/open/*.md` into the uniquely linked task's structured `spec` row through the authenticated API. The checkbox never satisfies the gate by itself; unchecked/ambiguous/inaccessible inputs and revoked rows do not write, and the API row remains authoritative. Bookmark, `tech_design`, and `qa` semantics are unchanged.
