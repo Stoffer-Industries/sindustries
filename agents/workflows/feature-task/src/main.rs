@@ -823,30 +823,61 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             }
             Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
         }
-        if let Ok(body) = pr_body(url) {
-            if !pr_gates::body_has_checked_acceptance(&body) {
+        // Docs-only follow-up PRs (system-spec ADRs, ADR corrections,
+        // runbook updates, audit-ledger PRs) carry the `docs-only` label
+        // and intentionally have no AC-checkbox evidence — the AC check
+        // happens against the delivery PR instead. Fail closed on a `gh`
+        // blip during label read so a transient error cannot silently
+        // bypass the docs-only skip.
+        let docs_only = match pr_gates::is_docs_only_pr(url) {
+            Ok(value) => value,
+            Err(err) => {
                 failures.push(format!(
-                    "PR {url} does not show checked acceptance criteria in its body."
+                    "Could not read PR labels for {url}: {err}. Cannot exempt docs-only check."
                 ));
+                false
             }
-            for ac_failure in ac_parsing::verify_pr_acs_failures(&body) {
-                failures.push(format!("PR {url} — {ac_failure}"));
+        };
+        if !docs_only {
+            if let Ok(body) = pr_body(url) {
+                if !pr_gates::body_has_checked_acceptance(&body) {
+                    failures.push(format!(
+                        "PR {url} does not show checked acceptance criteria in its body."
+                    ));
+                }
+                for ac_failure in ac_parsing::verify_pr_acs_failures(&body) {
+                    failures.push(format!("PR {url} — {ac_failure}"));
+                }
             }
         }
     }
     if let Some(url) = &latest_pr_url {
-        match pr_body(url) {
-            Ok(body) => {
-                for ac_failure in
-                    ac_parsing::task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url)
-                {
-                    failures.push(format!("PR {url} — {ac_failure}"));
-                }
-            }
+        // Same docs-only exemption for the AC text match against the
+        // task description — a docs-only follow-up PR does not need to
+        // cover the AC text in its body; the delivery PR does.
+        let docs_only = match pr_gates::is_docs_only_pr(url) {
+            Ok(value) => value,
             Err(err) => {
                 failures.push(format!(
-                    "Could not read PR body for {url}: {err}. Cannot validate AC text."
+                    "Could not read PR labels for {url}: {err}. Cannot exempt docs-only check."
                 ));
+                false
+            }
+        };
+        if !docs_only {
+            match pr_body(url) {
+                Ok(body) => {
+                    for ac_failure in
+                        ac_parsing::task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url)
+                    {
+                        failures.push(format!("PR {url} — {ac_failure}"));
+                    }
+                }
+                Err(err) => {
+                    failures.push(format!(
+                        "Could not read PR body for {url}: {err}. Cannot validate AC text."
+                    ));
+                }
             }
         }
     }
