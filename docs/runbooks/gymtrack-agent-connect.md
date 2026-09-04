@@ -76,7 +76,13 @@ Migration `apps/gymtrack/supabase/migrations/20260815070000_openclaw_oauth_clien
 | --- | --- | --- |
 | OpenClaw | `openclaw` | `http://127.0.0.1:8789/callback` |
 
-`127.0.0.1:8789` is the loopback redirect OpenClaw binds for the duration of the OAuth dance (RFC 8252 §7.3 / OAuth 2.1 §10.2); it is one port above `local-dev`'s `8788` so no two seeded clients collide. If port `8789` is unavailable on a host, surface an actionable error to the user — do not silently bind a different port.
+Migration `apps/gymtrack/supabase/migrations/20260904090000_openclaw_hosted_oauth_callback.sql` adds a second redirect URI to the same `openclaw` row (task `b7726e20`) so the OAuth dance works from devices that cannot reach the loopback listener (e.g. a phone with port 8789 firewalled):
+
+| Provider | Client ID | Allowed redirect URI |
+| --- | --- | --- |
+| OpenClaw | `openclaw` | `https://gymtrack-sigma-pied.vercel.app/oauth/callback` (hosted) |
+
+`127.0.0.1:8789` is the loopback redirect OpenClaw binds for the duration of the OAuth dance (RFC 8252 §7.3 / OAuth 2.1 §10.2); it is one port above `local-dev`'s `8788` so no two seeded clients collide. If port `8789` is unavailable on a host, surface an actionable error to the user — do not silently bind a different port. The hosted `<app-host>/oauth/callback` is the fallback for everyone else: the user lands on a GymTrack page that displays the one-time authorization code with a copy-to-clipboard action, and the connecting app exchanges the code at `POST /oauth/token` with its PKCE verifier. **Hosted callback URL — production migration:** the staging host `gymtrack-sigma-pied.vercel.app` is hard-coded in the new migration. Production needs the same row re-applied against the production Vercel host (one-off ops change after this PR merges). If we want to automate it, file a follow-up task to drive the `redirect_uris` from a Vercel-supplied env var at deploy time.
 
 Confirm the production rows have not drifted:
 

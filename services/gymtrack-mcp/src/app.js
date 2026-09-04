@@ -370,9 +370,14 @@ export function createApp({
         registeredAt: now()
       });
 
+      // RFC 7591 §3.2.1 — the registration response MUST echo the registered
+      // redirect_uris so the client can confirm what the server stored. Public
+      // clients (token_endpoint_auth_method: 'none') do NOT receive a
+      // client_secret; omit it entirely.
       return res.status(201).json({
         client_id: clientId,
-        client_id_issued_at: Math.floor(now().getTime() / 1000)
+        client_id_issued_at: Math.floor(now().getTime() / 1000),
+        redirect_uris: validation.value.redirectUris
       });
     } catch (error) {
       return oauthJsonError(res, 500, 'server_error', redactErrorForResponse(error.message));
@@ -657,6 +662,16 @@ export function createApp({
             serverInfo: { name: 'gymtrack-mcp', version: '0.1.0' }
           })
         );
+      }
+
+      // MCP transport spec — after `initialize`, a conformant client sends the
+      // `notifications/initialized` JSON-RPC notification (no `id`, no body,
+      // and the server MUST NOT send a JSON-RPC response). Acknowledge it
+      // with `202 Accepted` and an empty body so the next call (`tools/list`)
+      // can proceed on the same bearer token. The `!Object.hasOwn(rpc, 'id')`
+      // guard keeps an `initialize`-shaped body from accidentally matching.
+      if (rpc.method === 'notifications/initialized' && !Object.hasOwn(rpc, 'id')) {
+        return res.status(202).end();
       }
 
       if (rpc.method === 'tools/list') {
