@@ -204,6 +204,48 @@ A tech design that introduces a new runtime for a domain must state:
 3. how it is built, tested, deployed, and observed;
 4. what API/data boundary keeps it from leaking into unrelated domains.
 
+## Deployment platform fit
+
+Choose the hosting platform from the workload outward, not from the
+platform already used by a neighbouring service. Before selecting a
+deployment target, classify the workload and record:
+
+1. whether it is a static SPA, request-serving API, background worker, MCP
+   server, or another long-running/container workload;
+2. its runtime needs, private-network requirements, durable state, and
+   operational dependencies;
+3. which candidate platforms have native fit and what operational surface each
+   adds;
+4. why generic compute is justified if a more specialised platform fits;
+5. how independent deploy and rollback boundaries are preserved; and
+6. which alternatives were rejected, including the portability or exit path.
+
+Shared product surfaces do not require a shared hosting platform. In
+particular, independent frontends should remain independently deployable even
+when one shell embeds another app.
+
+### Current platform defaults
+
+| Workload | Default platform | Rationale |
+| --- | --- | --- |
+| Static Vite SPA | Vercel | Native static builds, preview deployments, and simple per-project rollback without running a container. |
+| Request-serving API | Fly.io | Container/process control, regional placement, health checks, and a portable Docker boundary. |
+| Background worker | Fly.io | Long-running process supervision and explicit worker isolation. |
+| MCP server or other long-running/container workload | Fly.io | Runtime and networking control are more important than static-hosting convenience. |
+
+Mission Control and the Tasks app are separate Vite SPAs and should therefore
+be separate Vercel projects, preserving their independent deploy and rollback
+boundaries. Their APIs, workers, MCP servers, and other long-running
+container workloads remain on Fly.io. This is a workload-fit decision, not a
+requirement that all Sindustries surfaces share one provider. The existing
+Fly-based staging deployment is a separate migration concern; changing the
+recommendation here does not silently change live infrastructure.
+
+When a workload is intentionally placed on a less-native platform, the tech
+design or deployment record must explain the trade-off and retain a portable
+boundary where practical (for example, a Dockerfile for a service that runs
+on Fly.io).
+
 ## Work classification
 
 Use the lightest workflow that preserves traceability and safety:
