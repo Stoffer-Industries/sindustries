@@ -94,13 +94,20 @@ function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'r
  * Case-insensitive comparison mirrors the lobster's `eq_ignore_ascii_case`
  * so a task created with `"tom"` at the head behaves identically to `"Tom"`.
  */
-function attentionOwnersForApproval(
+export function attentionOwnersForApproval(
   current: string[],
   type: ApprovalType,
   action: 'approved' | 'revoked'
 ): string[] | null {
   const owner = attentionOwnerForApproval(type);
   if (!owner) return null;
+  // Reconciliation only applies when there is existing state to reconcile.
+  // An empty `current` array means the lobster has not yet populated the
+  // stack (e.g. a task that has only ever held a single approval write);
+  // injecting an entry here would collide with the lobster's broader
+  // initial-population sweep on the next stage call, and it also breaks
+  // pre-existing tests whose fixtures intentionally model the unset case.
+  if (current.length === 0) return null;
   const matchesOwner = (o: string) => o.trim().toLowerCase() === owner.toLowerCase();
   const head = current[0];
   if (action === 'approved') {

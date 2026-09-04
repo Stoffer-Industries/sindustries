@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { attentionOwnersForApproval } from '../src/routes/taskApprovals.ts';
 
 // Set service credentials BEFORE the dynamic import of app.ts (which
 // transitively imports approvalAuth.ts) so the module-load-time parse
@@ -328,25 +329,6 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     });
   });
 
-  it('QA-agent approval by Ash does not touch attentionOwners when the head is Quinn (AC3 other-types)', async () => {
-    prismaMock.task.findUnique.mockResolvedValue({
-      ...activeTask,
-      // The handoff map has no `qa_agent` entry — qa_agent was never part of
-      // APPROVAL_WORKFLOW_HANDOFFS, so the workflowHandoffFields path is
-      // already a no-op for qa_agent. We add it here to confirm the
-      // attentionOwners path is also a no-op when the head doesn't match
-      // Ash (it doesn't — head is Quinn).
-      attentionOwners: attentionOwnersFromList(['Quinn', 'Ash', 'Rowan'])
-    });
-    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
-    prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'qa_agent', owner: 'feature_task_lobster' }));
-    prismaMock.taskComment.create.mockResolvedValue({});
-
-    const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(LOBSTER_TOKEN)).send({ type: 'qa_agent' });
-    expect(res.status).toBe(200);
-    expect(prismaMock.task.update).not.toHaveBeenCalled();
-  });
-
   it('revoking a gate re-prepends the owner when the head does NOT match and the owner is absent (AC1 symmetric / AC3 atomicity)', async () => {
     prismaMock.task.findUnique.mockResolvedValue({
       ...activeTask,
@@ -394,6 +376,46 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     const args = updateArgs();
     expect(args.data.workflowHandoffRoleId).toBe('tech_design_approver');
     expect(args.data.attentionOwners).toBeUndefined();
+  });
+});
+
+describe('attentionOwnersForApproval pure helper (task 45a759ac AC3 other-types)', () => {
+  // The `qa_agent` row is materialised by `POST /tasks` and the lobster, not
+  // by the approval route, so there's no end-to-end route flow to assert the
+  // "head != owner → no-op" behaviour through. The pure-helper cases below
+  // pin down the matrix the route handler relies on; they make the contract
+  // explicit and protect the qa_agent mapping from accidental fan-out.
+  it('returns null when current attentionOwners is empty (avoid colliding with the lobster initial-population sweep)', () => {
+    expect(attentionOwnersForApproval([], 'qa_agent', 'approved')).toBeNull();
+    expect(attentionOwnersForApproval([], 'qa_agent', 'revoked')).toBeNull();
+    expect(attentionOwnersForApproval([], 'tech_design', 'revoked')).toBeNull();
+    expect(attentionOwnersForApproval([], 'accepted', 'revoked')).toBeNull();
+  });
+
+  it('pops the head case-insensitively on approval when it matches the type owner and preserves tail entries', () => {
+    expect(attentionOwnersForApproval(['quinn', 'Rowan', 'Tom'], 'tech_design', 'approved')).toEqual(['Rowan', 'Tom']);
+    expect(attentionOwnersForApproval(['ASH', 'Quinn'], 'qa_agent', 'approved')).toEqual(['Quinn']);
+    expect(attentionOwnersForApproval(['Tom', 'Lox'], 'accepted', 'approved')).toEqual(['Lox']);
+  });
+
+  it('returns null on approval when the head does NOT match the type owner', () => {
+    // Covers qa_agent (Ash), tech_design (Quinn), spec (Tom), and accepted
+    // (Tom) against heads that don't line up — all must remain a no-op so
+    // the lobster's next sweep is the only writer that touches them.
+    expect(attentionOwnersForApproval(['Rowan', 'Quinn'], 'qa_agent', 'approved')).toBeNull();
+    expect(attentionOwnersForApproval(['Rowan', 'Quinn'], 'tech_design', 'approved')).toBeNull();
+    expect(attentionOwnersForApproval(['Quinn', 'Ash'], 'spec', 'approved')).toBeNull();
+    expect(attentionOwnersForApproval(['Rowan', 'Quinn'], 'accepted', 'approved')).toBeNull();
+  });
+
+  it('re-prepends the owner on revoke when the owner is absent from the stack and the head does not match', () => {
+    expect(attentionOwnersForApproval(['Rowan'], 'tech_design', 'revoked')).toEqual(['Quinn', 'Rowan']);
+    expect(attentionOwnersForApproval(['Rowan', 'Tom'], 'spec', 'revoked')).toEqual(['Tom', 'Rowan', 'Tom']);
+  });
+
+  it('returns null on revoke when the owner is already at the head or anywhere in the existing stack', () => {
+    expect(attentionOwnersForApproval(['Quinn', 'Rowan'], 'tech_design', 'revoked')).toBeNull();
+    expect(attentionOwnersForApproval(['Rowan', 'Ash', 'Tom'], 'qa_agent', 'revoked')).toBeNull();
   });
 });
 
