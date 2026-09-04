@@ -84,12 +84,13 @@ function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'r
  * Behaviour:
  *   - approved + head matches type's owner → remove the head (single pop).
  *     Tail slots (including duplicates) are preserved byte-for-byte.
- *   - revoked + head does NOT match type's owner (and owner is absent) →
- *     prepend the owner. This keeps the gate-owner on the routing stack
- *     while their gate is open.
+ *   - revoked + head does NOT match type's owner → prepend the owner, even
+ *     when the owner is already present lower in the stack. Only position 0
+ *     routes actionably, and the gate-owner must be there while their gate
+ *     is open (the lobster tolerates duplicates; matching it preserves the
+ *     invariant it relies on).
  *   - revoked + head already matches → no-op (idempotent).
- *   - anything else (head doesn't match on approve, owner already present on
- *     revoke, no owner for this type) → null.
+ *   - anything else (head doesn't match on approve, no owner for this type) → null.
  *
  * Case-insensitive comparison mirrors the lobster's `eq_ignore_ascii_case`
  * so a task created with `"tom"` at the head behaves identically to `"Tom"`.
@@ -114,8 +115,13 @@ export function attentionOwnersForApproval(
     return head !== undefined && matchesOwner(head) ? current.slice(1) : null;
   }
   // action === 'revoked'
+  // Only the head slot routes actionably; the lobster (Rust) treats head as
+  // the sole routing signal and tolerates duplicates lower in the stack.
+  // If the owner is already at the head (above) this is an idempotent revoke
+  // — no-op. Any other presence (e.g. owner in the tail from an earlier
+  // reconciliation pass) must NOT suppress the prepend, because the gate-
+  // owner must be at position 0 while their gate is open.
   if (head !== undefined && matchesOwner(head)) return null;
-  if (current.some(matchesOwner)) return null;
   return [owner, ...current];
 }
 
