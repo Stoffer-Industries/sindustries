@@ -417,9 +417,26 @@ describe('attentionOwnersForApproval pure helper (task 45a759ac AC3 other-types)
     expect(attentionOwnersForApproval(['Rowan', 'Tom'], 'spec', 'revoked')).toEqual(['Tom', 'Rowan', 'Tom']);
   });
 
-  it('returns null on revoke when the owner is already at the head or anywhere in the existing stack', () => {
+  it('returns null on revoke when the owner is already at the head', () => {
+    // Position 0 is the sole routing signal; the head-match guard above
+    // already covers the idempotent-revoke case. Any earlier presence lower
+    // in the stack must NOT suppress the prepend — see the next test.
     expect(attentionOwnersForApproval(['Quinn', 'Rowan'], 'tech_design', 'revoked')).toBeNull();
-    expect(attentionOwnersForApproval(['Rowan', 'Ash', 'Tom'], 'qa_agent', 'revoked')).toBeNull();
+    expect(attentionOwnersForApproval(['Ash', 'Rowan', 'Tom'], 'qa_agent', 'revoked')).toBeNull();
+  });
+
+  it('re-prepends the owner on revoke even when the owner is present elsewhere in the stack', () => {
+    // Mirrors the lobster's head-only routing invariant: only position 0
+    // routes actionably, so the gate-owner must sit at the head while their
+    // gate is open even if a stale tail entry already names them. Duplicate
+    // tail entries are tolerated by the lobster's reconciled sweep.
+    expect(attentionOwnersForApproval(['Rowan', 'Ash', 'Tom'], 'qa_agent', 'revoked')).toEqual([
+      'Ash',
+      'Rowan',
+      'Ash',
+      'Tom'
+    ]);
+    expect(attentionOwnersForApproval(['Rowan', 'Tom'], 'spec', 'revoked')).toEqual(['Tom', 'Rowan', 'Tom']);
   });
 });
 
