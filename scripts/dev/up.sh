@@ -10,6 +10,17 @@ source "$ROOT_DIR/scripts/dev/mode-env.sh"
 OBSERVABILITY="${1:-${OBSERVABILITY:-1}}"
 export OBSERVABILITY
 
+# Pin DOCKER_HOST to colima's socket when available. Without this,
+# /var/run/docker.sock often symlinks to Docker Desktop on hosts that have
+# it installed (e.g. this Mac mini), and `docker info` returns Docker
+# Desktop's daemon — fooling the preflight below into thinking colima is
+# healthy when it isn't. Setting DOCKER_HOST explicitly here ensures every
+# docker CLI call in this script (and the exec'd Tilt process) hits
+# colima, not whatever else is listening on /var/run/docker.sock.
+if [[ -S "$HOME/.colima/default/docker.sock" ]]; then
+  export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
+fi
+
 # shellcheck source=./port-cleanup.sh
 source "$ROOT_DIR/scripts/dev/port-cleanup.sh"
 
@@ -90,11 +101,19 @@ fi
 # Lima VM has died and dockerd is gone. Detect that case and try to
 # recover via `colima restart --runtime docker` before continuing.
 ensure_docker_daemon() {
-  if docker info >/dev/null 2>&1; then
+  # Verify the responding daemon is actually the colima VM. Without this
+  # check, `docker info >/dev/null` returns 0 for *any* reachable daemon
+  # (e.g. Docker Desktop, Rancher Desktop, OrbStack) and the preflight
+  # passes even when colima itself is wedged — which is the failure mode
+  # that prompted this PR.
+  if docker info 2>/dev/null | grep -q '^Name: colima'; then
     return 0
   fi
 
-  echo "Docker daemon unreachable. Attempting Colima restart to recover..."
+  echo "Docker daemon is responding but is NOT colima (or colima is unreachable)."
+  echo "Detected: $(docker info 2>&1 | grep -E '^(Operating System|Name):' | head -2 | tr '\n' ' | ')"
+  echo "Expected: a daemon reporting \`Name: colima\`."
+  echo "Attempting Colima restart to recover..."
 
   # Best-effort cleanup of stale state, then a clean start.
   colima stop 2>/dev/null || true
@@ -106,8 +125,8 @@ ensure_docker_daemon() {
   # Wait up to ~30s for dockerd to come back up.
   local attempts=0
   while (( attempts < 30 )); do
-    if docker info >/dev/null 2>&1; then
-      echo "Docker daemon recovered."
+    if docker info 2>/dev/null | grep -q '^Name: colima'; then
+      echo "Docker daemon recovered (colima VM)."
       return 0
     fi
     sleep 1
