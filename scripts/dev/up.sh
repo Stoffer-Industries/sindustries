@@ -136,6 +136,60 @@ ensure_docker_daemon() {
 
 ensure_docker_daemon
 
+# Lima currently implements its host Docker socket as an SSH ControlMaster
+# forward. If that shared master dies, the socket remains as an unreachable
+# stub even though the VM and dockerd are healthy. Give Tilt its own tunnel so
+# reload-time Compose traffic cannot depend on Lima's shared master lifecycle.
+start_tilt_docker_tunnel() {
+  local ssh_config="$HOME/.colima/_lima/colima/ssh.config"
+
+  if [[ ! -f "$ssh_config" ]]; then
+    echo "ERROR: Colima SSH config not found at $ssh_config." >&2
+    exit 1
+  fi
+
+  # Keep this under /tmp: OpenSSH appends a suffix while creating its control
+  # socket, and macOS rejects the much longer per-user TMPDIR path.
+  TILT_DOCKER_TUNNEL_DIR="$(mktemp -d "/tmp/sin-docker.XXXXXX")"
+  TILT_DOCKER_SOCKET="$TILT_DOCKER_TUNNEL_DIR/docker.sock"
+  TILT_DOCKER_CONTROL_SOCKET="$TILT_DOCKER_TUNNEL_DIR/control.sock"
+
+  ssh \
+    -F "$ssh_config" \
+    -S "$TILT_DOCKER_CONTROL_SOCKET" \
+    -o ControlMaster=yes \
+    -o ControlPersist=no \
+    -o ServerAliveInterval=15 \
+    -o ServerAliveCountMax=4 \
+    -o ExitOnForwardFailure=yes \
+    -f -N \
+    -L "$TILT_DOCKER_SOCKET:/var/run/docker.sock" \
+    lima-colima
+
+  export DOCKER_HOST="unix://$TILT_DOCKER_SOCKET"
+  if [[ "$(docker info --format '{{.Name}}' 2>/dev/null || true)" != "colima" ]]; then
+    echo "ERROR: dedicated Docker tunnel could not reach Colima." >&2
+    exit 1
+  fi
+}
+
+cleanup_tilt_docker_tunnel() {
+  if [[ -n "${TILT_DOCKER_CONTROL_SOCKET:-}" ]]; then
+    ssh \
+      -F "$HOME/.colima/_lima/colima/ssh.config" \
+      -S "$TILT_DOCKER_CONTROL_SOCKET" \
+      -O exit \
+      lima-colima >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${TILT_DOCKER_TUNNEL_DIR:-}" ]]; then
+    rm -f "$TILT_DOCKER_SOCKET" "$TILT_DOCKER_CONTROL_SOCKET"
+    rmdir "$TILT_DOCKER_TUNNEL_DIR" 2>/dev/null || true
+  fi
+}
+
+trap cleanup_tilt_docker_tunnel EXIT
+start_tilt_docker_tunnel
+
 # Preflight: clear stale local listeners for this mode before Tilt boots.
 cleanup_mode_ports
 
@@ -213,7 +267,7 @@ if [[ "$OBSERVABILITY" == "1" ]]; then
 fi
 
 cd "$ROOT_DIR"
-exec env \
+env \
   TILT_OBSERVABILITY="$OBSERVABILITY" \
   OBSERVABILITY="$OBSERVABILITY" \
   MODE="$MODE" \
