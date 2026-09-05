@@ -9,12 +9,12 @@ reaching the production Content Scheduler, the production OpenClaw
 angle model, the network, or the PostgreSQL checkpointer.
 
 The LangGraph Studio CLI loads the function declared in
-``langgraph.json`` and calls it with no arguments to obtain a compiled
-graph. ``build_studio_graph`` is the wired entrypoint: it takes no
-required arguments, returns a fresh compiled graph with fresh stubs
-and a fresh in-memory checkpointer on every call, and is invoked once
-per Studio session. The fresh-stubs-per-session invariant is preserved
-without a closure wrapper.
+``langgraph.json`` and calls it with an optional ``RunnableConfig`` to
+obtain a compiled graph. ``build_studio_graph`` is the wired entrypoint:
+it takes no required arguments, returns a fresh compiled graph with fresh
+stubs and a fresh in-memory checkpointer on every call, and is invoked
+once per Studio session. The fresh-stubs-per-session invariant is
+preserved without a closure wrapper.
 
 Key invariants enforced here (each is covered by a test in
 ``tests/test_studio.py``):
@@ -49,6 +49,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
 from cto_craft_workflow.angle_model import (
@@ -281,7 +282,7 @@ def _default_studio_fixtures() -> list[AngleOutput]:
 # Studio entrypoints.
 
 
-def build_studio_graph(
+def _build_studio_graph(
     *,
     fixtures: list[AngleOutput] | None = None,
     fetcher: StubSafeFetcher | None = None,
@@ -294,12 +295,10 @@ def build_studio_graph(
 ) -> Any:
     """Build a compiled Studio graph with deterministic dependencies.
 
-    This is the entrypoint declared in ``langgraph.json``. The
-    LangGraph Studio CLI loads this function and calls it with no
-    arguments to obtain a compiled graph. Every call produces a fresh
-    compiled graph with fresh stubs and a fresh in-memory checkpointer,
-    so Studio sessions are isolated from one another and from any
-    in-process state.
+    This is the internal builder used by the entrypoint declared in
+    ``langgraph.json``. Every call produces a fresh compiled graph with
+    fresh stubs and a fresh in-memory checkpointer, so Studio sessions are
+    isolated from one another and from any in-process state.
 
     The returned object is the same compiled :class:`CompiledStateGraph`
     the production ``cli.py`` produces, with stubs in place of every
@@ -325,6 +324,20 @@ def build_studio_graph(
         import_fn=import_fn,
     )
     return build_graph(deps, checkpointer=checkpointer)
+
+
+def build_studio_graph(config: RunnableConfig | None = None) -> Any:
+    """Build the Studio graph using the CLI-compatible factory signature.
+
+    The installed LangGraph API accepts either a no-argument factory or a
+    factory with exactly one ``RunnableConfig`` argument. Keeping this
+    public entrypoint to that one parameter lets Studio inject its runtime
+    config while preserving the richer dependency-injection surface for
+    tests through :func:`_build_studio_graph`.
+    """
+
+    del config  # Studio deliberately uses its own deterministic dependencies.
+    return _build_studio_graph()
 
 
 # ---------------------------------------------------------------------------

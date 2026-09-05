@@ -1,4 +1,5 @@
 {
+  "dependencies": ["."],
   "graphs": {
     "cto_craft": "./src/cto_craft_workflow/studio.py:build_studio_graph"
   },
