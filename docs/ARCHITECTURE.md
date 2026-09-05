@@ -232,6 +232,8 @@ when one shell embeds another app.
 | Request-serving API | Fly.io | Container/process control, regional placement, health checks, and a portable Docker boundary. |
 | Background worker | Fly.io | Long-running process supervision and explicit worker isolation. |
 | MCP server or other long-running/container workload | Fly.io | Runtime and networking control are more important than static-hosting convenience. |
+| Product backend needing managed Postgres plus auth, storage, or realtime | Supabase | Integrated product backend primitives are a good fit when the product deliberately uses them; keep product ownership and identity boundaries explicit. |
+| Managed Postgres for a service-owned API | Neon | Postgres-focused managed persistence suits services that own their API, auth integration, migrations, and domain boundary separately. |
 
 Mission Control and the Tasks app are separate Vite SPAs and should therefore
 be separate Vercel projects, preserving their independent deploy and rollback
