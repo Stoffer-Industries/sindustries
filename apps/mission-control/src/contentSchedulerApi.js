@@ -1,8 +1,9 @@
-// Thin client for the Content Scheduler Tasks API endpoints.
+// Thin client for the Content Scheduler API endpoints.
 //
-// Mirrors the patterns in tasksApi.js — uses the same Tasks API base URL
-// (port-overridable via VITE_TASKS_API_BASE_URL). All methods throw on
-// non-2xx with the parsed error body attached.
+// The scheduler is a separate service from tasks-api after the extraction.
+// Its base URL is build-time configurable and has a local port fallback for
+// the two Mission Control dev modes. All methods throw on non-2xx with the
+// parsed error body attached.
 //
 // Task: 115e8d89-be43-4b81-9e0e-9ab422810f5f
 // Tech design: docs/specs/content-scheduler-tab-tech-design.md
@@ -10,20 +11,20 @@
 const DEFAULT_API_BASE_BY_PORT = {
   '5173': 'http://localhost:4000/api/v1',
   '5174': 'http://localhost:4001/api/v1',
-  '5175': 'http://localhost:4002/api/v1',
+  '5175': 'http://localhost:4004/api/v1',
   '5176': 'http://localhost:4003/api/v1'
 };
 
-function baseUrl() {
+export function contentSchedulerApiBaseUrl() {
   return (
-    import.meta.env.VITE_TASKS_API_BASE_URL
+    import.meta.env.VITE_CONTENT_SCHEDULER_API_BASE_URL
     ?? DEFAULT_API_BASE_BY_PORT[window.location.port]
-    ?? 'http://localhost:4001/api/v1'
+    ?? 'http://localhost:4003/api/v1'
   );
 }
 
 async function request(path, { method = 'GET', body, actor } = {}) {
-  const res = await fetch(`${baseUrl()}${path}`, {
+  const res = await fetch(`${contentSchedulerApiBaseUrl()}${path}`, {
     method,
     headers: {
       'content-type': 'application/json',

@@ -78,7 +78,7 @@ surface.
      `@sindustries/design-tokens/styles.css` palette that the shell
      already loads — no new opaque colours.
 7. **Manage the Content Scheduler 10-day calendar.** User is on the Content tab.
-   - On mount, fetches the queue from the Tasks API
+   - On mount, fetches the queue from the Content Scheduler API
      (`/api/v1/content-scheduler/items`) and today's publish status
      (`/api/v1/content-scheduler/today-status`).
    - Renders the **day-status banner** ("✓ 0/1 posts published today" etc.)
@@ -87,7 +87,7 @@ surface.
    - **Composer (top).** The "Add to queue" form takes a tweet body
      (≤1000 chars), a source (`ops_notes` / `cto_craft` / `manual` /
      `other`), and an optional `scheduledFor` timestamp. Submit posts to
-     the Tasks API and reloads the calendar.
+     the Content Scheduler API and reloads the calendar.
    - **Calendar grid.** The primary view is a 10-day forward calendar
      from today through today + 9 in `Pacific/Auckland`. Each day is a
      column labelled "Wed 16 Jul" style (weekday short + day + month
@@ -184,17 +184,19 @@ specimen mount.
   the full archive (including done/closed tasks) without per-page pagination.
   This is the only Tasks API request the dashboard makes — see
   `apps/mission-control/src/tasksApi.js` (`getTasks`).
-- **Content Scheduler** state is read from the Tasks API at
+- **Content Scheduler** state is read from the Content Scheduler API at
   `/api/v1/content-scheduler/items` and `/api/v1/content-scheduler/today-status`.
-  The publish flow is server-side (Tasks API posts to X with OAuth 1.0a);
-  the Mission Control client never holds X credentials. The "max one
-  X post per day" rule is computed in `Pacific/Auckland` on both the
-  client (UI drop guard) and the server (`guardPublish`). The calendar
-  grid uses native HTML5 drag-and-drop; pure timezone helpers live in
+  Its base URL is overridable via `VITE_CONTENT_SCHEDULER_API_BASE_URL`.
+  The publish flow is server-side (Content Scheduler API posts to X with
+  OAuth 1.0a); the Mission Control client never holds X credentials. The
+  "max one X post per day" rule is computed in `Pacific/Auckland` on both the
+  client (UI drop guard) and the server (`guardPublish`). The calendar grid
+  uses native HTML5 drag-and-drop; pure timezone helpers live in
   `apps/mission-control/src/tabs/contentSchedulerCalendar.js` and use
-  `Intl.DateTimeFormat` to handle the NZST/NZDT offset and DST start
-  edge. Auto-publish on `scheduledFor` arrival is a separate subsystem
-  documented in [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md) under [Auto-post (event-driven delayed jobs)](../systems/content-scheduler.md#auto-post-event-driven-delayed-jobs).
+  `Intl.DateTimeFormat` to handle the NZST/NZDT offset and DST start edge.
+  Auto-publish on `scheduledFor` arrival is a separate subsystem documented
+  in [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
+  under [Auto-post (event-driven delayed jobs)](../systems/content-scheduler.md#auto-post-event-driven-delayed-jobs).
   See [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
   for the full system contract.
 - **Bookmark state** is read by the Bookmarks tab from

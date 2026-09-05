@@ -84,6 +84,7 @@ ensure_dev_workspace_deps() {
     npm install \
       --workspace @sindustries/tasks-api \
       --workspace @sindustries/budget-api \
+      --workspace @sindustries/content-scheduler-api \
       --workspace @sindustries/tasks-app \
       --workspace @sindustries/mission-control
   )
@@ -207,6 +208,7 @@ append_env_local_overrides "$ROOT_DIR/$BUDGET_API_ENV_FILE"
 echo "Starting $MODE stack"
 echo "  API: $TASKS_API_BASE_URL"
 echo "  Budget API: $BUDGET_API_BASE_URL"
+echo "  Content Scheduler API: $CONTENT_SCHEDULER_API_BASE_URL"
 echo "  App: http://localhost:$TASKS_APP_PORT"
 echo "  Mission Control: http://localhost:$MISSION_CONTROL_PORT"
 echo "  Postgres: localhost:$POSTGRES_PORT/$POSTGRES_DB"
