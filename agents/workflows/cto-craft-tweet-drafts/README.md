@@ -69,7 +69,7 @@ returns `NO_REPLY`.
 ## Tests
 
 ```bash
-uv run --frozen pytest tests/
+uv run --frozen --extra dev pytest tests/
 ```
 
 All tests are deterministic and offline. The fake model adapter and fake HTTP
@@ -97,7 +97,7 @@ the production runtime venv so cron / CI never installs it.
 
 ```bash
 cd agents/workflows/cto-craft-tweet-drafts
-uv sync --extra studio
+uv sync --frozen --extra studio
 ```
 
 ### Start Studio
@@ -106,7 +106,8 @@ uv sync --extra studio
 uv run --frozen --extra studio langgraph dev
 ```
 
-Open `http://localhost:8123` (the default Studio port). Select the
+Open `http://127.0.0.1:8123` (the default Studio port; `localhost` also
+works when it resolves locally). Select the
 `cto_craft` graph from the left pane. The topology visible in Studio is
 the *real* production graph:
 
@@ -151,11 +152,14 @@ gitignored; nothing local is committed.
 
 ### Troubleshooting
 
-- **Port in use.** Override with `LANGGRAPH_DEV_PORT=8124 langgraph dev`.
-- **`USE_RUNTIME_CONTEXT_API` crash on startup.** The pinned
-  `langgraph>=0.3.21,<0.4.0` + `langgraph-cli[inmem]>=0.3.6,<0.4.0`
-  pair resolves this. If a future bump re-introduces the crash,
-  re-pin both ends in `pyproject.toml` and re-run `uv sync`.
+- **Port in use.** Pass the port to the CLI explicitly:
+  `uv run --frozen --extra studio langgraph dev --port 8124`.
+  `LANGGRAPH_DEV_PORT` is not read by the current LangGraph CLI.
+- **Runtime compatibility crash on startup.** Keep the Studio-only
+  `langgraph-cli[inmem]==0.3.6`, `langgraph-api==0.2.102`, and
+  `langgraph-runtime-inmem==0.6.0` pins together. Newer in-memory runtime
+  releases expect feature flags not present in the pinned API; upgrading
+  only one package can make the server exit before binding port 8123.
 - **Studio graph looks empty.** Confirm the Studio CLI is running
   from this package root (where `langgraph.json` lives); Studio only
   loads graphs declared in the local `langgraph.json`.

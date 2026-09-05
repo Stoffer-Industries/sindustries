@@ -41,6 +41,7 @@ from cto_craft_workflow.studio import (
     StudioImportFn,
     StudioImportForbidden,
     assert_no_production_side_effects,
+    _build_studio_graph,
     build_studio_graph,
 )
 
@@ -104,6 +105,7 @@ def test_langgraph_json_entrypoint_returns_compiled_graph() -> None:
     the compiled graph.
     """
 
+    import inspect
     import json
     from importlib import import_module
     from pathlib import Path
@@ -111,6 +113,10 @@ def test_langgraph_json_entrypoint_returns_compiled_graph() -> None:
     config_path = Path(__file__).resolve().parents[1] / "langgraph.json"
     config = json.loads(config_path.read_text())
 
+    assert "." in config.get("dependencies", []), (
+        "langgraph.json must include the package root in 'dependencies' so "
+        "the LangGraph CLI can resolve the Python project"
+    )
     assert "graphs" in config, f"langgraph.json must define 'graphs'; got {list(config)}"
     assert "cto_craft" in config["graphs"], (
         f"langgraph.json must define 'cto_craft' graph; got {list(config['graphs'])}"
@@ -128,6 +134,12 @@ def test_langgraph_json_entrypoint_returns_compiled_graph() -> None:
 
     module = import_module(module_path)
     entrypoint = getattr(module, attr)
+
+    # The installed in-memory API accepts a no-argument factory or a
+    # one-argument RunnableConfig factory, but rejects factories that expose
+    # test-only keyword arguments. Keep the public entrypoint CLI-shaped;
+    # dependency-injection tests use the private builder directly.
+    assert len(inspect.signature(entrypoint).parameters) == 1
 
     # Calling the entrypoint must yield a compiled graph with .invoke.
     # If the entrypoint returns a closure or any other non-graph callable,
@@ -427,7 +439,7 @@ def test_studio_graph_with_custom_fixtures_uses_them() -> None:
         "https://www.techmanagerweekly.com/tmw-999/",
         b"<html><body>custom</body></html>",
     )
-    graph = build_studio_graph(fetcher=fetcher)
+    graph = _build_studio_graph(fetcher=fetcher)
     initial = make_initial_state(
         run_key="studio-custom",
         thread_id="studio-custom-thread",

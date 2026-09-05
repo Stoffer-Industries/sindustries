@@ -244,7 +244,9 @@ dev = [
     { name = "types-python-dateutil" },
 ]
 studio = [
+    { name = "langgraph-api" },
     { name = "langgraph-cli", extra = ["inmem"] },
+    { name = "langgraph-runtime-inmem" },
 ]
 
 [package.metadata]
@@ -252,8 +254,10 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.3,<5.0.0" },
     { name = "httpx", specifier = ">=0.27.0,<0.29.0" },
     { name = "langgraph", specifier = ">=0.3.21,<0.4.0" },
+    { name = "langgraph-api", marker = "extra == 'studio'", specifier = "==0.2.102" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0.10,<3.0.0" },
-    { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'studio'", specifier = ">=0.3.6,<0.4.0" },
+    { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'studio'", specifier = "==0.3.6" },
+    { name = "langgraph-runtime-inmem", marker = "extra == 'studio'", specifier = "==0.6.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.18,<4.0.0" },
     { name = "pydantic", specifier = ">=2.7.0,<3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0,<9.0.0" },
@@ -505,7 +509,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-runtime-inmem"
-version = "0.6.13"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blockbuster" },
@@ -515,9 +519,9 @@ dependencies = [
     { name = "starlette" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/27/a2847ee1027f83ed538f96c7ea34aeca40b8bee89aabb9fe2208a57fb236/langgraph_runtime_inmem-0.6.13.tar.gz", hash = "sha256:1756c557f83a8cd979ef97d3d0a36fa990666e63059212c6e11af2957b99350b", size = 80928, upload-time = "2025-08-13T04:57:19.359Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/0c/d145c6d83d36efda17b10812760711b77ec05f5bbe962c961d75b32e3c17/langgraph_runtime_inmem-0.6.0.tar.gz", hash = "sha256:b09675789a331be4a2b387c9c46de8772c4c8418e74c057b4ca24e85c25acae3", size = 77618, upload-time = "2025-07-17T16:51:01.504Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/f3/f0aa1421c6ce5ba29d950914228c0fafc657ff1a994c1155cf8ed4d11dbc/langgraph_runtime_inmem-0.6.13-py3-none-any.whl", hash = "sha256:e1fe25edf68c53359d443bbf3ea67fee2bd0b875de65584da236dbbedac6982d", size = 31112, upload-time = "2025-08-13T04:57:18.298Z" },
+    { url = "https://files.pythonhosted.org/packages/12/6a/9dc5769b5d2f97d1feacbbf93b180c359dff7462454b37dfef8aed4ebcf7/langgraph_runtime_inmem-0.6.0-py3-none-any.whl", hash = "sha256:312dab25bec6557f1edf95cb8bd7c8bb52f7f4bfeecaf66e7001662f095c9079", size = 29317, upload-time = "2025-07-17T16:51:00.622Z" },
 ]
 
 [[package]]

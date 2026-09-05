@@ -33,7 +33,11 @@ dev = [
 # USE_RUNTIME_CONTEXT_API crash when a fresh `uv sync` previously
 # resolved incompatible langgraph + langgraph-cli versions.
 studio = [
-  "langgraph-cli[inmem]>=0.3.6,<0.4.0",
+  "langgraph-cli[inmem]==0.3.6",
+  # Keep the in-memory server on the matching pre-runtime-context pair.
+  # Later runtime-inmem releases read a flag absent from API 0.2.102.
+  "langgraph-api==0.2.102",
+  "langgraph-runtime-inmem==0.6.0",
 ]
 
 [project.scripts]
