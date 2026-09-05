@@ -33,8 +33,8 @@ npm run dev --workspace services/content-scheduler-api
 ```
 
 Port defaults to `4003` (dev) so it does not collide with `tasks-api` (4000)
-or `budget-api` (4002). The Tiltfile will be updated to wire this service in a
-later commit.
+or `budget-api` (4002). The prodlike local stack uses port `4004` because its
+budget API uses `4003`. Tilt wires the service into both local modes.
 
 ## Acceptance criteria
 

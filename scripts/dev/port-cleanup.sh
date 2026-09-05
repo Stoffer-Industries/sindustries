@@ -41,6 +41,7 @@ cleanup_mode_ports() {
   kill_port_listener "${MISSION_CONTROL_PORT:-5174}" "mission control"
   kill_port_listener "$TASKS_API_PORT" "tasks api"
   kill_port_listener "${BUDGET_API_PORT:-4002}" "budget api"
+  kill_port_listener "${CONTENT_SCHEDULER_API_PORT:-4003}" "content scheduler api"
   kill_port_listener "$TILT_PORT" "Tilt"
   # Redis (CONTENT_SCHEDULER_JOB_ADAPTER=bullmq). Stopped on `make down`
   # by `docker compose down`, but if a previous stack leaked the

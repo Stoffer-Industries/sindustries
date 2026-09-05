@@ -4,9 +4,11 @@ observability_enabled = os.getenv('TILT_OBSERVABILITY', '1').strip() != '0'
 mode = os.getenv('MODE', 'dev')
 tasks_api_port = os.getenv('TASKS_API_PORT', '4000')
 budget_api_port = os.getenv('BUDGET_API_PORT', '4002')
+content_scheduler_api_port = os.getenv('CONTENT_SCHEDULER_API_PORT', '4003')
 tasks_app_port = os.getenv('TASKS_APP_PORT', '5173')
 mission_control_port = os.getenv('MISSION_CONTROL_PORT', '5176')  # dev default; prodlike uses 5175 via mode-env.sh
 tasks_api_base_url = os.getenv('TASKS_API_BASE_URL', 'http://localhost:4000/api/v1')
+content_scheduler_api_base_url = os.getenv('CONTENT_SCHEDULER_API_BASE_URL', 'http://localhost:4003/api/v1')
 tasks_api_env_file = os.getenv('TASKS_API_ENV_FILE', 'services/tasks-api/.env.dev')
 compose_project = os.getenv('COMPOSE_PROJECT_NAME', 'sindustries-' + mode)
 budget_api_env_file = os.getenv('BUDGET_API_ENV_FILE', 'services/budget-api/.env.dev')
@@ -78,6 +80,31 @@ local_resource(
   allow_parallel=False,
 )
 
+# Content Scheduler HTTP API. The UI talks to this service directly after
+# the scheduler backend extraction from tasks-api.
+local_resource(
+  'content-scheduler-api',
+  serve_cmd='cd ../../services/content-scheduler-api && DOTENV_CONFIG_PATH=../../{} PORT={} DATABASE_URL="{}" CORS_ALLOWED_ORIGINS="{}" CONTENT_SCHEDULER_JOB_ADAPTER=bullmq CONTENT_SCHEDULER_REDIS_URL="redis://localhost:{}" npm run dev'.format(
+    tasks_api_env_file,
+    content_scheduler_api_port,
+    os.getenv('CONTENT_SCHEDULER_DATABASE_URL', ''),
+    os.getenv('CORS_ALLOWED_ORIGINS', ''),
+    os.getenv('REDIS_PORT', '6379'),
+  ),
+  deps=[
+    '../../packages/otel-node/src',
+    '../../packages/otel-node/package.json',
+    '../../services/content-scheduler-api/src',
+    '../../services/content-scheduler-api/prisma',
+    '../../services/content-scheduler-api/package.json',
+    '../../services/content-scheduler-api/package-lock.json',
+    '../../services/content-scheduler-api/.env.example',
+  ],
+  resource_deps=['postgres', 'redis'],
+  labels=['content-scheduler', 'api', mode],
+  allow_parallel=False,
+)
+
 # Content Scheduler auto-post worker (long-lived process; the durable
 # BullMQ adapter side, see services/content-scheduler-api/src/routes/contentSchedulerJobs.bullmq.ts).
 # Runs reconciliation on boot (rebuilds queue state from the database if
@@ -123,9 +150,10 @@ tasks_app_base_url = 'http://localhost:{}'.format(tasks_app_port)
 
 local_resource(
   'mission-control',
-  serve_cmd='cd ../../apps/mission-control && WORKSPACE_ROOT={} VITE_TASKS_API_BASE_URL={} VITE_TASKS_APP_URL={} npm run dev -- --host 0.0.0.0 --port {}'.format(
+  serve_cmd='cd ../../apps/mission-control && WORKSPACE_ROOT={} VITE_TASKS_API_BASE_URL={} VITE_CONTENT_SCHEDULER_API_BASE_URL={} VITE_TASKS_APP_URL={} npm run dev -- --host 0.0.0.0 --port {}'.format(
     '../../../..',
     tasks_api_base_url,
+    content_scheduler_api_base_url,
     tasks_app_base_url,
     mission_control_port,
   ),
@@ -136,7 +164,7 @@ local_resource(
     '../../apps/mission-control/package.json',
     '../../apps/mission-control/package-lock.json',
   ],
-  resource_deps=['tasks-api'],
+  resource_deps=['tasks-api', 'content-scheduler-api'],
   labels=['mission-control', 'app', mode],
   allow_parallel=False,
 )

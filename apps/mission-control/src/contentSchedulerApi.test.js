@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createItem,
   updateItem,
@@ -6,7 +6,8 @@ import {
   unapproveItem,
   publishItem,
   removeItem,
-  reorderItems
+  reorderItems,
+  contentSchedulerApiBaseUrl
 } from './contentSchedulerApi.js';
 
 const mockFetch = vi.fn();
@@ -17,15 +18,54 @@ const mockResponse = (data, ok = true) => ({
   json: vi.fn().mockResolvedValue({ data })
 });
 
-// Regression: services/tasks-api/src/app.ts mounts requireAuthenticatedUser
-// on POST/PATCH/DELETE /api/v1/content-scheduler (task 0719a8e3), and the
-// Tasks API runs on a different port than mission-control — a cross-origin
-// request. Without credentials: 'include' the session cookie set by the
-// Tasks app's login() is never sent, so every mutation (including the
-// drag-to-reschedule "move tweet" flow) 401s.
+describe('contentSchedulerApiBaseUrl', () => {
+  const originalPort = window.location.port;
+
+  beforeEach(() => {
+    delete import.meta.env.VITE_CONTENT_SCHEDULER_API_BASE_URL;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', {
+      value: { port: originalPort },
+      configurable: true
+    });
+  });
+
+  function setPort(port) {
+    Object.defineProperty(window, 'location', {
+      value: { port },
+      configurable: true
+    });
+  }
+
+  it('returns the build-time scheduler service override when set', () => {
+    import.meta.env.VITE_CONTENT_SCHEDULER_API_BASE_URL = 'https://scheduler.example.com/api/v1';
+    setPort('5175');
+    expect(contentSchedulerApiBaseUrl()).toBe('https://scheduler.example.com/api/v1');
+  });
+
+  it('maps the Mission Control dev modes to the scheduler service ports', () => {
+    setPort('5175');
+    expect(contentSchedulerApiBaseUrl()).toBe('http://localhost:4004/api/v1');
+    setPort('5176');
+    expect(contentSchedulerApiBaseUrl()).toBe('http://localhost:4003/api/v1');
+  });
+
+  it('falls back to the scheduler service dev port on unknown ports', () => {
+    setPort('9999');
+    expect(contentSchedulerApiBaseUrl()).toBe('http://localhost:4003/api/v1');
+  });
+});
+
+// The Content Scheduler API runs on a different port than Mission Control —
+// a cross-origin request. Without credentials: 'include' the session cookie
+// set by the Tasks app's login() is never sent, so every mutation (including
+// the drag-to-reschedule "move tweet" flow) 401s.
 describe('contentSchedulerApi mutations send the browser session cookie', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete import.meta.env.VITE_CONTENT_SCHEDULER_API_BASE_URL;
   });
 
   it('createItem', async () => {
