@@ -10,16 +10,14 @@ source "$ROOT_DIR/scripts/dev/mode-env.sh"
 OBSERVABILITY="${1:-${OBSERVABILITY:-1}}"
 export OBSERVABILITY
 
-# Pin DOCKER_HOST to colima's socket when available. Without this,
+# Pin DOCKER_HOST to colima's socket. Without this,
 # /var/run/docker.sock often symlinks to Docker Desktop on hosts that have
 # it installed (e.g. this Mac mini), and `docker info` returns Docker
 # Desktop's daemon — fooling the preflight below into thinking colima is
 # healthy when it isn't. Setting DOCKER_HOST explicitly here ensures every
 # docker CLI call in this script (and the exec'd Tilt process) hits
 # colima, not whatever else is listening on /var/run/docker.sock.
-if [[ -S "$HOME/.colima/default/docker.sock" ]]; then
-  export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
-fi
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 
 # shellcheck source=./port-cleanup.sh
 source "$ROOT_DIR/scripts/dev/port-cleanup.sh"
@@ -99,23 +97,22 @@ fi
 
 # Preflight: confirm dockerd is actually reachable. `colima status` only
 # checks the Colima metadata; it returns OK even when the underlying
-# Lima VM has died and dockerd is gone. Detect that case and recover
-# (escalating from stop+start to delete+start if needed) before
-# continuing. Falls back to Docker Desktop if colima recovery fails.
+# Lima VM has died and dockerd is gone. Detect that case and recover via
+# a non-destructive stop/start before continuing.
 ensure_docker_daemon() {
   # Verify the responding daemon is actually the colima VM. Without this
   # check, `docker info >/dev/null` returns 0 for *any* reachable daemon
   # (e.g. Docker Desktop, Rancher Desktop, OrbStack) and the preflight
   # passes even when colima itself is wedged — which is the failure mode
   # that prompted this PR.
-  if docker info 2>/dev/null | grep -q '^Name: colima'; then
+  if [[ "$(docker info --format '{{.Name}}' 2>/dev/null || true)" == "colima" ]]; then
     return 0
   fi
 
   echo "Docker daemon is responding but is NOT colima (or colima is unreachable)."
-  echo "Detected: $(docker info 2>&1 | grep -E '^(Operating System|Name):' | head -2 | tr '\n' ' | ')"
+  echo "Detected: $(docker info --format 'Name: {{.Name}} | Operating System: {{.OperatingSystem}}' 2>/dev/null || echo 'unreachable')"
   echo "Expected: a daemon reporting \`Name: colima\`."
-  echo "Attempting Colima recovery (stop+start, then delete+start if needed)..."
+  echo "Attempting non-destructive Colima recovery (stop+start)..."
 
   # First attempt: stop + start (handles stale metadata where colima status
   # says 'running' but VM is actually stopped).
@@ -123,7 +120,7 @@ ensure_docker_daemon() {
   if colima start --runtime docker; then
     local attempts=0
     while (( attempts < 30 )); do
-      if docker info 2>/dev/null | grep -q '^Name: colima'; then
+      if [[ "$(docker info --format '{{.Name}}' 2>/dev/null || true)" == "colima" ]]; then
         echo "Docker daemon recovered (colima VM via stop+start)."
         return 0
       fi
@@ -132,35 +129,8 @@ ensure_docker_daemon() {
     done
   fi
 
-  # Second attempt: nuke and rebuild from scratch (handles wedged VM where
-  # stop+start doesn't recover — common when VZ driver is in a bad state).
-  echo "colima stop+start did not recover daemon — trying colima delete + start..."
-  colima delete --force 2>/dev/null || true
-  if colima start --runtime docker; then
-    local attempts=0
-    while (( attempts < 45 )); do
-      if docker info 2>/dev/null | grep -q '^Name: colima'; then
-        echo "Docker daemon recovered (colima VM after delete+start; VM boot takes longer after full wipe)."
-        return 0
-      fi
-      sleep 1
-      attempts=$((attempts + 1))
-    done
-  fi
-
-  # Final fallback: if Docker Desktop daemon is responsive, use it. The
-  # host's /var/run/docker.sock may symlink to Docker Desktop when colima
-  # is wedged beyond software recovery — don't fail the whole make up in
-  # that case. Honors the directive "make up needs to handle this gracefully".
-  local desktop_sock="/Users/quinnstoffer/.docker/run/docker.sock"
-  if [[ -S "$desktop_sock" ]] && /usr/local/bin/docker --context=desktop-linux info 2>/dev/null | grep -q '^Server Version'; then
-    echo "WARNING: colima recovery failed (stop+start and delete+start both tried) but Docker Desktop daemon is responsive."
-    echo "         Continuing with Docker Desktop as fallback (colima DOCKER_HOST not enforced)." >&2
-    return 0
-  fi
-
-  echo "ERROR: Docker daemon still unreachable. Colima recovery failed (stop+start, delete+start both tried) and Docker Desktop also down." >&2
-  echo "       Manual recovery: try 'colima restart' or 'colima delete --force && colima start --runtime docker'." >&2
+  echo "ERROR: Docker daemon still unreachable after a non-destructive Colima stop+start." >&2
+  echo "       Inspect 'colima status' and Colima's logs before considering 'colima delete'; delete removes local images and volumes." >&2
   exit 1
 }
 
