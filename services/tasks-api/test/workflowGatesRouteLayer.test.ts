@@ -280,7 +280,7 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
     expect(response.body.data.attentionOwners).toEqual([]);
   });
 
-  it('leaves attention owners untouched when the body omits them', async () => {
+  it('leaves attention owners untouched when status is already doing', async () => {
     prismaMock.task.findFirst
       .mockResolvedValueOnce({ id: TASK_ID, taskType: 'feature', archivedAt: null })
       .mockResolvedValueOnce(baseTaskFixture({
@@ -298,6 +298,57 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
     expect(prismaMock.taskAttentionOwner.deleteMany).not.toHaveBeenCalled();
     expect(prismaMock.taskAttentionOwner.createMany).not.toHaveBeenCalled();
     expect(response.body.data.attentionOwners).toEqual(['Tom']);
+  });
+
+  it('removes a stale Tom head when moving acceptance back to doing', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce({
+        id: TASK_ID,
+        taskType: 'feature',
+        archivedAt: null,
+        status: 'acceptance',
+        attentionOwners: [
+          { owner: 'Tom', position: 0 },
+          { owner: 'Rowan', position: 1 }
+        ]
+      })
+      .mockResolvedValueOnce(baseTaskFixture({
+        status: 'doing',
+        attentionOwners: [
+          { id: 'ao-2', taskId: TASK_ID, owner: 'Rowan', position: 0, addedBy: null, note: null, createdAt: new Date() }
+        ]
+      }));
+
+    const response = await authedRequest(createApp())
+      .patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ status: 'doing' });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskAttentionOwner.deleteMany).toHaveBeenCalledWith({ where: { taskId: TASK_ID } });
+    expect(prismaMock.taskAttentionOwner.createMany).toHaveBeenCalledWith({
+      data: [{ taskId: TASK_ID, owner: 'Rowan', position: 0 }]
+    });
+  });
+
+  it('honours an explicit attention-owner replacement during the backward transition', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce({
+        id: TASK_ID,
+        taskType: 'feature',
+        archivedAt: null,
+        status: 'acceptance',
+        attentionOwners: [{ owner: 'Tom', position: 0 }]
+      })
+      .mockResolvedValueOnce(baseTaskFixture({ attentionOwners: [{ owner: 'Quinn', position: 0 }] }));
+
+    const response = await authedRequest(createApp())
+      .patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ status: 'doing', attentionOwners: ['Quinn'] });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskAttentionOwner.createMany).toHaveBeenCalledWith({
+      data: [{ taskId: TASK_ID, owner: 'Quinn', position: 0 }]
+    });
   });
 
   it('returns 400 INVALID_ATTENTION_OWNERS on a non-array value', async () => {
