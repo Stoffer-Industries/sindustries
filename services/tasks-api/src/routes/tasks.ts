@@ -406,7 +406,10 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
   try {
     const id = parseTaskId(req.params.id);
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
-    const existing = await prisma.task.findFirst({ where: { id, archivedAt: null } });
+    const existing = await prisma.task.findFirst({
+      where: { id, archivedAt: null },
+      include: { attentionOwners: { orderBy: { position: 'asc' } } }
+    });
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
     const updates = {};
@@ -550,6 +553,21 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       attentionOwnersUpdate = normalized.owners;
     }
 
+    // Acceptance is a terminal human handoff. When Tom moves a task back to
+    // delivery, that terminal head slot is stale and must not continue to
+    // suppress the implementer. Apply this only when the caller omitted an
+    // explicit attentionOwners replacement; an explicit list is authoritative.
+    if (
+      !hasAttentionUpdate
+      && existing.status === 'acceptance'
+      && req.body?.status === 'doing'
+      && existing.attentionOwners?.[0]?.owner?.trim().toLowerCase() === 'tom'
+    ) {
+      attentionOwnersUpdate = existing.attentionOwners.slice(1).map((row) => row.owner);
+    }
+
+    const shouldPersistAttentionOwners = attentionOwnersUpdate !== null;
+
     const task = await prisma.$transaction(async (tx) => {
       await tx.task.update({
         where: { id },
@@ -605,7 +623,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         }
       }
 
-      if (hasAttentionUpdate) {
+      if (shouldPersistAttentionOwners) {
         // Full-replacement semantics: delete-then-create within the same
         // transaction. Each array entry is a distinct ordered role slot;
         // repeated owner names are intentionally retained. The
