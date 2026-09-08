@@ -31,7 +31,6 @@
 use anyhow::Result;
 use regex::Regex;
 use serde_json::Value;
-use std::process::Command;
 
 /// True iff the PR's changed files touch the Rust feature-task workflow.
 pub(crate) fn touches_rust_feature_workflow(files: &[String]) -> bool {
@@ -119,7 +118,7 @@ pub(crate) fn clippy_evidence_failures(url: &str) -> Vec<String> {
 /// `.is_empty()`; `Err(_)` is reserved for the fail-closed path so a
 /// transient `gh` blip cannot silently bypass a merge gate.
 pub(crate) fn pr_changed_files(url: &str) -> Result<Vec<String>, String> {
-    let output = Command::new("gh")
+    let output = crate::gh_command()
         .args([
             "pr",
             "view",
@@ -251,7 +250,7 @@ pub(crate) fn body_has_checked_acceptance(body: &str) -> bool {
 /// the gate-fail path so a transient `gh` blip cannot silently bypass
 /// the docs-only skip.
 pub(crate) fn pr_labels(url: &str) -> Result<Vec<String>, String> {
-    let output = Command::new("gh")
+    let output = crate::gh_command()
         .args([
             "pr",
             "view",
