@@ -454,8 +454,35 @@ fn format_evidence(map: &serde_json::Map<String, Value>) -> String {
     format!("{{{}}}", parts.join(","))
 }
 
+// Mirrors `_load_dotenv_token` in agents/workflows/feature-task/run.py.
+// gh calls here are made directly by this binary (not always spawned through
+// run.py's workflow_env()), so they can't rely on ambient env inheritance
+// alone — the cron/lobster invocation chain has repeatedly dropped GH_TOKEN
+// somewhere between run.py and this process, causing silent 401s.
+fn load_dotenv_token(key: &str) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let dotenv = Path::new(&home).join(".openclaw").join(".env");
+    let contents = fs::read_to_string(dotenv).ok()?;
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix(&format!("{key}=")) {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
+}
+
+pub(crate) fn gh_command() -> Command {
+    let mut cmd = Command::new("gh");
+    if std::env::var("GH_TOKEN").is_err() && std::env::var("GITHUB_TOKEN").is_err() {
+        if let Some(token) = load_dotenv_token("LOBSTER_GITHUB_TOKEN") {
+            cmd.env("GH_TOKEN", token);
+        }
+    }
+    cmd
+}
+
 fn pr_body(url: &str) -> Result<String> {
-    let output = Command::new("gh")
+    let output = gh_command()
         .args(["pr", "view", url, "--json", "body", "--jq", ".body"])
         .output()?;
     if !output.status.success() {
@@ -4154,7 +4181,7 @@ where
 }
 
 fn inspect_pr(url: &str) -> Result<pr_gates::ReviewState> {
-    let output = Command::new("gh")
+    let output = gh_command()
         .args([
             "pr",
             "view",
@@ -4186,6 +4213,30 @@ mod tests {
             .unwrap()
     }
 
+
+    // Single test covering both cases: load_dotenv_token mutates the
+    // process-global HOME env var, which cargo's multithreaded test runner
+    // would race on if split across separate #[test] fns.
+    #[test]
+    fn load_dotenv_token_reads_matching_key_and_none_when_absent() {
+        let home = tempdir().unwrap();
+        fs::create_dir(home.path().join(".openclaw")).unwrap();
+        fs::write(
+            home.path().join(".openclaw").join(".env"),
+            "OTHER_TOKEN=nope\nLOBSTER_GITHUB_TOKEN=abc123\n",
+        )
+        .unwrap();
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home.path());
+        let found = load_dotenv_token("LOBSTER_GITHUB_TOKEN");
+        let missing = load_dotenv_token("NOT_A_REAL_KEY");
+        match original_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        assert_eq!(found, Some("abc123".to_string()));
+        assert_eq!(missing, None);
+    }
 
     fn routing_task(status: &str, owner: &[&str]) -> Task {
         Task {
