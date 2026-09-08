@@ -91,7 +91,6 @@ export default function AgentConsentPage() {
       {!loading && !error ? (
         <section className="workout-card connected-agent-card" data-testid="agent-consent-card">
           <h2>{client?.client_name ?? request.client_id}</h2>
-          <p className="workout-card-meta">Redirect: {request.redirect_uri}</p>
           <ul>
             {scopeList(request.scope).map((scope) => (
               <li key={scope}>{scope}</li>
