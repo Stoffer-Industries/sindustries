@@ -38,3 +38,8 @@ services/budget-api/.env.prodlike
 # Quinn-owned staging env file consumed by infra/cloud/scripts/bootstrap-staging.sh.
 # infra/cloud/.env.local — Quinn keeps real values here, never committed.
 infra/cloud/.env.local
+
+# brain/ is workspace-only thinking-work (bookmarks, reviews, specs, posts) —
+# it does not belong in this codebase repo. Accidentally committed once
+# (cd2ad2a19ea098c860facf25418aecf06a8f486a); ignore to prevent recurrence.
+/brain/
