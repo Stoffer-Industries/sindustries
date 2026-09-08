@@ -31,6 +31,7 @@ import { parseId } from './contentSchedulerValidation.ts';
 import { validateImportItems } from './contentSchedulerValidation.ts';
 import { decideAutoPostAction, getJobSchedulerAdapter } from './contentSchedulerJobs.ts';
 import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts';
+import { publishThreadContentSchedulerItem } from './contentSchedulerThreadPublish.ts';
 
 export const contentSchedulerServiceRouter = Router();
 
@@ -66,9 +67,39 @@ contentSchedulerServiceRouter.post(
         );
       }
 
+      // Dispatch by kind: single-tweet items go through the existing
+      // publish service; thread items (task 1016cbff) go through the
+      // chain orchestrator so positions 1..n are posted as in_reply_to
+      // replies with full compensation on partial failure.
+      const existing = await prisma.contentSchedulerItem.findUnique({
+        where: { id },
+        select: { kind: true }
+      });
+      const isThread = (existing?.kind ?? 'scheduled') === 'thread';
+
+      if (isThread) {
+        const threadResult = await publishThreadContentSchedulerItem(id, 'manual');
+        if (threadResult.ok === false) {
+          if (threadResult.code === 'NOT_FOUND')
+            return notFound(res, 'NOT_FOUND', threadResult.message);
+          if (threadResult.code === 'NOT_THREAD')
+            return badRequest(res, 'NOT_THREAD', threadResult.message);
+          if (threadResult.code === 'MISSING_CREDENTIALS')
+            return sendError(res, 503, 'MISSING_CREDENTIALS', threadResult.message);
+          if (threadResult.code === 'PUBLISH_FAILED')
+            return sendError(res, 502, 'PUBLISH_FAILED', threadResult.message);
+          if (threadResult.code === 'CLEANUP_REQUIRED')
+            return sendError(res, 409, 'CLEANUP_REQUIRED', threadResult.message);
+          return sendError(res, 409, threadResult.code, threadResult.message);
+        }
+        const { date } = getAucklandTodayParts();
+        const threadItem = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+        return res.json({ data: threadItem, today: date });
+      }
+
       const result = await publishContentSchedulerItem(id, 'manual');
 
-      if (!result.ok) {
+      if (result.ok === false) {
         if (result.code === 'NOT_FOUND') return notFound(res, 'NOT_FOUND', result.message);
         if (result.code === 'MISSING_CREDENTIALS')
           return sendError(res, 503, 'MISSING_CREDENTIALS', result.message);
