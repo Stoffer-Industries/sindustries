@@ -39,8 +39,6 @@ export type ThreadPublishCode =
   | 'CLEANUP_REQUIRED'
   | 'CLEANUP_STILL_REQUIRED';
 
-export type ThreadPublishActor = 'manual' | 'auto';
-
 export type ThreadPublishResult =
   | {
       ok: true;
@@ -308,7 +306,6 @@ async function compensate(
  */
 export async function publishThreadContentSchedulerItem(
   itemId: string,
-  actor: ThreadPublishActor,
   deps: ThreadPublishDeps = {}
 ): Promise<ThreadPublishResult> {
   const db = deps.prismaOverride ?? prisma;
@@ -468,10 +465,6 @@ export async function publishThreadContentSchedulerItem(
       publishError: null
     }
   });
-  // `actor` is unused for now — reserved for future per-actor
-  // instrumentation (manual vs auto-post worker). Acknowledge the
-  // parameter so TypeScript doesn't flag it.
-  void actor;
   return {
     ok: true,
     code: 'OK',
@@ -625,5 +618,5 @@ export async function retryThreadPublish(
   // see a null default and return MISSING_CREDENTIALS). The user gets
   // a single round-trip result instead of an intermediate 'rolled_back,
   // now click publish again'.
-  return publishThreadContentSchedulerItem(itemId, 'manual', { ...deps, client });
+  return publishThreadContentSchedulerItem(itemId, { ...deps, client });
 }
