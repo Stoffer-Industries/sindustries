@@ -149,6 +149,19 @@ describe('FakeXClient', () => {
     expect(a?.handle).not.toEqual(c?.handle);
     expect(a?.handle).toMatch(/^fake_author_[0-9a-f]{8}$/);
   });
+
+  it('deleteTweet is a no-op for normal numeric ids', async () => {
+    const client = new FakeXClient();
+    await expect(client.deleteTweet('1234567890')).resolves.toBe(undefined);
+    await expect(client.deleteTweet('9999999999')).resolves.toBe(undefined);
+  });
+
+  it('deleteTweet throws when the id starts with FAIL_DELETE', async () => {
+    const client = new FakeXClient();
+    await expect(client.deleteTweet('FAIL_DELETE_AT_2')).rejects.toThrow(
+      /FakeXClient: injected delete failure for FAIL_DELETE_AT_2/
+    );
+  });
 });
 
 // --- RealXClient ------------------------------------------------------------
@@ -266,6 +279,52 @@ describe('RealXClient', () => {
       vi.fn(async () => ({ ok: false, status: 500, text: async () => 'server error' }) as unknown as Response)
     );
     await expect(client.getTweetAuthor('999')).rejects.toThrow(/X API 500/);
+  });
+
+  it('deleteTweet sends DELETE /2/tweets/:id with an OAuth1.0a Authorization header', async () => {
+    let capturedUrl: string | undefined;
+    let capturedMethod: string | undefined;
+    let capturedAuth: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        capturedUrl = url;
+        capturedMethod = init?.method;
+        capturedAuth = init?.headers ? (init.headers as Record<string, string>).authorization : undefined;
+        return { ok: true, status: 200 } as Response;
+      })
+    );
+
+    await client.deleteTweet('1234567890');
+
+    expect(capturedUrl).toBe('https://api.twitter.com/2/tweets/1234567890');
+    expect(capturedMethod).toBe('DELETE');
+    // OAuth1.0a Authorization header must be present and start with "OAuth "
+    // — the orchestrator depends on real OAuth-signed DELETE so cleanup
+    // failures surface as 4xx/5xx and not as silent no-ops.
+    expect(capturedAuth).toMatch(/^OAuth /);
+  });
+
+  it('deleteTweet throws on a non-ok response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 403, text: async () => 'forbidden' }) as unknown as Response)
+    );
+    await expect(client.deleteTweet('999')).rejects.toThrow(/X API 403/);
+  });
+
+  it('deleteTweet URL-encodes the id path segment', async () => {
+    let capturedUrl: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        capturedUrl = url;
+        return { ok: true, status: 200 } as Response;
+      })
+    );
+    await client.deleteTweet('a/b');
+    // The id is URL-encoded so a hostile id can't break out of the path.
+    expect(capturedUrl).toBe('https://api.twitter.com/2/tweets/a%2Fb');
   });
 });
 
