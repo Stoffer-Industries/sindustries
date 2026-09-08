@@ -4,11 +4,24 @@ export const MAX_TWEET_BODY = 280;
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const validSources = new Set(['ops_notes', 'cto_craft', 'manual', 'other']);
-export const validStatuses = new Set(['draft', 'queued', 'approved', 'published', 'removed']);
-// Manual-reply discriminator (task 5279b310). `manual_reply` rows are never
-// auto-published and are surfaced under the Mission Control "Reply drafts
-// (manual)" section for Tom to copy + post himself.
-export const validKinds = new Set(['scheduled', 'manual_reply']);
+// `publishing` and `cleanup_required` are intermediate states added for
+// thread support (task 1016cbff); the publish service flips into them
+// while a thread chain is being created or rolled back.
+export const validStatuses = new Set([
+  'draft',
+  'queued',
+  'approved',
+  'publishing',
+  'cleanup_required',
+  'published',
+  'removed',
+]);
+// Manual-reply discriminator (task 5279b310). `manual_reply` rows are
+// never auto-published and are surfaced under the Mission Control "Reply
+// drafts (manual)" section for Tom to copy + post himself. `thread`
+// (task 1016cbff) is the multi-tweet chain discriminator: body is the
+// root and ordered reply parts 1..n live in ContentSchedulerThreadPart.
+export const validKinds = new Set(['scheduled', 'manual_reply', 'thread']);
 // Permitted shapes for `manualPostedUrl` — only X/Twitter canonical tweet
 // URLs are accepted so a typo can't silently land in the DB. The PATCH
 // /items/:id/posted-url route validates more strictly because it is the
