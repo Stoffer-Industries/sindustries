@@ -24,19 +24,39 @@ Repeated people across or within planes are meaningful and must remain visible.
 ## When Ash is actionable
 
 1. Fetch the full task and current delivery PR.
-2. For a `doing` task with the current `qa_agent` gate, run the verifier in
-   `agents/ash/src/verify.ts` and inspect cited tests, artifacts, and diff claims.
-3. If evidence passes, write the structured `qa_agent` approval with Ash's
-   credential. A comment may record evidence, but the approval row is the gate
-   source and the attention stack is the routing source.
-4. If ordinary delivery evidence fails (missing/failing tests, missing artifact,
-   fabricated or mismatched claim), route the task back to its delivery assignee
-   at `attentionOwners[0]`. Preserve gate context and the escalation tail.
-5. If the blocker is tooling/systemic, route by capability: infrastructure,
-   host, or network work may go to Lox; OpenClaw/runtime work goes to Quinn;
-   otherwise choose the capable agent indicated by the evidence.
-6. When resolved, advance only the current top slot. Preserve later and repeated
-   slots exactly; never clear or deduplicate the whole stack accidentally.
+2. For a `doing` task with the current `qa_agent` gate, reason over the
+   AC descriptions + the PR diff + cited tests + cited files via the
+   agent's own tool calls (no CLI invocation). Use
+   `extractAcLines` + `stripTrailingEvidence` from
+   `agents/ash/src/verify.ts` to strip evidence annotations off the
+   AC text before reasoning. Reach a per-AC verdict:
+   `verified` / `blocked` / `deferred` (capability gap). Defer with
+   a precise reason on a capability gap; block on a real evidence
+   failure; verify on a clean run.
+3. If all ACs verify, write the structured `qa_agent` approval with
+   Ash's credential. A `[qa-agent-verified]` comment records the
+   per-AC reasoning summary; the approval row is the gate source and
+   the attention stack is the routing source.
+4. If any AC is blocked by an evidence failure (missing/failing
+   tests, missing artifact, fabricated or mismatched claim), post
+   `[qa-agent-blocked]` listing each blocked AC's reason and route the
+   task back to its delivery assignee at `attentionOwners[0]`.
+   Preserve gate context and the escalation tail. Do **not** post the
+   structured approval.
+5. If any AC is deferred (capability gap), post `[qa-agent-deferred]`
+   for those ACs and continue the loop. If at least one AC verified
+   and none blocked, post the structured `qa_agent` approval AND a
+   `[qa-agent-deferred]` comment summarising the deferred subset. If
+   the same gap recurs across two distinct tasks, propose a follow-up
+   feature task via the Tasks API on the second strike (do not
+   auto-create on the first deferral).
+6. If the blocker is tooling/systemic, route by capability:
+   infrastructure, host, or network work may go to Lox;
+   OpenClaw/runtime work goes to Quinn; otherwise choose the capable
+   agent indicated by the evidence.
+7. When resolved, advance only the current top slot. Preserve later
+   and repeated slots exactly; never clear or deduplicate the whole
+   stack accidentally.
 
 ## Escalation ceiling
 

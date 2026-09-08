@@ -3,11 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Ash QA-verifier agent: mechanical verification script. Invoked by Quinn's Ash heartbeat/cron after the agent identity is provisioned at ~/.openclaw/workspace/agents/ash/.",
+  "description": "Ash QA-verifier agent: utility module (AC extraction, evidence stripping, PR fetch). Ash's reasoning loop lives in the agent identity at ~/.openclaw/workspace/agents/ash/ and consumes these utilities through its own tool calls.",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest",
-    "verify": "tsx src/verify.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {},
   "devDependencies": {
