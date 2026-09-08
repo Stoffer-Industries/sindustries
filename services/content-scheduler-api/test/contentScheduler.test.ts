@@ -423,6 +423,28 @@ describe('contentScheduler routes', () => {
     );
   });
 
+  it('PATCH /api/v1/content-scheduler/items/:id promotes a scheduled draft to queued', async () => {
+    const scheduledFor = new Date('2026-07-19T20:00:00.000Z');
+    const existing = itemFixture({ status: 'draft', scheduledFor: null });
+    const updated = itemFixture({ status: 'queued', scheduledFor });
+    prismaMock.contentSchedulerItem.findUnique
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce(updated);
+    prismaMock.contentSchedulerItem.update.mockResolvedValue(updated);
+    const app = createApp();
+    const res = await authedRequest(app)
+      .patch(`/api/v1/content-scheduler/items/${existing.id}`)
+      .send({ scheduledFor: scheduledFor.toISOString() });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.contentSchedulerItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ scheduledFor, status: 'queued' })
+      })
+    );
+    expect(res.body.data.status).toBe('queued');
+  });
+
   // Per task 94d5e4fc (Content Scheduler extraction) + audit 2026-W35 finding
   // T1.2, this test exercises the post-T1.2 actor-authority rule:
   // `requireAuthenticatedUser` should make the authenticated actor (parsed

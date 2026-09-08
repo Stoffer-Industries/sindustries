@@ -12,12 +12,14 @@ export const SOURCES = [
 ];
 
 export const STATUS_LABELS = {
+  draft: 'Draft',
   queued: 'Queued',
   approved: 'Approved',
   published: 'Published'
 };
 
 export const STATUS_BADGE_VARIANT = {
+  draft: 'neutral',
   queued: 'neutral',
   approved: 'info',
   published: 'success'
