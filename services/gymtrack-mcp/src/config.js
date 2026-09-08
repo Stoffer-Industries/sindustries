@@ -11,6 +11,8 @@ export function loadConfig(env = process.env) {
     accessTokenTtlSeconds: Number(env.GYMTRACK_MCP_ACCESS_TOKEN_TTL_SECONDS ?? 3600),
     refreshTokenTtlSeconds: Number(env.GYMTRACK_MCP_REFRESH_TOKEN_TTL_SECONDS ?? 60 * 60 * 24 * 90),
     authorizationCodeTtlSeconds: Number(env.GYMTRACK_MCP_AUTH_CODE_TTL_SECONDS ?? 600),
+    oauthRateLimitMax: Number(env.GYMTRACK_MCP_OAUTH_RATE_LIMIT ?? 10),
+    oauthRateLimitWindowMs: Number(env.GYMTRACK_MCP_OAUTH_RATE_WINDOW_MS ?? 60_000),
     protectedResourceMetadataUrl: `${issuer}/.well-known/oauth-protected-resource`
   };
 }
