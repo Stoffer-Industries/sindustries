@@ -173,6 +173,8 @@ struct ActiveWorkflowHandoff {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct TaskComment {
     #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     body: Option<String>,
@@ -1576,10 +1578,28 @@ fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
         "ready" if !tech_design_approved_structured(task) && !tech_design_waived(task) => {
             Some("Quinn")
         }
-        "doing" if !implementer_pr_urls(task).is_empty() && !qa_agent_verified(task) => Some("Ash"),
+        "doing"
+            if !implementer_pr_urls(task).is_empty()
+                && !qa_agent_verified(task)
+                && !ash_was_last_commenter(task) =>
+        {
+            Some("Ash")
+        }
         "acceptance" if !accepted_structured(task) => Some("Tom"),
         _ => None,
     }
+}
+
+/// Ash routes ordinary verification failures back to the delivery assignee by
+/// removing herself from the attention stack. Keep that handoff intact until
+/// someone else comments; otherwise the next lobster sweep immediately
+/// derives Ash again from the still-open `qa_agent` gate and overwrites the
+/// delivery owner's slot.
+fn ash_was_last_commenter(task: &Task) -> bool {
+    task.comments
+        .last()
+        .and_then(|comment| comment.author.as_deref())
+        .is_some_and(|author| author.trim().eq_ignore_ascii_case("Ash"))
 }
 
 fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
@@ -4258,6 +4278,50 @@ mod tests {
     fn routing_replaces_implementer_with_ash_after_delivery() {
         let mut task = routing_task("doing", &["Rowan", "Tom"]);
         task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        assert_eq!(reconciled_attention_owners(&task), vec!["Ash", "Tom"]);
+    }
+
+    #[test]
+    fn routing_preserves_rowan_handoff_when_ash_is_last_commenter() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
+            body: None,
+        });
+        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan", "Tom"]);
+    }
+
+    #[test]
+    fn routing_resumes_ash_after_delivery_comments_again() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some("Collected the requested runtime evidence.".to_string()),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
             text: Some(
                 "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
                     .to_string(),
@@ -4317,6 +4381,7 @@ mod tests {
                     .to_string(),
             ),
             body: None,
+            ..TaskComment::default()
         });
         task.approvals.push(TaskApproval {
             approval_type: "qa_agent".to_string(),
@@ -4393,6 +4458,7 @@ mod tests {
             comments: vec![TaskComment {
                 text: Some(text.to_string()),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         }
@@ -4436,12 +4502,14 @@ mod tests {
                 TaskComment {
                     text: Some("random chatter".to_string()),
                     body: None,
+                    ..TaskComment::default()
                 },
                 TaskComment {
                     text: Some(
                         "[tech-design-not-required] small PR — no design needed".to_string(),
                     ),
                     body: None,
+                    ..TaskComment::default()
                 },
             ],
             ..Task::default()
@@ -5041,7 +5109,7 @@ feature
     #[test]
     fn extracts_multiple_implementer_pr_urls() {
         let task = Task {
-            comments: vec![TaskComment { text: Some("[rowan-prs]\nhttps://github.com/Stoffer-Industries/sindustries/pull/1\nhttps://github.com/Stoffer-Industries/sindustries/pull/2".to_string()), body: None }],
+            comments: vec![TaskComment { text: Some("[rowan-prs]\nhttps://github.com/Stoffer-Industries/sindustries/pull/1\nhttps://github.com/Stoffer-Industries/sindustries/pull/2".to_string()), body: None, ..TaskComment::default() }],
             ..Task::default()
         };
         assert_eq!(implementer_pr_urls(&task).len(), 2);
@@ -5057,6 +5125,7 @@ feature
                             .to_string(),
                     ),
                     body: None,
+                    ..TaskComment::default()
                 },
                 TaskComment {
                     text: Some(
@@ -5064,6 +5133,7 @@ feature
                             .to_string(),
                     ),
                     body: None,
+                    ..TaskComment::default()
                 },
             ],
             ..Task::default()
@@ -5203,6 +5273,7 @@ feature
             comments: vec![TaskComment {
                 text: Some("[tech-design-approved] true [qa-ac-verified] true".into()),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Default::default()
         };
@@ -5406,6 +5477,7 @@ feature
             comments: vec![TaskComment {
                 text: Some(format!("[rowan-prs] {merged_url} {open_url}")),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -5845,10 +5917,12 @@ feature
                             .to_string(),
                     ),
                     body: None,
+                    ..TaskComment::default()
                 },
                 TaskComment {
                     text: Some("Approval spec approved by Tom.".to_string()),
                     body: None,
+                    ..TaskComment::default()
                 },
             ],
             ..Task::default()
@@ -5874,6 +5948,7 @@ feature
             comments: vec![TaskComment {
                 text: Some("Approval spec approved by Tom.".to_string()),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -5984,6 +6059,7 @@ feature
         drifted_task.comments = vec![TaskComment {
             text: Some(resync_text),
             body: None,
+            ..TaskComment::default()
         }];
         let env = Envelope {
             criteria_met: true,
@@ -6128,6 +6204,7 @@ feature
             comments: vec![TaskComment {
                 text: Some("[spec-resynced] Previous episode".to_string()),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -6197,14 +6274,17 @@ feature
                 TaskComment {
                     text: Some("[rowan-prs] https://github.com/x/y/pull/1".to_string()),
                     body: None,
+                    ..TaskComment::default()
                 },
                 TaskComment {
                     text: Some(stale.to_string()),
                     body: None,
+                    ..TaskComment::default()
                 },
                 TaskComment {
                     text: Some(good),
                     body: None,
+                    ..TaskComment::default()
                 },
             ],
             ..Task::default()
@@ -6245,6 +6325,7 @@ feature
                     "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={fp}\n"
                 )),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -6261,6 +6342,7 @@ feature
                     "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={other_fp}\n"
                 )),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -6277,6 +6359,7 @@ feature
                     "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={fp}\n"
                 )),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -6300,6 +6383,7 @@ feature
                     fp_upper = fp.to_uppercase(),
                 )),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -6316,6 +6400,7 @@ feature
                     "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={fp}\n"
                 )),
                 body: None,
+                ..TaskComment::default()
             }],
             ..Task::default()
         };
@@ -7180,8 +7265,9 @@ keep me
             spec_checksum: Some(original_checksum.clone()),
             approvals: vec![approval_row("spec", "approved")],
             comments: vec![TaskComment {
-                text: Some(stale_comment),
-                body: None,
+            text: Some(stale_comment),
+            body: None,
+            ..TaskComment::default()
             }],
             ..Task::default()
         };

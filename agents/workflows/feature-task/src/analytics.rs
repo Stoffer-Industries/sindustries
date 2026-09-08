@@ -608,10 +608,12 @@ mod tests {
         let mut task = make_task("task-1");
         task.comments = vec![
             TaskComment {
+                author: None,
                 text: Some("[implementer-prs] https://github.com/foo/bar/pull/1".to_string()),
                 body: None,
             },
             TaskComment {
+                author: None,
                 text: Some("[implementer-prs] https://github.com/foo/bar/pull/2 https://github.com/foo/bar/pull/1".to_string()),
                 body: None,
             },
