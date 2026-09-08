@@ -62,6 +62,22 @@ describe('ApprovalsSection', () => {
     expect(screen.getByLabelText('Tom')).toBeInTheDocument();
   });
 
+  it('renders Tom\'s tech_design and qa_agent checkboxes enabled (task 2c3bf69b override)', async () => {
+    // Tom's session now includes tech_design + qa_agent as additive override
+    // permissions (ACTOR_PERMISSIONS.Tom extended). The component trusts
+    // approvalTypes from the server; with all four types returned every
+    // required checkbox must render enabled, including tech_design and
+    // qa_agent which were previously disabled for Tom.
+    fetchAuthSessionMock.mockResolvedValue({ actor: 'Tom', approvalTypes: ['spec', 'accepted', 'tech_design', 'qa_agent'] });
+    fetchRequiredApprovalsMock.mockResolvedValue(required(['spec', 'tech_design', 'qa_agent', 'accepted']));
+    render(<ApprovalsSection task={{ id: 'task-1', taskType: 'feature', approvals: [] }} />);
+
+    expect(await screen.findByRole('checkbox', { name: 'Spec approval' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'Tech Design approval' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'QA (Ash) approval' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'Accepted approval' })).toBeEnabled();
+  });
+
   it('prompts anonymous users to sign in, keeps credentials ephemeral, then performs the requested approval', async () => {
     fetchAuthSessionMock.mockRejectedValue(new Error('Unauthenticated'));
     fetchRequiredApprovalsMock.mockResolvedValue(required(['spec']));

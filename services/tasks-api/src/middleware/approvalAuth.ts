@@ -27,7 +27,15 @@ declare global { namespace Express { interface Request { approvalPrincipal?: App
 // approval's `owner` is `brain_spec_reconciler`, not `Tom` — the audit trail
 // always shows this was a mechanical reconciliation, never a live Tom action.
 const ACTOR_PERMISSIONS: Record<string, ReadonlySet<ApprovalType>> = {
-  Tom: new Set(['spec', 'accepted']),
+  // Tom holds the routine gates (`spec`, `accepted`) and is also authorised
+  // as an override actor for `tech_design` and `qa_agent`. The override is
+  // additive — `APPROVAL_ATTENTION_OWNERS` and the Rust
+  // `workflow_attention_owner` still key on approval type (Quinn for
+  // tech_design, Ash for qa_agent), so a Tom-granted approval satisfies
+  // the gate exactly as a Quinn/Ash grant would without making Tom the
+  // routine routable attention owner. See docs/specs/tom-approve-tech-
+  // design-qa-gates-tech-design.md for the full design and AC4 invariant.
+  Tom: new Set(['spec', 'accepted', 'tech_design', 'qa_agent']),
   Quinn: new Set(['tech_design']),
   Ash: new Set(['qa_agent']),
   feature_task_lobster: new Set([]),

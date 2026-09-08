@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // transitively imports approvalAuth.ts) so the module-load-time parse
 // in approvalAuth captures the test credentials instead of an empty value.
 process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
-  { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'accepted'] },
+  { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'accepted', 'tech_design', 'qa_agent'] },
   { token: 'quinn-service-token-long-enough', actor: 'Quinn', approvalTypes: ['tech_design'] },
   { token: 'lobster-service-token-long-enough', actor: 'feature_task_lobster', approvalTypes: ['qa_agent'] }
 ]);
@@ -76,11 +76,29 @@ describe('task approval boundary', () => {
     expect(res.status).toBe(200); expect(prismaMock.taskApproval.upsert).toHaveBeenCalled();
   });
 
-  it('enforces Tom-only spec/accepted and Quinn-only tech_design', async () => {
+  it('lets Tom grant tech_design and qa_agent as an override; still blocks Quinn on spec', async () => {
+    // Task 2c3bf69b: Tom is authorised to grant tech_design + qa_agent
+    // additively (override). Quinn's spec/accepted permissions and Ash's
+    // qa_agent permissions are unchanged — the cross-actor denial
+    // (Quinn -> spec) still returns 403. The Tom-grant path must reach
+    // $transaction and write an approval row owned by Tom.
     const app = createApp();
+    prismaMock.task.findUnique.mockResolvedValue(activeTask);
+    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'tech_design', owner: 'Tom' }));
+    prismaMock.taskComment.create.mockResolvedValue({});
     const tomTech = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'tech_design' });
+    expect(tomTech.status).toBe(200);
+    expect(prismaMock.taskApproval.upsert.mock.calls[0][0].create.owner).toBe('Tom');
+
+    prismaMock.taskApproval.findUnique.mockReset().mockResolvedValue(null);
+    prismaMock.taskApproval.upsert.mockReset().mockResolvedValue(approval({ type: 'qa_agent', owner: 'Tom' }));
+    const tomQa = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'qa_agent' });
+    expect(tomQa.status).toBe(200);
+    expect(prismaMock.taskApproval.upsert.mock.calls[0][0].create.owner).toBe('Tom');
+
     const quinnSpec = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(QUINN_TOKEN)).send({ type: 'spec' });
-    expect(tomTech.status).toBe(403); expect(quinnSpec.status).toBe(403); expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(quinnSpec.status).toBe(403);
   });
 
   it('rejects a body owner and derives owner from the credential', async () => {
