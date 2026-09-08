@@ -631,6 +631,9 @@ jobs:
       - name: Run package.json no-pnpm-pin AC3 test
         run: bash infra/cloud/scripts/tests/package-json-no-pnpm-pin.test.sh
 
+      - name: Run Mission Control Vercel deployment contract test
+        run: bash infra/cloud/scripts/tests/mission-control-deploy-fixtures.test.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest

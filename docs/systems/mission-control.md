@@ -2,7 +2,7 @@
 
 **Type:** Architecture decision record (system reference)
 **Status:** Accepted
-**Last updated:** 2026-09-04
+**Last updated:** 2026-09-08
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** `apps/mission-control/`
@@ -140,24 +140,23 @@ authentication lands.
 
 ## Production
 
-Mission Control is now deployed to **cloud-hosted staging** as two
-independent Fly apps. The decision was recorded by PR
-[#565](https://github.com/Stoffer-Industries/sindustries/pull/565) (task
-`dd232b99`, merged 2026-09-03); this section documents the chosen shape
-and the reasoning, replacing the prior Options A/B placeholder.
+Mission Control and Tasks deploy to **cloud-hosted staging** as two
+independent Vercel projects. PR #565 previously added Fly frontend
+scaffolding but no live Fly release; PR #573 then established the
+workload-fit rule that static Vite SPAs use Vercel while APIs and workers
+remain on Fly. Task `9a53b122` owns the migration and live deployment.
 
-### Chosen shape — separate Fly apps, iframe architecture preserved
+### Chosen shape — separate Vercel projects, iframe architecture preserved
 
-| Fly app                                | Purpose                                                    |
-| -------------------------------------- | ---------------------------------------------------------- |
-| `sindustries-mission-control-staging`  | Mission Control shell (Pulse UI); embeds Tasks via iframe  |
-| `sindustries-tasks-app-staging`        | Tasks app SPA, served standalone and iframeable            |
+| Vercel project | Purpose |
+| --- | --- |
+| `sindustries-mission-control-staging` | Mission Control shell; embeds Tasks via iframe |
+| `sindustries-tasks-app-staging` | Tasks app SPA, standalone and iframeable |
 
-Each app has its own `infra/cloud/fly/<app>.fly.toml`,
-`infra/cloud/docker/<app>.Dockerfile`, and `infra/cloud/env/<app>.env.example`.
-The shared SPA nginx config (`infra/cloud/docker/spa-nginx.conf`)
-provides SPA fallback plus a `/healthz` endpoint that Fly's `http_check`
-hits every 15s.
+Each project sets its Root Directory to the matching app directory and uses the
+co-located `vercel.json`. Vercel's monorepo checkout preserves access to the
+root npm lockfile and shared workspace packages. Catch-all rewrites send
+application routes to `index.html`.
 
 The iframe contract from [Decision](#decision) is preserved unchanged:
 Mission Control still loads the Tasks app via `<iframe>`. The build
@@ -168,7 +167,7 @@ two deploys must be coordinated on first rollout (Tasks first, then
 Mission Control); afterwards they can ship independently because the
 URL pair is stable.
 
-### Why this shape, not the prior Options A and B
+### Why this shape
 
 - **Not Option A (reverse proxy).** A reverse proxy in front of the two
   apps gives one URL, but it forces the iframe embed to be same-origin
@@ -182,21 +181,38 @@ URL pair is stable.
   Mission Control UI work and Tasks-app feature work would need
   coordinated releases again, and a Mission Control regression could
   no longer be reverted without reverting an unrelated Tasks change.
-- **Separate Fly apps keep the loose coupling** the [Decision](#decision)
-  section argues for, while still giving each app its own stable HTTPS
-  URL. Per-app revert (`fly releases rollback <version>`) is one command
-  and matches AC3's revert requirement directly. DNS, TLS certs, and
-  health checks are owned per-app.
+- **Separate Vercel projects keep the loose coupling** the
+  [Decision](#decision) section argues for while using the native static-SPA
+  platform. Each app receives its own stable HTTPS alias, preview deployments,
+  and independent promotion/rollback history without maintaining an nginx
+  container or Fly machine.
 
 ### Operational artefacts
 
-- **Runbook:** retired with PR #583 (was `infra/runbooks/mission-control-staging.md`). Operational deploy procedure, DNS handover checklist, smoke checks, health-check contract, and revert procedure are now documented inline in this section's spec above; any follow-up runbook of this class lands at `~/.openclaw/workspace/docs/infra/runbooks/mission-control-staging.md`.
-- **DNS targets (proposed):** `mc-staging.sindustries.dev` →
-  `sindustries-mission-control-staging.fly.dev`; `tasks-staging.sindustries.dev` →
-  `sindustries-tasks-app-staging.fly.dev`. TLS cert issuance via
-  `fly certs create` runs after the first deploy lands and the DNS
-  records are confirmed live (handover pending with Tom — see runbook
-  § DNS).
+- **Build configs:** `apps/mission-control/vercel.json` and
+  `apps/tasks/vercel.json`.
+- **Stable aliases:** the project-level `*.vercel.app` production aliases are
+  the initial staging URLs. Optional custom domains can be added later without
+  rebuilding either SPA.
+- **Health:** `GET /` and a referenced hashed asset must both return `200`.
+  The check verifies static hosting and bundle availability; API health remains
+  a separate backend signal.
+- **Rollback:** promote the previous known-good Vercel deployment for only the
+  affected project, then repeat the root-and-asset smoke check.
+- **Build-time URL contract:** Mission Control receives
+  `VITE_TASKS_API_BASE_URL` and `VITE_TASKS_APP_URL`; Tasks receives
+  `VITE_TASKS_API_BASE_URL` and `VITE_SHELL_ORIGIN`. These are public URLs,
+  never secrets.
+- **Current staging aliases (deployed 2026-09-08):**
+  `https://sindustries-mission-control-staging.vercel.app` and
+  `https://sindustries-tasks-app-staging.vercel.app`. Root documents, SPA
+  routes, and hashed assets have been smoke-tested at HTTP 200. A second
+  Mission Control release was deployed and rolled back successfully to prove
+  the provider rollback path.
+- **Current blocker:** the staging Tasks API hostname is not live, so frontend
+  hosting is healthy but authenticated end-to-end task workflows are not yet
+  validated. Vercel's GitHub integration also lacks access to the private
+  repository, leaving deploys CLI-triggered until that access is granted.
 - **Production cutover** is a separate workstream (task `020f423e`,
   spec `brain/tasks/specs/in-progress/sindustries-cloud-migration.md`).
   This ADR only commits to the staging shape; production decisions
