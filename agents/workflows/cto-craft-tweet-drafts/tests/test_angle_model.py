@@ -10,7 +10,10 @@ from cto_craft_workflow.angle_model import (
     AnglePrompt,
     OpenClawInvocationConfig,
     OpenClawStructuredAngleModel,
+    _ANGLE_EVALUATOR_PROMPT,
+    _TOM_WORLDVIEW_PROFILE,
     _build_openclaw_message,
+    load_prompts,
 )
 
 
@@ -172,3 +175,36 @@ def test_openclaw_prompt_includes_schema_and_null_contract() -> None:
     assert "Allowed outputs:" in message
     assert "- null if no angle qualifies" in message
     assert '"canonical_url"' in message
+
+
+def test_load_prompts_returns_module_constants() -> None:
+    """Defensive regression test: load_prompts() returns the cached module constants.
+
+    Pins the contract that ``load_prompts()`` is a thin wrapper over the
+    module-level prompt cache and performs no synchronous file I/O on the
+    call path. Identity-equality (``is``) on the strings proves the
+    function returns the same object the module-import-time helper
+    produced — not a fresh re-read from disk.
+    """
+    system_prompt, worldview_profile = load_prompts()
+    assert system_prompt is _ANGLE_EVALUATOR_PROMPT
+    assert worldview_profile is _TOM_WORLDVIEW_PROFILE
+    assert isinstance(system_prompt, str)
+    assert isinstance(worldview_profile, str)
+    assert len(system_prompt) > 0
+    assert len(worldview_profile) > 0
+
+
+def test_load_prompts_is_idempotent_across_calls() -> None:
+    """Repeated calls to load_prompts() return the same string objects.
+
+    Pins the cache contract from the call-site perspective: any second
+    invocation must hand back the same cached strings as the first, never
+    re-read the prompt files. A regression that re-reads synchronously on
+    each call would produce distinct string objects per call and fail
+    this identity check.
+    """
+    first_system, first_world = load_prompts()
+    second_system, second_world = load_prompts()
+    assert second_system is first_system
+    assert second_world is first_world

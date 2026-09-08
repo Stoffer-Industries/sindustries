@@ -313,27 +313,51 @@ def _build_openclaw_message(prompt: AnglePrompt) -> str:
     )
 
 
+def _load_prompt_or_raise(path: Path) -> str:
+    """Read a prompt file at module import time, raising on missing files.
+
+    Mirrors the original ``load_prompts()`` fail-fast contract: a missing
+    prompt file becomes a ``RuntimeError`` with the same message format.
+    Called once per prompt at module import so the result is cached and
+    no synchronous file I/O occurs on the LangGraph Studio request path.
+    """
+    if not path.exists():
+        raise RuntimeError(
+            f"missing prompt file: {path}. "
+            "The CTO Craft package must ship prompts/"
+            f"{path.name}."
+        )
+    return path.read_text(encoding="utf-8")
+
+
+# Loaded once at import; cached for the lifetime of the process.
+# This is the key behaviour change vs the previous load_prompts()
+# implementation: callers on async request paths (e.g. LangGraph Studio's
+# graph inspection via get_assistant_subgraphs) no longer trigger
+# blockbuster.BlockingError on a synchronous Path.read_text() call.
+_ANGLE_EVALUATOR_PROMPT: str = _load_prompt_or_raise(
+    _PROMPTS_DIR / "angle-evaluator.md"
+)
+_TOM_WORLDVIEW_PROFILE: str = _load_prompt_or_raise(
+    _PROMPTS_DIR / "tom-worldview.md"
+)
+
+
 def load_prompts() -> tuple[str, str]:
-    """Load the angle-evaluator and Tom-worldview prompts from disk.
+    """Return the angle-evaluator and Tom-worldview prompts.
 
     Returns a tuple ``(system_prompt, worldview_profile)``. The system
     prompt is the literal contents of ``angle-evaluator.md``; the profile
     is the literal contents of ``tom-worldview.md``.
+
+    The strings are loaded once at module import time and cached in
+    module-level constants, so callers on the LangGraph Studio request
+    path (which runs on an async loop) do not trigger the ``blockbuster``
+    guard on a synchronous ``Path.read_text()``. The wrapper preserves
+    the original tuple signature so existing call-sites do not change.
     """
 
-    evaluator_path = _PROMPTS_DIR / "angle-evaluator.md"
-    worldview_path = _PROMPTS_DIR / "tom-worldview.md"
-    if not evaluator_path.exists():
-        raise RuntimeError(
-            f"missing prompt file: {evaluator_path}. "
-            "The CTO Craft package must ship prompts/angle-evaluator.md."
-        )
-    if not worldview_path.exists():
-        raise RuntimeError(
-            f"missing prompt file: {worldview_path}. "
-            "The CTO Craft package must ship prompts/tom-worldview.md."
-        )
-    return (evaluator_path.read_text(encoding="utf-8"), worldview_path.read_text(encoding="utf-8"))
+    return _ANGLE_EVALUATOR_PROMPT, _TOM_WORLDVIEW_PROFILE
 
 
 @runtime_checkable
