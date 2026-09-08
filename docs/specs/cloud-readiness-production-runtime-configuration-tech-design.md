@@ -137,7 +137,7 @@ Every `services/<svc>/.env.example` is annotated with:
 
 This is the AC1 source-of-truth record. The `.env.example` is committed; secrets themselves are not.
 
-### 3. `docs/runbooks/production-runtime-config.md` — operator-facing contract
+### 3. `~/.openclaw/workspace/docs/infra/runbooks/production-runtime-config.md` — operator-facing contract
 
 A new runbook entry enumerates every required key for each cloud-deployed service, with:
 
@@ -180,10 +180,10 @@ The sibling `cloud-deployment-foundation` task picks the secret manager. This ta
 
 | AC | Verification |
 |---|---|
-| AC1 — every production-required value has source, owner, rotation expectation | `services/*/.env.example` has `Owner:` and `Rotation:` comments for every non-optional line. `docs/runbooks/production-runtime-config.md` enumerates each. PR diff shows the additions; a unit test (`test/config.contract.test.ts`) reads each `.env.example` and asserts every non-optional line has both annotations. |
+| AC1 — every production-required value has source, owner, rotation expectation | `services/*/.env.example` has `Owner:` and `Rotation:` comments for every non-optional line. `~/.openclaw/workspace/docs/infra/runbooks/production-runtime-config.md` enumerates each. PR diff shows the additions; a unit test (`test/config.contract.test.ts`) reads each `.env.example` and asserts every non-optional line has both annotations. |
 | AC2 — secrets are absent from source control, logs, client-visible responses | (a) `git log --all -- .env` returns empty. (b) `gitleaks` pre-commit hook is installed; CI `gitleaks` step passes. (c) A test that boots the service with a known-bad log line containing `X_API_KEY=secret` and asserts the structured logger output does NOT contain the substring `secret`. (d) `GET /health` test asserts no `process.env` keys appear in the response. |
 | AC3 — missing/invalid config fails safely with actionable operator signal | (a) Boot the service with `X_CLIENT=real` but no `X_API_KEY` — assert `process.exit(1)` and structured log line `config_validation_failed` with the missing key path. (b) Boot with malformed `DATABASE_URL` (`not-a-url`) — same structured failure. (c) Unit tests cover each schema branch (the `.superRefine` cross-field rules). |
-| AC4 — configuration contract documented and verified against each cloud-hosted service | `docs/runbooks/production-runtime-config.md` exists and is linked from `docs/systems/<svc>.md` for each service. The runbook includes the AC verification matrix above. A CI check (lightweight — script reads the runbook and the `.env.example` files, asserts every required key appears in both) runs as part of the `cloud-readiness` job. |
+| AC4 — configuration contract documented and verified against each cloud-hosted service | `~/.openclaw/workspace/docs/infra/runbooks/production-runtime-config.md` exists and is linked from `docs/systems/<svc>.md` for each service. The runbook includes the AC verification matrix above. A CI check (lightweight — script reads the runbook and the `.env.example` files, asserts every required key appears in both) runs as part of the `cloud-readiness` job. |
 
 ## Out of scope
 

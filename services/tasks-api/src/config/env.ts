@@ -12,10 +12,10 @@
 // (systemd, fly, k8s) can detect the misconfiguration and refuse to mark
 // the deployment healthy. No secret values are ever logged.
 //
-// See docs/runbooks/production-runtime-config.md for the operator-facing
-// view of this contract (every key, owner, rotation expectation, source of
-// truth, failure mode). See docs/specs/cloud-readiness-production-runtime-
-// configuration-tech-design.md for the design rationale.
+// See ~/.openclaw/workspace/docs/infra/runbooks/production-runtime-config.md
+// for the operator-facing view of this contract (every key, owner, rotation
+// expectation, source of truth, failure mode). See docs/specs/cloud-readiness-
+// production-runtime-configuration-tech-design.md for the design rationale.
 
 import { z } from 'zod';
 
