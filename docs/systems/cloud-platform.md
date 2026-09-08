@@ -7,7 +7,7 @@
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** Staging target on Fly.io (Sydney region) for `tasks-api`, `budget-api`, `auto-post-worker`
 
-> **Naming history:** this workstream was originally scoped as a separate "SIndustries Cloud Platform" spec (task `b2f62c36`). The artefacts land under `infra/cloud/` plus two handover docs (`docs/systems/cloud-platform.md` and `docs/runbooks/cloud-deployment-rollback.md`). Live deployment to production is a follow-on tracked under the broader cloud migration plan (tasks `206927ed`, `2850c5ac`, `020f423e`, `f2c23e26`, `d37681e1`, `4b3d6e9c`); this document covers the **staging** target only.
+> **Naming history:** this workstream was originally scoped as a separate "SIndustries Cloud Platform" spec (task `b2f62c36`). The artefacts land under `infra/cloud/` plus `docs/systems/cloud-platform.md` as the handover doc. The prior `docs/runbooks/cloud-deployment-rollback.md` and `docs/runbooks/rotate-akahu-access-tokens.md` were removed in PR #583 (operational runbooks no longer live in this repo — see `agents/definitions/README.md` "Where operational runbooks live"); their content lives in `~/.openclaw/workspace/docs/infra/runbooks/` or, for the rollback steps, in `docs/specs/cloud-deployment-foundation-tech-design.md`. Live deployment to production is a follow-on tracked under the broader cloud migration plan (tasks `206927ed`, `2850c5ac`, `020f423e`, `f2c23e26`, `d37681e1`, `4b3d6e9c`); this document covers the **staging** target only.
 
 ---
 
@@ -15,7 +15,7 @@
 
 SIndustries runs a multi-service Node/TypeScript stack (`services/tasks-api`, `services/budget-api`, `services/gymtrack-mcp`, `services/content-scheduler-api`) against a Postgres + Redis back-end. Historically the stack has been operated from Tom's Mac mini. The cloud workstream (task `b2f62c36`) creates the first production-like cloud target so the services can be deployed from CI, scaled independently of the developer's machine, and replicated for new operators without sharing local credentials.
 
-For the design rationale see [`docs/specs/cloud-deployment-foundation-tech-design.md`](../specs/cloud-deployment-foundation-tech-design.md). For the operator-facing index of artefacts see [`infra/cloud/README.md`](../../infra/cloud/README.md). For rollback see [`docs/runbooks/cloud-deployment-rollback.md`](../runbooks/cloud-deployment-rollback.md).
+For the design rationale see [`docs/specs/cloud-deployment-foundation-tech-design.md`](../specs/cloud-deployment-foundation-tech-design.md). For the operator-facing index of artefacts see [`infra/cloud/README.md`](../../infra/cloud/README.md). For rollback see `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section (the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583; the runbook convention now lives in `~/.openclaw/workspace/docs/infra/runbooks/`).
 
 This document exists so a new operator (or Quinn returning after a break) can answer the four handover questions — *what is this, who owns what, how much does it cost, and what happens when it breaks* — without having to reverse-engineer `infra/cloud/`.
 
@@ -37,7 +37,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | CI deploy                        | GitHub Actions, path-filtered per service, canary deploy | Rowan  | `.github/workflows/deploy-staging-*.yml`                      |
 | Secrets                          | Fly app secrets + GH repo secrets                        | Quinn  | `fly secrets set …` (operator CLI); `secrets.FLY_API_TOKEN`   |
 | First-time setup                 | Idempotent local bootstrap script                        | Quinn  | `infra/cloud/scripts/bootstrap-staging.sh`                    |
-| Rollback                         | `fly releases rollback <v>` per Fly app                   | Quinn  | [`docs/runbooks/cloud-deployment-rollback.md`](../runbooks/cloud-deployment-rollback.md) |
+| Rollback                         | `fly releases rollback <v>` per Fly app                   | Quinn  | `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section (the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583) |
 
 All env-var **names** referenced by deploy workflows are reviewable in the repo. Only the **values** are operator-owned.
 
@@ -143,7 +143,7 @@ The `.openclaw` boundary Quinn confirmed on the PR #508 review (merged `d6ee2d8`
 - **Quinn registers** the GitHub repo secrets under fixed names (`FLY_API_TOKEN` is the only one CI uses today). Workflow YAML references `secrets.FLY_API_TOKEN` by name.
 - **Rowan ships** only env-var names, Fly app specs, Dockerfiles, and deploy workflows. The workflow templates include `FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}` so the deploy job picks up Quinn's value at job time.
 - **Quinn runs** `infra/cloud/scripts/bootstrap-staging.sh` once. It reads `infra/cloud/.env.local` (gitignored) and applies Quinn's per-service `TASKS_API_*`, `BUDGET_API_*`, `AUTO_POST_WORKER_*` prefixed env vars via `fly secrets set`.
-- **Quinn rotates** any secret out-of-band. Rotation procedure for tokens with downstream ciphertext rows (e.g. Akahu) is the existing [`docs/runbooks/rotate-akahu-access-tokens.md`](../runbooks/rotate-akahu-access-tokens.md); no rotation procedure is needed for non-derived secrets.
+- **Quinn rotates** any secret out-of-band. Rotation procedure for tokens with downstream ciphertext rows (e.g. Akahu) was previously `docs/runbooks/rotate-akahu-access-tokens.md` (retired in PR #583; the procedure steps should be regenerated as a new runbook at `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` if Quinn needs to rotate Akahu tokens); no rotation procedure is needed for non-derived secrets.
 
 A new operator joining Quinn's seat gets the same out-of-band onboarding path: 1Password (or equivalent) handoff for `FLY_API_TOKEN` + Neon + Upstash + DNS, plus the `infra/cloud/.env.local` template.
 
@@ -158,7 +158,7 @@ The CI workflow runs `flyctl deploy --strategy canary` then a smoke check:
 - **HTTP services** — curl `https://<app>.fly.dev/health` (10 retries, 5s apart). The `/health` route is mounted in `services/tasks-api/src/app.ts` (and the equivalent in budget-api); Fly's `[[services.http_checks]]` block in the `fly.toml` hits the same route on the 15s interval.
 - **Worker** — `flyctl logs --app <app> --no-tail | grep '\[content-scheduler-worker\] starting (adapter=bullmq)'`. A clean boot line means Prisma connected + the BullMQ worker registered. Fly's process supervisor handles PID liveness; there's no `http_service` block to monitor.
 
-If the smoke check fails, the deploy job exits non-zero. Quinn/Lox investigates via `flyctl logs --app <app>` and either forward-fixes or rolls back per [`docs/runbooks/cloud-deployment-rollback.md`](../runbooks/cloud-deployment-rollback.md).
+If the smoke check fails, the deploy job exits non-zero. Quinn/Lox investigates via `flyctl logs --app <app>` and either forward-fixes or rolls back per the rollback procedure in `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section (the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
 
 ---
 
@@ -195,5 +195,5 @@ The script is **idempotent** — re-running it does not destroy existing apps or
 - [`infra/cloud/README.md`](../../infra/cloud/README.md) — operator index, Quinn-vs-Rowan ownership table, PR-stack history.
 - [`infra/cloud/env/.env.example`](../../infra/cloud/env/.env.example) — cross-service env contract template.
 - [`infra/cloud/scripts/bootstrap-staging.sh`](../../infra/cloud/scripts/bootstrap-staging.sh) — Quinn-runnable first-time setup.
-- [`docs/runbooks/cloud-deployment-rollback.md`](../runbooks/cloud-deployment-rollback.md) — rollback procedure.
-- [`docs/runbooks/rotate-akahu-access-tokens.md`](../runbooks/rotate-akahu-access-tokens.md) — secret rotation precedent.
+- `~/.openclaw/workspace/docs/infra/runbooks/cloud-deployment-rollback.md` — rollback procedure (was at `docs/runbooks/cloud-deployment-rollback.md`; retired in PR #583 — re-create in workspace if Quinn needs to roll back a deploy without re-deriving from `docs/specs/cloud-deployment-foundation-tech-design.md`).
+- `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` — secret rotation precedent (was at `docs/runbooks/rotate-akahu-access-tokens.md`; retired in PR #583 — re-create in workspace before rotating an Akahu token with downstream ciphertext rows).

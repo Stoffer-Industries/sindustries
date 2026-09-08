@@ -14,9 +14,11 @@ python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/wor
 ```
 
 The script exits `0` on success (publish or dry-run) and non-zero on
-any failure. Read the runbook before changing this command:
-
-`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/docs/runbooks/bookmark-compounding-signal.md`
+any failure. Before changing this command, inspect the calculator
+script (`compute_compounding_signal.py`) for its current invariants;
+operational runbooks (the prior `bookmark-compounding-signal.md` at
+`docs/runbooks/` is one of the ten deleted in PR #583) now live in
+`~/.openclaw/workspace/docs/infra/runbooks/`, not in this repo.
 
 ## Mandatory blocks
 

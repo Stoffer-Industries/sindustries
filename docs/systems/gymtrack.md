@@ -82,7 +82,7 @@ The SPA owns:
 
 When a signed-in user has no active row in `gymtrack_oauth_consents`, `/workouts` renders explicit Claude and ChatGPT connection options. Each option links to that provider's real MCP connector setup and displays GymTrack's remote MCP URL plus the seeded public client ID. The provider—not the SPA—must generate OAuth state and the PKCE challenge before calling `/oauth/authorize`.
 
-Production URLs, redirect allowlists, provider steps, and remaining operator checks are in [`docs/runbooks/gymtrack-agent-connect.md`](../runbooks/gymtrack-agent-connect.md).
+Production URLs, redirect allowlists, provider steps, and remaining operator checks were previously in `docs/runbooks/gymtrack-agent-connect.md` (retired in PR #583). The provider-specific flows live in `docs/specs/gymtrack-mcp-oauth-dcr-tech-design.md` + `docs/specs/gymtrack-mcp-openclaw-oauth-client-tech-design.md`; re-create the operator runbook at `~/.openclaw/workspace/docs/infra/runbooks/gymtrack-agent-connect.md` if Quinn needs to onboard a new MCP connector provider.
 
 ### MCP tool flow
 
@@ -184,4 +184,4 @@ This is a deliberate one-consumer build, consistent with `docs/ARCHITECTURE.md`'
   - `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`
   - `docs/specs/gymtrack-public-signup-social-login-tech-design.md`
   - `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`
-- Agent connection rollout runbook: `docs/runbooks/gymtrack-agent-connect.md`
+- Agent connection rollout runbook: `~/.openclaw/workspace/docs/infra/runbooks/gymtrack-agent-connect.md` (was at `docs/runbooks/gymtrack-agent-connect.md`; retired in PR #583 — re-create in workspace when onboarding a new MCP connector provider)

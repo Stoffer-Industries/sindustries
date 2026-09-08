@@ -57,3 +57,17 @@ The agent doc then *references* the skill. The skill owns the how; the agent doc
 
 - `agents/skills/` — reusable primitives called by these agent docs.
 - `agents/workflows/` — Rust-based lobster workflows that read agent output (`[ivy-prs]`, `[ivy-tweets-queued]`, `[tech-design]`, etc.) and drive task state.
+
+## Where operational runbooks live
+
+**Operational runbooks do not live in this repo.** As of PR #583 (2026-09-08) the prior `infra/runbooks/` (3 files) and `docs/runbooks/` (7 files) directories were deleted; operational runbooks now live in `~/.openclaw/workspace/docs/infra/runbooks/` (a workspace-local path that is **not** part of any repo).
+
+`codebases/sindustries/` is the Edge-managed canonical checkout — its `main` branch is fast-forwarded to `origin/main` by the `openclaw-edge` webhook on every push, and a 5-minute launchd guard reverts any local drift. Runbooks (which are inherently host/operator-specific) have no business there: any local file in that checkout blocks the mirror or gets reset out from under you. Use the workspace path above instead.
+
+Per Tom 2026-09-08: *"move all runbooks to workspace and dont put any more in sindustries going forward."*
+
+When an agent doc references a runbook, point at the workspace path
+(e.g. `~/.openclaw/workspace/docs/infra/runbooks/<name>.md`). When
+updating an agent doc, treat any lingering `infra/runbooks/...` or
+`docs/runbooks/...` link as a stale reference and remove or relocate it
+in the same change.

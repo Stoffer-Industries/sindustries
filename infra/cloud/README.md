@@ -78,7 +78,7 @@ fly deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary
 fly deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary
 ```
 
-The CI workflow runs `--strategy canary` for every deploy. For HTTP services (tasks-api, budget-api) the post-deploy smoke check curls `/health`. For the auto-post-worker (no HTTP) the smoke check greps `fly logs` for the worker's structured startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see [`docs/runbooks/cloud-deployment-rollback.md`](../../docs/runbooks/cloud-deployment-rollback.md), planned in WS3).
+The CI workflow runs `--strategy canary` for every deploy. For HTTP services (tasks-api, budget-api) the post-deploy smoke check curls `/health`. For the auto-post-worker (no HTTP) the smoke check greps `fly logs` for the worker's structured startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section — the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
 
 ## First-time environment creation
 
@@ -101,7 +101,7 @@ WS1 ships as stacked PRs:
 2. **PR #2 ✅:** budget-api slice (mirrors PR #1). [PR #527, merged 2026-08-24]
 3. **PR #3 (this slice):** auto-post-worker Fly app (separate process; builds from content-scheduler-api source; **no HTTP exposure**). Adds `infra/cloud/fly/auto-post-worker.fly.toml` + `infra/cloud/docker/auto-post-worker.Dockerfile` + `.github/workflows/deploy-staging-auto-post-worker.yml`. No Prisma `release_command` (worker does reconciliation in code, not as part of canary deploy) and no `http_service` block.
 4. PR #4: `bootstrap-staging.sh` + `env/.env.example` + per-service `.env.example` files.
-5. PR #5: `docs/systems/cloud-platform.md` (durable AC4 doc) + `docs/runbooks/cloud-deployment-rollback.md`.
+5. PR #5: `docs/systems/cloud-platform.md` (durable AC4 doc) + `docs/runbooks/cloud-deployment-rollback.md` (note: the rollback runbook was retired in PR #583 along with all `docs/runbooks/` artefacts — the rollback command + verify sequence is preserved in `docs/specs/cloud-deployment-foundation-tech-design.md`).
 
 Stacking rationale: each slice is reviewable in isolation (~150 LoC); Quinn can steer on PR #1 before Rowan replicates the pattern to budget-api and the worker.
 

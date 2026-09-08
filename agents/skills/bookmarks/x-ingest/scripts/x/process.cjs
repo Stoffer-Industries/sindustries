@@ -244,11 +244,13 @@ function getAcpxCommand() {
 // which is the billing pool that's currently healthy in this workspace. The
 // previous default (`codex`) routed through `@zed-industries/codex-acp` to
 // OpenAI's `/v1/responses` endpoint, which requires an `api.responses.write`
-// scope our key doesn't have — see
-// `infra/runbooks/bookmark-acpx-openai-401-no-scopes.md`. The OpenClaw
-// gateway is a separate billing pool from `MINIMAX_API_KEY` (direct), so
-// flipping the subcommand does not affect the direct-pool path documented in
-// `infra/runbooks/minimax-direct-key-out-of-balance.md`.
+// scope our key doesn't have (regression observed 2026-06-25 — see Lox's
+// MEMORY.md "Bookmark ACPX 401" note). The OpenClaw gateway is a separate
+// billing pool from `MINIMAX_API_KEY` (direct); flipping the subcommand does
+// not affect the direct-pool path. Both prior `infra/runbooks/` entries
+// (`bookmark-acpx-openai-401-no-scopes.md`,
+// `minimax-direct-key-out-of-balance.md`) were removed in PR #583 — operational
+// runbooks now live in `~/.openclaw/workspace/docs/infra/runbooks/`.
 function getAcpxSubcommand() {
   return (process.env.BOOKMARK_LLM_ACPX_SUBCOMMAND || 'openclaw').trim();
 }

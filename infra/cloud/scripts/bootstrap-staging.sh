@@ -327,7 +327,7 @@ Apps:
 Next steps:
   - Verify with the smoke workflow: gh workflow run deploy-staging-tasks-api.yml
   - Or run a manual deploy: cd $REPO_ROOT && fly deploy --config infra/cloud/fly/tasks-api.fly.toml
-  - See docs/runbooks/cloud-deployment-rollback.md for rollback procedure (planned in WS3).
+  - See ~/.openclaw/workspace/docs/infra/runbooks/cloud-deployment-rollback.md for rollback procedure (planned in WS3; relocated from docs/runbooks/ in PR #583).
 
 This script is idempotent — re-run any time with --migrate / --deploy flags to
 re-apply secrets, migrations, or smoke deploys.
