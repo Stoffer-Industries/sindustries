@@ -6,6 +6,7 @@ import { DEFAULT_SCOPE, normalizeScope, SUPPORTED_SCOPES } from './scopes.js';
 import { MCP_TOOLS, callMcpTool } from './mcpTools.js';
 import { pkceChallengeForVerifier, randomToken, sha256Hex } from './crypto.js';
 import { supabaseAdminClient } from './supabase.js';
+import { createRateLimit } from './middleware/rateLimit.js';
 
 function appendOAuthParams(baseUrl, params) {
   const url = new URL(baseUrl);
@@ -301,6 +302,26 @@ export function createApp({
 } = {}) {
   const app = express();
 
+  // Trust the first proxy hop so `req.ip` reflects the actual client IP
+  // behind Fly's edge. Required for the OAuth rate limiter to discriminate
+  // abusive clients; without it, every request would appear to come from
+  // the Fly proxy and the limiter would gate the entire client population
+  // together.
+  app.set('trust proxy', 1);
+
+  // Fixed-window per-IP rate limit for the OAuth write surface
+  // (/oauth/register, /oauth/token, /oauth/authorize*). Health and discovery
+  // GETs are explicitly exempt — see exemptPaths. Wired here, after the
+  // CORS preflight handler, so OPTIONS preflights never count against the
+  // limit.
+  const oauthRateLimit = createRateLimit({
+    name: 'oauth',
+    windowMs: config.oauthRateLimitWindowMs ?? 60_000,
+    max: config.oauthRateLimitMax ?? 10,
+    exemptPaths: ['/health', '/.well-known'],
+    now: () => now().getTime()
+  });
+
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin && origin === config.webOrigin) {
@@ -344,7 +365,7 @@ export function createApp({
     });
   });
 
-  app.post('/oauth/register', async (req, res) => {
+  app.post('/oauth/register', oauthRateLimit, async (req, res) => {
     try {
       if (req.body == null || typeof req.body !== 'object' || Array.isArray(req.body)) {
         return oauthJsonError(res, 400, 'invalid_request', 'Body is not a JSON object.');
@@ -393,7 +414,7 @@ export function createApp({
     });
   });
 
-  app.get('/oauth/authorize', async (req, res) => {
+  app.get('/oauth/authorize', oauthRateLimit, async (req, res) => {
     try {
       const requestError = validateAuthorizeRequest(req.query);
       if (requestError) return oauthJsonError(res, 400, 'invalid_request', requestError);
@@ -427,7 +448,7 @@ export function createApp({
     }
   });
 
-  app.post('/oauth/authorize/decision', async (req, res) => {
+  app.post('/oauth/authorize/decision', oauthRateLimit, async (req, res) => {
     try {
       const bearer = parseBearerToken(req);
       if (!bearer) {
@@ -495,7 +516,7 @@ export function createApp({
     }
   });
 
-  app.post('/oauth/token', async (req, res) => {
+  app.post('/oauth/token', oauthRateLimit, async (req, res) => {
     try {
       const grantType = req.body.grant_type;
       const clientId = req.body.client_id;
