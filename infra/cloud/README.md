@@ -28,6 +28,11 @@ infra/cloud/
 
 CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this subtree): `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-auto-post-worker.yml`.
 
+Mission Control and the Tasks app are static Vite SPAs and deploy as separate
+Vercel projects using their co-located `apps/<app>/vercel.json` files. They
+deliberately do not use Fly app specs or frontend containers; Fly remains the
+runtime for APIs and workers.
+
 ## Services (planned)
 
 | Fly app                       | Source                       | Notes                                                                                  |
