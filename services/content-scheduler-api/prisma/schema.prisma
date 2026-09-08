@@ -23,6 +23,8 @@ enum ContentSchedulerItemStatus {
   draft
   queued
   approved
+  publishing
+  cleanup_required
   published
   removed
 }
@@ -35,52 +37,140 @@ enum ContentSchedulerSource {
 }
 
 // Discriminates scheduled/auto-published items from manual-reply drafts
-// (task 5279b310). A `manual_reply` row is created by the bookmark
-// approval hook and is intentionally never auto-published: it surfaces in
-// the Mission Control UI under "Reply drafts (manual)" for Tom to copy
-// and post himself, with the resulting URL captured via
-// PATCH /content-scheduler/items/:id/posted-url. Default `scheduled`
-// preserves backwards compatibility for every existing row — no data
-// migration needed.
+// (task 5279b310), and now multi-tweet thread items (task 1016cbff).
+//
+// - `scheduled`   — single auto-published tweet (body, no thread parts).
+// - `manual_reply`— manual copy-and-post by Tom (body, no thread parts,
+//                   never auto-published).
+// - `thread`      — multi-tweet chain published as a root + ordered
+//                   replies (body is the root; reply positions 1..n live
+//                   in ContentSchedulerThreadPart).
+//
+// Default `scheduled` preserves backwards compatibility for every
+// existing row — no data migration needed. Note: the tweet-threads
+// tech design (docs/specs/content-scheduler-tweet-threads-2026-08-20-
+// tech-design.md) proposed a separate `single | thread` enum, but the
+// `manual_reply` discriminator from task 5279b310 already occupies the
+// "single, no parts" semantic for scheduled rows, so `thread` is added
+// alongside `scheduled`/`manual_reply` rather than renaming. `scheduled`
+// and `manual_reply` rows continue to flow through the publish loop
+// with zero thread parts; validation enforces 0 parts for those kinds
+// and 2-7 parts for `thread`.
 enum ContentSchedulerItemKind {
   scheduled
   manual_reply
+  thread
 }
 
 model ContentSchedulerItem {
-  id                       String                       @id @default(uuid()) @db.Uuid
-  body                     String                       @db.VarChar(1000)
-  source                   ContentSchedulerSource       @default(manual)
-  sourceRef                String?
-  status                   ContentSchedulerItemStatus   @default(queued)
-  scheduledFor             DateTime?
-  position                 Int                          @default(0)
-  approvedAt               DateTime?
-  approvedBy               String?
-  publishedAt              DateTime?
-  publishedUrl             String?
-  publishError             String?
-  autoPostJobId            String?
-  autoPostScheduleVersion  Int                          @default(0)
-  autoPostScheduledAt      DateTime?
-  autoPostLastEnqueuedAt   DateTime?
-  createdAt                DateTime                     @default(now())
-  updatedAt                DateTime                     @updatedAt
-  removedAt                DateTime?
+  id                      String                     @id @default(uuid()) @db.Uuid
+  body                    String                     @db.VarChar(1000)
+  source                  ContentSchedulerSource     @default(manual)
+  sourceRef               String?
+  status                  ContentSchedulerItemStatus @default(queued)
+  scheduledFor            DateTime?
+  position                Int                        @default(0)
+  approvedAt              DateTime?
+  approvedBy              String?
+  publishedAt             DateTime?
+  publishedUrl            String?
+  publishError            String?
+  autoPostJobId           String?
+  autoPostScheduleVersion Int                        @default(0)
+  autoPostScheduledAt     DateTime?
+  autoPostLastEnqueuedAt  DateTime?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  removedAt               DateTime?
 
   // Manual-reply draft metadata (task 5279b310). Null for ordinary
   // scheduled items.
-  kind                 ContentSchedulerItemKind @default(scheduled)
-  manualPostedUrl      String?
-  manualPostedAt       DateTime?
+  kind            ContentSchedulerItemKind @default(scheduled)
+  manualPostedUrl String?
+  manualPostedAt  DateTime?
   // Cross-link from a manual_reply item to its standalone "build in
   // public" tweet item. Renamed from `linksToDraftId` to match the
   // post-extraction `items/` terminology (the standalone tweet is also
   // a ContentSchedulerItem, not a separate draft entity).
-  linksToItemId        String?
+  linksToItemId   String?
+
+  // Thread support (task 1016cbff). For kind=thread, the root tweet
+  // text lives on `body` and ordered reply parts 1..n live in `parts`.
+  // `publishAttempts` is the journal for one publish call (manual or
+  // worker); the latest non-rolled-back attempt is what `GET /items`
+  // surfaces as the aggregate's publishState.
+  parts           ContentSchedulerThreadPart[]
+  publishAttempts ContentSchedulerPublishAttempt[]
 
   @@index([status, position])
   @@index([status, scheduledFor])
   @@index([status, publishedAt])
   @@index([kind])
+}
+
+// Ordered reply parts for a thread-kind ContentSchedulerItem. Position 0
+// (the root tweet) lives on ContentSchedulerItem.body; positions 1..n
+// live here. Validation enforces 0 parts for `scheduled`/`manual_reply`
+// rows and 2-7 contiguous parts starting at position 1 for `thread`
+// rows. ON DELETE CASCADE keeps thread parts consistent if the parent
+// item is hard-deleted during development; the public API never deletes
+// items, only marks them `removed`.
+model ContentSchedulerThreadPart {
+  id       String               @id @default(uuid()) @db.Uuid
+  itemId   String               @db.Uuid
+  position Int
+  body     String               @db.VarChar(1000)
+  item     ContentSchedulerItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, position])
+  @@index([itemId, position])
+}
+
+// Per-publish-attempt journal. X has no cross-tweet transaction, so a
+// thread publish records every remote tweet ID it created so a partial
+// failure can be compensated by reverse-order deletion and a cleanup
+// failure can preserve the possibly-live URLs without risking duplicate
+// posts on retry. See docs/specs/content-scheduler-tweet-threads-2026-
+// 08-20-tech-design.md (Publishing flow / Failure compensation and
+// retry / Atomicity limitation).
+enum ContentSchedulerPublishAttemptState {
+  publishing
+  rolling_back
+  rolled_back
+  succeeded
+  cleanup_required
+}
+
+model ContentSchedulerPublishAttempt {
+  id               String                              @id @default(uuid()) @db.Uuid
+  itemId           String                              @db.Uuid
+  state            ContentSchedulerPublishAttemptState
+  failedAtPosition Int?
+  error            String?
+  startedAt        DateTime                            @default(now())
+  completedAt      DateTime?
+  item             ContentSchedulerItem                @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  tweets           ContentSchedulerAttemptTweet[]
+
+  @@index([itemId, startedAt])
+}
+
+// One row per remote tweet created (or in the process of being deleted)
+// during a publish attempt. `tweetId`/`url` are recorded as soon as X
+// confirms each create, before the next part is posted, so a crash after
+// X accepted a tweet but before the next position was attempted leaves
+// the IDs recoverable for compensation.
+model ContentSchedulerAttemptTweet {
+  id          String                         @id @default(uuid()) @db.Uuid
+  attemptId   String                         @db.Uuid
+  position    Int
+  tweetId     String
+  url         String
+  postedAt    DateTime
+  deletedAt   DateTime?
+  deleteError String?
+  attempt     ContentSchedulerPublishAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, position])
+  @@unique([attemptId, tweetId])
 }
