@@ -825,22 +825,27 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     env.lobster_state.pr_urls = pr_urls.clone();
     let task_acs =
         ac_parsing::task_description_acs(&env.task.description.clone().unwrap_or_default());
-    // AC text match only checks the *latest* PR (highest PR number). Earlier PRs
-    // may legitimately have drifted from the current task description (e.g.
-    // trailing-period fixes landed in a follow-up PR). The latest PR is the one
-    // that will be merged at this gate, so it's the only one that needs to match.
-    let latest_pr_url = pr_urls.iter().max_by_key(|url| pr_number(url)).cloned();
+    // The PR(s) named in the most recent `[implementer-prs]`/`[rowan-prs]`
+    // comment — see `latest_implementer_pr_urls` for why this is comment
+    // recency, not PR-number magnitude.
+    let latest_urls = latest_implementer_pr_urls(&env.task);
+    // AC text match only checks the *latest* PR. Earlier PRs may legitimately
+    // have drifted from the current task description (e.g. trailing-period
+    // fixes landed in a follow-up PR). The latest PR is the one that will be
+    // merged at this gate, so it's the only one that needs to match.
+    let latest_pr_url = latest_urls.iter().max_by_key(|url| pr_number(url)).cloned();
     for url in &pr_urls {
-        // Only the latest PR (highest PR number) is the one that will be merged
-        // at this gate. Earlier PRs that were intentionally superseded (e.g.
-        // v1 → v2 branch replace, or stacked predecessors) should not
-        // contribute failures here — the AC text match below already targets
-        // the latest PR explicitly, so we extend the same principle to the
+        // Only the latest PR is the one that will be merged at this gate.
+        // Earlier PRs that were intentionally superseded (e.g. v1 → v2
+        // branch replace, stacked predecessors, or an accidental duplicate
+        // PR a later comment corrected away from) should not contribute
+        // failures here — the AC text match below already targets the
+        // latest PR explicitly, so we extend the same principle to the
         // review-state and body checks. Without this, a closed-without-merge
         // superseded PR leaves a persistent "PR X is closed without merge."
         // failure that blocks every sweep (fingerprint dedup), even after the
         // task has been re-delivered on a fresh branch.
-        if !is_latest_pr_url(url, &pr_urls) {
+        if !is_latest_pr_url(url, &latest_urls) {
             continue;
         }
         let review = inspect_pr(url);
@@ -1094,14 +1099,19 @@ fn verify_delivery_review_failure(url: &str, review: pr_gates::ReviewState) -> O
 }
 
 /// Merge gate for `acceptance → done`. Merged PRs pass. Closed-without-merge
-/// PRs that are *not* the latest listed implementer PR are treated as
-/// superseded (same principle as `verify_delivery`'s latest-only filter) and
-/// do not block. The latest ClosedUnmerged still fails, as do open / review /
-/// unknown states on any listed PR.
-fn post_merge_pr_failure(url: &str, state: pr_gates::ReviewState, all_pr_urls: &[String]) -> Option<String> {
+/// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
+/// are treated as superseded (same principle as `verify_delivery`'s
+/// latest-only filter) and do not block. A ClosedUnmerged PR that is still
+/// in `latest_pr_urls` fails, as do open / review / unknown states on any
+/// listed PR.
+fn post_merge_pr_failure(
+    url: &str,
+    state: pr_gates::ReviewState,
+    latest_pr_urls: &[String],
+) -> Option<String> {
     match state {
         pr_gates::ReviewState::Merged => None,
-        pr_gates::ReviewState::ClosedUnmerged if !is_latest_pr_url(url, all_pr_urls) => None,
+        pr_gates::ReviewState::ClosedUnmerged if !is_latest_pr_url(url, latest_pr_urls) => None,
         other => Some(format!("PR {url} is not merged: {other:?}.")),
     }
 }
@@ -1114,22 +1124,18 @@ fn pr_number(url: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// True when `candidate` is the PR URL in `all_pr_urls` with the highest
-/// PR number. Used by `verify_delivery` to skip review-state and body checks
-/// against superseded PRs (e.g. a v1 branch that was closed-without-merge and
-/// replaced by a v2 branch). Returns false for an unparseable candidate URL
-/// or an empty `all_pr_urls`.
-fn is_latest_pr_url(candidate: &str, all_pr_urls: &[String]) -> bool {
-    let candidate_num = pr_number(candidate);
-    if candidate_num == 0 {
-        return false;
-    }
-    let max_num = all_pr_urls
-        .iter()
-        .map(|url| pr_number(url))
-        .max()
-        .unwrap_or(0);
-    max_num == candidate_num
+/// True when `candidate` is a member of `latest_pr_urls` — the pre-computed
+/// result of `latest_implementer_pr_urls`, i.e. the PR(s) named in the most
+/// recent `[implementer-prs]`/`[rowan-prs]` comment. Used by `verify_delivery`
+/// and `post_merge` to skip review-state and body checks against superseded
+/// PRs (e.g. a v1 branch that was closed-without-merge and replaced by a v2
+/// branch, or an accidental duplicate PR that a later comment corrected
+/// away from). Callers must pass `latest_implementer_pr_urls(task)`, not the
+/// full historical `implementer_pr_urls(task)` — comparing by PR-number
+/// magnitude instead of comment recency broke on task 30251df0, where the
+/// abandoned duplicate PR happened to have the higher number.
+fn is_latest_pr_url(candidate: &str, latest_pr_urls: &[String]) -> bool {
+    latest_pr_urls.iter().any(|url| url == candidate)
 }
 
 fn feedback_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
@@ -1495,10 +1501,11 @@ fn post_merge(args: StageArgs) -> Result<Envelope> {
     }
     let mut failures = qa_failures;
     let pr_urls = implementer_pr_urls(&env.task);
+    let latest_urls = latest_implementer_pr_urls(&env.task);
     for url in &pr_urls {
         match inspect_pr(url) {
             Ok(state) => {
-                if let Some(failure) = post_merge_pr_failure(url, state, &pr_urls) {
+                if let Some(failure) = post_merge_pr_failure(url, state, &latest_urls) {
                     failures.push(failure);
                 }
             }
@@ -4186,6 +4193,34 @@ fn implementer_pr_urls(task: &Task) -> Vec<String> {
     urls
 }
 
+/// The PR URL(s) named in the most recent `[implementer-prs]` (or legacy
+/// `[rowan-prs]`) comment that names at least one parseable PR URL. This is
+/// the authoritative "currently gating" PR set — unlike `implementer_pr_urls`
+/// (the full historical union) or the old "highest PR number" heuristic,
+/// which both broke on task 30251df0: PR #455 was opened right after #454
+/// from the same branch as an accidental duplicate, then closed unmerged,
+/// while #454 (lower number, opened first) was the one that actually merged.
+/// Numeric-max treated #455 as "latest" and blocked `acceptance -> done`
+/// forever even after Rowan and Quinn each posted a correcting
+/// `[implementer-prs]` comment naming only #454 — a later correction comment
+/// is the real signal of intent, not PR number magnitude.
+fn latest_implementer_pr_urls(task: &Task) -> Vec<String> {
+    let re = Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").unwrap();
+    for comment in task.comments.iter().rev() {
+        let text = comment_text(comment).trim();
+        let rest = text
+            .strip_prefix("[implementer-prs]")
+            .or_else(|| text.strip_prefix("[rowan-prs]"));
+        if let Some(rest) = rest {
+            let urls: Vec<String> = re.find_iter(rest).map(|m| m.as_str().to_string()).collect();
+            if !urls.is_empty() {
+                return urls;
+            }
+        }
+    }
+    Vec::new()
+}
+
 #[allow(
     dead_code,
     reason = "test-only helper reached from #[cfg(test)] modules; clippy's bin target cannot see those calls"
@@ -5116,6 +5151,98 @@ feature
     }
 
     #[test]
+    fn latest_implementer_pr_urls_prefers_correcting_comment_over_pr_number() {
+        // Regression for task 30251df0: two [implementer-prs] comments both
+        // named the abandoned duplicate #455 first, then a correcting
+        // comment named only the actually-merged #454 (lower PR number,
+        // opened first from the same branch). `implementer_pr_urls` keeps
+        // both forever (full historical union); `latest_implementer_pr_urls`
+        // must resolve to only the correction.
+        let url_455 = "https://github.com/Stoffer-Industries/sindustries/pull/455";
+        let url_454 = "https://github.com/Stoffer-Industries/sindustries/pull/454";
+        let task = Task {
+            comments: vec![
+                TaskComment {
+                    text: Some(format!("[implementer-prs] {url_455}")),
+                    body: None,
+                    ..TaskComment::default()
+                },
+                TaskComment {
+                    text: Some(format!("[implementer-prs] {url_455}")),
+                    body: None,
+                    ..TaskComment::default()
+                },
+                TaskComment {
+                    text: Some(format!(
+                        "[implementer-prs] {url_454}\n\nCorrecting the earlier comments that referenced the closed-unmerged PR #455."
+                    )),
+                    body: None,
+                    ..TaskComment::default()
+                },
+            ],
+            ..Task::default()
+        };
+        assert_eq!(implementer_pr_urls(&task), vec![url_455.to_string(), url_454.to_string()]);
+        assert_eq!(latest_implementer_pr_urls(&task), vec![url_454.to_string()]);
+    }
+
+    #[test]
+    fn latest_implementer_pr_urls_returns_all_urls_from_a_multi_workstream_comment() {
+        let task = Task {
+            comments: vec![TaskComment {
+                text: Some("[implementer-prs] https://github.com/foo/bar/pull/1 https://github.com/foo/bar/pull/2".to_string()),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert_eq!(
+            latest_implementer_pr_urls(&task),
+            vec![
+                "https://github.com/foo/bar/pull/1".to_string(),
+                "https://github.com/foo/bar/pull/2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn latest_implementer_pr_urls_honors_recency_across_legacy_rowan_prs_alias() {
+        // A later [rowan-prs] comment must still supersede an earlier
+        // [implementer-prs] one — recency, not which tag was used, decides.
+        let old_url = "https://github.com/Stoffer-Industries/sindustries/pull/1";
+        let new_url = "https://github.com/Stoffer-Industries/sindustries/pull/2";
+        let task = Task {
+            comments: vec![
+                TaskComment {
+                    text: Some(format!("[implementer-prs] {old_url}")),
+                    body: None,
+                    ..TaskComment::default()
+                },
+                TaskComment {
+                    text: Some(format!("[rowan-prs] {new_url}")),
+                    body: None,
+                    ..TaskComment::default()
+                },
+            ],
+            ..Task::default()
+        };
+        assert_eq!(latest_implementer_pr_urls(&task), vec![new_url.to_string()]);
+    }
+
+    #[test]
+    fn latest_implementer_pr_urls_returns_empty_when_no_tagged_comments() {
+        let task = Task {
+            comments: vec![TaskComment {
+                text: Some("just a status update, no tag".to_string()),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert_eq!(latest_implementer_pr_urls(&task), Vec::<String>::new());
+    }
+
+    #[test]
     fn active_implementer_pr_urls_skip_merged_prs() {
         let task = Task {
             comments: vec![
@@ -5359,14 +5486,47 @@ feature
     #[test]
     fn post_merge_skips_superseded_closed_unmerged_prs() {
         // Task e9c06d01: PR #365 closed-without-merge, replaced by merged #368.
+        // `latest_pr_urls` reflects the most recent [implementer-prs] comment,
+        // which names only the replacement PR.
         let closed = "https://github.com/Stoffer-Industries/sindustries/pull/365";
         let merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
-        let urls = vec![closed.to_string(), merged.to_string()];
+        let latest_urls = vec![merged.to_string()];
         assert!(
-            post_merge_pr_failure(closed, pr_gates::ReviewState::ClosedUnmerged, &urls).is_none(),
+            post_merge_pr_failure(closed, pr_gates::ReviewState::ClosedUnmerged, &latest_urls)
+                .is_none(),
             "superseded closed PR must not block acceptance → done"
         );
-        assert!(post_merge_pr_failure(merged, pr_gates::ReviewState::Merged, &urls).is_none());
+        assert!(
+            post_merge_pr_failure(merged, pr_gates::ReviewState::Merged, &latest_urls).is_none()
+        );
+    }
+
+    #[test]
+    fn post_merge_skips_closed_unmerged_pr_with_lower_number_than_superseded_duplicate() {
+        // Regression for task 30251df0: PR #455 was opened right after #454
+        // from the same branch as an accidental duplicate, then closed
+        // unmerged, while #454 (the lower-numbered PR, opened first) is the
+        // one that actually merged. A correcting [implementer-prs] comment
+        // named only #454. The old "highest PR number wins" heuristic picked
+        // #455 as "latest" and blocked `acceptance -> done` forever.
+        let merged_lower_number = "https://github.com/Stoffer-Industries/sindustries/pull/454";
+        let closed_higher_number = "https://github.com/Stoffer-Industries/sindustries/pull/455";
+        let latest_urls = vec![merged_lower_number.to_string()];
+        assert!(
+            post_merge_pr_failure(
+                closed_higher_number,
+                pr_gates::ReviewState::ClosedUnmerged,
+                &latest_urls
+            )
+            .is_none(),
+            "the numerically-higher but superseded duplicate must not block done"
+        );
+        assert!(post_merge_pr_failure(
+            merged_lower_number,
+            pr_gates::ReviewState::Merged,
+            &latest_urls
+        )
+        .is_none());
     }
 
     #[test]
@@ -5403,18 +5563,18 @@ feature
     }
 
     #[test]
-    fn is_latest_pr_url_returns_true_only_for_highest_pr_number() {
-        let urls = vec![
-            "https://github.com/Stoffer-Industries/sindustries/pull/365".to_string(),
-            "https://github.com/Stoffer-Industries/sindustries/pull/368".to_string(),
-        ];
+    fn is_latest_pr_url_returns_true_only_for_members_of_latest_set() {
+        // `latest_pr_urls` is a pre-resolved set (the most recent
+        // [implementer-prs] comment's URLs), not "all PR URls ever seen" —
+        // membership, not PR-number magnitude, decides "latest" now.
+        let latest_urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/368".to_string()];
         assert!(!is_latest_pr_url(
             "https://github.com/Stoffer-Industries/sindustries/pull/365",
-            &urls
+            &latest_urls
         ));
         assert!(is_latest_pr_url(
             "https://github.com/Stoffer-Industries/sindustries/pull/368",
-            &urls
+            &latest_urls
         ));
     }
 
@@ -5437,36 +5597,28 @@ feature
     }
 
     #[test]
-    fn is_latest_pr_url_returns_false_for_unparseable_candidate() {
-        let urls = vec![
-            "https://github.com/Stoffer-Industries/sindustries/pull/365".to_string(),
-            "not-a-url".to_string(),
-        ];
-        assert!(!is_latest_pr_url("not-a-url", &urls));
-        // The parseable URL is still the latest when the only other URL is unparseable.
+    fn is_latest_pr_url_returns_false_for_candidate_not_in_latest_set() {
+        let latest_urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/365".to_string()];
+        assert!(!is_latest_pr_url("not-a-url", &latest_urls));
         assert!(is_latest_pr_url(
             "https://github.com/Stoffer-Industries/sindustries/pull/365",
-            &urls
+            &latest_urls
         ));
     }
 
     #[test]
-    fn is_latest_pr_url_ties_on_equal_pr_number() {
-        // Two URLs with the same PR number are an edge case (shouldn't happen in
-        // practice since each PR has a unique number), but the helper must be
-        // deterministic: every candidate with the max PR number is "latest".
-        let urls = vec![
+    fn is_latest_pr_url_true_for_every_member_of_a_multi_workstream_latest_set() {
+        // A single [implementer-prs] comment can legitimately name multiple
+        // PRs for concurrent workstreams (see
+        // implementer_pr_urls_preserve_merged_prs_for_delivery). All of them
+        // are "latest" together — none should be treated as superseded just
+        // because another has a higher PR number.
+        let latest_urls = vec![
             "https://github.com/foo/bar/pull/10".to_string(),
-            "https://github.com/baz/qux/pull/10".to_string(),
+            "https://github.com/baz/qux/pull/12".to_string(),
         ];
-        assert!(is_latest_pr_url(
-            "https://github.com/foo/bar/pull/10",
-            &urls
-        ));
-        assert!(is_latest_pr_url(
-            "https://github.com/baz/qux/pull/10",
-            &urls
-        ));
+        assert!(is_latest_pr_url("https://github.com/foo/bar/pull/10", &latest_urls));
+        assert!(is_latest_pr_url("https://github.com/baz/qux/pull/12", &latest_urls));
     }
 
     #[test]
