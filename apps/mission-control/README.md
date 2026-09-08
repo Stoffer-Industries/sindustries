@@ -34,9 +34,8 @@ an empty state rather than failing. Override the API base with
 
 The Bookmarks tab also renders a Sankey diagram of the curation pipeline
 (collapsed by default; click Expand) and a states-over-time line chart
-with a hover crosshair. The standalone `tools/bookmark-dashboard/`
-script was retired on 2026-07-16 — see `tools/README.md` for the
-pointer.
+with a hover crosshair. The standalone bookmark dashboard was retired on
+2026-07-16; use this tab at `/bookmarks` instead.
 
 ## Adding a new tab
 
