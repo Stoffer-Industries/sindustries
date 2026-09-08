@@ -547,6 +547,21 @@ class AgentTaskQueueTest(unittest.TestCase):
              patch("builtins.print"):
             agent_task_queue.main()
 
+    def test_lox_cli_identity_is_supported_for_attention_owner_queue(self):
+        self.assertEqual(
+            ("loxstoffer", "~/.config/gh-lox", "LOX_GITHUB_TOKEN"),
+            agent_task_queue.GITHUB_IDENTITIES["lox"],
+        )
+        with patch.object(sys, "argv", ["agent_task_queue.py", "--assignee", "Lox"]), \
+             patch.object(agent_task_queue, "fetch_agent_tasks", return_value=[]), \
+             patch.object(agent_task_queue, "fetch_github_prs", return_value=[]), \
+             patch.object(agent_task_queue, "fetch_linked_delivery_prs", return_value={}), \
+             patch.object(agent_task_queue, "fetch_attention_owner_tasks", return_value=[]), \
+             patch.object(agent_task_queue, "fetch_workflow_gate_owner_tasks", return_value=[]), \
+             patch.object(agent_task_queue, "print_human"), \
+             patch("builtins.print"):
+            agent_task_queue.main()
+
     def test_attention_owner_tasks_calls_list_with_attention_owner_filter(self):
         with patch.object(
             agent_task_queue.tasks_api_client,
