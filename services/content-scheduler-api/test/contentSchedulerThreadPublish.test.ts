@@ -145,7 +145,6 @@ describe('publishThreadContentSchedulerItem', () => {
 
     const result = await publishThreadContentSchedulerItem(
       '22222222-2222-2222-2222-222222222222',
-      'manual',
       { client, prismaOverride: prismaMock }
     );
 
@@ -250,7 +249,6 @@ describe('publishThreadContentSchedulerItem', () => {
 
     const result = await publishThreadContentSchedulerItem(
       '22222222-2222-2222-2222-222222222222',
-      'manual',
       { client, prismaOverride: prismaMock }
     );
 
@@ -309,7 +307,6 @@ describe('publishThreadContentSchedulerItem', () => {
     );
     const result = await publishThreadContentSchedulerItem(
       '22222222-2222-2222-2222-222222222222',
-      'manual',
       { client: { createTweet: vi.fn(), getTweetAuthor: vi.fn(), deleteTweet: vi.fn() }, prismaOverride: prismaMock }
     );
     expect(result.ok).toBe(false);
@@ -325,7 +322,6 @@ describe('publishThreadContentSchedulerItem', () => {
     );
     const result = await publishThreadContentSchedulerItem(
       '22222222-2222-2222-2222-222222222222',
-      'manual',
       { client: { createTweet: vi.fn(), getTweetAuthor: vi.fn(), deleteTweet: vi.fn() }, prismaOverride: prismaMock }
     );
     expect(result.ok).toBe(false);

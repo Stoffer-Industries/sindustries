@@ -78,7 +78,7 @@ contentSchedulerServiceRouter.post(
       const isThread = (existing?.kind ?? 'scheduled') === 'thread';
 
       if (isThread) {
-        const threadResult = await publishThreadContentSchedulerItem(id, 'manual');
+        const threadResult = await publishThreadContentSchedulerItem(id);
         if (threadResult.ok === false) {
           if (threadResult.code === 'NOT_FOUND')
             return notFound(res, 'NOT_FOUND', threadResult.message);
