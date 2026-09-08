@@ -23,19 +23,21 @@
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/prisma.ts';
-import type { XClient } from './contentSchedulerPublish.ts';
+import { getXClient, type XClient } from './contentSchedulerPublish.ts';
 
 export type ThreadPublishCode =
   | 'OK'
   | 'NOT_FOUND'
   | 'NOT_APPROVED'
   | 'NOT_THREAD'
+  | 'NOT_CLEANUP_REQUIRED'
   | 'NO_PARTS'
   | 'PART_BODY_INVALID'
   | 'PUBLISH_IN_PROGRESS'
   | 'MISSING_CREDENTIALS'
   | 'PUBLISH_FAILED'
-  | 'CLEANUP_REQUIRED';
+  | 'CLEANUP_REQUIRED'
+  | 'CLEANUP_STILL_REQUIRED';
 
 export type ThreadPublishActor = 'manual' | 'auto';
 
@@ -478,4 +480,150 @@ export async function publishThreadContentSchedulerItem(
     publishedUrl: rootTweet.url,
     publishedAt: now
   };
+}
+
+/**
+ * Retry a thread that previously ended in `cleanup_required`. The flow:
+ *
+ *   1. Re-attempt deletion of any recorded tweets that were NOT deleted
+ *      during the original compensation (the `cleanup_required` terminal
+ *      state means one or more deletes refused). Each retry updates
+ *      the attempt-tweet row's `deleteError` on failure or clears it
+ *      and stamps `deletedAt` on success.
+ *   2. If all recorded tweets are now deleted: transition the failed
+ *      attempt to `rolled_back`, return the item to `approved`, then
+ *      run the standard publish orchestrator end-to-end (which creates
+ *      a fresh attempt and re-posts the whole thread).
+ *   3. If any tweet is still undeletable: leave the attempt in
+ *      `cleanup_required`, surface the still-undeleted list so the UI
+ *      can prompt manual cleanup (Tom has to delete them by hand or
+ *      via the X web UI), and return CLEANUP_STILL_REQUIRED.
+ *
+ * Single-tweet items don't have this state machine — their failure
+ * path leaves `status='approved'` with `publishError` populated, and
+ * a plain re-publish handles retries. The route layer gates the
+ * retry endpoint on `kind === 'thread'` so a non-thread item can't
+ * reach this function.
+ */
+export async function retryThreadPublish(
+  itemId: string,
+  deps: ThreadPublishDeps = {}
+): Promise<ThreadPublishResult> {
+  const db = deps.prismaOverride ?? prisma;
+  const now = (deps.now ?? (() => new Date()))();
+  // Default to the process-resolved X client (FakeXClient in dev/test,
+  // RealXClient when X_CLIENT=real + OAuth creds are set). Tests pass
+  // an explicit `client` to bypass env resolution. Pass `client: null`
+  // to force the MISSING_CREDENTIALS path.
+  const client = deps.client !== undefined ? deps.client : getXClient();
+
+  // Client must be configured before we touch the DB. Failing fast
+  // here means a misconfigured retry call doesn't leave stale journal
+  // reads on the failed attempt row.
+  if (!client) {
+    return {
+      ok: false,
+      code: 'MISSING_CREDENTIALS',
+      message: 'X credentials are not configured'
+    };
+  }
+
+  const item = await loadItemWithParts(itemId, db);
+  if (!item) {
+    return { ok: false, code: 'NOT_FOUND', message: `Item ${itemId} not found` };
+  }
+  if (item.kind !== 'thread') {
+    return {
+      ok: false,
+      code: 'NOT_THREAD',
+      message: `Item ${itemId} is kind=${item.kind}, expected 'thread'`
+    };
+  }
+  if (item.status !== 'cleanup_required') {
+    return {
+      ok: false,
+      code: 'NOT_CLEANUP_REQUIRED',
+      message: `Item status is ${item.status}; retry-publish only applies to cleanup_required items`
+    };
+  }
+
+  // The most recent publish attempt is the one that left the item in
+  // cleanup_required — load it (with its tweet journal) and re-attempt
+  // any outstanding deletes.
+  const latestAttempt = await db.contentSchedulerPublishAttempt.findFirst({
+    where: { itemId, state: 'cleanup_required' },
+    orderBy: { startedAt: 'desc' }
+  });
+  if (!latestAttempt) {
+    return {
+      ok: false,
+      code: 'NOT_CLEANUP_REQUIRED',
+      message: `Item is cleanup_required but no cleanup_required attempt journal row exists`
+    };
+  }
+
+  const recorded = await db.contentSchedulerAttemptTweet.findMany({
+    where: { attemptId: latestAttempt.id, deletedAt: null },
+    orderBy: { position: 'desc' }
+  });
+
+  const stillUndeleted: Array<{
+    position: number;
+    tweetId: string;
+    url: string;
+    deleteError: string;
+  }> = [];
+  for (const row of recorded) {
+    try {
+      await client.deleteTweet(row.tweetId);
+      await db.contentSchedulerAttemptTweet.update({
+        where: { id: row.id },
+        data: { deletedAt: now, deleteError: null }
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await db.contentSchedulerAttemptTweet.update({
+        where: { id: row.id },
+        data: { deleteError: message }
+      });
+      stillUndeleted.push({
+        position: row.position,
+        tweetId: row.tweetId,
+        url: row.url,
+        deleteError: message
+      });
+    }
+  }
+
+  if (stillUndeleted.length > 0) {
+    // Attempt remains cleanup_required; item stays cleanup_required.
+    // Caller surfaces the undeleted URLs to the UI so Tom can decide
+    // whether to retry again (e.g. transient X outage) or manually
+    // delete via the X web UI.
+    return {
+      ok: false,
+      code: 'CLEANUP_STILL_REQUIRED',
+      message: `${stillUndeleted.length} tweet(s) still undeletable; manual cleanup required`,
+      attemptId: latestAttempt.id,
+      undeletedTweets: stillUndeleted
+    };
+  }
+
+  // Cleanup is complete. Close out the failed attempt and return the
+  // item to approved so the orchestrator can pick it up.
+  await db.contentSchedulerPublishAttempt.update({
+    where: { id: latestAttempt.id },
+    data: { state: 'rolled_back', completedAt: now }
+  });
+  await db.contentSchedulerItem.update({
+    where: { id: itemId },
+    data: { status: 'approved', publishError: null }
+  });
+
+  // Re-publish end-to-end. Pass the resolved client explicitly so the
+  // orchestrator doesn't re-resolve through `getXClient()` (it would
+  // see a null default and return MISSING_CREDENTIALS). The user gets
+  // a single round-trip result instead of an intermediate 'rolled_back,
+  // now click publish again'.
+  return publishThreadContentSchedulerItem(itemId, 'manual', { ...deps, client });
 }

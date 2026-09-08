@@ -31,7 +31,7 @@ import { parseId } from './contentSchedulerValidation.ts';
 import { validateImportItems } from './contentSchedulerValidation.ts';
 import { decideAutoPostAction, getJobSchedulerAdapter } from './contentSchedulerJobs.ts';
 import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts';
-import { publishThreadContentSchedulerItem } from './contentSchedulerThreadPublish.ts';
+import { publishThreadContentSchedulerItem, retryThreadPublish } from './contentSchedulerThreadPublish.ts';
 
 export const contentSchedulerServiceRouter = Router();
 
@@ -128,6 +128,106 @@ contentSchedulerServiceRouter.post(
 
       const { date } = getAucklandTodayParts();
       res.json({ data: result.item, today: date });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// POST /content-scheduler/items/:id/retry-publish — cleanup_required retry.
+//
+// Auth: same x-actor-secret gate as /publish (the Fly headless worker
+// is the legitimate caller for both, and a misconfigured browser-side
+// retry should still respect the gate).
+//
+// Scope: thread items only. A single-tweet item that failed to publish
+// stays in `approved` with a `publishError` row; re-clicking the
+// standard /publish endpoint is the correct retry path. The thread
+// orchestrator's `cleanup_required` terminal state is the only state
+// that genuinely blocks re-publish, so this endpoint is gated on
+// that and on `kind === 'thread'`.
+//
+// Flow:
+//   1. Re-attempt deletion of any tweets the original compensation
+//      couldn't delete (transient X 5xx, etc.).
+//   2. If cleanup completes: transition the failed attempt to
+//      `rolled_back`, item to `approved`, then run the standard
+//      publish orchestrator end-to-end. The response shape mirrors
+//      /publish so the UI can reuse its success handler.
+//   3. If cleanup still fails: return 409 CLEANUP_STILL_REQUIRED with
+//      the undeleted tweet URLs so Tom can decide whether to retry
+//      again or manually delete via the X web UI.
+// ---------------------------------------------------------------------------
+
+contentSchedulerServiceRouter.post(
+  '/content-scheduler/items/:id/retry-publish',
+  async (req, res, next) => {
+    try {
+      const id = parseId(req.params.id);
+      if (!id) return badRequest(res, 'INVALID_ID', 'Invalid id');
+
+      const rawHeader = req.headers['x-actor-secret'];
+      const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+      const actorGuard = checkActorSecret(headerValue);
+      if (actorGuard.ok === false) {
+        return sendError(
+          res,
+          401,
+          'UNAUTHORIZED',
+          actorGuard.reason === 'MISSING_HEADER'
+            ? 'Missing x-actor-secret header (X_ACTOR_SECRET is configured)'
+            : 'Invalid x-actor-secret header'
+        );
+      }
+
+      // Dispatch by kind. Non-thread items can't reach cleanup_required
+      // — the single-tweet publish path leaves status=approved on
+      // failure — so we refuse cleanly instead of routing them through
+      // the thread-only retry handler.
+      const existing = await prisma.contentSchedulerItem.findUnique({
+        where: { id },
+        select: { kind: true }
+      });
+      const isThread = (existing?.kind ?? 'scheduled') === 'thread';
+
+      if (!isThread) {
+        return badRequest(
+          res,
+          'NOT_THREAD',
+          'retry-publish only applies to thread items; non-thread items retry via POST /items/:id/publish'
+        );
+      }
+
+      const threadResult = await retryThreadPublish(id);
+      if (threadResult.ok === false) {
+        if (threadResult.code === 'NOT_FOUND')
+          return notFound(res, 'NOT_FOUND', threadResult.message);
+        if (threadResult.code === 'NOT_THREAD')
+          return badRequest(res, 'NOT_THREAD', threadResult.message);
+        if (threadResult.code === 'NOT_CLEANUP_REQUIRED')
+          return sendError(res, 409, 'NOT_CLEANUP_REQUIRED', threadResult.message);
+        if (threadResult.code === 'MISSING_CREDENTIALS')
+          return sendError(res, 503, 'MISSING_CREDENTIALS', threadResult.message);
+        if (threadResult.code === 'CLEANUP_STILL_REQUIRED') {
+          return res.status(409).json({
+            error: {
+              code: 'CLEANUP_STILL_REQUIRED',
+              message: threadResult.message,
+              undeletedTweets: threadResult.undeletedTweets
+            }
+          });
+        }
+        if (threadResult.code === 'CLEANUP_REQUIRED')
+          return sendError(res, 409, 'CLEANUP_REQUIRED', threadResult.message);
+        if (threadResult.code === 'PUBLISH_FAILED')
+          return sendError(res, 502, 'PUBLISH_FAILED', threadResult.message);
+        return sendError(res, 409, threadResult.code, threadResult.message);
+      }
+
+      const { date } = getAucklandTodayParts();
+      const threadItem = await prisma.contentSchedulerItem.findUnique({ where: { id } });
+      return res.json({ data: threadItem, today: date });
     } catch (err) {
       next(err);
     }

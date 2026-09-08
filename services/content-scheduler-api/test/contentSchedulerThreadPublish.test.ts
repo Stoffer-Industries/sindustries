@@ -6,7 +6,10 @@
 // in reverse; item returns to 'approved' with PUBLISH_FAILED).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { publishThreadContentSchedulerItem } from '../src/routes/contentSchedulerThreadPublish.ts';
+import {
+  publishThreadContentSchedulerItem,
+  retryThreadPublish
+} from '../src/routes/contentSchedulerThreadPublish.ts';
 
 // --- Prisma mock (hoisted before the import chain) -------------------------
 
@@ -21,7 +24,9 @@ const { prismaMock } = vi.hoisted(() => {
     contentSchedulerPublishAttempt: {
       create: vi.fn(),
       update: vi.fn(),
-      findMany: vi.fn()
+      updateMany: vi.fn(),
+      findMany: vi.fn(),
+      findFirst: vi.fn()
     },
     contentSchedulerAttemptTweet: {
       create: vi.fn(),
@@ -85,6 +90,9 @@ beforeEach(() => {
   });
   // attempt.update returns the updated attempt (callers don't read it).
   prismaMock.contentSchedulerPublishAttempt.update.mockResolvedValue({});
+  // attempt.findFirst (used by retry) returns the latest cleanup_required
+  // attempt. Default: empty so per-test setup is explicit.
+  prismaMock.contentSchedulerPublishAttempt.findFirst.mockResolvedValue(null);
   // attemptTweet.create returns the created row.
   prismaMock.contentSchedulerAttemptTweet.create.mockResolvedValue({});
   // attemptTweet.update returns the updated row.
@@ -323,5 +331,225 @@ describe('publishThreadContentSchedulerItem', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('PART_BODY_INVALID');
+  });
+});
+
+// --- Tests for retryThreadPublish ----------------------------------------
+
+describe('retryThreadPublish', () => {
+  function cleanupRequiredFixture(overrides: Record<string, unknown> = {}) {
+    return threadFixture({
+      status: 'cleanup_required',
+      publishError: 'X API 503: upstream down',
+      publishAttempts: [{ id: 'attempt-cleanup-1' }],
+      ...overrides
+    });
+  }
+
+  it('returns NOT_CLEANUP_REQUIRED when the item status is approved (not blocked)', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(
+      threadFixture({ status: 'approved' })
+    );
+    const result = await retryThreadPublish(
+      '22222222-2222-2222-2222-222222222222',
+      { client: { createTweet: vi.fn(), getTweetAuthor: vi.fn(), deleteTweet: vi.fn() }, prismaOverride: prismaMock }
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('NOT_CLEANUP_REQUIRED');
+    expect(result.message).toMatch(/approved/);
+  });
+
+  it('returns NOT_THREAD for a non-thread item', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(
+      cleanupRequiredFixture({ kind: 'scheduled', parts: [] })
+    );
+    const result = await retryThreadPublish(
+      '22222222-2222-2222-2222-222222222222',
+      { client: { createTweet: vi.fn(), getTweetAuthor: vi.fn(), deleteTweet: vi.fn() }, prismaOverride: prismaMock }
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('NOT_THREAD');
+  });
+
+  it('returns CLEANUP_STILL_REQUIRED when re-attempting deletes still fails', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(cleanupRequiredFixture());
+    prismaMock.contentSchedulerPublishAttempt.findFirst.mockResolvedValue({
+      id: 'attempt-cleanup-1',
+      state: 'cleanup_required'
+    });
+    prismaMock.contentSchedulerAttemptTweet.findMany.mockResolvedValue([
+      {
+        id: 'att-tweet-stuck',
+        attemptId: 'attempt-cleanup-1',
+        position: 0,
+        tweetId: 'FAIL_DELETE_stuck',
+        url: 'https://x.com/sindustries/status/FAIL_DELETE_stuck',
+        postedAt: new Date(),
+        deletedAt: null,
+        deleteError: 'previous failure'
+      }
+    ]);
+
+    const client = {
+      createTweet: vi.fn(),
+      getTweetAuthor: vi.fn(),
+      deleteTweet: vi.fn().mockRejectedValue(new Error('X API 503: still down'))
+    };
+
+    const result = await retryThreadPublish(
+      '22222222-2222-2222-2222-222222222222',
+      { client, prismaOverride: prismaMock }
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('CLEANUP_STILL_REQUIRED');
+    expect(result.undeletedTweets).toHaveLength(1);
+    expect(result.undeletedTweets?.[0]).toMatchObject({
+      position: 0,
+      tweetId: 'FAIL_DELETE_stuck',
+      deleteError: expect.stringMatching(/still down/) as unknown as string
+    });
+    expect(result.attemptId).toBe('attempt-cleanup-1');
+
+    // Item stays cleanup_required; the failed attempt stays
+    // cleanup_required; the failed tweet's deleteError is refreshed.
+    expect(prismaMock.contentSchedulerItem.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'approved' }) })
+    );
+    expect(prismaMock.contentSchedulerPublishAttempt.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'attempt-cleanup-1' },
+        data: expect.objectContaining({ state: 'rolled_back' })
+      })
+    );
+    expect(prismaMock.contentSchedulerAttemptTweet.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'att-tweet-stuck' },
+        data: expect.objectContaining({ deleteError: expect.stringMatching(/still down/) as unknown as string })
+      })
+    );
+
+    // Re-publish must not run on a still-undeletable cleanup.
+    expect(client.createTweet).not.toHaveBeenCalled();
+  });
+
+  it('completes cleanup then re-publishes when all outstanding deletes succeed', async () => {
+    // Track in-memory state so the second findUnique (the re-publish)
+    // reflects the transition cleanup_required -> approved.
+    const fixture = cleanupRequiredFixture();
+    prismaMock.contentSchedulerItem.findUnique.mockImplementation(async () => ({
+      ...fixture,
+      status: fixture.status
+    }));
+    prismaMock.contentSchedulerItem.update.mockImplementation(async ({ where, data }: any) => {
+      if (where.id === fixture.id && data.status) {
+        fixture.status = data.status;
+        if (data.publishError !== undefined) fixture.publishError = data.publishError;
+      }
+      return { ...fixture };
+    });
+    prismaMock.contentSchedulerPublishAttempt.findFirst.mockResolvedValue({
+      id: 'attempt-cleanup-1',
+      state: 'cleanup_required'
+    });
+    // The previous compensation left one tweet undeleted. The retry
+    // handler must delete it, then re-publish the full thread (root +
+    // 2 replies = 3 fresh creates).
+    prismaMock.contentSchedulerAttemptTweet.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'att-tweet-stuck',
+          attemptId: 'attempt-cleanup-1',
+          position: 0,
+          tweetId: 'stuck-root-id',
+          url: 'https://x.com/sindustries/status/stuck-root-id',
+          postedAt: new Date(),
+          deletedAt: null,
+          deleteError: 'previous failure'
+        }
+      ])
+      // After cleanup, the standard publish path re-uses findMany
+      // (compensation in publishThreadContentSchedulerItem, when it
+      // returns 0 rows it falls through to rolled_back). The default
+      // empty mock is fine for the happy re-publish path.
+      .mockResolvedValue([]);
+
+    const client = {
+      createTweet: vi
+        .fn()
+        .mockResolvedValueOnce({
+          url: 'https://x.com/sindustries/status/root-id',
+          postedAt: new Date('2026-09-08T11:00:01Z')
+        })
+        .mockResolvedValueOnce({
+          url: 'https://x.com/sindustries/status/reply-1-id',
+          postedAt: new Date('2026-09-08T11:00:02Z')
+        })
+        .mockResolvedValueOnce({
+          url: 'https://x.com/sindustries/status/reply-2-id',
+          postedAt: new Date('2026-09-08T11:00:03Z')
+        }),
+      getTweetAuthor: vi.fn(),
+      deleteTweet: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const result = await retryThreadPublish(
+      '22222222-2222-2222-2222-222222222222',
+      { client, prismaOverride: prismaMock }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.code).toBe('OK');
+    expect(result.publishedUrl).toBe('https://x.com/sindustries/status/root-id');
+
+    // The stuck tweet was deleted during cleanup, then the failed
+    // attempt was closed out as rolled_back, and the item was
+    // returned to approved before the standard publish orchestrator
+    // re-ran and created a fresh attempt.
+    expect(client.deleteTweet).toHaveBeenCalledWith('stuck-root-id');
+    expect(prismaMock.contentSchedulerAttemptTweet.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'att-tweet-stuck' },
+        data: expect.objectContaining({ deletedAt: expect.any(Date) as unknown as Date })
+      })
+    );
+    expect(prismaMock.contentSchedulerPublishAttempt.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'attempt-cleanup-1' },
+        data: expect.objectContaining({ state: 'rolled_back' })
+      })
+    );
+    expect(prismaMock.contentSchedulerItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: '22222222-2222-2222-2222-222222222222' },
+        data: expect.objectContaining({ status: 'approved', publishError: null })
+      })
+    );
+
+    // The standard publish orchestrator then claimed the (now-approved)
+    // item via updateMany and created a fresh attempt.
+    expect(prismaMock.contentSchedulerItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: '22222222-2222-2222-2222-222222222222', status: 'approved' },
+        data: expect.objectContaining({ status: 'publishing' })
+      })
+    );
+    // 3 fresh creates for the re-published thread.
+    expect(client.createTweet).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns MISSING_CREDENTIALS when no X client is provided', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(cleanupRequiredFixture());
+    const result = await retryThreadPublish(
+      '22222222-2222-2222-2222-222222222222',
+      { client: null, prismaOverride: prismaMock }
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('MISSING_CREDENTIALS');
   });
 });
