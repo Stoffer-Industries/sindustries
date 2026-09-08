@@ -347,7 +347,9 @@ describe('publishContentSchedulerItem (auto actor)', () => {
         createTweet: vi.fn().mockResolvedValue({
           url: 'https://x.com/sindustries/status/abc',
           postedAt: new Date('2026-07-17T09:00:00Z')
-        })
+        }),
+        getTweetAuthor: vi.fn(),
+        deleteTweet: vi.fn()
       }
     });
     expect(result.ok).toBe(true);
@@ -373,7 +375,9 @@ describe('publishContentSchedulerItem (auto actor)', () => {
 
     const result = await publishContentSchedulerItem(item.id, 'auto', {
       client: {
-        createTweet: vi.fn().mockRejectedValue(new Error('X API 500'))
+        createTweet: vi.fn().mockRejectedValue(new Error('X API 500')),
+        getTweetAuthor: vi.fn(),
+        deleteTweet: vi.fn()
       }
     });
     expect(result.ok).toBe(false);
