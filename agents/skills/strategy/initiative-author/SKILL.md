@@ -17,6 +17,7 @@ The strategy graph at `brain/sindustries/strategy/strategy-graph.md` remains the
 
 - Create `index.md` when an initiative is first recognised in the strategy graph.
 - Review an index when the hypothesis, output, Impact relationship, or status changes.
+- For evidence, stage, score, next-experiment, or decision changes to an existing initiative, use `initiative-learning-update` after this skill establishes the document shape.
 - Use it before starting market research, campaign planning, or implementation work.
 - Do not promote an `ideas/` file automatically. Promote only when the idea has a clear hypothesis, at least one Impact, and a deliberate status in the strategy graph.
 
@@ -114,6 +115,7 @@ Campaign-specific targets and scores belong in `campaign.md`; link them from thi
 
 ## Updating an existing index
 
+- Follow `initiative-learning-update` when new evidence changes the current stage, next experiment, decision boundary, or strategy-graph score.
 - Preserve useful history, but keep the current hypothesis and status near the top.
 - Replace stale links rather than accumulating duplicate sections.
 - Add dated notes only when a decision or evidence changes the initiative; detailed findings belong in `market-research.md`.
