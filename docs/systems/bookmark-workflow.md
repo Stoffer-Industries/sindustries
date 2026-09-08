@@ -355,7 +355,7 @@ or the task creation path.
   stage on a signal failure.
 - **Cadence:** weekly cron (Monday 08:15 `Pacific/Auckland`). The cron
   prompt lives at `agents/crons/prompts/bookmark-compounding-signal.md`.
-- **Operator runbook:** `docs/runbooks/bookmark-compounding-signal.md`.
+- **Operator runbook:** retired with PR #583 (was `docs/runbooks/bookmark-compounding-signal.md`). The calculator's contract now lives in the cron prompt `agents/crons/prompts/bookmark-compounding-signal.md`.
 - **Tech design:** `docs/specs/compounding-signal-for-bookmark-pipeline-tech-design.md`.
 
 The signal is downstream of three draft specs (knowledge-base metadata,

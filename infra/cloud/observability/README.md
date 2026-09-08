@@ -2,7 +2,7 @@
 
 This directory holds the artefacts that wire SIndustries' cloud-deployed services to a hosted observability backend (Grafana Cloud). The artefacts here are the runtime answer to task `4b3d6e9c` (Hosted Observability and Migration Alerts).
 
-For the durable ownership handover see [`docs/systems/observability.md`](../../docs/systems/observability.md). For the per-alert response runbook see [`docs/runbooks/cloud-alerts-response.md`](../../docs/runbooks/cloud-alerts-response.md). For the platform context this stack is built on top of see [`docs/systems/cloud-platform.md`](../../docs/systems/cloud-platform.md).
+For the durable ownership handover see [`docs/systems/observability.md`](../../docs/systems/observability.md). For the per-alert response expectation see the "Alert ownership" table in `docs/systems/observability.md` (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583). For the platform context this stack is built on top of see [`docs/systems/cloud-platform.md`](../../docs/systems/cloud-platform.md).
 
 ---
 
@@ -120,7 +120,7 @@ Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.ex
 ## Related docs
 
 - [`docs/systems/observability.md`](../../docs/systems/observability.md) — durable ownership handover (AC4).
-- [`docs/runbooks/cloud-alerts-response.md`](../../docs/runbooks/cloud-alerts-response.md) — per-alert response runbook.
+- `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` — per-alert response runbook (was at `docs/runbooks/cloud-alerts-response.md`; retired in PR #583 — re-create in workspace the first time an alert fires).
 - [`docs/specs/hosted-observability-migration-alerts-tech-design.md`](../../docs/specs/hosted-observability-migration-alerts-tech-design.md) — tech design.
 - [`infra/cloud/README.md`](../README.md) — parent index of `infra/cloud/` artefacts.
 - [`docs/systems/cloud-platform.md`](../../docs/systems/cloud-platform.md) — platform context.

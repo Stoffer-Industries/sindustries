@@ -190,9 +190,7 @@ URL pair is stable.
 
 ### Operational artefacts
 
-- **Runbook:** `infra/runbooks/mission-control-staging.md` — deploy
-  procedure, DNS handover checklist, smoke checks, health-check
-  contract, revert procedure.
+- **Runbook:** retired with PR #583 (was `infra/runbooks/mission-control-staging.md`). Operational deploy procedure, DNS handover checklist, smoke checks, health-check contract, and revert procedure are now documented inline in this section's spec above; any follow-up runbook of this class lands at `~/.openclaw/workspace/docs/infra/runbooks/mission-control-staging.md`.
 - **DNS targets (proposed):** `mc-staging.sindustries.dev` →
   `sindustries-mission-control-staging.fly.dev`; `tasks-staging.sindustries.dev` →
   `sindustries-tasks-app-staging.fly.dev`. TLS cert issuance via

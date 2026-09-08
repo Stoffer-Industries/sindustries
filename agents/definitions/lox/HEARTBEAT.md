@@ -59,7 +59,7 @@ On every heartbeat:
 5. For each unresolved item:
    - If state is `resolved`, skip it.
    - If state is `repair_attempted` or `blocked` and `nextRetryAt` is still in the future, skip it.
-   - Otherwise, look up the runbook in `infra/RUNBOOKS.md`.
+   - Otherwise, look up the runbook in `~/.openclaw/workspace/docs/infra/runbooks/` (operational runbooks no longer live in this repo — `codebases/sindustries/` is the Edge-managed canonical checkout, see PR #583).
 6. For each unresolved item that maps to a safe automatic runbook, run that runbook's status command.
 7. If the status is healthy, write/update state as `resolved` and stay quiet unless another item needs action.
 8. If the status is unhealthy and the runbook says repair is safe, run the repair command once.
@@ -193,7 +193,7 @@ This check is the **same diagnostic that caught Ivy's stall on 2026-06-05** (her
 
 **Known false-positive history (2026-06-07):** Lox incorrectly flagged Ivy's main session as stale because (a) the staleness check was reading the wrong session type for isolatedSession agents, and (b) the expected cadence was listed as 10 min when the actual config is 4h. Both bugs are fixed in this update.
 
-See `infra/runbooks/agent-main-session-stale-no-heartbeat.md` for the full diagnostic + recovery procedure.
+The full diagnostic + recovery procedure (formerly `infra/runbooks/agent-main-session-stale-no-heartbeat.md`, removed in PR #583) is now documented in Lox's `MEMORY.md` under the agent-main-session-stale-no-heartbeat note; any follow-up runbook should land in `~/.openclaw/workspace/docs/infra/runbooks/`.
 
 ## Common false-positive patterns
 
@@ -207,15 +207,13 @@ When a heartbeat/turn needs to check "does this file/dir exist?" across multiple
 # BAD — exit 2 on first missing dir, exit 1 on first unmatched glob.
 # OpenClaw flags the whole chain as a failure even though each line's
 # output is what we wanted.
-ls -la .../infra/runbooks/ && \
-ls -la .../infra/RUNBOOKS* && \
+ls -la ~/.openclaw/workspace/docs/infra/runbooks/ && \
 ls -la .../brain/state/lox-incident-state.json
 
 # GOOD — `|| true` flattens each probe's exit to 0, so the chain stays
 # green when "not found" is the answer. Read each line's output to
 # classify the result.
-ls -la .../infra/runbooks/ || true
-ls -la .../infra/RUNBOOKS*  || true
+ls -la ~/.openclaw/workspace/docs/infra/runbooks/ || true
 ls -la .../brain/state/lox-incident-state.json || true
 ```
 

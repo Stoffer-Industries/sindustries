@@ -7,7 +7,7 @@
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** Staging target on Fly.io (Sydney region); production rollout is tracked under the broader cloud migration plan
 
-> **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus three handover docs (`docs/systems/observability.md`, `infra/cloud/observability/README.md`, and `docs/runbooks/cloud-alerts-response.md`). The local observability stack documented in `infra/docker-compose.observability.yml` continues to operate the developer's local machine unchanged.
+> **Naming history:** this workstream was originally scoped as a separate "Hosted Observability and Migration Alerts" spec (task `4b3d6e9c`). The artefacts land under `infra/cloud/observability/` plus two handover docs (`docs/systems/observability.md` and `infra/cloud/observability/README.md`); the prior per-alert response runbook (`docs/runbooks/cloud-alerts-response.md`) was retired in PR #583 — its per-alert content lives in the AC3/AC4 sections of `docs/specs/hosted-observability-migration-alerts-tech-design.md` and in this document's "Alert ownership" + "Runbook for each alert" sections. The local observability stack documented in `infra/docker-compose.observability.yml` continues to operate the developer's local machine unchanged.
 
 ---
 
@@ -19,7 +19,7 @@ SIndustries runs a multi-service Node/TypeScript stack against a Postgres + Redi
 - No alert routing exists beyond the Grafana dashboard; there is no Alertmanager, no Slack/PagerDuty integration.
 - No documented ownership: who responds to a 5xx alert, who triages a database health alert, who owns the dashboard definitions.
 
-For the design rationale see [`docs/specs/hosted-observability-migration-alerts-tech-design.md`](../specs/hosted-observability-migration-alerts-tech-design.md). For the operator-facing index of artefacts see [`infra/cloud/observability/README.md`](../../infra/cloud/observability/README.md). For the alert response runbook see [`docs/runbooks/cloud-alerts-response.md`](../runbooks/cloud-alerts-response.md). For the platform context this hosted stack is built on top of see [`docs/systems/cloud-platform.md`](cloud-platform.md).
+For the design rationale see [`docs/specs/hosted-observability-migration-alerts-tech-design.md`](../specs/hosted-observability-migration-alerts-tech-design.md). For the operator-facing index of artefacts see [`infra/cloud/observability/README.md`](../../infra/cloud/observability/README.md). For the per-alert response expectation see this document's "Alert ownership" table below (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583). For the platform context this hosted stack is built on top of see [`docs/systems/cloud-platform.md`](cloud-platform.md).
 
 This document exists so a new operator (or Quinn returning after a break) can answer the four handover questions — *what is this, who owns what, how much does it cost, and what happens when it breaks* — without having to reverse-engineer `infra/cloud/observability/`.
 
@@ -41,7 +41,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Bootstrap                        | Idempotent local script that registers everything        | Quinn  | `infra/cloud/observability/bootstrap-observability.sh` (future PR) |
 | CI deploy                        | GitHub Actions, path-filtered, canary                    | Rowan  | `.github/workflows/deploy-observability-health-probe.yml` (future PR) |
 | Secrets                          | Fly app secrets + GH repo secrets                        | Quinn  | `fly secrets set …` (operator CLI); `secrets.FLY_API_TOKEN`   |
-| Alert response runbook           | One section per alert; on-call, severity, mitigation      | Quinn  | `docs/runbooks/cloud-alerts-response.md`                     |
+| Alert response runbook           | One section per alert; on-call, severity, mitigation      | Quinn  | Retired with PR #583 (was `docs/runbooks/cloud-alerts-response.md`). Re-create at `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` when an alert fires for the first time and needs its own step list; for now the "Alert ownership" table below + the AC4 section of `docs/specs/hosted-observability-migration-alerts-tech-design.md` carry the same expectation. |
 | Operator-facing artefact index   | README mapping each artefact to its purpose               | Rowan  | `infra/cloud/observability/README.md`                         |
 | Backward compatibility           | None required (no prior hosted telemetry)                | —      | —                                                             |
 
@@ -68,7 +68,7 @@ Grafana Cloud is the right shape for the foundation milestone: zero new agents, 
 
 - **Pros.** One fewer service to operate. Slack webhook integration is built-in. Alert rules live as JSON in the same provisioning tree as dashboards.
 - **Cons.** Tightly coupled to Grafana Cloud; portability to a Prometheus/Alertmanager self-host requires a small migration.
-- **Alternatives considered.** **Alertmanager** is the de-facto standard for Prometheus, but adding it would add another Fly app to operate and a parallel routing config. Grafana Cloud's alerting is sufficient for the alert set in [`docs/runbooks/cloud-alerts-response.md`](../runbooks/cloud-alerts-response.md).
+- **Alternatives considered.** **Alertmanager** is the de-facto standard for Prometheus, but adding it would add another Fly app to operate and a parallel routing config. Grafana Cloud's alerting is sufficient for the alert set documented in this document's "Alert ownership" table (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583).
 
 ---
 
@@ -91,7 +91,7 @@ If a future expansion adds Fly apps in additional regions, the hosted backend st
 | Grafana Cloud API key            | Quinn  | Fly secrets on the health-probe app; locally in `~/.config/grafana-cloud/` |
 | Slack workspace                  | Quinn  | Slack workspace admin console                              |
 | Slack webhook URL (per channel)  | Quinn  | Fly secrets per app; bootstrapped from `infra/cloud/observability/.env.local` |
-| Slack channel ownership          | Quinn  | See alert table in [`docs/runbooks/cloud-alerts-response.md`](../runbooks/cloud-alerts-response.md) |
+| Slack channel ownership          | Quinn  | See "Alert ownership" table below (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583) |
 | Fly secrets (OTEL_EXPORTER_*)    | Quinn  | `fly secrets set OTEL_EXPORTER_OTLP_ENDPOINT=…` per app     |
 | Neon DB connection string        | Quinn  | Fly secrets on the health-probe app                        |
 | Upstash Redis URL                | Quinn  | Fly secrets on the health-probe app                        |
@@ -113,7 +113,7 @@ No live secret values appear in the repo at any commit.
 
 ## Dashboard and alert ownership (AC4 summary)
 
-For the full per-alert response expectation see [`docs/runbooks/cloud-alerts-response.md`](../runbooks/cloud-alerts-response.md). For the dashboard inventory see [`infra/cloud/observability/README.md`](../../infra/cloud/observability/README.md) (Dashboards section). The summary table here is the canonical ownership index.
+For the full per-alert response expectation see the "Alert ownership" table below + the AC4 section of `docs/specs/hosted-observability-migration-alerts-tech-design.md` (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583). For the dashboard inventory see [`infra/cloud/observability/README.md`](../../infra/cloud/observability/README.md) (Dashboards section). The summary table here is the canonical ownership index.
 
 ### Dashboards
 
@@ -154,7 +154,7 @@ A future operator should be able to:
 2. Open the four hosted dashboards from the URLs the bootstrap script prints, and see real data for the staging environment.
 3. Open the ten alert rules from the Grafana Cloud alerting UI, and see severity + Slack channel + owner populated for each.
 4. Trigger a synthetic failure (e.g., stop a Fly app) and observe the corresponding alert fires within 2 minutes and routes to the documented Slack channel.
-5. Read [`docs/runbooks/cloud-alerts-response.md`](../runbooks/cloud-alerts-response.md) for the on-call response expectation of each alert.
+5. Read the "Alert ownership" table below for the on-call response expectation of each alert (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583).
 
 If any of those five steps fails, the gap is filed as a follow-on feature task under the `4b3d6e9c` parent or as a new `infra` task depending on scope.
 
@@ -176,5 +176,5 @@ If any of those five steps fails, the gap is filed as a follow-on feature task u
 - [`docs/systems/cloud-platform.md`](cloud-platform.md) — the cloud platform this hosted stack is built on.
 - [`docs/systems/agent-incidents.md`](agent-incidents.md) — the local agent-incident reporting flow; future work may route agent incidents through the same alerting machinery.
 - [`infra/cloud/observability/README.md`](../../infra/cloud/observability/README.md) — operator-facing index of the artefacts.
-- [`docs/runbooks/cloud-alerts-response.md`](../runbooks/cloud-alerts-response.md) — per-alert response runbook.
+- `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` — per-alert response runbook (was at `docs/runbooks/cloud-alerts-response.md`; retired in PR #583 — re-create in workspace the first time an alert fires and needs its own step list; for now the "Alert ownership" table above is the source of truth).
 - [`infra/cloud/README.md`](../../infra/cloud/README.md) — parent index of `infra/cloud/` artefacts.

@@ -269,7 +269,7 @@ Both can produce **content signals** that flow into the Content Pipeline.
 ```mermaid
 flowchart LR
   subgraph lox_side[Lox side]
-    lox_check[Daily health check] -->|anomaly| lox_runbook[infra/runbooks/]
+    lox_check[Daily health check] -->|anomaly| lox_runbook[workspace docs/infra/runbooks/]
     lox_check -->|incident| lox_ir[workspace docs/infra/incident-reviews/]
     lox_ir -->|severity high| lox_alert[Telegram alert]
   end
@@ -304,7 +304,7 @@ flowchart LR
 
 **Key files**
 - Lox logs: workspace `docs/infra/lox-daily-YYYY-MM-DD.md`
-- Lox runbooks: `infra/runbooks/`
+- Lox runbooks: `~/.openclaw/workspace/docs/infra/runbooks/` (moved out of this repo in PR #583 — see `agents/definitions/README.md` "Where operational runbooks live")
 - Lox incident reviews: workspace `docs/infra/incident-reviews/`
 - Lox notify: `agents/skills/ops/notify-soft-fail/`
 - Quinn ops state: `quinn-ops-state.json` (in workspace root)

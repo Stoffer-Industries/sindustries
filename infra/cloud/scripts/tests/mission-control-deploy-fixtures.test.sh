@@ -13,8 +13,11 @@
 #     four-tuple is checked together)
 #   - infra/cloud/env/<app>.env.example exists with at least one
 #     VITE_-prefixed build arg documented
-#   - infra/runbooks/mission-control-staging.md mentions the app by name
-#     so the runbook stays in sync with the deployable units
+#
+# (The prior "runbook mentions the app by name" check was dropped in PR
+# #583 along with `infra/runbooks/mission-control-staging.md` — operational
+# runbooks no longer live in this repo; see
+# `agents/definitions/README.md` "Where operational runbooks live".)
 
 set -euo pipefail
 
@@ -25,7 +28,6 @@ if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
 fi
 
 APPS=(mission-control tasks-app)
-RUNBOOK="$REPO_ROOT/infra/runbooks/mission-control-staging.md"
 
 FAIL=0
 for app in "${APPS[@]}"; do
@@ -70,15 +72,6 @@ for app in "${APPS[@]}"; do
         "${env_example#"$REPO_ROOT"/}" >&2
       FAIL=1
     fi
-  fi
-
-  # 4. Runbook mentions the app by name.
-  if [[ ! -f "$RUNBOOK" ]]; then
-    printf 'FAIL: missing %s\n' "${RUNBOOK#"$REPO_ROOT"/}" >&2
-    FAIL=1
-  elif ! grep -q "$app" "$RUNBOOK"; then
-    printf 'FAIL: runbook does not mention %s\n' "$app" >&2
-    FAIL=1
   fi
 done
 
