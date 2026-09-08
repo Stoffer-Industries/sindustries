@@ -1,137 +1,101 @@
-# Ash — QA-Verifier Agent (semantic judgment)
+# Ash — QA-Verifier Agent (utility module)
 
-This directory holds the **pure-code** half of the Ash QA-verifier agent:
-TypeScript that **semantically** judges whether a task's PR diff actually
-satisfies the AC's intent — not whether the cited evidence exists or
-the cited test passes. The agent **identity** (session, model, GitHub
-PAT, tasks-api token, Telegram account, heartbeat/cron wiring, identity
-docs) lives outside this repo at `~/.openclaw/workspace/agents/ash/`
-and is provisioned by **Quinn** per the `[openclaw-needed]` comment
-on task `f6a4d56a`.
+This directory holds the **utility** half of the Ash QA-verifier agent:
+TypeScript helpers that Ash's reasoning loop imports for context loading.
+The agent **identity** (session, model, GitHub PAT, tasks-api token,
+Telegram account, heartbeat/cron wiring, identity docs) lives outside
+this repo at `~/.openclaw/workspace/agents/ash/` and is provisioned by
+Quinn per the bootstrap pattern used for Rowan.
 
-Until Quinn's provisioning lands, this code is a placeholder. The
-lobster-side `qa_agent` gate enforcement (PR #2 of task f6a4d56a) and
-the migrated enum value (PR #1) are both already in `main`; the gate
-holds tasks in `doing` until either Ash (when wired) runs verify.ts
-or a human posts the approval.
+The lobster-side `qa_agent` gate enforcement (task `f6a4d56a`) and the
+migrated enum value are both already in `main`; the gate holds tasks in
+`doing` until Ash (when wired) runs her reasoning loop or a human posts
+the approval.
 
-## Scope (after PR #3 of task 5e35dc25)
+## Scope (after task 0b16dc37)
 
-This file is **semantic-only**. The mechanical checks (cited-file
-existence, cited-test pass/fail, evidence-text matching against the PR
-diff) now live in the lobster's `mechanical_evidence_failures` function
-at `agents/workflows/feature-task/src/ac_parsing.rs:331` and run as
-part of the `doing → acceptance` gate **before** the `qa_agent` row is
-created. Ash's qa_agent approval is only requested after the lobster's
-mechanical gate has passed, and is scoped to judging whether the diff
-actually satisfies the AC's intent — not whether the cited file
-exists or the cited test passes.
+This file is **utility-only**. The bespoke `defaultJudgeIntent` placeholder
+that lived here until 2026-09-08 has been removed; Ash's judgment now
+runs through her own reasoning loop (see
+`agents/definitions/ash/{HEARTBEAT,WORKFLOW}.md`), not through a CLI
+invocation of this file. Three exports remain:
 
-If the lobster's mechanical gate is failing on your task, the
-`[feature-task-progress-checklist]` comment on the task already tells
-you exactly what to fix — you don't need Ash to run for deterministic
-feedback.
+- `extractAcLines(prBody)` — walks `- [x] AC<N>: <text>` lines and strips
+  trailing `(testID|not tested|not code|pr: <value>)` evidence annotations
+  so the bare AC description reaches Ash's reasoning prompt without
+  test-ID noise. Mirrors the lobster's canonical AC parser at
+  `agents/workflows/feature-task/src/ac_parsing.rs:127`.
+- `stripTrailingEvidence(text)` — same regex as above, exposed standalone
+  for callers that need to strip evidence from a PR description without
+  walking ACs.
+- `fetchPrSummary(prUrl, token)` — fetches the PR body, file list, and
+  raw patch via the GitHub REST API. Ash's reasoning tools consume this
+  via the agent's own `read` / `exec` calls; the file does not embed the
+  patch in an LLM prompt.
 
-The recommended shape for Quinn's eventual semantic implementation
-is an LLM call against the AC's bare description + the PR's patch
-text with a strict `{ ok: true } | { ok: false; reason: string }` JSON
-response, deterministically reproducible by setting `temperature=0`
-and recording the model + prompt version. Alternative deterministic
-approaches (e.g. extracted function/class symbols compared against AC
-claim keywords) are acceptable when LLM budget is a concern.
-
-Until Quinn's implementation is wired, the `defaultJudgeIntent`
-placeholder returns `ok: false` for every AC so the task stays in
-`doing` rather than reaching acceptance on a stub.
-
-## When this runs
-
-Per `docs/specs/add-ash-qa-agent-verifier-gate-tech-design.md` §9,
-Ash's heartbeat (Quinn's cron, ~15 min cadence) discovers tasks in
-`doing` with a merged PR whose `qa_agent` gate is outstanding and
-invokes `verify.ts` against each one. Quinn's cron wires this up after
-the agent identity is provisioned.
-
-## CLI
-
-```bash
-# Required env vars (set by Quinn's provisioning):
-export ASH_TASKS_API_APPROVAL_TOKEN=<Ash's per-agent token>
-export ASH_GITHUB_TOKEN=<Ash's fine-grained PAT>
-
-# Required CLI args:
-npx tsx src/verify.ts \
-  --task-id <uuid> \
-  --tasks-api-base-url http://localhost:4001/api/v1 \
-  --pr-url https://github.com/Stoffer-Industries/sindustries/pull/<n>
-```
-
-Exit codes: `0` = all ACs pass judgment, approval posted. `1` = at
-least one AC failed, `[qa-agent-blocked]` comment posted. `2` = missing
-input or env var.
-
-## What it checks
-
-Per the consolidated design in
-`docs/specs/migrate-ash-mechanical-checks-tech-design.md` step 4, the
-script walks each AC line in the PR body and calls `judgeIntent(ac,
-patch)` for each one. The judgment function returns
-`{ ok: true } | { ok: false; reason: string }`. On all ACs passing, the
-script POSTs `/tasks/{id}/approvals` with `{type: "qa_agent"}` to
-satisfy the gate. On any failure, it POSTs a `[qa-agent-blocked]`
-comment naming the failing AC and its reason and does NOT satisfy the
-gate — the lobster holds the task in `doing`.
-
-The mechanical surface (file existence, test pass, evidence-text
-match) is **not** checked here. Those checks are delegated to the
-lobster's `mechanical_evidence_failures` and run before this file is
-invoked.
-
-## Tests
-
-```bash
-npm ci          # one-time, installs vitest + tsx
-npm test        # runs the semantic-contract pin tests
-```
-
-The test fixtures pin the comment-shape contract that the lobster and
-Tom's QA verdict both rely on:
-
-- **All-pass case** — `verifySemantic` returns `ok: true`, posts
-  `[qa-agent-verified]`, and calls `postApproval`. Uses a fake
-  `judgeIntent` that returns `{ok: true}`.
-- **One-fail case** — `verifySemantic` returns `ok: false`, posts
-  `[qa-agent-blocked]` naming the failing AC and its reason, and does
-  NOT call `postApproval`. Uses a fake `judgeIntent` that returns
-  `{ok: false, reason: "..."}` for AC2.
-- **Pre-conditions** — no PR URL, not-merged PR, and no-AC-tags cases
-  each return `ok: false` with the right `[qa-agent-blocked]` reason
-  and no approval.
-- **Prompt shape** — `judgeIntent` is called with the bare AC
-  description (trailing evidence annotation stripped) and the PR's
-  patch text.
-
-These tests do not depend on Quinn's real judgment implementation —
-the fake `judgeIntent` returns a deterministic verdict. When Quinn
-lands the real impl, the fake in the test stays as the
-"happy-path" / "one-fail" coverage and Quinn's wiring is exercised
-through the CLI integration path.
+The mechanical surface (cited-file existence, cited-test pass/fail,
+evidence-text matching against the PR diff) lives in the lobster's
+`mechanical_evidence_failures` function at
+`agents/workflows/feature-task/src/ac_parsing.rs:331` and runs as part
+of the `doing → acceptance` gate **before** Ash's `qa_agent` approval is
+requested. If the lobster's mechanical gate is failing on your task,
+the `[feature-task-progress-checklist]` comment on the task already
+tells you exactly what to fix — Ash will only see tasks where the
+mechanical gate has already passed.
 
 ## Why this is in `agents/ash/` (not `services/`)
 
 `agents/` is the canonical home for agent-shaped code in this repo.
 When Quinn provisions Ash's identity at `~/.openclaw/workspace/agents/ash/`,
 the `AGENTS.md` / `SOUL.md` / `WORKFLOW.md` / `HEARTBEAT.md` files
-created there describe how the agent runs the script in this directory.
-The .openclaw boundary stays separate from the code surface — the
-script is in `codebases/sindustries`, the agent identity is in
+created there describe how Ash's reasoning loop uses this module. The
+.openclaw boundary stays separate from the code surface — the
+utilities are in `codebases/sindustries`, the agent identity is in
 `~/.openclaw/`.
+
+## When this runs
+
+Per the prompt-driven verification design (`docs/specs/ash-prompt-driven-verifier-tech-design.md`),
+Ash's reasoning loop runs as part of her heartbeat session — not via a
+CLI invocation. The agent's own tool calls read the PR diff + cited
+tests + cited files, and reach a `verified` / `blocked` / `deferred`
+verdict per AC. On `verified` for all ACs, she posts the structured
+`qa_agent` approval via the Tasks API. On any `blocked` AC she posts
+`[qa-agent-blocked]` and routes back to the delivery assignee. On a
+`deferred` AC (capability gap) she posts `[qa-agent-deferred]` and
+continues; the structured approval still posts if the remaining ACs
+are clean. If the same capability gap recurs across two distinct
+tasks, Ash proposes a follow-up feature task on the second strike.
+
+## Tests
+
+```bash
+npm ci          # one-time, installs vitest + tsx
+npm test        # runs the utility tests + the judgment-pattern doc-test
+```
+
+The two test surfaces cover:
+
+- **`test/verify.test.ts`** — unit tests for the surviving utilities:
+  AC-line extraction (regex shape, evidence stripping, unchecked-AC
+  skip, empty-input), `stripTrailingEvidence` (with/without annotations),
+  and `fetchPrSummary` (token presence, three-endpoint fetch, URL
+  parsing).
+- **`test/judgment-pattern.test.ts`** — doc-test asserting that
+  `agents/definitions/ash/{HEARTBEAT,WORKFLOW,SOUL,DoD}.md` describe
+  the reasoning loop, the `[qa-agent-deferred]` convention, the
+  two-strike rule, and that `verify.ts` no longer exports any bespoke
+  judgment code (`defaultJudgeIntent`, `verifySemantic`, `runCli`,
+  `judgeIntent`).
+
+These tests do not exercise Ash's judgment itself — judgment is an
+LLM property, not a code property, and runs through the agent's own
+reasoning loop outside this module.
 
 ## Related
 
-- Tech design: `docs/specs/migrate-ash-mechanical-checks-tech-design.md`
+- Tech design: `docs/specs/ash-prompt-driven-verifier-tech-design.md`
 - Lobster-side mechanical-evidence gate: `agents/workflows/feature-task/src/ac_parsing.rs:331`
 - Lobster-side `verify_delivery` wiring: `agents/workflows/feature-task/src/main.rs:737`
-- Task: `5e35dc25-aed5-4064-8f11-a99413d18612` (this PR's scope)
+- Task: `0b16dc37-cc81-483a-a30a-893884aef6f1` (this PR's scope)
 - Sibling task: `f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47` (Ash gate design + provisioning)
-- `[openclaw-needed]` bootstrap ask: task comment `acc27231`

@@ -1,22 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  verifySemantic,
   extractAcLines,
-  defaultJudgeIntent,
+  stripTrailingEvidence,
+  fetchPrSummary,
   type AcEvidence,
-  type Deps,
-  type JudgeIntentResult,
   type PrFile,
   type PrSummary,
 } from '../src/verify.ts';
 
 // ---------------------------------------------------------------------------
 // extractAcLines — minimal AC walker. Strips trailing evidence annotations
-// so the LLM judge prompt sees the bare AC description.
+// so Ash's reasoning prompt sees the bare AC description.
 //
 // The lobster's parse_evidence at agents/workflows/feature-task/src/ac_parsing.rs:86
 // is the canonical evidence-tag parser; here we only walk AC lines for
-// the semantic loop. The two implementations must agree on the
+// Ash's reasoning context. The two implementations must agree on the
 // `(testID|not tested|not code|pr: <value>)` annotation shape.
 // ---------------------------------------------------------------------------
 
@@ -67,208 +65,125 @@ Some preamble.
 });
 
 // ---------------------------------------------------------------------------
-// defaultJudgeIntent — placeholder behavior. Until Quinn implements the
-// LLM call, every AC fails so the task stays in `doing` rather than
-// reaching acceptance on a stub. This is the contract the semantic pin
-// tests below assume.
+// stripTrailingEvidence — standalone export so the lobster's annotation
+// shape can be reused by other consumers (e.g. an external tool that
+// needs to strip evidence from a PR description without walking ACs).
 // ---------------------------------------------------------------------------
 
-describe('defaultJudgeIntent', () => {
-  it('returns ok: false with an explicit reason so tasks stay in `doing`', async () => {
-    const result = await defaultJudgeIntent(
-      { ac: '1', description: 'do the thing' },
-      'diff --git a/foo b/foo\n+added',
+describe('stripTrailingEvidence', () => {
+  it('strips a trailing testID annotation', () => {
+    expect(stripTrailingEvidence('wire the oauth route (testID: tests/auth.test.ts)')).toBe(
+      'wire the oauth route',
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('Quinn owns');
+  });
+
+  it('strips a trailing not-tested annotation with emoji prefix', () => {
+    expect(
+      stripTrailingEvidence('manually verify button click (⚠️ not tested: needs browser QA)'),
+    ).toBe('manually verify button click');
+  });
+
+  it('returns the input unchanged when no annotation is present', () => {
+    expect(stripTrailingEvidence('standalone description')).toBe('standalone description');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchPrSummary — fetches PR body + file list + raw patch via the GitHub
+// REST API. Tests stub `fetch` with a fake that returns the three
+// endpoints Ash's reasoning loop consumes. Live behavior (real network
+// calls, real auth) is exercised through Ash's heartbeat path, not unit
+// tests.
+// ---------------------------------------------------------------------------
+
+describe('fetchPrSummary', () => {
+  function makeFakeFetch(handlers: {
+    prJson: Record<string, unknown>;
+    filesJson: unknown[];
+    patchText: string;
+  }) {
+    return vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
+      const u = new URL(url);
+      // PR JSON endpoint
+      if (u.pathname.match(/\/pulls\/\d+$/)) {
+        const accept = init?.headers?.['Accept'] ?? init?.headers?.['accept'] ?? '';
+        if (accept === 'application/vnd.github.v3.patch') {
+          return {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: async () => handlers.patchText,
+            json: async () => ({}),
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => handlers.prJson,
+          text: async () => '',
+        } as unknown as Response;
+      }
+      // PR files endpoint
+      if (u.pathname.match(/\/pulls\/\d+\/files/)) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => handlers.filesJson,
+          text: async () => '',
+        } as unknown as Response;
+      }
+      throw new Error(`unexpected fetch URL: ${url}`);
+    });
+  }
+
+  it('fetches body + files + patch from the three PR endpoints', async () => {
+    const fakeFetch = makeFakeFetch({
+      prJson: {
+        number: 471,
+        state: 'closed',
+        merged: true,
+        body: '- [x] AC1: do the thing (testID: tests/foo.test.ts)',
+      },
+      filesJson: [
+        { filename: 'src/foo.ts', status: 'modified', additions: 1, deletions: 0 },
+        { filename: 'tests/foo.test.ts', status: 'modified', additions: 10, deletions: 0 },
+      ],
+      patchText: 'diff --git a/src/foo.ts b/src/foo.ts\n+added',
+    });
+    const realFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof fetch }).fetch = fakeFetch as unknown as typeof fetch;
+    try {
+      const pr = await fetchPrSummary('https://github.com/o/r/pull/471', 'fake-token');
+      expect(pr.number).toBe(471);
+      expect(pr.merged).toBe(true);
+      expect(pr.state).toBe('merged');
+      expect(pr.body).toContain('AC1');
+      expect(pr.files).toHaveLength(2);
+      expect(pr.patch).toContain('+added');
+    } finally {
+      (globalThis as { fetch: typeof fetch }).fetch = realFetch;
     }
   });
-});
 
-// ---------------------------------------------------------------------------
-// Test fixtures — shared across the four semantic-contract pin tests.
-// ---------------------------------------------------------------------------
-
-const taskId = 'f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47';
-
-function makeDeps(opts: {
-  pr: PrSummary;
-  posts: { approval: string[]; comments: string[] };
-  judgeIntent: Deps['judgeIntent'];
-}) {
-  const postApproval = vi.fn(async (id: string, type: string) => {
-    opts.posts.approval.push(`${id}:${type}`);
+  it('throws when the token is missing', async () => {
+    await expect(
+      fetchPrSummary('https://github.com/o/r/pull/471', ''),
+    ).rejects.toThrow(/ASH_GITHUB_TOKEN/);
   });
-  const postComment = vi.fn(async (_id: string, text: string) => {
-    opts.posts.comments.push(text);
-  });
-  const fetchPr = vi.fn(async (_url: string) => opts.pr);
-  return {
-    deps: { fetchPr, postComment, postApproval, judgeIntent: opts.judgeIntent } satisfies Deps,
-    postApproval,
-    postComment,
-  };
-}
 
-function makePr(body: string, files: PrFile[] = [], patch = ''): PrSummary {
-  return {
-    number: 474,
-    state: 'merged',
-    merged: true,
-    body,
-    files,
-    patch,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// verifySemantic — semantic-contract pin tests. These pin the I/O
-// contract (which comment shapes stay machine-parseable, when postApproval
-// fires) and don't depend on Quinn's actual judgment logic. Replace
-// the fake judgeIntent with a real impl when Quinn lands it.
-// ---------------------------------------------------------------------------
-
-describe('verifySemantic — judgeIntent returns ok: true for every AC', () => {
-  it('posts [qa-agent-verified] and satisfies the qa_agent gate', async () => {
-    const pr = makePr(
-      `- [x] AC1: do the thing (testID: tests/foo.test.ts)
-- [x] AC2: add a doc (📄 not code: README added)`,
-      [],
-      'diff --git a/foo b/foo\n+added',
-    );
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const fakeJudge: Deps['judgeIntent'] = vi.fn(
-      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
-    );
-    const { deps, postApproval } = makeDeps({ pr, posts, judgeIntent: fakeJudge });
-
-    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(true);
-    expect(outcome.commentText.startsWith('[qa-agent-verified]')).toBe(true);
-    expect(postApproval).toHaveBeenCalledWith(taskId, 'qa_agent');
-    // Both ACs passed through the fake — no failures reported.
-    expect(fakeJudge).toHaveBeenCalledTimes(2);
+  it('throws on a non-github URL', async () => {
+    await expect(
+      fetchPrSummary('https://example.com/no-such-pr', 'fake-token'),
+    ).rejects.toThrow(/cannot parse PR URL/);
   });
 });
 
-describe('verifySemantic — judgeIntent returns ok: false for one AC', () => {
-  it('posts [qa-agent-blocked] naming the failing AC and does NOT satisfy the gate', async () => {
-    const pr = makePr(
-      `- [x] AC1: happy path (testID: tests/foo.test.ts)
-- [x] AC2: error path (testID: tests/bar.test.ts)`,
-      [],
-      'diff --git a/foo b/foo\n+added only happy path',
-    );
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const fakeJudge: Deps['judgeIntent'] = vi.fn(
-      async (ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => {
-        if (ac.ac === '2') {
-          return {
-            ok: false,
-            reason:
-              'AC2 implementation handles the happy path but not the error case mentioned in the AC text',
-          };
-        }
-        return { ok: true };
-      },
-    );
-    const { deps, postApproval } = makeDeps({ pr, posts, judgeIntent: fakeJudge });
-
-    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText.startsWith('[qa-agent-blocked]')).toBe(true);
-    expect(outcome.commentText).toContain('AC2');
-    expect(outcome.commentText).toContain('error case');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-});
-
-describe('verifySemantic — pre-conditions', () => {
-  it('returns a no-PR-URL outcome when no PR URL is supplied', async () => {
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const fakeJudge: Deps['judgeIntent'] = vi.fn(
-      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
-    );
-    const { deps, postApproval } = makeDeps({
-      pr: makePr('', [], ''),
-      posts,
-      judgeIntent: fakeJudge,
-    });
-
-    const outcome = await verifySemantic(taskId, '', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText).toContain('No PR URL');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-
-  it('returns a not-merged outcome when the PR is open', async () => {
-    const pr: PrSummary = {
-      ...makePr('- [x] AC1: foo (testID: tests/foo.test.ts)'),
-      state: 'open',
-      merged: false,
-    };
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const fakeJudge: Deps['judgeIntent'] = vi.fn(
-      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
-    );
-    const { deps, postApproval } = makeDeps({
-      pr,
-      posts,
-      judgeIntent: fakeJudge,
-    });
-
-    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText).toContain('not merged');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-
-  it('returns a no-AC-lines outcome when the PR body has no AC tags', async () => {
-    const pr = makePr('Just a description, no ACs.', [], '');
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const fakeJudge: Deps['judgeIntent'] = vi.fn(
-      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
-    );
-    const { deps, postApproval } = makeDeps({
-      pr,
-      posts,
-      judgeIntent: fakeJudge,
-    });
-
-    const outcome = await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.commentText).toContain('No AC evidence tags');
-    expect(postApproval).not.toHaveBeenCalled();
-  });
-});
-
-describe('verifySemantic — judgeIntent gets the AC description and patch text', () => {
-  it('forwards the bare AC description (without trailing evidence) and the PR patch', async () => {
-    const pr = makePr(
-      `- [x] AC1: wire the oauth route (testID: tests/auth.test.ts)`,
-      [],
-      'diff --git a/services/x.ts b/services/x.ts\n+export const oauth = () => { ... }',
-    );
-    const posts = { approval: [] as string[], comments: [] as string[] };
-    const fakeJudge: Deps['judgeIntent'] = vi.fn(
-      async (_ac: AcEvidence, _patch: string): Promise<JudgeIntentResult> => ({ ok: true }),
-    );
-    const { deps } = makeDeps({ pr, posts, judgeIntent: fakeJudge });
-
-    await verifySemantic(taskId, 'https://github.com/owner/repo/pull/474', deps);
-
-    expect(fakeJudge).toHaveBeenCalledTimes(1);
-    const mock = fakeJudge as unknown as { mock: { calls: Array<[AcEvidence, string]> } };
-    const firstCall = mock.mock.calls[0];
-    expect(firstCall).toBeDefined();
-    const [ac, patchText] = firstCall!;
-    expect(ac).toEqual({ ac: '1', description: 'wire the oauth route' });
-    expect(patchText).toContain('export const oauth');
-  });
-});
+// Suppress unused-import warnings: AcEvidence / PrFile / PrSummary are
+// exported types used by Ash's reasoning context (and by future test
+// files) but not directly referenced inside this file's runtime
+// assertions.
+type _Unused = AcEvidence | PrFile | PrSummary;
+const _u: _Unused | undefined = undefined;
+void _u;
