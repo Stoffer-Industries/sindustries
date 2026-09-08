@@ -278,6 +278,14 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
         );
       }
       updates.scheduledFor = schedParsed ?? null;
+      // Imported CTO Craft items start life as drafts so Tom can review them
+      // before they enter the publish queue. Scheduling a draft is the
+      // explicit transition into that queue; without this, the item remains
+      // invisible to the approval action and auto-post correctly refuses it
+      // as non-approved.
+      if (schedParsed && existing.status === 'draft') {
+        updates.status = 'queued';
+      }
     }
     // kind: null would pass validateKind (which treats null/undefined as
     // "not provided") but then set updates.kind = null, bypassing the
@@ -617,4 +625,3 @@ contentSchedulerRouter.get('/content-scheduler/today-status', async (_req, res, 
     next(err);
   }
 });
-

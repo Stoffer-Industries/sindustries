@@ -27,6 +27,7 @@ import { ContentSchedulerTab } from './ContentSchedulerTab.jsx';
 const QUEUED_ID = '11111111-1111-1111-1111-111111111111';
 const APPROVED_ID = '22222222-2222-2222-2222-222222222222';
 const PUBLISHED_ID = '33333333-3333-3333-3333-333333333333';
+const SCHEDULED_DRAFT_ID = '44444444-4444-4444-4444-444444444444';
 
 function fixture({ now = '2026-07-18T15:00:00.000Z' } = {}) {
   // Default fixture uses scheduledFor values that resolve to the same
@@ -88,6 +89,24 @@ function fixture({ now = '2026-07-18T15:00:00.000Z' } = {}) {
       publishError: null,
       createdAt: '2026-07-09T20:00:00.000Z',
       updatedAt: '2026-07-21T02:00:00.000Z',
+      removedAt: null
+    },
+    {
+      id: SCHEDULED_DRAFT_ID,
+      body: 'Imported CTO Craft draft',
+      source: 'cto_craft',
+      sourceRef: 'https://example.com/article',
+      status: 'draft',
+      // 2026-07-18T20:00:00Z = 2026-07-19 08:00 NZST → today
+      scheduledFor: '2026-07-18T20:00:00.000Z',
+      position: 0,
+      approvedAt: null,
+      approvedBy: null,
+      publishedAt: null,
+      publishedUrl: null,
+      publishError: null,
+      createdAt: '2026-07-10T00:00:00.000Z',
+      updatedAt: '2026-07-10T00:00:00.000Z',
       removedAt: null
     }
   ];
@@ -177,6 +196,14 @@ describe('ContentSchedulerTab', () => {
     fireEvent.click(screen.getByTestId(`content-scheduler-approve-${QUEUED_ID}`));
     await waitFor(() => expect(approveItem.mock.calls.length).toBe(callsBefore + 1));
     expect(approveItem).toHaveBeenCalledWith(QUEUED_ID, 'Tom');
+  });
+
+  it('shows the approve action for an imported draft that is already scheduled', async () => {
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler')).toBeTruthy());
+    expect(screen.getByTestId(`content-scheduler-status-${SCHEDULED_DRAFT_ID}`).textContent).toBe('Draft');
+    fireEvent.click(screen.getByTestId(`content-scheduler-approve-${SCHEDULED_DRAFT_ID}`));
+    await waitFor(() => expect(approveItem).toHaveBeenCalledWith(SCHEDULED_DRAFT_ID, 'Tom'));
   });
 
   it('publish button on an approved item calls the publish endpoint', async () => {

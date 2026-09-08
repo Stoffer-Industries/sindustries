@@ -97,13 +97,14 @@ This index is the **domain idempotency key** for the CTO Craft ingestion workflo
 ```
         create
    ──►  queued  ──approve──►  approved  ──publish──►  published
+ draft ──schedule──► queued
             │                    │                       │
             ├──remove──► removed ├──remove──► removed  └───(terminal)
             │                    │
             └────unapprove───────┘
 ```
 
-- `draft` exists for parity with the earlier spec but the current UI composes items directly into `queued`. `draft` is reserved for future "save without queue" affordances.
+- `draft` is used by trusted imports such as CTO Craft while Tom reviews copy. Scheduling a draft promotes it to `queued`; queued items then require explicit approval before publishing. Unscheduled drafts remain review-only.
 - `published` is reached only via `POST /items/:id/publish` (manual) or via the auto-post worker. Both call the shared `publishContentSchedulerItem` service.
 - `removed` is a soft-delete; rows are retained.
 
@@ -131,7 +132,7 @@ All routes are mounted under `/api/v1` from `services/tasks-api/src/app.ts`. COR
 |---|---|---|
 | `GET` | `/content-scheduler/items` | List non-`removed` items. Includes the `autoPost*` fields. Used by the calendar grouping helper. |
 | `POST` | `/content-scheduler/items` | Create a new item. Defaults: `status=queued`, `source=manual`, `position=next` |
-| `PATCH` | `/content-scheduler/items/:id` | Edit `body`, `scheduledFor`, `source`, `sourceRef`. Reschedules preserve HH:MM client-side; server stores ISO. Re-evaluates the auto-post schedule when `scheduledFor` changes. Returns 503 `AUTO_POST_SCHEDULE_FAILED` if the adapter rejects. |
+| `PATCH` | `/content-scheduler/items/:id` | Edit `body`, `scheduledFor`, `source`, `sourceRef`. Scheduling a draft promotes it to `queued`; reschedules preserve HH:MM client-side and the server stores ISO. Re-evaluates the auto-post schedule when `scheduledFor` changes. Returns 503 `AUTO_POST_SCHEDULE_FAILED` if the adapter rejects. |
 | `POST` | `/content-scheduler/items/:id/approve` | Set `approvedAt`/`approvedBy`. Enqueues auto-post job. Returns 503 `AUTO_POST_SCHEDULE_FAILED` if the adapter rejects the enqueue. |
 | `POST` | `/content-scheduler/items/:id/unapprove` | Clear approval. Cancels auto-post job. |
 | `POST` | `/content-scheduler/items/:id/publish` | Manual publish. Runs `guardPublish` then `publishContentSchedulerItem`. On success, cancels any in-flight delayed job and bumps the schedule version. |

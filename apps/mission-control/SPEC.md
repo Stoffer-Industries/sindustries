@@ -91,8 +91,8 @@ surface.
    - **Calendar grid.** The primary view is a 10-day forward calendar
      from today through today + 9 in `Pacific/Auckland`. Each day is a
      column labelled "Wed 16 Jul" style (weekday short + day + month
-     short). Approved, queued, and published items render as cards in
-     the day column matching their `scheduledFor` date.
+     short). Approved, queued, published, and scheduled imported draft items
+     render as cards in the day column matching their `scheduledFor` date.
    - **Unscheduled overflow.** Items with no `scheduledFor` or a date
      outside the 10-day window appear in an "Unscheduled" overflow panel
      after the calendar grid.
@@ -107,11 +107,13 @@ surface.
      "Published" badge and the X post URL link when present. The day
      column header shows a `✓ Published` indicator when a card on that
      day has already published.
-   - **Approve gate.** Items are not publishable until `approvedAt` is
-     set. The Publish button is disabled with a tooltip when the item is
-     unapproved. Manual publish is still available in the composer flow
-     for on-demand posting; event-driven auto-publish on `scheduledFor`
-     arrival is documented in the [auto-post system spec](../systems/content-scheduler-auto-post.md).
+   - **Approve gate.** Imported drafts show a Draft badge while unscheduled.
+     Scheduling a draft promotes it to the queue and exposes the Approve
+     action; items are not publishable until `approvedAt` is set. The Publish
+     button is disabled with a tooltip when the item is unapproved. Manual
+     publish is still available in the composer flow for on-demand posting;
+     event-driven auto-publish on `scheduledFor` arrival is documented in the
+     [auto-post system spec](../systems/content-scheduler-auto-post.md).
    - **Max-one-published-per-day guard.** When Tom drags a card onto a
      day column that already has a published item, the drop is refused
      at the UI layer with the inline error `"Already has a published

@@ -33,6 +33,10 @@ export function SchedulerItemCard({
   const disabled = isPublishDisabled(item, today);
   const tip = publishTooltip(item, today);
   const published = item.status === 'published';
+  // Imported CTO Craft items can already have a schedule from before the
+  // draft-to-queued transition was deployed. Keep those rows actionable so
+  // Tom can approve them without having to move them again.
+  const canApprove = item.status === 'queued' || (item.status === 'draft' && item.scheduledFor);
   const cardClass = `content-scheduler-row${published ? ' content-scheduler-row--published' : ''}`;
 
   return (
@@ -137,7 +141,7 @@ export function SchedulerItemCard({
                 Edit
               </Button>
             )}
-            {item.status === 'queued' && (
+            {canApprove && (
               <Button variant="primary" size="sm" onClick={() => onApprove(item.id)} data-testid={`content-scheduler-approve-${item.id}`}>
                 Approve
               </Button>
