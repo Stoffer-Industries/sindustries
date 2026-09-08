@@ -96,6 +96,18 @@ export interface XClient {
    * handle in the path.
    */
   getTweetAuthor(tweetId: string): Promise<{ handle: string } | null>;
+  /**
+   * Delete a tweet by id. Used by the publish-orchestration compensation
+   * flow (task 1016cbff): when a multi-part thread fails after some parts
+   * have already been posted, every recorded tweet is deleted in reverse
+   * order so the aggregate returns to `approved` without leaving orphaned
+   * partial threads on X.
+   *
+   * Implementations must throw on failure — the orchestrator catches and
+   * marks the attempt `cleanup_required` rather than retrying blindly, so
+   * the caller can inspect the partially-cleaned state and retry.
+   */
+  deleteTweet(tweetId: string): Promise<void>;
 }
 
 /**
@@ -123,6 +135,17 @@ export class FakeXClient implements XClient {
     // Deterministic fake handle so dev/test flows have stable assertions.
     const digest = createHash('sha256').update(tweetId).digest('hex').slice(0, 8);
     return { handle: `fake_author_${digest}` };
+  }
+
+  async deleteTweet(tweetId: string): Promise<void> {
+    // Failure-injection hook: tests prefix the tweet id with `FAIL_DELETE`
+    // (and optionally `FAIL_DELETE_AT_<pos>:` for cleanup_required tests)
+    // to make this fake throw. Production callers never see this branch
+    // because real X ids are numeric.
+    if (tweetId.startsWith('FAIL_DELETE')) {
+      throw new Error(`FakeXClient: injected delete failure for ${tweetId}`);
+    }
+    // No-op happy path; the fake has no remote side to clean up.
   }
 }
 
@@ -253,6 +276,27 @@ export class RealXClient implements XClient {
       };
       const username = json?.includes?.users?.[0]?.username;
       return username ? { handle: username } : null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async deleteTweet(tweetId: string): Promise<void> {
+    const url = `https://api.twitter.com/2/tweets/${encodeURIComponent(tweetId)}`;
+    // DELETE — no body, no signed params (OAuth1.0a same rule as JSON POST).
+    const authorization = await this.oauthHeader('DELETE', url, {});
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: 'DELETE',
+        signal: controller.signal,
+        headers: { authorization }
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`X API ${res.status}: ${body.slice(0, 200)}`);
+      }
     } finally {
       clearTimeout(timer);
     }
