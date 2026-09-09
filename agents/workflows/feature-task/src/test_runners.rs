@@ -53,6 +53,28 @@ pub(crate) struct NpmTestRunner {
     pub(crate) workspace: Option<String>,
 }
 
+/// Escape regex metacharacters in a literal test description before it is
+/// used as vitest's `-t` filter, which matches as a regex, not a literal
+/// substring. A resolved `it()`/`test()` description can contain any
+/// character the source author wrote — parens are common (task 2c3bf69b
+/// AC3: `"...checkboxes enabled (task 2c3bf69b override)"`) — and an
+/// unescaped `(...)` is a non-capturing group boundary, not two literal
+/// characters, so the real test name (which does contain literal parens)
+/// silently fails to match. Escaping is safe for the raw-citation fallback
+/// case too: a citation `resolve_npm_test_filters` couldn't parse into a
+/// known shape is still meant to match literally, never as a deliberate
+/// regex.
+fn regex_escape_literal(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if "\\.+*?()|[]{}^$".contains(ch) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
 /// True when vitest's default reporter output shows at least one test that
 /// actually ran and passed (`Tests  N passed` with N > 0, not just
 /// `N skipped`). A `-t` filter matching nothing still exits 0 with every
@@ -67,46 +89,328 @@ fn has_passed_tests(stdout: &str) -> bool {
 
 impl ac_parsing::TestRunner for NpmTestRunner {
     fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
-        let Some(workspace) = &self.workspace else {
+        let repo_root = repo_root_dir();
+        let filters = resolve_npm_test_filters(&repo_root, test_name);
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        for resolved in &filters {
+            // A citation's own file (when known, e.g. `file#Lline` or
+            // `file > desc`) resolves the workspace that file actually
+            // lives in — needed because a single PR can touch more than
+            // one JS/TS package (e.g. `apps/tasks` + `services/tasks-api`
+            // in the same PR, task 2c3bf69b), and `self.workspace` is
+            // only ever the *first* changed file's package. Falls back to
+            // `self.workspace` for citations with no resolvable file
+            // (bare slugs) or when the citation's file isn't itself in a
+            // known workspace.
+            let workspace = resolved
+                .file
+                .as_ref()
+                .and_then(|file| resolve_npm_workspace(&repo_root, std::slice::from_ref(file)))
+                .or_else(|| self.workspace.clone());
+            let Some(workspace) = workspace else {
+                stderr.push_str(
+                    "no npm workspace package could be resolved for this citation; cannot run \
+                     a JS/TS test citation\n",
+                );
+                return Ok(ac_parsing::TestOutcome {
+                    exit_code: 1,
+                    stdout,
+                    stderr,
+                });
+            };
+            let filter = &resolved.filter;
+            let outcome = run_npm_filter(&workspace, &repo_root, filter)?;
+            stdout.push_str(&outcome.stdout);
+            stdout.push('\n');
+            if outcome.exit_code == 0 {
+                continue;
+            }
+            // Retry as an AND of comma-joined sub-descriptions before
+            // failing outright — implementers sometimes cite several
+            // `it()` names for one AC as "desc one, desc two, desc three"
+            // (task 37bbc104 AC4) rather than splitting them with `;`
+            // like `resolve_npm_test_filters` already expects at the top
+            // level. Only attempted after the whole-string filter already
+            // failed to match, so a description that legitimately
+            // contains a comma and matches as-is never reaches this path.
+            if filter.contains(", ") {
+                let sub_filters: Vec<&str> = filter
+                    .split(", ")
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let mut all_sub_passed = !sub_filters.is_empty();
+                let mut sub_stderr = String::new();
+                for sub in &sub_filters {
+                    let sub_outcome = run_npm_filter(&workspace, &repo_root, sub)?;
+                    stdout.push_str(&sub_outcome.stdout);
+                    stdout.push('\n');
+                    if sub_outcome.exit_code != 0 {
+                        all_sub_passed = false;
+                        sub_stderr.push_str(&sub_outcome.stderr);
+                        sub_stderr.push('\n');
+                    }
+                }
+                if all_sub_passed {
+                    continue;
+                }
+                stderr.push_str(&sub_stderr);
+                return Ok(ac_parsing::TestOutcome {
+                    exit_code: 1,
+                    stdout,
+                    stderr,
+                });
+            }
+            stderr.push_str(&outcome.stderr);
             return Ok(ac_parsing::TestOutcome {
                 exit_code: 1,
-                stdout: String::new(),
-                stderr: "no npm workspace package could be resolved from this PR's changed \
-                         files; cannot run a JS/TS test citation"
-                    .to_string(),
-            });
-        };
-        let output = std::process::Command::new("npm")
-            .args(["test", "--workspace", workspace, "--", "-t", test_name])
-            .current_dir(repo_root_dir())
-            .output()
-            .map_err(|err| format!("spawn npm test --workspace {workspace}: {err}"))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        if output.status.success() && has_passed_tests(&stdout) {
-            return Ok(ac_parsing::TestOutcome {
-                exit_code: 0,
                 stdout,
                 stderr,
             });
         }
-        if output.status.success() {
-            // Exit 0 but nothing matched the name filter — silent-pass trap.
-            return Ok(ac_parsing::TestOutcome {
-                exit_code: 1,
-                stdout,
-                stderr: format!(
-                    "no test named \"{test_name}\" matched in npm workspace \"{workspace}\" \
-                     (vitest ran 0 matching tests)"
-                ),
-            });
-        }
         Ok(ac_parsing::TestOutcome {
-            exit_code: output.status.code().unwrap_or(-1),
+            exit_code: 0,
             stdout,
             stderr,
         })
     }
+}
+
+/// Run a single resolved vitest name filter against `workspace` and report
+/// pass/fail, guarding the same silent-pass trap `has_passed_tests` exists
+/// for (a non-matching `-t` filter exits 0 with everything "skipped").
+fn run_npm_filter(
+    workspace: &str,
+    repo_root: &Path,
+    filter: &str,
+) -> Result<ac_parsing::TestOutcome, String> {
+    let pattern = regex_escape_literal(filter);
+    let output = std::process::Command::new("npm")
+        .args(["test", "--workspace", workspace, "--", "-t", &pattern])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|err| format!("spawn npm test --workspace {workspace}: {err}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if output.status.success() && has_passed_tests(&stdout) {
+        return Ok(ac_parsing::TestOutcome {
+            exit_code: 0,
+            stdout,
+            stderr,
+        });
+    }
+    if output.status.success() {
+        return Ok(ac_parsing::TestOutcome {
+            exit_code: 1,
+            stdout,
+            stderr: format!(
+                "no test named \"{filter}\" matched in npm workspace \"{workspace}\" \
+                 (vitest ran 0 matching tests)"
+            ),
+        });
+    }
+    Ok(ac_parsing::TestOutcome {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout,
+        stderr,
+    })
+}
+
+/// True when `path` is a bare JS/TS test-file path (`foo.test.ts`,
+/// `bar.spec.jsx`, …) with no trailing description — the same shape
+/// `ac_parsing::test_file_re` uses to decide a citation is a file
+/// reference rather than a test name.
+fn is_test_file_path(path: &str) -> bool {
+    Regex::new(r"^\S+\.(?:test|spec)\.[mc]?[jt]sx?$")
+        .unwrap()
+        .is_match(path)
+}
+
+/// Find the description string of the `it(`/`test(` call nearest to (at or
+/// before) `line` in `rel_file`, read relative to `repo_root`. Citations
+/// naming a file + line (e.g. `#L78`) point at the body of a test rather
+/// than its description, so this walks forward from the top of the file
+/// tracking the last-seen `it(`/`test(` literal up to `line` — the
+/// enclosing test. Single-line `it('desc', ...)` declarations only (this
+/// repo's prevailing style); a description that itself spans multiple
+/// lines is not resolved and the caller falls back to the raw citation.
+fn nearest_test_description(repo_root: &Path, rel_file: &str, line: usize) -> Option<String> {
+    let contents = std::fs::read_to_string(repo_root.join(rel_file)).ok()?;
+    // No backreferences in the `regex` crate, so each quote style gets its
+    // own capture group instead of a shared `\1` close-quote match.
+    let re = Regex::new(
+        r#"(?:^|[^.\w])(?:it|test)\(\s*(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"|`((?:\\.|[^`\\])*)`)"#,
+    )
+    .unwrap();
+    let mut best: Option<String> = None;
+    for (idx, text) in contents.lines().enumerate() {
+        if idx + 1 > line {
+            break;
+        }
+        if let Some(caps) = re.captures(text) {
+            if let Some(desc) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
+                best = Some(unescape_js_string(desc.as_str()));
+            }
+        }
+    }
+    best
+}
+
+/// Undo JS string-literal escaping in a description captured verbatim
+/// from source text (e.g. `Tom\'s` inside a single-quoted literal is the
+/// two characters `\` `'` in the source, but the string's real value —
+/// and what vitest reports as the test name — is just `'`). Handles the
+/// escapes that actually show up in this repo's test descriptions;
+/// unrecognised `\x` sequences are left as `x` (backslash dropped), which
+/// only matters for escapes this repo doesn't use.
+fn unescape_js_string(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// One resolved vitest `-t` filter, plus the source file it was resolved
+/// from when known. The file lets the caller resolve *that citation's*
+/// workspace specifically, rather than the one workspace resolved for the
+/// whole PR — needed when a PR touches more than one JS/TS package (task
+/// 2c3bf69b: `apps/tasks` + `services/tasks-api` in the same PR, where the
+/// PR-level `resolve_npm_workspace` only ever picks the first).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedFilter {
+    pub(crate) file: Option<String>,
+    pub(crate) filter: String,
+}
+
+/// Parse one or more `#L<n>` / `#L<n>-<m>` line references out of a
+/// citation, resolving each to the enclosing test's real description via
+/// `nearest_test_description`. Handles the multi-range shape
+/// `file.ts#L8 + #L78-100` (task 2c3bf69b AC1) where only the first `+`
+/// segment carries the file path and later segments reuse it. Returns
+/// `None` if the citation has no `#L` marker at all, or if every `#L`
+/// reference fails to resolve (stale line number, unreadable file, …) so
+/// the caller can fall back to the raw citation text instead of silently
+/// dropping the AC's evidence.
+fn resolve_line_citations(repo_root: &Path, citation: &str) -> Option<Vec<ResolvedFilter>> {
+    if !citation.contains("#L") {
+        return None;
+    }
+    let mut current_file: Option<String> = None;
+    let mut resolved: Vec<ResolvedFilter> = Vec::new();
+    for chunk in citation.split('+') {
+        let chunk = chunk.trim();
+        let Some((maybe_file, rest)) = chunk.split_once("#L") else {
+            continue;
+        };
+        let file = if maybe_file.trim().is_empty() {
+            current_file.clone()?
+        } else {
+            let file = maybe_file.trim().to_string();
+            current_file = Some(file.clone());
+            file
+        };
+        let line_digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let Ok(line) = line_digits.parse::<usize>() else {
+            continue;
+        };
+        if let Some(name) = nearest_test_description(repo_root, &file, line) {
+            if !resolved.iter().any(|r| r.filter == name) {
+                resolved.push(ResolvedFilter {
+                    file: Some(file.clone()),
+                    filter: name,
+                });
+            }
+        }
+    }
+    if resolved.is_empty() { None } else { Some(resolved) }
+}
+
+/// Resolve one `<file> > <description>` citation segment (vitest's own
+/// reporter path format) to the bare description, which is what actually
+/// appears in a test's reported name — the file portion is never part of
+/// it, so passing the segment through unchanged to `-t` can never match
+/// (task 37bbc104 AC1-3/5).
+fn resolve_arrow_citation(segment: &str) -> Option<ResolvedFilter> {
+    let (prefix, rest) = segment.split_once(" > ")?;
+    let prefix = prefix.trim();
+    is_test_file_path(prefix).then(|| ResolvedFilter {
+        file: Some(prefix.to_string()),
+        filter: rest.trim().to_string(),
+    })
+}
+
+/// Resolve one `<file> <description>` citation segment (no `>` separator,
+/// just a leading file token) to the bare description, the same
+/// file-prefix-strip `resolve_arrow_citation` does for the `>` shape
+/// (tasks 1016cbff AC2, PR #598/#608 style citations).
+fn resolve_leading_filename_citation(segment: &str) -> Option<ResolvedFilter> {
+    let re = Regex::new(r"^(\S+\.(?:test|spec)\.[mc]?[jt]sx?)\s+(.+)$").unwrap();
+    let caps = re.captures(segment)?;
+    Some(ResolvedFilter {
+        file: Some(caps[1].to_string()),
+        filter: caps[2].trim().to_string(),
+    })
+}
+
+/// Split a raw AC test citation into the list of vitest `-t` filters that
+/// must each independently match and pass. Citations vary in shape by
+/// implementer — a bare literal test name, a `file#Lline` reference, a
+/// `file > description` (vitest's own path format), a `file description`
+/// pair, or several of those joined by `;` for one AC (task 1016cbff AC3)
+/// — so each `;`-separated segment is resolved independently and any
+/// segment that doesn't match a known shape is kept as-is. That keeps
+/// today's literal-match behaviour for citations this can't parse (e.g. a
+/// bare slug with no file/line reference at all) rather than dropping
+/// them, so those still fail loudly instead of silently passing.
+pub(crate) fn resolve_npm_test_filters(repo_root: &Path, citation: &str) -> Vec<ResolvedFilter> {
+    // A `#L` line reference is resolved against the *whole* citation
+    // first, before any `;` splitting: several real citations use `;` as
+    // ordinary sentence punctuation after a line range to explain why it
+    // covers the AC (task 2c3bf69b AC2/AC4/AC5, e.g. "...#L78-100 covers
+    // the grant path; the existing DELETE branches ... are unchanged"),
+    // and splitting on `;` first would strand that explanatory clause as
+    // its own unresolvable sub-citation and fail an AC whose cited test
+    // actually does resolve and pass. `resolve_line_citations` already
+    // walks `+`-joined ranges within one citation on its own, so this
+    // only needs to fall through to the `;`-as-multi-citation-delimiter
+    // case (task 1016cbff AC3: two independent `file > desc` citations
+    // for one AC) when there is no line reference at all.
+    if let Some(resolved) = resolve_line_citations(repo_root, citation) {
+        return resolved;
+    }
+    let mut filters = Vec::new();
+    for segment in citation.split(';') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if let Some(resolved) = resolve_arrow_citation(segment) {
+            filters.push(resolved);
+        } else if let Some(resolved) = resolve_leading_filename_citation(segment) {
+            filters.push(resolved);
+        } else {
+            filters.push(ResolvedFilter {
+                file: None,
+                filter: segment.to_string(),
+            });
+        }
+    }
+    if filters.is_empty() {
+        filters.push(ResolvedFilter {
+            file: None,
+            filter: citation.to_string(),
+        });
+    }
+    filters
 }
 
 /// Resolve the npm workspace package name a PR most likely needs its JS/TS
@@ -312,7 +616,8 @@ impl PytestTestRunner {
         repo_root: &Path,
         test_name: &str,
     ) -> Result<ac_parsing::TestOutcome, String> {
-        let (file_part, _func_part) = test_name
+        let normalized = normalize_pytest_citation(test_name);
+        let (file_part, _func_part) = normalized
             .split_once("::")
             .ok_or_else(|| format!("not a pytest nodeid (missing '::'): {test_name}"))?;
         let file_abs = repo_root.join(file_part);
@@ -344,6 +649,24 @@ impl ac_parsing::TestRunner for PytestTestRunner {
     }
 }
 
+/// Convert the space-separated pytest citation shape implementers
+/// sometimes write instead of the canonical `file.py::Class::method`
+/// nodeid — e.g. `path/to/test_foo.py FooTest.test_bar` (task 1016cbff
+/// AC4/AC5) — into a real nodeid. Already-`::`-qualified citations pass
+/// through unchanged; a bare dotted `Class.method` after the `.py ` file
+/// token becomes `Class::method` (pytest's own nodeid separator for
+/// unittest-style classes).
+fn normalize_pytest_citation(test_name: &str) -> String {
+    if test_name.contains("::") {
+        return test_name.to_string();
+    }
+    let Some((file, rest)) = test_name.split_once(".py ") else {
+        return test_name.to_string();
+    };
+    let qualname = rest.trim().replace('.', "::");
+    format!("{file}.py::{qualname}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TestRunnerKind {
     Shell,
@@ -352,13 +675,24 @@ pub(crate) enum TestRunnerKind {
     Npm,
 }
 
+/// Detect the space-separated pytest citation shape `normalize_pytest_citation`
+/// converts to a nodeid — a `.py` file token, one space, then a bare
+/// dotted `Class.method` (or `function`) name with no whitespace of its
+/// own. Anchored on both ends so a prose citation that merely mentions a
+/// `.py` file in passing doesn't get misrouted to the Pytest runner.
+fn looks_like_pytest_space_nodeid(test_name: &str) -> bool {
+    Regex::new(r"^\S+\.py \S+\.\S+$")
+        .unwrap()
+        .is_match(test_name.trim())
+}
+
 /// Choose which runner should execute a cited `testID` based on the shape
 /// of the name itself, not just which crate/workspace the PR happened to
 /// touch. A single PR can mix Rust, shell, Python, and JS ACs, so
 /// dispatch looks at each citation independently rather than picking one
 /// runner for the whole PR (tasks 5baf6809 / 60971f78).
 pub(crate) fn select_test_runner_kind(test_name: &str, is_rust_pr: bool) -> TestRunnerKind {
-    if test_name.contains(".py::") {
+    if test_name.contains(".py::") || looks_like_pytest_space_nodeid(test_name) {
         TestRunnerKind::Pytest
     } else if test_name.ends_with(".sh") {
         TestRunnerKind::Shell
@@ -405,6 +739,60 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn regex_escape_literal_escapes_parens_so_they_match_literally() {
+        // Task 2c3bf69b AC3: the real `it()` description contains literal
+        // parens ("...enabled (task 2c3bf69b override)"); unescaped, `(`
+        // is a non-capturing regex group boundary, not two literal
+        // characters, and the pattern silently matches nothing.
+        assert_eq!(
+            regex_escape_literal("enabled (task 2c3bf69b override)"),
+            r"enabled \(task 2c3bf69b override\)"
+        );
+    }
+
+    #[test]
+    fn regex_escape_literal_is_a_no_op_for_plain_text() {
+        assert_eq!(
+            regex_escape_literal("lets Tom grant tech_design"),
+            "lets Tom grant tech_design"
+        );
+    }
+
+    #[test]
+    fn unescape_js_string_undoes_an_escaped_apostrophe() {
+        // Task 2c3bf69b AC3's real citation resolves into a description
+        // captured from `it('renders Tom\'s tech_design ...', ...)` — the
+        // source has the two characters `\` `'`, but the JS string's real
+        // value (and what vitest reports) is just `'`.
+        assert_eq!(unescape_js_string(r"Tom\'s tech_design"), "Tom's tech_design");
+    }
+
+    #[test]
+    fn nearest_test_description_unescapes_an_escaped_apostrophe_in_source() {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("apps/tasks/src/components");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("ApprovalsSection.test.jsx"),
+            "describe('ApprovalsSection', () => {\n\
+             it('renders Tom\\'s tech_design and qa_agent checkboxes enabled (task override)', async () => {\n\
+             });\n\
+             });\n",
+        )
+        .unwrap();
+
+        let name = nearest_test_description(
+            root.path(),
+            "apps/tasks/src/components/ApprovalsSection.test.jsx",
+            2,
+        );
+        assert_eq!(
+            name,
+            Some("renders Tom's tech_design and qa_agent checkboxes enabled (task override)".to_string())
+        );
+    }
 
     #[test]
     fn has_passed_tests_true_when_at_least_one_test_passed() {
@@ -475,6 +863,222 @@ mod tests {
 
         let pr_files = vec!["docs/specs/some-doc.md".to_string()];
         assert_eq!(resolve_npm_workspace(root.path(), &pr_files), None);
+    }
+
+    // ---- citation resolution (task 5baf6809-adjacent: PR #610 fixed the
+    // wrong half of the pnpm->npm bug — the runner found the right
+    // workspace but still passed the raw AC citation text verbatim as the
+    // `-t` filter, and real citations are file#Lline refs, vitest's own
+    // `file > description` path format, or several of those joined by
+    // `;`, never a literal test-name string on their own) ----
+
+    fn resolved(file: Option<&str>, filter: &str) -> ResolvedFilter {
+        ResolvedFilter {
+            file: file.map(str::to_string),
+            filter: filter.to_string(),
+        }
+    }
+
+    #[test]
+    fn resolve_arrow_citation_strips_the_file_prefix() {
+        // Task 37bbc104 AC1: vitest's own reporter path format. The file
+        // segment is never part of a test's reported name, so it must be
+        // stripped before use as a `-t` filter.
+        assert_eq!(
+            resolve_arrow_citation(
+                "services/gymtrack-mcp/test/rateLimit.test.js > lets the first request \
+                 through and 429s once the per-IP window is exceeded"
+            ),
+            Some(resolved(
+                Some("services/gymtrack-mcp/test/rateLimit.test.js"),
+                "lets the first request through and 429s once the per-IP window is exceeded"
+            ))
+        );
+    }
+
+    #[test]
+    fn resolve_arrow_citation_rejects_a_non_file_prefix() {
+        // No `.test.`/`.spec.` extension before " > " — not this shape,
+        // must not be misread as one (falls through to the raw-citation
+        // fallback in `resolve_npm_test_filters` instead).
+        assert_eq!(resolve_arrow_citation("some prose > with an arrow in it"), None);
+    }
+
+    #[test]
+    fn resolve_leading_filename_citation_strips_the_file_token() {
+        // Task 1016cbff AC2 style: `<file> <description>` with no `>`.
+        assert_eq!(
+            resolve_leading_filename_citation("ContentSchedulerTab.test.jsx thread surface"),
+            Some(resolved(Some("ContentSchedulerTab.test.jsx"), "thread surface"))
+        );
+    }
+
+    #[test]
+    fn resolve_leading_filename_citation_none_for_a_bare_slug() {
+        // Tasks ec75969b/3d80fd5a: a symbolic testID with no file token
+        // at all must fall through unresolved, not be mangled.
+        assert_eq!(
+            resolve_leading_filename_citation("mission-control-vercel-deploy-fixtures"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_line_citations_finds_the_enclosing_test_by_line_number() {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("services/tasks-api/test");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("taskApprovals.test.ts"),
+            "import { it } from 'vitest';\n\n\
+             it('accepts a durable unexpired browser session cookie', async () => {\n\
+             });\n\n\
+             it('lets Tom grant tech_design and qa_agent as an override', async () => {\n\
+             });\n",
+        )
+        .unwrap();
+
+        let names = resolve_line_citations(
+            root.path(),
+            "services/tasks-api/test/taskApprovals.test.ts#L7",
+        );
+        assert_eq!(
+            names,
+            Some(vec![resolved(
+                Some("services/tasks-api/test/taskApprovals.test.ts"),
+                "lets Tom grant tech_design and qa_agent as an override"
+            )])
+        );
+    }
+
+    #[test]
+    fn resolve_line_citations_reuses_the_file_across_a_plus_joined_range() {
+        // Task 2c3bf69b AC1's real citation shape: only the first `+`
+        // segment carries the file path, later segments are bare `#L`
+        // ranges against that same file.
+        let root = tempdir().unwrap();
+        let dir = root.path().join("services/tasks-api/test");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("taskApprovals.test.ts"),
+            "import { it } from 'vitest';\n\n\
+             it('first test', async () => {\n\
+             });\n\n\
+             it('second test', async () => {\n\
+             });\n",
+        )
+        .unwrap();
+
+        let names = resolve_line_citations(
+            root.path(),
+            "services/tasks-api/test/taskApprovals.test.ts#L3 + #L6-8",
+        );
+        let file = Some("services/tasks-api/test/taskApprovals.test.ts");
+        assert_eq!(
+            names,
+            Some(vec![resolved(file, "first test"), resolved(file, "second test")])
+        );
+    }
+
+    #[test]
+    fn resolve_line_citations_none_without_a_hash_l_marker() {
+        assert_eq!(resolve_line_citations(Path::new("/tmp"), "just a plain name"), None);
+    }
+
+    #[test]
+    fn resolve_npm_test_filters_splits_semicolon_joined_citations() {
+        // Task 1016cbff AC3: two file+description citations for one AC.
+        let root = tempdir().unwrap();
+        let filters = resolve_npm_test_filters(
+            root.path(),
+            "a.test.ts > first thing; b.test.ts > second thing",
+        );
+        assert_eq!(
+            filters,
+            vec![
+                resolved(Some("a.test.ts"), "first thing"),
+                resolved(Some("b.test.ts"), "second thing")
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_npm_test_filters_keeps_a_line_citation_whole_across_an_explanatory_semicolon() {
+        // Task 2c3bf69b AC2's real citation shape: `;` here is sentence
+        // punctuation after the line range, not a second citation. Must
+        // resolve via the line reference, not fragment on `;` and strand
+        // "the existing DELETE branches ..." as an unresolvable citation.
+        let root = tempdir().unwrap();
+        let dir = root.path().join("services/tasks-api/test");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("taskApprovals.test.ts"),
+            "import { it } from 'vitest';\n\n\
+             it('lets Tom grant tech_design and qa_agent as an override', async () => {\n\
+             });\n",
+        )
+        .unwrap();
+
+        let filters = resolve_npm_test_filters(
+            root.path(),
+            "services/tasks-api/test/taskApprovals.test.ts#L3 covers the grant path; \
+             the existing DELETE branches in the same file exercise revocation",
+        );
+        assert_eq!(
+            filters,
+            vec![resolved(
+                Some("services/tasks-api/test/taskApprovals.test.ts"),
+                "lets Tom grant tech_design and qa_agent as an override"
+            )]
+        );
+    }
+
+    #[test]
+    fn resolve_npm_test_filters_falls_back_to_the_raw_citation_when_unrecognised() {
+        // Tasks ec75969b/3d80fd5a: a bare symbolic slug with no file
+        // reference at all is not a shape this can resolve — it must
+        // still be attempted (and fail loudly) rather than dropped.
+        let root = tempdir().unwrap();
+        let filters = resolve_npm_test_filters(root.path(), "mission-control-vercel-deploy-fixtures");
+        assert_eq!(
+            filters,
+            vec![resolved(None, "mission-control-vercel-deploy-fixtures")]
+        );
+    }
+
+    #[test]
+    fn normalize_pytest_citation_converts_space_separated_classname_to_a_nodeid() {
+        // Task 1016cbff AC4: implementers sometimes cite a pytest
+        // unittest-style test as `<file>.py <Class>.<method>` instead of
+        // the canonical `<file>.py::<Class>::<method>` nodeid.
+        assert_eq!(
+            normalize_pytest_citation(
+                "agents/workflows/content-tasks/tests/test_foo.py FooTest.test_bar"
+            ),
+            "agents/workflows/content-tasks/tests/test_foo.py::FooTest::test_bar"
+        );
+    }
+
+    #[test]
+    fn normalize_pytest_citation_passes_through_an_already_qualified_nodeid() {
+        assert_eq!(
+            normalize_pytest_citation("agents/foo/test_bar.py::test_baz"),
+            "agents/foo/test_bar.py::test_baz"
+        );
+    }
+
+    #[test]
+    fn looks_like_pytest_space_nodeid_matches_the_file_space_classname_dot_method_shape() {
+        assert!(looks_like_pytest_space_nodeid(
+            "agents/workflows/content-tasks/tests/test_foo.py FooTest.test_bar"
+        ));
+    }
+
+    #[test]
+    fn looks_like_pytest_space_nodeid_rejects_prose_mentioning_a_py_file() {
+        assert!(!looks_like_pytest_space_nodeid(
+            "see agents/foo/test_bar.py for the fixture setup"
+        ));
     }
 
     #[test]
