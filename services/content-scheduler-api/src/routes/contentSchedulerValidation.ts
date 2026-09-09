@@ -38,6 +38,12 @@ export function parseDate(value: unknown): Date | null | 'invalid' {
   return Number.isNaN(d.valueOf()) ? 'invalid' : d;
 }
 
+export function parseScheduledFor(value: unknown): Date | null | 'invalid' {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') return 'invalid';
+  return parseDate(value);
+}
+
 export function validateBody(body: unknown): string | null {
   if (typeof body !== 'string') return 'body must be a string';
   const trimmed = body.trim();
@@ -106,6 +112,7 @@ export type ImportItemInput = {
   sourceRef: unknown;
   issueRef?: unknown;
   evidenceExcerpt?: unknown;
+  scheduledFor?: unknown;
 };
 
 export function validateImportItem(input: unknown): string | null {
@@ -140,6 +147,10 @@ export function validateImportItem(input: unknown): string | null {
     typeof item.evidenceExcerpt !== 'string'
   ) {
     return 'item.evidenceExcerpt must be a string when present';
+  }
+
+  if (parseScheduledFor(item.scheduledFor) === 'invalid') {
+    return 'item.scheduledFor must be a valid ISO 8601 datetime string when present';
   }
 
   return null;

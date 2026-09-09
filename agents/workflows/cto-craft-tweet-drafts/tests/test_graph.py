@@ -20,11 +20,13 @@ separate deterministic tests in ``test_angle_model.py`` and
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import httpx
 import pytest
 
 from cto_craft_workflow.angle_model import AngleOutput, FakeAngleModel
-from cto_craft_workflow.graph import GraphDeps, build_graph
+from cto_craft_workflow.graph import GraphDeps, build_graph, import_drafts
 from cto_craft_workflow.safe_fetch import SafeFetcher
 from cto_craft_workflow.state import make_initial_state
 
@@ -185,6 +187,60 @@ def test_happy_path_creates_three_drafts(
     assert len(final["selected_angles"]) <= 5
     assert final["import_result"]["createdCount"] == len(import_calls[0])
     assert len(import_calls) == 1
+    scheduled = [datetime.fromisoformat(item["scheduledFor"]) for item in import_calls[0]]
+    assert all(
+        (later - earlier).days == 1
+        for earlier, later in zip(scheduled, scheduled[1:])
+    )
+
+
+def test_import_drafts_truncates_url_bearing_tweet_and_preserves_link() -> None:
+    url = "https://example.com/article"
+    imported: list[dict] = []
+
+    def fake_import(items: list[dict]) -> dict:
+        imported.extend(items)
+        return {
+            "createdCount": len(items),
+            "skippedDuplicateCount": 0,
+            "createdIds": ["id-1"],
+            "sourceRefs": [items[0]["sourceRef"]],
+        }
+
+    state = make_initial_state(
+        run_key="2026-W32",
+        thread_id="cto-craft/2026-W32-link-budget",
+        started_at="2026-08-10T09:00:00Z",
+    )
+    state["selected_angles"] = [
+        {
+            "canonical_url": url,
+            "tweet_body": "x" * 300 + " " + url,
+            "evidence_excerpt": "evidence",
+            "resonance_score": 0.8,
+            "issue_ref": "https://example.com/issue",
+        }
+    ]
+    deps = GraphDeps(
+        fetcher=None,  # type: ignore[arg-type]
+        model=None,  # type: ignore[arg-type]
+        system_prompt="",
+        worldview_profile="",
+        min_resonance_score=0.55,
+        max_selected_angles=5,
+        model_timeout_seconds=5.0,
+        archive_url="https://example.com/archive",
+        import_fn=fake_import,
+    )
+
+    result = import_drafts(state, deps)
+
+    assert result["outcome"] == "created"
+    assert len(imported[0]["body"]) <= 280
+    assert imported[0]["body"].endswith(url)
+    assert "TWEET_TRUNCATED_FOR_LINK_BUDGET" in {
+        diagnostic["code"] for diagnostic in state["diagnostics"]
+    }
 
 
 def test_fewer_than_three_strong_candidates_is_noop(
