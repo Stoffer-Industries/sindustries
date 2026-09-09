@@ -90,9 +90,27 @@ pub(crate) fn nearest_pyproject_dir(repo_root: &Path, start_file: &Path) -> Opti
     }
 }
 
+/// Nearest ancestor of `start_file` (inclusive of its parent, exclusive of
+/// `repo_root` itself) containing a `package.json`. This repo's JS/TS
+/// packages live under `apps/*`, `services/*`, and `packages/*`, each an
+/// npm workspace package with its own `package.json` — the root
+/// `package.json`'s legacy `"workspaces"` field is not itself a runnable
+/// package, so reaching `repo_root` without finding a nearer one is "not
+/// found", matching `nearest_pyproject_dir`'s contract.
+pub(crate) fn nearest_package_json_dir(repo_root: &Path, start_file: &Path) -> Option<PathBuf> {
+    let mut dir = start_file.parent()?;
+    while dir != repo_root {
+        if dir.join("package.json").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{nearest_pyproject_dir, resolve_repo_file_by_name};
+    use super::{nearest_package_json_dir, nearest_pyproject_dir, resolve_repo_file_by_name};
     use std::fs;
     use tempfile::tempdir;
 
@@ -178,5 +196,32 @@ mod tests {
         fs::write(&test_file, "def test_z(): pass\n").unwrap();
 
         assert!(nearest_pyproject_dir(root.path(), &test_file).is_none());
+    }
+
+    #[test]
+    fn nearest_package_json_dir_walks_up_to_the_workspace_package_root() {
+        let root = tempdir().unwrap();
+        let package = root.path().join("apps/mission-control");
+        let src_dir = package.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(package.join("package.json"), "{\"name\": \"@sindustries/mission-control\"}\n")
+            .unwrap();
+        let changed_file = src_dir.join("Sidebar.test.jsx");
+        fs::write(&changed_file, "").unwrap();
+
+        let found = nearest_package_json_dir(root.path(), &changed_file).unwrap();
+        assert_eq!(found, package);
+    }
+
+    #[test]
+    fn nearest_package_json_dir_does_not_match_the_repo_root_package_json() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("package.json"), "{\"workspaces\": [\"apps/*\"]}\n").unwrap();
+        let nested = root.path().join("docs/specs");
+        fs::create_dir_all(&nested).unwrap();
+        let changed_file = nested.join("some-doc.md");
+        fs::write(&changed_file, "").unwrap();
+
+        assert!(nearest_package_json_dir(root.path(), &changed_file).is_none());
     }
 }
