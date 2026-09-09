@@ -26,8 +26,6 @@ _WORKSPACE = _SCRIPTS_DIR.parents[3]
 sys.path.insert(0, str(_WORKSPACE))  # for `agents.lib`
 sys.path.insert(0, str(_SCRIPTS_DIR))  # for `common`, `ws3_routing`
 
-import pytest  # noqa: E402
-
 from ws3_routing import (  # noqa: E402
     ROUTE_AMBIGUOUS,
     ROUTE_DIRECT,
