@@ -44,6 +44,7 @@ import {
   validateKind,
   validateLinksToItemId,
   validateManualPostedUrl,
+  validateThreadParts,
   validSources,
   validStatuses
 } from './contentSchedulerValidation.ts';
@@ -81,9 +82,9 @@ async function applyAutoPostSchedule(
     scheduledFor: Date | null;
     autoPostJobId: string | null;
     autoPostScheduleVersion: number;
-    kind?: 'scheduled' | 'manual_reply';
+    kind?: 'scheduled' | 'manual_reply' | 'thread' | 'thread';
   },
-  next: { status: typeof TERMINAL_STATUSES[number] | 'draft' | 'queued' | 'approved'; scheduledFor: Date | null; kind?: 'scheduled' | 'manual_reply' }
+  next: { status: typeof TERMINAL_STATUSES[number] | 'draft' | 'queued' | 'approved'; scheduledFor: Date | null; kind?: 'scheduled' | 'manual_reply' | 'thread' | 'thread' }
 ): Promise<void> {
   const decision = decideAutoPostAction({ prior, next });
   const adapter = getJobSchedulerAdapter();
@@ -137,7 +138,14 @@ contentSchedulerRouter.get('/content-scheduler/items', async (req, res, next) =>
       where: statusFilter
         ? { status: statusFilter as any }
         : { status: { not: 'removed' as const } },
-      orderBy: [{ status: 'asc' }, { position: 'asc' }, { createdAt: 'asc' }]
+      orderBy: [{ status: 'asc' }, { position: 'asc' }, { createdAt: 'asc' }],
+      // Include ordered thread parts (task 1016cbff PR B). `body` is
+      // position 0; the parts array covers positions 1..n. The MC UI
+      // flattens these into one card with the parts displayed under
+      // the root body.
+      include: {
+        parts: { orderBy: { position: 'asc' } }
+      }
     });
 
     res.json({ data: items });
@@ -148,17 +156,50 @@ contentSchedulerRouter.get('/content-scheduler/items', async (req, res, next) =>
 
 contentSchedulerRouter.post('/content-scheduler/items', async (req, res, next) => {
   try {
-    const { body, source, sourceRef, scheduledFor, kind, manualPostedUrl, manualPostedAt, linksToItemId } = req.body ?? {};
+    const { body, parts, source, sourceRef, scheduledFor, kind, manualPostedUrl, manualPostedAt, linksToItemId } = req.body ?? {};
 
-    const bodyError = validateBody(body);
-    if (bodyError) return badRequest(res, 'INVALID_BODY', bodyError);
+    const kindError = validateKind(kind);
+    if (kindError) return badRequest(res, 'INVALID_KIND', kindError);
+
+    // Thread create: parts[] carries the ordered tweet texts (root + replies).
+    // The single-tweet `body` field is reserved for kind=scheduled /
+    // kind=manual_reply items. Threads that also set `body` are rejected
+    // so the root text never has two sources of truth.
+    let threadParts: Array<{ body: string }> | null = null;
+    if (kind === 'thread') {
+      if (parts === undefined || parts === null) {
+        return badRequest(
+          res,
+          'INVALID_PARTS',
+          'kind=thread requires a `parts` array of 2..7 ordered tweet texts'
+        );
+      }
+      if (body !== undefined && body !== null) {
+        return badRequest(
+          res,
+          'INVALID_PARTS',
+          'kind=thread items must use `parts` (root text); do not also set `body`'
+        );
+      }
+      const partsError = validateThreadParts(parts);
+      if (partsError) return badRequest(res, 'INVALID_PARTS', partsError);
+      threadParts = (parts as Array<{ body: unknown }>).map((p) => ({ body: (p.body as string).trim() }));
+    } else {
+      // Non-thread kinds require the single-tweet `body` field.
+      const bodyError = validateBody(body);
+      if (bodyError) return badRequest(res, 'INVALID_BODY', bodyError);
+      if (parts !== undefined && parts !== null) {
+        return badRequest(
+          res,
+          'INVALID_PARTS',
+          '`parts` is only valid when kind=thread; omit it for scheduled / manual_reply items'
+        );
+      }
+    }
 
     if (source !== undefined && !validSources.has(source)) {
       return badRequest(res, 'INVALID_SOURCE', 'Invalid source value');
     }
-
-    const kindError = validateKind(kind);
-    if (kindError) return badRequest(res, 'INVALID_KIND', kindError);
 
     const schedParsed = parseDate(scheduledFor);
     if (schedParsed === 'invalid') {
@@ -217,14 +258,32 @@ contentSchedulerRouter.post('/content-scheduler/items', async (req, res, next) =
 
     const created = await prisma.contentSchedulerItem.create({
       data: {
-        body: (body as string).trim(),
+        // For thread items, the root tweet text lives at parts[0].body;
+        // for other kinds the single-tweet `body` field is used.
+        body: threadParts ? threadParts[0].body : (body as string).trim(),
         source: source ?? 'manual',
         sourceRef: typeof sourceRef === 'string' ? sourceRef : null,
         scheduledFor: schedParsed ?? null,
         status: 'queued',
         position: nextPosition,
         kind: kind ?? 'scheduled',
-        linksToItemId: typeof linksToItemId === 'string' ? linksToItemId : null
+        linksToItemId: typeof linksToItemId === 'string' ? linksToItemId : null,
+        // Persist ordered reply parts (positions 1..n) for kind=thread.
+        // Position 0 lives on `body` so the public API contract is a
+        // contiguous, normalised array on read.
+        ...(threadParts && threadParts.length > 1
+          ? {
+              parts: {
+                create: threadParts.slice(1).map((p, idx) => ({
+                  position: idx + 1,
+                  body: p.body
+                }))
+              }
+            }
+          : {})
+      },
+      include: {
+        parts: { orderBy: { position: 'asc' } }
       }
     });
 
@@ -245,10 +304,47 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
       return sendError(res, 409, 'TERMINAL_STATUS', `Cannot edit item in status ${existing.status}`);
     }
 
-    const { body, source, sourceRef, scheduledFor, kind, linksToItemId } = req.body ?? {};
+    const { body, parts, source, sourceRef, scheduledFor, kind, linksToItemId } = req.body ?? {};
     const updates: Record<string, unknown> = {};
+    let threadReplaceParts: Array<{ body: string }> | null = null;
+
+    // Thread PATCH semantics (task 1016cbff PR B): when the existing item
+    // is kind=thread, the client may send `parts` to replace the full
+    // ordered part list in one call. We never allow mixed shape — either
+    // pass the thread's full part list (root in parts[0]) or pass plain
+    // single-tweet fields. The two surfaces have distinct validation
+    // paths so a malformed request can never silently drop parts.
+    const effectiveKindAtStart = (updates.kind as string | undefined) ?? existing.kind;
+    if (parts !== undefined && parts !== null) {
+      if (effectiveKindAtStart !== 'thread') {
+        return badRequest(
+          res,
+          'INVALID_PARTS',
+          '`parts` may only be patched on kind=thread items; current kind is ' + existing.kind
+        );
+      }
+      const partsError = validateThreadParts(parts);
+      if (partsError) return badRequest(res, 'INVALID_PARTS', partsError);
+      if (body !== undefined && body !== null) {
+        return badRequest(
+          res,
+          'INVALID_PARTS',
+          'kind=thread PATCH must use `parts` (root text); do not also set `body`'
+        );
+      }
+      threadReplaceParts = (parts as Array<{ body: unknown }>).map((p) => ({
+        body: (p.body as string).trim()
+      }));
+    }
 
     if (body !== undefined) {
+      if (effectiveKindAtStart === 'thread') {
+        return badRequest(
+          res,
+          'INVALID_BODY',
+          'kind=thread items cannot PATCH `body` directly; pass `parts` to replace the full list'
+        );
+      }
       const bodyError = validateBody(body);
       if (bodyError) return badRequest(res, 'INVALID_BODY', bodyError);
       updates.body = (body as string).trim();
@@ -321,14 +417,88 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
       updates.linksToItemId = typeof linksToItemId === 'string' ? linksToItemId : null;
     }
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && !threadReplaceParts) {
       return badRequest(res, 'NO_UPDATES', 'No updatable fields provided');
     }
 
-    const updated = await prisma.contentSchedulerItem.update({
+    // Thread PATCH is a full part-list replacement (task 1016cbff PR B):
+    // delete existing reply rows, create new ones with positions 1..n-1,
+    // and update body to parts[0].body. Editing any part of an approved
+    // thread invalidates approval, returns the item to queued, and bumps
+    // the auto-post schedule version so any in-flight delayed job sees
+    // the new version. The whole replacement happens in one transaction
+    // so partial state can never be observed.
+    let updated: any;
+    if (threadReplaceParts) {
+      updated = await prisma.$transaction(async (tx) => {
+        const replacementUpdates: Record<string, unknown> = {
+          ...updates,
+          body: threadReplaceParts![0].body
+        };
+        if (existing.status === 'approved') {
+          // Approval invalidation: clear approvedAt/approvedBy and return
+          // to queued. Documented behavior (tech design §PR B Mission
+          // Control changes); the UI surfaces this with an explanatory
+          // note when Tom edits an approved thread.
+          replacementUpdates.status = 'queued';
+          replacementUpdates.approvedAt = null;
+          replacementUpdates.approvedBy = null;
+        }
+        await tx.contentSchedulerItem.update({
+          where: { id },
+          data: replacementUpdates
+        });
+        await tx.contentSchedulerThreadPart.deleteMany({ where: { itemId: id } });
+        if (threadReplaceParts!.length > 1) {
+          await tx.contentSchedulerThreadPart.createMany({
+            data: threadReplaceParts!.slice(1).map((p, idx) => ({
+              itemId: id,
+              position: idx + 1,
+              body: p.body
+            }))
+          });
+        }
+        return tx.contentSchedulerItem.findUnique({
+          where: { id },
+          include: { parts: { orderBy: { position: 'asc' } } }
+        });
+      });
+      // Bump auto-post schedule version / cancel stale job so the next
+      // approve re-enqueues cleanly.
+      try {
+        await applyAutoPostSchedule(
+          id,
+          {
+            id: existing.id,
+            status: existing.status as any,
+            scheduledFor: existing.scheduledFor,
+            autoPostJobId: existing.autoPostJobId,
+            autoPostScheduleVersion: existing.autoPostScheduleVersion,
+            kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
+          },
+          {
+            status: updated.status as any,
+            scheduledFor: updated.scheduledFor,
+            kind: (updates.kind as 'scheduled' | 'manual_reply' | 'thread' | undefined) ?? (existing.kind as 'scheduled' | 'manual_reply' | 'thread')
+          }
+        );
+        const refreshed = await prisma.contentSchedulerItem.findUnique({
+          where: { id },
+          include: { parts: { orderBy: { position: 'asc' } } }
+        });
+        if (refreshed) return res.json({ data: refreshed });
+      } catch (err) {
+        return sendError(res, 503, 'AUTO_POST_SCHEDULE_FAILED', 'Failed to enqueue auto-post job');
+      }
+      return res.json({ data: updated });
+    }
+
+    const updatedStandard = await prisma.contentSchedulerItem.update({
       where: { id },
-      data: updates
+      data: updates,
+      include: { parts: { orderBy: { position: 'asc' } } }
     });
+    updated = updatedStandard;
 
     // Re-evaluate auto-post schedule when scheduledFor changed. Body /
     // source / sourceRef do not affect auto-post timing.
@@ -342,12 +512,12 @@ contentSchedulerRouter.patch('/content-scheduler/items/:id', async (req, res, ne
             scheduledFor: existing.scheduledFor,
             autoPostJobId: existing.autoPostJobId,
             autoPostScheduleVersion: existing.autoPostScheduleVersion,
-            kind: existing.kind as 'scheduled' | 'manual_reply'
+            kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
           },
           {
             status: updated.status as any,
             scheduledFor: updated.scheduledFor,
-            kind: (updates.kind as 'scheduled' | 'manual_reply' | undefined) ?? (existing.kind as 'scheduled' | 'manual_reply')
+            kind: (updates.kind as 'scheduled' | 'manual_reply' | 'thread' | undefined) ?? (existing.kind as 'scheduled' | 'manual_reply' | 'thread')
           }
         );
         // Re-read so the response reflects the latest autoPost* fields.
@@ -399,12 +569,12 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/approve', async (req, 
             scheduledFor: existing.scheduledFor,
             autoPostJobId: existing.autoPostJobId,
             autoPostScheduleVersion: existing.autoPostScheduleVersion,
-            kind: existing.kind as 'scheduled' | 'manual_reply'
+            kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
           },
           {
             status: 'approved',
             scheduledFor: updated.scheduledFor,
-            kind: existing.kind as 'scheduled' | 'manual_reply'
+            kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
           }
         );
         const refreshed = await prisma.contentSchedulerItem.findUnique({ where: { id } });
@@ -449,12 +619,12 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/unapprove', async (req
           scheduledFor: existing.scheduledFor,
           autoPostJobId: existing.autoPostJobId,
           autoPostScheduleVersion: existing.autoPostScheduleVersion,
-          kind: existing.kind as 'scheduled' | 'manual_reply'
+          kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
         },
         {
           status: 'queued',
           scheduledFor: null,
-          kind: existing.kind as 'scheduled' | 'manual_reply'
+          kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
         }
       );
     } catch (err) {
@@ -539,12 +709,12 @@ contentSchedulerRouter.post('/content-scheduler/items/:id/remove', async (req, r
           scheduledFor: existing.scheduledFor,
           autoPostJobId: existing.autoPostJobId,
           autoPostScheduleVersion: existing.autoPostScheduleVersion,
-          kind: existing.kind as 'scheduled' | 'manual_reply'
+          kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
         },
         {
           status: 'removed',
           scheduledFor: null,
-          kind: existing.kind as 'scheduled' | 'manual_reply'
+          kind: existing.kind as 'scheduled' | 'manual_reply' | 'thread'
         }
       );
     } catch (err) {

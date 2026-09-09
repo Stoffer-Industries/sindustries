@@ -402,3 +402,106 @@ describe('ContentSchedulerTab', () => {
     expect(updateItem).not.toHaveBeenCalled();
   });
 });
+
+// --- Thread composer + card (task 1016cbff PR B) -----------------------
+
+const THREAD_ID = '55555555-5555-5555-5555-555555555555';
+
+function threadFixture() {
+  return [
+    {
+      id: THREAD_ID,
+      body: 'Root tweet text',
+      source: 'manual',
+      sourceRef: null,
+      status: 'queued',
+      scheduledFor: '2026-07-18T19:00:00.000Z',
+      position: 0,
+      approvedAt: null,
+      approvedBy: null,
+      publishedAt: null,
+      publishedUrl: null,
+      publishError: null,
+      createdAt: '2026-07-10T00:00:00.000Z',
+      updatedAt: '2026-07-10T00:00:00.000Z',
+      removedAt: null,
+      kind: 'thread',
+      parts: [
+        { position: 1, body: 'Reply one' },
+        { position: 2, body: 'Reply two' }
+      ]
+    }
+  ];
+}
+
+describe('ContentSchedulerTab thread surface (task 1016cbff PR B)', () => {
+  it('renders a Single/Thread kind selector and thread composer parts', async () => {
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler')).toBeTruthy());
+    expect(screen.getByTestId('pulse-content-scheduler-kind-single')).toBeTruthy();
+    expect(screen.getByTestId('pulse-content-scheduler-kind-thread')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('pulse-content-scheduler-kind-thread'));
+    // Two default parts render with add/remove + reorder controls.
+    await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler-thread-composer')).toBeTruthy());
+    expect(screen.getByTestId('pulse-content-scheduler-thread-part-0')).toBeTruthy();
+    expect(screen.getByTestId('pulse-content-scheduler-thread-part-1')).toBeTruthy();
+    expect(screen.getByTestId('pulse-content-scheduler-thread-add-part')).toBeTruthy();
+  });
+
+  it('submits a thread as one create call with kind=thread and parts (no body)', async () => {
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('pulse-content-scheduler-kind-thread'));
+    await waitFor(() => expect(screen.getByTestId('pulse-content-scheduler-thread-composer')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('pulse-content-scheduler-thread-part-body-0'), {
+      target: { value: 'Root tweet' }
+    });
+    fireEvent.change(screen.getByTestId('pulse-content-scheduler-thread-part-body-1'), {
+      target: { value: 'Reply 1' }
+    });
+    fireEvent.click(screen.getByTestId('pulse-content-scheduler-add'));
+    await waitFor(() => expect(createItem).toHaveBeenCalled());
+    const call = createItem.mock.calls[createItem.mock.calls.length - 1][0];
+    expect(call.kind).toBe('thread');
+    expect(call.parts).toEqual([{ body: 'Root tweet' }, { body: 'Reply 1' }]);
+    expect('body' in call).toBe(false);
+  });
+
+  it('renders a thread card as one row with a Thread · N parts badge and a collapsed root preview', async () => {
+    listItems.mockResolvedValue(threadFixture());
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-row-${THREAD_ID}`)).toBeTruthy());
+    expect(screen.getByTestId(`content-scheduler-thread-badge-${THREAD_ID}`).textContent).toMatch(/Thread · 3 parts/);
+    // The root body is visible without expanding.
+    expect(screen.getByTestId(`content-scheduler-body-${THREAD_ID}`).textContent).toContain('Root tweet text');
+    // The reply parts are hidden until Expand is clicked.
+    expect(screen.queryByTestId(`content-scheduler-thread-part-${THREAD_ID}-1`)).toBeNull();
+    fireEvent.click(screen.getByTestId(`content-scheduler-thread-toggle-${THREAD_ID}`));
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-thread-part-${THREAD_ID}-1`)).toBeTruthy());
+    expect(screen.getByTestId(`content-scheduler-thread-part-${THREAD_ID}-1`).textContent).toContain('Reply one');
+    expect(screen.getByTestId(`content-scheduler-thread-part-${THREAD_ID}-2`).textContent).toContain('Reply two');
+  });
+
+  it('edits a thread by replacing the full part list via one PATCH (handleSaveThread)', async () => {
+    listItems.mockResolvedValue(threadFixture());
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-row-${THREAD_ID}`)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(`content-scheduler-edit-${THREAD_ID}`));
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-thread-edit-${THREAD_ID}`)).toBeTruthy());
+    fireEvent.change(screen.getByTestId(`content-scheduler-thread-edit-body-${THREAD_ID}-1`), {
+      target: { value: 'Updated reply' }
+    });
+    fireEvent.click(screen.getByTestId(`content-scheduler-save-${THREAD_ID}`));
+    await waitFor(() => expect(updateItem).toHaveBeenCalled());
+    const callArgs = updateItem.mock.calls[updateItem.mock.calls.length - 1];
+    expect(callArgs[0]).toBe(THREAD_ID);
+    expect(callArgs[1]).toEqual({
+      kind: 'thread',
+      parts: [
+        { body: 'Root tweet text' },
+        { body: 'Updated reply' },
+        { body: 'Reply two' }
+      ]
+    });
+  });
+});

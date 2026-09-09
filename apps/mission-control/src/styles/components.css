@@ -809,3 +809,130 @@
     grid-template-columns: repeat(10, 220px);
   }
 }
+
+/* Thread UI (task 1016cbff PR B). The composer shows ordered textareas
+   with move / remove controls; the card renders one aggregate row with
+   a Thread · N parts badge and a collapsible numbered part list. */
+.content-scheduler-composer__kind {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.content-scheduler-composer__kind-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.content-scheduler-composer__thread {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.content-scheduler-composer__thread-help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--si-color-text-muted, #666);
+}
+
+.content-scheduler-composer__thread-part {
+  border: 1px solid var(--si-color-border, #d9d4cb);
+  border-radius: 6px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: var(--si-color-bg-subtle, #fafaf6);
+}
+
+.content-scheduler-composer__thread-part-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.content-scheduler-composer__thread-part-label {
+  font-weight: 600;
+  color: var(--si-color-text-strong, #333);
+}
+
+.content-scheduler-composer__thread-part-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--si-color-text-muted, #888);
+}
+
+.content-scheduler-composer__thread-part-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.content-scheduler-row__thread {
+  display: grid;
+  gap: 8px;
+}
+
+.content-scheduler-row__thread-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.content-scheduler-row__thread-root {
+  margin: 0;
+  font-weight: 500;
+}
+
+.content-scheduler-row__thread-parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.content-scheduler-row__thread-part {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  border-left: 2px solid var(--si-color-brand-300, #d8a874);
+  padding: 4px 8px;
+  background: var(--si-color-bg-subtle, #fafaf6);
+  border-radius: 0 4px 4px 0;
+}
+
+.content-scheduler-row__thread-part-label {
+  font-weight: 600;
+  color: var(--si-color-text-muted, #888);
+  flex-shrink: 0;
+  width: 1.5em;
+  text-align: right;
+}
+
+.content-scheduler-row__thread-edit {
+  display: grid;
+  gap: 8px;
+}
+
+.content-scheduler-row__thread-edit-help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--si-color-warning-500, #8a5a00);
+}
+
+.content-scheduler-row__thread-edit-part {
+  display: grid;
+  gap: 4px;
+}
+
+.content-scheduler-row__thread-edit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 600;
+}

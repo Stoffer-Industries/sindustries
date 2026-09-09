@@ -29,6 +29,12 @@ export function useContentScheduler() {
   const [body, setBody] = useState('');
   const [source, setSource] = useState('manual');
   const [scheduledFor, setScheduledFor] = useState(defaultScheduledFor());
+  // Thread composer state (task 1016cbff PR B). The composer has two modes:
+  // 'single' uses the existing `body` field; 'thread' uses an ordered
+  // `threadParts` array of { body } entries (2..7). Switching kinds clears
+  // the other surface so the operator cannot accidentally mix them.
+  const [composerKind, setComposerKind] = useState('single');
+  const [threadParts, setThreadParts] = useState([{ body: '' }, { body: '' }]);
   const [draggingItemId, setDraggingItemId] = useState(null);
   const [dragOverZone, setDragOverZone] = useState(null);
   const [dropError, setDropError] = useState(null); // { dayKey, message } | null
@@ -71,6 +77,34 @@ export function useContentScheduler() {
   }, []);
 
   const handleCreate = useCallback(async () => {
+    if (composerKind === 'thread') {
+      // Validate client-side: the server enforces the same rules, but a
+      // local check gives the operator feedback before a round-trip and
+      // keeps the submit button disabled. Server still authoritatively
+      // rejects on race conditions / edge cases.
+      const trimmedParts = threadParts.map((p) => ({ body: p.body.trim() }));
+      if (trimmedParts.length < 2 || trimmedParts.length > 7) {
+        setError('Thread must have 2–7 parts');
+        return;
+      }
+      if (trimmedParts.some((p) => p.body.length === 0)) {
+        setError('Every thread part must be non-empty');
+        return;
+      }
+      await captureError(async () => {
+        await createItem({
+          kind: 'thread',
+          parts: trimmedParts,
+          source,
+          scheduledFor: fromDatetimeLocal(scheduledFor),
+          actor: ACTOR
+        });
+        setThreadParts([{ body: '' }, { body: '' }]);
+        setScheduledFor(defaultScheduledFor());
+        await reload();
+      });
+      return;
+    }
     if (!body.trim()) return;
     await captureError(async () => {
       await createItem({
@@ -83,7 +117,29 @@ export function useContentScheduler() {
       setScheduledFor(defaultScheduledFor());
       await reload();
     });
-  }, [body, source, scheduledFor, reload, captureError]);
+  }, [composerKind, threadParts, body, source, scheduledFor, reload, captureError]);
+
+  // Thread part composer helpers (task 1016cbff PR B). The composer keeps
+  // 2..7 ordered parts; addPart / removePart clamp to those bounds.
+  const addThreadPart = useCallback(() => {
+    setThreadParts((parts) => (parts.length >= 7 ? parts : [...parts, { body: '' }]));
+  }, []);
+  const removeThreadPart = useCallback((index) => {
+    setThreadParts((parts) => (parts.length <= 2 ? parts : parts.filter((_, i) => i !== index)));
+  }, []);
+  const moveThreadPart = useCallback((index, direction) => {
+    setThreadParts((parts) => {
+      const target = index + direction;
+      if (target < 0 || target >= parts.length) return parts;
+      const next = parts.slice();
+      const [moved] = next.splice(index, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+  }, []);
+  const setThreadPartBody = useCallback((index, value) => {
+    setThreadParts((parts) => parts.map((p, i) => (i === index ? { body: value } : p)));
+  }, []);
 
   const handleApprove = useCallback((id) => captureError(async () => {
     await approveItem(id, ACTOR);
@@ -107,6 +163,24 @@ export function useContentScheduler() {
 
   const handleSave = useCallback((id, patch) => captureError(async () => {
     await updateItem(id, patch, { actor: ACTOR });
+    await reload();
+  }), [reload, captureError]);
+
+  // Save a thread's full part list as one aggregate PATCH (task 1016cbff
+  // PR B). The server performs the delete+create replacement atomically
+  // and clears approval if the item was approved. We mirror that on the
+  // client: editing an approved thread always requires re-approval.
+  const handleSaveThread = useCallback((id, parts) => captureError(async () => {
+    const trimmed = parts.map((p) => ({ body: p.body.trim() }));
+    if (trimmed.length < 2 || trimmed.length > 7) {
+      setError('Thread must have 2–7 parts');
+      return;
+    }
+    if (trimmed.some((p) => p.body.length === 0)) {
+      setError('Every thread part must be non-empty');
+      return;
+    }
+    await updateItem(id, { kind: 'thread', parts: trimmed }, { actor: ACTOR });
     await reload();
   }), [reload, captureError]);
 
@@ -213,6 +287,14 @@ export function useContentScheduler() {
     setBody,
     setSource,
     setScheduledFor,
+    // Thread composer surface (task 1016cbff PR B).
+    composerKind,
+    setComposerKind,
+    threadParts,
+    addThreadPart,
+    removeThreadPart,
+    moveThreadPart,
+    setThreadPartBody,
     days,
     grouped,
     reload,
@@ -222,6 +304,7 @@ export function useContentScheduler() {
     handlePublish,
     handleRemove,
     handleSave,
+    handleSaveThread,
     handleDragStart,
     handleDayDragOver,
     handleDayDrop,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, Field, Textarea } from '@sindustries/ui/react';
 import { SCHEDULER_TIME_ZONE, getAucklandTimeOfDay } from './contentSchedulerCalendar.js';
 import {
@@ -10,6 +10,20 @@ import {
   toDatetimeLocal
 } from './contentSchedulerConstants.js';
 
+// Combine the parent row's `body` (position 0) with the ordered `parts`
+// rows into one normalized parts array. The API returns parts as
+// positions 1..n; the UI treats them as a contiguous list with the
+// parent body as position 0 so Tom sees them in order without a second
+// visual model. Task 1016cbff PR B.
+function normalizeThreadParts(item) {
+  if (item.kind !== 'thread') return null;
+  const sorted = (item.parts ?? []).slice().sort((a, b) => a.position - b.position);
+  return [
+    { position: 0, id: null, body: item.body },
+    ...sorted.map((p) => ({ position: p.position, id: p.id, body: p.body }))
+  ];
+}
+
 export function SchedulerItemCard({
   item,
   today,
@@ -18,12 +32,34 @@ export function SchedulerItemCard({
   onPublish,
   onRemove,
   onSave,
+  onSaveThread,
   onDragStart,
   isPublishedInCalendar = false
 }) {
   const [editing, setEditing] = useState(false);
   const [draftBody, setDraftBody] = useState(item.body);
   const [draftSchedule, setDraftSchedule] = useState(toDatetimeLocal(item.scheduledFor));
+  // Thread edit state (task 1016cbff PR B). When editing a thread, the
+  // operator sees N ordered textareas; saving sends the full list as
+  // one aggregate PATCH (`onSaveThread`). The single-edit `onSave` is
+  // unchanged for kind=single / kind=manual_reply items.
+  const normalizedParts = useMemo(() => normalizeThreadParts(item), [item]);
+  const isThread = item.kind === 'thread';
+  const [draftParts, setDraftParts] = useState(
+    normalizedParts ? normalizedParts.map((p) => ({ body: p.body })) : null
+  );
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setDraftBody(item.body);
+    setDraftSchedule(toDatetimeLocal(item.scheduledFor));
+  }, [item.body, item.scheduledFor]);
+
+  useEffect(() => {
+    if (normalizedParts) {
+      setDraftParts(normalizedParts.map((p) => ({ body: p.body })));
+    }
+  }, [normalizedParts]);
 
   useEffect(() => {
     setDraftBody(item.body);
@@ -57,7 +93,29 @@ export function SchedulerItemCard({
       }}
     >
       <div className="content-scheduler-row__body">
-        {editing ? (
+        {editing && isThread && draftParts ? (
+          <div className="content-scheduler-row__thread-edit" data-testid={`content-scheduler-thread-edit-${item.id}`}>
+            <p className="content-scheduler-row__thread-edit-help">
+              Editing any part clears the thread's approval; re-approve after saving.
+            </p>
+            {draftParts.map((part, index) => (
+              <div key={`thread-edit-${item.id}-${index}`} className="content-scheduler-row__thread-edit-part">
+                <div className="content-scheduler-row__thread-edit-header">
+                  <span>Part {index + 1}</span>
+                  <span data-testid={`content-scheduler-thread-edit-count-${item.id}-${index}`}>
+                    {part.body.length}/280
+                  </span>
+                </div>
+                <Textarea
+                  value={part.body}
+                  onChange={(e) => setDraftParts((parts) => parts.map((p, i) => (i === index ? { body: e.target.value } : p)))}
+                  maxLength={1000}
+                  data-testid={`content-scheduler-thread-edit-body-${item.id}-${index}`}
+                />
+              </div>
+            ))}
+          </div>
+        ) : editing ? (
           <Field label="Body">
             <Textarea
               value={draftBody}
@@ -67,7 +125,46 @@ export function SchedulerItemCard({
             />
           </Field>
         ) : (
-          <p data-testid={`content-scheduler-body-${item.id}`}>{item.body}</p>
+          <div data-testid={`content-scheduler-body-${item.id}`}>
+            {isThread && normalizedParts ? (
+              <div className="content-scheduler-row__thread">
+                <div className="content-scheduler-row__thread-head">
+                  <Badge variant="info" data-testid={`content-scheduler-thread-badge-${item.id}`}>
+                    Thread · {normalizedParts.length} parts
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpanded((v) => !v)}
+                    aria-expanded={expanded}
+                    data-testid={`content-scheduler-thread-toggle-${item.id}`}
+                  >
+                    {expanded ? 'Collapse' : 'Expand'}
+                  </Button>
+                </div>
+                <p className="content-scheduler-row__thread-root">{normalizedParts[0].body}</p>
+                {expanded && (
+                  <ol
+                    className="content-scheduler-row__thread-parts"
+                    data-testid={`content-scheduler-thread-parts-${item.id}`}
+                  >
+                    {normalizedParts.slice(1).map((part, idx) => (
+                      <li
+                        key={`thread-${item.id}-${idx}`}
+                        className="content-scheduler-row__thread-part"
+                        data-testid={`content-scheduler-thread-part-${item.id}-${idx + 1}`}
+                      >
+                        <span className="content-scheduler-row__thread-part-label">{idx + 1}.</span>
+                        <span className="content-scheduler-row__thread-part-body">{part.body}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            ) : (
+              <p>{item.body}</p>
+            )}
+          </div>
         )}
         <div className="content-scheduler-row__meta">
           <Badge
@@ -123,7 +220,11 @@ export function SchedulerItemCard({
               variant="primary"
               size="sm"
               onClick={async () => {
-                await onSave(item.id, { body: draftBody, scheduledFor: fromDatetimeLocal(draftSchedule) });
+                if (isThread && draftParts && onSaveThread) {
+                  await onSaveThread(item.id, draftParts);
+                } else {
+                  await onSave(item.id, { body: draftBody, scheduledFor: fromDatetimeLocal(draftSchedule) });
+                }
                 setEditing(false);
               }}
               data-testid={`content-scheduler-save-${item.id}`}

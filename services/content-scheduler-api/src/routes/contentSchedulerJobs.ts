@@ -102,13 +102,13 @@ export type AutoPostScheduleAction =
 export function decideAutoPostAction(args: {
   prior:
     | (Pick<ContentSchedulerItem, 'id' | 'status' | 'scheduledFor' | 'autoPostJobId' | 'autoPostScheduleVersion'> & {
-        kind?: 'scheduled' | 'manual_reply';
+        kind?: 'scheduled' | 'manual_reply' | 'thread';
       })
     | null;
   next: {
     status: ContentSchedulerItem['status'];
     scheduledFor: Date | null;
-    kind?: 'scheduled' | 'manual_reply';
+    kind?: 'scheduled' | 'manual_reply' | 'thread';
   };
   now?: Date;
 }): AutoPostScheduleAction {
