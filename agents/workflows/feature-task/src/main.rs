@@ -17,6 +17,7 @@ mod analytics;
 mod pr_gates;
 mod test_resolution;
 mod test_runners;
+mod verify_delivery;
 
 // Comment author is derived from the authenticated actor at the API
 // boundary (task 0719a8e3); this workflow no longer carries a literal
@@ -833,7 +834,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // have drifted from the current task description (e.g. trailing-period
     // fixes landed in a follow-up PR). The latest PR is the one that will be
     // merged at this gate, so it's the only one that needs to match.
-    let latest_pr_url = latest_urls.iter().max_by_key(|url| pr_number(url)).cloned();
+    let latest_pr_url = latest_urls.iter().max_by_key(|url| crate::verify_delivery::pr_number(url)).cloned();
     for url in &pr_urls {
         // Only the latest PR is the one that will be merged at this gate.
         // Earlier PRs that were intentionally superseded (e.g. v1 → v2
@@ -845,13 +846,13 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // superseded PR leaves a persistent "PR X is closed without merge."
         // failure that blocks every sweep (fingerprint dedup), even after the
         // task has been re-delivered on a fresh branch.
-        if !is_latest_pr_url(url, &latest_urls) {
+        if !crate::verify_delivery::is_latest_pr_url(url, &latest_urls) {
             continue;
         }
         let review = inspect_pr(url);
         match review {
             Ok(r) => {
-                if let Some(failure) = verify_delivery_review_failure(url, r) {
+                if let Some(failure) = crate::verify_delivery::verify_delivery_review_failure(url, r) {
                     failures.push(failure);
                 }
             }
@@ -1005,7 +1006,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // gate has already failed — Ash's qa_agent is not requested until
     // mechanical checks pass.
     if !mechanical_gate_failed {
-        let qa_agent_failures = qa_agent_verified_failures(&env.task);
+        let qa_agent_failures = crate::verify_delivery::qa_agent_verified_failures(&env.task);
         if !qa_agent_failures.is_empty() {
         if !args.dry_run {
             let qa_fingerprint = qa_agent_failures.join("\n");
@@ -1095,14 +1096,6 @@ fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
     Ok(env)
 }
 
-fn verify_delivery_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
-    match review {
-        pr_gates::ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
-        pr_gates::ReviewState::ClosedUnmerged => Some(format!("PR {url} is closed without merge.")),
-        _ => None,
-    }
-}
-
 /// Merge gate for `acceptance → done`. Merged PRs pass. Closed-without-merge
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
 /// are treated as superseded (same principle as `verify_delivery`'s
@@ -1116,31 +1109,9 @@ fn post_merge_pr_failure(
 ) -> Option<String> {
     match state {
         pr_gates::ReviewState::Merged => None,
-        pr_gates::ReviewState::ClosedUnmerged if !is_latest_pr_url(url, latest_pr_urls) => None,
+        pr_gates::ReviewState::ClosedUnmerged if !crate::verify_delivery::is_latest_pr_url(url, latest_pr_urls) => None,
         other => Some(format!("PR {url} is not merged: {other:?}.")),
     }
-}
-
-/// Extract the PR number from a GitHub PR URL for ordering.
-fn pr_number(url: &str) -> u64 {
-    url.rsplit('/')
-        .next()
-        .and_then(|n| n.parse::<u64>().ok())
-        .unwrap_or(0)
-}
-
-/// True when `candidate` is a member of `latest_pr_urls` — the pre-computed
-/// result of `latest_implementer_pr_urls`, i.e. the PR(s) named in the most
-/// recent `[implementer-prs]`/`[rowan-prs]` comment. Used by `verify_delivery`
-/// and `post_merge` to skip review-state and body checks against superseded
-/// PRs (e.g. a v1 branch that was closed-without-merge and replaced by a v2
-/// branch, or an accidental duplicate PR that a later comment corrected
-/// away from). Callers must pass `latest_implementer_pr_urls(task)`, not the
-/// full historical `implementer_pr_urls(task)` — comparing by PR-number
-/// magnitude instead of comment recency broke on task 30251df0, where the
-/// abandoned duplicate PR happened to have the higher number.
-fn is_latest_pr_url(candidate: &str, latest_pr_urls: &[String]) -> bool {
-    latest_pr_urls.iter().any(|url| url == candidate)
 }
 
 fn feedback_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
@@ -1190,17 +1161,6 @@ fn accepted_structured_failures(task: &Task) -> Vec<String> {
 /// rows must be approved before the task can reach `done`.
 fn qa_agent_verified(task: &Task) -> bool {
     task_approval_granted(task, "qa_agent")
-}
-
-/// Failure strings for the `qa_agent` gate. Empty when the gate is satisfied.
-/// Used by `verify_delivery` to short-circuit the transition with a
-/// `[qa-agent-blocked]` comment.
-fn qa_agent_verified_failures(task: &Task) -> Vec<String> {
-    if qa_agent_verified(task) {
-        vec![]
-    } else {
-        vec!["Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.".to_string()]
-    }
 }
 
 fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
@@ -5473,22 +5433,6 @@ feature
     }
 
     #[test]
-    fn verify_delivery_review_gate_allows_pending_review() {
-        let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
-        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::Required).is_none());
-        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::CommentsPresent).is_none());
-        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::Merged).is_none());
-        assert_eq!(
-            verify_delivery_review_failure(url, pr_gates::ReviewState::ChangesRequested),
-            Some(format!("Changes requested on {url}."))
-        );
-        assert_eq!(
-            verify_delivery_review_failure(url, pr_gates::ReviewState::ClosedUnmerged),
-            Some(format!("PR {url} is closed without merge."))
-        );
-    }
-
-    #[test]
     fn post_merge_skips_superseded_closed_unmerged_prs() {
         // Task e9c06d01: PR #365 closed-without-merge, replaced by merged #368.
         // `latest_pr_urls` reflects the most recent [implementer-prs] comment,
@@ -5556,74 +5500,6 @@ feature
             Some(format!("PR {earlier_open} is not merged: Approved."))
         );
         assert!(post_merge_pr_failure(later_merged, pr_gates::ReviewState::Merged, &urls).is_none());
-    }
-
-    #[test]
-    fn pr_number_extracts_from_url() {
-        assert_eq!(
-            pr_number("https://github.com/Stoffer-Industries/sindustries/pull/142"),
-            142
-        );
-        assert_eq!(pr_number("not-a-url"), 0);
-    }
-
-    #[test]
-    fn is_latest_pr_url_returns_true_only_for_members_of_latest_set() {
-        // `latest_pr_urls` is a pre-resolved set (the most recent
-        // [implementer-prs] comment's URLs), not "all PR URls ever seen" —
-        // membership, not PR-number magnitude, decides "latest" now.
-        let latest_urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/368".to_string()];
-        assert!(!is_latest_pr_url(
-            "https://github.com/Stoffer-Industries/sindustries/pull/365",
-            &latest_urls
-        ));
-        assert!(is_latest_pr_url(
-            "https://github.com/Stoffer-Industries/sindustries/pull/368",
-            &latest_urls
-        ));
-    }
-
-    #[test]
-    fn is_latest_pr_url_handles_single_url() {
-        let urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/365".to_string()];
-        assert!(is_latest_pr_url(
-            "https://github.com/Stoffer-Industries/sindustries/pull/365",
-            &urls
-        ));
-    }
-
-    #[test]
-    fn is_latest_pr_url_returns_false_for_empty_list() {
-        let urls: Vec<String> = vec![];
-        assert!(!is_latest_pr_url(
-            "https://github.com/Stoffer-Industries/sindustries/pull/365",
-            &urls
-        ));
-    }
-
-    #[test]
-    fn is_latest_pr_url_returns_false_for_candidate_not_in_latest_set() {
-        let latest_urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/365".to_string()];
-        assert!(!is_latest_pr_url("not-a-url", &latest_urls));
-        assert!(is_latest_pr_url(
-            "https://github.com/Stoffer-Industries/sindustries/pull/365",
-            &latest_urls
-        ));
-    }
-
-    #[test]
-    fn is_latest_pr_url_true_for_every_member_of_a_multi_workstream_latest_set() {
-        // A single [implementer-prs] comment can legitimately name multiple
-        // PRs for concurrent workstreams (see
-        // implementer_pr_urls_preserve_merged_prs_for_delivery). All of them
-        // are "latest" together — none should be treated as superseded just
-        // because another has a higher PR number.
-        let latest_urls = vec![
-            "https://github.com/foo/bar/pull/10".to_string(),
-            "https://github.com/baz/qux/pull/12".to_string(),
-        ];
-        assert!(is_latest_pr_url("https://github.com/foo/bar/pull/10", &latest_urls));
-        assert!(is_latest_pr_url("https://github.com/baz/qux/pull/12", &latest_urls));
     }
 
     #[test]
@@ -8041,7 +7917,7 @@ detached
     fn ac1_qa_agent_verified_returns_false_with_no_approval_row() {
         let task = qa_test_task_with_approvals(vec![]);
         assert!(!qa_agent_verified(&task));
-        let failures = qa_agent_verified_failures(&task);
+        let failures = crate::verify_delivery::qa_agent_verified_failures(&task);
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("`qa_agent`"));
     }
@@ -8052,14 +7928,14 @@ detached
         // open-question #1): predicate must read it as "not satisfied".
         let task = qa_test_task_with_approvals(vec![("qa_agent", "revoked")]);
         assert!(!qa_agent_verified(&task));
-        assert_eq!(qa_agent_verified_failures(&task).len(), 1);
+        assert_eq!(crate::verify_delivery::qa_agent_verified_failures(&task).len(), 1);
     }
 
     #[test]
     fn ac1_qa_agent_verified_returns_true_when_approval_approved() {
         let task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
         assert!(qa_agent_verified(&task));
-        assert!(qa_agent_verified_failures(&task).is_empty());
+        assert!(crate::verify_delivery::qa_agent_verified_failures(&task).is_empty());
     }
 
     #[test]
@@ -8070,7 +7946,7 @@ detached
         // observable change to any gate pass/fail outcome.
         let task = qa_test_task_with_approvals(vec![("qa_agent", "pending")]);
         assert!(!qa_agent_verified(&task));
-        let failures = qa_agent_verified_failures(&task);
+        let failures = crate::verify_delivery::qa_agent_verified_failures(&task);
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("`qa_agent`"));
     }
