@@ -621,8 +621,10 @@ impl PytestTestRunner {
             .split_once("::")
             .ok_or_else(|| format!("not a pytest nodeid (missing '::'): {test_name}"))?;
         let file_abs = repo_root.join(file_part);
-        let project_dir = crate::test_resolution::nearest_pyproject_dir(repo_root, &file_abs)
-            .ok_or_else(|| format!("no pyproject.toml found above {}", file_abs.display()))?;
+        let Some(project_dir) = crate::test_resolution::nearest_pyproject_dir(repo_root, &file_abs)
+        else {
+            return run_unittest_in(repo_root, &file_abs, _func_part, test_name);
+        };
         let rel_file = file_abs.strip_prefix(&project_dir).map_err(|err| {
             format!(
                 "compute pytest path relative to {}: {err}",
@@ -641,6 +643,50 @@ impl PytestTestRunner {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         })
     }
+}
+
+/// Run a standard-library `unittest` node when the cited Python workflow has
+/// no `pyproject.toml`. The content-tasks workflow is intentionally a plain
+/// Python/unittest project: CI runs `python -m unittest discover` there, so
+/// requiring a uv project would reject valid citations before their tests can
+/// run (task 1016cbff).
+fn run_unittest_in(
+    repo_root: &Path,
+    file_abs: &Path,
+    func_part: &str,
+    original_citation: &str,
+) -> Result<ac_parsing::TestOutcome, String> {
+    let rel_file = file_abs.strip_prefix(repo_root).map_err(|err| {
+        format!(
+            "compute unittest module relative to {}: {err}",
+            repo_root.display()
+        )
+    })?;
+    let mut module = rel_file.to_string_lossy().replace(['/', '\\'], ".");
+    if let Some(stripped) = module.strip_suffix(".py") {
+        module = stripped.to_string();
+    }
+    let target = format!("{}.{}", module, func_part.replace("::", "."));
+    let output = std::process::Command::new("python3")
+        .args(["-m", "unittest", &target])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|err| format!("spawn python3 -m unittest {target}: {err}"))?;
+    if output.status.success() {
+        return Ok(ac_parsing::TestOutcome {
+            exit_code: 0,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(ac_parsing::TestOutcome {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: format!(
+            "python3 -m unittest failed for citation \"{original_citation}\": {}",
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    })
 }
 
 impl ac_parsing::TestRunner for PytestTestRunner {
@@ -1333,6 +1379,30 @@ mod tests {
         assert_ne!(
             fail_outcome.exit_code, 0,
             "expected failing pytest to report a nonzero exit"
+        );
+    }
+
+    #[test]
+    fn pytest_test_runner_falls_back_to_unittest_without_a_pyproject() {
+        let root = tempdir().unwrap();
+        let tests_dir = root.path().join("agents/workflows/content-tasks/tests");
+        fs::create_dir_all(&tests_dir).unwrap();
+        fs::write(
+            tests_dir.join("test_sample.py"),
+            "import unittest\n\n\nclass SampleTest(unittest.TestCase):\n    def test_pass(self):\n        self.assertTrue(True)\n",
+        )
+        .unwrap();
+
+        let outcome = PytestTestRunner
+            .run_in(
+                root.path(),
+                "agents/workflows/content-tasks/tests/test_sample.py::SampleTest::test_pass",
+            )
+            .expect("spawn python3 -m unittest");
+        assert_eq!(
+            outcome.exit_code, 0,
+            "expected unittest fallback to report exit 0\nstdout: {}\nstderr: {}",
+            outcome.stdout, outcome.stderr
         );
     }
 }
