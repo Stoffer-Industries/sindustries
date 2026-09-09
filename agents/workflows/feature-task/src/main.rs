@@ -1585,7 +1585,10 @@ fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
         "Quinn" => tech_design_approved_structured(task) || tech_design_waived(task),
         "Ash" => qa_agent_verified(task),
-        "Tom" => accepted_structured(task),
+        // Tom owns the accepted gate only once the task reaches acceptance.
+        // While still doing, a pending accepted approval must not leave Tom
+        // blocking delivery-owner routing.
+        "Tom" => task.status != "acceptance" || accepted_structured(task),
         _ => false,
     }
 }
@@ -4363,17 +4366,12 @@ mod tests {
         );
     }
 
-    /// Regression for task `e67c8835` (2026-08-27 incident): a `doing`-status
-    /// task whose `attentionOwners` is `[Tom, Quinn, Ash]` and whose only
-    /// closed gate is `qa_agent` must not have the array drained across
-    /// multiple reconcile calls in a single sweep. Pre-fix, every managed
-    /// name's OR-clause returned `true` on status `doing`, so each call
-    /// popped one head and the 3-entry array reached `[]`. Post-fix,
-    /// removal is gated on each owner's own structured closeout: Tom is
-    /// head, Tom has not been accepted, so nothing is popped and the
-    /// result is idempotent.
+    /// A `doing`-status task whose `attentionOwners` is `[Tom, Quinn, Ash]`
+    /// and whose only closed gate is `qa_agent` should remove Tom, because
+    /// the accepted gate is not actionable until acceptance, without draining
+    /// the remaining owner stack across repeated reconcile calls.
     #[test]
-    fn routing_does_not_drain_managed_owners_when_only_ash_gate_closed() {
+    fn routing_removes_tom_without_draining_remaining_managed_owners() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
         task.comments.push(TaskComment {
             text: Some(
@@ -4389,23 +4387,31 @@ mod tests {
             ..TaskApproval::default()
         });
         let once = reconciled_attention_owners(&task);
-        assert_eq!(once, vec!["Tom", "Quinn", "Ash"]);
+        assert_eq!(once, vec!["Quinn", "Ash"]);
         task.attention_owners = once.clone();
         assert_eq!(reconciled_attention_owners(&task), once);
     }
 
-    /// Regression for task `e67c8835` (2026-08-27 incident): Quinn's tech-design
-    /// closeout landing must not be enough to pop a Tom head entry, even when
-    /// `task.status` is `doing` (where Tom's gate clause is trivially inert).
-    /// Tom's removal is gated on `accepted_structured` only.
+    /// Tom's accepted gate is only actionable in acceptance. A pending
+    /// accepted approval must not leave Tom as the head owner while a task is
+    /// still doing.
     #[test]
-    fn routing_keeps_tom_head_until_accepted_even_when_status_is_doing() {
+    fn routing_removes_tom_head_before_acceptance() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
         task.approvals.push(TaskApproval {
             approval_type: "tech_design".to_string(),
             state: "approved".to_string(),
             ..TaskApproval::default()
         });
+        assert_eq!(
+            reconciled_attention_owners(&task),
+            vec!["Quinn", "Ash"]
+        );
+    }
+
+    #[test]
+    fn routing_keeps_tom_head_for_pending_acceptance() {
+        let task = routing_task("acceptance", &["Tom", "Quinn", "Ash"]);
         assert_eq!(
             reconciled_attention_owners(&task),
             vec!["Tom", "Quinn", "Ash"]
