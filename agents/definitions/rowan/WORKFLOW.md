@@ -30,8 +30,8 @@ cd /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>
 
 ## Task Process Reference
 
-For task-state behavior, always follow:
-- `/Users/quinnstoffer/.openclaw/workspace/brain/bookmarks/specs/feature-factory-v2-2026-06-04.md`
+For task-state behavior, always follow the maintained task-system reference:
+- `docs/systems/tasks.md`
 
 This includes:
 - task status changes
@@ -107,7 +107,7 @@ Rowan breaks large work into milestones that are:
 3. Implement
 4. Validate
 5. Document
-6. Follow `brain/bookmarks/specs/feature-factory-v2-2026-06-04.md` for task updates / PR / completion state
+6. Follow `docs/systems/tasks.md` and the applicable workflow/skill instructions for task updates, PRs, and completion state
 7. Report back clearly to Quinn
 
 ---
