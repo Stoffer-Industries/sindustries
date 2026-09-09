@@ -22,12 +22,13 @@ const STRONG_REF = 'https://staysaasy.com/p/slow-iteration';
 const BOUNDARY_REF = 'https://lethain.com/boundaries/';
 const HIRING_REF = 'https://lethain.com/hiring-receiving-role/';
 
-function itemBody(body: string, sourceRef: string) {
+function itemBody(body: string, sourceRef: string, scheduledFor?: string) {
   return {
     body,
     sourceRef,
     issueRef: ARCHIVE_REF,
-    evidenceExcerpt: 'evidence excerpt'
+    evidenceExcerpt: 'evidence excerpt',
+    ...(scheduledFor === undefined ? {} : { scheduledFor })
   };
 }
 
@@ -75,7 +76,7 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
       expect(res.body.data.createdIds).toHaveLength(3);
       expect(res.body.data.sourceRefs).toEqual([STRONG_REF, BOUNDARY_REF, HIRING_REF]);
 
-      // Verify the rows sent to Prisma are always draft/cto_craft/null/0
+      // Verify the rows sent to Prisma are always draft/cto_craft/0; schedule is optional.
       const createCall = prismaMock.contentSchedulerItem.createMany.mock.calls[0][0];
       for (const row of createCall.data) {
         expect(row.source).toBe('cto_craft');
@@ -84,6 +85,22 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
         expect(row.position).toBe(0);
       }
       expect(createCall.skipDuplicates).toBe(true);
+    });
+
+    it('persists an optional scheduledFor value for an import item', async () => {
+      const scheduledFor = '2026-09-10T20:00:00.000Z';
+      const items = [itemBody('Slow iteration is paid for by the team closest to the user.', STRONG_REF, scheduledFor)];
+      prismaMock.contentSchedulerItem.createMany.mockResolvedValue({ count: 1 });
+      prismaMock.contentSchedulerItem.findMany.mockResolvedValue([asPersisted(STRONG_REF, 'id-1')]);
+
+      const app = await createApp();
+      const res = await authedRequest(app)
+        .post('/api/v1/content-scheduler/imports/cto-craft')
+        .send({ items });
+
+      expect(res.status).toBe(201);
+      const createCall = prismaMock.contentSchedulerItem.createMany.mock.calls[0][0];
+      expect(createCall.data[0].scheduledFor).toEqual(new Date(scheduledFor));
     });
 
     it('returns 1–5 items (boundary)', async () => {
@@ -200,6 +217,16 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
         .send({ items });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_ITEMS');
+    });
+
+    it('rejects an invalid scheduledFor value with the scheduled-time error code', async () => {
+      const items = [itemBody('a body', STRONG_REF, 'not-a-date')];
+      const app = await createApp();
+      const res = await authedRequest(app)
+        .post('/api/v1/content-scheduler/imports/cto-craft')
+        .send({ items });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('INVALID_SCHEDULED_FOR');
     });
 
     it('rejects items that are not an array', async () => {

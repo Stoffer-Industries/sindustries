@@ -15,6 +15,8 @@ that talks to the network or the database.
 from __future__ import annotations
 
 import logging
+import re
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -36,6 +38,7 @@ from cto_craft_workflow.issue_source import (
     parse_archive,
     parse_issue_links,
 )
+from cto_craft_workflow.pacing import stagger_scheduled_for
 from cto_craft_workflow.safe_fetch import (
     FetchError,
     FetchedResource,
@@ -44,6 +47,7 @@ from cto_craft_workflow.safe_fetch import (
 from cto_craft_workflow.state import (
     MAX_ELIGIBLE_LINKS,
     MAX_SELECTED_ANGLES,
+    MAX_TWEET_CHARS,
     MIN_QUALIFIED_CANDIDATES,
     PipelineState,
     is_valid_candidate_shape,
@@ -60,6 +64,7 @@ COLLECT = "collect_candidates"
 SELECT = "select_distinct_angles"
 IMPORT = "import_drafts"
 NOTIFY = "format_notification"
+_URL_RE = re.compile(r"https?://[^\s]+")
 
 
 @dataclass(frozen=True)
@@ -332,6 +337,44 @@ def select_distinct_angles(state: PipelineState, deps: GraphDeps) -> dict:
     return {"selected_angles": selected}
 
 
+def _enforce_link_budget(tweet_body: str) -> tuple[str, bool]:
+    """Trim a URL-bearing tweet while preserving the complete URL tail.
+
+    The persisted ``tweet_body`` is validated by the Content Scheduler API at
+    280 raw characters. The model prompt reserves 23 X characters for a URL,
+    but preserving a longer URL in the raw body requires reserving its actual
+    length here so the API cannot reject the import.
+    """
+
+    match = _URL_RE.search(tweet_body)
+    if match is None or len(tweet_body) <= MAX_TWEET_CHARS:
+        return tweet_body, False
+
+    url = match.group(0)
+    copy = tweet_body[: match.start()].rstrip()
+    max_copy = MAX_TWEET_CHARS - len(url) - 1
+    if max_copy > 0:
+        copy = copy[:max_copy].rstrip()
+    else:
+        copy = ""
+    return f"{copy} {url}".strip(), True
+
+
+def _run_clock(state: PipelineState) -> datetime:
+    """Use the persisted run start when available, with a live-clock fallback."""
+
+    raw = state.get("started_at")
+    if isinstance(raw, str):
+        try:
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
 def import_drafts(state: PipelineState, deps: GraphDeps) -> dict:
     """Post the selected angles to the Content Scheduler import endpoint.
 
@@ -348,15 +391,28 @@ def import_drafts(state: PipelineState, deps: GraphDeps) -> dict:
         _emit_diagnostic(state, node="import_drafts", code="NO_IMPORT_FN", message="no import function configured")
         return {"outcome": "failed"}
 
-    items = [
-        {
-            "body": s["tweet_body"],
-            "sourceRef": s["canonical_url"],
-            "issueRef": s.get("issue_ref"),
-            "evidenceExcerpt": s.get("evidence_excerpt", ""),
-        }
-        for s in selected
-    ]
+    items = []
+    for selected_angle in selected:
+        body = selected_angle["tweet_body"]
+        trimmed, was_trimmed = _enforce_link_budget(body)
+        if was_trimmed:
+            _emit_diagnostic(
+                state,
+                node="import_drafts",
+                code="TWEET_TRUNCATED_FOR_LINK_BUDGET",
+                message=f"tweet body {len(body)} chars; preserved link tail in {len(trimmed)} chars",
+                url=selected_angle.get("canonical_url"),
+            )
+        items.append(
+            {
+                "body": trimmed,
+                "sourceRef": selected_angle["canonical_url"],
+                "issueRef": selected_angle.get("issue_ref"),
+                "evidenceExcerpt": selected_angle.get("evidence_excerpt", ""),
+            }
+        )
+
+    items = stagger_scheduled_for(items, now=_run_clock(state))
 
     try:
         response = deps.import_fn(items)

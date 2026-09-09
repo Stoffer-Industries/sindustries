@@ -88,6 +88,7 @@ class ImportItem(TypedDict):
     sourceRef: str
     issueRef: str | None
     evidenceExcerpt: str | None
+    scheduledFor: str | None
 
 
 class ImportResponse(TypedDict):

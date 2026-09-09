@@ -26,7 +26,7 @@ Return a JSON object with exactly these fields:
 {
   "canonical_url": "https://example.com/the-article",
   "angle": "short one-sentence description of the claim, max 200 chars",
-  "tweet_body": "the tweet, 1-280 chars, no markdown, no links",
+  "tweet_body": "the tweet, 1-280 chars, no markdown; include the source URL only when it earns its place",
   "evidence_excerpt": "a 1-2 sentence excerpt from the article, max 500 chars",
   "resonance_score": 0.0,
   "evidence_strength": 0.0,
@@ -38,8 +38,9 @@ Notes on each field:
 
 - `canonical_url`: copy the article's canonical URL verbatim from the
   user message. Do not invent or rewrite it.
-- `tweet_body`: must be ≤ 280 characters. No hashtags, no markdown, no
-  links. Standalone — must read as a post, not as a fragment.
+- `tweet_body`: must be ≤ 280 raw characters. No hashtags or markdown.
+  Standalone — must read as a post, not as a fragment. It may include the
+  article URL when that link is load-bearing; otherwise omit it.
 - `evidence_excerpt`: must be a real substring (or near-substring with
   a `…` marker) of the article text. Generic platitudes are not
   evidence.
@@ -74,6 +75,28 @@ Return `null` if **any** of these hold:
 - The evidence_excerpt is the actual sentence(s) from the article that
   justify the angle. A reviewer reading the excerpt alone should be able
   to see why the angle is supported.
+
+## Link policy
+
+Decide per article whether the source link earns its place in the tweet.
+Include it when the article is the load-bearing reference for the claim —
+for example, a rare data point, a specific framework, or a named failure
+mode the reader should be able to verify. Do not add a link by default.
+
+When `tweet_body` includes a URL, keep the whole URL as the final token and
+count 23 characters for the link's X/t.co budget. Leave the remaining
+copy within that budget. The pipeline performs a final raw-length check;
+never use a bare link as a substitute for making the tweet's point.
+
+## Disagreement copy
+
+If the angle disagrees with or pushes back on the article's take, the tweet
+body must state the reasoning for the disagreement, not only an opinion next
+to a bare link. The reasoning should identify the specific contrary reason —
+a counterexample, a missing constraint, or a named failure mode — so the
+tweet can stand on its own. The link may corroborate the reason, but it is
+not the argument itself. For non-disagreement angles, preserve the existing
+opinionated standalone style and omit unnecessary links.
 
 ## Profile
 

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: 3d80fd5a-a94a-4bd2-bd8d-e0021b75a6ef
 product_spec: brain/tasks/specs/in-progress/cto-craft-tweet-pipeline.md
 shipped_pr: null
@@ -8,7 +8,7 @@ shipped_date: null
 
 # Tech Design — CTO Craft: paced daily scheduling, source links, and disagreement reasoning (task 3d80fd5a)
 
-**Status:** Draft (awaiting Quinn approval via structured `tech_design` approval)
+**Status:** Approved by Quinn on 2026-09-08 via structured `tech_design` approval
 **Task:** https://api.localhost/tasks/3d80fd5a-a94a-4bd2-bd8d-e0021b75a6ef (full UUID on Tasks API)
 **Branch:** `3d80fd5a-cto-craft-pacing-sources-disagreement` (off `origin/main`, commit `a09b796`)
 **Worktree:** `/Users/quinnstoffer/.openclaw/workspace/worktrees/3d80fd5a-cto-craft-pacing-sources-disagreement`

@@ -139,7 +139,7 @@ All routes are mounted under `/api/v1` from `services/tasks-api/src/app.ts`. COR
 | `POST` | `/content-scheduler/items/:id/remove` | Soft-delete; sets `status=removed`, `removedAt=now`. Cancels any in-flight delayed job. |
 | `POST` | `/content-scheduler/reorder` | Body: `{ ids: string[] }`. Rewrites `position` for `queued` items only. |
 | `GET` | `/content-scheduler/today-status` | `{ publishedCount, cap, publishedItemId }` for `Pacific/Auckland` today. Drives the day-status banner and the "max reached" UI hint. |
-| `POST` | `/content-scheduler/imports/cto-craft` | Trusted internal batch import used by the [CTO Craft LangGraph workflow](#cto-craft-integration-task-9dfe56e4). Always creates `source=cto_craft, status=draft, scheduledFor=null, position=0`. Authenticated via `x-content-ingest-secret` when `CONTENT_SCHEDULER_INGEST_SECRET` is configured; pass-through when unset. Idempotent via the partial `(source, sourceRef)` unique index — re-running returns `createdCount=0`. |
+| `POST` | `/content-scheduler/imports/cto-craft` | Trusted internal batch import used by the [CTO Craft LangGraph workflow](#cto-craft-integration-task-9dfe56e4). Creates `source=cto_craft, status=draft, position=0`; callers may provide an optional ISO 8601 `scheduledFor` (the CTO Craft workflow staggers batches one day apart). Authenticated via `x-content-ingest-secret` when `CONTENT_SCHEDULER_INGEST_SECRET` is configured; pass-through when unset. Idempotent via the partial `(source, sourceRef)` unique index — re-running returns `createdCount=0`. |
 
 ### `guardPublish` outcomes
 

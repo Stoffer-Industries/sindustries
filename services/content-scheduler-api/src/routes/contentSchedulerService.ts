@@ -27,7 +27,7 @@ import {
   getAucklandTodayParts,
   checkActorSecret
 } from './contentSchedulerPublish.ts';
-import { parseId } from './contentSchedulerValidation.ts';
+import { parseId, parseScheduledFor } from './contentSchedulerValidation.ts';
 import { validateImportItems } from './contentSchedulerValidation.ts';
 import { decideAutoPostAction, getJobSchedulerAdapter } from './contentSchedulerJobs.ts';
 import { publishContentSchedulerItem } from './contentSchedulerPublishService.ts';
@@ -288,6 +288,18 @@ contentSchedulerServiceRouter.post(
       }
 
       const { items } = req.body ?? {};
+      const rawItems = Array.isArray(items) ? items : [];
+      const invalidScheduleIndex = rawItems.findIndex(
+        (item) => parseScheduledFor(item?.scheduledFor) === 'invalid'
+      );
+      if (invalidScheduleIndex >= 0) {
+        return badRequest(
+          res,
+          'INVALID_SCHEDULED_FOR',
+          `items[${invalidScheduleIndex}].scheduledFor must be a valid ISO 8601 datetime string`
+        );
+      }
+
       const itemsError = validateImportItems(items);
       if (itemsError) {
         return badRequest(res, 'INVALID_ITEMS', itemsError);
@@ -299,12 +311,13 @@ contentSchedulerServiceRouter.post(
         sourceRef: string;
         issueRef?: string;
         evidenceExcerpt?: string;
+        scheduledFor?: string;
       }>).map((item) => ({
         body: item.body.trim(),
         source: 'cto_craft' as const,
         sourceRef: item.sourceRef,
         status: 'draft' as const,
-        scheduledFor: null,
+        scheduledFor: parseScheduledFor(item.scheduledFor) ?? null,
         position: 0,
         approvedAt: null,
         approvedBy: null,
