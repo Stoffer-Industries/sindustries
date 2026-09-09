@@ -51,34 +51,48 @@ steps:
       --json
     stdin: $list_curations.stdout
 
-  - id: request_spec_approval
+  # WS3 pure-routing step (task 536e04fc) — runs AHEAD of the
+  # `approval: required` halt on `request_spec_approval` so direct and
+  # ambiguous items are computed without ever touching the approval gate.
+  # Produces readyPackages / blockedPackages / directCreateItems /
+  # triageEvents. State mutations for the finalize cycle happen later in
+  # `lobster_request_spec_approval.py`. This split is the AC3 reliability
+  # fix (Quinn 2026-09-08 handoff): in --mode tool, the previous combined
+  # step's unconditional `approval: required` halted the pipeline before
+  # `create_tasks_from_direct.py` could run, so code/research specs never
+  # turned into tasks when the batch had no feature items to approve.
+  - id: route_specs
     command: >-
-      python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_request_spec_approval.py
+      python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_route_specs.py
       --approval-topic ${approvalTopic}
       --json
     stdin: $generate_specs.stdout
-    approval: required
 
   # WS3 direct-create route (task 536e04fc) — runs unconditionally because
-  # code/research specs do not require Tom's approval. Splits the
-  # request_spec_approval payload by direct vs. approval buckets so the
-  # approval flow above can still gate on $request_spec_approval.approved
-  # without dragging direct items in with it.
+  # code/research specs do not require Tom's approval. Sits between
+  # route_specs and the approval-halt step so a code/research-only batch
+  # creates its tasks in this cron tick instead of waiting for an
+  # unrelated feature approval to resume the pipeline.
   - id: create_tasks_from_direct
     command: >-
       python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_create_tasks_from_direct.py
       --base-url ${TASKS_API_BASE_URL}
       --json
-    stdin: >-
-      {"directCreateItems": $request_spec_approval.json.directCreateItems}
+    stdin: $route_specs.json
+
+  - id: request_spec_approval
+    command: >-
+      python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_request_spec_approval.py
+      --json
+    stdin: $route_specs.json
+    approval: required
 
   - id: create_tasks_from_proposals
     command: >-
       python3 codebases/sindustries/agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py
       --base-url ${TASKS_API_BASE_URL}
       --json
-    stdin: >-
-      {"readyPackages": $request_spec_approval.json.readyPackages, "blockedPackages": $request_spec_approval.json.blockedPackages}
+    stdin: $request_spec_approval.json
     condition: $request_spec_approval.approved
 
   - id: resolve_spec_request
