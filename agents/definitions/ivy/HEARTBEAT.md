@@ -46,11 +46,16 @@ I am a heartbeat agent. I check the Tasks API on a regular interval for content 
 
 **Only applies when the task is still `doing`, the title contains `weekly review` or `weekly content updates`, and `[ivy-tweets-queued]` is missing.**
 
-Alongside my usual PR work, I drive a themed 5–7 tweet arc into the Content Scheduler for the coming week. One theme per week, one tweet per day. Tom approves each in Mission Control; auto-post fires at `scheduledFor`.
+Alongside my usual PR work, I queue the week's tweets into the Content Scheduler for Tom's approval. The shape of those units is decided by the **Decision point** below — genuine threads publish as one aggregate on a single day; standalones publish as independent posts on separate days. Tom approves each unit in Mission Control; auto-post fires at each `scheduledFor`.
 
 This campaign must run while the task is still `doing`, even when the task already has one or more open PRs. Existing PRs suppress duplicate PR authoring only; they do not satisfy or suppress the `[ivy-tweets-queued]` gate.
 
-The scheduler primitive lives in `agents/skills/content/schedule-tweets/SKILL.md` — that skill queues one tweet. This section owns the *campaign* logic: theme, arc, sequencing, traceability.
+Two scheduler primitives cover the campaign:
+
+- `agents/skills/content/schedule-tweets/SKILL.md` — one standalone tweet → one `single` item.
+- `agents/skills/content/schedule-tweet-thread/SKILL.md` — 2–7 ordered parts → one `thread` aggregate item.
+
+This section owns the *campaign* logic: which unit to produce, how many, and in what order. The primitives own the queue mechanics.
 
 ### Idempotence
 
@@ -60,34 +65,55 @@ If a `[ivy-tweets-queued]` comment already exists on this task, the campaign is 
 
 Find the file linked in the task body (typically the most recent under `brain/content/sindustries-weekly-content/`). Read the whole file — Quinn-execute bucket, Tom-approval bucket, defer bucket, and the raw daily notes if present.
 
-### 2. Pick ONE theme for the week
+### 2. Decision point — thread vs standalone
 
-Themed beats scattergun. A narrative arc pulls the reader forward; 7 disconnected wins do not.
+Before drafting anything, classify each candidate signal as either a **thread** or **standalone** posts. Shared topic alone is not enough to make a thread.
 
-Scan the week's signals and pick the single strongest arc — a story with a beginning, middle, and end that can be told across 5–7 tweets. Good arcs look like:
+A candidate is a **thread** only when all five hold:
+
+1. It is one narrative, not a collection of weekly wins.
+2. Order carries meaning: setup precedes consequence, steps depend on prior steps, or later parts are materially weaker/ambiguous without earlier context.
+3. The root (`parts[0]`) can state a concrete hook and promise the thread's payoff.
+4. Each reply advances the same story; none is filler or an unrelated update.
+5. The story needs at least two parts after applying the 280-character limit and the concise-copy pass.
+
+Use a standalone post when the idea is understandable and useful without another post. If uncertain, prefer standalone.
+
+Do not pad a candidate into a thread to hit a quota. Do not split a genuine narrative across standalone posts on consecutive days — that loses the all-or-none publish semantics and breaks the reader's experience.
+
+### 3. Pick themes / candidate signals
+
+For each thread candidate: one theme per week. Pick the single strongest arc — a story with a beginning, middle, and end. Good arcs look like:
 
 - **A capability shipped:** "what didn't exist last week → how we built it → what it unlocks → the lesson"
 - **A pattern discovery:** "we kept seeing X → we tried Y → Y didn't scale → we landed on Z → now we do it every time"
 - **A system going live:** "we've been building X → here's the first end-to-end run → what it proves → what's next"
 - **A workflow evolution:** "our old process had Y bottleneck → we tried Z → it worked → here's how it changed the team"
 
+For standalone candidates: pull the strongest independent signals. Order by impact, not chronology.
+
 **Bad themes to avoid:**
 - "Weekly wrap-up" — that's a format, not a theme
 - Meta-commentary on the studio itself — themes should be about the *work*, not how the studio operates
 - Anything referencing private client work, private team dynamics, or context Tom hasn't publicly established
 
-**Fallback:** if the week genuinely has no single arc (rare — usually a signal the week was low-shipping), draft 3–5 scattergun tweets from the strongest individual signals and note the shortfall in the traceability comment. Do not pad with weak signals.
+**Fallback:** if the week genuinely has no thread candidate AND no strong standalones (rare — usually a signal the week was low-shipping), draft 3–5 scattergun standalones from the strongest individual signals and note the shortfall in the traceability comment. Do not pad with weak signals, do not force a thread.
 
-### 3. Sketch the arc, then draft each tweet
+### 4. Sketch each unit, then draft the parts
 
-- Sketch first: one bullet per tweet, in order, telling the story. Iterate the arc before writing final copy.
-- For each tweet:
-  1. Apply `agents/skills/content/sindustries-copy/SKILL.md` for voice.
-  2. Run it through `agents/skills/content/no-ai-slop/SKILL.md`.
-  3. Max 280 chars — count precisely; X truncates without warning.
-  4. No hashtags unless the signal warrants one (Tom's audience does not need them).
-  5. One idea per tweet. If a tweet needs a second sentence, split it into a follow-up bullet in the arc.
-  6. Concrete over abstract: "shipped a 10-day calendar view in Mission Control" beats "improved our operating surface."
+For each unit:
+
+- **Thread** — sketch first: one bullet per part, in order, telling the story. Iterate the arc before writing final copy. Cap at 7 parts; prefer 3–5 tight parts over 7 padded ones.
+- **Standalone** — sketch one bullet per tweet; each tweet must stand alone, no dependency on another day's copy.
+
+For every part / standalone tweet:
+
+1. Apply `agents/skills/content/sindustries-copy/SKILL.md` for voice.
+2. Run it through `agents/skills/content/no-ai-slop/SKILL.md`.
+3. Max 280 chars — count precisely; X truncates without warning.
+4. No hashtags unless the signal warrants one (Tom's audience does not need them).
+5. One idea per tweet. If a tweet needs a second sentence, split it into a follow-up part (thread) or a separate standalone.
+6. Concrete over abstract: "shipped a 10-day calendar view in Mission Control" beats "improved our operating surface."
 
 ### Tweet voice and formatting
 
@@ -101,48 +127,60 @@ These tweets publish from Tom's X account, so write as Tom:
 - A one-line tweet is fine when the idea is genuinely one line. Formatting is there for readability, not decoration.
 - Count line breaks, bullets, and spaces in the 280-character limit.
 
-### 4. Schedule the sequence
+### 5. Schedule the units
 
-- First tweet: **tomorrow** (today + 1) at `10:00 Pacific/Auckland`.
-- Subsequent tweets: one per consecutive day, same time.
-- Aim for 5–7. Prefer 5 tight tweets to 7 padded ones.
+- **Thread** — schedule the aggregate once, on the day the root should land. Reply parts are **not** assigned consecutive days; the whole chain publishes at one `scheduledFor`. First thread of the week: tomorrow at `10:00 Pacific/Auckland`.
+- **Standalones** — schedule each on its own day, one per consecutive day, `10:00 Pacific/Auckland`. First standalone: tomorrow at `10:00 Pacific/Auckland` (or the day after the thread if a thread is also queued that week).
 
-### 5. Queue each tweet
+Mix and quantity:
 
-For each drafted tweet, call `agents/skills/content/schedule-tweets/SKILL.md` with:
-- `body` = the drafted text
-- `scheduledFor` = the day's 10:00 NZ ISO datetime (with correct NZST/NZDT offset)
+- One thread + 0–3 standalones is fine when the week's strongest signal is genuinely sequential.
+- All standalones (no thread) is fine when no candidate met all five thread conditions.
+- All threads (no standalones) is fine only when the thread's narrative alone covers the week's most important signal — but prefer adding 1–2 strong standalones rather than producing only a thread.
+- Aim for 3–6 total units per week. Prefer fewer strong units over padded filler.
+- Do not restate thread parts as standalone posts in the same week — that's duplication, not reinforcement.
+
+### 6. Queue each unit
+
+For each drafted unit, call the matching primitive with:
+- For `schedule-tweets`: `body` = the drafted text.
+- For `schedule-tweet-thread`: `parts` = ordered array of `{ body }` (2–7 entries).
+- `scheduledFor` = the unit's 10:00 NZ ISO datetime (with correct NZST/NZDT offset).
 - `source` = `ops_notes`
 - `sourceRef` = the weekly review file path
 - `actor` = `Ivy`
 
 Capture each returned item `id` — needed for the traceability comment.
 
-### 6. Post the traceability comment
+### 7. Post the traceability comment
 
 Post exactly one task comment in this format:
 
 ```
 [ivy-tweets-queued] theme: <one-line theme summary>
-- <id1> — <one-line what this tweet says>
-- <id2> — <one-line what this tweet says>
+- <id1> (single) — <purpose: one-line what this tweet argues/announces and why it stands alone>
+- <id2> (thread, N parts) — <purpose: the multi-part story arc, what the root promises and what the replies deliver>
+- <id3> (single) — <purpose>
 ...
 ```
 
-The theme line lets the reviewer (Tom / Quinn) see the arc at a glance without opening Mission Control.
+Rules:
 
-If you fell back to scattergun (step 2), state that explicitly:
+- Every line must be tagged with `(single)` or `(thread, N parts)`. The `N` is the actual part count for that thread.
+- Every line must include a one-line **purpose** — not just "what the tweet says" but the standalone claim, hook, or arc role. This is the AC5 audit trail Tom/Quinn use to review the schedule without opening every card.
+- The first line is the week theme. If you fell back to scattergun standalones (step 3), state that explicitly:
 
 ```
 [ivy-tweets-queued] theme: none — no clear arc this week, scattergun of N strongest signals
-- <id1> — ...
+- <id1> (single) — <purpose>
+...
 ```
 
-### 7. Let the Lobster take it from here
+### 8. Let the Lobster take it from here
 
 - The `pr_transition` lobster gate detects the comment and no longer blocks `doing → acceptance` on tweets.
 - Tom sees the queued items in Mission Control's Content Scheduler tab, edits any that need work, approves the rest.
-- Auto-post fires at each `scheduledFor`.
+- Auto-post fires at each `scheduledFor`. Threads publish as one aggregate (whole chain or `cleanup_required`); standalones publish individually.
 
 ### Guardrails
 

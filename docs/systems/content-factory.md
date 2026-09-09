@@ -47,6 +47,17 @@ Quinn normally does not write final website copy. She is the orchestrator, not t
 **Ivy's worktree:** `~/workspaces/ivy/sindustries`  
 **GitHub identity:** `GH_CONFIG_DIR=~/.config/gh-ivy gh ...`
 
+#### Ivy's weekly content campaign (Content Scheduler)
+
+For weekly-content tasks (`weekly review` / `weekly content updates` in title), Ivy queues the week's units into the Content Scheduler for Tom's Mission Control approval. The unit shape is decided by Ivy's heartbeat "Decision point" — a candidate is a **thread** only when all five conditions hold (single narrative, order carries meaning, root carries a hook, every reply advances the story, ≥ 2 parts after the concise-copy pass). Threads publish as one aggregate on a single day; standalones publish as independent posts on separate days.
+
+Two scheduler primitives cover the campaign:
+
+- `agents/skills/content/schedule-tweets/SKILL.md` — one standalone tweet → one `single` item.
+- `agents/skills/content/schedule-tweet-thread/SKILL.md` — 2–7 ordered parts → one `thread` aggregate item (introduced for task 1016cbff PR C).
+
+The `[ivy-tweets-queued]` traceability comment must tag each entry as `(single)` or `(thread, N parts)` with a one-line purpose per item so Tom can audit the schedule without opening every card. The lobster's `pr_transition` gate (`has_ivy_tweets_queued`) checks only that the comment matches the legacy `^\[ivy-tweets-queued\]\s+theme:\s+\S` regex; the new structured format is enforced by review.
+
 ### Tom — Approval Authority
 
 - Provides context, approvals, and redirects during weekly review triage
