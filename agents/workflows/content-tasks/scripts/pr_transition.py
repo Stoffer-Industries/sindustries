@@ -294,7 +294,12 @@ def main() -> int:
     if task_is_weekly_content(task) and not has_ivy_tweets_queued(task):
         failures.append(
             "Weekly-content task requires a `[ivy-tweets-queued]` comment before advancing to acceptance. "
-            "Run the `schedule-tweets` skill to queue the week's tweets into the Content Scheduler."
+            "Follow Ivy's `HEARTBEAT.md` \"Weekly tweet campaign\" → \"Decision point\" to classify each "
+            "candidate as a thread (all five conditions hold) or standalone. Queue thread units via the "
+            "`schedule-tweet-thread` skill (one aggregate, 2–7 parts); queue standalone units via the "
+            "`schedule-tweets` skill (one item per tweet). The traceability comment must tag each entry "
+            "as `(single)` or `(thread, N parts)` and include a one-line purpose per item so Tom can "
+            "audit the schedule without opening every card."
         )
 
     task_acs = task_acceptance_criteria(description)
