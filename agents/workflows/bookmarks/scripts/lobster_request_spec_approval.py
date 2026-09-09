@@ -2,8 +2,8 @@
 """Build, finalize, and dispatch spec approval request (task 536e04fc).
 
 Runs AFTER the pure-routing step `lobster_route_specs.py`. Its job is now
-narrow: apply state mutations for the finalize cycle (Phase 3), preserve
-the routed sub-buckets, and emit a compact JSON preview that the lobster
+narrow: apply state mutations for the finalize cycle (Phase 3) and emit
+a compact JSON preview that the lobster
 captures as `requiresApproval.preview` when this step (configured with
 `approval: required`) halts in `--mode tool`.
 
@@ -94,9 +94,6 @@ def main() -> int:
     # Pull routed sub-buckets out of the upstream route_specs.json.
     ready_packages = data.get("readyPackages") or []
     blocked_packages = data.get("blockedPackages") or []
-    direct_create_items = data.get("directCreateItems") or []
-    triage_events = data.get("triageEvents") or []
-    routed_implement = data.get("routedImplement") or []
     routed_reviewed = data.get("routedReviewed") or data.get("reviewed") or []
     routed_monitoring = data.get("routedMonitoring") or data.get("monitoring") or []
 
@@ -155,18 +152,16 @@ def main() -> int:
 
     save_state(state, state_path)
 
-    # Pass-through for the lobster preview (`approval: required` step
-    # captures this). The shape matches what `request_topic_approval.py`
-    # and `lobster_create_tasks_from_proposals.py` already consume.
+    # Lobster captures this stdout as the `requiresApproval.preview` value.
+    # Keep the approval boundary deliberately narrow: routed/finalized
+    # internals can contain full bookmark analysis and push the serialized
+    # payload past Lobster's 2,000-character preview cap, which truncates the
+    # JSON mid-string. Direct-create and triage data are consumed from the
+    # upstream route_specs output before this approval halt, so only these
+    # approval consumers are required downstream.
     json.dump({
         "readyPackages": ready_packages,
         "blockedPackages": blocked_packages,
-        "directCreateItems": direct_create_items,
-        "triageEvents": triage_events,
-        "routedImplement": routed_implement,
-        "routedReviewed": routed_reviewed,
-        "routedMonitoring": routed_monitoring,
-        "finalized": finalized,
     }, sys.stdout)
     sys.stdout.write("\n")
     return 0

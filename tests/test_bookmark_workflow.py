@@ -1579,6 +1579,60 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertFalse(payload["created"][0]["reused"])
         api_mock.assert_called_once()
 
+    def test_request_spec_approval_preview_stays_parseable_below_lobster_cap(self):
+        """Full routed items must not leak across the approval boundary.
+
+        Lobster truncates approval previews at 2,000 characters. A routed
+        bookmark can exceed that size on its own, so the finalize step must
+        emit only the compact approval payload consumed after resume.
+        """
+        state = common.state_template()
+        common.save_state(state, self.state_path)
+        oversized_routed_item = {
+            "bookmarkKey": "oversized-bookmark",
+            "title": "Large routed item",
+            "analysis": {"summary": "x" * 3000},
+            "sourceTweet": "y" * 3000,
+        }
+        payload = {
+            "readyPackages": [{
+                "topic": "infra",
+                "approvalTopic": "infra",
+                "items": [{
+                    "bookmarkKey": "oversized-bookmark",
+                    "specDocs": ["brain/specs/infra/compact.md"],
+                    "title": "Large routed item",
+                }],
+            }],
+            "blockedPackages": [],
+            "directCreateItems": [{"bookmarkKey": "direct", "tasks": []}],
+            "triageEvents": [{"bookmarkKey": "triage", "reason": "ambiguous"}],
+            "routedImplement": [oversized_routed_item],
+            "routedReviewed": [],
+            "routedMonitoring": [],
+        }
+        self.assertGreater(len(json.dumps(payload)), 2000)
+
+        stdin = io.StringIO(json.dumps(payload))
+        stdout = io.StringIO()
+        with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
+             patch.object(request_spec_approval, "WORKSPACE", self.root):
+            with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(
+                sys, "argv", ["lobster_request_spec_approval.py", "--json"]
+            ):
+                rc = request_spec_approval.main()
+
+        self.assertEqual(rc, 0)
+        preview = stdout.getvalue().strip()
+        self.assertLess(len(preview), 2000)
+        self.assertEqual(
+            json.loads(preview),
+            {
+                "readyPackages": payload["readyPackages"],
+                "blockedPackages": [],
+            },
+        )
+
     def test_request_spec_approval_marks_reviewed_and_monitoring_items(self):
         state = common.state_template()
         state["items"]["reviewed-item"] = {
