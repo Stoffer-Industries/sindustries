@@ -258,7 +258,17 @@ class BookmarkWorkflowTests(unittest.TestCase):
 
     def test_request_spec_approval_blocks_same_topic_when_pending(self):
         """Per-topic lock: an infra pending approval does NOT block a brain package,
-        but a brain pending approval blocks another brain package."""
+        but a brain pending approval blocks another brain package.
+
+        Post-WS3 split (task 536e04fc): `lobster_request_spec_approval.main()`
+        is now a finalize-cycle step that consumes pre-routed `readyPackages`
+        and `blockedPackages` from the upstream `lobster_route_specs.py`. The
+        routing decision itself (per-topic lock) is exercised there and in
+        `agents/workflows/bookmarks/scripts/tests/test_lobster_route_specs.py`.
+        This test pins the finalize-cycle contract: pass-through of the routed
+        sub-buckets and the state mutation for items in `blockedPackages`
+        (queued back to `spec_created`).
+        """
         state = common.state_template()
         state["items"]["existing"] = {
             "bookmarkKey": "existing",
@@ -273,24 +283,25 @@ class BookmarkWorkflowTests(unittest.TestCase):
         }
         common.save_state(state, self.state_path)
 
-        # brain package: should NOT be blocked by infra pending
+        # brain package: pre-routed as ready (infra pending doesn't block it).
         stdin = io.StringIO(json.dumps({
-            "implement": [
-                {
+            "readyPackages": [{
+                "topic": "brain",
+                "approvalTopic": "brain",
+                "items": [{
                     "bookmarkKey": self.bookmark["bookmarkKey"],
+                    "specDocs": ["brain/specs/infra/new.md"],
                     "topic": "brain",
                     "title": self.bookmark["title"],
-                    "specDocs": ["brain/specs/infra/new.md"],
                     "proposedTasks": [],
-                }
-            ],
-            "monitoring": [],
-            "reviewed": [],
+                }],
+                "proposedTasks": [],
+            }],
+            "blockedPackages": [],
+            "routedReviewed": [],
+            "routedMonitoring": [],
         }))
         stdout = io.StringIO()
-        spec_path = self.root / "brain" / "specs" / "infra" / "new.md"
-        spec_path.parent.mkdir(parents=True, exist_ok=True)
-        spec_path.write_text("# spec\n")
         with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
              patch.object(request_spec_approval, "WORKSPACE", self.root):
             with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.object(sys, "argv", ["lobster_request_spec_approval.py", "--json"]):
@@ -302,7 +313,7 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(len(payload["readyPackages"]), 1)
         self.assertEqual(payload["readyPackages"][0]["topic"], "brain")
 
-        # Now add a brain pending and confirm a second brain package is blocked
+        # Now add a brain pending and confirm a second brain package is blocked.
         state["items"]["existing_brain"] = {
             "bookmarkKey": "existing_brain",
             "path": "brain/bookmarks/brain/existing_brain.md",
@@ -316,21 +327,24 @@ class BookmarkWorkflowTests(unittest.TestCase):
         }
         common.save_state(state, self.state_path)
 
-        brain_spec = self.root / "brain" / "specs" / "brain" / "new.md"
-        brain_spec.parent.mkdir(parents=True, exist_ok=True)
-        brain_spec.write_text("# spec\n")
+        # Pre-routed: brain package lands in blockedPackages because the topic
+        # is already approval_pending.
         stdin2 = io.StringIO(json.dumps({
-            "implement": [
-                {
+            "readyPackages": [],
+            "blockedPackages": [{
+                "topic": "brain",
+                "approvalTopic": "brain",
+                "items": [{
                     "bookmarkKey": self.bookmark["bookmarkKey"],
+                    "specDocs": ["brain/specs/brain/new.md"],
                     "topic": "brain",
                     "title": self.bookmark["title"],
-                    "specDocs": ["brain/specs/brain/new.md"],
                     "proposedTasks": [],
-                }
-            ],
-            "monitoring": [],
-            "reviewed": [],
+                }],
+                "reason": "approval already pending for topic",
+            }],
+            "routedReviewed": [],
+            "routedMonitoring": [],
         }))
         stdout2 = io.StringIO()
         with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
@@ -359,32 +373,43 @@ class BookmarkWorkflowTests(unittest.TestCase):
         }
         common.save_state(state, self.state_path)
 
-        implement_item = {
-            "bookmarkKey": self.bookmark["bookmarkKey"],
-            "topic": "infra",
-            "title": self.bookmark["title"],
-            "reviewDoc": "brain/reviews/infra/agent-harness-note-abc123bookmark.md",
-            "analysis": {
-                "summary": "Strong fit for workflow automation.",
-                "decisionRationale": "It is worth implementation now because it sharpens triage before approval and tasking.",
-                "stackJudgment": "It improves bookmark triage quality before tasking.",
-            },
-            "specDocs": ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
-            "proposedTasks": [
-                {
-                    "title": "Wire structured review analysis",
-                    "priority": "high",
-                    "assignee": None,
-                    "description": "Implement LLM-backed bookmark review output.",
-                }
-            ],
+        # Post-WS3 split (task 536e04fc): feed the pre-routed `readyPackages`
+        # directly to the finalize-cycle step. The routing + package-build
+        # step (`lobster_route_specs.py`) is exercised separately in
+        # `agents/workflows/bookmarks/scripts/tests/test_lobster_route_specs.py`.
+        prepared = {
+            "readyPackages": [{
+                "topic": "infra",
+                "approvalTopic": "infra",
+                "items": [{
+                    "bookmarkKey": self.bookmark["bookmarkKey"],
+                    "specDocs": ["brain/specs/infra/llm-driven-bookmark-reviews-abc123bookmark.md"],
+                    "topic": "infra",
+                    "title": self.bookmark["title"],
+                    "proposedTasks": [
+                        {
+                            "title": "Wire structured review analysis",
+                            "priority": "high",
+                            "assignee": None,
+                            "description": "Implement LLM-backed bookmark review output.",
+                        }
+                    ],
+                }],
+                "proposedTasks": [
+                    {
+                        "title": "Wire structured review analysis",
+                        "priority": "high",
+                        "assignee": None,
+                        "description": "Implement LLM-backed bookmark review output.",
+                    }
+                ],
+            }],
+            "blockedPackages": [],
+            "routedReviewed": [],
+            "routedMonitoring": [],
         }
 
-        spec_path = self.root / "brain" / "specs" / "infra" / "llm-driven-bookmark-reviews-abc123bookmark.md"
-        spec_path.parent.mkdir(parents=True, exist_ok=True)
-        spec_path.write_text("# spec\n")
-
-        prep_in = io.StringIO(json.dumps({"implement": [implement_item], "monitoring": [], "reviewed": []}))
+        prep_in = io.StringIO(json.dumps(prepared))
         prep_out = io.StringIO()
         with patch.object(request_spec_approval, "STATE_PATH", self.state_path), \
              patch.object(request_spec_approval, "WORKSPACE", self.root):
@@ -392,13 +417,13 @@ class BookmarkWorkflowTests(unittest.TestCase):
                 rc = request_spec_approval.main()
 
         self.assertEqual(rc, 0)
-        prepared = json.loads(prep_out.getvalue())
-        self.assertEqual(len(prepared["readyPackages"]), 1)
-        package = prepared["readyPackages"][0]
+        prepared_out = json.loads(prep_out.getvalue())
+        self.assertEqual(len(prepared_out["readyPackages"]), 1)
+        package = prepared_out["readyPackages"][0]
         self.assertEqual(package["items"][0]["proposedTasks"][0]["title"], "Wire structured review analysis")
 
-        prepared["readyPackages"][0]["resumeToken"] = "resume-token-1"
-        request_in = io.StringIO(json.dumps(prepared))
+        prepared_out["readyPackages"][0]["resumeToken"] = "resume-token-1"
+        request_in = io.StringIO(json.dumps(prepared_out))
         request_out = io.StringIO()
         with patch.object(request_topic_approval, "STATE_PATH", self.state_path), \
              patch.object(request_topic_approval, "resolve_delivery_config", return_value=(None, None)), \

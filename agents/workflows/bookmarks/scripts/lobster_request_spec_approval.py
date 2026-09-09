@@ -25,6 +25,7 @@ from pathlib import Path
 
 from common import (
     STATE_PATH,
+    WORKSPACE,
     dump_json,
     load_state,
     log_transition,
@@ -35,6 +36,22 @@ from common import (
 from bookmark_state_machine import (
     is_task_linked,
     reconcile_tasked_item,
+)
+# Backward-compat shims for legacy tests at top-level `tests/`. The routing
+# helpers moved to `ws3_routing.py` in the AC3-reliability split; re-export
+# them under their old underscored names so legacy tests that patch
+# `lobster_request_spec_approval.WORKSPACE` / `.TRIAGE_QUEUE_PATH` /
+# `._resolve_route` / `._build_direct_create_item` / `._append_triage_events`
+# still resolve. The shims are a no-op at runtime; the new module is the
+# authoritative home for the logic.
+from ws3_routing import (
+    ROUTE_AMBIGUOUS,
+    ROUTE_DIRECT,
+    ROUTE_FEATURE,
+    TRIAGE_QUEUE_PATH,
+    append_triage_events as _append_triage_events,
+    build_direct_create_item as _build_direct_create_item,
+    resolve_route as _resolve_route,
 )
 
 
