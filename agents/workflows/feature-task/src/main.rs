@@ -961,6 +961,7 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             ));
         }
         let pr_files = pr_files_result.unwrap_or_default();
+        let npm_workspace = test_runners::resolve_npm_workspace(&test_runners::repo_root_dir(), &pr_files);
         let body = pr_body(url).unwrap_or_default();
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
@@ -972,8 +973,12 @@ fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // evidence gate above already uses — task e67c8835). When the
         // file list is unknown we keep `is_rust_pr: true` so bare-Rust
         // citations stay on the cargo runner.
-        let test_runner: Box<dyn ac_parsing::TestRunner> =
-            Box::new(test_runners::DispatchingTestRunner { is_rust_pr });
+        let test_runner: Box<dyn ac_parsing::TestRunner> = Box::new(
+            test_runners::DispatchingTestRunner {
+                is_rust_pr,
+                npm_workspace,
+            },
+        );
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
             &task_acs,

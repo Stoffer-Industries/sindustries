@@ -8,7 +8,7 @@
 //!
 //! Public-to-this-crate surface (`pub(crate)`):
 //!
-//! - [`PnpmTestRunner`], [`CargoTestRunner`], [`ShellTestRunner`],
+//! - [`NpmTestRunner`], [`CargoTestRunner`], [`ShellTestRunner`],
 //!   [`PytestTestRunner`], [`DispatchingTestRunner`] — five
 //!   implementations of `ac_parsing::TestRunner`
 //! - [`TestRunnerKind`] enum + [`select_test_runner_kind`] dispatcher
@@ -22,6 +22,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use regex::Regex;
 
 use crate::ac_parsing;
 
@@ -29,29 +30,111 @@ use crate::ac_parsing;
 // Mechanical evidence gate (task 5e35dc25 — migrate Ash's mechanical
 // verify.ts checks into the lobster).
 //
-// `PnpmTestRunner` is the production implementation of the `TestRunner`
-// trait declared in `ac_parsing`. It shells out to `pnpm test --filter
-// <name>` and surfaces the exit code + stdout/stderr as a `TestOutcome`.
-// Unit tests in `ac_parsing` substitute `AlwaysPassTestRunner` /
-// `AlwaysFailTestRunner` so they can exercise the mechanical-evidence
-// path without spawning `pnpm`.
-//
-// Mirrors Ash's `verify.ts` invocation closely; if the project's test
-// invocation diverges, this is the single place to update.
-pub(crate) struct PnpmTestRunner;
+// `NpmTestRunner` is the production implementation of the `TestRunner`
+// trait declared in `ac_parsing` for JS/TS citations. It used to shell out
+// to `pnpm test --filter <name>`, but this repo has never had a
+// `pnpm-workspace.yaml` — only the legacy `package.json` `"workspaces"`
+// field, which pnpm 10.x does not honor (`WARN The "workspaces" field in
+// package.json is not supported by pnpm`), so `pnpm --filter` always
+// resolved zero projects and every JS/TS citation mechanically failed
+// regardless of whether the real test passed. This repo's actual JS/TS
+// tooling is npm workspaces (`npm ci`, `npm test --workspace <pkg>` — see
+// `.github/workflows/ci.yml`), so this runs the equivalent
+// `npm test --workspace <pkg> -- -t "<test_name>"` against the workspace
+// package resolved from the PR's own changed files (`resolve_npm_workspace`
+// below), mirroring `PytestTestRunner`'s `nearest_pyproject_dir` approach
+// for Python. A `test_name` that doesn't match any test in that workspace
+// still exits 0 (vitest reports "0 passed" and treats a non-matching `-t`
+// filter as nothing to do, not a failure) — the same silent-pass trap
+// `cargo_test_leaf_outcome` already guards against for Rust citations
+// (PR #541) — so this parses stdout for an actual "N passed" with N > 0
+// before treating the run as a genuine pass.
+pub(crate) struct NpmTestRunner {
+    pub(crate) workspace: Option<String>,
+}
 
-impl ac_parsing::TestRunner for PnpmTestRunner {
+/// True when vitest's default reporter output shows at least one test that
+/// actually ran and passed (`Tests  N passed` with N > 0, not just
+/// `N skipped`). A `-t` filter matching nothing still exits 0 with every
+/// test reported "skipped" — without this check that would read as a pass.
+fn has_passed_tests(stdout: &str) -> bool {
+    let re = Regex::new(r"Tests\s+(\d+)\s+passed").unwrap();
+    re.captures(stdout)
+        .and_then(|caps| caps.get(1))
+        .and_then(|m| m.as_str().parse::<u32>().ok())
+        .is_some_and(|n| n > 0)
+}
+
+impl ac_parsing::TestRunner for NpmTestRunner {
     fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
-        let output = std::process::Command::new("pnpm")
-            .args(["test", "--filter", test_name])
+        let Some(workspace) = &self.workspace else {
+            return Ok(ac_parsing::TestOutcome {
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: "no npm workspace package could be resolved from this PR's changed \
+                         files; cannot run a JS/TS test citation"
+                    .to_string(),
+            });
+        };
+        let output = std::process::Command::new("npm")
+            .args(["test", "--workspace", workspace, "--", "-t", test_name])
+            .current_dir(repo_root_dir())
             .output()
-            .map_err(|err| format!("spawn pnpm test: {err}"))?;
+            .map_err(|err| format!("spawn npm test --workspace {workspace}: {err}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if output.status.success() && has_passed_tests(&stdout) {
+            return Ok(ac_parsing::TestOutcome {
+                exit_code: 0,
+                stdout,
+                stderr,
+            });
+        }
+        if output.status.success() {
+            // Exit 0 but nothing matched the name filter — silent-pass trap.
+            return Ok(ac_parsing::TestOutcome {
+                exit_code: 1,
+                stdout,
+                stderr: format!(
+                    "no test named \"{test_name}\" matched in npm workspace \"{workspace}\" \
+                     (vitest ran 0 matching tests)"
+                ),
+            });
+        }
         Ok(ac_parsing::TestOutcome {
             exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            stdout,
+            stderr,
         })
     }
+}
+
+/// Resolve the npm workspace package name a PR most likely needs its JS/TS
+/// test citations run against, from the PR's changed files. Takes the
+/// first changed file that resolves to a workspace package (via
+/// `nearest_package_json_dir`) and returns that package's `"name"` field.
+/// A PR touching more than one JS/TS package only gets citations checked
+/// against the first one — the citation format has no per-AC package
+/// scope to disambiguate further, the same single-value-per-PR
+/// simplification `is_rust_pr` already makes.
+pub(crate) fn resolve_npm_workspace(repo_root: &Path, pr_files: &[String]) -> Option<String> {
+    for file in pr_files {
+        let Some(package_dir) =
+            crate::test_resolution::nearest_package_json_dir(repo_root, &repo_root.join(file))
+        else {
+            continue;
+        };
+        let Ok(contents) = std::fs::read_to_string(package_dir.join("package.json")) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) else {
+            continue;
+        };
+        if let Some(name) = parsed.get("name").and_then(|v| v.as_str()) {
+            return Some(name.to_string());
+        }
+    }
+    None
 }
 
 // `CargoTestRunner` is the production `TestRunner` for ACs whose cited test
@@ -266,7 +349,7 @@ pub(crate) enum TestRunnerKind {
     Shell,
     Pytest,
     Cargo,
-    Pnpm,
+    Npm,
 }
 
 /// Choose which runner should execute a cited `testID` based on the shape
@@ -282,7 +365,7 @@ pub(crate) fn select_test_runner_kind(test_name: &str, is_rust_pr: bool) -> Test
     } else if is_rust_pr {
         TestRunnerKind::Cargo
     } else {
-        TestRunnerKind::Pnpm
+        TestRunnerKind::Npm
     }
 }
 
@@ -294,6 +377,7 @@ pub(crate) fn select_test_runner_kind(test_name: &str, is_rust_pr: bool) -> Test
 /// that one case.
 pub(crate) struct DispatchingTestRunner {
     pub(crate) is_rust_pr: bool,
+    pub(crate) npm_workspace: Option<String>,
 }
 
 impl ac_parsing::TestRunner for DispatchingTestRunner {
@@ -302,7 +386,10 @@ impl ac_parsing::TestRunner for DispatchingTestRunner {
             TestRunnerKind::Shell => ShellTestRunner.run(test_name),
             TestRunnerKind::Pytest => PytestTestRunner.run(test_name),
             TestRunnerKind::Cargo => CargoTestRunner.run(test_name),
-            TestRunnerKind::Pnpm => PnpmTestRunner.run(test_name),
+            TestRunnerKind::Npm => NpmTestRunner {
+                workspace: self.npm_workspace.clone(),
+            }
+            .run(test_name),
         }
     }
 }
@@ -318,6 +405,77 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn has_passed_tests_true_when_at_least_one_test_passed() {
+        let stdout = " RUN  v4.1.11 /repo/apps/mission-control\n\n\
+             Test Files  1 passed | 13 skipped (14)\n\
+                  Tests  1 passed | 226 skipped (227)\n";
+        assert!(has_passed_tests(stdout));
+    }
+
+    #[test]
+    fn has_passed_tests_false_when_the_name_filter_matched_nothing() {
+        // Regression for the silent-pass trap: vitest exits 0 and reports
+        // every test "skipped" when `-t` matches no test at all, not a
+        // genuine pass (task 30251df0-adjacent lobster-blocked-forever
+        // pattern, same class of bug as PR #541's cargo exact-match fix).
+        let stdout = " RUN  v4.1.11 /repo/apps/mission-control\n\n\
+             Test Files  14 skipped (14)\n\
+                  Tests  227 skipped (227)\n";
+        assert!(!has_passed_tests(stdout));
+    }
+
+    #[test]
+    fn has_passed_tests_false_on_empty_or_unparseable_output() {
+        assert!(!has_passed_tests(""));
+        assert!(!has_passed_tests("npm error code 127\nsh: vitest: command not found\n"));
+    }
+
+    #[test]
+    fn resolve_npm_workspace_finds_the_package_touched_by_the_pr() {
+        let root = tempdir().unwrap();
+        let package = root.path().join("apps/mission-control");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("package.json"),
+            "{\"name\": \"@sindustries/mission-control\"}\n",
+        )
+        .unwrap();
+
+        let pr_files = vec!["apps/mission-control/src/Sidebar.test.jsx".to_string()];
+        let found = resolve_npm_workspace(root.path(), &pr_files);
+        assert_eq!(found, Some("@sindustries/mission-control".to_string()));
+    }
+
+    #[test]
+    fn resolve_npm_workspace_skips_files_with_no_resolvable_package_and_tries_the_next() {
+        let root = tempdir().unwrap();
+        let package = root.path().join("services/tasks-api");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("package.json"),
+            "{\"name\": \"@sindustries/tasks-api\"}\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.path().join("docs/specs")).unwrap();
+
+        let pr_files = vec![
+            "docs/specs/some-doc.md".to_string(),
+            "services/tasks-api/src/routes/tasks.ts".to_string(),
+        ];
+        let found = resolve_npm_workspace(root.path(), &pr_files);
+        assert_eq!(found, Some("@sindustries/tasks-api".to_string()));
+    }
+
+    #[test]
+    fn resolve_npm_workspace_returns_none_for_a_docs_only_pr() {
+        let root = tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs/specs")).unwrap();
+
+        let pr_files = vec!["docs/specs/some-doc.md".to_string()];
+        assert_eq!(resolve_npm_workspace(root.path(), &pr_files), None);
+    }
 
     #[test]
     fn cargo_test_runner_reports_success_for_a_real_passing_test() {
@@ -489,14 +647,14 @@ mod tests {
     }
 
     #[test]
-    fn select_test_runner_kind_falls_back_to_cargo_or_pnpm_by_pr_flag() {
+    fn select_test_runner_kind_falls_back_to_cargo_or_npm_by_pr_flag() {
         assert_eq!(
             select_test_runner_kind("routing_does_not_drain_managed_owners", true),
             TestRunnerKind::Cargo
         );
         assert_eq!(
             select_test_runner_kind("routing_does_not_drain_managed_owners", false),
-            TestRunnerKind::Pnpm
+            TestRunnerKind::Npm
         );
     }
 
