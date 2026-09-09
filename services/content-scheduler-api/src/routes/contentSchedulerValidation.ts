@@ -95,6 +95,55 @@ export function validateLinksToItemId(value: unknown): string | null {
   return null;
 }
 
+// Thread part bounds (task 1016cbff). A thread is one root tweet plus 1..6
+// reply tweets (1 + 6 = 7 normalised parts max). The seven-part upper bound
+// covers the existing five-to-seven-part campaign shape while preventing
+// accidental long chains in the weekly flow. Two is the lower bound — a
+// "thread" of one tweet is just a single-tweet item.
+export const MIN_THREAD_PARTS = 2;
+export const MAX_THREAD_PARTS = 7;
+
+/**
+ * Validate one thread-part body. The same X-safe counting rule that
+ * applies to single-tweet bodies applies to every thread part: non-empty
+ * after trim, <= 280 Unicode code points. Returns null on success.
+ */
+export function validateThreadPartBody(value: unknown): string | null {
+  if (typeof value !== 'string') return 'thread part body must be a string';
+  if (value.trim().length === 0) return 'thread part body must not be empty';
+  if (value.length > MAX_TWEET_BODY) {
+    return `thread part body must be <= ${MAX_TWEET_BODY} characters`;
+  }
+  return null;
+}
+
+/**
+ * Validate the `parts` array on POST /content-scheduler/items for
+ * `kind: 'thread'` and on PATCH /items/:id when replacing a thread.
+ *
+ * Rules (task 1016cbff tech design):
+ *   - parts must be an array of 2..7 entries;
+ *   - every entry must have a string body that passes validateThreadPartBody;
+ *   - bodies are stored verbatim, no implicit dedup.
+ *
+ * Returns null on success, error message on failure.
+ */
+export function validateThreadParts(parts: unknown): string | null {
+  if (!Array.isArray(parts)) return 'parts must be an array';
+  if (parts.length < MIN_THREAD_PARTS || parts.length > MAX_THREAD_PARTS) {
+    return `thread must have ${MIN_THREAD_PARTS}..${MAX_THREAD_PARTS} parts (got ${parts.length})`;
+  }
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] as { body?: unknown };
+    if (!part || typeof part !== 'object') {
+      return `parts[${i}] must be an object with a body string`;
+    }
+    const err = validateThreadPartBody(part.body);
+    if (err) return `parts[${i}]: ${err}`;
+  }
+  return null;
+}
+
 /**
  * Validate the request body for POST /content-scheduler/imports/cto-craft.
  *

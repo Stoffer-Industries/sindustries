@@ -377,3 +377,82 @@ Mission Control suite: 161/161 green as of PR #257 merge.
 - **Thread composition**: a single Content Scheduler item is a single tweet. Thread drafts are out of scope for v1.
 - **Per-user actor attribution**: `approvedBy` is a free-form string. The future Multi-user support work should formalise this.
 - **BullMQ wiring**: the `bullmq` adapter is a throw-stub. Wire it up + add `bullmq`/`ioredis` deps + flip `CONTENT_SCHEDULER_JOB_ADAPTER` for production.
+
+## Threads (multi-part stories)
+
+Threads are first-class Content Scheduler items: one aggregate id, one
+calendar row, ordered root + reply tweets that publish as a single
+chained X thread. Tasks `1016cbff` slice 1/3 (PR #594 — schema) and
+slice 2/3 (PR #598 — atomic publish + retry) shipped the schema and the
+publish orchestrator; slice B (PR B, in this branch) wires the
+create/update/GET surface and the Mission Control UI for threads. The
+Ivy weekly-flow classifier (slice C, AC4 + AC5) is the remaining work.
+
+### Aggregate model
+
+- `ContentSchedulerItem.kind = 'thread'` extends the existing
+  single-tweet model. Position 0 is the parent row's `body`; positions
+  1..n live in `ContentSchedulerThreadPart` rows keyed by
+  `(itemId, position)`. The API normalises both shapes into one ordered
+  `parts` array on read so clients do not need a second visual model.
+- A thread has 2–7 parts; each part body is non-empty and ≤280 code
+  points. The bounds are server-enforced on POST/PATCH.
+- All thread parts share the aggregate's `source`, `sourceRef`,
+  `scheduledFor`, status, approval metadata, and auto-post job. The
+  scheduled day is the aggregate's day; replies do not occupy separate
+  calendar days.
+
+### Create / update API surface
+
+- `POST /content-scheduler/items` accepts
+  `{ kind: 'thread', parts: [{ body }, ...], source?, sourceRef?,
+  scheduledFor? }`. `parts[0]` becomes the root tweet (stored on the
+  parent `body`); `parts[1..n]` become `ContentSchedulerThreadPart`
+  rows in one transaction. `body` is rejected when `parts` is present
+  to keep the root text single-sourced.
+- `PATCH /content-scheduler/items/:id` with `kind: 'thread'` and a new
+  `parts` array replaces the full ordered list atomically. Editing an
+  approved thread clears approval (status → `queued`, approvedAt/By →
+  null) and bumps the auto-post schedule version so any in-flight
+  delayed job sees the new version.
+- `GET /content-scheduler/items` returns the `parts` array on every
+  row (sorted by position ascending).
+
+### Publish + recovery (cross-reference)
+
+The atomic-publish + reverse-deletion flow lives in
+`services/content-scheduler-api/src/routes/contentSchedulerThreadPublish.ts`
+(documented as part of PR #598). Compensation deletes tweeted replies
+in reverse order on partial failure; unrecoverable delete failures flip
+the item to `cleanup_required` and the operator retries via
+`POST /items/:id/retry-publish` (thread-only).
+
+### Mission Control surface
+
+The composer has a `Single tweet` / `Thread` kind selector. Thread mode
+renders one textarea per part with live `n/280` counts and Add / Remove
+/ Move-up / Move-down controls. The card renders one calendar row with
+a `Thread · N parts` badge, a collapsed root preview, and an `Expand`
+toggle revealing the numbered reply parts. Editing a thread replaces
+the full list via one aggregate `PATCH`; the UI surfaces the
+"editing an approved thread clears approval" behaviour with an inline
+note and requires Tom to re-approve.
+
+### Atomicity limitation (X public API)
+
+X exposes separate create / delete calls and no transaction or
+idempotency key. Literal cross-system atomicity is impossible; this
+design interprets AC3 as **compensating all-or-none publication with
+explicit recovery**:
+
+- local validation failures post nothing;
+- known partial failures are rolled back automatically;
+- cleanup failures are never hidden or called successful;
+- retries cannot create a second chain while known remote remnants
+  exist.
+
+A startup/worker reconciliation pass inspects stale `publishing`,
+`rolling_back`, and `cleanup_required` attempts. It retries only known
+cleanup, never blindly replays creates. Unknown-outcome crash windows
+require operator inspection of X and remain a surfaced
+`cleanup_required` state rather than risking duplicate posts.

@@ -110,3 +110,40 @@ describe('contentSchedulerApi mutations send the browser session cookie', () => 
     expect(mockFetch.mock.calls[0][1].credentials).toBe('include');
   });
 });
+
+// Thread create + update shape (task 1016cbff PR B). The MC client
+// splits the create payload by kind: thread items send `parts` and omit
+// `body`; single-tweet items send `body`. The server validates the
+// discrimination and rejects mixed shape; the client matches.
+describe('createItem thread payload (task 1016cbff PR B)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete import.meta.env.VITE_CONTENT_SCHEDULER_API_BASE_URL;
+  });
+
+  it('sends `parts` (not `body`) when kind=thread', async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ id: 1, kind: 'thread' }));
+    await createItem({
+      kind: 'thread',
+      parts: [{ body: 'Root' }, { body: 'Reply' }],
+      source: 'manual',
+      scheduledFor: '2026-09-09T10:00:00Z'
+    });
+    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(callBody.kind).toBe('thread');
+    expect(callBody.parts).toEqual([{ body: 'Root' }, { body: 'Reply' }]);
+    expect('body' in callBody).toBe(false);
+  });
+
+  it('sends `body` (not `parts`) when kind=single', async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ id: 1, kind: 'scheduled' }));
+    await createItem({
+      kind: 'scheduled',
+      body: 'Single tweet',
+      source: 'manual'
+    });
+    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(callBody.body).toBe('Single tweet');
+    expect('parts' in callBody).toBe(false);
+  });
+});

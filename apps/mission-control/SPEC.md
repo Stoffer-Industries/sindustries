@@ -84,10 +84,27 @@ surface.
    - Renders the **day-status banner** ("✓ 0/1 posts published today" etc.)
      at the bottom so the operator can see at-a-glance whether the daily
      X-post cap is reached.
-   - **Composer (top).** The "Add to queue" form takes a tweet body
-     (≤1000 chars), a source (`ops_notes` / `cto_craft` / `manual` /
-     `other`), and an optional `scheduledFor` timestamp. Submit posts to
-     the Content Scheduler API and reloads the calendar.
+   - **Composer (top).** The composer has a `Single tweet` / `Thread`
+     kind selector (task 1016cbff PR B). Single mode is the existing
+     form: a tweet body (≤1000 chars), a source (`ops_notes` /
+     `cto_craft` / `manual` / `other`), and an optional `scheduledFor`
+     timestamp; submit posts to the Content Scheduler API and reloads
+     the calendar. Thread mode renders ordered textareas (one per part),
+     each with a live `n/280` count, and per-part Add / Remove /
+     Move-up / Move-down controls. Thread submit requires 2–7 non-empty
+     parts and posts one `kind=thread` create with the full part list
+     (the root tweet is `parts[0]`); the server stores positions
+     1..n as `ContentSchedulerThreadPart` rows.
+   - **Thread cards (one aggregate per scheduledFor).** When the queue
+     includes a `kind=thread` item, the card renders as a single
+     calendar row with a `Thread · N parts` badge and the root text
+     preview. An `Expand` toggle reveals the numbered reply parts in
+     order. Editing a thread replaces the full part list via one
+     aggregate `PATCH /items/:id`; the server clears approval if the
+     item was approved (the UI surfaces this with an inline note), and
+     Tom must re-approve after saving. Approve / Unapprove / Publish /
+     Remove / drag-to-reschedule all operate on the aggregate id, never
+     on individual parts.
    - **Calendar grid.** The primary view is a 10-day forward calendar
      from today through today + 9 in `Pacific/Auckland`. Each day is a
      column labelled "Wed 16 Jul" style (weekday short + day + month
@@ -121,7 +138,8 @@ surface.
      enforced server-side by `guardPublish` (`code:
      already_published_today`, `409 Conflict`) for manual and auto-post
      publish attempts. The day boundary is computed in
-     `Pacific/Auckland` on both sides.
+     `Pacific/Auckland` on both sides. A published thread counts as one
+     day unit against the cap regardless of how many X posts it created.
 
 
 ## Screens

@@ -53,10 +53,21 @@ export async function listItems(status) {
   return request(`/content-scheduler/items${qs}`);
 }
 
-export async function createItem({ body, source, sourceRef, scheduledFor, actor }) {
+export async function createItem({ kind, body, parts, source, sourceRef, scheduledFor, actor }) {
+  // Thread items (task 1016cbff PR B) send `parts` (an ordered array of
+  // { body } entries) and omit `body` — the server stores parts[0].body
+  // as the root and parts[1..n] as ordered reply rows. Single-tweet items
+  // still use `body` unchanged. The server validates the discrimination
+  // and rejects mixed shape (body + parts) on thread creates.
+  const payload = { kind, source, sourceRef, scheduledFor };
+  if (kind === 'thread') {
+    payload.parts = parts;
+  } else {
+    payload.body = body;
+  }
   return request('/content-scheduler/items', {
     method: 'POST',
-    body: { body, source, sourceRef, scheduledFor },
+    body: payload,
     actor
   });
 }

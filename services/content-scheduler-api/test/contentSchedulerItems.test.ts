@@ -21,6 +21,10 @@ const prismaMock: any = {
     update: vi.fn(),
     aggregate: vi.fn()
   },
+  contentSchedulerThreadPart: {
+    createMany: vi.fn(),
+    deleteMany: vi.fn()
+  },
   $transaction: vi.fn()
 };
 
@@ -364,5 +368,330 @@ describe('PATCH /content-scheduler/items/:id — kind discrimination', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.kind).toBe('scheduled');
+  });
+});
+
+// --- Thread kind: create/update (task 1016cbff PR B) -------------------
+//
+// These tests cover the new POST /content-scheduler/items and PATCH
+// /content-scheduler/items/:id surface for kind=thread items:
+//   - 2..7 ordered parts with <=280-char bodies each
+//   - body + parts conflict (must use parts)
+//   - editing an approved thread clears approval atomically
+//   - PATCH without parts on a thread item is rejected
+//   - GET /items includes parts in the response
+
+describe('POST /content-scheduler/items — kind=thread (task 1016cbff PR B)', () => {
+  function threadCreateMock(body: string, parts: Array<{ position: number; body: string }>) {
+    return {
+      id: ITEM_ID,
+      body,
+      source: 'manual',
+      sourceRef: null,
+      status: 'queued',
+      scheduledFor: null,
+      position: 0,
+      approvedAt: null,
+      approvedBy: null,
+      publishedAt: null,
+      publishedUrl: null,
+      publishError: null,
+      createdAt: new Date('2026-09-09T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-09T00:00:00.000Z'),
+      removedAt: null,
+      kind: 'thread',
+      manualPostedUrl: null,
+      manualPostedAt: null,
+      linksToItemId: null,
+      parts
+    };
+  }
+
+  it('creates a 2-part thread as one aggregate (AC1 surface)', async () => {
+    const created = threadCreateMock('Root tweet', [
+      { position: 1, body: 'Reply 1' }
+    ]);
+    prismaMock.contentSchedulerItem.create.mockResolvedValueOnce(created);
+
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({
+        kind: 'thread',
+        parts: [{ body: 'Root tweet' }, { body: 'Reply 1' }]
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.kind).toBe('thread');
+    expect(res.body.data.body).toBe('Root tweet');
+    expect(res.body.data.parts).toEqual([{ position: 1, body: 'Reply 1' }]);
+    // Prisma create payload must include ordered reply parts (positions
+    // 1..n) so the storage shape matches the public contract.
+    const createArgs = prismaMock.contentSchedulerItem.create.mock.calls[0][0];
+    expect(createArgs.data.parts.create).toEqual([
+      { position: 1, body: 'Reply 1' }
+    ]);
+    expect(createArgs.data.body).toBe('Root tweet');
+  });
+
+  it('creates a 7-part thread (the upper bound)', async () => {
+    const partsBodies = [
+      'Root', 'Reply 1', 'Reply 2', 'Reply 3', 'Reply 4', 'Reply 5', 'Reply 6'
+    ];
+    const created = threadCreateMock('Root', partsBodies.slice(1).map((body, i) => ({ position: i + 1, body })));
+    prismaMock.contentSchedulerItem.create.mockResolvedValueOnce(created);
+
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({ kind: 'thread', parts: partsBodies.map((body) => ({ body })) });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.parts).toHaveLength(6);
+  });
+
+  it('rejects 1-part thread (too short)', async () => {
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({ kind: 'thread', parts: [{ body: 'Only one part' }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+
+  it('rejects 8-part thread (too long)', async () => {
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({
+        kind: 'thread',
+        parts: Array.from({ length: 8 }, (_, i) => ({ body: `Part ${i}` }))
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+
+  it('rejects body+parts combination (one source of truth)', async () => {
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({
+        kind: 'thread',
+        body: 'Root text in body',
+        parts: [{ body: 'Reply' }, { body: 'Reply 2' }]
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+
+  it('rejects thread part body > 280 chars', async () => {
+    const longBody = 'x'.repeat(281);
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({
+        kind: 'thread',
+        parts: [{ body: 'Root' }, { body: longBody }]
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+
+  it('rejects parts on kind=scheduled (only kind=thread supports parts)', async () => {
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({
+        kind: 'scheduled',
+        body: 'Single tweet',
+        parts: [{ body: 'Should be ignored' }, { body: 'Not allowed' }]
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+
+  it('rejects kind=thread without parts', async () => {
+    const res = await authedRequest(await createApp())
+      .post('/api/v1/content-scheduler/items')
+      .send({ kind: 'thread', body: 'No parts' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+});
+
+describe('PATCH /content-scheduler/items/:id — thread full replacement (task 1016cbff PR B)', () => {
+  function threadExistingFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      id: ITEM_ID,
+      body: 'Old root',
+      source: 'manual',
+      sourceRef: null,
+      status: 'queued',
+      scheduledFor: null,
+      position: 0,
+      approvedAt: null,
+      approvedBy: null,
+      publishedAt: null,
+      publishedUrl: null,
+      publishError: null,
+      createdAt: new Date('2026-09-09T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-09T00:00:00.000Z'),
+      removedAt: null,
+      kind: 'thread',
+      manualPostedUrl: null,
+      manualPostedAt: null,
+      linksToItemId: null,
+      autoPostJobId: null,
+      autoPostScheduleVersion: 0,
+      ...overrides
+    };
+  }
+
+  it('replaces parts atomically and returns the updated aggregate with parts', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValueOnce(threadExistingFixture());
+    const txMock = {
+      contentSchedulerItem: {
+        update: vi.fn().mockResolvedValueOnce(threadExistingFixture()),
+        findUnique: vi.fn().mockResolvedValueOnce(
+          threadExistingFixture({
+            body: 'New root',
+            parts: [
+              { position: 1, body: 'New reply 1' },
+              { position: 2, body: 'New reply 2' }
+            ]
+          })
+        )
+      },
+      contentSchedulerThreadPart: {
+        deleteMany: vi.fn().mockResolvedValueOnce({ count: 2 }),
+        createMany: vi.fn().mockResolvedValueOnce({ count: 2 })
+      }
+    };
+    prismaMock.$transaction.mockImplementationOnce(async (cb: any) => cb(txMock));
+
+    const res = await authedRequest(await createApp())
+      .patch(`/api/v1/content-scheduler/items/${ITEM_ID}`)
+      .send({
+        kind: 'thread',
+        parts: [
+          { body: 'New root' },
+          { body: 'New reply 1' },
+          { body: 'New reply 2' }
+        ]
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.body).toBe('New root');
+    expect(res.body.data.parts).toEqual([
+      { position: 1, body: 'New reply 1' },
+      { position: 2, body: 'New reply 2' }
+    ]);
+    expect(txMock.contentSchedulerThreadPart.deleteMany).toHaveBeenCalledWith({ where: { itemId: ITEM_ID } });
+    expect(txMock.contentSchedulerThreadPart.createMany).toHaveBeenCalledWith({
+      data: [
+        { itemId: ITEM_ID, position: 1, body: 'New reply 1' },
+        { itemId: ITEM_ID, position: 2, body: 'New reply 2' }
+      ]
+    });
+  });
+
+  it('clears approval when an approved thread is edited (tech design \u00a7PR B)', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValueOnce(
+      threadExistingFixture({ status: 'approved', approvedAt: new Date(), approvedBy: 'Tom' })
+    );
+    const txMock = {
+      contentSchedulerItem: {
+        update: vi.fn().mockResolvedValueOnce({}),
+        findUnique: vi.fn().mockResolvedValueOnce(
+          threadExistingFixture({
+            status: 'queued',
+            approvedAt: null,
+            approvedBy: null,
+            parts: [{ position: 1, body: 'Updated reply' }]
+          })
+        )
+      },
+      contentSchedulerThreadPart: {
+        deleteMany: vi.fn().mockResolvedValueOnce({ count: 1 }),
+        createMany: vi.fn().mockResolvedValueOnce({ count: 1 })
+      }
+    };
+    prismaMock.$transaction.mockImplementationOnce(async (cb: any) => cb(txMock));
+
+    const res = await authedRequest(await createApp())
+      .patch(`/api/v1/content-scheduler/items/${ITEM_ID}`)
+      .send({
+        kind: 'thread',
+        parts: [{ body: 'Updated root' }, { body: 'Updated reply' }]
+      });
+
+    expect(res.status).toBe(200);
+    const updateArgs = txMock.contentSchedulerItem.update.mock.calls[0][0];
+    expect(updateArgs.data.status).toBe('queued');
+    expect(updateArgs.data.approvedAt).toBeNull();
+    expect(updateArgs.data.approvedBy).toBeNull();
+  });
+
+  it('rejects parts on a non-thread item (kind=scheduled)', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValueOnce(
+      threadExistingFixture({ kind: 'scheduled' })
+    );
+
+    const res = await authedRequest(await createApp())
+      .patch(`/api/v1/content-scheduler/items/${ITEM_ID}`)
+      .send({ parts: [{ body: 'r' }, { body: 'r2' }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_PARTS');
+  });
+
+  it('rejects body on a thread item (must use parts)', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValueOnce(threadExistingFixture());
+
+    const res = await authedRequest(await createApp())
+      .patch(`/api/v1/content-scheduler/items/${ITEM_ID}`)
+      .send({ body: 'Should not be allowed' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_BODY');
+  });
+});
+
+describe('GET /content-scheduler/items — parts in response (task 1016cbff PR B)', () => {
+  it('includes ordered parts on each item', async () => {
+    prismaMock.contentSchedulerItem.findMany.mockResolvedValueOnce([
+      {
+        id: ITEM_ID,
+        body: 'Root',
+        source: 'manual',
+        sourceRef: null,
+        status: 'queued',
+        scheduledFor: null,
+        position: 0,
+        approvedAt: null,
+        approvedBy: null,
+        publishedAt: null,
+        publishedUrl: null,
+        publishError: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        removedAt: null,
+        kind: 'thread',
+        manualPostedUrl: null,
+        manualPostedAt: null,
+        linksToItemId: null,
+        parts: [{ position: 1, body: 'Reply 1' }, { position: 2, body: 'Reply 2' }]
+      }
+    ]);
+
+    const res = await authedRequest(await createApp())
+      .get('/api/v1/content-scheduler/items');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].parts).toEqual([
+      { position: 1, body: 'Reply 1' },
+      { position: 2, body: 'Reply 2' }
+    ]);
+    const findArgs = prismaMock.contentSchedulerItem.findMany.mock.calls[0][0];
+    expect(findArgs.include).toEqual({ parts: { orderBy: { position: 'asc' } } });
   });
 });
