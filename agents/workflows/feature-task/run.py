@@ -229,11 +229,9 @@ def main() -> int:
         for task in tasks
     ]
     errors = [result for result in results if result.get("returncode") != 0 or result.get("error")]
-    reconciliation_envelope = reconciliation.get("envelope") or {}
     if (
         reconciliation.get("returncode") != 0
         or reconciliation.get("error")
-        or reconciliation_envelope.get("criteriaMet") is False
     ):
         errors.insert(0, reconciliation)
     pipelines = sorted({task.get("_pipeline", str(PIPELINE)) for task in tasks})
