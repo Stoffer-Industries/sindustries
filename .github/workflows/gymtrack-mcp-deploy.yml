@@ -1,0 +1,84 @@
+# Deploy the machine-facing GymTrack MCP service to its production Fly app.
+# This is intentionally separate from the GymTrack SPA/Supabase workflow: the
+# MCP service has its own image, runtime, and rollback boundary.
+
+name: GymTrack MCP Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/gymtrack-mcp/**'
+      - 'apps/gymtrack/server/agentData.js'
+      - '.github/workflows/gymtrack-mcp-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gymtrack-mcp-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  FLY_APP: gymtrack-mcp
+  FLY_CONFIG: services/gymtrack-mcp/fly.toml
+
+jobs:
+  deploy:
+    name: Deploy GymTrack MCP to Fly.io production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Test GymTrack MCP
+        run: npm test --workspace @sindustries/gymtrack-mcp
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate fly.toml
+        run: flyctl config validate --config "$FLY_CONFIG"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy (canary)
+        run: flyctl deploy --config "$FLY_CONFIG" --app "$FLY_APP" --strategy canary --wait-timeout 600
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Smoke check (/health)
+        run: |
+          set -euo pipefail
+          URL="https://${FLY_APP}.fly.dev/health"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error --max-time 10 "$URL"; then
+              echo "Smoke OK on attempt $attempt"
+              exit 0
+            fi
+            echo "Smoke attempt $attempt failed; retrying in 5s"
+            sleep 5
+          done
+          echo "Smoke check failed after 10 attempts" >&2
+          exit 1
+
+      - name: Smoke check (OAuth discovery)
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15 \
+            "https://${FLY_APP}.fly.dev/.well-known/oauth-authorization-server" \
+            | grep -F '"registration_endpoint":"https://gymtrack-mcp.fly.dev/oauth/register"'
