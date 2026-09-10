@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 mod ac_parsing;
@@ -14,6 +13,7 @@ mod analytics;
 mod analytics_replay;
 mod api_client;
 mod brain_spec_lifecycle;
+mod cli_utils;
 mod feedback_aggregate;
 mod git_worktree;
 mod lobster_state;
@@ -277,7 +277,7 @@ struct Workstream {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let envelope = match cli.command {
-        Commands::LoadTask { base_url, task_id } => load_task(&base_url, &task_id)?,
+        Commands::LoadTask { base_url, task_id } => cli_utils::load_task(&base_url, &task_id)?,
         Commands::SpecCheck(args) => spec_check_ready::spec_check(args)?,
         Commands::ReadyChecks(args) => spec_check_ready::ready_checks(args)?,
         Commands::VerifyDelivery(args) => crate::verify_delivery::verify_delivery(args)?,
@@ -300,41 +300,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn gh_command() -> Command {
-    let mut cmd = Command::new("gh");
-    if std::env::var("GH_TOKEN").is_err() && std::env::var("GITHUB_TOKEN").is_err() {
-        if let Some(token) = crate::analytics_replay::load_dotenv_token("LOBSTER_GITHUB_TOKEN") {
-            cmd.env("GH_TOKEN", token);
-        }
-    }
-    cmd
-}
-
-fn pr_body(url: &str) -> Result<String> {
-    let output = gh_command()
-        .args(["pr", "view", url, "--json", "body", "--jq", ".body"])
-        .output()?;
-    if !output.status.success() {
-        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string()));
-    }
-    let raw = String::from_utf8(output.stdout)?;
-    Ok(pr_gates::decode_pr_body_output(&raw))
-}
-
-fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
-    let task: Task = api_client::api_get(base_url, &format!("/tasks/{task_id}"))?;
-    let state = lobster_state::parse_lobster_state(&task);
-    Ok(api_client::output(
-        true,
-        false,
-        "loaded_task",
-        task,
-        state,
-        vec![],
-    ))
-}
+// `gh_command` / `pr_body` / `load_task` moved to `cli_utils.rs` in
+// Slice 2 (W38+ second tranche main.rs carve). Cross-module consumers
+// reference these helpers via `crate::cli_utils::{gh_command, pr_body,
+// load_task}` — same `pub(crate)` shape as the W37 first-tranche carve.
 
 // `open -> ready` / `ready -> doing` stage handlers (`spec_check`,
 // `ready_checks`, `code_task_tech_design_check`, `code_task_ready_checks`)
