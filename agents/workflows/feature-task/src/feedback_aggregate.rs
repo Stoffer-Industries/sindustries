@@ -34,7 +34,8 @@ use crate::pr_gates;
 use crate::product_spec_parsing::{implementer_pr_urls, inspect_pr};
 use crate::{
     api_client::{add_comment, api_get_task, read_envelope, spec_checksum_mismatch_message},
-    reconcile_workflow_attention, Envelope, StageArgs,
+    spec_check_ready::reconcile_workflow_attention,
+    Envelope, StageArgs,
 };
 use anyhow::Result;
 

@@ -40,7 +40,9 @@ use crate::{
         cleanup_task_worktree_for_task, format_worktree_cleanup_summary, WorktreeCleanupOutcome,
     },
     lobster_state::{is_past, write_state},
-    pr_body, transition_or_block, workflow_handoff, Envelope, StageArgs, Task,
+    pr_body,
+    spec_check_ready::{transition_or_block, workflow_handoff},
+    Envelope, StageArgs, Task,
 };
 
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
@@ -125,7 +127,7 @@ pub(crate) fn run_post_merge_worktree_cleanup(
 ///   `done` handoff, and on success archive the spec + run worktree cleanup.
 pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    crate::reconcile_workflow_attention(&args, &mut env)?;
+    crate::spec_check_ready::reconcile_workflow_attention(&args, &mut env)?;
     // Spec drift is not blocked at post_merge: Tom owns the ACs during QA and may
     // legitimately refine them. The resync flow (unchecking "Approved by Tom" and
     // requiring explicit re-approval) handles drift tracking; see the spec-resync
