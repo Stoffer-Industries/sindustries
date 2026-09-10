@@ -33,8 +33,8 @@ use crate::brain_spec_lifecycle::{
 use crate::pr_gates;
 use crate::product_spec_parsing::{implementer_pr_urls, inspect_pr};
 use crate::{
-    add_comment, api_get_task, read_envelope, reconcile_workflow_attention,
-    spec_checksum_mismatch_message, Envelope, StageArgs,
+    api_client::{add_comment, api_get_task, read_envelope, spec_checksum_mismatch_message},
+    reconcile_workflow_attention, Envelope, StageArgs,
 };
 use anyhow::Result;
 

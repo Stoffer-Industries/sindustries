@@ -41,10 +41,12 @@ use crate::product_spec_parsing::{
 };
 use crate::task_approvals;
 use crate::{
-    add_comment, api_delete, api_get_task, api_patch, archive_task_spec_for_done_task, comment_text,
-    rewrite_spec_line_in_description, spec_checksum_mismatch_message, workflow_handoff, write_state,
-    ArchiveDoneTaskSpecsSweepArgs, ArchiveOutcome, Envelope, LobsterState, StageArgs, Task,
-    BRAIN_DIR, TASK_SPECS_DONE_DIR, TASK_SPECS_IN_PROGRESS_DIR,
+    api_client::{
+        add_comment, api_delete, api_get_task, api_patch, spec_checksum_mismatch_message,
+    },
+    archive_task_spec_for_done_task, comment_text, rewrite_spec_line_in_description,
+    workflow_handoff, write_state, ArchiveDoneTaskSpecsSweepArgs, ArchiveOutcome, Envelope,
+    LobsterState, StageArgs, Task, BRAIN_DIR, TASK_SPECS_DONE_DIR, TASK_SPECS_IN_PROGRESS_DIR,
 };
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
