@@ -17,6 +17,7 @@ mod analytics;
 mod feedback_aggregate;
 mod post_merge;
 mod pr_gates;
+mod task_approvals;
 mod test_resolution;
 mod test_runners;
 mod verify_delivery;
@@ -791,47 +792,14 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
 /// `feedback_aggregate.rs` in PR-B. Imported here as
 /// `crate::feedback_aggregate::feedback_review_failure`.
 ///
-/// Return true only when the matching structured approval row is approved.
-/// Missing, revoked, and unknown states fail closed.
-fn task_approval_granted(task: &Task, approval_type: &str) -> bool {
-    task.approvals
-        .iter()
-        .any(|a| a.approval_type == approval_type && a.state == "approved")
-}
-
-/// The structured approval row is the source of truth regardless of actor.
-/// Legacy approval-marker and acceptance-criteria reconciliation must stop
-/// after approval; lifecycle path movement remains allowed separately.
-fn spec_check_should_skip_legacy_mutation(task: &Task) -> bool {
-    task_approval_granted(task, "spec")
-}
-fn accepted_structured(task: &Task) -> bool {
-    task_approval_granted(task, "accepted")
-}
-pub(crate) fn accepted_structured_failures(task: &Task) -> Vec<String> {
-    if accepted_structured(task) {
-        vec![]
-    } else {
-        vec!["Structured accepted approval is missing or not approved; Tom must approve the `accepted` TaskApproval before closing.".to_string()]
-    }
-}
-
-// ---- qa_agent gate (AC1 of task f6a4d56a, "Add Ash: QA-verifier gate") ----
-//
-// The `qa_agent` workflow gate is Ash's mechanical verification gate. It is
-// created when a task enters `doing` (or when its PR merges while in `doing`)
-// and gates the `doing → acceptance` transition. The lobster reads the
-// structured `TaskApproval` row via `task_approval_granted` and refuses to
-// promote a task until Ash approves the gate.
-
-/// True when the structured `qa_agent` TaskApproval row is `state: approved`.
-/// Used to gate the `doing -> acceptance` transition in `verify_delivery`.
-/// Distinct from `accepted_structured` above (Tom's human sign-off); both
-/// rows must be approved before the task can reach `done`.
-fn qa_agent_verified(task: &Task) -> bool {
-    task_approval_granted(task, "qa_agent")
-}
-
+/// Cross-stage structured-approval predicates — moved to
+/// `task_approvals.rs` in PR-D (W37 A3 main.rs carve). Imported here as
+/// `crate::task_approvals::{task_approval_granted,
+/// spec_check_should_skip_legacy_mutation, accepted_structured,
+/// accepted_structured_failures, qa_agent_verified}`. The legacy
+/// approval-marker + acceptance-criteria cross-check tests stay in
+/// `main.rs::mod tests` and reference the new module via
+/// `crate::task_approvals::*` paths per the W36 carve convention.
 fn parse_git_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
     let mut entries: Vec<WorktreeEntry> = Vec::new();
     for block in output.split("\n\n") {
@@ -1028,12 +996,12 @@ fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
         }
         "doing"
             if !implementer_pr_urls(task).is_empty()
-                && !qa_agent_verified(task)
+                && !task_approvals::qa_agent_verified(task)
                 && !ash_was_last_commenter(task) =>
         {
             Some("Ash")
         }
-        "acceptance" if !accepted_structured(task) => Some("Tom"),
+        "acceptance" if !task_approvals::accepted_structured(task) => Some("Tom"),
         _ => None,
     }
 }
@@ -1060,11 +1028,11 @@ fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         // `workflow_attention_owner` already handles replacement of a stale
         // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
         "Quinn" => tech_design_approved_structured(task) || tech_design_waived(task),
-        "Ash" => qa_agent_verified(task),
+        "Ash" => task_approvals::qa_agent_verified(task),
         // Tom owns the accepted gate only once the task reaches acceptance.
         // While still doing, a pending accepted approval must not leave Tom
         // blocking delivery-owner routing.
-        "Tom" => task.status != "acceptance" || accepted_structured(task),
+        "Tom" => task.status != "acceptance" || task_approvals::accepted_structured(task),
         _ => false,
     }
 }
@@ -2633,7 +2601,7 @@ fn block_on_spec_drift_fluid(
             if we_actioned_episode
                 || api_reapproval_after_auto_revoke
                 || fresh_resync_record
-                || spec_check_should_skip_legacy_mutation(&env.task)
+                || task_approvals::spec_check_should_skip_legacy_mutation(&env.task)
             {
                 return Ok(None);
             }
@@ -2670,7 +2638,7 @@ fn block_on_spec_drift_fluid(
         // workflow credential (which may intentionally be scoped to Quinn's
         // tech-design approval only). A future explicit approval lifecycle
         // action may still move this task into case (a) or (b).
-        if spec_check_should_skip_legacy_mutation(&env.task) {
+        if task_approvals::spec_check_should_skip_legacy_mutation(&env.task) {
             return Ok(None);
         }
 
@@ -3186,7 +3154,7 @@ fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Pat
 
 /// Structured TaskApproval rows are the sole source of spec approval.
 fn spec_is_approved(task: &Task) -> bool {
-    task_approval_granted(task, "spec")
+    task_approvals::task_approval_granted(task, "spec")
 }
 
 fn product_spec(task: &Task) -> Option<ProductSpecRef> {
@@ -3606,7 +3574,7 @@ fn tech_design_url(task: &Task) -> Option<String> {
 
 /// Structured TaskApproval rows are the sole source of tech-design approval.
 fn tech_design_approved_structured(task: &Task) -> bool {
-    task_approval_granted(task, "tech_design")
+    task_approvals::task_approval_granted(task, "tech_design")
 }
 
 /// True if any task comment starts with `[tech-design-not-required]` followed
@@ -4071,7 +4039,7 @@ mod tests {
             ..Task::default()
         };
 
-        assert!(spec_check_should_skip_legacy_mutation(&task));
+        assert!(task_approvals::spec_check_should_skip_legacy_mutation(&task));
     }
 
     #[test]
@@ -4081,7 +4049,7 @@ mod tests {
             ..Task::default()
         };
 
-        assert!(!spec_check_should_skip_legacy_mutation(&task));
+        assert!(!task_approvals::spec_check_should_skip_legacy_mutation(&task));
     }
 
     #[test]
@@ -4841,7 +4809,7 @@ feature
         };
         assert!(spec_is_approved(&approved));
         assert!(tech_design_approved_structured(&approved));
-        assert!(accepted_structured(&approved));
+        assert!(task_approvals::accepted_structured(&approved));
         let legacy = Task {
             description: Some("- [x] **Approved by Tom**".into()),
             comments: vec![TaskComment {
@@ -4853,7 +4821,7 @@ feature
         };
         assert!(!spec_is_approved(&legacy));
         assert!(!tech_design_approved_structured(&legacy));
-        assert!(!accepted_structured(&legacy));
+        assert!(!task_approvals::accepted_structured(&legacy));
         let revoked = Task {
             approvals: vec![
                 approval_row("spec", "revoked"),
@@ -4864,7 +4832,7 @@ feature
         };
         assert!(!spec_is_approved(&revoked));
         assert!(!tech_design_approved_structured(&revoked));
-        assert!(!accepted_structured(&revoked));
+        assert!(!task_approvals::accepted_structured(&revoked));
     }
 
     #[test]
@@ -7285,89 +7253,13 @@ detached
         assert_eq!(percent_encode_assignee("a#b"), "a%23b");
     }
 
-    // ---- AC1 of task f6a4d56a ("Add Ash: QA-verifier gate") ----
-    // The qa_agent predicate is the source-of-truth gate on the
-    // `doing → acceptance` transition. These tests pin the contract:
-    //   * absent row / revoked row → predicate false, transition blocked
-    //   * approved row              → predicate true, transition allowed
-    //   * cross-check with the (existing) accepted_structured predicate
-    //     so PR #1's rename is regression-protected.
-    // The transition itself is exercised end-to-end in a follow-up PR
-    // (services/tasks-api integration test, see tech-design §10 AC4).
-
-    fn qa_test_task_with_approvals(rows: Vec<(&str, &str)>) -> Task {
-        Task {
-            id: "f6a4d56a-fdd0-41fe-b5c0-6c042cb53f47".to_string(),
-            title: "AC1 unit test fixture".to_string(),
-            description: None,
-            status: "doing".to_string(),
-            assignee: Some("Rowan".to_string()),
-            blocked: false,
-            dependency_blocked: false,
-            task_type: Some("code".to_string()),
-            spec_checksum: None,
-            tags: Vec::new(),
-            comments: Vec::new(),
-            approvals: rows
-                .into_iter()
-                .map(|(approval_type, state)| TaskApproval {
-                    approval_type: approval_type.to_string(),
-                    state: state.to_string(),
-                    ..TaskApproval::default()
-                })
-                .collect(),
-            attention_owners: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn ac1_qa_agent_verified_returns_false_with_no_approval_row() {
-        let task = qa_test_task_with_approvals(vec![]);
-        assert!(!qa_agent_verified(&task));
-        let failures = crate::verify_delivery::qa_agent_verified_failures(&task);
-        assert_eq!(failures.len(), 1);
-        assert!(failures[0].contains("`qa_agent`"));
-    }
-
-    #[test]
-    fn ac1_qa_agent_verified_returns_false_when_approval_revoked() {
-        // A revoked row is the revoke-as-outstanding proxy (per tech-design
-        // open-question #1): predicate must read it as "not satisfied".
-        let task = qa_test_task_with_approvals(vec![("qa_agent", "revoked")]);
-        assert!(!qa_agent_verified(&task));
-        assert_eq!(crate::verify_delivery::qa_agent_verified_failures(&task).len(), 1);
-    }
-
-    #[test]
-    fn ac1_qa_agent_verified_returns_true_when_approval_approved() {
-        let task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
-        assert!(qa_agent_verified(&task));
-        assert!(crate::verify_delivery::qa_agent_verified_failures(&task).is_empty());
-    }
-
-    #[test]
-    fn ac1_qa_agent_verified_returns_false_when_approval_pending() {
-        // Task d9cd8a83: `POST /tasks` materialises required gates as
-        // `state: pending` rows. The predicate must read them as
-        // "not satisfied" identically to a missing/revoked row — no
-        // observable change to any gate pass/fail outcome.
-        let task = qa_test_task_with_approvals(vec![("qa_agent", "pending")]);
-        assert!(!qa_agent_verified(&task));
-        let failures = crate::verify_delivery::qa_agent_verified_failures(&task);
-        assert_eq!(failures.len(), 1);
-        assert!(failures[0].contains("`qa_agent`"));
-    }
-
-    #[test]
-    fn ac1_qa_agent_state_does_not_affect_accepted_structured() {
-        // Cross-check the predicates that PR #1 already shipped
-        // (renamed from qa_ac_verified_structured). They read distinct
-        // approval types so a qa_agent row should never short-circuit
-        // Tom's `accepted` gate and vice-versa.
-        let task =
-            qa_test_task_with_approvals(vec![("qa_agent", "approved"), ("accepted", "revoked")]);
-        assert!(qa_agent_verified(&task));
-        assert!(!accepted_structured(&task));
-        assert!(!accepted_structured_failures(&task).is_empty());
-    }
+    // The AC1 of task f6a4d56a ("Add Ash: QA-verifier gate") test group
+    // moved to `task_approvals::tests` in PR-D (W37 A3 main.rs carve).
+    // `task_approvals::qa_agent_verified`, `accepted_structured`,
+    // `accepted_structured_failures`, and `verify_delivery::qa_agent_verified_failures`
+    // are exercised in their respective module-local test blocks. The
+    // cross-stage integration tests above (e.g.
+    // `structured_approval_rows_are_the_only_gate_source`) reference the
+    // new module via `crate::task_approvals::*` paths per the W36 carve
+    // convention.
 }

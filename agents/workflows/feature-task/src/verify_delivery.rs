@@ -19,8 +19,9 @@
 //!   constructor for the `verify_delivery` gate
 //! - `qa_agent_verified_failures` — failure strings for the `qa_agent`
 //!   structured-approval gate; the gate predicate itself
-//!   (`qa_agent_verified`) stays in `main.rs` for this slice and moves
-//!   with PR-D (task_approvals.rs)
+//!   (`qa_agent_verified`) lives in `task_approvals.rs` from PR-D
+//!   onward (W37 A3 main.rs carve). Imported here as
+//!   `crate::task_approvals::qa_agent_verified`.
 //!
 //! The leaf helpers do no I/O, no network, and no state mutation. They
 //! are exercised as focused units via the `#[cfg(test)] mod tests`
@@ -32,10 +33,11 @@ use crate::pr_gates;
 use crate::{
     add_comment, analytics, block_on_spec_drift_fluid, block_with_manual_block,
     implementer_pr_urls, inspect_pr, is_past, latest_implementer_pr_urls,
-    manual_block_failures, pr_body, qa_agent_verified, read_envelope,
+    manual_block_failures, pr_body, read_envelope,
     reconcile_workflow_attention, transition_or_block, workstreams,
     write_state, Envelope, StageArgs,
 };
+use crate::task_approvals;
 use crate::{ac_parsing, test_runners};
 
 /// Extract the PR number from a GitHub PR URL for ordering.
@@ -76,10 +78,10 @@ pub(crate) fn verify_delivery_review_failure(
 
 /// Failure strings for the `qa_agent` gate. Empty when the gate is satisfied.
 /// Used by `verify_delivery` to short-circuit the transition with a
-/// `[qa-agent-blocked]` comment. Gate predicate (`qa_agent_verified`) lives
-/// in `main.rs` until PR-D (task_approvals.rs).
+/// `[qa-agent-blocked]` comment. Gate predicate (`task_approvals::qa_agent_verified`)
+/// lives in `task_approvals.rs` from PR-D onward.
 pub(crate) fn qa_agent_verified_failures(task: &crate::Task) -> Vec<String> {
-    if qa_agent_verified(task) {
+    if task_approvals::qa_agent_verified(task) {
         vec![]
     } else {
         vec!["Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.".to_string()]
