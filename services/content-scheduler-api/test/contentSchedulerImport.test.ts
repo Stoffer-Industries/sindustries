@@ -289,6 +289,57 @@ describe('POST /content-scheduler/imports/cto-craft', () => {
     });
   });
 
+  // Reproduces the real CTO-Craft client's exact header set (task afe1056c,
+  // W34 T1.1). `authedRequest` above injects a Bearer token the production
+  // client never sends (see agents/workflows/cto-craft-tweet-drafts/src/
+  // cto_craft_workflow/content_scheduler.py:104-111); using plain
+  // `request(app)` here means a future regression that reintroduces a
+  // prefix-scoped requireAuthenticatedUser gate would actually fail this
+  // suite, instead of being masked by the Bearer header.
+  describe('real client header set (no Bearer, no cookie)', () => {
+    it('imports 1 item with only x-content-ingest-secret and no Bearer', async () => {
+      const secret = 'test-secret-1234567890';
+      process.env.CONTENT_SCHEDULER_INGEST_SECRET = secret;
+      prismaMock.contentSchedulerItem.createMany.mockResolvedValue({ count: 1 });
+      prismaMock.contentSchedulerItem.findMany.mockResolvedValue([asPersisted(STRONG_REF, 'id-1')]);
+
+      const app = await createApp();
+      const res = await request(app)
+        .post('/api/v1/content-scheduler/imports/cto-craft')
+        .set('x-content-ingest-secret', secret)
+        .send({ items: [itemBody('body', STRONG_REF)] });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.createdCount).toBe(1);
+    });
+
+    it('returns 401 when x-content-ingest-secret is missing', async () => {
+      process.env.CONTENT_SCHEDULER_INGEST_SECRET = 'test-secret-1234567890';
+      const app = await createApp();
+      const res = await request(app)
+        .post('/api/v1/content-scheduler/imports/cto-craft')
+        .send({ items: [itemBody('body', STRONG_REF)] });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHORIZED');
+      expect(res.body.error.message).toContain('x-content-ingest-secret');
+    });
+
+    it('returns 401 when x-content-ingest-secret is wrong', async () => {
+      // Same length as the configured secret so the timing-safe equality
+      // path is exercised, not the length-mismatch fast path.
+      process.env.CONTENT_SCHEDULER_INGEST_SECRET = 'test-secret-1234567890';
+      const app = await createApp();
+      const res = await request(app)
+        .post('/api/v1/content-scheduler/imports/cto-craft')
+        .set('x-content-ingest-secret', 'wrong-secret-1234567')
+        .send({ items: [itemBody('body', STRONG_REF)] });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHORIZED');
+    });
+  });
+
   describe('body is always normalised', () => {
     it('trims whitespace from item.body', async () => {
       const items = [itemBody('  trimmed body  ', STRONG_REF)];

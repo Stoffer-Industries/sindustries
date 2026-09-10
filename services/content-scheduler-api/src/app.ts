@@ -110,7 +110,11 @@ export function createApp() {
   // gates) must be mounted BEFORE the auth middleware so the Fly headless
   // worker and the CTO Craft LangGraph pipeline can call the API without
   // a Bearer token or session cookie. The auth middleware gates the
-  // user-facing mutation surface only.
+  // user-facing mutation surface only. Do not replace the path/method
+  // scoping below with a bare `app.use('/api/v1/content-scheduler',
+  // requireAuthenticatedUser)` — that reintroduces the W34 T1.1 auth
+  // collision (docs/specs/content-scheduler-cto-craft-import-auth-tech-design.md)
+  // that 401s the CTO-Craft import path in production.
   app.use('/api/v1', contentSchedulerServiceRouter);
 
   // Gate every mutation (POST/PATCH/DELETE) under
