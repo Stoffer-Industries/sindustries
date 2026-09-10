@@ -34,6 +34,7 @@
 //! remain co-located with the rest of the brain-spec surface.
 
 use crate::analytics;
+use crate::lobster_state::{comment_text, write_state};
 use crate::product_spec_parsing::{
     acceptance_criteria_checksum, acceptance_criteria_text, brain_spec_approved_by_tom,
     drift_episode_fingerprint, latest_resync_record_matches_drift, product_spec, spec_checksum,
@@ -44,8 +45,8 @@ use crate::{
     api_client::{
         add_comment, api_delete, api_get_task, api_patch, spec_checksum_mismatch_message,
     },
-    archive_task_spec_for_done_task, comment_text, rewrite_spec_line_in_description,
-    workflow_handoff, write_state, ArchiveDoneTaskSpecsSweepArgs, ArchiveOutcome, Envelope,
+    archive_task_spec_for_done_task, rewrite_spec_line_in_description,
+    workflow_handoff, ArchiveDoneTaskSpecsSweepArgs, ArchiveOutcome, Envelope,
     LobsterState, StageArgs, Task, BRAIN_DIR, TASK_SPECS_DONE_DIR, TASK_SPECS_IN_PROGRESS_DIR,
 };
 use anyhow::{anyhow, Context, Result};

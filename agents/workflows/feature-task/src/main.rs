@@ -15,6 +15,7 @@ mod api_client;
 mod brain_spec_lifecycle;
 mod feedback_aggregate;
 mod git_worktree;
+mod lobster_state;
 mod post_merge;
 mod pr_gates;
 mod product_spec_parsing;
@@ -26,10 +27,10 @@ mod verify_delivery;
 // Comment author is derived from the authenticated actor at the API
 // boundary (task 0719a8e3); this workflow no longer carries a literal
 // "Lobster" author fallback.
-const WORKFLOW: &str = "feature-task-workflow";
-const CODE_TASK_WORKFLOW: &str = "code-task-workflow";
-const STATE_TAG: &str = "[lobster-state]";
-const STATUS_ORDER: [&str; 5] = ["open", "ready", "doing", "acceptance", "done"];
+pub(crate) const WORKFLOW: &str = "feature-task-workflow";
+pub(crate) const CODE_TASK_WORKFLOW: &str = "code-task-workflow";
+pub(crate) const STATE_TAG: &str = "[lobster-state]";
+pub(crate) const STATUS_ORDER: [&str; 5] = ["open", "ready", "doing", "acceptance", "done"];
 
 #[derive(Parser)]
 #[command(name = "feature-task")]
@@ -492,7 +493,7 @@ fn pr_body(url: &str) -> Result<String> {
 
 fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
     let task: Task = api_client::api_get(base_url, &format!("/tasks/{task_id}"))?;
-    let state = parse_lobster_state(&task);
+    let state = lobster_state::parse_lobster_state(&task);
     Ok(api_client::output(
         true,
         false,
@@ -533,8 +534,8 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
     if !args.dry_run {
         env = move_approved_chat_spec_if_needed(&args, env)?;
     }
-    if is_past(&env.task, "open") {
-        let failures = missing_spec_checksum_failures(
+    if lobster_state::is_past(&env.task, "open") {
+        let failures = lobster_state::missing_spec_checksum_failures(
             &env.task,
             &args.repo,
             product_spec_parsing::workspace_root(&args),
@@ -558,7 +559,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
                             failures.join("\n")
                         ),
                     )?;
-                    write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+                    lobster_state::write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
                 }
             }
             env.criteria_met = false;
@@ -571,7 +572,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_open".to_string();
         return Ok(env);
     }
-    let failures = spec_failures(
+    let failures = lobster_state::spec_failures(
         &env.task,
         &args.repo,
         product_spec_parsing::workspace_root(&args),
@@ -618,7 +619,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
             "[feature-task-blocked]",
         );
     }
-    if is_past(&env.task, "ready") {
+    if lobster_state::is_past(&env.task, "ready") {
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_ready".to_string();
@@ -631,17 +632,17 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
     if !product_spec_parsing::tech_design_approved_structured(&env.task) {
         failures.push("Structured `tech_design` approval is missing or not approved.".to_string());
     }
-    let implementer = task_implementer(&env.task);
+    let implementer = lobster_state::task_implementer(&env.task);
     if implementer.is_none() {
         failures
             .push("Task must have an assignee/implementer before moving to `doing`.".to_string());
     }
     if let (Some(implementer), Ok(tasks)) = (
         implementer.as_deref(),
-        list_all_active_tasks(&args.base_url),
+        lobster_state::list_all_active_tasks(&args.base_url),
     ) {
         let current_id = &env.task.id;
-        failures.extend(implementer_doing_capacity_failures(
+        failures.extend(lobster_state::implementer_doing_capacity_failures(
             &tasks,
             current_id,
             implementer,
@@ -693,7 +694,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
     let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
-    env.lobster_state.workflow = workflow_for_task(&env.task);
+    env.lobster_state.workflow = lobster_state::workflow_for_task(&env.task);
     let manual_failures = brain_spec_lifecycle::manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
         return brain_spec_lifecycle::block_with_manual_block(
@@ -704,7 +705,7 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
             "[code-task-blocked]",
         );
     }
-    if is_past(&env.task, "open") {
+    if lobster_state::is_past(&env.task, "open") {
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_open".to_string();
@@ -745,7 +746,7 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
 fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
-    env.lobster_state.workflow = workflow_for_task(&env.task);
+    env.lobster_state.workflow = lobster_state::workflow_for_task(&env.task);
     let manual_failures = brain_spec_lifecycle::manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
         return brain_spec_lifecycle::block_with_manual_block(
@@ -756,7 +757,7 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
             "[code-task-blocked]",
         );
     }
-    if is_past(&env.task, "ready") {
+    if lobster_state::is_past(&env.task, "ready") {
         env.already_past = true;
         env.criteria_met = true;
         env.action_taken = "already_past_ready".to_string();
@@ -765,17 +766,17 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
     let mut failures = Vec::new();
     // The tech-design gate has already moved the task to `ready` in the
     // previous stage. This stage is purely about assignee + capacity.
-    let implementer = task_implementer(&env.task);
+    let implementer = lobster_state::task_implementer(&env.task);
     if implementer.is_none() {
         failures
             .push("Task must have an assignee/implementer before moving to `doing`.".to_string());
     }
     if let (Some(implementer), Ok(tasks)) = (
         implementer.as_deref(),
-        list_all_active_tasks(&args.base_url),
+        lobster_state::list_all_active_tasks(&args.base_url),
     ) {
         let current_id = &env.task.id;
-        failures.extend(implementer_doing_capacity_failures(
+        failures.extend(lobster_state::implementer_doing_capacity_failures(
             &tasks,
             current_id,
             implementer,
@@ -974,7 +975,7 @@ fn transition_or_block(
             }
             env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
             reconcile_workflow_attention(args, &mut env)?;
-            if let Err(err) = write_state(
+            if let Err(err) = lobster_state::write_state(
                 &args.base_url,
                 &env.task.id,
                 &env.lobster_state,
@@ -1014,7 +1015,7 @@ fn transition_or_block(
                 }
                 return Err(err);
             }
-            if let Err(err) = write_state(&args.base_url, &env.task.id, &env.lobster_state, None) {
+            if let Err(err) = lobster_state::write_state(&args.base_url, &env.task.id, &env.lobster_state, None) {
                 if let Some(message) = api_client::spec_checksum_mismatch_message(&err) {
                     env.action_taken = format!("{action}_blocked_spec_drift");
                     env.failures = vec![message];
@@ -1115,7 +1116,7 @@ fn plan_brain_spec_approval(
         };
     }
     let task = matches[0];
-    if spec_is_approved(task) {
+    if lobster_state::spec_is_approved(task) {
         return BrainSpecApprovalPlan::AlreadyApproved {
             task_id: task.id.clone(),
         };
@@ -1194,7 +1195,7 @@ fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Resu
         ));
     }
 
-    let tasks = list_all_active_tasks(&args.base_url)?;
+    let tasks = lobster_state::list_all_active_tasks(&args.base_url)?;
     let mut paths = Vec::new();
     for spec_dir_const in [TASK_SPECS_OPEN_DIR, TASK_SPECS_IN_PROGRESS_DIR] {
         let dir = args.workspace_root.join(spec_dir_const);
@@ -1468,7 +1469,7 @@ pub(crate) fn move_approved_chat_spec_if_needed(
         Ok(text) => text,
         Err(_) => return Ok(env),
     };
-    let plan = plan_chat_spec_lifecycle_move(&spec.path, &spec_text, spec_is_approved(&env.task));
+    let plan = plan_chat_spec_lifecycle_move(&spec.path, &spec_text, lobster_state::spec_is_approved(&env.task));
     let (from_rel, to_rel, should_move) = match plan {
         ChatApprovalMovePlan::Move { from_rel, to_rel } => (from_rel, to_rel, true),
         ChatApprovalMovePlan::AlreadyMoved { from_rel, to_rel } => (from_rel, to_rel, false),
@@ -1718,194 +1719,13 @@ pub(crate) fn archive_task_spec_for_done_task(
 // `lobster_service_token`, `add_comment`, `handle_api_result`,
 // `api_status_error`, and `spec_checksum_mismatch_message` moved to
 // `api_client.rs` in PR-G (W37 A3 main.rs carve).
-
-pub(crate) fn write_state(
-    base_url: &str,
-    task_id: &str,
-    state: &LobsterState,
-    note: Option<&str>,
-) -> Result<()> {
-    let state_json = serde_json::to_string_pretty(state)?;
-    let body = match note {
-        Some(note) => format!("{note}\n\n{STATE_TAG}\n```json\n{state_json}\n```"),
-        None => format!("{STATE_TAG}\n```json\n{state_json}\n```"),
-    };
-    api_client::add_comment(base_url, task_id, &body)
-}
-
-/// Fetch every task across the statuses the capacity gate cares about,
-/// regardless of `taskType`. The capacity check is purely about how many
-/// tickets an implementer has in `doing` right now, so it must not filter
-/// by feature-vs-code (or any other task type/tag) — that filtering was
-/// the root cause of the code-task lobster being blind to an
-/// implementer's existing code-task load (Tom: 2026-07-28, "it doesn't
-/// need to use type at all, just check on number of tickets assigned in
-/// doing").
-fn list_all_active_tasks(base_url: &str) -> Result<Vec<Task>> {
-    let mut out = Vec::new();
-    for status in ["open", "ready", "doing", "acceptance"] {
-        let url = format!(
-            "{}/tasks?status={status}&limit=10000",
-            base_url.trim_end_matches('/')
-        );
-        let value: Value = ureq::get(&url).call()?.into_json()?;
-        let data = value
-            .get("data")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        for item in data {
-            let task: Task = serde_json::from_value(item)?;
-            out.push(task);
-        }
-    }
-    Ok(out)
-}
-
-fn task_implementer(task: &Task) -> Option<String> {
-    task.assignee
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-/// Maximum number of tasks (of any `taskType`) an implementer may have in
-/// `doing` at once. Tom: 2026-07-28 — "im fine with increasing the limit
-/// to 2 for implementer in doing."
-const IMPLEMENTER_DOING_CAPACITY: usize = 2;
-
-fn is_actionable_for(task: &Task, implementer: &str) -> bool {
-    task.attention_owners
-        .first()
-        .map(|owner| owner.trim().eq_ignore_ascii_case(implementer.trim()))
-        .unwrap_or(true)
-}
-
-fn implementer_doing_capacity_failures(
-    tasks: &[Task],
-    current_id: &str,
-    implementer: &str,
-) -> Vec<String> {
-    // Counts every task assigned to `implementer` that is currently in
-    // `doing`, regardless of `taskType` — feature tasks and code tasks
-    // assigned to the same person share one capacity pool.
-    let active_doing = tasks
-        .iter()
-        .filter(|task| {
-            task.id != current_id
-                && task.status == "doing"
-                && !task.blocked
-                && !task.dependency_blocked
-                && task.assignee.as_deref() == Some(implementer)
-                && is_actionable_for(task, implementer)
-        })
-        .count();
-    if active_doing >= IMPLEMENTER_DOING_CAPACITY {
-        vec![format!(
-            "Implementer `{implementer}` already has {active_doing} active task(s) in `doing` (limit {IMPLEMENTER_DOING_CAPACITY})."
-        )]
-    } else {
-        Vec::new()
-    }
-}
-
-pub(crate) fn comment_text(comment: &TaskComment) -> &str {
-    comment
-        .text
-        .as_deref()
-        .or(comment.body.as_deref())
-        .unwrap_or("")
-}
-
-fn parse_lobster_state(task: &Task) -> LobsterState {
-    let mut state = LobsterState::default();
-    for comment in &task.comments {
-        let text = comment_text(comment);
-        let Some(idx) = text.find(STATE_TAG) else {
-            continue;
-        };
-        let mut raw = text[idx + STATE_TAG.len()..].trim();
-        if raw.starts_with("```") {
-            raw = raw
-                .trim_start_matches("```json")
-                .trim_start_matches("```")
-                .trim();
-            raw = raw.trim_end_matches("```").trim();
-        }
-        if let Ok(parsed) = serde_json::from_str::<LobsterState>(raw) {
-            state = parsed;
-        }
-    }
-    // Pick the workflow string from the task's `taskType` so feature and
-    // code task state comments stay distinguishable on subsequent reads.
-    state.workflow = workflow_for_task(task);
-    state
-}
-
-/// Return the LobsterState `workflow` value that should be persisted for a
-/// given task. Code tasks (`taskType: code`) use a distinct workflow string
-/// so the code-task pipeline can be told apart from the feature-task
-/// pipeline on re-runs.
-fn workflow_for_task(task: &Task) -> String {
-    match task.task_type.as_deref() {
-        Some("code") => CODE_TASK_WORKFLOW.to_string(),
-        _ => WORKFLOW.to_string(),
-    }
-}
-
-fn status_rank(status: &str) -> usize {
-    STATUS_ORDER
-        .iter()
-        .position(|value| *value == status)
-        .unwrap_or(0)
-}
-
-fn is_past(task: &Task, stage: &str) -> bool {
-    status_rank(&task.status) > status_rank(stage)
-}
-
-fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
-    let mut failures = Vec::new();
-    match product_spec_parsing::product_spec(task) {
-        Some(spec) => {
-            let path =
-                product_spec_parsing::resolve_product_spec_path(&spec.path, repo, workspace_root);
-            if !path.exists() {
-                failures.push(format!("Product spec not found at {}", spec.path));
-            } else if fs::read_to_string(&path).is_ok() && !spec_is_approved(task) {
-                failures.push("Structured spec approval is missing or not approved; Tom must approve the `spec` TaskApproval.".to_string());
-            }
-        }
-        None => failures.push("Task description must include a **Spec:** line".to_string()),
-    }
-    if product_spec_parsing::acceptance_criteria_text(&task.description.clone().unwrap_or_default())
-        .is_empty()
-    {
-        failures.push("Task description must include acceptance criteria checkboxes.".to_string());
-    }
-    if product_spec_parsing::workstreams(task).is_empty() {
-        failures.push("Task description must include workstreams.".to_string());
-    }
-    failures
-}
-
-fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
-    if task.spec_checksum.is_some() {
-        return vec![];
-    }
-    let mut failures = vec![
-        "Task is past `open` but has no stored `specChecksum`; the spec gate was bypassed."
-            .to_string(),
-    ];
-    failures.extend(spec_failures(task, repo, workspace_root));
-    failures
-}
-
-/// Structured TaskApproval rows are the sole source of spec approval.
-pub(crate) fn spec_is_approved(task: &Task) -> bool {
-    task_approvals::task_approval_granted(task, "spec")
-}
+//
+// `write_state`, `list_all_active_tasks`, `task_implementer`,
+// `IMPLEMENTER_DOING_CAPACITY`, `is_actionable_for`,
+// `implementer_doing_capacity_failures`, `comment_text`,
+// `parse_lobster_state`, `workflow_for_task`, `status_rank`, `is_past`,
+// `spec_failures`, `missing_spec_checksum_failures`, and `spec_is_approved`
+// moved to `lobster_state.rs` in PR-I (W37 A3 main.rs carve).
 
 // body_has_checked_acceptance, ReviewState) live in src/pr_gates.rs (W36 A3+A4).
 #[cfg(test)]
@@ -2226,7 +2046,7 @@ mod tests {
             task_type: Some("code".to_string()),
             ..Task::default()
         };
-        assert_eq!(workflow_for_task(&task), "code-task-workflow");
+        assert_eq!(lobster_state::workflow_for_task(&task), "code-task-workflow");
     }
 
     #[test]
@@ -2235,7 +2055,7 @@ mod tests {
             task_type: Some("feature".to_string()),
             ..Task::default()
         };
-        assert_eq!(workflow_for_task(&task), "feature-task-workflow");
+        assert_eq!(lobster_state::workflow_for_task(&task), "feature-task-workflow");
     }
 
     #[test]
@@ -2244,7 +2064,7 @@ mod tests {
             task_type: None,
             ..Task::default()
         };
-        assert_eq!(workflow_for_task(&task), "feature-task-workflow");
+        assert_eq!(lobster_state::workflow_for_task(&task), "feature-task-workflow");
     }
 
     #[test]
@@ -2255,7 +2075,7 @@ mod tests {
             task_type: Some("research".to_string()),
             ..Task::default()
         };
-        assert_eq!(workflow_for_task(&task), "feature-task-workflow");
+        assert_eq!(lobster_state::workflow_for_task(&task), "feature-task-workflow");
     }
 
     // ---- AC evidence parsing (task 6e70deb8) ----
@@ -2335,7 +2155,7 @@ mod tests {
             ..Task::default()
         };
 
-        assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(lobster_state::spec_failures(&task, repo.path(), workspace.path()).is_empty());
     }
 
     #[test]
@@ -2392,7 +2212,7 @@ mod tests {
             ..Task::default()
         };
 
-        assert!(spec_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(lobster_state::spec_failures(&task, repo.path(), workspace.path()).is_empty());
         assert!(!repo.path().join("brain/tasks/specs/example.md").exists());
     }
 
@@ -2499,7 +2319,7 @@ mod tests {
             },
         ];
 
-        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
@@ -2513,7 +2333,7 @@ mod tests {
             ..Task::default()
         }];
 
-        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
@@ -2534,7 +2354,7 @@ mod tests {
         ];
 
         assert_eq!(
-            implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
+            lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
             vec![
                 "Implementer `Rowan` already has 2 active task(s) in `doing` (limit 2)."
                     .to_string()
@@ -2561,7 +2381,7 @@ mod tests {
             },
         ];
 
-        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
@@ -2584,7 +2404,7 @@ mod tests {
         ];
 
         assert_eq!(
-            implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").len(),
+            lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").len(),
             1
         );
     }
@@ -2604,7 +2424,7 @@ mod tests {
             ..Task::default()
         }];
 
-        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
@@ -2631,7 +2451,7 @@ mod tests {
             },
         ];
 
-        assert!(implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
     }
 
     #[test]
@@ -2663,7 +2483,7 @@ mod tests {
         ];
 
         assert_eq!(
-            implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
+            lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan"),
             vec![
                 "Implementer `Rowan` already has 2 active task(s) in `doing` (limit 2)."
                     .to_string()
@@ -2779,7 +2599,7 @@ feature
             ),
             ..Task::default()
         };
-        let failures = spec_failures(&task, repo.path(), workspace.path());
+        let failures = lobster_state::spec_failures(&task, repo.path(), workspace.path());
         assert!(failures.contains(&"Task description must include a **Spec:** line".to_string()));
         assert!(
             !failures
@@ -3052,7 +2872,7 @@ feature
             ],
             ..Default::default()
         };
-        assert!(spec_is_approved(&approved));
+        assert!(lobster_state::spec_is_approved(&approved));
         assert!(product_spec_parsing::tech_design_approved_structured(
             &approved
         ));
@@ -3066,7 +2886,7 @@ feature
             }],
             ..Default::default()
         };
-        assert!(!spec_is_approved(&legacy));
+        assert!(!lobster_state::spec_is_approved(&legacy));
         assert!(!product_spec_parsing::tech_design_approved_structured(
             &legacy
         ));
@@ -3079,7 +2899,7 @@ feature
             ],
             ..legacy
         };
-        assert!(!spec_is_approved(&revoked));
+        assert!(!lobster_state::spec_is_approved(&revoked));
         assert!(!product_spec_parsing::tech_design_approved_structured(
             &revoked
         ));
@@ -3097,7 +2917,7 @@ feature
         };
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        let failures = missing_spec_checksum_failures(&task, repo.path(), workspace.path());
+        let failures = lobster_state::missing_spec_checksum_failures(&task, repo.path(), workspace.path());
         assert!(
             !failures.is_empty(),
             "expected failures for manually-advanced task without checksum"
@@ -3119,7 +2939,7 @@ feature
         };
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        assert!(missing_spec_checksum_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(lobster_state::missing_spec_checksum_failures(&task, repo.path(), workspace.path()).is_empty());
 
         // A task with a stored checksum is already past "open" legitimately — spec_checksum_failures
         // (not spec_failures) is the gate from here on, so we just confirm no spec drift.

@@ -39,8 +39,8 @@ use crate::{
     git_worktree::{
         cleanup_task_worktree_for_task, format_worktree_cleanup_summary, WorktreeCleanupOutcome,
     },
-    is_past, pr_body, transition_or_block, workflow_handoff, write_state, Envelope, StageArgs,
-    Task,
+    lobster_state::{is_past, write_state},
+    pr_body, transition_or_block, workflow_handoff, Envelope, StageArgs, Task,
 };
 
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
