@@ -28,15 +28,17 @@
 
 use anyhow::Result;
 
-use crate::{
-    ac_parsing, add_comment, analytics, api_get_task, api_patch, archive_done_task_spec,
-    block_with_manual_block, cleanup_task_worktree_for_task, format_worktree_cleanup_summary,
-    implementer_pr_urls, inspect_pr, is_past, latest_implementer_pr_urls, manual_block_failures,
-    pr_body, read_envelope, transition_or_block, workflow_handoff, write_state,
-    Envelope, StageArgs, Task,
+use crate::brain_spec_lifecycle::{
+    archive_done_task_spec, block_with_manual_block, manual_block_failures,
 };
 use crate::pr_gates;
 use crate::task_approvals;
+use crate::{
+    ac_parsing, add_comment, analytics, api_get_task, api_patch, cleanup_task_worktree_for_task,
+    format_worktree_cleanup_summary, implementer_pr_urls, inspect_pr, is_past,
+    latest_implementer_pr_urls, pr_body, read_envelope, transition_or_block, workflow_handoff,
+    write_state, Envelope, StageArgs, Task,
+};
 
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
 /// are treated as superseded (same principle as `verify_delivery`'s
@@ -287,8 +289,9 @@ mod tests {
                 .is_none(),
             "superseded closed-unmerged PRs must not block"
         );
-        assert!(post_merge_pr_failure(merged, pr_gates::ReviewState::Merged, &latest_urls)
-            .is_none());
+        assert!(
+            post_merge_pr_failure(merged, pr_gates::ReviewState::Merged, &latest_urls).is_none()
+        );
     }
 
     #[test]
@@ -299,12 +302,10 @@ mod tests {
         let later_closed = "https://github.com/owner/repo/pull/100";
         let later_merged = "https://github.com/owner/repo/pull/200";
         let urls = vec![later_merged.to_string()];
-        assert!(post_merge_pr_failure(
-            later_closed,
-            pr_gates::ReviewState::ClosedUnmerged,
-            &urls,
-        )
-        .is_none());
+        assert!(
+            post_merge_pr_failure(later_closed, pr_gates::ReviewState::ClosedUnmerged, &urls,)
+                .is_none()
+        );
     }
 
     #[test]
@@ -313,8 +314,10 @@ mod tests {
         // must fail (no further fallback).
         let later_closed = "https://github.com/owner/repo/pull/200";
         let urls = vec![later_closed.to_string()];
-        assert!(post_merge_pr_failure(later_closed, pr_gates::ReviewState::ClosedUnmerged, &urls)
-            .is_some());
+        assert!(
+            post_merge_pr_failure(later_closed, pr_gates::ReviewState::ClosedUnmerged, &urls)
+                .is_some()
+        );
     }
 
     #[test]
@@ -324,9 +327,12 @@ mod tests {
         let earlier_open = "https://github.com/owner/repo/pull/100";
         let later_merged = "https://github.com/owner/repo/pull/200";
         let urls = vec![later_merged.to_string(), earlier_open.to_string()];
-        assert!(post_merge_pr_failure(earlier_open, pr_gates::ReviewState::Approved, &urls)
-            .is_some());
-        assert!(post_merge_pr_failure(later_merged, pr_gates::ReviewState::Merged, &urls).is_none());
+        assert!(
+            post_merge_pr_failure(earlier_open, pr_gates::ReviewState::Approved, &urls).is_some()
+        );
+        assert!(
+            post_merge_pr_failure(later_merged, pr_gates::ReviewState::Merged, &urls).is_none()
+        );
     }
 
     // Worktree-cleanup helpers live in main.rs for this slice; once the
