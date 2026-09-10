@@ -32,12 +32,12 @@ use crate::brain_spec_lifecycle::{
     archive_done_task_spec, block_with_manual_block, manual_block_failures,
 };
 use crate::pr_gates;
+use crate::product_spec_parsing::{implementer_pr_urls, inspect_pr, latest_implementer_pr_urls};
 use crate::task_approvals;
 use crate::{
     ac_parsing, add_comment, analytics, api_get_task, api_patch, cleanup_task_worktree_for_task,
-    format_worktree_cleanup_summary, implementer_pr_urls, inspect_pr, is_past,
-    latest_implementer_pr_urls, pr_body, read_envelope, transition_or_block, workflow_handoff,
-    write_state, Envelope, StageArgs, Task,
+    format_worktree_cleanup_summary, is_past, pr_body, read_envelope, transition_or_block,
+    workflow_handoff, write_state, Envelope, StageArgs, Task,
 };
 
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)

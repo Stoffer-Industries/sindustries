@@ -2,10 +2,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
+use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
     fmt, fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -17,6 +15,7 @@ mod analytics;
 mod brain_spec_lifecycle;
 mod feedback_aggregate;
 mod post_merge;
+mod product_spec_parsing;
 mod pr_gates;
 mod task_approvals;
 mod test_resolution;
@@ -514,7 +513,7 @@ fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
 fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
-    bootstrap_task_spec_layout(workspace_root(&args))?;
+    bootstrap_task_spec_layout(product_spec_parsing::workspace_root(&args))?;
     if let Some(drift) =
         brain_spec_lifecycle::block_on_spec_drift_fluid(&args, env.clone(), "spec_check")?
     {
@@ -542,7 +541,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env = move_approved_chat_spec_if_needed(&args, env)?;
     }
     if is_past(&env.task, "open") {
-        let failures = missing_spec_checksum_failures(&env.task, &args.repo, workspace_root(&args));
+        let failures = missing_spec_checksum_failures(&env.task, &args.repo, product_spec_parsing::workspace_root(&args));
         if !failures.is_empty() {
             if !args.dry_run {
                 api_patch::<Task>(
@@ -575,7 +574,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_open".to_string();
         return Ok(env);
     }
-    let failures = spec_failures(&env.task, &args.repo, workspace_root(&args));
+    let failures = spec_failures(&env.task, &args.repo, product_spec_parsing::workspace_root(&args));
     // The legacy task-description approval mirror (mirror_task_approval_to_brain_spec_if_needed)
     // is removed as part of e2aba106 WS2: approval state is now exclusively structured TaskApproval
     // rows, and the brain spec file marker is owned by the brain-spec workflow, not the task
@@ -625,10 +624,10 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = Vec::new();
-    if tech_design_url(&env.task).is_none() {
+    if product_spec_parsing::tech_design_url(&env.task).is_none() {
         failures.push("Missing task comment `[tech-design] <url>`.".to_string());
     }
-    if !tech_design_approved_structured(&env.task) {
+    if !product_spec_parsing::tech_design_approved_structured(&env.task) {
         failures.push("Structured `tech_design` approval is missing or not approved.".to_string());
     }
     let implementer = task_implementer(&env.task);
@@ -715,9 +714,9 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
     // explicit waiver must be present. If both are present, prefer the
     // approved design (a waiver without an approved design is fine for
     // small tasks).
-    let has_tech_design = tech_design_url(&env.task).is_some();
-    let has_tech_design_approved = tech_design_approved_structured(&env.task);
-    let has_waiver = tech_design_waived(&env.task);
+    let has_tech_design = product_spec_parsing::tech_design_url(&env.task).is_some();
+    let has_tech_design_approved = product_spec_parsing::tech_design_approved_structured(&env.task);
+    let has_waiver = product_spec_parsing::tech_design_waived(&env.task);
     if !has_tech_design && !has_waiver {
         failures.push(
             "Missing task comment `[tech-design] <url>` or `[tech-design-not-required] <reason>`."
@@ -1003,11 +1002,11 @@ pub(crate) fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult])
 
 fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
     match task.status.as_str() {
-        "ready" if !tech_design_approved_structured(task) && !tech_design_waived(task) => {
+        "ready" if !product_spec_parsing::tech_design_approved_structured(task) && !product_spec_parsing::tech_design_waived(task) => {
             Some("Quinn")
         }
         "doing"
-            if !implementer_pr_urls(task).is_empty()
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && !task_approvals::qa_agent_verified(task)
                 && !ash_was_last_commenter(task) =>
         {
@@ -1039,7 +1038,7 @@ fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         // sweep drain a multi-entry array across multiple stage calls.
         // `workflow_attention_owner` already handles replacement of a stale
         // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
-        "Quinn" => tech_design_approved_structured(task) || tech_design_waived(task),
+        "Quinn" => product_spec_parsing::tech_design_approved_structured(task) || product_spec_parsing::tech_design_waived(task),
         "Ash" => task_approvals::qa_agent_verified(task),
         // Tom owns the accepted gate only once the task reaches acceptance.
         // While still doing, a pending accepted approval must not leave Tom
@@ -1132,7 +1131,7 @@ fn transition_or_block(
         if !args.dry_run {
             let mut patch = json!({"status": next_status, "workflowHandoff": Value::Null});
             if next_status == "ready" {
-                patch["specChecksum"] = Value::String(spec_checksum(&env.task));
+                patch["specChecksum"] = Value::String(product_spec_parsing::spec_checksum(&env.task));
             }
             if let Err(err) = api_patch::<Task>(&args.base_url, &env.task.id, patch) {
                 if let Some(message) = spec_checksum_mismatch_message(&err) {
@@ -1258,7 +1257,7 @@ fn reconciliation_spec_link(task: &Task) -> Option<String> {
     if captures.next().is_some() {
         return None;
     }
-    extract_spec_path_from_line(first.get(1)?.as_str()).map(|spec| normalize_rel_path(&spec.path))
+    product_spec_parsing::extract_spec_path_from_line(first.get(1)?.as_str()).map(|spec| normalize_rel_path(&spec.path))
 }
 
 fn plan_brain_spec_approval(
@@ -1266,7 +1265,7 @@ fn plan_brain_spec_approval(
     spec_text: &str,
     tasks: &[Task],
 ) -> BrainSpecApprovalPlan {
-    if !brain_spec_approved_by_tom(spec_text) {
+    if !product_spec_parsing::brain_spec_approved_by_tom(spec_text) {
         return BrainSpecApprovalPlan::Unchecked;
     }
     let normalized = normalize_rel_path(spec_path);
@@ -1608,7 +1607,7 @@ pub(crate) fn plan_chat_spec_lifecycle_move(
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
         if suffix.is_empty()
             || suffix.contains('/')
-            || (!structured_approved && !brain_spec_approved_by_tom(spec_text))
+            || (!structured_approved && !product_spec_parsing::brain_spec_approved_by_tom(spec_text))
         {
             return ChatApprovalMovePlan::Noop;
         }
@@ -1633,14 +1632,14 @@ pub(crate) fn move_approved_chat_spec_if_needed(
     args: &StageArgs,
     mut env: Envelope,
 ) -> Result<Envelope> {
-    let Some(spec) = product_spec(&env.task) else {
+    let Some(spec) = product_spec_parsing::product_spec(&env.task) else {
         return Ok(env);
     };
     let normalized = normalize_rel_path(&spec.path);
     let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
         let to_rel = format!("{TASK_SPECS_IN_PROGRESS_DIR}/{suffix}");
-        if workspace_root(args).join(&to_rel).exists() {
+        if product_spec_parsing::workspace_root(args).join(&to_rel).exists() {
             let description = env.task.description.clone().unwrap_or_default();
             if let Some(new_desc) =
                 rewrite_spec_line_in_description(&description, &normalized, &to_rel)
@@ -1656,7 +1655,7 @@ pub(crate) fn move_approved_chat_spec_if_needed(
             return Ok(env);
         }
     }
-    let spec_abs = resolve_product_spec_path(&spec.path, &args.repo, workspace_root(args));
+    let spec_abs = product_spec_parsing::resolve_product_spec_path(&spec.path, &args.repo, product_spec_parsing::workspace_root(args));
     let spec_text = match fs::read_to_string(&spec_abs) {
         Ok(text) => text,
         Err(_) => return Ok(env),
@@ -1667,8 +1666,8 @@ pub(crate) fn move_approved_chat_spec_if_needed(
         ChatApprovalMovePlan::AlreadyMoved { from_rel, to_rel } => (from_rel, to_rel, false),
         ChatApprovalMovePlan::Noop => return Ok(env),
     };
-    let from_abs = workspace_root(args).join(&from_rel);
-    let to_abs = workspace_root(args).join(&to_rel);
+    let from_abs = product_spec_parsing::workspace_root(args).join(&from_rel);
+    let to_abs = product_spec_parsing::workspace_root(args).join(&to_rel);
     if should_move && from_abs.exists() {
         if let Some(parent) = to_abs.parent() {
             fs::create_dir_all(parent)?;
@@ -1779,7 +1778,7 @@ pub(crate) fn rewrite_spec_line_in_description(
         let prefix = &caps[1];
         let existing = caps[2].trim();
         // Strip a trailing inline annotation so we can compare the bare path.
-        let existing_path = strip_trailing_annotation(existing).unwrap_or(existing);
+        let existing_path = product_spec_parsing::strip_trailing_annotation(existing).unwrap_or(existing);
         let existing_path = existing_path
             .trim_end_matches([',', '.', ';'])
             .trim()
@@ -1830,7 +1829,7 @@ pub(crate) fn archive_task_spec_for_done_task(
     task: &Task,
     workspace_root: &Path,
 ) -> ArchiveOutcome {
-    let Some(spec) = product_spec(task) else {
+    let Some(spec) = product_spec_parsing::product_spec(task) else {
         return ArchiveOutcome::NotApplicable {
             reason: ArchiveSkipReason::UnparseableSpecLine,
         };
@@ -2204,9 +2203,9 @@ fn is_past(task: &Task, stage: &str) -> bool {
 
 fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String> {
     let mut failures = Vec::new();
-    match product_spec(task) {
+    match product_spec_parsing::product_spec(task) {
         Some(spec) => {
-            let path = resolve_product_spec_path(&spec.path, repo, workspace_root);
+            let path = product_spec_parsing::resolve_product_spec_path(&spec.path, repo, workspace_root);
             if !path.exists() {
                 failures.push(format!("Product spec not found at {}", spec.path));
             } else if fs::read_to_string(&path).is_ok() && !spec_is_approved(task) {
@@ -2215,10 +2214,10 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
         }
         None => failures.push("Task description must include a **Spec:** line".to_string()),
     }
-    if acceptance_criteria_text(&task.description.clone().unwrap_or_default()).is_empty() {
+    if product_spec_parsing::acceptance_criteria_text(&task.description.clone().unwrap_or_default()).is_empty() {
         failures.push("Task description must include acceptance criteria checkboxes.".to_string());
     }
-    if workstreams(task).is_empty() {
+    if product_spec_parsing::workstreams(task).is_empty() {
         failures.push("Task description must include workstreams.".to_string());
     }
     failures
@@ -2239,515 +2238,6 @@ fn missing_spec_checksum_failures(task: &Task, repo: &Path, workspace_root: &Pat
 /// Structured TaskApproval rows are the sole source of spec approval.
 pub(crate) fn spec_is_approved(task: &Task) -> bool {
     task_approvals::task_approval_granted(task, "spec")
-}
-
-pub(crate) fn product_spec(task: &Task) -> Option<ProductSpecRef> {
-    parse_product_spec_ref(&task.description.clone().unwrap_or_default())
-}
-
-/// Parse the `**Spec:**` line from a task description. Tolerates inline
-/// annotations in parens (`(...)`), brackets (`[...]`), backticks (`` `...` ``),
-/// and trailing punctuation that isn't part of the path. Returns `None` only
-/// when the line is genuinely missing or unparseable.
-///
-/// Used both for spec drift detection (where the strict form matters) and for
-/// archival (where we want to survive legacy inline notes). The lenient form
-/// here is intentionally bounded — exotic multi-line / malformed Spec values
-/// still return `None` and surface via the existing `MissingSpecRef` path.
-fn parse_product_spec_ref(text: &str) -> Option<ProductSpecRef> {
-    let line_re = Regex::new(r"(?im)^\s*\*\*Spec:\*\*\s+(.+?)\s*$").unwrap();
-    let cap = line_re.captures(text)?;
-    let raw = cap.get(1)?.as_str();
-    extract_spec_path_from_line(raw)
-}
-
-/// Extract a spec path from the raw text after `**Spec:**`. Strips:
-///   - backtick-wrapped paths (`` `<path>` ``)
-///   - trailing punctuation (`,`, `.`, `;`)
-///   - one trailing inline annotation in `(...)`, `[...]`, or `` `...` `` form
-///
-/// Returns `None` when the residue is not a parseable spec path.
-fn extract_spec_path_from_line(raw: &str) -> Option<ProductSpecRef> {
-    let mut s = raw.trim();
-    // Strip a single trailing inline annotation: "(...)", "[...]", or "`...`".
-    if let Some(stripped) = strip_trailing_annotation(s) {
-        s = stripped;
-    }
-    // Trim trailing punctuation first (so a trailing `,` doesn't fool the
-    // backtick-wrap detector into seeing a backtick + comma residue).
-    s = s.trim_end_matches([',', '.', ';']);
-    // Strip optional backtick wrapping.
-    if s.starts_with('`') && s.ends_with('`') && s.len() >= 2 {
-        s = &s[1..s.len() - 1];
-    }
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    // Reject obviously malformed (whitespace, control chars, multi-token) values.
-    if s.chars().any(char::is_whitespace) {
-        return None;
-    }
-    // Reject shell-quoted or otherwise bracketed residue we didn't strip.
-    if matches!(s.chars().next(), Some('(') | Some('[') | Some('{'))
-        || matches!(s.chars().last(), Some(')') | Some(']') | Some('}'))
-    {
-        return None;
-    }
-    // Accept .md or .spec.ts / _spec.ts paths only (matches the existing
-    // strict regex's contract: `[._]spec\.ts` allows either `.` or `_`).
-    let valid_suffix = s.ends_with(".md") || s.ends_with(".spec.ts") || s.ends_with("_spec.ts");
-    if !valid_suffix {
-        return None;
-    }
-    Some(ProductSpecRef {
-        path: s.to_string(),
-    })
-}
-
-fn strip_trailing_annotation(s: &str) -> Option<&str> {
-    let bytes = s.as_bytes();
-    if bytes.last().copied() != Some(b')')
-        && bytes.last().copied() != Some(b']')
-        && bytes.last().copied() != Some(b'`')
-    {
-        return None;
-    }
-    let opener = match bytes.last().copied() {
-        Some(b')') => b'(',
-        Some(b']') => b'[',
-        Some(b'`') => b'`',
-        _ => return None,
-    };
-    // Find the matching opener at the same depth from the start. We don't
-    // handle nested parens here; that's exactly the slippery-slope surface
-    // the tech design calls out and we want to leave for human review.
-    if let Some(open_idx) = s.find(opener as char) {
-        return Some(s[..open_idx].trim_end());
-    }
-    None
-}
-
-pub(crate) fn brain_spec_approved_by_tom(text: &str) -> bool {
-    Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+\*\*Approved by Tom\*\*\s*$")
-        .unwrap()
-        .is_match(text)
-}
-
-/// True if any task comment starts with `[spec-resynced]`.
-///
-/// Note: this check is deliberately permissive on presence — Quinn (or any
-/// external writer) can post the comment at any time. The fluid drift gate
-/// additionally verifies the comment carries a drift fingerprint that
-/// matches the current drift episode (see
-/// [`latest_resync_record_matches_drift`]). Without that secondary check
-/// a stale `[spec-resynced]` from a previous episode could clear drift for
-/// a brand new drift episode.
-#[allow(
-    dead_code,
-    reason = "test-only helper reached from #[cfg(test)] modules; clippy's bin target cannot see those calls"
-)]
-fn spec_resync_signal_present(task: &Task) -> bool {
-    !tagged_values(task, "[spec-resynced]").is_empty()
-}
-
-/// One parsed `[spec-resynced]` comment, including its bound checksum and
-/// drift fingerprint.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResyncRecord {
-    /// sha256 hex digest of the spec checksum that was set after this resync.
-    checksum: String,
-    /// sha256 hex digest of the failure list that defined the resynced drift
-    /// episode. A new drift episode with different failures produces a
-    /// different fingerprint and the previous record becomes stale.
-    fingerprint: String,
-    /// Pretty short summary line from the comment, used for diagnostics.
-    summary: String,
-}
-
-/// Parse a single comment's body for `[spec-resynced]` + bound fields.
-///
-/// Recognised format (Lobster-authored):
-/// ```text
-/// [spec-resynced] <optional prose>
-/// checksum=<64 hex>
-/// driftFingerprint=<64 hex>
-/// ```
-/// The two key=value lines may appear in any order, before or after the
-/// `[spec-resynced]` line. Returns `None` if the comment does not start with
-/// `[spec-resynced]` or does not carry both fields (older or hand-written
-/// comments are intentionally rejected so the stale-drift guard holds).
-pub(crate) fn parse_resync_record(text: &str) -> Option<ResyncRecord> {
-    let trimmed = text.trim();
-    if !trimmed.starts_with("[spec-resynced]") {
-        return None;
-    }
-    let mut checksum: Option<String> = None;
-    let mut fingerprint: Option<String> = None;
-    let mut summary = String::new();
-    let summary_capture = Regex::new(r"(?m)^\[spec-resynced\]\s*(.*)$").unwrap();
-    if let Some(cap) = summary_capture.captures(trimmed) {
-        summary = cap[1].trim().to_string();
-    }
-    let kv = Regex::new(r"(?m)^\s*(checksum|driftFingerprint)\s*=\s*([a-fA-F0-9]+)\s*$").unwrap();
-    for cap in kv.captures_iter(trimmed) {
-        match &cap[1] {
-            "checksum" => checksum = Some(cap[2].to_lowercase()),
-            "driftFingerprint" => fingerprint = Some(cap[2].to_lowercase()),
-            _ => {}
-        }
-    }
-    let checksum = checksum?;
-    if !ResyncRecord::is_sha256_hex(&checksum) {
-        return None;
-    }
-    let fingerprint = fingerprint?;
-    if !ResyncRecord::is_sha256_hex(&fingerprint) {
-        return None;
-    }
-    Some(ResyncRecord {
-        checksum,
-        fingerprint,
-        summary,
-    })
-}
-
-impl ResyncRecord {
-    fn is_sha256_hex(value: &str) -> bool {
-        value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
-    }
-}
-
-/// Walk comments newest-to-oldest and return the most recent
-/// `[spec-resynced]` record parsed successfully.
-pub(crate) fn latest_resync_record(task: &Task) -> Option<ResyncRecord> {
-    for comment in task.comments.iter().rev() {
-        let text = comment_text(comment);
-        if let Some(record) = parse_resync_record(text) {
-            return Some(record);
-        }
-    }
-    None
-}
-
-/// True iff the most recent `[spec-resynced]` comment carries a
-/// `driftFingerprint` that matches the current drift episode fingerprint
-/// and a checksum whose stored value on the task still matches. Both legs
-/// must hold — a fingerprint match alone is not enough because the spec
-/// checksum can drift again after a resync without a fresh `[spec-resynced]`.
-pub(crate) fn latest_resync_record_matches_drift(
-    task: &Task,
-    drift_fingerprint: &str,
-    stored_checksum: Option<&str>,
-) -> bool {
-    let Some(record) = latest_resync_record(task) else {
-        return false;
-    };
-    record.fingerprint == drift_fingerprint && stored_checksum == Some(&record.checksum)
-}
-
-/// Hash the failure list that defined the current drift episode. Returns a
-/// lowercase sha256 hex digest. Stable across runs (failure order is
-/// preserved verbatim), so it can be embedded in `[spec-resynced]` comments
-/// to bind them to the episode.
-pub(crate) fn drift_episode_fingerprint(failures: &[String]) -> String {
-    let joined = failures.join("\n");
-    let digest = Sha256::digest(joined.as_bytes());
-    format!("{digest:x}")
-}
-
-/// True if the task is in the `open` status (uses brain spec as source of truth).
-pub(crate) fn task_is_open(task: &Task) -> bool {
-    task.status == "open"
-}
-
-pub(crate) fn resolve_product_spec_path(path: &str, repo: &Path, workspace_root: &Path) -> PathBuf {
-    let spec = Path::new(path);
-    if spec.is_absolute() {
-        return spec.to_path_buf();
-    }
-    if path.starts_with("brain/") {
-        if workspace_root.file_name().and_then(|name| name.to_str()) == Some("brain") {
-            return workspace_root.join(path.trim_start_matches("brain/"));
-        }
-        return workspace_root.join(spec);
-    }
-    repo.join(spec)
-}
-
-pub(crate) fn workspace_root(args: &StageArgs) -> &Path {
-    args.workspace_root
-        .as_deref()
-        .unwrap_or_else(|| Path::new("/Users/quinnstoffer/.openclaw/workspace"))
-}
-
-pub(crate) fn acceptance_criteria_text(text: &str) -> Vec<String> {
-    let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(.+)$").unwrap();
-    re.captures_iter(text)
-        .filter_map(|cap| cap.get(1).map(|m| m.as_str().trim().to_string()))
-        .filter(|criterion| criterion != "**Approved by Tom**")
-        .collect()
-}
-
-pub(crate) fn spec_checksum(task: &Task) -> String {
-    let acs = acceptance_criteria_text(&task.description.clone().unwrap_or_default());
-    acceptance_criteria_checksum(&acs)
-}
-
-pub(crate) fn acceptance_criteria_checksum(acceptance_criteria: &[String]) -> String {
-    let value = json!({ "acceptanceCriteria": acceptance_criteria });
-    let canonical = canonical_json_bytes(&value);
-    let digest = Sha256::digest(canonical);
-    format!("{digest:x}")
-}
-
-fn canonical_json_bytes(value: &Value) -> Vec<u8> {
-    serde_json::to_vec(&canonical_json_value(value)).expect("serialize canonical JSON")
-}
-
-fn canonical_json_value(value: &Value) -> Value {
-    match value {
-        Value::Object(object) => {
-            let sorted: BTreeMap<_, _> = object
-                .iter()
-                .map(|(key, value)| (key.clone(), canonical_json_value(value)))
-                .collect();
-            Value::Object(Map::from_iter(sorted))
-        }
-        Value::Array(items) => Value::Array(items.iter().map(canonical_json_value).collect()),
-        _ => value.clone(),
-    }
-}
-
-pub(crate) fn spec_checksum_failures(task: &Task) -> Vec<String> {
-    let Some(stored) = task.spec_checksum.as_deref() else {
-        return vec![];
-    };
-    let current = spec_checksum(task);
-    if current == stored {
-        vec![]
-    } else {
-        vec![format!(
-            "Spec drift detected — AC checksum changed since last approval. Task {} stored specChecksum `{stored}` but current AC checksum is `{current}`.",
-            task.id
-        )]
-    }
-}
-
-fn workstreams(task: &Task) -> Vec<Workstream> {
-    parse_workstreams(&task.description.clone().unwrap_or_default())
-}
-
-fn parse_workstreams(text: &str) -> Vec<Workstream> {
-    let owner_section = parse_owner_workstreams(text);
-    if !owner_section.is_empty() {
-        return owner_section;
-    }
-
-    let heading = Regex::new(r"(?im)^\s{0,3}#{2,6}\s+(.+?)\s*$").unwrap();
-    let mut matches: Vec<_> = heading.find_iter(text).collect();
-    matches.retain(|m| m.as_str().to_lowercase().contains("workstream"));
-    let strip_workstream_word = Regex::new(r"(?i)workstreams?").unwrap();
-    matches
-        .iter()
-        .enumerate()
-        .flat_map(|(idx, m)| {
-            let start = m.end();
-            let end = matches
-                .get(idx + 1)
-                .map(|n| n.start())
-                .unwrap_or(text.len());
-            let title = heading
-                .captures(m.as_str())
-                .and_then(|cap| cap.get(1))
-                .map(|m| m.as_str().trim())
-                .unwrap_or("Implementer");
-            let owner = strip_workstream_word
-                .replace_all(title, "")
-                .trim_matches(|c: char| c.is_whitespace() || c == ':' || c == '-' || c == '/')
-                .trim()
-                .to_string();
-            let body_text = text[start..end].trim();
-            // A titled heading ("## Workstream: Rowan") names one workstream
-            // directly. A bare plural heading ("## Workstreams") introduces a
-            // bulleted list underneath, one workstream per top-level bullet —
-            // same shape as the bold `**Workstreams**` section below.
-            if owner.is_empty() {
-                parse_bulleted_workstream_items(body_text)
-            } else {
-                vec![Workstream {
-                    owner,
-                    body: body_text.to_string(),
-                }]
-            }
-        })
-        .collect()
-}
-
-fn parse_owner_workstreams(text: &str) -> Vec<Workstream> {
-    let section_re = Regex::new(r"(?im)^\s*\*\*Workstreams\*\*\s*$").unwrap();
-    let Some(section_match) = section_re.find(text) else {
-        return Vec::new();
-    };
-    let start = section_match.end();
-    let after = &text[start..];
-    let end_re = Regex::new(r"(?m)^\s*(?:#{1,6}\s+|\*\*[^*\n]+\*\*\s*$)").unwrap();
-    let end = end_re
-        .find(after)
-        .map(|m| start + m.start())
-        .unwrap_or(text.len());
-    let section = &text[start..end];
-    parse_bulleted_workstream_items(section)
-}
-
-/// Parse a workstreams section body into one `Workstream` per top-level
-/// bullet (`- ...`). Handles both the legacy `- Owner: <name>` shape (owner
-/// at the start of the bullet, often followed by indented `key: value`
-/// continuation lines) and the `- **WS<N> — <title>** ... Owner: <name>; ...`
-/// shape (owner anywhere in the bullet, or omitted entirely). Bullets with no
-/// `Owner:` tag default to "Implementer".
-fn parse_bulleted_workstream_items(section: &str) -> Vec<Workstream> {
-    let item_re = Regex::new(r"(?m)^-\s+.*$").unwrap();
-    let items: Vec<_> = item_re.find_iter(section).collect();
-    if items.is_empty() {
-        return Vec::new();
-    }
-    let owner_re = Regex::new(r"(?i)Owner:\s*([^;\n]+)").unwrap();
-    items
-        .iter()
-        .enumerate()
-        .map(|(idx, item_match)| {
-            let body_start = item_match.start();
-            let body_end = items
-                .get(idx + 1)
-                .map(|next| next.start())
-                .unwrap_or(section.len());
-            let body = section[body_start..body_end].trim().to_string();
-            let owner = owner_re
-                .captures(&body)
-                .and_then(|cap| cap.get(1))
-                .map(|m| {
-                    m.as_str()
-                        .trim()
-                        .trim_end_matches(['.', ','])
-                        .trim()
-                        .to_string()
-                })
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "Implementer".to_string());
-            Workstream { owner, body }
-        })
-        .collect()
-}
-
-fn tagged_values(task: &Task, tag: &str) -> Vec<String> {
-    task.comments
-        .iter()
-        .filter_map(|comment| {
-            let text = comment_text(comment).trim();
-            text.strip_prefix(tag).map(|rest| rest.trim().to_string())
-        })
-        .collect()
-}
-
-fn tech_design_url(task: &Task) -> Option<String> {
-    tagged_values(task, "[tech-design]")
-        .into_iter()
-        .find(|v| !v.is_empty())
-}
-
-/// Structured TaskApproval rows are the sole source of tech-design approval.
-fn tech_design_approved_structured(task: &Task) -> bool {
-    task_approvals::task_approval_granted(task, "tech_design")
-}
-
-/// True if any task comment starts with `[tech-design-not-required]` followed
-/// by a non-empty rationale. Used by the code-task lobster to allow code
-/// tasks to skip the tech design gate when they are small enough not to
-/// warrant one.
-fn tech_design_waived(task: &Task) -> bool {
-    tagged_values(task, "[tech-design-not-required]")
-        .into_iter()
-        .any(|v| !v.trim().is_empty())
-}
-
-fn implementer_pr_urls(task: &Task) -> Vec<String> {
-    let re = Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").unwrap();
-    let mut urls = Vec::new();
-    // `[implementer-prs]` is the role-based tag. Keep `[rowan-prs]` as a
-    // compatibility alias for existing tasks while they drain.
-    for tag in ["[implementer-prs]", "[rowan-prs]"] {
-        for value in tagged_values(task, tag) {
-            for m in re.find_iter(&value) {
-                let url = m.as_str().to_string();
-                if !urls.contains(&url) {
-                    urls.push(url);
-                }
-            }
-        }
-    }
-    urls
-}
-
-/// The PR URL(s) named in the most recent `[implementer-prs]` (or legacy
-/// `[rowan-prs]`) comment that names at least one parseable PR URL. This is
-/// the authoritative "currently gating" PR set — unlike `implementer_pr_urls`
-/// (the full historical union) or the old "highest PR number" heuristic,
-/// which both broke on task 30251df0: PR #455 was opened right after #454
-/// from the same branch as an accidental duplicate, then closed unmerged,
-/// while #454 (lower number, opened first) was the one that actually merged.
-/// Numeric-max treated #455 as "latest" and blocked `acceptance -> done`
-/// forever even after Rowan and Quinn each posted a correcting
-/// `[implementer-prs]` comment naming only #454 — a later correction comment
-/// is the real signal of intent, not PR number magnitude.
-fn latest_implementer_pr_urls(task: &Task) -> Vec<String> {
-    let re = Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").unwrap();
-    for comment in task.comments.iter().rev() {
-        let text = comment_text(comment).trim();
-        let rest = text
-            .strip_prefix("[implementer-prs]")
-            .or_else(|| text.strip_prefix("[rowan-prs]"));
-        if let Some(rest) = rest {
-            let urls: Vec<String> = re.find_iter(rest).map(|m| m.as_str().to_string()).collect();
-            if !urls.is_empty() {
-                return urls;
-            }
-        }
-    }
-    Vec::new()
-}
-
-#[allow(
-    dead_code,
-    reason = "test-only helper reached from #[cfg(test)] modules; clippy's bin target cannot see those calls"
-)]
-fn implementer_active_pr_urls_with<F>(task: &Task, inspect: F) -> Vec<String>
-where
-    F: Fn(&str) -> Result<pr_gates::ReviewState>,
-{
-    implementer_pr_urls(task)
-        .into_iter()
-        .filter(|url| !matches!(inspect(url), Ok(pr_gates::ReviewState::Merged)))
-        .collect()
-}
-
-fn inspect_pr(url: &str) -> Result<pr_gates::ReviewState> {
-    let output = gh_command()
-        .args([
-            "pr",
-            "view",
-            url,
-            "--json",
-            "reviewDecision,state,mergedAt,comments,reviews",
-        ])
-        .output()
-        .context("run gh pr view")?;
-    if !output.status.success() {
-        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .to_string()));
-    }
-    pr_gates::parse_github_review_state(&String::from_utf8(output.stdout)?)
 }
 
 // body_has_checked_acceptance, ReviewState) live in src/pr_gates.rs (W36 A3+A4).
@@ -2960,7 +2450,7 @@ mod tests {
 
     #[test]
     fn parses_product_spec_link() {
-        let spec = parse_product_spec_ref(&fixture("task_full.md")).unwrap();
+        let spec = product_spec_parsing::parse_product_spec_ref(&fixture("task_full.md")).unwrap();
         assert_eq!(
             spec.path,
             "brain/bookmarks/specs/feature-factory-v2-2026-06-04.md"
@@ -2969,13 +2459,13 @@ mod tests {
 
     #[test]
     fn detects_missing_product_spec() {
-        assert!(parse_product_spec_ref("no spec here").is_none());
+        assert!(product_spec_parsing::parse_product_spec_ref("no spec here").is_none());
     }
 
     #[test]
     fn parses_only_bold_spec_line_from_description() {
-        assert!(parse_product_spec_ref("Product spec: brain/bookmarks/specs/example.md").is_none());
-        let spec = parse_product_spec_ref("**Spec:** brain/bookmarks/specs/example.md").unwrap();
+        assert!(product_spec_parsing::parse_product_spec_ref("Product spec: brain/bookmarks/specs/example.md").is_none());
+        let spec = product_spec_parsing::parse_product_spec_ref("**Spec:** brain/bookmarks/specs/example.md").unwrap();
         assert_eq!(spec.path, "brain/bookmarks/specs/example.md");
     }
 
@@ -3001,31 +2491,31 @@ mod tests {
     #[test]
     fn tech_design_waived_accepts_bare_reason() {
         let task = task_with_waiver_comment("[tech-design-not-required] trivial change");
-        assert!(tech_design_waived(&task));
+        assert!(product_spec_parsing::tech_design_waived(&task));
     }
 
     #[test]
     fn tech_design_waived_accepts_leading_whitespace() {
         let task = task_with_waiver_comment("[tech-design-not-required]    trivial config tweak");
-        assert!(tech_design_waived(&task));
+        assert!(product_spec_parsing::tech_design_waived(&task));
     }
 
     #[test]
     fn tech_design_waived_rejects_missing_reason() {
         let task = task_with_waiver_comment("[tech-design-not-required]");
-        assert!(!tech_design_waived(&task));
+        assert!(!product_spec_parsing::tech_design_waived(&task));
     }
 
     #[test]
     fn tech_design_waived_rejects_whitespace_only_reason() {
         let task = task_with_waiver_comment("[tech-design-not-required]    \t  ");
-        assert!(!tech_design_waived(&task));
+        assert!(!product_spec_parsing::tech_design_waived(&task));
     }
 
     #[test]
     fn tech_design_waived_rejects_unrelated_tag() {
         let task = task_with_waiver_comment("[tech-design-not-required-forever] nope");
-        assert!(!tech_design_waived(&task));
+        assert!(!product_spec_parsing::tech_design_waived(&task));
     }
 
     #[test]
@@ -3048,7 +2538,7 @@ mod tests {
             ],
             ..Task::default()
         };
-        assert!(tech_design_waived(&task));
+        assert!(product_spec_parsing::tech_design_waived(&task));
     }
 
     // ---- workflow_for_task (task f77b7a60) ----
@@ -3180,7 +2670,7 @@ mod tests {
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
         assert_eq!(
-            resolve_product_spec_path(
+            product_spec_parsing::resolve_product_spec_path(
                 "brain/tasks/specs/example.md",
                 repo.path(),
                 workspace.path()
@@ -3189,13 +2679,13 @@ mod tests {
         );
 
         assert_eq!(
-            resolve_product_spec_path("docs/spec.md", repo.path(), workspace.path()),
+            product_spec_parsing::resolve_product_spec_path("docs/spec.md", repo.path(), workspace.path()),
             repo.path().join("docs/spec.md")
         );
 
         let absolute = workspace.path().join("brain/tasks/specs/example.md");
         assert_eq!(
-            resolve_product_spec_path(absolute.to_str().unwrap(), repo.path(), workspace.path()),
+            product_spec_parsing::resolve_product_spec_path(absolute.to_str().unwrap(), repo.path(), workspace.path()),
             absolute
         );
     }
@@ -3231,11 +2721,11 @@ mod tests {
             "AC2: Build the second thing".to_string(),
             "AC1: Build the first thing".to_string(),
         ];
-        let checksum = acceptance_criteria_checksum(&acs);
+        let checksum = product_spec_parsing::acceptance_criteria_checksum(&acs);
 
-        assert_eq!(checksum, acceptance_criteria_checksum(&acs));
+        assert_eq!(checksum, product_spec_parsing::acceptance_criteria_checksum(&acs));
         assert_eq!(
-            canonical_json_bytes(&json!({
+            product_spec_parsing::canonical_json_bytes(&json!({
                 "z": "last",
                 "acceptanceCriteria": acs,
                 "a": { "second": 2, "first": 1 }
@@ -3251,8 +2741,8 @@ mod tests {
         let without_marker = "## Acceptance Criteria\n- [ ] AC1: Build it";
 
         assert_eq!(
-            acceptance_criteria_text(with_marker),
-            acceptance_criteria_text(without_marker)
+            product_spec_parsing::acceptance_criteria_text(with_marker),
+            product_spec_parsing::acceptance_criteria_text(without_marker)
         );
     }
 
@@ -3263,9 +2753,9 @@ mod tests {
             description: Some("## Acceptance Criteria\n- [ ] AC1: Build it".to_string()),
             ..Task::default()
         };
-        task.spec_checksum = Some(spec_checksum(&task));
+        task.spec_checksum = Some(product_spec_parsing::spec_checksum(&task));
 
-        assert!(spec_checksum_failures(&task).is_empty());
+        assert!(product_spec_parsing::spec_checksum_failures(&task).is_empty());
     }
 
     #[test]
@@ -3281,11 +2771,11 @@ mod tests {
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Also build this"
                     .to_string(),
             ),
-            spec_checksum: Some(spec_checksum(&approved_task)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved_task)),
             ..Task::default()
         };
 
-        let failures = spec_checksum_failures(&changed_task);
+        let failures = product_spec_parsing::spec_checksum_failures(&changed_task);
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("Spec drift detected"));
         assert!(failures[0].contains("AC checksum changed since last approval"));
@@ -3328,12 +2818,12 @@ mod tests {
             ..Task::default()
         };
         let mut patch = json!({"status": "ready"});
-        patch["specChecksum"] = Value::String(spec_checksum(&task));
+        patch["specChecksum"] = Value::String(product_spec_parsing::spec_checksum(&task));
 
         assert_eq!(patch["status"], "ready");
         assert_eq!(
             patch["specChecksum"].as_str().unwrap(),
-            spec_checksum(&task)
+            product_spec_parsing::spec_checksum(&task)
         );
     }
 
@@ -3528,7 +3018,7 @@ mod tests {
 
     #[test]
     fn parses_multiple_workstreams() {
-        let streams = parse_workstreams(&fixture("task_full.md"));
+        let streams = product_spec_parsing::parse_workstreams(&fixture("task_full.md"));
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].owner, "Rowan");
         assert_eq!(streams[1].owner, "Quinn");
@@ -3552,7 +3042,7 @@ mod tests {
 
 **Type:** feature
 "#;
-        let streams = parse_workstreams(text);
+        let streams = product_spec_parsing::parse_workstreams(text);
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].owner, "Implementer");
         assert!(streams[0].body.contains("task-456c92a8-depends-on"));
@@ -3571,7 +3061,7 @@ mod tests {
 
 **Type:** feature
 "#;
-        let streams = parse_workstreams(text);
+        let streams = product_spec_parsing::parse_workstreams(text);
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].owner, "Rowan");
         assert!(streams[0].body.contains("WS1"));
@@ -3589,7 +3079,7 @@ mod tests {
 - **WS2 — Cloud data environment** (`infra/cloud/scripts/`): Postgres and Redis. (AC2)
 - **WS3 — Health checks** (`.github/workflows/`): healthz endpoints. (AC3)
 "#;
-        let streams = parse_workstreams(text);
+        let streams = product_spec_parsing::parse_workstreams(text);
         assert_eq!(streams.len(), 3);
         assert!(streams.iter().all(|s| s.owner == "Implementer"));
         assert!(streams[2].body.contains("WS3"));
@@ -3609,7 +3099,7 @@ mod tests {
 ## Type
 feature
 "#;
-        let streams = parse_workstreams(text);
+        let streams = product_spec_parsing::parse_workstreams(text);
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].owner, "Rowan");
         assert_eq!(streams[1].owner, "Implementer");
@@ -3650,7 +3140,7 @@ feature
             comments: vec![TaskComment { text: Some("[rowan-prs]\nhttps://github.com/Stoffer-Industries/sindustries/pull/1\nhttps://github.com/Stoffer-Industries/sindustries/pull/2".to_string()), body: None, ..TaskComment::default() }],
             ..Task::default()
         };
-        assert_eq!(implementer_pr_urls(&task).len(), 2);
+        assert_eq!(product_spec_parsing::implementer_pr_urls(&task).len(), 2);
     }
 
     #[test]
@@ -3686,10 +3176,10 @@ feature
             ..Task::default()
         };
         assert_eq!(
-            implementer_pr_urls(&task),
+            product_spec_parsing::implementer_pr_urls(&task),
             vec![url_455.to_string(), url_454.to_string()]
         );
-        assert_eq!(latest_implementer_pr_urls(&task), vec![url_454.to_string()]);
+        assert_eq!(product_spec_parsing::latest_implementer_pr_urls(&task), vec![url_454.to_string()]);
     }
 
     #[test]
@@ -3703,7 +3193,7 @@ feature
             ..Task::default()
         };
         assert_eq!(
-            latest_implementer_pr_urls(&task),
+            product_spec_parsing::latest_implementer_pr_urls(&task),
             vec![
                 "https://github.com/foo/bar/pull/1".to_string(),
                 "https://github.com/foo/bar/pull/2".to_string(),
@@ -3732,7 +3222,7 @@ feature
             ],
             ..Task::default()
         };
-        assert_eq!(latest_implementer_pr_urls(&task), vec![new_url.to_string()]);
+        assert_eq!(product_spec_parsing::latest_implementer_pr_urls(&task), vec![new_url.to_string()]);
     }
 
     #[test]
@@ -3745,7 +3235,7 @@ feature
             }],
             ..Task::default()
         };
-        assert_eq!(latest_implementer_pr_urls(&task), Vec::<String>::new());
+        assert_eq!(product_spec_parsing::latest_implementer_pr_urls(&task), Vec::<String>::new());
     }
 
     #[test]
@@ -3771,7 +3261,7 @@ feature
             ],
             ..Task::default()
         };
-        let active = implementer_active_pr_urls_with(&task, |url| {
+        let active = product_spec_parsing::implementer_active_pr_urls_with(&task, |url| {
             if url.ends_with("/120") {
                 Ok(pr_gates::ReviewState::Merged)
             } else {
@@ -3899,7 +3389,7 @@ feature
             ..Default::default()
         };
         assert!(spec_is_approved(&approved));
-        assert!(tech_design_approved_structured(&approved));
+        assert!(product_spec_parsing::tech_design_approved_structured(&approved));
         assert!(task_approvals::accepted_structured(&approved));
         let legacy = Task {
             description: Some("- [x] **Approved by Tom**".into()),
@@ -3911,7 +3401,7 @@ feature
             ..Default::default()
         };
         assert!(!spec_is_approved(&legacy));
-        assert!(!tech_design_approved_structured(&legacy));
+        assert!(!product_spec_parsing::tech_design_approved_structured(&legacy));
         assert!(!task_approvals::accepted_structured(&legacy));
         let revoked = Task {
             approvals: vec![
@@ -3922,7 +3412,7 @@ feature
             ..legacy
         };
         assert!(!spec_is_approved(&revoked));
-        assert!(!tech_design_approved_structured(&revoked));
+        assert!(!product_spec_parsing::tech_design_approved_structured(&revoked));
         assert!(!task_approvals::accepted_structured(&revoked));
     }
 
@@ -3963,7 +3453,7 @@ feature
 
         // A task with a stored checksum is already past "open" legitimately — spec_checksum_failures
         // (not spec_failures) is the gate from here on, so we just confirm no spec drift.
-        let failures = spec_checksum_failures(&task);
+        let failures = product_spec_parsing::spec_checksum_failures(&task);
         // checksum "abc123" won't match the real computed checksum, so drift is detected —
         // that's correct behaviour: the stored checksum must match current ACs.
         assert!(
@@ -3988,9 +3478,9 @@ feature
             ..Task::default()
         };
 
-        assert_eq!(implementer_pr_urls(&task), vec![merged_url, open_url]);
+        assert_eq!(product_spec_parsing::implementer_pr_urls(&task), vec![merged_url, open_url]);
         assert_eq!(
-            implementer_active_pr_urls_with(&task, |url| {
+            product_spec_parsing::implementer_active_pr_urls_with(&task, |url| {
                 if url == merged_url {
                     Ok(pr_gates::ReviewState::Merged)
                 } else {
@@ -4201,7 +3691,7 @@ feature
                     .to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             ..Task::default()
         };
         let env = Envelope {
@@ -4244,10 +3734,10 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift".to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             ..Task::default()
         };
-        task.spec_checksum = Some(spec_checksum(&approved));
+        task.spec_checksum = Some(product_spec_parsing::spec_checksum(&approved));
         let env = Envelope {
             criteria_met: true,
             already_past: false,
@@ -4289,7 +3779,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift".to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "revoked")],
             ..Task::default()
         };
@@ -4332,7 +3822,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "approved")],
             ..Task::default()
         };
@@ -4371,7 +3861,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift".to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "approved")],
             ..Task::default()
         };
@@ -4407,7 +3897,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Original\n- [ ] AC2: Drift".to_string(),
             ),
             status: "doing".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "approved")],
             comments: vec![
                 TaskComment {
@@ -4477,7 +3967,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "approved")],
             ..Task::default()
         };
@@ -4529,18 +4019,18 @@ feature
             id: "task-resynced-record".to_string(),
             description: Some(drifted_description),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             ..Task::default()
         };
         // Build a `[spec-resynced]` comment bound to the current drift
         // episode.
-        let drift_failures = spec_checksum_failures(&task);
+        let drift_failures = product_spec_parsing::spec_checksum_failures(&task);
         assert!(
             !drift_failures.is_empty(),
             "fixture must produce drift so the test exercises the binding"
         );
-        let fingerprint = drift_episode_fingerprint(&drift_failures);
-        let new_checksum = acceptance_criteria_checksum(&acceptance_criteria_text(
+        let fingerprint = product_spec_parsing::drift_episode_fingerprint(&drift_failures);
+        let new_checksum = product_spec_parsing::acceptance_criteria_checksum(&product_spec_parsing::acceptance_criteria_text(
             &task.description.clone().unwrap(),
         ));
         // Sanity: the resync comment must already be cryptographically
@@ -4597,7 +4087,7 @@ feature
             id: "task-open".to_string(),
             description: Some(description),
             status: "open".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             ..Task::default()
         };
         let env = Envelope {
@@ -4649,7 +4139,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
             ),
             status: "ready".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "revoked")],
             ..Task::default()
         };
@@ -4698,7 +4188,7 @@ feature
                 "## Acceptance Criteria\n- [ ] AC1: Build it\n- [ ] AC2: Drift\n".to_string(),
             ),
             status: "doing".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             approvals: vec![approval_row("spec", "revoked")],
             comments: vec![TaskComment {
                 text: Some("[spec-resynced] Previous episode".to_string()),
@@ -4735,7 +4225,7 @@ feature
         let chk = "a".repeat(64);
         let fp = "b".repeat(64);
         let text = format!("[spec-resynced] reset checksum after approval\nchecksum={chk}\ndriftFingerprint={fp}\n");
-        let record = parse_resync_record(&text).expect("record should parse");
+        let record = product_spec_parsing::parse_resync_record(&text).expect("record should parse");
         assert_eq!(record.checksum, chk);
         assert_eq!(record.fingerprint, fp);
         assert_eq!(record.summary, "reset checksum after approval");
@@ -4746,19 +4236,19 @@ feature
         // A hand-written `[spec-resynced]` without checksum/driftFingerprint
         // must NOT be trusted — the stale-drift guard requires the binding.
         let text = "[spec-resynced] does not carry checksum/fingerprint fields";
-        assert!(parse_resync_record(text).is_none());
+        assert!(product_spec_parsing::parse_resync_record(text).is_none());
     }
 
     #[test]
     fn parse_resync_record_rejects_unbound_comment() {
         let text = "Spec resynced offline.";
-        assert!(parse_resync_record(text).is_none());
+        assert!(product_spec_parsing::parse_resync_record(text).is_none());
     }
 
     #[test]
     fn parse_resync_record_rejects_short_hex() {
         let text = "[spec-resynced] short\nchecksum=deadbeef\ndriftFingerprint=cafebabe\n";
-        assert!(parse_resync_record(text).is_none());
+        assert!(product_spec_parsing::parse_resync_record(text).is_none());
     }
 
     #[test]
@@ -4789,7 +4279,7 @@ feature
             ],
             ..Task::default()
         };
-        let record = latest_resync_record(&task).expect("record must be found");
+        let record = product_spec_parsing::latest_resync_record(&task).expect("record must be found");
         assert_eq!(record.checksum, "a".repeat(64));
         assert_eq!(record.fingerprint, "b".repeat(64));
     }
@@ -4799,10 +4289,10 @@ feature
         let a = vec!["one".to_string(), "two".to_string()];
         let b = vec!["one".to_string(), "two".to_string()];
         let c = vec!["two".to_string(), "one".to_string()];
-        assert_eq!(drift_episode_fingerprint(&a), drift_episode_fingerprint(&b));
-        assert_ne!(drift_episode_fingerprint(&a), drift_episode_fingerprint(&c));
+        assert_eq!(product_spec_parsing::drift_episode_fingerprint(&a), product_spec_parsing::drift_episode_fingerprint(&b));
+        assert_ne!(product_spec_parsing::drift_episode_fingerprint(&a), product_spec_parsing::drift_episode_fingerprint(&c));
         // Lowercase sha256 hex of length 64.
-        let fp = drift_episode_fingerprint(&a);
+        let fp = product_spec_parsing::drift_episode_fingerprint(&a);
         assert_eq!(fp.len(), 64);
         assert!(fp
             .chars()
@@ -4829,7 +4319,7 @@ feature
             }],
             ..Task::default()
         };
-        assert!(!latest_resync_record_matches_drift(
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
             &task_cs_mismatch,
             &fp,
             task_cs_mismatch.spec_checksum.as_deref()
@@ -4846,7 +4336,7 @@ feature
             }],
             ..Task::default()
         };
-        assert!(!latest_resync_record_matches_drift(
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
             &task_fp_mismatch,
             &fp,
             Some(&cs)
@@ -4863,12 +4353,12 @@ feature
             }],
             ..Task::default()
         };
-        assert!(latest_resync_record_matches_drift(
+        assert!(product_spec_parsing::latest_resync_record_matches_drift(
             &task_match,
             &fp,
             Some(&cs)
         ));
-        assert!(!latest_resync_record_matches_drift(
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
             &task_match,
             &other_fp,
             Some(&cs)
@@ -4887,7 +4377,7 @@ feature
             }],
             ..Task::default()
         };
-        assert!(latest_resync_record_matches_drift(
+        assert!(product_spec_parsing::latest_resync_record_matches_drift(
             &task_normalises,
             &fp,
             Some(&cs)
@@ -4904,7 +4394,7 @@ feature
             }],
             ..Task::default()
         };
-        assert!(!latest_resync_record_matches_drift(
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
             &task_old_stored,
             &fp,
             Some(&other_cs)
@@ -5480,7 +4970,7 @@ Lead-in paragraph.
             id: "task-resync-dry".to_string(),
             description: Some(drifted_description.clone()),
             status: "doing".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             ..Task::default()
         };
         let workspace_path = workspace.path().to_path_buf();
@@ -5524,8 +5014,8 @@ keep me
             lobster_state: LobsterState::default(),
             failures: Vec::new(),
         };
-        let drift_failures = spec_checksum_failures(&env.task);
-        let fingerprint = drift_episode_fingerprint(&drift_failures);
+        let drift_failures = product_spec_parsing::spec_checksum_failures(&env.task);
+        let fingerprint = product_spec_parsing::drift_episode_fingerprint(&drift_failures);
         let result =
             resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
                 .expect("dry-run resync must not error");
@@ -5544,7 +5034,7 @@ keep me
         assert!(result.failures[0].contains("would rewrite"));
         assert!(result.failures[0].contains("2 AC line"));
         let expected_checksum =
-            acceptance_criteria_checksum(&acceptance_criteria_text(&drifted_description));
+            product_spec_parsing::acceptance_criteria_checksum(&product_spec_parsing::acceptance_criteria_text(&drifted_description));
         assert!(result.failures[0].contains(&expected_checksum));
     }
 
@@ -5580,7 +5070,7 @@ keep me
             failures: Vec::new(),
         };
         let drift_failures = vec!["AC drift".to_string()];
-        let fingerprint = drift_episode_fingerprint(&drift_failures);
+        let fingerprint = product_spec_parsing::drift_episode_fingerprint(&drift_failures);
         let result =
             resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
                 .expect("unsafe-path resync must not error");
@@ -5632,7 +5122,7 @@ keep me
             failures: Vec::new(),
         };
         let drift_failures = vec!["drift".to_string()];
-        let fingerprint = drift_episode_fingerprint(&drift_failures);
+        let fingerprint = product_spec_parsing::drift_episode_fingerprint(&drift_failures);
         let result =
             resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
                 .expect("revoked-spec resync must not error");
@@ -5682,7 +5172,7 @@ keep me
             id: "task-stable".to_string(),
             description: Some(description),
             status: "doing".to_string(),
-            spec_checksum: Some(spec_checksum(&approved)),
+            spec_checksum: Some(product_spec_parsing::spec_checksum(&approved)),
             ..Task::default()
         };
         let workspace_path = workspace.path().to_path_buf();
@@ -5700,8 +5190,8 @@ keep me
             lobster_state: LobsterState::default(),
             failures: Vec::new(),
         };
-        let drift_failures = spec_checksum_failures(&env.task);
-        let fingerprint = drift_episode_fingerprint(&drift_failures);
+        let drift_failures = product_spec_parsing::spec_checksum_failures(&env.task);
+        let fingerprint = product_spec_parsing::drift_episode_fingerprint(&drift_failures);
         let result =
             resync_spec_and_reset_checksum(&args, env, &drift_failures, &fingerprint, &args.repo)
                 .expect("stable-spec resync must not error");
@@ -5744,12 +5234,12 @@ keep me
             description: Some("## Acceptance Criteria\n- [ ] AC1: Original".to_string()),
             ..Task::default()
         };
-        let original_checksum = spec_checksum(&original);
+        let original_checksum = product_spec_parsing::spec_checksum(&original);
 
         // Stale comment: bound to an OLD episode (checksum matches old
         // ACs, fingerprint from a different drift failures list).
         let old_failures = vec!["old drift".to_string()];
-        let old_fp = drift_episode_fingerprint(&old_failures);
+        let old_fp = product_spec_parsing::drift_episode_fingerprint(&old_failures);
         let stale_comment = format!(
             "[spec-resynced] previous episode\nchecksum={cs}\ndriftFingerprint={fp}\n",
             cs = original_checksum,
@@ -6014,27 +5504,27 @@ detached
     fn archive_spec_parses_inline_annotated_spec_line() {
         // AC3: legacy inline annotation form must remain parseable.
         let desc = "Some prose.\n\n**Spec:** brain/tasks/specs/in-progress/example.md (legacy inline note)\n\nAC1: ...";
-        let parsed = parse_product_spec_ref(desc).expect("must parse");
+        let parsed = product_spec_parsing::parse_product_spec_ref(desc).expect("must parse");
         assert_eq!(parsed.path, "brain/tasks/specs/in-progress/example.md");
 
         // Backtick-wrapped path with trailing comma.
         let desc2 = "**Spec:** `brain/tasks/specs/in-progress/foo.md`,\n";
         assert_eq!(
-            parse_product_spec_ref(desc2).unwrap().path,
+            product_spec_parsing::parse_product_spec_ref(desc2).unwrap().path,
             "brain/tasks/specs/in-progress/foo.md"
         );
 
         // Bracket annotation.
         let desc3 = "**Spec:** brain/tasks/specs/in-progress/bar.md [archived ticket]";
         assert_eq!(
-            parse_product_spec_ref(desc3).unwrap().path,
+            product_spec_parsing::parse_product_spec_ref(desc3).unwrap().path,
             "brain/tasks/specs/in-progress/bar.md"
         );
 
         // Whitespace-only annotation is still parseable.
         let desc4 = "**Spec:** brain/tasks/specs/in-progress/baz.md (a b c)";
         assert_eq!(
-            parse_product_spec_ref(desc4).unwrap().path,
+            product_spec_parsing::parse_product_spec_ref(desc4).unwrap().path,
             "brain/tasks/specs/in-progress/baz.md"
         );
     }
@@ -6043,10 +5533,10 @@ detached
     fn archive_spec_rejects_unparseable_spec_line() {
         // Multi-token path with whitespace -> reject (returns None).
         assert!(
-            parse_product_spec_ref("**Spec:** brain/tasks/specs/in-progress/foo bar.md").is_none()
+            product_spec_parsing::parse_product_spec_ref("**Spec:** brain/tasks/specs/in-progress/foo bar.md").is_none()
         );
         // Bracket-only residue (no path component) -> reject.
-        assert!(parse_product_spec_ref("**Spec:** (just a note)").is_none());
+        assert!(product_spec_parsing::parse_product_spec_ref("**Spec:** (just a note)").is_none());
     }
 
     #[test]
