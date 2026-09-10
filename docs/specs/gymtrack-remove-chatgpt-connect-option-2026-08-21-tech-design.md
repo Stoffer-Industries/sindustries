@@ -1,3 +1,33 @@
+---
+status: superseded
+task_id: 91994011-5c34-4af5-8ef4-40daac604e64
+shipped_pr: https://github.com/Stoffer-Industries/sindustries/pull/501
+shipped_date: 2026-08-23
+superseded_by:
+  task_id: 696f2487-4817-4ecb-83fb-480b6ce654cc
+  tech_design: docs/specs/gymtrack-readd-chatgpt-connect-option-2026-09-10-tech-design.md
+  shipped_pr: (pending — PR for task 696f2487)
+  shipped_date: null
+  rationale: >
+    OpenAI's docs (help.openai.com/en/articles/12584461) confirm Developer
+    Mode / custom MCP connectors with write actions are available on any
+    paid ChatGPT plan (Plus, Pro, Business, Enterprise, Edu); only the
+    Free tier is excluded. The plan-tier-restriction rationale this design
+    relied on (Business / Enterprise / Edu only) is no longer accurate.
+    Tom verified on a ChatGPT Pro tier account that Developer Mode /
+    custom MCP connectors with both read and write tools are reachable.
+---
+
+> **Superseded by task `696f2487-4817-4ecb-83fb-480b6ce654cc`** (2026-09-10).
+>
+> This design's "ChatGPT intentionally excluded" rationale was based on OpenAI docs that restricted custom MCP connectors with write actions to ChatGPT Business / Enterprise / Edu plans. OpenAI has since updated the docs (verified via [help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)) — Developer Mode / custom MCP connectors are now available on **any paid ChatGPT plan** (Plus, Pro, Business, Enterprise, Edu) with only the Free tier excluded. Tom has independently verified this on a Pro tier account by adding GymTrack as a custom connector and observing both read and write tools being usable.
+>
+> The replacement design is [`docs/specs/gymtrack-readd-chatgpt-connect-option-2026-09-10-tech-design.md`](./gymtrack-readd-chatgpt-connect-option-2026-09-10-tech-design.md). The seeded `chatgpt` OAuth client row (registered in `apps/gymtrack/supabase/migrations/20260804070000_mcp_oauth.sql` and accepted by `gymtrack-mcp`) is reused end-to-end; no new migration, env var, or service is required.
+>
+> This doc's body remains below for historical reference; it is no longer the source of truth for the GymTrack connector surface.
+
+---
+
 # Tech design — GymTrack: remove ChatGPT connect option
 
 - **Task:** `91994011-5c34-4af5-8ef4-40daac604e64` (split out of `6350f444` on 2026-08-21 during acceptance review)

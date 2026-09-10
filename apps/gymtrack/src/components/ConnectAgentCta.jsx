@@ -30,9 +30,22 @@ export const AGENT_CONNECT_OPTIONS = [
     buildHref: buildClaudeHref,
     instructions:
       'Claude will open the Add Custom Connector modal with the GymTrack MCP URL pre-filled. In Advanced settings enter OAuth client ID claude-desktop (no secret — public PKCE client), then approve GymTrack access.'
+  },
+  {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    clientId: 'chatgpt',
+    // ChatGPT has no pre-fillable connector URL — the workspace settings pane
+    // takes the MCP URL as an in-app form field. Open the ChatGPT root and
+    // walk the user through Settings → Apps → Create (Developer Mode). Card
+    // instructions carry the per-step text. Re-added under task 696f2487
+    // after OpenAI documented Developer Mode / custom MCP connectors on
+    // any paid plan (Plus or above); see
+    // docs/specs/gymtrack-readd-chatgpt-connect-option-2026-09-10-tech-design.md.
+    href: 'https://chatgpt.com/',
+    instructions:
+      'In ChatGPT open Settings → Apps → Create (or enable Developer Mode) and add GymTrack as a custom MCP server with URL https://gymtrack-mcp.fly.dev/mcp. Choose OAuth, scan tools, authorise, and create the app. In a new chat, Tools → Use connectors → select GymTrack. Requires any paid ChatGPT plan (Plus or above); Free tier does not support Developer Mode custom connectors.'
   }
-  // ChatGPT connector option intentionally removed — see
-  // docs/runbooks/gymtrack-agent-connect.md § "ChatGPT intentionally excluded".
 ];
 
 /**
@@ -61,7 +74,8 @@ export default function ConnectAgentCta() {
         {AGENT_CONNECT_OPTIONS.map((option) => {
           // Each option either declares a static `href` or a `buildHref(mcpEndpoint)`
           // builder. The Claude entry uses the builder because its deep link
-          // needs the live MCP URL encoded into a query parameter.
+          // needs the live MCP URL encoded into a query parameter; ChatGPT
+          // links to a static page.
           const href = option.buildHref
             ? option.buildHref(endpoint)
             : option.href;
