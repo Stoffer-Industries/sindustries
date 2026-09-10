@@ -11,6 +11,7 @@ use std::{
 
 mod ac_parsing;
 mod analytics;
+mod analytics_replay;
 mod api_client;
 mod brain_spec_lifecycle;
 mod feedback_aggregate;
@@ -93,7 +94,7 @@ struct ReconcileBrainSpecApprovalsArgs {
 }
 
 #[derive(Parser, Clone)]
-struct AnalyticsArgs {
+pub(crate) struct AnalyticsArgs {
     #[arg(long, default_value = "http://localhost:4001/api/v1")]
     base_url: String,
     #[command(subcommand)]
@@ -101,7 +102,7 @@ struct AnalyticsArgs {
 }
 
 #[derive(Subcommand, Clone)]
-enum AnalyticsAction {
+pub(crate) enum AnalyticsAction {
     /// Replay a task's lifecycle analytics events in chronological order
     /// (AC5 of task f170e344).
     Replay {
@@ -285,9 +286,7 @@ fn main() -> Result<()> {
         Commands::CodeTaskTechDesignCheck(args) => {
             spec_check_ready::code_task_tech_design_check(args)?
         }
-        Commands::CodeTaskReadyChecks(args) => {
-            spec_check_ready::code_task_ready_checks(args)?
-        }
+        Commands::CodeTaskReadyChecks(args) => spec_check_ready::code_task_ready_checks(args)?,
         Commands::CodeTaskVerifyDelivery(args) => {
             crate::verify_delivery::code_task_verify_delivery(args)?
         }
@@ -295,188 +294,16 @@ fn main() -> Result<()> {
         Commands::ArchiveDoneTaskSpecsSweep(args) => {
             brain_spec_lifecycle::archive_done_task_specs_sweep(args)?
         }
-        Commands::Analytics(args) => analytics_replay(args)?,
+        Commands::Analytics(args) => analytics_replay::analytics_replay(args)?,
     };
     println!("{}", serde_json::to_string_pretty(&envelope)?);
     Ok(())
 }
 
-/// Replay a task's lifecycle analytics events in chronological order
-/// (AC5 of task f170e344). Prints one human-readable line per event and
-/// exits non-zero only for invalid task IDs, unreachable API, or
-/// malformed API response. "No events" is a successful empty replay.
-fn analytics_replay(args: AnalyticsArgs) -> Result<Envelope> {
-    let base_url = args.base_url.trim_end_matches('/').to_string();
-    let task_id = match args.action {
-        AnalyticsAction::Replay { task_id } => task_id,
-    };
-
-    // Match the API's UUID pattern (36-char with 4 dashes). Surface as a
-    // structured error rather than letting the API reject the request.
-    let uuid_re = Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-        .expect("constant regex");
-    if !uuid_re.is_match(&task_id) {
-        return Err(anyhow!(
-            "task-id must be a 36-char UUID (got `{}`)",
-            task_id
-        ));
-    }
-
-    let url = format!("{base_url}/feature-task-analytics/tasks/{task_id}/events");
-    let body: Value = api_client::handle_api_result(ureq::get(&url).call())?;
-    let events = body
-        .get("data")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
-    let envelope = replay_envelope(&task_id, &events);
-    print_replay(&task_id, &events);
-    Ok(envelope)
-}
-
-/// Build the JSON envelope for the replay output. The replay is a
-/// read-only operation, so the envelope's task is empty and the action
-/// reflects the operation that ran.
-fn replay_envelope(task_id: &str, events: &[Value]) -> Envelope {
-    #[allow(
-        clippy::field_reassign_with_default,
-        reason = "default-initializer is the cheapest way to build LobsterState before attaching it to the Envelope; refactor to struct-update syntax only when LobsterState grows a field set that warrants a parallel constructor"
-    )]
-    let lobster_state = {
-        let mut lobster_state = LobsterState::default();
-        lobster_state.last_orchestrated_at = Some(analytics::chrono_like_now_iso());
-        lobster_state
-    };
-    Envelope {
-        criteria_met: true,
-        already_past: false,
-        action_taken: format!("analytics_replay_returned_{}_events", events.len()),
-        task: Task {
-            id: task_id.to_string(),
-            ..Task::default()
-        },
-        lobster_state,
-        failures: Vec::new(),
-    }
-}
-
-/// Print the human-readable replay output (separate from the JSON envelope
-/// so callers can `feature-task analytics replay … | jq .` without losing
-/// the prose).
-fn print_replay(task_id: &str, events: &[Value]) {
-    println!("Task {task_id} lifecycle replay");
-    if events.is_empty() {
-        println!("(no events)");
-        return;
-    }
-    for event in events {
-        let event_type = event
-            .get("eventType")
-            .and_then(Value::as_str)
-            .unwrap_or("?");
-        let occurred_at = event
-            .get("occurredAt")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let gate = event.get("gate").and_then(Value::as_str).unwrap_or("");
-        let cause = event.get("cause").and_then(Value::as_str).unwrap_or("");
-        let message = event.get("message").and_then(Value::as_str).unwrap_or("");
-        match event_type {
-            "gate_failure" => {
-                println!(
-                    "{occurred_at} {gate} {cause} {message}",
-                    gate = if gate.is_empty() { "?" } else { gate },
-                );
-            }
-            "terminal_summary" => {
-                let terminal_status = event
-                    .get("terminalStatus")
-                    .and_then(Value::as_str)
-                    .unwrap_or("done");
-                let total = event
-                    .get("totalGateFailureCount")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0);
-                let capacity = event
-                    .get("capacityBlockCount")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0);
-                let quality = event
-                    .get("qualityFailureCount")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0);
-                let cycle = event
-                    .get("prCycleTimeSeconds")
-                    .and_then(Value::as_i64)
-                    .map(format_seconds)
-                    .unwrap_or_else(|| "n/a".to_string());
-                let evidence = event
-                    .get("evidenceTypeDistribution")
-                    .and_then(Value::as_object)
-                    .map(format_evidence)
-                    .unwrap_or_default();
-                println!(
-                    "{occurred_at} terminal_summary {terminal_status} total={total} capacity={capacity} quality={quality} prCycle={cycle} evidence={evidence}",
-                    evidence = if evidence.is_empty() { "{}".to_string() } else { evidence },
-                );
-            }
-            _ => {
-                println!("{occurred_at} {event_type} {message}");
-            }
-        }
-    }
-}
-
-fn format_seconds(total_seconds: i64) -> String {
-    if total_seconds < 60 {
-        return format!("{total_seconds}s");
-    }
-    if total_seconds < 3600 {
-        let minutes = total_seconds / 60;
-        let seconds = total_seconds % 60;
-        return format!("{minutes}m{seconds}s");
-    }
-    if total_seconds < 86400 {
-        let hours = total_seconds / 3600;
-        let minutes = (total_seconds % 3600) / 60;
-        return format!("{hours}h{minutes}m");
-    }
-    let days = total_seconds / 86400;
-    let hours = (total_seconds % 86400) / 3600;
-    format!("{days}d{hours}h")
-}
-
-fn format_evidence(map: &serde_json::Map<String, Value>) -> String {
-    let mut parts: Vec<String> = map
-        .iter()
-        .map(|(k, v)| format!("{k}:{}", v.as_i64().unwrap_or(0)))
-        .collect();
-    parts.sort();
-    format!("{{{}}}", parts.join(","))
-}
-
-// Mirrors `_load_dotenv_token` in agents/workflows/feature-task/run.py.
-// gh calls here are made directly by this binary (not always spawned through
-// run.py's workflow_env()), so they can't rely on ambient env inheritance
-// alone — the cron/lobster invocation chain has repeatedly dropped GH_TOKEN
-// somewhere between run.py and this process, causing silent 401s.
-fn load_dotenv_token(key: &str) -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
-    let dotenv = Path::new(&home).join(".openclaw").join(".env");
-    let contents = fs::read_to_string(dotenv).ok()?;
-    for line in contents.lines() {
-        if let Some(value) = line.strip_prefix(&format!("{key}=")) {
-            return Some(value.trim().to_string());
-        }
-    }
-    None
-}
-
 pub(crate) fn gh_command() -> Command {
     let mut cmd = Command::new("gh");
     if std::env::var("GH_TOKEN").is_err() && std::env::var("GITHUB_TOKEN").is_err() {
-        if let Some(token) = load_dotenv_token("LOBSTER_GITHUB_TOKEN") {
+        if let Some(token) = crate::analytics_replay::load_dotenv_token("LOBSTER_GITHUB_TOKEN") {
             cmd.env("GH_TOKEN", token);
         }
     }
@@ -960,7 +787,11 @@ pub(crate) fn move_approved_chat_spec_if_needed(
         Ok(text) => text,
         Err(_) => return Ok(env),
     };
-    let plan = plan_chat_spec_lifecycle_move(&spec.path, &spec_text, lobster_state::spec_is_approved(&env.task));
+    let plan = plan_chat_spec_lifecycle_move(
+        &spec.path,
+        &spec_text,
+        lobster_state::spec_is_approved(&env.task),
+    );
     let (from_rel, to_rel, should_move) = match plan {
         ChatApprovalMovePlan::Move { from_rel, to_rel } => (from_rel, to_rel, true),
         ChatApprovalMovePlan::AlreadyMoved { from_rel, to_rel } => (from_rel, to_rel, false),
@@ -1236,30 +1067,6 @@ mod tests {
             .unwrap()
     }
 
-    // Single test covering both cases: load_dotenv_token mutates the
-    // process-global HOME env var, which cargo's multithreaded test runner
-    // would race on if split across separate #[test] fns.
-    #[test]
-    fn load_dotenv_token_reads_matching_key_and_none_when_absent() {
-        let home = tempdir().unwrap();
-        fs::create_dir(home.path().join(".openclaw")).unwrap();
-        fs::write(
-            home.path().join(".openclaw").join(".env"),
-            "OTHER_TOKEN=nope\nLOBSTER_GITHUB_TOKEN=abc123\n",
-        )
-        .unwrap();
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", home.path());
-        let found = load_dotenv_token("LOBSTER_GITHUB_TOKEN");
-        let missing = load_dotenv_token("NOT_A_REAL_KEY");
-        match original_home {
-            Some(value) => std::env::set_var("HOME", value),
-            None => std::env::remove_var("HOME"),
-        }
-        assert_eq!(found, Some("abc123".to_string()));
-        assert_eq!(missing, None);
-    }
-
     fn routing_task(status: &str, owner: &[&str]) -> Task {
         Task {
             id: "task-1".to_string(),
@@ -1273,7 +1080,10 @@ mod tests {
     #[test]
     fn routing_does_not_surface_ash_before_delivery_evidence() {
         let task = routing_task("doing", &["Rowan", "Tom"]);
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), vec!["Rowan", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Rowan", "Tom"]
+        );
     }
 
     #[test]
@@ -1287,7 +1097,10 @@ mod tests {
             ),
             body: None,
         });
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), vec!["Ash", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Ash", "Tom"]
+        );
     }
 
     #[test]
@@ -1306,7 +1119,10 @@ mod tests {
             text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
             body: None,
         });
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), vec!["Rowan", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Rowan", "Tom"]
+        );
     }
 
     #[test]
@@ -1330,7 +1146,10 @@ mod tests {
             ),
             body: None,
         });
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), vec!["Ash", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Ash", "Tom"]
+        );
     }
 
     #[test]
@@ -1353,7 +1172,10 @@ mod tests {
         let once = crate::spec_check_ready::reconciled_attention_owners(&task);
         assert_eq!(once, vec!["Rowan", "Tom"]);
         task.attention_owners = once.clone();
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), once);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            once
+        );
     }
 
     #[test]
@@ -1388,7 +1210,10 @@ mod tests {
         let once = crate::spec_check_ready::reconciled_attention_owners(&task);
         assert_eq!(once, vec!["Quinn", "Ash"]);
         task.attention_owners = once.clone();
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), once);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            once
+        );
     }
 
     /// Tom's accepted gate is only actionable in acceptance. A pending
@@ -1402,7 +1227,10 @@ mod tests {
             state: "approved".to_string(),
             ..TaskApproval::default()
         });
-        assert_eq!(crate::spec_check_ready::reconciled_attention_owners(&task), vec!["Quinn", "Ash"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn", "Ash"]
+        );
     }
 
     #[test]
@@ -1537,7 +1365,10 @@ mod tests {
             task_type: Some("code".to_string()),
             ..Task::default()
         };
-        assert_eq!(lobster_state::workflow_for_task(&task), "code-task-workflow");
+        assert_eq!(
+            lobster_state::workflow_for_task(&task),
+            "code-task-workflow"
+        );
     }
 
     #[test]
@@ -1546,7 +1377,10 @@ mod tests {
             task_type: Some("feature".to_string()),
             ..Task::default()
         };
-        assert_eq!(lobster_state::workflow_for_task(&task), "feature-task-workflow");
+        assert_eq!(
+            lobster_state::workflow_for_task(&task),
+            "feature-task-workflow"
+        );
     }
 
     #[test]
@@ -1555,7 +1389,10 @@ mod tests {
             task_type: None,
             ..Task::default()
         };
-        assert_eq!(lobster_state::workflow_for_task(&task), "feature-task-workflow");
+        assert_eq!(
+            lobster_state::workflow_for_task(&task),
+            "feature-task-workflow"
+        );
     }
 
     #[test]
@@ -1566,7 +1403,10 @@ mod tests {
             task_type: Some("research".to_string()),
             ..Task::default()
         };
-        assert_eq!(lobster_state::workflow_for_task(&task), "feature-task-workflow");
+        assert_eq!(
+            lobster_state::workflow_for_task(&task),
+            "feature-task-workflow"
+        );
     }
 
     // ---- AC evidence parsing (task 6e70deb8) ----
@@ -1810,7 +1650,12 @@ mod tests {
             },
         ];
 
-        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(
+            &tasks,
+            "current-task",
+            "Rowan"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1824,7 +1669,12 @@ mod tests {
             ..Task::default()
         }];
 
-        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(
+            &tasks,
+            "current-task",
+            "Rowan"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1872,7 +1722,12 @@ mod tests {
             },
         ];
 
-        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(
+            &tasks,
+            "current-task",
+            "Rowan"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1895,7 +1750,8 @@ mod tests {
         ];
 
         assert_eq!(
-            lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").len(),
+            lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan")
+                .len(),
             1
         );
     }
@@ -1915,7 +1771,12 @@ mod tests {
             ..Task::default()
         }];
 
-        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(
+            &tasks,
+            "current-task",
+            "Rowan"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1942,7 +1803,12 @@ mod tests {
             },
         ];
 
-        assert!(lobster_state::implementer_doing_capacity_failures(&tasks, "current-task", "Rowan").is_empty());
+        assert!(lobster_state::implementer_doing_capacity_failures(
+            &tasks,
+            "current-task",
+            "Rowan"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -2408,7 +2274,8 @@ feature
         };
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        let failures = lobster_state::missing_spec_checksum_failures(&task, repo.path(), workspace.path());
+        let failures =
+            lobster_state::missing_spec_checksum_failures(&task, repo.path(), workspace.path());
         assert!(
             !failures.is_empty(),
             "expected failures for manually-advanced task without checksum"
@@ -2430,7 +2297,12 @@ feature
         };
         let repo = tempdir().unwrap();
         let workspace = tempdir().unwrap();
-        assert!(lobster_state::missing_spec_checksum_failures(&task, repo.path(), workspace.path()).is_empty());
+        assert!(lobster_state::missing_spec_checksum_failures(
+            &task,
+            repo.path(),
+            workspace.path()
+        )
+        .is_empty());
 
         // A task with a stored checksum is already past "open" legitimately — spec_checksum_failures
         // (not spec_failures) is the gate from here on, so we just confirm no spec drift.
