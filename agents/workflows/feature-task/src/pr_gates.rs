@@ -23,7 +23,7 @@
 //! (`verify_delivery_review_failure`, `post_merge_pr_failure`,
 //! `feedback_review_failure`, `is_latest_pr_url`, `pr_number`) stay in
 //! `main.rs` per the W36 design: pr_gates consumes `pr_body` via
-//! `crate::pr_body`, and the failure constructors carry workflow-state
+//! `crate::cli_utils::pr_body`, and the failure constructors carry workflow-state
 //! orchestration logic that does not belong in a leaf helpers module.
 //!
 //! All items are `pub(crate)` — only `main.rs` consumes this surface.
@@ -100,7 +100,7 @@ pub(crate) fn clippy_evidence_failures(url: &str) -> Vec<String> {
     if !touches_rust_feature_workflow(&files) {
         return Vec::new();
     }
-    match crate::pr_body(url) {
+    match crate::cli_utils::pr_body(url) {
         Ok(body) if body_has_clippy_evidence(&body) => Vec::new(),
         Ok(_) => vec![clippy_evidence_missing_failure()],
         Err(err) => vec![format!(
@@ -118,7 +118,7 @@ pub(crate) fn clippy_evidence_failures(url: &str) -> Vec<String> {
 /// `.is_empty()`; `Err(_)` is reserved for the fail-closed path so a
 /// transient `gh` blip cannot silently bypass a merge gate.
 pub(crate) fn pr_changed_files(url: &str) -> Result<Vec<String>, String> {
-    let output = crate::gh_command()
+    let output = crate::cli_utils::gh_command()
         .args([
             "pr",
             "view",
@@ -250,7 +250,7 @@ pub(crate) fn body_has_checked_acceptance(body: &str) -> bool {
 /// the gate-fail path so a transient `gh` blip cannot silently bypass
 /// the docs-only skip.
 pub(crate) fn pr_labels(url: &str) -> Result<Vec<String>, String> {
-    let output = crate::gh_command()
+    let output = crate::cli_utils::gh_command()
         .args([
             "pr",
             "view",

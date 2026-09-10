@@ -60,9 +60,8 @@ use serde_json::{json, Value};
 
 use crate::task_approvals;
 use crate::{
-    brain_spec_lifecycle,
-    product_spec_parsing, ActiveWorkflowHandoff, Envelope, StageArgs, Task, api_client,
-    bootstrap_task_spec_layout, lobster_state, move_approved_chat_spec_if_needed,
+    api_client, brain_spec_lifecycle, brain_spec_reconcile, lobster_state, product_spec_parsing,
+    ActiveWorkflowHandoff, Envelope, StageArgs, Task,
 };
 
 /// `open -> ready` stage handler for feature tasks.
@@ -80,7 +79,7 @@ use crate::{
 pub(crate) fn spec_check(args: StageArgs) -> Result<Envelope> {
     let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
-    bootstrap_task_spec_layout(product_spec_parsing::workspace_root(&args))?;
+    brain_spec_reconcile::bootstrap_task_spec_layout(product_spec_parsing::workspace_root(&args))?;
     if let Some(drift) =
         brain_spec_lifecycle::block_on_spec_drift_fluid(&args, env.clone(), "spec_check")?
     {
@@ -105,7 +104,7 @@ pub(crate) fn spec_check(args: StageArgs) -> Result<Envelope> {
     // reconciliation. An authoritative structured approval must still move a
     // linked chat spec into in-progress; this helper patches only the Spec path.
     if !args.dry_run {
-        env = move_approved_chat_spec_if_needed(&args, env)?;
+        env = brain_spec_reconcile::move_approved_chat_spec_if_needed(&args, env)?;
     }
     if lobster_state::is_past(&env.task, "open") {
         let failures = lobster_state::missing_spec_checksum_failures(
@@ -132,7 +131,12 @@ pub(crate) fn spec_check(args: StageArgs) -> Result<Envelope> {
                             failures.join("\n")
                         ),
                     )?;
-                    lobster_state::write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
+                    lobster_state::write_state(
+                        &args.base_url,
+                        &env.task.id,
+                        &env.lobster_state,
+                        None,
+                    )?;
                 }
             }
             env.criteria_met = false;
@@ -615,7 +619,9 @@ pub(crate) fn transition_or_block(
                 }
                 return Err(err);
             }
-            if let Err(err) = lobster_state::write_state(&args.base_url, &env.task.id, &env.lobster_state, None) {
+            if let Err(err) =
+                lobster_state::write_state(&args.base_url, &env.task.id, &env.lobster_state, None)
+            {
                 if let Some(message) = api_client::spec_checksum_mismatch_message(&err) {
                     env.action_taken = format!("{action}_blocked_spec_drift");
                     env.failures = vec![message];
