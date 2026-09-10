@@ -15,7 +15,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{ProductSpecRef, StageArgs, Task, Workstream, comment_text, gh_command};
+use super::{ProductSpecRef, StageArgs, Task, Workstream, gh_command};
+use crate::lobster_state::comment_text;
 use crate::{pr_gates, task_approvals};
 
 pub(crate) fn product_spec(task: &Task) -> Option<ProductSpecRef> {

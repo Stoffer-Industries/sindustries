@@ -40,8 +40,8 @@ use crate::{ac_parsing, test_runners};
 use crate::{
     analytics,
     api_client::{add_comment, read_envelope},
-    is_past, pr_body, reconcile_workflow_attention, transition_or_block, write_state, Envelope,
-    StageArgs,
+    lobster_state::{is_past, write_state},
+    pr_body, reconcile_workflow_attention, transition_or_block, Envelope, StageArgs,
 };
 use anyhow::Result;
 
