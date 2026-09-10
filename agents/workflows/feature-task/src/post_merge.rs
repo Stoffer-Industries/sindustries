@@ -29,13 +29,14 @@
 use anyhow::Result;
 
 use crate::{
-    accepted_structured_failures, ac_parsing, add_comment, analytics, api_get_task,
-    api_patch, archive_done_task_spec, block_with_manual_block, cleanup_task_worktree_for_task,
-    format_worktree_cleanup_summary, implementer_pr_urls, inspect_pr, is_past,
-    latest_implementer_pr_urls, manual_block_failures, pr_body, read_envelope,
-    transition_or_block, workflow_handoff, write_state, Envelope, StageArgs, Task,
+    ac_parsing, add_comment, analytics, api_get_task, api_patch, archive_done_task_spec,
+    block_with_manual_block, cleanup_task_worktree_for_task, format_worktree_cleanup_summary,
+    implementer_pr_urls, inspect_pr, is_past, latest_implementer_pr_urls, manual_block_failures,
+    pr_body, read_envelope, transition_or_block, workflow_handoff, write_state,
+    Envelope, StageArgs, Task,
 };
 use crate::pr_gates;
+use crate::task_approvals;
 
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
 /// are treated as superseded (same principle as `verify_delivery`'s
@@ -181,7 +182,7 @@ pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
 
     // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
     // Require Tom's explicit sign-off before closing.
-    let qa_failures = accepted_structured_failures(&env.task);
+    let qa_failures = task_approvals::accepted_structured_failures(&env.task);
     if is_past(&env.task, "acceptance") {
         if !qa_failures.is_empty() {
             if !args.dry_run {
