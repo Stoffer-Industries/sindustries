@@ -31,9 +31,10 @@ use crate::brain_spec_lifecycle::{
     block_on_spec_drift_fluid, block_with_manual_block, manual_block_failures,
 };
 use crate::pr_gates;
+use crate::product_spec_parsing::{implementer_pr_urls, inspect_pr};
 use crate::{
-    add_comment, api_get_task, implementer_pr_urls, inspect_pr, read_envelope,
-    reconcile_workflow_attention, spec_checksum_mismatch_message, Envelope, StageArgs,
+    add_comment, api_get_task, read_envelope, reconcile_workflow_attention,
+    spec_checksum_mismatch_message, Envelope, StageArgs,
 };
 use anyhow::Result;
 

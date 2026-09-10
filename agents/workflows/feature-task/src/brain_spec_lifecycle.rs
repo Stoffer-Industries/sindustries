@@ -34,13 +34,15 @@
 //! remain co-located with the rest of the brain-spec surface.
 
 use crate::analytics;
+use crate::product_spec_parsing::{
+    acceptance_criteria_checksum, acceptance_criteria_text, brain_spec_approved_by_tom,
+    drift_episode_fingerprint, latest_resync_record_matches_drift, product_spec, spec_checksum,
+    spec_checksum_failures, task_is_open, workspace_root,
+};
 use crate::task_approvals;
 use crate::{
-    acceptance_criteria_checksum, acceptance_criteria_text, add_comment, api_delete, api_get_task,
-    api_patch, archive_task_spec_for_done_task, brain_spec_approved_by_tom, comment_text,
-    drift_episode_fingerprint, latest_resync_record_matches_drift, product_spec,
-    rewrite_spec_line_in_description, spec_checksum, spec_checksum_failures,
-    spec_checksum_mismatch_message, task_is_open, workflow_handoff, workspace_root, write_state,
+    add_comment, api_delete, api_get_task, api_patch, archive_task_spec_for_done_task, comment_text,
+    rewrite_spec_line_in_description, spec_checksum_mismatch_message, workflow_handoff, write_state,
     ArchiveDoneTaskSpecsSweepArgs, ArchiveOutcome, Envelope, LobsterState, StageArgs, Task,
     BRAIN_DIR, TASK_SPECS_DONE_DIR, TASK_SPECS_IN_PROGRESS_DIR,
 };
