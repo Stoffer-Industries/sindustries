@@ -41,7 +41,9 @@ use crate::{
     analytics,
     api_client::{add_comment, read_envelope},
     lobster_state::{is_past, write_state},
-    pr_body, reconcile_workflow_attention, transition_or_block, Envelope, StageArgs,
+    pr_body,
+    spec_check_ready::{reconcile_workflow_attention, transition_or_block},
+    Envelope, StageArgs,
 };
 use anyhow::Result;
 
