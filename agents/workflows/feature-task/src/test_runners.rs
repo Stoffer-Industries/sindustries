@@ -87,6 +87,114 @@ fn has_passed_tests(stdout: &str) -> bool {
         .is_some_and(|n| n > 0)
 }
 
+/// How `NpmTestRunner` should invoke `npm test` for a given package.
+/// Picked per-citation from `resolve_npm_invocation` based on whether
+/// the package is listed in the repo root's `workspaces` field.
+#[derive(Debug, PartialEq, Eq)]
+enum NpmInvocation {
+    /// `npm test --workspace <name> …` — registered in root's workspaces
+    /// (apps/*, packages/*, services/*, etc.).
+    Workspace(String),
+    /// `npm test --prefix <dir> …` — packages the repo keeps outside root
+    /// workspaces, e.g. `agents/<x>` agent crates. CI invokes these as
+    /// `npm test --prefix agents/<x>` (see `.github/workflows/ci.yml`
+    /// `ash-tests` / `ash verifier tests` job); `--workspace` on a name
+    /// not registered in the root's `workspaces` always exits with
+    /// `npm error No workspaces found` regardless of whether the tests
+    /// themselves would pass, so the runner must pick `--prefix` for
+    /// these packages (task 0b16dc37 lobster mechanical-evidence gate
+    /// failure: ash-verifier-tests citation resolved to `@sindustries/ash`
+    /// which is not in root workspaces).
+    Prefix(String),
+}
+
+impl NpmInvocation {
+    fn name(&self) -> &str {
+        match self {
+            NpmInvocation::Workspace(name) => name,
+            NpmInvocation::Prefix(dir) => dir,
+        }
+    }
+}
+
+/// Decide how to invoke `npm test` for the first PR file (or supplied
+/// changed-files list) that resolves to a JS/TS package: `--workspace`
+/// for packages in the repo root's `workspaces`, `--prefix` for
+/// everything else (notably `agents/<x>`). Mirrors the per-package
+/// invocation CI uses (`.github/workflows/ci.yml` `ash-tests` runs
+/// `npm test --prefix agents/ash`, while `gymtrack-tests` runs
+/// `npm test --workspace @sindustries/gymtrack`).
+///
+/// Falls back to `resolve_npm_workspace`'s name-only resolution when the
+/// first-changed-file package's directory can't be located under
+/// `repo_root` (defensive — `resolve_npm_workspace` already walked the
+/// same path and produced a name).
+fn resolve_npm_invocation(
+    repo_root: &Path,
+    pr_files: &[String],
+) -> Option<NpmInvocation> {
+    for file in pr_files {
+        let package_dir =
+            crate::test_resolution::nearest_package_json_dir(repo_root, &repo_root.join(file))?;
+        let Ok(contents) = std::fs::read_to_string(package_dir.join("package.json")) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) else {
+            continue;
+        };
+        let Some(name) = parsed.get("name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let dir_rel = package_dir
+            .strip_prefix(repo_root)
+            .ok()?
+            .to_string_lossy()
+            .into_owned();
+        let inv = if package_is_in_root_workspaces(repo_root, &dir_rel) {
+            NpmInvocation::Workspace(name.to_string())
+        } else {
+            NpmInvocation::Prefix(dir_rel)
+        };
+        return Some(inv);
+    }
+    None
+}
+
+/// True when `dir_rel` (a repo-relative directory path like `"apps/foo"`)
+/// is listed under any of the glob prefixes in the repo root's
+/// `package.json` `"workspaces"` array (e.g. `"apps/*"` matches
+/// `"apps/foo"`). Returns `false` if the root `package.json` can't be
+/// read or has no `workspaces` array — `--workspace` will fail at
+/// invocation time anyway, and `NpmTestRunner::run` falls back to
+/// `--prefix` via `resolve_npm_invocation`'s name-only resolution path
+/// so the gate still produces a real test result.
+fn package_is_in_root_workspaces(repo_root: &Path, dir_rel: &str) -> bool {
+    let Ok(contents) = std::fs::read_to_string(repo_root.join("package.json")) else {
+        return false;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return false;
+    };
+    let Some(workspaces) = parsed.get("workspaces").and_then(|v| v.as_array()) else {
+        return false;
+    };
+    for ws in workspaces {
+        let Some(ws_str) = ws.as_str() else { continue };
+        // npm workspaces globs are `<prefix>/*`; strip the `/*` and require
+        // a literal `/` after so `apps` doesn't accidentally match
+        // `appsx/foo` (and so the empty-prefix case from a stray `*`
+        // entry doesn't match every directory).
+        let Some(prefix) = ws_str.strip_suffix("/*") else { continue };
+        if prefix.is_empty() {
+            continue;
+        }
+        if dir_rel.starts_with(prefix) && dir_rel[prefix.len()..].starts_with('/') {
+            return true;
+        }
+    }
+    false
+}
+
 impl ac_parsing::TestRunner for NpmTestRunner {
     fn run(&self, test_name: &str) -> Result<ac_parsing::TestOutcome, String> {
         let repo_root = repo_root_dir();
@@ -103,12 +211,22 @@ impl ac_parsing::TestRunner for NpmTestRunner {
             // `self.workspace` for citations with no resolvable file
             // (bare slugs) or when the citation's file isn't itself in a
             // known workspace.
-            let workspace = resolved
+            //
+            // Prefer `resolve_npm_invocation` so `agents/<x>` packages
+            // get `--prefix <dir>` (they aren't in root workspaces); fall
+            // back to the name-only `self.workspace` when no citation
+            // file resolves to a package (bare slugs, malformed
+            // citations) so the runner still has something to invoke.
+            let invocation = resolved
                 .file
                 .as_ref()
-                .and_then(|file| resolve_npm_workspace(&repo_root, std::slice::from_ref(file)))
-                .or_else(|| self.workspace.clone());
-            let Some(workspace) = workspace else {
+                .and_then(|file| resolve_npm_invocation(&repo_root, std::slice::from_ref(file)))
+                .or_else(|| {
+                    self.workspace
+                        .as_ref()
+                        .map(|name| NpmInvocation::Workspace(name.clone()))
+                });
+            let Some(invocation) = invocation else {
                 stderr.push_str(
                     "no npm workspace package could be resolved for this citation; cannot run \
                      a JS/TS test citation\n",
@@ -120,7 +238,7 @@ impl ac_parsing::TestRunner for NpmTestRunner {
                 });
             };
             let filter = &resolved.filter;
-            let outcome = run_npm_filter(&workspace, &repo_root, filter)?;
+            let outcome = run_npm_filter(&invocation, &repo_root, filter)?;
             stdout.push_str(&outcome.stdout);
             stdout.push('\n');
             if outcome.exit_code == 0 {
@@ -143,7 +261,7 @@ impl ac_parsing::TestRunner for NpmTestRunner {
                 let mut all_sub_passed = !sub_filters.is_empty();
                 let mut sub_stderr = String::new();
                 for sub in &sub_filters {
-                    let sub_outcome = run_npm_filter(&workspace, &repo_root, sub)?;
+                    let sub_outcome = run_npm_filter(&invocation, &repo_root, sub)?;
                     stdout.push_str(&sub_outcome.stdout);
                     stdout.push('\n');
                     if sub_outcome.exit_code != 0 {
@@ -177,20 +295,34 @@ impl ac_parsing::TestRunner for NpmTestRunner {
     }
 }
 
-/// Run a single resolved vitest name filter against `workspace` and report
-/// pass/fail, guarding the same silent-pass trap `has_passed_tests` exists
-/// for (a non-matching `-t` filter exits 0 with everything "skipped").
+/// Run a single resolved vitest name filter against `invocation` and
+/// report pass/fail, guarding the same silent-pass trap `has_passed_tests`
+/// exists for (a non-matching `-t` filter exits 0 with everything
+/// "skipped"). The invocation is either `--workspace <name>` (for
+/// registered npm workspaces) or `--prefix <dir>` (for agent packages
+/// the repo keeps outside root workspaces, e.g. `agents/<x>`).
 fn run_npm_filter(
-    workspace: &str,
+    invocation: &NpmInvocation,
     repo_root: &Path,
     filter: &str,
 ) -> Result<ac_parsing::TestOutcome, String> {
     let pattern = regex_escape_literal(filter);
-    let output = std::process::Command::new("npm")
-        .args(["test", "--workspace", workspace, "--", "-t", &pattern])
-        .current_dir(repo_root)
+    let mut command = std::process::Command::new("npm");
+    command.arg("test");
+    match invocation {
+        NpmInvocation::Workspace(name) => {
+            command.args(["--workspace", name]);
+        }
+        NpmInvocation::Prefix(dir) => {
+            command.args(["--prefix", dir]);
+        }
+    }
+    command.args(["--", "-t", &pattern]);
+    command.current_dir(repo_root);
+    let inv_label = invocation.name();
+    let output = command
         .output()
-        .map_err(|err| format!("spawn npm test --workspace {workspace}: {err}"))?;
+        .map_err(|err| format!("spawn npm test for {inv_label}: {err}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if output.status.success() && has_passed_tests(&stdout) {
@@ -205,7 +337,7 @@ fn run_npm_filter(
             exit_code: 1,
             stdout,
             stderr: format!(
-                "no test named \"{filter}\" matched in npm workspace \"{workspace}\" \
+                "no test named \"{filter}\" matched for npm invocation \"{inv_label}\" \
                  (vitest ran 0 matching tests)"
             ),
         });
@@ -909,6 +1041,95 @@ mod tests {
 
         let pr_files = vec!["docs/specs/some-doc.md".to_string()];
         assert_eq!(resolve_npm_workspace(root.path(), &pr_files), None);
+    }
+
+    /// Helpers used by the new `package_is_in_root_workspaces` and
+    /// `resolve_npm_invocation` tests: write a minimal repo-root
+    /// `package.json` with the canonical workspaces list
+    /// (`apps/* packages/* services/*`), then drop a single JS/TS
+    /// package with its own `package.json` under one of those prefixes
+    /// (the `apps/foo` happy path) or under `agents/<x>` (the
+    /// intentionally-out-of-workspaces case the lobster used to
+    /// mechanically fail on — task 0b16dc37 ash-verifier-tests
+    /// citation).
+    fn write_root_workspaces(root: &Path) {
+        fs::write(
+            root.join("package.json"),
+            r#"{"name": "sindustries", "workspaces": ["apps/*", "packages/*", "services/*"]}"#,
+        )
+        .unwrap();
+    }
+
+    fn write_subpackage(root: &Path, dir_rel: &str, name: &str) {
+        let dir = root.join(dir_rel);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            format!("{{\"name\": \"{name}\"}}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn package_is_in_root_workspaces_matches_a_registered_apps_prefix() {
+        let root = tempdir().unwrap();
+        write_root_workspaces(root.path());
+        assert!(package_is_in_root_workspaces(root.path(), "apps/foo"));
+        assert!(package_is_in_root_workspaces(root.path(), "packages/foo"));
+        assert!(package_is_in_root_workspaces(root.path(), "services/tasks-api"));
+    }
+
+    #[test]
+    fn package_is_in_root_workspaces_rejects_agents_which_intentionally_lives_outside_workspaces() {
+        let root = tempdir().unwrap();
+        write_root_workspaces(root.path());
+        // agents/* is deliberately not a registered workspace — CI
+        // invokes `npm test --prefix agents/<x>` for those packages
+        // (see `.github/workflows/ci.yml` `ash-tests`). The lobster
+        // must mirror that, not `--workspace @sindustries/ash`.
+        assert!(!package_is_in_root_workspaces(root.path(), "agents/ash"));
+        // Partial-prefix overlap (`appsx/...`) must not match `apps`.
+        assert!(!package_is_in_root_workspaces(root.path(), "appsx/foo"));
+        // A package at the repo root is not under any workspace.
+        assert!(!package_is_in_root_workspaces(root.path(), "."));
+    }
+
+    #[test]
+    fn resolve_npm_invocation_picks_workspace_for_apps_and_prefix_for_agents() {
+        let root = tempdir().unwrap();
+        write_root_workspaces(root.path());
+        write_subpackage(root.path(), "apps/mission-control", "@sindustries/mission-control");
+        write_subpackage(root.path(), "agents/ash", "@sindustries/ash");
+
+        let apps_invocation = resolve_npm_invocation(
+            root.path(),
+            &["apps/mission-control/src/Sidebar.test.jsx".to_string()],
+        );
+        assert_eq!(
+            apps_invocation,
+            Some(NpmInvocation::Workspace("@sindustries/mission-control".to_string()))
+        );
+
+        let agents_invocation = resolve_npm_invocation(
+            root.path(),
+            &["agents/ash/test/judgment-pattern.test.ts".to_string()],
+        );
+        assert_eq!(
+            agents_invocation,
+            Some(NpmInvocation::Prefix("agents/ash".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_npm_invocation_returns_none_when_no_file_resolves_to_a_package() {
+        let root = tempdir().unwrap();
+        write_root_workspaces(root.path());
+
+        let docs_invocation = resolve_npm_invocation(
+            root.path(),
+            &["docs/specs/some-doc.md".to_string()],
+        );
+        assert_eq!(docs_invocation, None);
     }
 
     // ---- citation resolution (task 5baf6809-adjacent: PR #610 fixed the
