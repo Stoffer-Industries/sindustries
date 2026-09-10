@@ -14,6 +14,7 @@ use std::{
 
 mod ac_parsing;
 mod analytics;
+mod feedback_aggregate;
 mod pr_gates;
 mod test_resolution;
 mod test_runners;
@@ -289,7 +290,7 @@ fn main() -> Result<()> {
         Commands::SpecCheck(args) => spec_check(args)?,
         Commands::ReadyChecks(args) => ready_checks(args)?,
         Commands::VerifyDelivery(args) => crate::verify_delivery::verify_delivery(args)?,
-        Commands::FeedbackAggregate(args) => feedback_aggregate(args)?,
+        Commands::FeedbackAggregate(args) => feedback_aggregate::feedback_aggregate(args)?,
         Commands::PostMerge(args) => post_merge(args)?,
         Commands::CodeTaskTechDesignCheck(args) => code_task_tech_design_check(args)?,
         Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
@@ -781,63 +782,10 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
     )
 }
 
-fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
-    reconcile_workflow_attention(&args, &mut env)?;
-    if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "feedback_aggregate")? {
-        if !drift.criteria_met {
-            return Ok(drift);
-        }
-        env = drift;
-    }
-    let manual_failures = manual_block_failures(&env.task);
-    if !manual_failures.is_empty() {
-        return block_with_manual_block(
-            &args,
-            env,
-            "feedback_aggregate",
-            manual_failures,
-            "[feature-task-blocked]",
-        );
-    }
-    let mut failures = Vec::new();
-    for url in implementer_pr_urls(&env.task) {
-        match inspect_pr(&url) {
-            Ok(review) => {
-                if let Some(failure) = feedback_review_failure(&url, review) {
-                    failures.push(failure);
-                }
-            }
-            Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
-        }
-    }
-    if failures.is_empty() {
-        env.criteria_met = true;
-        env.action_taken = "feedback_clear".to_string();
-        return Ok(env);
-    }
-    if !args.dry_run {
-        if let Err(err) = add_comment(
-            &args.base_url,
-            &env.task.id,
-            &format!("[implementer-feedback]\n{}", failures.join("\n")),
-        ) {
-            if let Some(message) = spec_checksum_mismatch_message(&err) {
-                env.criteria_met = false;
-                env.action_taken = "feedback_aggregate_blocked_spec_drift".to_string();
-                env.failures = vec![message];
-                return Ok(env);
-            }
-            return Err(err);
-        }
-        env.task = api_get_task(&args.base_url, &env.task.id)?;
-    }
-    env.criteria_met = false;
-    env.action_taken = "feedback_routed".to_string();
-    env.failures = failures;
-    Ok(env)
-}
-
+/// `acceptance → done` stage handler — moved to `feedback_aggregate.rs`
+/// in PR-B (W37 A3 main.rs carve). Imported here as
+/// `crate::feedback_aggregate::feedback_aggregate`.
+///
 /// Merge gate for `acceptance → done`. Merged PRs pass. Closed-without-merge
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
 /// are treated as superseded (same principle as `verify_delivery`'s
@@ -856,14 +804,10 @@ fn post_merge_pr_failure(
     }
 }
 
-fn feedback_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
-    match review {
-        pr_gates::ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
-        pr_gates::ReviewState::CommentsPresent => Some(format!("Open review comments remain on {url}.")),
-        _ => None,
-    }
-}
-
+/// `feedback_aggregate` review-failure helper — moved to
+/// `feedback_aggregate.rs` in PR-B. Imported here as
+/// `crate::feedback_aggregate::feedback_review_failure`.
+///
 /// Return true only when the matching structured approval row is approved.
 /// Missing, revoked, and unknown states fail closed.
 fn task_approval_granted(task: &Task, approval_type: &str) -> bool {
@@ -5276,15 +5220,8 @@ feature
         );
     }
 
-    #[test]
-    fn feedback_aggregate_waits_on_required_review_without_failure() {
-        let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
-        assert!(feedback_review_failure(url, pr_gates::ReviewState::Required).is_none());
-        assert_eq!(
-            feedback_review_failure(url, pr_gates::ReviewState::ChangesRequested),
-            Some(format!("Changes requested on {url}."))
-        );
-    }
+    // ---- feedback_aggregate review-failure helper moved to
+    //      feedback_aggregate.rs in PR-B (W37 A3 main.rs carve) ----
 
     // ---- manual block guard (task 593ee264) ----
 
