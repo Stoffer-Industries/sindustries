@@ -40,8 +40,8 @@ use crate::{ac_parsing, test_runners};
 use crate::{
     analytics,
     api_client::{add_comment, read_envelope},
+    cli_utils,
     lobster_state::{is_past, write_state},
-    pr_body,
     spec_check_ready::{reconcile_workflow_attention, transition_or_block},
     Envelope, StageArgs,
 };
@@ -190,7 +190,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             }
         };
         if !docs_only {
-            if let Ok(body) = pr_body(url) {
+            if let Ok(body) = cli_utils::pr_body(url) {
                 if !pr_gates::body_has_checked_acceptance(&body) {
                     failures.push(format!(
                         "PR {url} does not show checked acceptance criteria in its body."
@@ -216,7 +216,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             }
         };
         if !docs_only {
-            match pr_body(url) {
+            match cli_utils::pr_body(url) {
                 Ok(body) => {
                     for ac_failure in
                         ac_parsing::task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url)
@@ -280,7 +280,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         let pr_files = pr_files_result.unwrap_or_default();
         let npm_workspace =
             test_runners::resolve_npm_workspace(&test_runners::repo_root_dir(), &pr_files);
-        let body = pr_body(url).unwrap_or_default();
+        let body = cli_utils::pr_body(url).unwrap_or_default();
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
         // same underlying bug: `PnpmTestRunner` was the only runner and

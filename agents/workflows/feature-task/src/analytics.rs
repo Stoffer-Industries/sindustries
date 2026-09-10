@@ -287,7 +287,7 @@ fn fetch_pr_cycle_time_seconds(prs: &[String]) -> Option<u64> {
     let mut earliest_created: Option<i64> = None;
     let mut latest_merged: Option<i64> = None;
     for pr in prs {
-        let output = crate::gh_command()
+        let output = crate::cli_utils::gh_command()
             .args([
                 "pr",
                 "view",
@@ -403,7 +403,7 @@ pub fn emit_terminal_summary_event(args: &StageArgs, task: &Task, terminal_statu
 /// be JSON-encoded by gh 2.87.3 when the body contains non-ASCII — we
 /// decode here too.
 fn gh_pr_body(url: &str) -> Result<String> {
-    let output = crate::gh_command()
+    let output = crate::cli_utils::gh_command()
         .args(["pr", "view", url, "--json", "body", "--jq", ".body"])
         .output()
         .context("run gh pr view --json body")?;

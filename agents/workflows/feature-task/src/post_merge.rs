@@ -36,11 +36,11 @@ use crate::task_approvals;
 use crate::{
     ac_parsing, analytics,
     api_client::{add_comment, api_get_task, api_patch, read_envelope},
+    cli_utils,
     git_worktree::{
         cleanup_task_worktree_for_task, format_worktree_cleanup_summary, WorktreeCleanupOutcome,
     },
     lobster_state::{is_past, write_state},
-    pr_body,
     spec_check_ready::{transition_or_block, workflow_handoff},
     Envelope, StageArgs, Task,
 };
@@ -153,7 +153,7 @@ pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
     if !unchecked_acs.is_empty() {
         let pr_bodies: Vec<String> = implementer_pr_urls(&env.task)
             .iter()
-            .filter_map(|url| pr_body(url).ok())
+            .filter_map(|url| cli_utils::pr_body(url).ok())
             .collect();
         let needs_pr = ac_parsing::ac_labels_needing_new_pr(&unchecked_acs, &pr_bodies);
         if !needs_pr.is_empty() {
