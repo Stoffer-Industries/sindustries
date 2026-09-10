@@ -4,19 +4,19 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    fmt, fs,
-    io::{self, Read},
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
 
 mod ac_parsing;
 mod analytics;
+mod api_client;
 mod brain_spec_lifecycle;
 mod feedback_aggregate;
 mod post_merge;
-mod product_spec_parsing;
 mod pr_gates;
+mod product_spec_parsing;
 mod task_approvals;
 mod test_resolution;
 mod test_runners;
@@ -267,23 +267,8 @@ struct Workstream {
     body: String,
 }
 
-#[derive(Debug)]
-pub(crate) struct ApiStatusError {
-    status: u16,
-    code: Option<String>,
-    message: String,
-}
-
-impl fmt::Display for ApiStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.code {
-            Some(code) => write!(f, "API returned {} {code}: {}", self.status, self.message),
-            None => write!(f, "API returned {}: {}", self.status, self.message),
-        }
-    }
-}
-
-impl std::error::Error for ApiStatusError {}
+// `ApiStatusError` + `Display` + `Error` moved to `api_client.rs` in
+// PR-G (W37 A3 main.rs carve).
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -331,7 +316,7 @@ fn analytics_replay(args: AnalyticsArgs) -> Result<Envelope> {
     }
 
     let url = format!("{base_url}/feature-task-analytics/tasks/{task_id}/events");
-    let body: Value = handle_api_result(ureq::get(&url).call())?;
+    let body: Value = api_client::handle_api_result(ureq::get(&url).call())?;
     let events = body
         .get("data")
         .and_then(Value::as_array)
@@ -505,13 +490,20 @@ fn pr_body(url: &str) -> Result<String> {
 }
 
 fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
-    let task: Task = api_get(base_url, &format!("/tasks/{task_id}"))?;
+    let task: Task = api_client::api_get(base_url, &format!("/tasks/{task_id}"))?;
     let state = parse_lobster_state(&task);
-    Ok(output(true, false, "loaded_task", task, state, vec![]))
+    Ok(api_client::output(
+        true,
+        false,
+        "loaded_task",
+        task,
+        state,
+        vec![],
+    ))
 }
 
 fn spec_check(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
+    let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
     bootstrap_task_spec_layout(product_spec_parsing::workspace_root(&args))?;
     if let Some(drift) =
@@ -541,19 +533,23 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env = move_approved_chat_spec_if_needed(&args, env)?;
     }
     if is_past(&env.task, "open") {
-        let failures = missing_spec_checksum_failures(&env.task, &args.repo, product_spec_parsing::workspace_root(&args));
+        let failures = missing_spec_checksum_failures(
+            &env.task,
+            &args.repo,
+            product_spec_parsing::workspace_root(&args),
+        );
         if !failures.is_empty() {
             if !args.dry_run {
-                api_patch::<Task>(
+                api_client::api_patch::<Task>(
                     &args.base_url,
                     &env.task.id,
                     json!({"status": "open", "workflowHandoff": workflow_handoff("product_spec_approver", "spec", "Product spec approval is required")}),
                 )?;
-                env.task = api_get_task(&args.base_url, &env.task.id)?;
+                env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
                 let fingerprint = failures.join("\n");
                 if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
                     env.lobster_state.failure_fingerprint = Some(fingerprint);
-                    add_comment(
+                    api_client::add_comment(
                         &args.base_url,
                         &env.task.id,
                         &format!(
@@ -574,7 +570,11 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
         env.action_taken = "already_past_open".to_string();
         return Ok(env);
     }
-    let failures = spec_failures(&env.task, &args.repo, product_spec_parsing::workspace_root(&args));
+    let failures = spec_failures(
+        &env.task,
+        &args.repo,
+        product_spec_parsing::workspace_root(&args),
+    );
     // The legacy task-description approval mirror (mirror_task_approval_to_brain_spec_if_needed)
     // is removed as part of e2aba106 WS2: approval state is now exclusively structured TaskApproval
     // rows, and the brain spec file marker is owned by the brain-spec workflow, not the task
@@ -597,7 +597,7 @@ fn spec_check(args: StageArgs) -> Result<Envelope> {
 }
 
 fn ready_checks(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
+    let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
     if let Some(drift) =
         brain_spec_lifecycle::block_on_spec_drift_fluid(&args, env.clone(), "ready_checks")?
@@ -690,7 +690,7 @@ fn ready_checks(args: StageArgs) -> Result<Envelope> {
 // handoff contract once they reach implementation.
 
 fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
+    let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
     env.lobster_state.workflow = workflow_for_task(&env.task);
     let manual_failures = brain_spec_lifecycle::manual_block_failures(&env.task);
@@ -742,7 +742,7 @@ fn code_task_tech_design_check(args: StageArgs) -> Result<Envelope> {
 }
 
 fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
+    let mut env = api_client::read_envelope()?;
     reconcile_workflow_attention(&args, &mut env)?;
     env.lobster_state.workflow = workflow_for_task(&env.task);
     let manual_failures = brain_spec_lifecycle::manual_block_failures(&env.task);
@@ -1002,7 +1002,10 @@ pub(crate) fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult])
 
 fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
     match task.status.as_str() {
-        "ready" if !product_spec_parsing::tech_design_approved_structured(task) && !product_spec_parsing::tech_design_waived(task) => {
+        "ready"
+            if !product_spec_parsing::tech_design_approved_structured(task)
+                && !product_spec_parsing::tech_design_waived(task) =>
+        {
             Some("Quinn")
         }
         "doing"
@@ -1038,7 +1041,10 @@ fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         // sweep drain a multi-entry array across multiple stage calls.
         // `workflow_attention_owner` already handles replacement of a stale
         // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
-        "Quinn" => product_spec_parsing::tech_design_approved_structured(task) || product_spec_parsing::tech_design_waived(task),
+        "Quinn" => {
+            product_spec_parsing::tech_design_approved_structured(task)
+                || product_spec_parsing::tech_design_waived(task)
+        }
         "Ash" => task_approvals::qa_agent_verified(task),
         // Tom owns the accepted gate only once the task reaches acceptance.
         // While still doing, a pending accepted approval must not leave Tom
@@ -1088,12 +1094,12 @@ fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<
         env.task.attention_owners = desired;
         return Ok(());
     }
-    api_patch::<Task>(
+    api_client::api_patch::<Task>(
         &args.base_url,
         &env.task.id,
         json!({"attentionOwners": desired}),
     )?;
-    env.task = api_get_task(&args.base_url, &env.task.id)?;
+    env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
     Ok(())
 }
 
@@ -1131,10 +1137,11 @@ fn transition_or_block(
         if !args.dry_run {
             let mut patch = json!({"status": next_status, "workflowHandoff": Value::Null});
             if next_status == "ready" {
-                patch["specChecksum"] = Value::String(product_spec_parsing::spec_checksum(&env.task));
+                patch["specChecksum"] =
+                    Value::String(product_spec_parsing::spec_checksum(&env.task));
             }
-            if let Err(err) = api_patch::<Task>(&args.base_url, &env.task.id, patch) {
-                if let Some(message) = spec_checksum_mismatch_message(&err) {
+            if let Err(err) = api_client::api_patch::<Task>(&args.base_url, &env.task.id, patch) {
+                if let Some(message) = api_client::spec_checksum_mismatch_message(&err) {
                     env.criteria_met = false;
                     env.action_taken = format!("{action}_blocked_spec_drift");
                     env.failures = vec![message];
@@ -1142,7 +1149,7 @@ fn transition_or_block(
                 }
                 return Err(err);
             }
-            env.task = api_get_task(&args.base_url, &env.task.id)?;
+            env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
             reconcile_workflow_attention(args, &mut env)?;
             if let Err(err) = write_state(
                 &args.base_url,
@@ -1150,7 +1157,7 @@ fn transition_or_block(
                 &env.lobster_state,
                 Some(move_message),
             ) {
-                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                if let Some(message) = api_client::spec_checksum_mismatch_message(&err) {
                     env.criteria_met = false;
                     env.action_taken = format!("{action}_blocked_spec_drift");
                     env.failures = vec![message];
@@ -1163,21 +1170,21 @@ fn transition_or_block(
         env.action_taken = format!("{action}_blocked");
         let fingerprint = failures.join("\n");
         if !args.dry_run {
-            api_patch::<Task>(
+            api_client::api_patch::<Task>(
                 &args.base_url,
                 &env.task.id,
                 json!({"workflowHandoff": handoff_on_block}),
             )?;
-            env.task = api_get_task(&args.base_url, &env.task.id)?;
+            env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
         }
         if !args.dry_run && env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
             env.lobster_state.failure_fingerprint = Some(fingerprint);
-            if let Err(err) = add_comment(
+            if let Err(err) = api_client::add_comment(
                 &args.base_url,
                 &env.task.id,
                 &format!("{comment_tag}\n{}", failures.join("\n")),
             ) {
-                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                if let Some(message) = api_client::spec_checksum_mismatch_message(&err) {
                     env.action_taken = format!("{action}_blocked_spec_drift");
                     env.failures = vec![message];
                     return Ok(env);
@@ -1185,7 +1192,7 @@ fn transition_or_block(
                 return Err(err);
             }
             if let Err(err) = write_state(&args.base_url, &env.task.id, &env.lobster_state, None) {
-                if let Some(message) = spec_checksum_mismatch_message(&err) {
+                if let Some(message) = api_client::spec_checksum_mismatch_message(&err) {
                     env.action_taken = format!("{action}_blocked_spec_drift");
                     env.failures = vec![message];
                     return Ok(env);
@@ -1257,7 +1264,8 @@ fn reconciliation_spec_link(task: &Task) -> Option<String> {
     if captures.next().is_some() {
         return None;
     }
-    product_spec_parsing::extract_spec_path_from_line(first.get(1)?.as_str()).map(|spec| normalize_rel_path(&spec.path))
+    product_spec_parsing::extract_spec_path_from_line(first.get(1)?.as_str())
+        .map(|spec| normalize_rel_path(&spec.path))
 }
 
 fn plan_brain_spec_approval(
@@ -1304,7 +1312,7 @@ fn plan_brain_spec_approval(
 }
 
 fn feature_policy_requires_spec(base_url: &str) -> Result<bool> {
-    let value: Value = api_get(base_url, "/task-types/feature/required-approvals")?;
+    let value: Value = api_client::api_get(base_url, "/task-types/feature/required-approvals")?;
     let required = value
         .get("requiredApprovals")
         .and_then(Value::as_array)
@@ -1335,7 +1343,7 @@ fn grant_reconciled_spec_approval(base_url: &str, task_id: &str, spec_path: &str
         base_url.trim_end_matches('/')
     );
     let note = format!("{BRAIN_SPEC_APPROVAL_NOTE_PREFIX} `{spec_path}`.");
-    handle_api_result(
+    api_client::handle_api_result(
         ureq::post(&url)
             .set("Authorization", &format!("Bearer {token}"))
             .send_json(json!({"type": "spec", "note": note})),
@@ -1353,7 +1361,7 @@ fn grant_reconciled_spec_approval(base_url: &str, task_id: &str, spec_path: &str
 /// links, and ambiguous links are diagnostics and never trigger a write.
 fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Result<Envelope> {
     if !feature_policy_requires_spec(&args.base_url)? {
-        return Ok(output(
+        return Ok(api_client::output(
             true,
             false,
             "brain_spec_approval_reconciliation_skipped: feature_policy_has_no_spec_gate",
@@ -1443,7 +1451,7 @@ fn reconcile_brain_spec_approvals(args: ReconcileBrainSpecApprovalsArgs) -> Resu
         }
     }
 
-    Ok(output(
+    Ok(api_client::output(
         failures.is_empty(),
         false,
         &format!(
@@ -1607,7 +1615,8 @@ pub(crate) fn plan_chat_spec_lifecycle_move(
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
         if suffix.is_empty()
             || suffix.contains('/')
-            || (!structured_approved && !product_spec_parsing::brain_spec_approved_by_tom(spec_text))
+            || (!structured_approved
+                && !product_spec_parsing::brain_spec_approved_by_tom(spec_text))
         {
             return ChatApprovalMovePlan::Noop;
         }
@@ -1639,23 +1648,30 @@ pub(crate) fn move_approved_chat_spec_if_needed(
     let open_prefix = format!("{TASK_SPECS_OPEN_DIR}/");
     if let Some(suffix) = normalized.strip_prefix(&open_prefix) {
         let to_rel = format!("{TASK_SPECS_IN_PROGRESS_DIR}/{suffix}");
-        if product_spec_parsing::workspace_root(args).join(&to_rel).exists() {
+        if product_spec_parsing::workspace_root(args)
+            .join(&to_rel)
+            .exists()
+        {
             let description = env.task.description.clone().unwrap_or_default();
             if let Some(new_desc) =
                 rewrite_spec_line_in_description(&description, &normalized, &to_rel)
             {
-                api_patch::<Task>(
+                api_client::api_patch::<Task>(
                     &args.base_url,
                     &env.task.id,
                     json!({"description": new_desc}),
                 )?;
-                env.task = api_get_task(&args.base_url, &env.task.id)?;
+                env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
                 env.action_taken = "repaired_chat_spec_in_progress_path".to_string();
             }
             return Ok(env);
         }
     }
-    let spec_abs = product_spec_parsing::resolve_product_spec_path(&spec.path, &args.repo, product_spec_parsing::workspace_root(args));
+    let spec_abs = product_spec_parsing::resolve_product_spec_path(
+        &spec.path,
+        &args.repo,
+        product_spec_parsing::workspace_root(args),
+    );
     let spec_text = match fs::read_to_string(&spec_abs) {
         Ok(text) => text,
         Err(_) => return Ok(env),
@@ -1684,12 +1700,12 @@ pub(crate) fn move_approved_chat_spec_if_needed(
     }
     let description = env.task.description.clone().unwrap_or_default();
     if let Some(new_desc) = rewrite_spec_line_in_description(&description, &from_rel, &to_rel) {
-        api_patch::<Task>(
+        api_client::api_patch::<Task>(
             &args.base_url,
             &env.task.id,
             json!({"description": new_desc}),
         )?;
-        env.task = api_get_task(&args.base_url, &env.task.id)?;
+        env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
         env.action_taken = "moved_approved_chat_spec_to_in_progress".to_string();
     }
     Ok(env)
@@ -1778,7 +1794,8 @@ pub(crate) fn rewrite_spec_line_in_description(
         let prefix = &caps[1];
         let existing = caps[2].trim();
         // Strip a trailing inline annotation so we can compare the bare path.
-        let existing_path = product_spec_parsing::strip_trailing_annotation(existing).unwrap_or(existing);
+        let existing_path =
+            product_spec_parsing::strip_trailing_annotation(existing).unwrap_or(existing);
         let existing_path = existing_path
             .trim_end_matches([',', '.', ';'])
             .trim()
@@ -1904,156 +1921,11 @@ pub(crate) fn archive_task_spec_for_done_task(
 
     ArchiveOutcome::Moved { from_rel, to_rel }
 }
-fn output(
-    criteria_met: bool,
-    already_past: bool,
-    action_taken: &str,
-    task: Task,
-    lobster_state: LobsterState,
-    failures: Vec<String>,
-) -> Envelope {
-    Envelope {
-        criteria_met,
-        already_past,
-        action_taken: action_taken.to_string(),
-        task,
-        lobster_state,
-        failures,
-    }
-}
-
-fn read_envelope() -> Result<Envelope> {
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
-    serde_json::from_str(input.trim()).context("expected JSON envelope on stdin")
-}
-
-fn api_get<T: for<'de> Deserialize<'de>>(base_url: &str, path: &str) -> Result<T> {
-    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
-    let value: Value = ureq::get(&url).call()?.into_json()?;
-    serde_json::from_value(value.get("data").cloned().unwrap_or(value))
-        .context("decode API response")
-}
-
-pub(crate) fn api_get_task(base_url: &str, task_id: &str) -> Result<Task> {
-    api_get(base_url, &format!("/tasks/{task_id}"))
-}
-
-fn authenticated_api_patch_request(url: &str) -> ureq::Request {
-    let mut request = ureq::patch(url);
-    if let Ok(token) = std::env::var("TASKS_API_APPROVAL_TOKEN") {
-        let token = token.trim();
-        if !token.is_empty() {
-            request = request.set("Authorization", &format!("Bearer {token}"));
-        }
-    }
-    request
-}
-
-pub(crate) fn api_patch<T: for<'de> Deserialize<'de>>(
-    base_url: &str,
-    task_id: &str,
-    payload: Value,
-) -> Result<T> {
-    let url = format!("{}/tasks/{task_id}", base_url.trim_end_matches('/'));
-    let value: Value = handle_api_result(authenticated_api_patch_request(&url).send_json(payload))?;
-    serde_json::from_value(value.get("data").cloned().unwrap_or(value))
-        .context("decode API patch response")
-}
-
-/// DELETE wrapper used to revoke a structured TaskApproval row
-/// (e.g. `DELETE /tasks/:id/approvals/spec` when spec drift is detected).
-pub(crate) fn api_delete(base_url: &str, path: &str) -> Result<Value> {
-    let token = std::env::var("TASKS_API_APPROVAL_TOKEN")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            anyhow!("TASKS_API_APPROVAL_TOKEN is required to revoke structured approvals")
-        })?;
-    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
-    handle_api_result(
-        ureq::delete(&url)
-            .set("Authorization", &format!("Bearer {token}"))
-            .call(),
-    )
-}
-
-/// Token used for the lobster's own service-identity calls (comments, the
-/// `qa_agent` bootstrap gate): prefers the per-agent `FEATURE_TASK_LOBSTER_TOKEN`
-/// (actor `feature_task_lobster`), falling back to the shared
-/// `TASKS_API_APPROVAL_TOKEN` (actor `Rowan`) when the per-agent token isn't
-/// provisioned yet.
-fn lobster_service_token() -> Option<String> {
-    std::env::var("FEATURE_TASK_LOBSTER_TOKEN")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            std::env::var("TASKS_API_APPROVAL_TOKEN")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-}
-
-pub(crate) fn add_comment(base_url: &str, task_id: &str, text: &str) -> Result<()> {
-    let url = format!(
-        "{}/tasks/{task_id}/comments",
-        base_url.trim_end_matches('/')
-    );
-    // The comment author is now derived from the authenticated session
-    // (task 0719a8e3). Body-supplied author is rejected with 403 if it
-    // disagrees with the authenticated actor, so we never set it here.
-    let token = lobster_service_token().ok_or_else(|| {
-        anyhow!(
-            "FEATURE_TASK_LOBSTER_TOKEN (or TASKS_API_APPROVAL_TOKEN) is required to post comments"
-        )
-    })?;
-    handle_api_result(
-        ureq::post(&url)
-            .set("Authorization", &format!("Bearer {token}"))
-            .send_json(json!({"text": text})),
-    )?;
-    Ok(())
-}
-
-fn handle_api_result(response: std::result::Result<ureq::Response, ureq::Error>) -> Result<Value> {
-    match response {
-        Ok(response) => Ok(response.into_json()?),
-        Err(ureq::Error::Status(status, response)) => {
-            Err(api_status_error(status, response)).context("API request failed")
-        }
-        Err(err) => Err(err).context("API request failed"),
-    }
-}
-
-fn api_status_error(status: u16, response: ureq::Response) -> ApiStatusError {
-    let fallback = response.status_text().to_string();
-    let value = response.into_json::<Value>().ok();
-    let code = value
-        .as_ref()
-        .and_then(|value| value.pointer("/error/code"))
-        .and_then(Value::as_str)
-        .map(ToString::to_string);
-    let message = value
-        .as_ref()
-        .and_then(|value| value.pointer("/error/message"))
-        .and_then(Value::as_str)
-        .unwrap_or(&fallback)
-        .to_string();
-    ApiStatusError {
-        status,
-        code,
-        message,
-    }
-}
-
-pub(crate) fn spec_checksum_mismatch_message(err: &anyhow::Error) -> Option<String> {
-    let api_err = err.downcast_ref::<ApiStatusError>()?;
-    (api_err.status == 409 && api_err.code.as_deref() == Some("SPEC_CHECKSUM_MISMATCH"))
-        .then(|| api_err.message.clone())
-}
+// `output`, `read_envelope`, `api_get`, `api_get_task`,
+// `authenticated_api_patch_request`, `api_client::api_patch`, `api_delete`,
+// `lobster_service_token`, `add_comment`, `handle_api_result`,
+// `api_status_error`, and `spec_checksum_mismatch_message` moved to
+// `api_client.rs` in PR-G (W37 A3 main.rs carve).
 
 pub(crate) fn write_state(
     base_url: &str,
@@ -2066,7 +1938,7 @@ pub(crate) fn write_state(
         Some(note) => format!("{note}\n\n{STATE_TAG}\n```json\n{state_json}\n```"),
         None => format!("{STATE_TAG}\n```json\n{state_json}\n```"),
     };
-    add_comment(base_url, task_id, &body)
+    api_client::add_comment(base_url, task_id, &body)
 }
 
 /// Fetch every task across the statuses the capacity gate cares about,
@@ -2205,7 +2077,8 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
     let mut failures = Vec::new();
     match product_spec_parsing::product_spec(task) {
         Some(spec) => {
-            let path = product_spec_parsing::resolve_product_spec_path(&spec.path, repo, workspace_root);
+            let path =
+                product_spec_parsing::resolve_product_spec_path(&spec.path, repo, workspace_root);
             if !path.exists() {
                 failures.push(format!("Product spec not found at {}", spec.path));
             } else if fs::read_to_string(&path).is_ok() && !spec_is_approved(task) {
@@ -2214,7 +2087,9 @@ fn spec_failures(task: &Task, repo: &Path, workspace_root: &Path) -> Vec<String>
         }
         None => failures.push("Task description must include a **Spec:** line".to_string()),
     }
-    if product_spec_parsing::acceptance_criteria_text(&task.description.clone().unwrap_or_default()).is_empty() {
+    if product_spec_parsing::acceptance_criteria_text(&task.description.clone().unwrap_or_default())
+        .is_empty()
+    {
         failures.push("Task description must include acceptance criteria checkboxes.".to_string());
     }
     if product_spec_parsing::workstreams(task).is_empty() {
@@ -2464,8 +2339,14 @@ mod tests {
 
     #[test]
     fn parses_only_bold_spec_line_from_description() {
-        assert!(product_spec_parsing::parse_product_spec_ref("Product spec: brain/bookmarks/specs/example.md").is_none());
-        let spec = product_spec_parsing::parse_product_spec_ref("**Spec:** brain/bookmarks/specs/example.md").unwrap();
+        assert!(product_spec_parsing::parse_product_spec_ref(
+            "Product spec: brain/bookmarks/specs/example.md"
+        )
+        .is_none());
+        let spec = product_spec_parsing::parse_product_spec_ref(
+            "**Spec:** brain/bookmarks/specs/example.md",
+        )
+        .unwrap();
         assert_eq!(spec.path, "brain/bookmarks/specs/example.md");
     }
 
@@ -2679,13 +2560,21 @@ mod tests {
         );
 
         assert_eq!(
-            product_spec_parsing::resolve_product_spec_path("docs/spec.md", repo.path(), workspace.path()),
+            product_spec_parsing::resolve_product_spec_path(
+                "docs/spec.md",
+                repo.path(),
+                workspace.path()
+            ),
             repo.path().join("docs/spec.md")
         );
 
         let absolute = workspace.path().join("brain/tasks/specs/example.md");
         assert_eq!(
-            product_spec_parsing::resolve_product_spec_path(absolute.to_str().unwrap(), repo.path(), workspace.path()),
+            product_spec_parsing::resolve_product_spec_path(
+                absolute.to_str().unwrap(),
+                repo.path(),
+                workspace.path()
+            ),
             absolute
         );
     }
@@ -2723,7 +2612,10 @@ mod tests {
         ];
         let checksum = product_spec_parsing::acceptance_criteria_checksum(&acs);
 
-        assert_eq!(checksum, product_spec_parsing::acceptance_criteria_checksum(&acs));
+        assert_eq!(
+            checksum,
+            product_spec_parsing::acceptance_criteria_checksum(&acs)
+        );
         assert_eq!(
             product_spec_parsing::canonical_json_bytes(&json!({
                 "z": "last",
@@ -2780,35 +2672,6 @@ mod tests {
         assert!(failures[0].contains("Spec drift detected"));
         assert!(failures[0].contains("AC checksum changed since last approval"));
         assert!(failures[0].contains("task-drift"));
-    }
-
-    #[test]
-    fn extracts_api_spec_checksum_mismatch_as_blocked_message() {
-        let err = Err::<(), _>(ApiStatusError {
-            status: 409,
-            code: Some("SPEC_CHECKSUM_MISMATCH".to_string()),
-            message: "ACs modified after spec approval".to_string(),
-        })
-        .context("API request failed")
-        .unwrap_err();
-
-        assert_eq!(
-            spec_checksum_mismatch_message(&err).as_deref(),
-            Some("ACs modified after spec approval")
-        );
-    }
-
-    #[test]
-    fn ignores_other_api_conflicts_for_spec_checksum_handling() {
-        let err = Err::<(), _>(ApiStatusError {
-            status: 409,
-            code: Some("SPEC_CHECKSUM_LOCKED".to_string()),
-            message: "specChecksum is locked".to_string(),
-        })
-        .context("API request failed")
-        .unwrap_err();
-
-        assert!(spec_checksum_mismatch_message(&err).is_none());
     }
 
     #[test]
@@ -3179,7 +3042,10 @@ feature
             product_spec_parsing::implementer_pr_urls(&task),
             vec![url_455.to_string(), url_454.to_string()]
         );
-        assert_eq!(product_spec_parsing::latest_implementer_pr_urls(&task), vec![url_454.to_string()]);
+        assert_eq!(
+            product_spec_parsing::latest_implementer_pr_urls(&task),
+            vec![url_454.to_string()]
+        );
     }
 
     #[test]
@@ -3222,7 +3088,10 @@ feature
             ],
             ..Task::default()
         };
-        assert_eq!(product_spec_parsing::latest_implementer_pr_urls(&task), vec![new_url.to_string()]);
+        assert_eq!(
+            product_spec_parsing::latest_implementer_pr_urls(&task),
+            vec![new_url.to_string()]
+        );
     }
 
     #[test]
@@ -3235,7 +3104,10 @@ feature
             }],
             ..Task::default()
         };
-        assert_eq!(product_spec_parsing::latest_implementer_pr_urls(&task), Vec::<String>::new());
+        assert_eq!(
+            product_spec_parsing::latest_implementer_pr_urls(&task),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -3389,7 +3261,9 @@ feature
             ..Default::default()
         };
         assert!(spec_is_approved(&approved));
-        assert!(product_spec_parsing::tech_design_approved_structured(&approved));
+        assert!(product_spec_parsing::tech_design_approved_structured(
+            &approved
+        ));
         assert!(task_approvals::accepted_structured(&approved));
         let legacy = Task {
             description: Some("- [x] **Approved by Tom**".into()),
@@ -3401,7 +3275,9 @@ feature
             ..Default::default()
         };
         assert!(!spec_is_approved(&legacy));
-        assert!(!product_spec_parsing::tech_design_approved_structured(&legacy));
+        assert!(!product_spec_parsing::tech_design_approved_structured(
+            &legacy
+        ));
         assert!(!task_approvals::accepted_structured(&legacy));
         let revoked = Task {
             approvals: vec![
@@ -3412,7 +3288,9 @@ feature
             ..legacy
         };
         assert!(!spec_is_approved(&revoked));
-        assert!(!product_spec_parsing::tech_design_approved_structured(&revoked));
+        assert!(!product_spec_parsing::tech_design_approved_structured(
+            &revoked
+        ));
         assert!(!task_approvals::accepted_structured(&revoked));
     }
 
@@ -3478,7 +3356,10 @@ feature
             ..Task::default()
         };
 
-        assert_eq!(product_spec_parsing::implementer_pr_urls(&task), vec![merged_url, open_url]);
+        assert_eq!(
+            product_spec_parsing::implementer_pr_urls(&task),
+            vec![merged_url, open_url]
+        );
         assert_eq!(
             product_spec_parsing::implementer_active_pr_urls_with(&task, |url| {
                 if url == merged_url {
@@ -4030,9 +3911,9 @@ feature
             "fixture must produce drift so the test exercises the binding"
         );
         let fingerprint = product_spec_parsing::drift_episode_fingerprint(&drift_failures);
-        let new_checksum = product_spec_parsing::acceptance_criteria_checksum(&product_spec_parsing::acceptance_criteria_text(
-            &task.description.clone().unwrap(),
-        ));
+        let new_checksum = product_spec_parsing::acceptance_criteria_checksum(
+            &product_spec_parsing::acceptance_criteria_text(&task.description.clone().unwrap()),
+        );
         // Sanity: the resync comment must already be cryptographically
         // bound to the values it claims.
         assert_eq!(fingerprint.len(), 64);
@@ -4279,7 +4160,8 @@ feature
             ],
             ..Task::default()
         };
-        let record = product_spec_parsing::latest_resync_record(&task).expect("record must be found");
+        let record =
+            product_spec_parsing::latest_resync_record(&task).expect("record must be found");
         assert_eq!(record.checksum, "a".repeat(64));
         assert_eq!(record.fingerprint, "b".repeat(64));
     }
@@ -4289,8 +4171,14 @@ feature
         let a = vec!["one".to_string(), "two".to_string()];
         let b = vec!["one".to_string(), "two".to_string()];
         let c = vec!["two".to_string(), "one".to_string()];
-        assert_eq!(product_spec_parsing::drift_episode_fingerprint(&a), product_spec_parsing::drift_episode_fingerprint(&b));
-        assert_ne!(product_spec_parsing::drift_episode_fingerprint(&a), product_spec_parsing::drift_episode_fingerprint(&c));
+        assert_eq!(
+            product_spec_parsing::drift_episode_fingerprint(&a),
+            product_spec_parsing::drift_episode_fingerprint(&b)
+        );
+        assert_ne!(
+            product_spec_parsing::drift_episode_fingerprint(&a),
+            product_spec_parsing::drift_episode_fingerprint(&c)
+        );
         // Lowercase sha256 hex of length 64.
         let fp = product_spec_parsing::drift_episode_fingerprint(&a);
         assert_eq!(fp.len(), 64);
@@ -5033,8 +4921,9 @@ keep me
         // (so Quinn / Tom can audit the proposed change).
         assert!(result.failures[0].contains("would rewrite"));
         assert!(result.failures[0].contains("2 AC line"));
-        let expected_checksum =
-            product_spec_parsing::acceptance_criteria_checksum(&product_spec_parsing::acceptance_criteria_text(&drifted_description));
+        let expected_checksum = product_spec_parsing::acceptance_criteria_checksum(
+            &product_spec_parsing::acceptance_criteria_text(&drifted_description),
+        );
         assert!(result.failures[0].contains(&expected_checksum));
     }
 
@@ -5510,21 +5399,27 @@ detached
         // Backtick-wrapped path with trailing comma.
         let desc2 = "**Spec:** `brain/tasks/specs/in-progress/foo.md`,\n";
         assert_eq!(
-            product_spec_parsing::parse_product_spec_ref(desc2).unwrap().path,
+            product_spec_parsing::parse_product_spec_ref(desc2)
+                .unwrap()
+                .path,
             "brain/tasks/specs/in-progress/foo.md"
         );
 
         // Bracket annotation.
         let desc3 = "**Spec:** brain/tasks/specs/in-progress/bar.md [archived ticket]";
         assert_eq!(
-            product_spec_parsing::parse_product_spec_ref(desc3).unwrap().path,
+            product_spec_parsing::parse_product_spec_ref(desc3)
+                .unwrap()
+                .path,
             "brain/tasks/specs/in-progress/bar.md"
         );
 
         // Whitespace-only annotation is still parseable.
         let desc4 = "**Spec:** brain/tasks/specs/in-progress/baz.md (a b c)";
         assert_eq!(
-            product_spec_parsing::parse_product_spec_ref(desc4).unwrap().path,
+            product_spec_parsing::parse_product_spec_ref(desc4)
+                .unwrap()
+                .path,
             "brain/tasks/specs/in-progress/baz.md"
         );
     }
@@ -5532,9 +5427,10 @@ detached
     #[test]
     fn archive_spec_rejects_unparseable_spec_line() {
         // Multi-token path with whitespace -> reject (returns None).
-        assert!(
-            product_spec_parsing::parse_product_spec_ref("**Spec:** brain/tasks/specs/in-progress/foo bar.md").is_none()
-        );
+        assert!(product_spec_parsing::parse_product_spec_ref(
+            "**Spec:** brain/tasks/specs/in-progress/foo bar.md"
+        )
+        .is_none());
         // Bracket-only residue (no path component) -> reject.
         assert!(product_spec_parsing::parse_product_spec_ref("**Spec:** (just a note)").is_none());
     }
@@ -5767,63 +5663,6 @@ detached
             updated.contains("(legacy inline note)"),
             "annotation must be preserved: {updated}"
         );
-    }
-
-    #[test]
-    fn api_patch_request_uses_tasks_api_approval_token() {
-        let previous = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
-        std::env::set_var("TASKS_API_APPROVAL_TOKEN", "test-service-token");
-
-        let request = authenticated_api_patch_request("http://localhost/tasks/task-1");
-
-        match previous {
-            Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
-            None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
-        }
-        assert_eq!(
-            request.header("Authorization"),
-            Some("Bearer test-service-token")
-        );
-    }
-
-    #[test]
-    fn lobster_service_token_prefers_feature_task_lobster_token() {
-        let previous_lobster = std::env::var_os("FEATURE_TASK_LOBSTER_TOKEN");
-        let previous_shared = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
-        std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", "lobster-token");
-        std::env::set_var("TASKS_API_APPROVAL_TOKEN", "shared-token");
-
-        let token = lobster_service_token();
-
-        match previous_lobster {
-            Some(value) => std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", value),
-            None => std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN"),
-        }
-        match previous_shared {
-            Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
-            None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
-        }
-        assert_eq!(token.as_deref(), Some("lobster-token"));
-    }
-
-    #[test]
-    fn lobster_service_token_falls_back_to_shared_token() {
-        let previous_lobster = std::env::var_os("FEATURE_TASK_LOBSTER_TOKEN");
-        let previous_shared = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
-        std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN");
-        std::env::set_var("TASKS_API_APPROVAL_TOKEN", "shared-token");
-
-        let token = lobster_service_token();
-
-        match previous_lobster {
-            Some(value) => std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", value),
-            None => std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN"),
-        }
-        match previous_shared {
-            Some(value) => std::env::set_var("TASKS_API_APPROVAL_TOKEN", value),
-            None => std::env::remove_var("TASKS_API_APPROVAL_TOKEN"),
-        }
-        assert_eq!(token.as_deref(), Some("shared-token"));
     }
 
     #[test]

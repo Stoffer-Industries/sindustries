@@ -38,8 +38,10 @@ use crate::product_spec_parsing::{
 use crate::task_approvals;
 use crate::{ac_parsing, test_runners};
 use crate::{
-    add_comment, analytics, is_past, pr_body, read_envelope, reconcile_workflow_attention,
-    transition_or_block, write_state, Envelope, StageArgs,
+    analytics,
+    api_client::{add_comment, read_envelope},
+    is_past, pr_body, reconcile_workflow_attention, transition_or_block, write_state, Envelope,
+    StageArgs,
 };
 use anyhow::Result;
 
