@@ -100,7 +100,7 @@ describe('WorkoutsTab', () => {
     expect(screen.queryByTestId('workout-cards')).not.toBeInTheDocument();
   });
 
-  it('shows real Claude connector link when no agent is connected', async () => {
+  it('shows real Claude + ChatGPT connector links when no agent is connected', async () => {
     mockListPendingPlannedWorkouts.mockResolvedValueOnce({ data: [], error: null });
     mockListConnectedAgents.mockResolvedValueOnce({ data: [], error: null });
     renderWorkoutsTab();
@@ -120,14 +120,25 @@ describe('WorkoutsTab', () => {
       'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=GymTrack&connectorUrl=http%3A%2F%2Flocalhost%3A8787%2Fmcp'
     );
     expect(screen.getByTestId('connect-claude')).toHaveAttribute('target', '_blank');
-    // ChatGPT connector option intentionally removed (task 91994011) — see
-    // docs/runbooks/gymtrack-agent-connect.md § "ChatGPT intentionally excluded".
-    expect(screen.queryByTestId('connect-chatgpt')).not.toBeInTheDocument();
+    // ChatGPT option re-added under task 696f2487 — OpenAI's published docs now
+    // confirm Developer Mode / custom MCP connectors are available on any paid
+    // ChatGPT plan (Plus, Pro, Business, Enterprise, Edu); only the Free tier
+    // is excluded. The seeded `chatgpt` OAuth client row in
+    // public.gymtrack_oauth_clients is reused end-to-end; the card links to the
+    // ChatGPT root because OpenAI does not expose a pre-fillable connector URL
+    // the way Anthropic's `/customize/connectors?modal=add-custom-connector`
+    // deep link does. Card instructions walk the user through
+    // Settings → Apps → Create (Developer Mode).
+    expect(screen.getByTestId('connect-chatgpt')).toHaveAttribute(
+      'href',
+      'https://chatgpt.com/'
+    );
+    expect(screen.getByTestId('connect-chatgpt')).toHaveAttribute('target', '_blank');
     expect(screen.getByTestId('connect-agent-mcp-url')).toHaveTextContent(
       'http://localhost:8787/mcp'
     );
     expect(screen.getByText('claude-desktop')).toBeInTheDocument();
-    expect(screen.queryByText('chatgpt')).not.toBeInTheDocument();
+    expect(screen.getByText('chatgpt')).toBeInTheDocument();
   });
 
   it('hides the connect CTA when an active agent consent exists', async () => {
