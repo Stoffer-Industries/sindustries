@@ -15,11 +15,10 @@
 //! `git worktree remove` sweep for any worktree created for this task).
 //!
 //! The worktree-cleanup implementation (`cleanup_task_worktree_for_task`
-//! plus its helpers) stays in `main.rs` for this slice and follows with
-//! the reconciliation cluster as PR-D. `post_merge.rs` consumes them via
-//! `crate::{cleanup_task_worktree_for_task, format_worktree_cleanup_summary,
-//! WorktreeEntry, ...}` — the same pattern `verify_delivery.rs` uses for
-//! `implementer_pr_urls` etc.
+//! plus its helpers) lives in `git_worktree.rs` (W37 A3 PR-H). This
+//! module consumes it via `crate::git_worktree::{cleanup_task_worktree_for_task,
+//! format_worktree_cleanup_summary, WorktreeCleanupOutcome, ...}` — the
+//! same pattern `verify_delivery.rs` uses for `implementer_pr_urls` etc.
 //!
 //! Spec drift is intentionally NOT blocked at post_merge: Tom owns the ACs
 //! during QA and may legitimately refine them. The spec-resync flow
@@ -37,8 +36,11 @@ use crate::task_approvals;
 use crate::{
     ac_parsing, analytics,
     api_client::{add_comment, api_get_task, api_patch, read_envelope},
-    cleanup_task_worktree_for_task, format_worktree_cleanup_summary, is_past, pr_body,
-    transition_or_block, workflow_handoff, write_state, Envelope, StageArgs, Task,
+    git_worktree::{
+        cleanup_task_worktree_for_task, format_worktree_cleanup_summary, WorktreeCleanupOutcome,
+    },
+    is_past, pr_body, transition_or_block, workflow_handoff, write_state, Envelope, StageArgs,
+    Task,
 };
 
 /// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
@@ -77,7 +79,7 @@ pub(crate) fn run_post_merge_worktree_cleanup(
     let results = cleanup_task_worktree_for_task(&args.repo, &env.task.id);
     let had_failure = results
         .iter()
-        .any(|r| matches!(r.outcome, crate::WorktreeCleanupOutcome::Failed(_)));
+        .any(|r| matches!(r.outcome, WorktreeCleanupOutcome::Failed(_)));
     if results.is_empty() {
         return Ok(env);
     }
