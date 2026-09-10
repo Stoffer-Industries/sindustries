@@ -45,9 +45,12 @@ use crate::{
     api_client::{
         add_comment, api_delete, api_get_task, api_patch, spec_checksum_mismatch_message,
     },
-    archive_task_spec_for_done_task, rewrite_spec_line_in_description,
-    spec_check_ready::workflow_handoff, ArchiveDoneTaskSpecsSweepArgs, ArchiveOutcome, Envelope,
-    LobsterState, StageArgs, Task, BRAIN_DIR, TASK_SPECS_DONE_DIR, TASK_SPECS_IN_PROGRESS_DIR,
+    brain_spec_reconcile::{
+        archive_task_spec_for_done_task, rewrite_spec_line_in_description, ArchiveOutcome,
+        BRAIN_DIR, TASK_SPECS_DONE_DIR, TASK_SPECS_IN_PROGRESS_DIR,
+    },
+    spec_check_ready::workflow_handoff,
+    ArchiveDoneTaskSpecsSweepArgs, Envelope, LobsterState, StageArgs, Task,
 };
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
