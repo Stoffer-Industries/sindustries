@@ -27,13 +27,15 @@
 //! at the bottom of this file; the stage handler's higher-level
 //! integration coverage stays in `main.rs`.
 
-use anyhow::Result;
-use crate::{
-    add_comment, api_get_task, block_on_spec_drift_fluid, block_with_manual_block,
-    implementer_pr_urls, inspect_pr, manual_block_failures, read_envelope,
-    reconcile_workflow_attention, spec_checksum_mismatch_message, Envelope, StageArgs,
+use crate::brain_spec_lifecycle::{
+    block_on_spec_drift_fluid, block_with_manual_block, manual_block_failures,
 };
 use crate::pr_gates;
+use crate::{
+    add_comment, api_get_task, implementer_pr_urls, inspect_pr, read_envelope,
+    reconcile_workflow_attention, spec_checksum_mismatch_message, Envelope, StageArgs,
+};
+use anyhow::Result;
 
 /// `acceptance → done` stage handler. Aggregates PR review feedback across
 /// the task's latest implementer PRs and either clears the gate or posts
@@ -101,13 +103,12 @@ pub(crate) fn feedback_aggregate(args: StageArgs) -> Result<Envelope> {
 /// review comments must be resolved before the `accepted` gate). Every
 /// other state (including `Required`, `Approved`, `Merged`) is a
 /// pass-through.
-pub(crate) fn feedback_review_failure(
-    url: &str,
-    review: pr_gates::ReviewState,
-) -> Option<String> {
+pub(crate) fn feedback_review_failure(url: &str, review: pr_gates::ReviewState) -> Option<String> {
     match review {
         pr_gates::ReviewState::ChangesRequested => Some(format!("Changes requested on {url}.")),
-        pr_gates::ReviewState::CommentsPresent => Some(format!("Open review comments remain on {url}.")),
+        pr_gates::ReviewState::CommentsPresent => {
+            Some(format!("Open review comments remain on {url}."))
+        }
         _ => None,
     }
 }

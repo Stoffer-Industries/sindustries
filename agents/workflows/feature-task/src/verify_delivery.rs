@@ -28,17 +28,18 @@
 //! block at the bottom of this file; the stage handler's higher-level
 //! integration coverage stays in `main.rs`.
 
-use anyhow::Result;
-use crate::pr_gates;
-use crate::{
-    add_comment, analytics, block_on_spec_drift_fluid, block_with_manual_block,
-    implementer_pr_urls, inspect_pr, is_past, latest_implementer_pr_urls,
-    manual_block_failures, pr_body, read_envelope,
-    reconcile_workflow_attention, transition_or_block, workstreams,
-    write_state, Envelope, StageArgs,
+use crate::brain_spec_lifecycle::{
+    block_on_spec_drift_fluid, block_with_manual_block, manual_block_failures,
 };
+use crate::pr_gates;
 use crate::task_approvals;
 use crate::{ac_parsing, test_runners};
+use crate::{
+    add_comment, analytics, implementer_pr_urls, inspect_pr, is_past, latest_implementer_pr_urls,
+    pr_body, read_envelope, reconcile_workflow_attention, transition_or_block, workstreams,
+    write_state, Envelope, StageArgs,
+};
+use anyhow::Result;
 
 /// Extract the PR number from a GitHub PR URL for ordering.
 pub(crate) fn pr_number(url: &str) -> u64 {
@@ -271,7 +272,8 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             ));
         }
         let pr_files = pr_files_result.unwrap_or_default();
-        let npm_workspace = test_runners::resolve_npm_workspace(&test_runners::repo_root_dir(), &pr_files);
+        let npm_workspace =
+            test_runners::resolve_npm_workspace(&test_runners::repo_root_dir(), &pr_files);
         let body = pr_body(url).unwrap_or_default();
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
@@ -283,12 +285,11 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // evidence gate above already uses — task e67c8835). When the
         // file list is unknown we keep `is_rust_pr: true` so bare-Rust
         // citations stay on the cargo runner.
-        let test_runner: Box<dyn ac_parsing::TestRunner> = Box::new(
-            test_runners::DispatchingTestRunner {
+        let test_runner: Box<dyn ac_parsing::TestRunner> =
+            Box::new(test_runners::DispatchingTestRunner {
                 is_rust_pr,
                 npm_workspace,
-            },
-        );
+            });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
             &task_acs,
@@ -363,7 +364,9 @@ mod tests {
     fn verify_delivery_review_gate_allows_pending_review() {
         let url = "https://github.com/Stoffer-Industries/sindustries/pull/117";
         assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::Required).is_none());
-        assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::CommentsPresent).is_none());
+        assert!(
+            verify_delivery_review_failure(url, pr_gates::ReviewState::CommentsPresent).is_none()
+        );
         assert!(verify_delivery_review_failure(url, pr_gates::ReviewState::Merged).is_none());
         assert_eq!(
             verify_delivery_review_failure(url, pr_gates::ReviewState::ChangesRequested),
@@ -403,8 +406,7 @@ mod tests {
 
     #[test]
     fn is_latest_pr_url_handles_single_url() {
-        let urls =
-            vec!["https://github.com/Stoffer-Industries/sindustries/pull/365".to_string()];
+        let urls = vec!["https://github.com/Stoffer-Industries/sindustries/pull/365".to_string()];
         assert!(is_latest_pr_url(
             "https://github.com/Stoffer-Industries/sindustries/pull/365",
             &urls
@@ -442,7 +444,13 @@ mod tests {
             "https://github.com/foo/bar/pull/10".to_string(),
             "https://github.com/baz/qux/pull/12".to_string(),
         ];
-        assert!(is_latest_pr_url("https://github.com/foo/bar/pull/10", &latest_urls));
-        assert!(is_latest_pr_url("https://github.com/baz/qux/pull/12", &latest_urls));
+        assert!(is_latest_pr_url(
+            "https://github.com/foo/bar/pull/10",
+            &latest_urls
+        ));
+        assert!(is_latest_pr_url(
+            "https://github.com/baz/qux/pull/12",
+            &latest_urls
+        ));
     }
 }
