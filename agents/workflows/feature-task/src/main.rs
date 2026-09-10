@@ -15,6 +15,7 @@ use std::{
 mod ac_parsing;
 mod analytics;
 mod feedback_aggregate;
+mod post_merge;
 mod pr_gates;
 mod test_resolution;
 mod test_runners;
@@ -291,7 +292,7 @@ fn main() -> Result<()> {
         Commands::ReadyChecks(args) => ready_checks(args)?,
         Commands::VerifyDelivery(args) => crate::verify_delivery::verify_delivery(args)?,
         Commands::FeedbackAggregate(args) => feedback_aggregate::feedback_aggregate(args)?,
-        Commands::PostMerge(args) => post_merge(args)?,
+        Commands::PostMerge(args) => crate::post_merge::post_merge(args)?,
         Commands::CodeTaskTechDesignCheck(args) => code_task_tech_design_check(args)?,
         Commands::CodeTaskReadyChecks(args) => code_task_ready_checks(args)?,
         Commands::CodeTaskVerifyDelivery(args) => crate::verify_delivery::code_task_verify_delivery(args)?,
@@ -786,24 +787,6 @@ fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
 /// in PR-B (W37 A3 main.rs carve). Imported here as
 /// `crate::feedback_aggregate::feedback_aggregate`.
 ///
-/// Merge gate for `acceptance → done`. Merged PRs pass. Closed-without-merge
-/// PRs that are *not* in `latest_pr_urls` (see `latest_implementer_pr_urls`)
-/// are treated as superseded (same principle as `verify_delivery`'s
-/// latest-only filter) and do not block. A ClosedUnmerged PR that is still
-/// in `latest_pr_urls` fails, as do open / review / unknown states on any
-/// listed PR.
-fn post_merge_pr_failure(
-    url: &str,
-    state: pr_gates::ReviewState,
-    latest_pr_urls: &[String],
-) -> Option<String> {
-    match state {
-        pr_gates::ReviewState::Merged => None,
-        pr_gates::ReviewState::ClosedUnmerged if !crate::verify_delivery::is_latest_pr_url(url, latest_pr_urls) => None,
-        other => Some(format!("PR {url} is not merged: {other:?}.")),
-    }
-}
-
 /// `feedback_aggregate` review-failure helper — moved to
 /// `feedback_aggregate.rs` in PR-B. Imported here as
 /// `crate::feedback_aggregate::feedback_review_failure`.
@@ -825,7 +808,7 @@ fn spec_check_should_skip_legacy_mutation(task: &Task) -> bool {
 fn accepted_structured(task: &Task) -> bool {
     task_approval_granted(task, "accepted")
 }
-fn accepted_structured_failures(task: &Task) -> Vec<String> {
+pub(crate) fn accepted_structured_failures(task: &Task) -> Vec<String> {
     if accepted_structured(task) {
         vec![]
     } else {
@@ -974,7 +957,7 @@ fn remove_worktrees_best_effort(
 
 /// Top-level worktree cleanup for a feature task. Returns a list of cleanup
 /// results (empty when nothing matched). Failures are non-fatal by design.
-fn cleanup_task_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCleanupResult> {
+pub(crate) fn cleanup_task_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCleanupResult> {
     let list_output = Command::new("git")
         .args([
             "-C",
@@ -1019,7 +1002,7 @@ fn cleanup_task_worktree_for_task(repo: &Path, task_id: &str) -> Vec<WorktreeCle
     remove_worktrees_best_effort(repo, &candidates)
 }
 
-fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult]) -> String {
+pub(crate) fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult]) -> String {
     if results.is_empty() {
         return "No matching task worktrees found for this task.".to_string();
     }
@@ -1036,199 +1019,6 @@ fn format_worktree_cleanup_summary(results: &[WorktreeCleanupResult]) -> String 
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn post_merge(args: StageArgs) -> Result<Envelope> {
-    let mut env = read_envelope()?;
-    reconcile_workflow_attention(&args, &mut env)?;
-    // Spec drift is not blocked at post_merge: Tom owns the ACs during QA and may
-    // legitimately refine them. The resync flow (unchecking "Approved by Tom" and
-    // requiring explicit re-approval) handles drift tracking; see the spec-resync
-    // feature task for full implementation.
-    let manual_failures = manual_block_failures(&env.task);
-    if !manual_failures.is_empty() {
-        return block_with_manual_block(
-            &args,
-            env,
-            "post_merge",
-            manual_failures,
-            "[feature-task-blocked]",
-        );
-    }
-
-    // If the task has unchecked ACs that don't appear in any merged PR body, those ACs
-    // were added after the PRs landed and are not yet implemented. Revert to `doing`
-    // so the implementer picks up the new work and opens a follow-up PR.
-    // Unchecked ACs that DO appear in a merged PR are mid-QA (Tom hasn't checked them
-    // off yet) — those are fine; leave them until qa-ac-verified.
-    let description = env.task.description.clone().unwrap_or_default();
-    let unchecked_acs = ac_parsing::unchecked_task_ac_labels(&description);
-    if !unchecked_acs.is_empty() {
-        let pr_bodies: Vec<String> = implementer_pr_urls(&env.task)
-            .iter()
-            .filter_map(|url| pr_body(url).ok())
-            .collect();
-        let needs_pr = ac_parsing::ac_labels_needing_new_pr(&unchecked_acs, &pr_bodies);
-        if !needs_pr.is_empty() {
-            let labels = needs_pr.join(", ");
-            let fingerprint = format!("uncovered_acs:{labels}");
-            if !args.dry_run {
-                api_patch::<Task>(
-                    &args.base_url,
-                    &env.task.id,
-                    json!({"status": "doing", "workflowHandoff": Value::Null}),
-                )?;
-                env.task = api_get_task(&args.base_url, &env.task.id)?;
-                if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
-                    env.lobster_state.failure_fingerprint = Some(fingerprint);
-                    add_comment(
-                        &args.base_url,
-                        &env.task.id,
-                        &format!(
-                            "[feature-task-progress-checklist]\nUnchecked ACs ({labels}) are not covered by any merged PR — reverted to `doing`. Open a new PR covering these ACs; once merged, Tom can verify with `[qa-ac-verified] true`."
-                        ),
-                    )?;
-                    write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
-                }
-            }
-            env.criteria_met = false;
-            env.action_taken = "post_merge_reverted_to_doing".to_string();
-            env.failures = vec![format!(
-                "Unchecked ACs ({labels}) are not covered by any merged PR."
-            )];
-            return Ok(env);
-        }
-    }
-
-    // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
-    // Require Tom's explicit sign-off before closing.
-    let qa_failures = accepted_structured_failures(&env.task);
-    if is_past(&env.task, "acceptance") {
-        if !qa_failures.is_empty() {
-            if !args.dry_run {
-                api_patch::<Task>(
-                    &args.base_url,
-                    &env.task.id,
-                    json!({"status": "acceptance", "workflowHandoff": workflow_handoff("qa_verifier", "qa", "Acceptance criteria require QA verification")}),
-                )?;
-                env.task = api_get_task(&args.base_url, &env.task.id)?;
-                let fingerprint = qa_failures.join("\n");
-                if env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
-                    env.lobster_state.failure_fingerprint = Some(fingerprint);
-                    add_comment(
-                        &args.base_url,
-                        &env.task.id,
-                        &format!(
-                            "[feature-task-progress-checklist]\nTask advanced to `done` without Tom verifying task ACs. Reverted to `acceptance`.\n{}",
-                            qa_failures.join("\n")
-                        ),
-                    )?;
-                    write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
-                }
-            }
-            env.criteria_met = false;
-            env.action_taken = "post_merge_reverted_to_acceptance".to_string();
-            env.failures = qa_failures;
-            // AC2: every gate failure emits a `gate_failure` event. The non-past
-            // `post_merge` path goes through `transition_or_block` which calls
-            // `emit_gate_failure_events`; this `is_past` early-return path
-            // doesn't, so it must emit here to keep the weekly analytics
-            // dashboard (`qualityFailureCount`) consistent across re-runs.
-            if !args.dry_run && !env.failures.is_empty() {
-                analytics::emit_gate_failure_events(&args, &env.task, "post_merge", &env.failures);
-            }
-            return Ok(env);
-        }
-        env.already_past = true;
-        env.criteria_met = true;
-        env.action_taken = "already_past_acceptance".to_string();
-        let env = run_post_merge_worktree_cleanup(&args, env)?;
-        // AC1: best-effort terminal summary emission (idempotent on re-run
-        // via stable eventKey). Never blocks task progression.
-        if !args.dry_run && env.criteria_met && env.task.status == "done" {
-            analytics::emit_terminal_summary_event(&args, &env.task, "done");
-        }
-        return Ok(env);
-    }
-    let mut failures = qa_failures;
-    let pr_urls = implementer_pr_urls(&env.task);
-    let latest_urls = latest_implementer_pr_urls(&env.task);
-    for url in &pr_urls {
-        match inspect_pr(url) {
-            Ok(state) => {
-                if let Some(failure) = post_merge_pr_failure(url, state, &latest_urls) {
-                    failures.push(failure);
-                }
-            }
-            Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
-        }
-    }
-    let env = transition_or_block(
-        &args,
-        env,
-        "done",
-        "post_merge",
-        failures,
-        Some(workflow_handoff(
-            "qa_verifier",
-            "qa",
-            "Acceptance criteria require QA verification",
-        )),
-        "[feature-task-progress-checklist]",
-        "Feature task workflow moved task to `done`.",
-    )?;
-    // If the transition succeeded, archive the task spec into brain/tasks/specs/done/
-    // and rewrite the description's Spec line. Idempotent: re-running post_merge
-    // on an already-archived task is a no-op.
-    if env.criteria_met && env.task.status == "done" {
-        // AC1: best-effort terminal summary emission (idempotent on re-run).
-        if !args.dry_run {
-            analytics::emit_terminal_summary_event(&args, &env.task, "done");
-        }
-        let env = archive_done_task_spec(&args, env)?;
-        return run_post_merge_worktree_cleanup(&args, env);
-    }
-    Ok(env)
-}
-
-/// Best-effort removal of any feature-task worktree that was created for this
-/// task. Runs on every post_merge invocation that reaches the `done` state
-/// (including idempotent re-runs) so stale worktrees cannot accumulate.
-/// Cleanup failures are surfaced as a `[feature-task-progress-checklist]`
-/// comment but never block the lobster.
-fn run_post_merge_worktree_cleanup(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
-    if args.dry_run {
-        return Ok(env);
-    }
-    let results = cleanup_task_worktree_for_task(&args.repo, &env.task.id);
-    let had_failure = results
-        .iter()
-        .any(|r| matches!(r.outcome, WorktreeCleanupOutcome::Failed(_)));
-    if results.is_empty() {
-        return Ok(env);
-    }
-    let header = if had_failure {
-        "Post-merge worktree cleanup encountered errors (non-fatal):"
-    } else {
-        "Post-merge worktree cleanup:"
-    };
-    let body = format_worktree_cleanup_summary(&results);
-    // Best-effort: a comment write failure should not block the lobster.
-    let _ = add_comment(
-        &args.base_url,
-        &env.task.id,
-        &format!("[feature-task-progress-checklist]\n{header}\n{body}"),
-    );
-    if had_failure {
-        // Surface the failure on the envelope so the heartbeat can see it,
-        // but do not flip criteria_met -- the task is still done.
-        if env.action_taken.is_empty() || env.action_taken == "moved_to_done" {
-            env.action_taken = "moved_to_done_worktree_cleanup_warning".to_string();
-        } else {
-            env.action_taken = format!("{}_worktree_cleanup_warning", env.action_taken);
-        }
-    }
-    Ok(env)
 }
 
 fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
@@ -1328,7 +1118,7 @@ fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<
     Ok(())
 }
 
-fn workflow_handoff(role_id: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
+pub(crate) fn workflow_handoff(role_id: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
     ActiveWorkflowHandoff {
         role_id: role_id.to_string(),
         gate: Some(gate.to_string()),
@@ -1700,20 +1490,20 @@ const TASK_SPEC_LIFECYCLE_DIRS: [&str; 4] = ["open", "in-progress", "done", "arc
 const TASK_ID_PREFIX_LEN: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct WorktreeEntry {
+pub(crate) struct WorktreeEntry {
     path: PathBuf,
     branch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum WorktreeCleanupOutcome {
+pub(crate) enum WorktreeCleanupOutcome {
     Removed,
     AlreadyAbsent,
     Failed(String),
 }
 
 #[derive(Debug, Clone)]
-struct WorktreeCleanupResult {
+pub(crate) struct WorktreeCleanupResult {
     path: PathBuf,
     branch: Option<String>,
     outcome: WorktreeCleanupOutcome,
@@ -2136,7 +1926,7 @@ fn archive_task_spec_for_done_task(task: &Task, workspace_root: &Path) -> Archiv
 ///   lobster-state failure fingerprint, do **not** revert the task status.
 /// - `Conflict` → post a `[spec-archive-conflict]` task comment and leave the
 ///   task alone; the sweep will not retry until a human resolves the conflict.
-fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
+pub(crate) fn archive_done_task_spec(args: &StageArgs, mut env: Envelope) -> Result<Envelope> {
     let outcome = archive_task_spec_for_done_task(&env.task, workspace_root(args));
     apply_archive_outcome(&mut env, args, &outcome);
     Ok(env)
@@ -3096,7 +2886,7 @@ fn api_get<T: for<'de> Deserialize<'de>>(base_url: &str, path: &str) -> Result<T
         .context("decode API response")
 }
 
-fn api_get_task(base_url: &str, task_id: &str) -> Result<Task> {
+pub(crate) fn api_get_task(base_url: &str, task_id: &str) -> Result<Task> {
     api_get(base_url, &format!("/tasks/{task_id}"))
 }
 
@@ -3111,7 +2901,7 @@ fn authenticated_api_patch_request(url: &str) -> ureq::Request {
     request
 }
 
-fn api_patch<T: for<'de> Deserialize<'de>>(
+pub(crate) fn api_patch<T: for<'de> Deserialize<'de>>(
     base_url: &str,
     task_id: &str,
     payload: Value,
@@ -5124,75 +4914,7 @@ feature
         assert!(failures[0].contains("Spec drift detected"));
     }
 
-    #[test]
-    fn post_merge_skips_superseded_closed_unmerged_prs() {
-        // Task e9c06d01: PR #365 closed-without-merge, replaced by merged #368.
-        // `latest_pr_urls` reflects the most recent [implementer-prs] comment,
-        // which names only the replacement PR.
-        let closed = "https://github.com/Stoffer-Industries/sindustries/pull/365";
-        let merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
-        let latest_urls = vec![merged.to_string()];
-        assert!(
-            post_merge_pr_failure(closed, pr_gates::ReviewState::ClosedUnmerged, &latest_urls)
-                .is_none(),
-            "superseded closed PR must not block acceptance → done"
-        );
-        assert!(
-            post_merge_pr_failure(merged, pr_gates::ReviewState::Merged, &latest_urls).is_none()
-        );
-    }
-
-    #[test]
-    fn post_merge_skips_closed_unmerged_pr_with_lower_number_than_superseded_duplicate() {
-        // Regression for task 30251df0: PR #455 was opened right after #454
-        // from the same branch as an accidental duplicate, then closed
-        // unmerged, while #454 (the lower-numbered PR, opened first) is the
-        // one that actually merged. A correcting [implementer-prs] comment
-        // named only #454. The old "highest PR number wins" heuristic picked
-        // #455 as "latest" and blocked `acceptance -> done` forever.
-        let merged_lower_number = "https://github.com/Stoffer-Industries/sindustries/pull/454";
-        let closed_higher_number = "https://github.com/Stoffer-Industries/sindustries/pull/455";
-        let latest_urls = vec![merged_lower_number.to_string()];
-        assert!(
-            post_merge_pr_failure(
-                closed_higher_number,
-                pr_gates::ReviewState::ClosedUnmerged,
-                &latest_urls
-            )
-            .is_none(),
-            "the numerically-higher but superseded duplicate must not block done"
-        );
-        assert!(post_merge_pr_failure(
-            merged_lower_number,
-            pr_gates::ReviewState::Merged,
-            &latest_urls
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn post_merge_still_fails_latest_closed_unmerged_pr() {
-        let closed = "https://github.com/Stoffer-Industries/sindustries/pull/365";
-        let later_closed = "https://github.com/Stoffer-Industries/sindustries/pull/368";
-        let urls = vec![closed.to_string(), later_closed.to_string()];
-        assert_eq!(
-            post_merge_pr_failure(later_closed, pr_gates::ReviewState::ClosedUnmerged, &urls),
-            Some(format!("PR {later_closed} is not merged: ClosedUnmerged."))
-        );
-    }
-
-    #[test]
-    fn post_merge_still_fails_open_earlier_pr() {
-        // Stacked delivery: an earlier still-open PR must keep blocking done.
-        let earlier_open = "https://github.com/Stoffer-Industries/sindustries/pull/365";
-        let later_merged = "https://github.com/Stoffer-Industries/sindustries/pull/368";
-        let urls = vec![earlier_open.to_string(), later_merged.to_string()];
-        assert_eq!(
-            post_merge_pr_failure(earlier_open, pr_gates::ReviewState::Approved, &urls),
-            Some(format!("PR {earlier_open} is not merged: Approved."))
-        );
-        assert!(post_merge_pr_failure(later_merged, pr_gates::ReviewState::Merged, &urls).is_none());
-    }
+    // ---- post_merge stage-handler tests moved to `post_merge.rs` (W37 A3 PR-C) ----
 
     #[test]
     fn implementer_pr_urls_preserve_merged_prs_for_delivery() {
