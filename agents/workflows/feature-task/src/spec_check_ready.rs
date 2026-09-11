@@ -643,6 +643,10 @@ mod tests {
     use super::*;
     use crate::Task;
 
+    use crate::{TaskApproval, TaskComment};
+    use std::fs;
+    use tempfile::tempdir;
+
     fn task_with_status(status: &str) -> Task {
         Task {
             id: "00000000-0000-0000-0000-000000000001".to_string(),
@@ -699,5 +703,300 @@ mod tests {
         let mut task = task_with_status("open");
         task.attention_owners = vec!["Rowan".to_string()];
         assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
+    }
+    fn approval_row(kind: &str, state: &str) -> crate::TaskApproval {
+        crate::TaskApproval {
+            approval_type: kind.into(),
+            state: state.into(),
+            ..Default::default()
+        }
+    }
+
+    fn routing_task(status: &str, owner: &[&str]) -> Task {
+        Task {
+            id: "task-1".to_string(),
+            status: status.to_string(),
+            assignee: Some("Rowan".to_string()),
+            attention_owners: owner.iter().map(|value| (*value).to_string()).collect(),
+            ..Task::default()
+        }
+    }
+    #[test]
+    fn routing_does_not_surface_ash_before_delivery_evidence() {
+        let task = routing_task("doing", &["Rowan", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Rowan", "Tom"]
+        );
+    }
+    #[test]
+    fn routing_replaces_implementer_with_ash_after_delivery() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Ash", "Tom"]
+        );
+    }
+    #[test]
+    fn routing_preserves_rowan_handoff_when_ash_is_last_commenter() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
+            body: None,
+        });
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Rowan", "Tom"]
+        );
+    }
+    #[test]
+    fn routing_resumes_ash_after_delivery_comments_again() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some("Collected the requested runtime evidence.".to_string()),
+            body: None,
+        });
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+        });
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Ash", "Tom"]
+        );
+    }
+    #[test]
+    fn routing_advances_stale_implementer_to_tom_at_acceptance() {
+        let task = routing_task("acceptance", &["Rowan", "Ash", "Rowan", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom", "Ash", "Rowan", "Tom"]
+        );
+    }
+    #[test]
+    fn routing_removes_satisfied_managed_owner_and_is_idempotent() {
+        let mut task = routing_task("acceptance", &["Tom", "Rowan", "Tom"]);
+        task.approvals.push(TaskApproval {
+            approval_type: "accepted".to_string(),
+            state: "approved".to_string(),
+            ..TaskApproval::default()
+        });
+        let once = crate::spec_check_ready::reconciled_attention_owners(&task);
+        assert_eq!(once, vec!["Rowan", "Tom"]);
+        task.attention_owners = once.clone();
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            once
+        );
+    }
+    #[test]
+    fn routing_preserves_unrelated_head_and_duplicate_tail_slots() {
+        let task = routing_task("acceptance", &["Lox", "Rowan", "Tom", "Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom", "Lox", "Rowan", "Tom", "Tom"]
+        );
+    }
+    /// A `doing`-status task whose `attentionOwners` is `[Tom, Quinn, Ash]`
+    /// and whose only closed gate is `qa_agent` should remove Tom, because
+    /// the accepted gate is not actionable until acceptance, without draining
+    /// the remaining owner stack across repeated reconcile calls.
+    #[test]
+    fn routing_removes_tom_without_draining_remaining_managed_owners() {
+        let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
+        task.comments.push(TaskComment {
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            body: None,
+            ..TaskComment::default()
+        });
+        task.approvals.push(TaskApproval {
+            approval_type: "qa_agent".to_string(),
+            state: "approved".to_string(),
+            ..TaskApproval::default()
+        });
+        let once = crate::spec_check_ready::reconciled_attention_owners(&task);
+        assert_eq!(once, vec!["Quinn", "Ash"]);
+        task.attention_owners = once.clone();
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            once
+        );
+    }
+    /// Tom's accepted gate is only actionable in acceptance. A pending
+    /// accepted approval must not leave Tom as the head owner while a task is
+    /// still doing.
+    #[test]
+    fn routing_removes_tom_head_before_acceptance() {
+        let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
+        task.approvals.push(TaskApproval {
+            approval_type: "tech_design".to_string(),
+            state: "approved".to_string(),
+            ..TaskApproval::default()
+        });
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn", "Ash"]
+        );
+    }
+    #[test]
+    fn routing_keeps_tom_head_for_pending_acceptance() {
+        let task = routing_task("acceptance", &["Tom", "Quinn", "Ash"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom", "Quinn", "Ash"]
+        );
+    }
+    #[test]
+    fn workflow_handoff_serializes_tasks_api_role_id_contract() {
+        let value = serde_json::to_value(crate::spec_check_ready::workflow_handoff(
+            "product_spec_approver",
+            "spec",
+            "Product spec approval is required",
+        ))
+        .unwrap();
+        assert_eq!(value["roleId"], "product_spec_approver");
+        assert!(value.get("role").is_none());
+    }
+    #[test]
+    fn spec_check_skips_legacy_mutation_for_any_approved_spec_actor() {
+        let task = Task {
+            approvals: vec![TaskApproval {
+                approval_type: "spec".to_string(),
+                state: "approved".to_string(),
+                owner: Some("Quinn".to_string()),
+                ..TaskApproval::default()
+            }],
+            ..Task::default()
+        };
+
+        assert!(task_approvals::spec_check_should_skip_legacy_mutation(
+            &task
+        ));
+    }
+    #[test]
+    fn spec_check_keeps_legacy_mutation_available_without_approved_spec() {
+        let task = Task {
+            approvals: vec![approval_row("spec", "revoked")],
+            ..Task::default()
+        };
+
+        assert!(!task_approvals::spec_check_should_skip_legacy_mutation(
+            &task
+        ));
+    }
+    #[test]
+    fn spec_gate_accepts_structured_approval_row() {
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let spec_path = workspace.path().join("brain/tasks/specs/example.md");
+        fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+        fs::write(
+            &spec_path,
+            "- [ ] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Implementation-ready criteria",
+        )
+        .unwrap();
+
+        let task = Task {
+            description: Some(
+                "**Spec:** brain/tasks/specs/example.md
+- [x] **Approved by Tom**
+
+## Acceptance Criteria
+- [ ] Build it
+
+## Workstreams
+- Owner: Implementer
+  ACs: AC1"
+                    .to_string(),
+            ),
+            approvals: vec![approval_row("spec", "approved")],
+            ..Task::default()
+        };
+
+        assert!(lobster_state::spec_failures(&task, repo.path(), workspace.path()).is_empty());
+    }
+    #[test]
+    fn spec_check_detects_manually_advanced_task_without_checksum() {
+        let task = Task {
+            id: "task-manually-advanced".to_string(),
+            status: "acceptance".to_string(),
+            spec_checksum: None,
+            description: Some("No spec line here".to_string()),
+            ..Task::default()
+        };
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let failures =
+            lobster_state::missing_spec_checksum_failures(&task, repo.path(), workspace.path());
+        assert!(
+            !failures.is_empty(),
+            "expected failures for manually-advanced task without checksum"
+        );
+        assert!(failures
+            .iter()
+            .any(|f| f.contains("no stored `specChecksum`")));
+        assert!(failures.iter().any(|f| f.contains("**Spec:**")));
+    }
+    #[test]
+    fn spec_check_allows_past_open_task_with_valid_checksum() {
+        let task = Task {
+            id: "task-legit-ready".to_string(),
+            status: "acceptance".to_string(),
+            spec_checksum: Some("abc123".to_string()),
+            description: Some("## Acceptance Criteria\n- [ ] AC1".to_string()),
+            ..Task::default()
+        };
+        let repo = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        assert!(lobster_state::missing_spec_checksum_failures(
+            &task,
+            repo.path(),
+            workspace.path()
+        )
+        .is_empty());
+
+        // A task with a stored checksum is already past "open" legitimately — spec_checksum_failures
+        // (not spec_failures) is the gate from here on, so we just confirm no spec drift.
+        let failures = product_spec_parsing::spec_checksum_failures(&task);
+        // checksum "abc123" won't match the real computed checksum, so drift is detected —
+        // that's correct behaviour: the stored checksum must match current ACs.
+        assert!(
+            !failures.is_empty(),
+            "expected drift for mismatched checksum"
+        );
+        assert!(failures[0].contains("Spec drift detected"));
     }
 }

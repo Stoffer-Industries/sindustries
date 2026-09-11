@@ -6,9 +6,9 @@
 //! and implementer-PR URL/review inspection. The CLI dispatch and shared task
 //! envelope types remain in `main.rs`; no public CLI or API surface changes.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use regex::Regex;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -522,9 +522,199 @@ pub(crate) fn inspect_pr(url: &str) -> Result<pr_gates::ReviewState> {
         .output()
         .context("run gh pr view")?;
     if !output.status.success() {
-        return Err(anyhow!(
-            String::from_utf8_lossy(&output.stderr).trim().to_string()
-        ));
+        return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_string()));
     }
     pr_gates::parse_github_review_state(&String::from_utf8(output.stdout)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::product_spec_parsing;
+    use crate::TaskComment;
+
+    #[test]
+    fn parse_resync_record_extracts_bound_fields() {
+        // Use exactly-64-char lowercase hex strings so is_sha256_hex accepts them.
+        let chk = "a".repeat(64);
+        let fp = "b".repeat(64);
+        let text = format!("[spec-resynced] reset checksum after approval\nchecksum={chk}\ndriftFingerprint={fp}\n");
+        let record = product_spec_parsing::parse_resync_record(&text).expect("record should parse");
+        assert_eq!(record.checksum, chk);
+        assert_eq!(record.fingerprint, fp);
+        assert_eq!(record.summary, "reset checksum after approval");
+    }
+    #[test]
+    fn parse_resync_record_rejects_record_without_binding() {
+        // A hand-written `[spec-resynced]` without checksum/driftFingerprint
+        // must NOT be trusted — the stale-drift guard requires the binding.
+        let text = "[spec-resynced] does not carry checksum/fingerprint fields";
+        assert!(product_spec_parsing::parse_resync_record(text).is_none());
+    }
+    #[test]
+    fn parse_resync_record_rejects_unbound_comment() {
+        let text = "Spec resynced offline.";
+        assert!(product_spec_parsing::parse_resync_record(text).is_none());
+    }
+    #[test]
+    fn parse_resync_record_rejects_short_hex() {
+        let text = "[spec-resynced] short\nchecksum=deadbeef\ndriftFingerprint=cafebabe\n";
+        assert!(product_spec_parsing::parse_resync_record(text).is_none());
+    }
+    #[test]
+    fn latest_resync_record_returns_most_recent_with_binding() {
+        let good = format!(
+            "[spec-resynced] reset\nchecksum={chk}\ndriftFingerprint={fp}\n",
+            chk = "a".repeat(64),
+            fp = "b".repeat(64),
+        );
+        let stale = "[spec-resynced] old reset (no fields)";
+        let task = Task {
+            comments: vec![
+                TaskComment {
+                    text: Some("[rowan-prs] https://github.com/x/y/pull/1".to_string()),
+                    body: None,
+                    ..TaskComment::default()
+                },
+                TaskComment {
+                    text: Some(stale.to_string()),
+                    body: None,
+                    ..TaskComment::default()
+                },
+                TaskComment {
+                    text: Some(good),
+                    body: None,
+                    ..TaskComment::default()
+                },
+            ],
+            ..Task::default()
+        };
+        let record =
+            product_spec_parsing::latest_resync_record(&task).expect("record must be found");
+        assert_eq!(record.checksum, "a".repeat(64));
+        assert_eq!(record.fingerprint, "b".repeat(64));
+    }
+    #[test]
+    fn drift_episode_fingerprint_is_stable_and_order_sensitive() {
+        let a = vec!["one".to_string(), "two".to_string()];
+        let b = vec!["one".to_string(), "two".to_string()];
+        let c = vec!["two".to_string(), "one".to_string()];
+        assert_eq!(
+            product_spec_parsing::drift_episode_fingerprint(&a),
+            product_spec_parsing::drift_episode_fingerprint(&b)
+        );
+        assert_ne!(
+            product_spec_parsing::drift_episode_fingerprint(&a),
+            product_spec_parsing::drift_episode_fingerprint(&c)
+        );
+        // Lowercase sha256 hex of length 64.
+        let fp = product_spec_parsing::drift_episode_fingerprint(&a);
+        assert_eq!(fp.len(), 64);
+        assert!(fp
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    }
+    #[test]
+    fn latest_resync_record_matches_drift_requires_both_legs() {
+        let fp = "f".repeat(64);
+        let cs = "0".repeat(64);
+        let other_fp = "9".repeat(64);
+        let other_cs = "8".repeat(64);
+        // Same fingerprint but different stored checksum -> reject.
+        // The task's spec_checksum is a different value than cs (the comment's checksum).
+        let mismatch_cs = "deadbeef".repeat(8)[..64].to_string();
+        let task_cs_mismatch = Task {
+            spec_checksum: Some(mismatch_cs.clone()),
+            comments: vec![TaskComment {
+                text: Some(format!(
+                    "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={fp}\n"
+                )),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
+            &task_cs_mismatch,
+            &fp,
+            task_cs_mismatch.spec_checksum.as_deref()
+        ));
+        // Same checksum but different fingerprint (new drift episode) -> reject.
+        let task_fp_mismatch = Task {
+            spec_checksum: Some(cs.clone()),
+            comments: vec![TaskComment {
+                text: Some(format!(
+                    "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={other_fp}\n"
+                )),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
+            &task_fp_mismatch,
+            &fp,
+            Some(&cs)
+        ));
+        // Both match -> accept (and prefer the new fingerprint).
+        let task_match = Task {
+            spec_checksum: Some(cs.clone()),
+            comments: vec![TaskComment {
+                text: Some(format!(
+                    "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={fp}\n"
+                )),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert!(product_spec_parsing::latest_resync_record_matches_drift(
+            &task_match,
+            &fp,
+            Some(&cs)
+        ));
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
+            &task_match,
+            &other_fp,
+            Some(&cs)
+        ));
+        // Both match but checksum field uses OLD/uppercase hex -> normalise.
+        let task_normalises = Task {
+            spec_checksum: Some(cs.clone()),
+            comments: vec![TaskComment {
+                text: Some(format!(
+                    "[spec-resynced]\nchecksum={cs_upper}\ndriftFingerprint={fp_upper}\n",
+                    cs_upper = cs.to_uppercase(),
+                    fp_upper = fp.to_uppercase(),
+                )),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert!(product_spec_parsing::latest_resync_record_matches_drift(
+            &task_normalises,
+            &fp,
+            Some(&cs)
+        ));
+        // Fresh comment but stored checksum is the OLD value still -> reject.
+        let task_old_stored = Task {
+            spec_checksum: Some(other_cs.clone()),
+            comments: vec![TaskComment {
+                text: Some(format!(
+                    "[spec-resynced]\nchecksum={cs}\ndriftFingerprint={fp}\n"
+                )),
+                body: None,
+                ..TaskComment::default()
+            }],
+            ..Task::default()
+        };
+        assert!(!product_spec_parsing::latest_resync_record_matches_drift(
+            &task_old_stored,
+            &fp,
+            Some(&other_cs)
+        ));
+    }
 }

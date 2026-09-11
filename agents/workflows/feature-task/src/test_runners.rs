@@ -1373,7 +1373,7 @@ mod tests {
         // actually ran. Confirm the target line is present and reports `ok`.
         assert!(
             outcome.stdout.contains(
-                "test tests::routing_advances_stale_implementer_to_tom_at_acceptance ... ok"
+                "test spec_check_ready::tests::routing_advances_stale_implementer_to_tom_at_acceptance ... ok"
             ),
             "expected the target test to actually run, got:\n{}",
             outcome.stdout
