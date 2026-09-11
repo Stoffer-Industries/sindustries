@@ -11,9 +11,8 @@ use std::path::{Path, PathBuf};
 /// Directories skipped during `resolve_repo_file_by_name`'s search — build
 /// artefacts and dependency trees that are large, irrelevant, and (for
 /// `.git`) not meaningful to search.
-pub(crate) const SEARCH_EXCLUDE_DIRS: &[&str] = &[
-    ".git", "target", "node_modules", ".venv", "dist", "build",
-];
+pub(crate) const SEARCH_EXCLUDE_DIRS: &[&str] =
+    &[".git", "target", "node_modules", ".venv", "dist", "build"];
 
 /// Resolve a bare filename (e.g. `package-json-no-pnpm-pin.test.sh`) or a
 /// repo-relative path cited in an AC's `testID` evidence to an absolute
@@ -27,10 +26,7 @@ pub(crate) const SEARCH_EXCLUDE_DIRS: &[&str] = &[
 /// instead of silently resolving to the wrong script — the same
 /// no-silent-pass discipline `cargo_test_leaf_outcome` applies (PR #541
 /// review).
-pub(crate) fn resolve_repo_file_by_name(
-    repo_root: &Path,
-    name: &str,
-) -> Result<PathBuf, String> {
+pub(crate) fn resolve_repo_file_by_name(repo_root: &Path, name: &str) -> Result<PathBuf, String> {
     let direct = repo_root.join(name);
     if direct.is_file() {
         return Ok(direct);
@@ -204,8 +200,11 @@ mod tests {
         let package = root.path().join("apps/mission-control");
         let src_dir = package.join("src");
         fs::create_dir_all(&src_dir).unwrap();
-        fs::write(package.join("package.json"), "{\"name\": \"@sindustries/mission-control\"}\n")
-            .unwrap();
+        fs::write(
+            package.join("package.json"),
+            "{\"name\": \"@sindustries/mission-control\"}\n",
+        )
+        .unwrap();
         let changed_file = src_dir.join("Sidebar.test.jsx");
         fs::write(&changed_file, "").unwrap();
 
@@ -216,7 +215,11 @@ mod tests {
     #[test]
     fn nearest_package_json_dir_does_not_match_the_repo_root_package_json() {
         let root = tempdir().unwrap();
-        fs::write(root.path().join("package.json"), "{\"workspaces\": [\"apps/*\"]}\n").unwrap();
+        fs::write(
+            root.path().join("package.json"),
+            "{\"workspaces\": [\"apps/*\"]}\n",
+        )
+        .unwrap();
         let nested = root.path().join("docs/specs");
         fs::create_dir_all(&nested).unwrap();
         let changed_file = nested.join("some-doc.md");

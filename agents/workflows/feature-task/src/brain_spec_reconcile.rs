@@ -741,7 +741,6 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-
     #[test]
     fn plan_task_spec_archive_moves_eligible_spec() {
         let plan = plan_task_spec_archive(Some("brain/tasks/specs/in-progress/example-2026.md"));
@@ -829,7 +828,6 @@ mod tests {
             ArchiveSpecPlan::MissingSpecRef
         );
     }
-
 
     #[test]
     fn spec_lifecycle_bootstrap_creates_expected_dirs_and_is_idempotent() {
@@ -1332,5 +1330,4 @@ Whatever.
             "annotation must be preserved: {updated}"
         );
     }
-
 }

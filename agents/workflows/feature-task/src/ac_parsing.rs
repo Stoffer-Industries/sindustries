@@ -144,8 +144,8 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
 /// Strip a trailing evidence annotation from a description string.
 /// Returns the description with the trailing `(...)` evidence removed.
 pub(crate) fn strip_trailing_evidence(text: &str) -> String {
-    let re = Regex::new(r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr):\s*[^)]+\)\s*$")
-        .unwrap();
+    let re =
+        Regex::new(r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr):\s*[^)]+\)\s*$").unwrap();
     match re.find(text) {
         Some(m) => text[..m.start()].trim_end().to_string(),
         None => text.to_string(),
@@ -1247,7 +1247,10 @@ Lead-in.
             &files,
             &AlwaysPassTestRunner,
         );
-        assert!(failures.is_empty(), "expected suffix match, got: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "expected suffix match, got: {failures:?}"
+        );
     }
 
     #[test]

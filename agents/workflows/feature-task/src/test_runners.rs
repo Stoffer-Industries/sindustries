@@ -196,7 +196,9 @@ fn package_is_in_root_workspaces(repo_root: &Path, dir_rel: &str) -> bool {
         // a literal `/` after so `apps` doesn't accidentally match
         // `appsx/foo` (and so the empty-prefix case from a stray `*`
         // entry doesn't match every directory).
-        let Some(prefix) = ws_str.strip_suffix("/*") else { continue };
+        let Some(prefix) = ws_str.strip_suffix("/*") else {
+            continue;
+        };
         if prefix.is_empty() {
             continue;
         }
@@ -471,7 +473,11 @@ fn resolve_line_citations(repo_root: &Path, citation: &str) -> Option<Vec<Resolv
             }
         }
     }
-    if resolved.is_empty() { None } else { Some(resolved) }
+    if resolved.is_empty() {
+        None
+    } else {
+        Some(resolved)
+    }
 }
 
 /// Resolve one `<file> > <description>` citation segment (vitest's own
@@ -933,7 +939,10 @@ mod tests {
         // captured from `it('renders Tom\'s tech_design ...', ...)` — the
         // source has the two characters `\` `'`, but the JS string's real
         // value (and what vitest reports) is just `'`.
-        assert_eq!(unescape_js_string(r"Tom\'s tech_design"), "Tom's tech_design");
+        assert_eq!(
+            unescape_js_string(r"Tom\'s tech_design"),
+            "Tom's tech_design"
+        );
     }
 
     #[test]
@@ -957,7 +966,10 @@ mod tests {
         );
         assert_eq!(
             name,
-            Some("renders Tom's tech_design and qa_agent checkboxes enabled (task override)".to_string())
+            Some(
+                "renders Tom's tech_design and qa_agent checkboxes enabled (task override)"
+                    .to_string()
+            )
         );
     }
 
@@ -984,7 +996,9 @@ mod tests {
     #[test]
     fn has_passed_tests_false_on_empty_or_unparseable_output() {
         assert!(!has_passed_tests(""));
-        assert!(!has_passed_tests("npm error code 127\nsh: vitest: command not found\n"));
+        assert!(!has_passed_tests(
+            "npm error code 127\nsh: vitest: command not found\n"
+        ));
     }
 
     
@@ -1022,7 +1036,10 @@ mod tests {
         write_root_workspaces(root.path());
         assert!(package_is_in_root_workspaces(root.path(), "apps/foo"));
         assert!(package_is_in_root_workspaces(root.path(), "packages/foo"));
-        assert!(package_is_in_root_workspaces(root.path(), "services/tasks-api"));
+        assert!(package_is_in_root_workspaces(
+            root.path(),
+            "services/tasks-api"
+        ));
     }
 
     #[test]
@@ -1044,7 +1061,11 @@ mod tests {
     fn resolve_npm_invocation_picks_workspace_for_apps_and_prefix_for_agents() {
         let root = tempdir().unwrap();
         write_root_workspaces(root.path());
-        write_subpackage(root.path(), "apps/mission-control", "@sindustries/mission-control");
+        write_subpackage(
+            root.path(),
+            "apps/mission-control",
+            "@sindustries/mission-control",
+        );
         write_subpackage(root.path(), "agents/ash", "@sindustries/ash");
 
         let apps_invocation = resolve_npm_invocation(
@@ -1053,7 +1074,9 @@ mod tests {
         );
         assert_eq!(
             apps_invocation,
-            Some(NpmInvocation::Workspace("@sindustries/mission-control".to_string()))
+            Some(NpmInvocation::Workspace(
+                "@sindustries/mission-control".to_string()
+            ))
         );
 
         let agents_invocation = resolve_npm_invocation(
@@ -1071,10 +1094,8 @@ mod tests {
         let root = tempdir().unwrap();
         write_root_workspaces(root.path());
 
-        let docs_invocation = resolve_npm_invocation(
-            root.path(),
-            &["docs/specs/some-doc.md".to_string()],
-        );
+        let docs_invocation =
+            resolve_npm_invocation(root.path(), &["docs/specs/some-doc.md".to_string()]);
         assert_eq!(docs_invocation, None);
     }
 
@@ -1156,7 +1177,10 @@ mod tests {
         // No `.test.`/`.spec.` extension before " > " — not this shape,
         // must not be misread as one (falls through to the raw-citation
         // fallback in `resolve_npm_test_filters` instead).
-        assert_eq!(resolve_arrow_citation("some prose > with an arrow in it"), None);
+        assert_eq!(
+            resolve_arrow_citation("some prose > with an arrow in it"),
+            None
+        );
     }
 
     #[test]
@@ -1164,7 +1188,10 @@ mod tests {
         // Task 1016cbff AC2 style: `<file> <description>` with no `>`.
         assert_eq!(
             resolve_leading_filename_citation("ContentSchedulerTab.test.jsx thread surface"),
-            Some(resolved(Some("ContentSchedulerTab.test.jsx"), "thread surface"))
+            Some(resolved(
+                Some("ContentSchedulerTab.test.jsx"),
+                "thread surface"
+            ))
         );
     }
 
@@ -1231,13 +1258,19 @@ mod tests {
         let file = Some("services/tasks-api/test/taskApprovals.test.ts");
         assert_eq!(
             names,
-            Some(vec![resolved(file, "first test"), resolved(file, "second test")])
+            Some(vec![
+                resolved(file, "first test"),
+                resolved(file, "second test")
+            ])
         );
     }
 
     #[test]
     fn resolve_line_citations_none_without_a_hash_l_marker() {
-        assert_eq!(resolve_line_citations(Path::new("/tmp"), "just a plain name"), None);
+        assert_eq!(
+            resolve_line_citations(Path::new("/tmp"), "just a plain name"),
+            None
+        );
     }
 
     #[test]
@@ -1294,7 +1327,8 @@ mod tests {
         // reference at all is not a shape this can resolve — it must
         // still be attempted (and fail loudly) rather than dropped.
         let root = tempdir().unwrap();
-        let filters = resolve_npm_test_filters(root.path(), "mission-control-vercel-deploy-fixtures");
+        let filters =
+            resolve_npm_test_filters(root.path(), "mission-control-vercel-deploy-fixtures");
         assert_eq!(
             filters,
             vec![resolved(None, "mission-control-vercel-deploy-fixtures")]
