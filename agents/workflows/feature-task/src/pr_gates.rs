@@ -72,7 +72,12 @@ pub(crate) fn clippy_evidence_missing_failure() -> String {
 /// feature-task clippy CI gate (`cbe3333a`) has been green for ≥1 week.
 pub(crate) fn clippy_enforce_enabled() -> bool {
     std::env::var("CLIPPY_ENFORCE")
-        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "On"))
+        .map(|v| {
+            matches!(
+                v.as_str(),
+                "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "On"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -139,9 +144,7 @@ pub(crate) fn pr_changed_files(url: &str) -> Result<Vec<String>, String> {
             ));
         }
         Err(err) => {
-            return Err(format!(
-                "failed to spawn `gh pr view` for {url}: {err}"
-            ));
+            return Err(format!("failed to spawn `gh pr view` for {url}: {err}"));
         }
     };
     let raw = String::from_utf8(output.stdout).unwrap_or_default();
@@ -271,9 +274,7 @@ pub(crate) fn pr_labels(url: &str) -> Result<Vec<String>, String> {
             ));
         }
         Err(err) => {
-            return Err(format!(
-                "failed to spawn `gh pr view` for {url}: {err}"
-            ));
+            return Err(format!("failed to spawn `gh pr view` for {url}: {err}"));
         }
     };
     let raw = String::from_utf8(output.stdout).unwrap_or_default();
@@ -386,11 +387,8 @@ mod tests {
             .map(|label| format!("echo '{label}'"))
             .collect::<Vec<_>>()
             .join("\n");
-        std::fs::write(
-            &script,
-            format!("#!/bin/sh\n{echo_lines}\nexit 0\n"),
-        )
-        .expect("write gh shim");
+        std::fs::write(&script, format!("#!/bin/sh\n{echo_lines}\nexit 0\n"))
+            .expect("write gh shim");
         let mut perm = std::fs::metadata(&script).unwrap().permissions();
         perm.set_mode(0o755);
         std::fs::set_permissions(&script, perm).unwrap();
@@ -443,7 +441,11 @@ mod tests {
         let labels = result.expect("expected Ok when gh succeeds");
         assert_eq!(
             labels,
-            vec!["bug".to_string(), "docs-only".to_string(), "priority-high".to_string()]
+            vec![
+                "bug".to_string(),
+                "docs-only".to_string(),
+                "priority-high".to_string()
+            ]
         );
     }
 

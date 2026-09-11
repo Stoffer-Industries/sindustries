@@ -28,7 +28,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::{Task, StageArgs};
+use crate::{StageArgs, Task};
 
 /// Capacity vs quality classification for a single gate failure string.
 ///
@@ -288,13 +288,7 @@ fn fetch_pr_cycle_time_seconds(prs: &[String]) -> Option<u64> {
     let mut latest_merged: Option<i64> = None;
     for pr in prs {
         let output = crate::cli_utils::gh_command()
-            .args([
-                "pr",
-                "view",
-                pr,
-                "--json",
-                "state,createdAt,mergedAt",
-            ])
+            .args(["pr", "view", pr, "--json", "state,createdAt,mergedAt"])
             .output()
             .ok()?;
         if !output.status.success() {
@@ -347,7 +341,11 @@ fn chrono_like_parse_to_unix(s: &str) -> Option<i64> {
     let minute = parse_component(14, 16)?;
     let second = parse_component(17, 19)?;
     // Days from civil (Howard Hinnant's algorithm) — UTC, no leap seconds.
-    let (year, month) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
+    let (year, month) = if month <= 2 {
+        (year - 1, month + 9)
+    } else {
+        (year, month - 3)
+    };
     let era = if year >= 0 { year } else { year - 399 } / 400;
     let yoe = year - era * 400;
     let m = month;
@@ -499,28 +497,82 @@ mod tests {
 
     #[test]
     fn classify_capacity_block_patterns() {
-        assert_eq!(classify_failure("ready_checks", "Implementer `Rowan` already has an active task in `doing`."), "capacity");
-        assert_eq!(classify_failure("ready_checks", "Task is manually blocked (`blocked: true`); clear the block to allow progression."), "capacity");
-        assert_eq!(classify_failure("ready_checks", "Dependency blocked; clear the block to allow progression."), "capacity");
+        assert_eq!(
+            classify_failure(
+                "ready_checks",
+                "Implementer `Rowan` already has an active task in `doing`."
+            ),
+            "capacity"
+        );
+        assert_eq!(
+            classify_failure(
+                "ready_checks",
+                "Task is manually blocked (`blocked: true`); clear the block to allow progression."
+            ),
+            "capacity"
+        );
+        assert_eq!(
+            classify_failure(
+                "ready_checks",
+                "Dependency blocked; clear the block to allow progression."
+            ),
+            "capacity"
+        );
     }
 
     #[test]
     fn classify_quality_missing_patterns() {
-        assert_eq!(classify_failure("ready_checks", "Missing task comment `[tech-design] <url>`."), "quality");
-        assert_eq!(classify_failure("ready_checks", "AC2 missing evidence."), "quality");
-        assert_eq!(classify_failure("verify_delivery", "PR https://example.com/pull/1 is not merged: ChangesRequested."), "quality");
-        assert_eq!(classify_failure("post_merge", "AC text altered — copy the AC text verbatim from the task description."), "quality");
+        assert_eq!(
+            classify_failure(
+                "ready_checks",
+                "Missing task comment `[tech-design] <url>`."
+            ),
+            "quality"
+        );
+        assert_eq!(
+            classify_failure("ready_checks", "AC2 missing evidence."),
+            "quality"
+        );
+        assert_eq!(
+            classify_failure(
+                "verify_delivery",
+                "PR https://example.com/pull/1 is not merged: ChangesRequested."
+            ),
+            "quality"
+        );
+        assert_eq!(
+            classify_failure(
+                "post_merge",
+                "AC text altered — copy the AC text verbatim from the task description."
+            ),
+            "quality"
+        );
     }
 
     #[test]
     fn classify_unknown_defaults_to_quality() {
-        assert_eq!(classify_failure("ready_checks", "Some new failure mode we haven't seen before"), "quality");
+        assert_eq!(
+            classify_failure(
+                "ready_checks",
+                "Some new failure mode we haven't seen before"
+            ),
+            "quality"
+        );
     }
 
     #[test]
     fn classify_is_case_insensitive() {
-        assert_eq!(classify_failure("ready_checks", "MISSING `[tech-design] <url>`"), "quality");
-        assert_eq!(classify_failure("ready_checks", "Implementer RowAN ALREADY HAS AN ACTIVE TASK IN `doing`."), "capacity");
+        assert_eq!(
+            classify_failure("ready_checks", "MISSING `[tech-design] <url>`"),
+            "quality"
+        );
+        assert_eq!(
+            classify_failure(
+                "ready_checks",
+                "Implementer RowAN ALREADY HAS AN ACTIVE TASK IN `doing`."
+            ),
+            "capacity"
+        );
     }
 
     #[test]
@@ -556,9 +608,18 @@ mod tests {
         ];
         let dist = EvidenceDistribution::from_bodies(&bodies).into_json();
         let obj = dist.unwrap();
-        assert_eq!(obj.get("unit").cloned().unwrap_or(Value::Null), Value::from(1u64));
-        assert_eq!(obj.get("manual").cloned().unwrap_or(Value::Null), Value::from(1u64));
-        assert_eq!(obj.get("integration").cloned().unwrap_or(Value::Null), Value::from(1u64));
+        assert_eq!(
+            obj.get("unit").cloned().unwrap_or(Value::Null),
+            Value::from(1u64)
+        );
+        assert_eq!(
+            obj.get("manual").cloned().unwrap_or(Value::Null),
+            Value::from(1u64)
+        );
+        assert_eq!(
+            obj.get("integration").cloned().unwrap_or(Value::Null),
+            Value::from(1u64)
+        );
     }
 
     #[test]
@@ -567,12 +628,13 @@ mod tests {
         // recognised label list, so a checked AC with this evidence
         // should fall into the "unspecified" bucket so the dashboard
         // still shows coverage without inventing a label.
-        let bodies = vec![
-            "- [x] AC1: Foo (testID: 1)".to_string(),
-        ];
+        let bodies = vec!["- [x] AC1: Foo (testID: 1)".to_string()];
         let dist = EvidenceDistribution::from_bodies(&bodies).into_json();
         let obj = dist.unwrap();
-        assert_eq!(obj.get("unspecified").cloned().unwrap_or(Value::Null), Value::from(1u64));
+        assert_eq!(
+            obj.get("unspecified").cloned().unwrap_or(Value::Null),
+            Value::from(1u64)
+        );
     }
 
     #[test]
@@ -619,9 +681,12 @@ mod tests {
             },
         ];
         let urls = extract_implementer_pr_urls(&task);
-        assert_eq!(urls, vec![
-            "https://github.com/foo/bar/pull/1".to_string(),
-            "https://github.com/foo/bar/pull/2".to_string(),
-        ]);
+        assert_eq!(
+            urls,
+            vec![
+                "https://github.com/foo/bar/pull/1".to_string(),
+                "https://github.com/foo/bar/pull/2".to_string(),
+            ]
+        );
     }
 }

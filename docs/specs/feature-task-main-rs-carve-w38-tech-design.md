@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: fd1aeef8-cd32-4d66-9149-6af8fa93e7d0
 product_spec: n/a (refactor task from repo-audit-2026-W37, finding A3, W38+ second tranche)
-shipped_pr: null
-shipped_date: null
+shipped_pr: 647
+shipped_date: 2026-09-12
 ---
 
 # Feature-task `main.rs` — W38+ second tranche (finish the carve)
