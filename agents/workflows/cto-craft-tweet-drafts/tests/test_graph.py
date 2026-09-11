@@ -21,6 +21,7 @@ separate deterministic tests in ``test_angle_model.py`` and
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -60,13 +61,13 @@ def _transport(
         routes[url] = (200, body, {"content-type": "text/html"})
 
     def handler(req: httpx.Request) -> httpx.Response:
-        url = str(req.url)
-        if url in routes:
-            status, body, headers = routes[url]
-            return httpx.Response(status, content=body, headers=headers)
-        # Substring match for article URLs with query params.
+        # safe_fetch pins the resolved IP into the request URL, so the
+        # transport sees URLs like ``https://<pinned_ip>/...`` rather than
+        # the original hostname. Match routes by path instead of full URL
+        # so the fixture works under pinning.
+        path = req.url.path
         for prefix, (status, body, headers) in routes.items():
-            if url.startswith(prefix):
+            if path == urlsplit(prefix).path:
                 return httpx.Response(status, content=body, headers=headers)
         return httpx.Response(404, content=b"not found", headers={"content-type": "text/plain"})
 
