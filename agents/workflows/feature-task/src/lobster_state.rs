@@ -52,14 +52,11 @@ use crate::api_client;
 use crate::product_spec_parsing;
 use crate::task_approvals;
 use crate::{
-    Task, TaskComment, CODE_TASK_WORKFLOW, LobsterState, STATE_TAG, STATUS_ORDER, WORKFLOW,
+    LobsterState, Task, TaskComment, CODE_TASK_WORKFLOW, STATE_TAG, STATUS_ORDER, WORKFLOW,
 };
 use anyhow::Result;
 use serde_json::Value;
-use std::{
-    fs,
-    path::Path,
-};
+use std::{fs, path::Path};
 
 /// Maximum number of tasks (of any `taskType`) an implementer may have in
 /// `doing` at once. Tom: 2026-07-28 — "im fine with increasing the limit

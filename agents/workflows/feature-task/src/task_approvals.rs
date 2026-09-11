@@ -217,7 +217,10 @@ mod tests {
         // open-question #1): predicate must read it as "not satisfied".
         let task = qa_test_task_with_approvals(vec![("qa_agent", "revoked")]);
         assert!(!qa_agent_verified(&task));
-        assert_eq!(crate::verify_delivery::qa_agent_verified_failures(&task).len(), 1);
+        assert_eq!(
+            crate::verify_delivery::qa_agent_verified_failures(&task).len(),
+            1
+        );
     }
 
     #[test]
