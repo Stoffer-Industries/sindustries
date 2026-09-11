@@ -108,8 +108,26 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
             reason: cap[1].trim().to_string(),
         });
     }
-    // (testID: <value>) — preferred evidence type
-    let test_id = Regex::new(r"\([^a-zA-Z)]*testID:\s*([^)]+)\)\s*$").unwrap();
+    // (testID: <value>) — preferred evidence type.
+    //
+    // The capture stops at the optional ` — <description>` em-dash
+    // separator (whitespace-em-dash-whitespace) when one is present, so
+    // `(🧪 testID: reasoning loop over PR diff — \`agents/ash/test/foo.ts\` asserts ...)`
+    // extracts only `reasoning loop over PR diff` as the testID rather
+    // than the entire em-dash-joined string. The ` — <desc>` half is
+    // human-readable audit metadata, not part of the testID — the
+    // mechanical-evidence gate passes it to the test runner as a vitest
+    // `-t` filter, where it never matches any real `it()`/`test()`
+    // description and the runner's `has_passed_tests` guard then reports
+    // the AC as `test failed (exit 1)` regardless of whether the cited
+    // tests actually pass (this regressed task 0b16dc37's and the 16
+    // other actionable `merged PR + lobster evidence gate stuck` tasks
+    // for ~36h after PR #634 fixed the agents/* invocation; the missing
+    // piece was the parser change below).
+    let test_id = Regex::new(
+        r"\([^a-zA-Z)]*testID:\s*([^)—]+?)(?:\s+—\s+[^)]*)?\)\s*$",
+    )
+    .unwrap();
     if let Some(cap) = test_id.captures(text) {
         return Some(Evidence::TestId(cap[1].trim().to_string()));
     }
@@ -476,6 +494,47 @@ mod tests {
         assert_eq!(
             parse_evidence("foo (🧪 testID: cal-10-day-render)"),
             Some(Evidence::TestId("cal-10-day-render".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_evidence_truncates_test_id_at_em_dash_separator() {
+        // The em-dash + description after the testID is human-readable
+        // audit metadata, not part of the testID. Without truncation the
+        // mechanical-evidence gate passes the entire em-dash-joined
+        // string to vitest as a `-t` filter, where it never matches any
+        // real `it()` description and the runner's silent-pass guard
+        // reports `test failed (exit 1)` for every AC with this shape.
+        assert_eq!(
+            parse_evidence(
+                "AC text (🧪 testID: reasoning loop over PR diff — \
+                 `agents/ash/test/judgment-pattern.test.ts` asserts \
+                 `agents/definitions/ash/HEARTBEAT.md` step 3 describes \
+                 the unified task-queue discovery + reasoning loop with \
+                 no CLI invocation.)",
+            ),
+            Some(Evidence::TestId(
+                "reasoning loop over PR diff".to_string()
+            ))
+        );
+        // Same shape, no emoji prefix.
+        assert_eq!(
+            parse_evidence(
+                "AC text (testID: qa-agent-deferred — HEARTBEAT step 3 \
+                 sub-step 7 posts the per-AC deferral comment.)",
+            ),
+            Some(Evidence::TestId("qa-agent-deferred".to_string()))
+        );
+        // No em-dash separator: legacy single-token shape still works.
+        assert_eq!(
+            parse_evidence("AC text (testID: 1234)"),
+            Some(Evidence::TestId("1234".to_string()))
+        );
+        // Multiple em-dashes inside the description: only the first
+        // (whitespace-bounded) one truncates.
+        assert_eq!(
+            parse_evidence("AC text (testID: simple-name — a — b — c)"),
+            Some(Evidence::TestId("simple-name".to_string()))
         );
     }
 
