@@ -41,7 +41,7 @@ use crate::ac_parsing;
 // tooling is npm workspaces (`npm ci`, `npm test --workspace <pkg>` — see
 // `.github/workflows/ci.yml`), so this runs the equivalent
 // `npm test --workspace <pkg> -- -t "<test_name>"` against the workspace
-// package resolved from the PR's own changed files (`resolve_npm_workspace`
+// package resolved from the PR's own changed files (`resolve_npm_invocation`
 // below), mirroring `PytestTestRunner`'s `nearest_pyproject_dir` approach
 // for Python. A `test_name` that doesn't match any test in that workspace
 // still exits 0 (vitest reports "0 passed" and treats a non-matching `-t`
@@ -50,7 +50,17 @@ use crate::ac_parsing;
 // (PR #541) — so this parses stdout for an actual "N passed" with N > 0
 // before treating the run as a genuine pass.
 pub(crate) struct NpmTestRunner {
-    pub(crate) workspace: Option<String>,
+    /// Default npm invocation for citations that don't carry their own
+    /// file/line reference (bare testID slugs). Computed once per PR by
+    /// `verify_delivery` from the PR's changed files, picking the right
+    /// `Workspace(name)` for registered npm workspaces or `Prefix(dir)`
+    /// for `agents/<x>` (which are intentionally outside the repo root's
+    /// `workspaces`). A bare testID citation on an `agents/<x>` PR
+    /// previously fell back to `Workspace(<name>)` and exited 1 with
+    /// `npm error No workspaces found` (task 0b16dc37 lobster
+    /// mechanical-evidence gate; surfaced after PR #651 fixed the regex
+    /// truncation).
+    pub(crate) default_invocation: Option<NpmInvocation>,
 }
 
 /// Escape regex metacharacters in a literal test description before it is
@@ -90,8 +100,8 @@ fn has_passed_tests(stdout: &str) -> bool {
 /// How `NpmTestRunner` should invoke `npm test` for a given package.
 /// Picked per-citation from `resolve_npm_invocation` based on whether
 /// the package is listed in the repo root's `workspaces` field.
-#[derive(Debug, PartialEq, Eq)]
-enum NpmInvocation {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NpmInvocation {
     /// `npm test --workspace <name> …` — registered in root's workspaces
     /// (apps/*, packages/*, services/*, etc.).
     Workspace(String),
@@ -125,11 +135,13 @@ impl NpmInvocation {
 /// `npm test --prefix agents/ash`, while `gymtrack-tests` runs
 /// `npm test --workspace @sindustries/gymtrack`).
 ///
-/// Falls back to `resolve_npm_workspace`'s name-only resolution when the
-/// first-changed-file package's directory can't be located under
-/// `repo_root` (defensive — `resolve_npm_workspace` already walked the
-/// same path and produced a name).
-fn resolve_npm_invocation(
+/// Falls back to the citation's resolved invocation when no PR file
+/// resolves to a package (bare-slug citations, malformed citations).
+/// `verify_delivery` precomputes a `NpmInvocation` from the PR's
+/// changed files and threads it through `DispatchingTestRunner`'s
+/// `npm_default_invocation` so this fallback is always available when
+/// the citation itself has no file or `#L` reference.
+pub(crate) fn resolve_npm_invocation(
     repo_root: &Path,
     pr_files: &[String],
 ) -> Option<NpmInvocation> {
@@ -221,11 +233,7 @@ impl ac_parsing::TestRunner for NpmTestRunner {
                 .file
                 .as_ref()
                 .and_then(|file| resolve_npm_invocation(&repo_root, std::slice::from_ref(file)))
-                .or_else(|| {
-                    self.workspace
-                        .as_ref()
-                        .map(|name| NpmInvocation::Workspace(name.clone()))
-                });
+                .or_else(|| self.default_invocation.clone());
             let Some(invocation) = invocation else {
                 stderr.push_str(
                     "no npm workspace package could be resolved for this citation; cannot run \
@@ -416,7 +424,7 @@ fn unescape_js_string(raw: &str) -> String {
 /// workspace specifically, rather than the one workspace resolved for the
 /// whole PR — needed when a PR touches more than one JS/TS package (task
 /// 2c3bf69b: `apps/tasks` + `services/tasks-api` in the same PR, where the
-/// PR-level `resolve_npm_workspace` only ever picks the first).
+/// PR-level `resolve_npm_invocation` only ever picks the first).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedFilter {
     pub(crate) file: Option<String>,
@@ -545,33 +553,7 @@ pub(crate) fn resolve_npm_test_filters(repo_root: &Path, citation: &str) -> Vec<
     filters
 }
 
-/// Resolve the npm workspace package name a PR most likely needs its JS/TS
-/// test citations run against, from the PR's changed files. Takes the
-/// first changed file that resolves to a workspace package (via
-/// `nearest_package_json_dir`) and returns that package's `"name"` field.
-/// A PR touching more than one JS/TS package only gets citations checked
-/// against the first one — the citation format has no per-AC package
-/// scope to disambiguate further, the same single-value-per-PR
-/// simplification `is_rust_pr` already makes.
-pub(crate) fn resolve_npm_workspace(repo_root: &Path, pr_files: &[String]) -> Option<String> {
-    for file in pr_files {
-        let Some(package_dir) =
-            crate::test_resolution::nearest_package_json_dir(repo_root, &repo_root.join(file))
-        else {
-            continue;
-        };
-        let Ok(contents) = std::fs::read_to_string(package_dir.join("package.json")) else {
-            continue;
-        };
-        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) else {
-            continue;
-        };
-        if let Some(name) = parsed.get("name").and_then(|v| v.as_str()) {
-            return Some(name.to_string());
-        }
-    }
-    None
-}
+
 
 // `CargoTestRunner` is the production `TestRunner` for ACs whose cited test
 // lives in this Rust crate rather than a JS workspace (dispatched by
@@ -889,7 +871,14 @@ pub(crate) fn select_test_runner_kind(test_name: &str, is_rust_pr: bool) -> Test
 /// that one case.
 pub(crate) struct DispatchingTestRunner {
     pub(crate) is_rust_pr: bool,
-    pub(crate) npm_workspace: Option<String>,
+    /// Pre-computed default npm invocation for bare testID citations
+    /// (see `NpmTestRunner::default_invocation` docs). `resolve_npm_invocation`
+    /// walks the PR's changed files and emits the right `Workspace` vs
+    /// `Prefix` shape, so a bare-slug citation on an `agents/<x>` PR
+    /// resolves to `Prefix("agents/<x>")` instead of the previous
+    /// `Workspace("@sindustries/ash")` (which `npm --workspace` rejects
+    /// because agents/* aren't in the repo root's `workspaces`).
+    pub(crate) npm_default_invocation: Option<NpmInvocation>,
 }
 
 impl ac_parsing::TestRunner for DispatchingTestRunner {
@@ -899,7 +888,7 @@ impl ac_parsing::TestRunner for DispatchingTestRunner {
             TestRunnerKind::Pytest => PytestTestRunner.run(test_name),
             TestRunnerKind::Cargo => CargoTestRunner.run(test_name),
             TestRunnerKind::Npm => NpmTestRunner {
-                workspace: self.npm_workspace.clone(),
+                default_invocation: self.npm_default_invocation.clone(),
             }
             .run(test_name),
         }
@@ -998,50 +987,7 @@ mod tests {
         assert!(!has_passed_tests("npm error code 127\nsh: vitest: command not found\n"));
     }
 
-    #[test]
-    fn resolve_npm_workspace_finds_the_package_touched_by_the_pr() {
-        let root = tempdir().unwrap();
-        let package = root.path().join("apps/mission-control");
-        fs::create_dir_all(&package).unwrap();
-        fs::write(
-            package.join("package.json"),
-            "{\"name\": \"@sindustries/mission-control\"}\n",
-        )
-        .unwrap();
-
-        let pr_files = vec!["apps/mission-control/src/Sidebar.test.jsx".to_string()];
-        let found = resolve_npm_workspace(root.path(), &pr_files);
-        assert_eq!(found, Some("@sindustries/mission-control".to_string()));
-    }
-
-    #[test]
-    fn resolve_npm_workspace_skips_files_with_no_resolvable_package_and_tries_the_next() {
-        let root = tempdir().unwrap();
-        let package = root.path().join("services/tasks-api");
-        fs::create_dir_all(&package).unwrap();
-        fs::write(
-            package.join("package.json"),
-            "{\"name\": \"@sindustries/tasks-api\"}\n",
-        )
-        .unwrap();
-        fs::create_dir_all(root.path().join("docs/specs")).unwrap();
-
-        let pr_files = vec![
-            "docs/specs/some-doc.md".to_string(),
-            "services/tasks-api/src/routes/tasks.ts".to_string(),
-        ];
-        let found = resolve_npm_workspace(root.path(), &pr_files);
-        assert_eq!(found, Some("@sindustries/tasks-api".to_string()));
-    }
-
-    #[test]
-    fn resolve_npm_workspace_returns_none_for_a_docs_only_pr() {
-        let root = tempdir().unwrap();
-        fs::create_dir_all(root.path().join("docs/specs")).unwrap();
-
-        let pr_files = vec!["docs/specs/some-doc.md".to_string()];
-        assert_eq!(resolve_npm_workspace(root.path(), &pr_files), None);
-    }
+    
 
     /// Helpers used by the new `package_is_in_root_workspaces` and
     /// `resolve_npm_invocation` tests: write a minimal repo-root
@@ -1130,6 +1076,48 @@ mod tests {
             &["docs/specs/some-doc.md".to_string()],
         );
         assert_eq!(docs_invocation, None);
+    }
+
+    /// Regression for task 0b16dc37 lobster mechanical-evidence gate
+    /// (second regression after PR #651): the previous
+    /// `NpmTestRunner::workspace: Option<String>` built a
+    /// `Workspace("<name>")` from the name returned by the
+    /// name-only `resolve_npm_workspace`, even when the PR's first
+    /// changed file resolved to a package the repo root *doesn't* list in
+    /// its `workspaces` (`agents/<x>` is intentionally outside, so
+    /// `npm --workspace @sindustries/ash` exits 1 with
+    /// `npm error No workspaces found` before vitest ever runs). For a
+    /// bare-slug citation (no file or `#L` reference), `resolved.file`
+    /// is `None` so the per-citation `resolve_npm_invocation` branch
+    /// never fires and the dispatch must use the PR-level default
+    /// invocation — which `resolve_npm_invocation` returns as
+    /// `Prefix(dir)` for non-workspace packages.
+    #[test]
+    fn npm_default_invocation_picks_prefix_for_non_workspace_packages() {
+        let root = tempdir().unwrap();
+        write_root_workspaces(root.path());
+        // Drop an agents/* package — intentionally NOT in root workspaces.
+        let agents_pkg = root.path().join("agents/ash");
+        fs::create_dir_all(&agents_pkg).unwrap();
+        fs::write(
+            agents_pkg.join("package.json"),
+            "{\"name\": \"@sindustries/ash\"}\n",
+        )
+        .unwrap();
+
+        let invocation = resolve_npm_invocation(
+            root.path(),
+            &["agents/ash/src/verify.ts".to_string()],
+        );
+        assert_eq!(
+            invocation,
+            Some(NpmInvocation::Prefix("agents/ash".to_string())),
+            "agents/* must resolve to `Prefix(\"agents/<x>\")` so \
+             `npm --prefix agents/ash` matches CI; `Workspace(\"<name>\")` \
+             makes `npm --workspace` reject the package as not registered \
+             and the gate mechanically fails the AC regardless of test \
+             outcome (task 0b16dc37 lobster evidence gate)."
+        );
     }
 
     // ---- citation resolution (task 5baf6809-adjacent: PR #610 fixed the

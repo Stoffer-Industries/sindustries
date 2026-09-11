@@ -278,8 +278,18 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             ));
         }
         let pr_files = pr_files_result.unwrap_or_default();
-        let npm_workspace =
-            test_runners::resolve_npm_workspace(&test_runners::repo_root_dir(), &pr_files);
+        // Compute the default `NpmInvocation` from the PR's changed files
+        // (rather than the previous name-only `resolve_npm_workspace`).
+        // The name-only path returned `@sindustries/ash` for agents/* PRs
+        // and the runner then built `Workspace("@sindustries/ash")`, which
+        // `npm --workspace` rejects with `npm error No workspaces found`
+        // because agents/* are intentionally outside the repo root's
+        // `workspaces`. `resolve_npm_invocation` emits `Prefix(dir)` for
+        // non-workspace packages, which is what CI itself uses (task
+        // 0b16dc37 lobster mechanical-evidence gate, second regression
+        // after PR #651).
+        let npm_default_invocation =
+            test_runners::resolve_npm_invocation(&test_runners::repo_root_dir(), &pr_files);
         let body = cli_utils::pr_body(url).unwrap_or_default();
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
@@ -294,7 +304,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         let test_runner: Box<dyn ac_parsing::TestRunner> =
             Box::new(test_runners::DispatchingTestRunner {
                 is_rust_pr,
-                npm_workspace,
+                npm_default_invocation,
             });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
