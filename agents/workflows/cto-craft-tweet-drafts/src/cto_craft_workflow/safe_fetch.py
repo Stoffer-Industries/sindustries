@@ -7,7 +7,12 @@ network, and it does the following:
 - Rejects URLs that are not http(s) and that contain embedded credentials.
 - Resolves DNS and forbids loopback, private, link-local, multicast,
   reserved, and unspecified IP ranges for every redirect hop.
-- Re-validates scheme and IP on every redirect.
+- Pins the resolved public IP into the actual TCP/TLS connection so the
+  server cannot return a different IP for the second DNS lookup
+  (DNS rebinding). The original hostname is preserved in the HTTP ``Host``
+  header and, for HTTPS, in the TLS SNI extension.
+- Re-validates scheme and IP on every redirect, with a fresh resolve and
+  fresh pin per hop (no parent-hop IP reuse).
 - Caps redirect hops, response size, and total wall-clock time.
 - Accepts only HTML or text response content types.
 - Strips known tracking query parameters before returning the canonical URL.
@@ -110,14 +115,21 @@ def _validate_scheme(url: str) -> None:
         raise FetchError("UNSAFE_URL", "URL contains embedded credentials", url=_safe_label(url))
 
 
-def _resolve_and_validate_ip(host: str, url: str) -> None:
-    """Resolve the host and ensure every returned address is public."""
+def _resolve_and_validate_ip(host: str, url: str) -> str:
+    """Resolve ``host`` once and return the first public IP.
+
+    Any returned address that is loopback, private, link-local, multicast,
+    reserved, or unspecified aborts the fetch with ``SSRF_BLOCKED``. The
+    returned IP is then pinned into the actual TCP/TLS connection by the
+    caller, closing the validate-then-refetch DNS-rebinding gap.
+    """
 
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise FetchError("DNS_LOOKUP_FAILED", f"DNS lookup failed for {host}", url=_safe_label(url)) from exc
 
+    pinned_ip: str | None = None
     for info in infos:
         sockaddr = info[4]
         ip = sockaddr[0]
@@ -138,33 +150,33 @@ def _resolve_and_validate_ip(host: str, url: str) -> None:
                 f"Refusing to fetch {host}: resolved to {ip} which is not a public address",
                 url=_safe_label(url),
             )
+        if pinned_ip is None:
+            pinned_ip = ip
+
+    if pinned_ip is None:
+        raise FetchError(
+            "DNS_NO_ADDRESS",
+            f"DNS returned no addresses for {host}",
+            url=_safe_label(url),
+        )
+    return pinned_ip
 
 
-def _is_public_ip(ip: str) -> bool:
-    """Public-IP predicate used after each redirect resolution."""
+def _validate_url_and_resolve(url: str) -> tuple[str, str]:
+    """Validate scheme, resolve host, and return ``(hostname, pinned_ip)``.
 
-    try:
-        parsed = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    if (
-        parsed.is_private
-        or parsed.is_loopback
-        or parsed.is_link_local
-        or parsed.is_multicast
-        or parsed.is_reserved
-        or parsed.is_unspecified
-    ):
-        return False
-    return True
+    Returns both so the caller can build a request with the URL pointing at
+    the pinned IP while the ``Host`` header and TLS SNI advertise the
+    original hostname.
+    """
 
-
-def _validate_url_and_resolve(url: str) -> None:
     _validate_scheme(url)
-    host = urlsplit(url).hostname or ""
-    if not host:
+    parts = urlsplit(url)
+    hostname = parts.hostname or ""
+    if not hostname:
         raise FetchError("UNSAFE_URL", "URL is missing a hostname", url=_safe_label(url))
-    _resolve_and_validate_ip(host, url)
+    pinned_ip = _resolve_and_validate_ip(hostname, url)
+    return hostname, pinned_ip
 
 
 def _acceptable_content_type(content_type: str | None) -> bool:
@@ -172,6 +184,14 @@ def _acceptable_content_type(content_type: str | None) -> bool:
         return False
     head = content_type.split(";", 1)[0].strip().lower()
     return head in ("text/html", "application/xhtml+xml", "text/plain", "text/markdown")
+
+
+def _build_pinned_headers(hostname: str) -> dict:
+    """Build headers for a pinned request: original ``Host`` + Accept."""
+    return {
+        "Accept": "text/html, application/xhtml+xml, text/plain, text/markdown",
+        "Host": hostname,
+    }
 
 
 class SafeFetcher:
@@ -208,6 +228,49 @@ class SafeFetcher:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
+    def _send_pinned(
+        self,
+        *,
+        url: str,
+        hostname: str,
+        pinned_ip: str,
+    ) -> httpx.Response:
+        """Send a GET to ``pinned_ip`` while advertising ``hostname`` in Host + SNI.
+
+        Each hop rebuilds the URL and headers so no parent-hop IP is reused
+        and the original hostname is preserved on the wire.
+        """
+
+        pinned_url = httpx.URL(url).copy_with(host=pinned_ip)
+        headers = _build_pinned_headers(hostname)
+        headers.setdefault("User-Agent", self._user_agent)
+        timeout = httpx.Timeout(
+            connect=self._timeout_seconds,
+            read=self._timeout_seconds,
+            write=self._timeout_seconds,
+            pool=self._timeout_seconds,
+        )
+        request = self._client.build_request("GET", pinned_url, headers=headers, timeout=timeout)
+        if urlsplit(url).scheme == "https":
+            # SNI must advertise the original hostname so the server's
+            # certificate validates against the legitimate host. The IP
+            # itself has no certificate.
+            request.extensions["sni_hostname"] = hostname
+        try:
+            return self._client.send(request)
+        except httpx.TimeoutException as exc:
+            raise FetchError(
+                "TIMEOUT",
+                f"timeout after {self._timeout_seconds}s",
+                url=_safe_label(url),
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise FetchError(
+                "TRANSPORT_ERROR",
+                f"transport error: {exc.__class__.__name__}",
+                url=_safe_label(url),
+            ) from exc
+
     def fetch(
         self,
         url: str,
@@ -217,6 +280,14 @@ class SafeFetcher:
         """Fetch ``url`` and return a bounded, validated resource.
 
         ``kind`` is ``"issue"`` or ``"article"`` and selects the byte cap.
+
+        Each hop resolves the target hostname, validates that every
+        returned address is public, and pins the first public IP into the
+        actual TCP/TLS connection. The HTTP ``Host`` header and TLS SNI
+        continue to advertise the original hostname so the connection is
+        indistinguishable from a normal client to a cooperative server,
+        but a rebinding attacker cannot substitute a private IP because
+        the second DNS lookup never happens.
         """
 
         if kind not in ("issue", "article"):
@@ -224,32 +295,14 @@ class SafeFetcher:
         max_bytes = self._max_issue_bytes if kind == "issue" else self._max_article_bytes
 
         current_url = url
-        for hop in range(self._max_redirects + 1):
-            _validate_url_and_resolve(current_url)
+        current_hostname, current_ip = _validate_url_and_resolve(current_url)
 
-            try:
-                response = self._client.get(
-                    current_url,
-                    timeout=httpx.Timeout(
-                        connect=self._timeout_seconds,
-                        read=self._timeout_seconds,
-                        write=self._timeout_seconds,
-                        pool=self._timeout_seconds,
-                    ),
-                    headers={"Accept": "text/html, application/xhtml+xml, text/plain, text/markdown"},
-                )
-            except httpx.TimeoutException as exc:
-                raise FetchError(
-                    "TIMEOUT",
-                    f"timeout after {self._timeout_seconds}s",
-                    url=_safe_label(current_url),
-                ) from exc
-            except httpx.HTTPError as exc:
-                raise FetchError(
-                    "TRANSPORT_ERROR",
-                    f"transport error: {exc.__class__.__name__}",
-                    url=_safe_label(current_url),
-                ) from exc
+        for hop in range(self._max_redirects + 1):
+            response = self._send_pinned(
+                url=current_url,
+                hostname=current_hostname,
+                pinned_ip=current_ip,
+            )
 
             if response.status_code in (301, 302, 303, 307, 308):
                 if hop >= self._max_redirects:
@@ -266,11 +319,11 @@ class SafeFetcher:
                         url=_safe_label(current_url),
                     )
                 next_url = _resolve_redirect_url(current_url, location)
-                try:
-                    _validate_url_and_resolve(next_url)
-                except FetchError:
-                    raise
+                # Per-hop fresh resolve + fresh pin. No parent-hop IP reuse.
+                next_hostname, next_ip = _validate_url_and_resolve(next_url)
                 current_url = next_url
+                current_hostname = next_hostname
+                current_ip = next_ip
                 continue
 
             if response.status_code >= 400:
@@ -296,7 +349,10 @@ class SafeFetcher:
                     url=_safe_label(current_url),
                 )
 
-            canonical_url = _strip_tracking_query(str(response.url))
+            # Canonical URL preserves the original hostname, not the pinned IP
+            # (the pinned IP is internal to the connection; the resource's
+            # canonical identifier is the hostname the user asked for).
+            canonical_url = _strip_tracking_query(current_url)
             return FetchedResource(
                 url=canonical_url,
                 body=body,
