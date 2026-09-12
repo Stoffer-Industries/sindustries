@@ -28,7 +28,8 @@ pub(crate) struct PrFile {
 /// Evidence annotation recognised on a feature-task PR AC line.
 ///
 /// Priority order: `TestId` (e2e/unit, always prefer this) → `NotTested`
-/// (explicit opt-out with reason) → `NotCode` / `Pr` (non-code ACs).
+/// (explicit opt-out with reason) → `NotCode` / `Pr` / `Signoff` (non-code
+/// or human-judgement ACs).
 ///
 /// `file:` was removed — it encouraged citing implementation files instead of
 /// test files. Use `testID` for any automated test, or `not tested` with a
@@ -49,10 +50,19 @@ pub(crate) enum Evidence {
     NotCode { reason: String },
     /// Covered by another merged PR. e.g. `(🔗 pr: #216)`
     Pr { reference: String },
+    /// Verified by an explicit human sign-off. This is intentionally not
+    /// reduced to a test or file citation: some ACs are approvals or other
+    /// judgement calls that a deterministic runner cannot establish.
+    /// e.g. `(✅ sign-off: Tom)`
+    Signoff { approver: String },
 }
 
 /// One parsed AC line from a PR body.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "retained as a focused parser shape for regression tests"
+)]
 pub(crate) struct AcEvidence {
     pub(crate) ac_label: String,
     pub(crate) description: String,
@@ -138,14 +148,24 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
             reference: cap[1].trim().to_string(),
         });
     }
+    // (sign-off: <approver>) / (signoff: <approver>) — explicit human
+    // judgement evidence, not a claim that a test or file proves the AC.
+    let signoff = Regex::new(r"\([^a-zA-Z)]*sign[- ]?off:\s*([^)]+)\)\s*$").unwrap();
+    if let Some(cap) = signoff.captures(text) {
+        return Some(Evidence::Signoff {
+            approver: cap[1].trim().to_string(),
+        });
+    }
     None
 }
 
 /// Strip a trailing evidence annotation from a description string.
 /// Returns the description with the trailing `(...)` evidence removed.
 pub(crate) fn strip_trailing_evidence(text: &str) -> String {
-    let re =
-        Regex::new(r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr):\s*[^)]+\)\s*$").unwrap();
+    let re = Regex::new(
+        r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr|sign[- ]?off):\s*[^)]+\)\s*$",
+    )
+    .unwrap();
     match re.find(text) {
         Some(m) => text[..m.start()].trim_end().to_string(),
         None => text.to_string(),
@@ -153,6 +173,10 @@ pub(crate) fn strip_trailing_evidence(text: &str) -> String {
 }
 
 /// Parse a single AC line. Returns `None` if the line isn't a checked AC.
+#[allow(
+    dead_code,
+    reason = "retained as a focused single-line parser for regression tests"
+)]
 pub(crate) fn parse_ac_line(line: &str) -> Option<AcEvidence> {
     let ac_re = Regex::new(r"^\s*-\s*\[[xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
     let cap = ac_re.captures(line.trim())?;
@@ -176,8 +200,13 @@ pub(crate) fn parse_ac_line(line: &str) -> Option<AcEvidence> {
 
 /// Build failure messages for ACs that lack evidence. Empty list = all ACs
 /// in the section carry a valid evidence annotation: `(testID: ...)`,
-/// `(not tested: reason)`, `(not code: reason)`, or `(pr: #<n>)`.
+/// `(not tested: reason)`, `(not code: reason)`, `(pr: #<n>)`, or
+/// `(sign-off: approver)`.
 /// Emojis are optional before the keyword.
+#[allow(
+    dead_code,
+    reason = "retained as a focused single-PR validator for regression tests"
+)]
 pub(crate) fn verify_pr_acs_failures(body: &str) -> Vec<String> {
     let section = extract_ac_section(body);
     let mut failures = Vec::new();
@@ -185,13 +214,145 @@ pub(crate) fn verify_pr_acs_failures(body: &str) -> Vec<String> {
         if let Some(ac) = parse_ac_line(line) {
             if ac.evidence.is_none() {
                 failures.push(format!(
-                    "AC {} — missing evidence. Use `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, or `(🔗 pr: #<n>)` if covered by another merged PR.",
+                    "AC {} — missing evidence. Use `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, `(🔗 pr: #<n>)` if covered by another merged PR, or `(✅ sign-off: <approver>)` for a human judgement call.",
                     ac.ac_label
                 ));
             }
         }
     }
     failures
+}
+
+/// Evidence and changed files for one PR that contributes to delivery.
+/// Historical merged PRs are included so a task can be delivered over
+/// several implementation PRs without forcing the final PR to repeat every
+/// earlier AC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeliveryPrEvidence {
+    pub(crate) url: String,
+    pub(crate) body: String,
+    pub(crate) files: Vec<String>,
+}
+
+/// Verify task AC coverage across the complete set of delivery PRs.
+///
+/// An AC is satisfied when at least one delivery PR contains the same AC text
+/// and a recognised evidence annotation. This deliberately allows a later
+/// PR to carry a subset of the task's ACs while preserving the strict checks
+/// for coverage, exact text, and evidence. The caller decides which PRs are
+/// valid delivery (normally the latest PRs plus historical merged PRs).
+pub(crate) fn task_acs_vs_delivery_pr_failures(
+    task_id: &str,
+    task_acs: &[(String, String)],
+    deliveries: &[DeliveryPrEvidence],
+) -> Vec<String> {
+    if task_acs.is_empty() {
+        return vec![];
+    }
+    let entries = collect_delivery_ac_entries(task_id, deliveries);
+
+    let mut failures = Vec::new();
+    for (label, task_text) in task_acs {
+        let Some(candidates) = entries.get(label) else {
+            failures.push(format!(
+                "{label} missing from delivery PRs — include the AC with evidence in one of the implementation PRs."
+            ));
+            continue;
+        };
+        let exact: Vec<_> = candidates
+            .iter()
+            .filter(|(text, _, _)| text.eq_ignore_ascii_case(task_text))
+            .collect();
+        if exact.is_empty() {
+            let (pr_text, _, idx) = &candidates[0];
+            let url = &deliveries[*idx].url;
+            failures.push(format!(
+                "{label} text altered — task: \"{task_text}\", delivery PR {url}: \"{pr_text}\". Copy the AC text verbatim."
+            ));
+        } else if !exact.iter().any(|(_, evidence, _)| evidence.is_some()) {
+            let url = &deliveries[exact[0].2].url;
+            failures.push(format!(
+                "{label} in delivery PR {url} is missing evidence. Append a recognised evidence annotation."
+            ));
+        }
+    }
+    failures
+}
+
+/// Parse every delivery PR's AC lines into `label -> [(text, evidence,
+/// delivery_index)]`, scoped per-delivery to a `### Task <id>` subsection
+/// when one is present. Shared by `task_acs_vs_delivery_pr_failures` (which
+/// reports coverage/text/evidence failures) and `winning_ac_evidence_sources`
+/// (which selects the one delivery whose evidence should be mechanically
+/// checked for each AC), so both agree on exactly the same candidate set.
+fn collect_delivery_ac_entries(
+    task_id: &str,
+    deliveries: &[DeliveryPrEvidence],
+) -> HashMap<String, Vec<(String, Option<Evidence>, usize)>> {
+    let subsection_re = Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
+    let ac_re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
+    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
+    let mut entries: HashMap<String, Vec<(String, Option<Evidence>, usize)>> = HashMap::new();
+
+    for (idx, delivery) in deliveries.iter().enumerate() {
+        let section = extract_ac_section(&delivery.body);
+        let mut matching_section = true;
+        let mut saw_any_subsection = false;
+        for line in section.lines() {
+            if let Some(cap) = subsection_re.captures(line) {
+                let captured = &cap[1];
+                matching_section = captured == task_id || captured == task_short_id;
+                saw_any_subsection = true;
+                continue;
+            }
+            if saw_any_subsection && !matching_section {
+                continue;
+            }
+            if let Some(cap) = ac_re.captures(line) {
+                let label = cap[2].to_string();
+                let raw = cap[3].trim().to_string();
+                entries
+                    .entry(label)
+                    .or_default()
+                    .push((strip_trailing_evidence(&raw), parse_evidence(&raw), idx));
+            }
+        }
+    }
+    entries
+}
+
+/// Select, for each task AC, the single delivery PR whose evidence is
+/// authoritative: the first delivery (in `deliveries` order) whose AC text
+/// exactly matches the task description AND carries evidence — the same
+/// candidate `task_acs_vs_delivery_pr_failures` accepts as satisfying the AC.
+///
+/// Mechanical evidence checks must key off this selection rather than
+/// re-validating every delivery PR that happens to mention the label: when a
+/// task is delivered over several PRs, an earlier PR's now-stale citation
+/// (e.g. a file later moved or renamed) must not block a task whose current,
+/// exact-text AC already has valid evidence elsewhere. ACs with no winning
+/// source are omitted — `task_acs_vs_delivery_pr_failures` already reports
+/// those as coverage/text/evidence failures, and there is no unambiguous
+/// evidence to mechanically check.
+pub(crate) fn winning_ac_evidence_sources(
+    task_id: &str,
+    task_acs: &[(String, String)],
+    deliveries: &[DeliveryPrEvidence],
+) -> HashMap<String, usize> {
+    let entries = collect_delivery_ac_entries(task_id, deliveries);
+    let mut winners = HashMap::new();
+    for (label, task_text) in task_acs {
+        let Some(candidates) = entries.get(label) else {
+            continue;
+        };
+        let winner = candidates
+            .iter()
+            .find(|(text, evidence, _)| text.eq_ignore_ascii_case(task_text) && evidence.is_some());
+        if let Some((_, _, idx)) = winner {
+            winners.insert(label.clone(), *idx);
+        }
+    }
+    winners
 }
 
 /// Extract all ACs from a task description (both checked and unchecked), returning (label, text) pairs.
@@ -244,6 +405,10 @@ pub(crate) fn ac_labels_needing_new_pr(unchecked: &[String], pr_bodies: &[String
 /// so AC labels (`AC1`, `AC2`, ...) from different tasks don't collide in the
 /// underlying HashMap. PR bodies without any `### Task <id>` heading fall back to
 /// consuming the whole AC section — preserving the pre-#183 single-task behavior.
+#[allow(
+    dead_code,
+    reason = "retained as a focused single-PR helper for callers and regression tests"
+)]
 pub(crate) fn task_ac_vs_open_pr_failures(
     task_id: &str,
     task_acs: &[(String, String)],
@@ -302,7 +467,7 @@ pub(crate) fn task_ac_vs_open_pr_failures(
                 }
                 if evidence.is_none() {
                     failures.push(format!(
-                        "{label} — missing evidence. Append `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, or `(🔗 pr: #<n>)` if covered by another merged PR. Emojis are optional but encouraged."
+                        "{label} — missing evidence. Append `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, `(🔗 pr: #<n>)` if covered by another merged PR, or `(✅ sign-off: <approver>)` for a human judgement call. Emojis are optional but encouraged."
                     ));
                 }
             }
@@ -403,11 +568,17 @@ pub(crate) fn mechanical_evidence_failures(
         };
         match evidence {
             Evidence::TestId(test_id) => {
-                if test_file_re.is_match(test_id) {
-                    // File path: must be in the PR diff.
-                    if !path_in_pr(test_id, pr_files) {
+                // A line citation points into a test file, but its line
+                // numbers are attached to the historical PR diff. Re-running
+                // the citation against today's main can select a different
+                // test after later edits, so validate the stable file path
+                // and leave execution to CI/Ash.
+                let line_cited_file = test_id.split_once("#L").map(|(path, _)| path.trim());
+                if test_file_re.is_match(test_id) || line_cited_file.is_some() {
+                    let path = line_cited_file.unwrap_or(test_id);
+                    if !path_in_pr(path, pr_files) {
                         failures.push(format!(
-                            "{label} cites test file \"{test_id}\" but that file is not in the merged PR diff."
+                            "{label} cites test file \"{path}\" but that file is not in the merged PR diff."
                         ));
                     }
                 } else {
@@ -430,35 +601,40 @@ pub(crate) fn mechanical_evidence_failures(
                 }
             }
             Evidence::NotTested { reason } => {
-                // The reason may be a file path or free text. If it looks
-                // like a file path (contains a slash or has a test/spec
-                // extension), check it's in the diff. Otherwise pass.
-                if (reason.contains('/') || test_file_re.is_match(reason))
-                    && !path_in_pr(reason, pr_files)
-                {
-                    failures.push(format!(
-                        "{label} cites not-tested file \"{reason}\" but that file is not in the merged PR diff."
-                    ));
-                }
-                // Free-text reasons pass — no mechanical surface.
+                // `not tested` is an explicit human exception. Its reason is
+                // explanatory prose, not a second file citation; checking
+                // for slashes here made ordinary explanations look like
+                // paths and created false blockers.
+                let _ = (label, reason);
             }
             Evidence::NotCode { reason: _ } => {
                 // Non-code ACs always pass — no file or test surface.
             }
             Evidence::Pr { reference } => {
                 // PR reference: `#<n>` or URL is a sibling cross-reference
-                // and passes structurally. Anything else is treated as a
-                // file path and must be in the diff.
-                if reference.starts_with('#')
-                    || reference.starts_with("http://")
-                    || reference.starts_with("https://")
+                // and passes structurally. A same-PR file citation may have
+                // explanatory prose after the path, so inspect only its first
+                // token before checking the diff.
+                let reference_token = reference
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches('`')
+                    .trim_end_matches([',', '.', ';']);
+                if reference_token.starts_with('#')
+                    || reference_token.starts_with("http://")
+                    || reference_token.starts_with("https://")
                 {
                     // Sibling PR cross-reference — pass.
-                } else if !path_in_pr(reference, pr_files) {
+                } else if !path_in_pr(reference_token, pr_files) {
                     failures.push(format!(
-                        "{label} cites pr reference \"{reference}\" but that file is not in the merged PR diff."
+                        "{label} cites pr reference \"{reference_token}\" but that file is not in the merged PR diff."
                     ));
                 }
+            }
+            Evidence::Signoff { approver: _ } => {
+                // Human sign-off is deliberately verified by the reviewer,
+                // not by a test runner or changed-file heuristic.
             }
         }
     }
@@ -564,6 +740,22 @@ mod tests {
             parse_evidence("foo (🔗 pr: #216)"),
             Some(Evidence::Pr {
                 reference: "#216".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_evidence_recognises_manual_signoff() {
+        assert_eq!(
+            parse_evidence("approval semantics reviewed (✅ sign-off: Tom)"),
+            Some(Evidence::Signoff {
+                approver: "Tom".to_string()
+            })
+        );
+        assert_eq!(
+            parse_evidence("approval semantics reviewed (signoff: Tom)"),
+            Some(Evidence::Signoff {
+                approver: "Tom".to_string()
             })
         );
     }
@@ -858,6 +1050,54 @@ Lead-in.
             failures.is_empty(),
             "expected no failures, got: {failures:?}"
         );
+    }
+
+    #[test]
+    fn delivery_pr_evidence_can_cover_acs_across_multiple_merged_prs() {
+        let task_acs = vec![
+            ("AC1".to_string(), "First slice is delivered".to_string()),
+            ("AC2".to_string(), "Second slice is delivered".to_string()),
+        ];
+        let deliveries = vec![
+            DeliveryPrEvidence {
+                url: "https://github.com/org/repo/pull/10".to_string(),
+                body: "## Acceptance Criteria\n- [x] AC1: First slice is delivered (pr: #10)"
+                    .to_string(),
+                files: vec!["src/first.rs".to_string()],
+            },
+            DeliveryPrEvidence {
+                url: "https://github.com/org/repo/pull/11".to_string(),
+                body:
+                    "## Acceptance Criteria\n- [x] AC2: Second slice is delivered (sign-off: Tom)"
+                        .to_string(),
+                files: vec!["src/second.rs".to_string()],
+            },
+        ];
+        let failures = task_acs_vs_delivery_pr_failures("task-1", &task_acs, &deliveries);
+        assert!(
+            failures.is_empty(),
+            "expected aggregate coverage, got: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn delivery_pr_evidence_requires_exact_text_and_evidence_somewhere() {
+        let task_acs = vec![
+            ("AC1".to_string(), "First slice is delivered".to_string()),
+            ("AC2".to_string(), "Second slice is delivered".to_string()),
+        ];
+        let deliveries = vec![DeliveryPrEvidence {
+            url: "https://github.com/org/repo/pull/10".to_string(),
+            body: "## Acceptance Criteria\n\
+                - [x] AC1: First slice changed\n\
+                - [x] AC2: Second slice is delivered"
+                .to_string(),
+            files: vec![],
+        }];
+        let failures = task_acs_vs_delivery_pr_failures("task-1", &task_acs, &deliveries);
+        assert_eq!(failures.len(), 2, "got: {failures:?}");
+        assert!(failures.iter().any(|failure| failure.contains("AC1")));
+        assert!(failures.iter().any(|failure| failure.contains("AC2")));
     }
 
     #[test]
@@ -1247,9 +1487,31 @@ Lead-in.
             &files,
             &AlwaysPassTestRunner,
         );
+        assert!(failures.is_empty(), "expected suffix match, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_line_citation_checks_stable_file_not_current_line() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Historical test citation (testID: tests/foo.test.ts#L78-100)\n";
+        let files = vec!["tests/foo.test.ts".to_string()];
+        let runner = RecordingTestRunner {
+            log: std::cell::RefCell::new(Vec::new()),
+        };
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Historical test citation"),
+            body,
+            &files,
+            &runner,
+        );
         assert!(
             failures.is_empty(),
-            "expected suffix match, got: {failures:?}"
+            "expected stable file check, got: {failures:?}"
+        );
+        assert!(
+            runner.log.borrow().is_empty(),
+            "line citations must not execute a stale current-line filter"
         );
     }
 
@@ -1313,7 +1575,7 @@ Lead-in.
     }
 
     #[test]
-    fn mechanical_evidence_not_tested_file_path_not_in_diff_fails() {
+    fn mechanical_evidence_not_tested_file_path_is_explanatory_prose() {
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Manual-only test (\u{26a0}\u{fe0f} not tested: apps/ash/src/verify.ts)\n";
         let failures = mechanical_evidence_failures(
@@ -1323,10 +1585,9 @@ Lead-in.
             &[],
             &AlwaysPassTestRunner,
         );
-        assert_eq!(failures.len(), 1, "got: {failures:?}");
         assert!(
-            failures[0].contains("apps/ash/src/verify.ts"),
-            "failure must name the cited file"
+            failures.is_empty(),
+            "expected explicit exception, got: {failures:?}"
         );
     }
 
@@ -1386,6 +1647,24 @@ Lead-in.
             &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
+    }
+
+    #[test]
+    fn mechanical_evidence_pr_file_reference_ignores_explanatory_prose() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: Tech design is documented (pr: docs/specs/design.md on this same branch, Tom sign-off requested)\n";
+        let files = vec!["docs/specs/design.md".to_string()];
+        let failures = mechanical_evidence_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &single_ac("AC1", "Tech design is documented"),
+            body,
+            &files,
+            &AlwaysPassTestRunner,
+        );
+        assert!(
+            failures.is_empty(),
+            "expected first-token path check, got: {failures:?}"
+        );
     }
 
     #[test]

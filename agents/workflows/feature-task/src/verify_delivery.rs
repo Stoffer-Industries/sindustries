@@ -48,6 +48,10 @@ use crate::{
 use anyhow::Result;
 
 /// Extract the PR number from a GitHub PR URL for ordering.
+#[allow(
+    dead_code,
+    reason = "retained for compatibility with existing ordering tests and callers"
+)]
 pub(crate) fn pr_number(url: &str) -> u64 {
     url.rsplit('/')
         .next()
@@ -146,33 +150,34 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // comment — see `latest_implementer_pr_urls` for why this is comment
     // recency, not PR-number magnitude.
     let latest_urls = latest_implementer_pr_urls(&env.task);
-    // AC text match only checks the *latest* PR. Earlier PRs may legitimately
-    // have drifted from the current task description (e.g. trailing-period
-    // fixes landed in a follow-up PR). The latest PR is the one that will be
-    // merged at this gate, so it's the only one that needs to match.
-    let latest_pr_url = latest_urls.iter().max_by_key(|url| pr_number(url)).cloned();
+    // The latest PR set controls review/lifecycle state. Evidence is broader:
+    // merged historical delivery PRs remain valid proof when a task was
+    // intentionally delivered over several PRs.
+    let mut delivery_evidence = Vec::new();
     for url in &pr_urls {
-        // Only the latest PR is the one that will be merged at this gate.
-        // Earlier PRs that were intentionally superseded (e.g. v1 → v2
-        // branch replace, stacked predecessors, or an accidental duplicate
-        // PR a later comment corrected away from) should not contribute
-        // failures here — the AC text match below already targets the
-        // latest PR explicitly, so we extend the same principle to the
-        // review-state and body checks. Without this, a closed-without-merge
-        // superseded PR leaves a persistent "PR X is closed without merge."
-        // failure that blocks every sweep (fingerprint dedup), even after the
-        // task has been re-delivered on a fresh branch.
-        if !is_latest_pr_url(url, &latest_urls) {
-            continue;
-        }
         let review = inspect_pr(url);
-        match review {
-            Ok(r) => {
-                if let Some(failure) = verify_delivery_review_failure(url, r) {
+        let is_latest = is_latest_pr_url(url, &latest_urls);
+        match &review {
+            Ok(r) if is_latest => {
+                if let Some(failure) = verify_delivery_review_failure(url, *r) {
                     failures.push(failure);
                 }
             }
-            Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
+            Err(err) if is_latest => failures.push(format!("Could not inspect PR {url}: {err}.")),
+            _ => {}
+        }
+        // A historical PR contributes evidence only if it actually merged.
+        // This preserves the superseded-PR fix: a closed replacement branch
+        // cannot block delivery, but a merged predecessor can still prove an
+        // AC whose implementation and test remain on main.
+        let contributes_evidence = is_latest || matches!(review, Ok(pr_gates::ReviewState::Merged));
+        if !contributes_evidence {
+            if let Err(err) = review {
+                failures.push(format!(
+                    "Could not inspect historical delivery PR {url}: {err}; cannot use it as AC evidence."
+                ));
+            }
+            continue;
         }
         // Docs-only follow-up PRs (system-spec ADRs, ADR corrections,
         // runbook updates, audit-ledger PRs) carry the `docs-only` label
@@ -189,54 +194,62 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 false
             }
         };
-        if !docs_only {
-            if let Ok(body) = cli_utils::pr_body(url) {
-                if !pr_gates::body_has_checked_acceptance(&body) {
-                    failures.push(format!(
-                        "PR {url} does not show checked acceptance criteria in its body."
-                    ));
-                }
-                for ac_failure in ac_parsing::verify_pr_acs_failures(&body) {
-                    failures.push(format!("PR {url} — {ac_failure}"));
-                }
-            }
+if docs_only {
+            continue;
         }
-    }
-    if let Some(url) = &latest_pr_url {
-        // Same docs-only exemption for the AC text match against the
-        // task description — a docs-only follow-up PR does not need to
-        // cover the AC text in its body; the delivery PR does.
-        let docs_only = match pr_gates::is_docs_only_pr(url) {
-            Ok(value) => value,
+        let body = match cli_utils::pr_body(url) {
+            Ok(body) => body,
             Err(err) => {
                 failures.push(format!(
-                    "Could not read PR labels for {url}: {err}. Cannot exempt docs-only check."
+                    "Could not read PR body for {url}: {err}. Cannot use it as AC evidence."
                 ));
-                false
+                continue;
             }
         };
-        if !docs_only {
-            match cli_utils::pr_body(url) {
-                Ok(body) => {
-                    for ac_failure in
-                        ac_parsing::task_ac_vs_open_pr_failures(&env.task.id, &task_acs, &body, url)
-                    {
-                        failures.push(format!("PR {url} — {ac_failure}"));
-                    }
-                }
-                Err(err) => {
-                    failures.push(format!(
-                        "Could not read PR body for {url}: {err}. Cannot validate AC text."
-                    ));
-                }
+let files = match pr_gates::pr_changed_files(url) {
+            Ok(files) => files,
+            Err(err) => {
+                failures.push(format!(
+                    "Could not list changed files for delivery PR {url}: {err}."
+                ));
+                Vec::new()
+            }
+        };
+        delivery_evidence.push(ac_parsing::DeliveryPrEvidence {
+            url: url.clone(),
+            body,
+            files,
+        });
+    }
+    if !task_acs.is_empty() {
+        if delivery_evidence.is_empty() {
+            failures.push(
+                "No usable delivery PR evidence was found for the task acceptance criteria."
+                    .to_string(),
+            );
+        } else {
+            if !delivery_evidence
+                .iter()
+                .any(|delivery| pr_gates::body_has_checked_acceptance(&delivery.body))
+            {
+                failures.push(
+                    "Delivery PRs do not show checked acceptance criteria in their bodies."
+                        .to_string(),
+                );
+            }
+            for ac_failure in ac_parsing::task_acs_vs_delivery_pr_failures(
+                &env.task.id,
+                &task_acs,
+                &delivery_evidence,
+            ) {
+                failures.push(ac_failure);
             }
         }
     }
-    // Clippy evidence gate (opt-in via CLIPPY_ENFORCE env). When the gate
-    // is enabled, only the latest PR is checked (matches the
-    // `latest_pr_url` principle used above for AC text). Non-Rust /
-    // content-only PRs are skipped outright.
-    if let Some(url) = &latest_pr_url {
+    // Clippy evidence gate (opt-in via CLIPPY_ENFORCE env). Check every
+    // current delivery PR in a multi-workstream task; historical merged PRs
+    // do not need to repeat the current clippy evidence.
+    for url in &latest_urls {
         failures.extend(pr_gates::clippy_evidence_failures(url));
     }
     if workstreams(&env.task).is_empty() {
@@ -257,27 +270,33 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // check below so Ash's heartbeat is not asked to verify a delivery that
     // has not yet cleared the mechanical bar.
     let mut mechanical_gate_failed = false;
-    if let Some(url) = &latest_pr_url {
-        // Pull the changed file list once and let both the runner
-        // disambiguator and the mechanical-evidence check consume it. On
-        // `gh` errors we surface the failure to the gate AND default
-        // `is_rust_pr: true` so citations are over-checked rather than
-        // under-checked during a transient blip (W36 audit finding A2:
-        // false positives — shell citation routed to cargo — are less
-        // harmful than false negatives — Rust citation silently routed to
-        // pnpm).
-        let pr_files_result = pr_gates::pr_changed_files(url);
-        let is_rust_pr = match &pr_files_result {
-            Ok(files) => pr_gates::touches_rust_feature_workflow(files),
-            Err(_) => true,
-        };
-        if let Err(err) = &pr_files_result {
-            failures.push(format!(
-                "Could not list changed files for mechanical evidence check ({url}): {err}; \
-                 defaulting to Rust citation runner."
-            ));
+    // Mechanical evidence checks must key off the same winning source the
+    // coverage/evidence check above selects for each AC — the first delivery
+    // PR (in `pr_urls` order) whose AC text exactly matches the task
+    // description and carries evidence. Checking every delivery PR that
+    // merely *mentions* a label would re-fail a task on a now-stale citation
+    // in an earlier, superseded PR even though a later PR already proves the
+    // AC (task 2c3bf69b's AC6/AC review, Tom's 2026-09-12 05:44 NZST question).
+    let winning_ac_sources =
+        ac_parsing::winning_ac_evidence_sources(&env.task.id, &task_acs, &delivery_evidence);
+    for (delivery_index, delivery) in delivery_evidence.iter().enumerate() {
+        let url = &delivery.url;
+        let acs_won_by_this_delivery: Vec<(String, String)> = task_acs
+            .iter()
+            .filter(|(label, _)| winning_ac_sources.get(label) == Some(&delivery_index))
+            .cloned()
+            .collect();
+        if acs_won_by_this_delivery.is_empty() {
+            // This PR isn't the authoritative evidence source for any AC —
+            // either it doesn't cover any AC, or an earlier PR already won.
+            // Its own (possibly stale) citations are not re-checked.
+            continue;
         }
-        let pr_files = pr_files_result.unwrap_or_default();
+        // Mechanical checks run against each contributing PR's own files and
+        // body. That prevents a multi-PR task from failing merely because its
+        // final PR does not repeat a test file introduced by an earlier merge.
+        let is_rust_pr = pr_gates::touches_rust_feature_workflow(&delivery.files);
+        let pr_files = &delivery.files;
         // Compute the default `NpmInvocation` from the PR's changed files
         // (rather than the previous name-only `resolve_npm_workspace`).
         // The name-only path returned `@sindustries/ash` for agents/* PRs
@@ -289,8 +308,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // 0b16dc37 lobster mechanical-evidence gate, second regression
         // after PR #651).
         let npm_default_invocation =
-            test_runners::resolve_npm_invocation(&test_runners::repo_root_dir(), &pr_files);
-        let body = cli_utils::pr_body(url).unwrap_or_default();
+            test_runners::resolve_npm_invocation(&test_runners::repo_root_dir(), pr_files);
         // A single PR can cite Rust, shell, and Python tests across
         // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
         // same underlying bug: `PnpmTestRunner` was the only runner and
@@ -308,9 +326,9 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
-            &task_acs,
-            &body,
-            &pr_files,
+            &acs_won_by_this_delivery,
+            &delivery.body,
+            pr_files,
             test_runner.as_ref(),
         );
         if !mechanical_failures.is_empty() {
