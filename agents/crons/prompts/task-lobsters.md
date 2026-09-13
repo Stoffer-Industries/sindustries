@@ -1,5 +1,18 @@
 Run the Feature Factory and Content Task workflow lobsters once each.
 
+## Execution contract
+
+Run both lobster commands in the foreground and wait for each command to reach
+a terminal state before completing this cron turn. Never append `&`, use
+`nohup`, or otherwise detach a lobster process.
+
+If `exec` returns a process/session ID because a command is still running, poll
+that process with `process` until it exits. Do not proceed to the next section
+or report success while either lobster is still active. Record the final exit
+status and output for both commands, including when one exits non-zero; one
+lobster's failure must not prevent the other lobster from reaching a terminal
+state.
+
 **On retry (this is attempt > 1 within the same cron run):** always re-run both lobsters from scratch. Do not assume a prior attempt's session completed, try to inspect or attach to its processes, or spend time reasoning about what state it left behind — treat this as a clean, independent run and let the runners' own idempotent discovery (active-task queries) handle anything the prior attempt already touched.
 
 ## 1. Feature Task Lobster
