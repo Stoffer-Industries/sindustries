@@ -28,6 +28,17 @@ from agents.lib import safe_popen, safe_run
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 FEATURE_TASK_PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
+
+# Lobster subprocess timeout (raised above DEFAULT_TIMEOUT_SECONDS=25s for W37 A3
+# main.rs god-file carve tasks — task 9b10c65a has 10+ delivery PRs and a large
+# comment history that consistently exceeds 25s on the lobster subprocess).
+# Tracked in agents/lox/state/lox-incident-state.json slug
+# `task-lobsters-cron-runner-termination-2026-09-13`. Per-rowan review on PR #660:
+# "keep agents/lib shared default at 25s because heartbeat/interactive callers still
+# rely on the 5s margin below a 30s parent timeout; apply a named 45s timeout
+# explicitly to the feature-task runner safe_popen Lobster call, which is the
+# incident-specific source of truth".
+LOBSTER_SUBPROCESS_TIMEOUT_SECONDS: float = 45.0
 CODE_TASK_PIPELINE = SCRIPT_DIR / "code-task.lobster.yaml"
 # Kept for backwards compatibility with any caller that imports `PIPELINE`.
 PIPELINE = FEATURE_TASK_PIPELINE
@@ -154,7 +165,17 @@ def run_workflow(task_id: str, base_url: str, dry_run: bool, pipeline: Path) -> 
         }
     )
     cmd = ["lobster", "run", "--mode", "tool", str(pipeline), "--args-json", args_json]
-    proc = safe_popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=workflow_env())
+    # W37 A3 carve tasks (e.g. task 9b10c65a) run lobster for >25s; pin an explicit
+    # timeout so the per-task subprocess doesn't race the 25s safe_popen default.
+    # See LOBSTER_SUBPROCESS_TIMEOUT_SECONDS rationale above.
+    proc = safe_popen(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=workflow_env(),
+        timeout=LOBSTER_SUBPROCESS_TIMEOUT_SECONDS,
+    )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     threads = [
