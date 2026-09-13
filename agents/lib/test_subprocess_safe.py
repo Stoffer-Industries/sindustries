@@ -89,13 +89,11 @@ class SafeRunTests(unittest.TestCase):
 class ModuleSurfaceTests(unittest.TestCase):
     """The helper is exposed both via the module and via `agents.lib.safe_run`."""
 
-    def test_module_default_constant_is_twenty_five_seconds(self) -> None:
-        # AC1 pins the default at 25s (reduced from 30s on 2026-08-20 to fix
-        # incident `agent-task-queue-script-subprocess-timeout-race-2026-08-20`:
-        # the 30s default raced the heartbeat's 30s exec timeout, leaving 0 bytes
-        # of stdout when python3 was SIGKILL'd mid-subprocess). If you change the
-        # constant, update the runbook and the task description together.
-        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 25.0)
+    def test_module_default_constant_is_forty_five_seconds(self) -> None:
+        # The default is 45s for heavyweight cron tasks such as the W37 feature-task
+        # carve. The earlier 25s default was too tight and caused the lobster's inner
+        # subprocess to abort before the task could finish.
+        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 45.0)
 
     def test_safe_run_is_reexported_from_agents_lib_package(self) -> None:
         # AC2: `from agents.lib import safe_run` must work.
@@ -177,7 +175,7 @@ class SafePopenTests(unittest.TestCase):
                 proc.wait(timeout=5)
 
     def test_b_prime_default_constant_also_fires_within_window(self) -> None:
-        # Sanity: with the module's DEFAULT_TIMEOUT_SECONDS = 25, an explicit
+        # Sanity: with the module's DEFAULT_TIMEOUT_SECONDS = 45, an explicit
         # call to safe_popen(..., timeout=25) using a child that sleeps forever
         # (or much longer than 30s) would raise TimeoutExpired. We exercise a
         # short timeout here to keep the test under a second; the intent is to
