@@ -27,6 +27,14 @@ Any agent can use this. No campaign logic, no theme picking, no arc drafting —
 - **`sourceRef`** (string, optional) — a URL or file path pointing back to the source signal (e.g. `brain/content/sindustries-weekly-content/YYYY-MM-DD.md`).
 - **`actor`** (string, default = the calling agent's name) — sent as the `x-actor` header for audit attribution. It must match the actor bound to the caller's Tasks API credential.
 
+## Base URL
+
+```bash
+export CONTENT_SCHEDULER_API_BASE_URL=http://localhost:4004/api/v1
+```
+
+The default port is **4004** (prodlike content-scheduler-api, per `services/content-scheduler-api/.env.prodlike`). For local dev, set `CONTENT_SCHEDULER_API_BASE_URL=http://localhost:4003/api/v1` (per `.env.example`). The previous `:4001` was a documentation drift — that port is tasks-api and does not serve this route.
+
 ## Authentication
 
 `TASKS_API_APPROVAL_TOKEN` is mandatory and must be the calling agent's own workspace-scoped credential. Never borrow another agent's token. The Tasks API derives the authoritative actor from the bearer credential; `x-actor` remains an audit signal and must match it.
@@ -35,6 +43,7 @@ Fail before making a request when the token is missing:
 
 ```bash
 : "${TASKS_API_APPROVAL_TOKEN:?calling agent Tasks API credential is required}"
+: "${CONTENT_SCHEDULER_API_BASE_URL:?content-scheduler base URL is required (default http://localhost:4004/api/v1 for prodlike)}"
 ```
 
 ## Output
@@ -58,8 +67,9 @@ Compute the ISO in `Pacific/Auckland` with the correct NZST (+12:00) / NZDT (+13
 
 ```bash
 : "${TASKS_API_APPROVAL_TOKEN:?calling agent Tasks API credential is required}"
+: "${CONTENT_SCHEDULER_API_BASE_URL:?content-scheduler base URL is required (default http://localhost:4004/api/v1 for prodlike)}"
 
-curl -sS -X POST http://localhost:4001/api/v1/content-scheduler/items \
+curl -sS -X POST "${CONTENT_SCHEDULER_API_BASE_URL}/content-scheduler/items" \
   -H "Authorization: Bearer ${TASKS_API_APPROVAL_TOKEN}" \
   -H 'content-type: application/json' \
   -H "x-actor: ${actor}" \
@@ -72,7 +82,7 @@ curl -sS -X POST http://localhost:4001/api/v1/content-scheduler/items \
   }'
 ```
 
-Endpoint: `http://localhost:4001/api/v1/content-scheduler/items`. Route is documented in `docs/systems/content-scheduler.md`.
+Endpoint: `${CONTENT_SCHEDULER_API_BASE_URL}/content-scheduler/items`. Route is documented in `docs/systems/content-scheduler.md`.
 
 ### 4. Handle the response
 
