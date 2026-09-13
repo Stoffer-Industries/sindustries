@@ -40,12 +40,14 @@ The default port is **4004** (prodlike content-scheduler-api, per `services/cont
 
 ## Authentication
 
-`TASKS_API_APPROVAL_TOKEN` is mandatory and must be the calling agent's own workspace-scoped credential. Never borrow another agent's token. The Tasks API derives the authoritative actor from the bearer credential; `x-actor` remains an audit signal and must match it.
+`CONTENT_SCHEDULER_API_APPROVAL_TOKEN` is mandatory. This is a **content-scheduler-specific** bearer credential, **not** a Tasks API token — the two services have intentionally separate credential stores (see `docs/specs/content-scheduler-auth-tech-design.md`). A leaked content-scheduler token does NOT unlock tasks-api and vice versa.
+
+Each agent has their own per-agent `CONTENT_SCHEDULER_API_APPROVAL_TOKEN`. Tokens are configured server-side in `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` as a JSON array of `{ token, actor, approvalTypes }` entries. Never borrow another agent's token. The content-scheduler does not derive actor from the bearer (unlike tasks-api); the actor is bound to the credential at server-config time.
 
 Fail before making a request when the token is missing:
 
 ```bash
-: "${TASKS_API_APPROVAL_TOKEN:?calling agent Tasks API credential is required}"
+: "${CONTENT_SCHEDULER_API_APPROVAL_TOKEN:?content-scheduler bearer credential is required (per-agent; distinct from tasks-api TASKS_API_APPROVAL_TOKEN)}"
 : "${CONTENT_SCHEDULER_API_BASE_URL:?content-scheduler base URL is required (default http://localhost:4004/api/v1 for prodlike)}"
 ```
 
@@ -76,11 +78,11 @@ A thread occupies one `scheduledFor`. Its reply parts are **not** assigned conse
 ### 3. POST to the scheduler
 
 ```bash
-: "${TASKS_API_APPROVAL_TOKEN:?calling agent Tasks API credential is required}"
+: "${CONTENT_SCHEDULER_API_APPROVAL_TOKEN:?content-scheduler bearer credential is required (per-agent; distinct from tasks-api TASKS_API_APPROVAL_TOKEN)}"
 : "${CONTENT_SCHEDULER_API_BASE_URL:?content-scheduler base URL is required (default http://localhost:4004/api/v1 for prodlike)}"
 
 curl -sS -X POST "${CONTENT_SCHEDULER_API_BASE_URL}/content-scheduler/items" \
-  -H "Authorization: Bearer ${TASKS_API_APPROVAL_TOKEN}" \
+  -H "Authorization: Bearer ${CONTENT_SCHEDULER_API_APPROVAL_TOKEN}" \
   -H 'content-type: application/json' \
   -H "x-actor: ${actor}" \
   -d '{
