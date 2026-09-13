@@ -326,8 +326,15 @@ jobs:
       - name: Run ash verifier tests
         run: npm test --prefix agents/ash
 
-  budget-api-tests:
-    name: budget-api tests (unit + db integration)
+  budget-api-unit:
+    # W38 audit T0/F4 — renamed from `budget-api-tests` and split off the
+    # misleading "(unit + db integration)" label. The job now honestly
+    # declares its scope: budget-api unit tests + the budget-domain and
+    # budget-mobile checks the workspace already declared but CI never
+    # ran. The real-DB integration suite lives in the sibling
+    # `budget-api-db-integration` job below. See docs/repo-audits/2026-W38.md
+    # finding F4 for the audit trail.
+    name: budget-api unit + domain/mobile checks
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -370,11 +377,85 @@ jobs:
       - name: Run unit tests
         run: npm test --workspace services/budget-api
 
+      # W38 audit F4 AC1: CI now runs the budget-domain and budget-mobile
+      # checks the rest of the workspace already declared. These three steps
+      # are what the old "unit + db integration" job claimed to cover but
+      # never actually exercised.
+      - name: Run packages/budget-domain tests
+        run: npm test --workspace packages/budget-domain
+
+      - name: Run packages/budget-domain typecheck
+        run: npm run typecheck --workspace packages/budget-domain
+
+      - name: Run apps/budget-mobile typecheck
+        run: npm run typecheck --workspace apps/budget-mobile
+
       - name: Apply DB migrations
         run: npm run prisma:migrate --workspace services/budget-api
 
       - name: Seed DB
         run: npm run prisma:seed --workspace services/budget-api
+
+  budget-api-db-integration:
+    # W38 audit F4 AC2/AC3: the existing `ownership-contract.test.ts`
+    # suite mocks Prisma entirely, so real DB-layer bugs (mistyped fields,
+    # missing `where`, broken transaction boundaries) silently pass CI.
+    # This job runs a parallel test file
+    # (`services/budget-api/test/ownership-contract-integration.test.ts`)
+    # against the same Postgres service the unit job provisions, with
+    # Akahu HTTP stubs so no real outbound network is required. The test
+    # self-skips when `BUDGET_API_INTEGRATION_TEST` is unset so local
+    # developers running `npm test` against a non-existent DB are not
+    # broken. The unit job deliberately does not set this env var.
+    name: budget-api db integration (real Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sindustries_budget
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sindustries_budget"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sindustries_budget?schema=budget_api
+      OTEL_SDK_DISABLED: '1'
+      AKAHU_DEV_USER_ACCESS_TOKEN: ''
+      BUDGET_API_INTEGRATION_TEST: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Ensure Rollup Linux native binary is present
+        run: npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace services/budget-api
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace services/budget-api
+
+      - name: Apply DB migrations
+        run: npm run prisma:migrate --workspace services/budget-api
+
+      - name: Seed DB
+        run: npm run prisma:seed --workspace services/budget-api
+
+      - name: Run ownership-contract integration (real DB)
+        run: npm test --workspace services/budget-api -- ownership-contract-integration
 
   tasks-app-tests:
     name: tasks app tests
