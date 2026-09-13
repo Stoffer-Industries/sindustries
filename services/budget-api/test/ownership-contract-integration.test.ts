@@ -187,23 +187,17 @@ d('budget-api ownership contract — real Postgres (task 1eb22a09)', () => {
     stubAkahuFetch();
   });
 
-  afterEach(async () => {
-    // Per-test cleanup: wipe only the rows touched by tests (mutable
-    // per-card/per-user data). Users + sessions + cards persist from
-    // beforeAll so the auth and ownership fixtures stay stable across
-    // tests. Truncate with CASCADE so foreign-key dependencies inside
-    // this subset don't block the wipe.
-    await prisma.$executeRawUnsafe(`
-      TRUNCATE TABLE
-        "budget_api"."CategorizationFeedback",
-        "budget_api"."BalanceAlertConfig",
-        "budget_api"."NotificationEvent",
-        "budget_api"."CardMonthlyBudget",
-        "budget_api"."Transaction",
-        "budget_api"."AccountBalanceSnapshot"
-      CASCADE
-    `);
-  });
+  // No afterEach cleanup. The beforeAll TRUNCATE + seed is sufficient
+  // because every test uses stable fixture IDs (USER_1_ID, CARD_1_ID,
+  // TXN_1_ID, ALERT_1_ID) and the route handlers under test don't
+  // depend on per-test ordering of those fixtures. An earlier version
+  // of this suite ran a per-test TRUNCATE here that — once the snake-
+  // case identifier bug was fixed — actually succeeded and wiped the
+  // shared seed rows that downstream tests (AC5/AC6/AC7) depend on.
+  // Removing the wipe keeps every test running against the complete
+  // dataset. If a future test mutates a fixture other tests need,
+  // re-seed that fixture in that test rather than reintroducing a
+  // global afterEach wipe.
 
   // ─── Cards: budget ─────────────────────────────────────────────────────────
 
