@@ -58,8 +58,8 @@ class LobsterTimeoutConstantTests(unittest.TestCase):
             constants,
             f"{RUN_PY.name} must declare LOBSTER_SUBPROCESS_TIMEOUT_SECONDS "
             "explicitly so the W37 A3 carve tasks don't race the 25s default. "
-            "Tracked in agents/lox/state/lox-incident-state.json slug "
-            "`task-lobsters-cron-runner-termination-2026-09-13`.",
+            "Tracked in brain/state/lox-incident-state.json slug "
+            "(canonical) `task-lobsters-cron-runner-termination-2026-09-13`.",
         )
         self.assertEqual(
             constants["LOBSTER_SUBPROCESS_TIMEOUT_SECONDS"],
@@ -69,32 +69,51 @@ class LobsterTimeoutConstantTests(unittest.TestCase):
         )
 
     def test_safe_popen_lobster_call_passes_explicit_timeout(self) -> None:
-        # The safe_popen call must pass timeout= explicitly (not rely on the
-        # DEFAULT_TIMEOUT_SECONDS default). If a future edit drops the kwarg, this
-        # catches it before the cron failure recurs.
+        # The safe_popen call that runs the lobster subprocess must pass timeout=
+        # explicitly (not rely on the DEFAULT_TIMEOUT_SECONDS default). If a future
+        # edit drops the kwarg, this catches it before the cron failure recurs.
+        #
+        # Per-rowan review (second pass on PR #663): require exactly ONE matching
+        # call site so the test does not pass vacuously if safe_popen is missing
+        # entirely.
         tree = ast.parse(RUN_PY.read_text())
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            if not (isinstance(func, ast.Name) and func.id == "safe_popen"):
-                continue
-            kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg == "timeout"}
-            self.assertIn(
-                "timeout",
-                kwargs,
-                "feature-task/run.py safe_popen call must pass timeout= explicitly. "
-                "See LOBSTER_SUBPROCESS_TIMEOUT_SECONDS comment for rationale.",
-            )
-            # The value passed must reference the constant, not a literal number,
-            # so the timeout stays discoverable and testable.
-            self.assertIsInstance(
-                kwargs["timeout"],
-                ast.Name,
-                "safe_popen timeout= must reference LOBSTER_SUBPROCESS_TIMEOUT_SECONDS "
-                "(not a literal) so the value stays discoverable.",
-            )
-            self.assertEqual(kwargs["timeout"].id, "LOBSTER_SUBPROCESS_TIMEOUT_SECONDS")
+
+        def _safe_popen_calls(t: ast.AST) -> list:
+            out: list = []
+            for node in ast.walk(t):
+                if isinstance(node, ast.Call):
+                    func = node.func
+                    if isinstance(func, ast.Name) and func.id == "safe_popen":
+                        out.append(node)
+            return out
+
+        calls = _safe_popen_calls(tree)
+        self.assertEqual(
+            len(calls),
+            1,
+            f"feature-task/run.py must have exactly one safe_popen call to run "
+            "the lobster subprocess; found {len(calls)}. Per-rowan review on PR "
+            "#663: assert exactly one matching call so the test does not pass "
+            "vacuously.",
+        )
+
+        call = calls[0]
+        kwargs = {kw.arg: kw.value for kw in call.keywords if kw.arg == "timeout"}
+        self.assertIn(
+            "timeout",
+            kwargs,
+            "feature-task/run.py safe_popen call must pass timeout= explicitly. "
+            "See LOBSTER_SUBPROCESS_TIMEOUT_SECONDS comment for rationale.",
+        )
+        # The value passed must reference the constant, not a literal number,
+        # so the timeout stays discoverable and testable.
+        self.assertIsInstance(
+            kwargs["timeout"],
+            ast.Name,
+            "safe_popen timeout= must reference LOBSTER_SUBPROCESS_TIMEOUT_SECONDS "
+            "(not a literal) so the value stays discoverable.",
+        )
+        self.assertEqual(kwargs["timeout"].id, "LOBSTER_SUBPROCESS_TIMEOUT_SECONDS")
 
 
 if __name__ == "__main__":
