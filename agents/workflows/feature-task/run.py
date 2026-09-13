@@ -32,7 +32,7 @@ FEATURE_TASK_PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
 # Lobster subprocess timeout (raised above DEFAULT_TIMEOUT_SECONDS=25s for W37 A3
 # main.rs god-file carve tasks — task 9b10c65a has 10+ delivery PRs and a large
 # comment history that consistently exceeds 25s on the lobster subprocess).
-# Tracked in agents/lox/state/lox-incident-state.json slug
+# Tracked in brain/state/lox-incident-state.json slug (canonical; agents/lox/state/lox-incident-state.json is the iCloud-zone-failure fallback per the file's _meta)
 # `task-lobsters-cron-runner-termination-2026-09-13`. Per-rowan review on PR #660:
 # "keep agents/lib shared default at 25s because heartbeat/interactive callers still
 # rely on the 5s margin below a 30s parent timeout; apply a named 45s timeout
