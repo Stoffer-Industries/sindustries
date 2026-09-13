@@ -33,7 +33,7 @@ on:
       - 'services/content-scheduler-api/**'
       - 'packages/otel-node/**'
       - 'package.json'
-      - 'pnpm-lock.yaml'
+      - 'package-lock.json'
       - 'infra/cloud/**'
       - '.github/workflows/deploy-staging-auto-post-worker.yml'
   workflow_dispatch:
