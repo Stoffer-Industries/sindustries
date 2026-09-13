@@ -135,7 +135,7 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
     // for ~36h after PR #634 fixed the agents/* invocation; the missing
     // piece was the parser change below).
     let test_id = Regex::new(
-        r"\([^a-zA-Z)]*testID:\s*([^)—]+?)(?:\s+—\s+[^)]*)?\)\s*$",
+        r"\([^a-zA-Z)]*testID:\s*([^)—]+?)(?:\s+—\s+[^()]*+(?:\([^)]*\)[^()]*)*)?\)\s*$",
     )
     .unwrap();
     if let Some(cap) = test_id.captures(text) {
@@ -161,9 +161,19 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
 
 /// Strip a trailing evidence annotation from a description string.
 /// Returns the description with the trailing `(...)` evidence removed.
+///
+/// The body matcher allows one level of nested parens inside the
+/// annotation so an evidence body that quotes a description containing
+/// `(...)` — e.g. `(🧪 testID: … pre-existing app.test.js (24 tests)
+/// untouched …)` (task 37bbc104 AC6) — is matched as a single trailing
+/// annotation instead of being chopped at the first inner `)`. The
+/// previous `[^)]+` stopped at the first inner `)` and left the
+/// remaining annotation text attached to the description, so
+/// `task_acs_vs_delivery_pr_failures` reported the AC as "text altered"
+/// even though the only difference was a legitimate evidence annotation.
 pub(crate) fn strip_trailing_evidence(text: &str) -> String {
     let re = Regex::new(
-        r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr|sign[- ]?off):\s*[^)]+\)\s*$",
+        r"\s+\([^a-zA-Z)]*(?:testID|not tested|not code|pr|sign[- ]?off):\s*[^()]*+(?:\([^)]*\)[^()]*)*\)\s*$",
     )
     .unwrap();
     match re.find(text) {
@@ -792,6 +802,33 @@ mod tests {
             strip_trailing_evidence("AC text (not code: updated brain/foo.md)"),
             "AC text"
         );
+    }
+
+    /// Regression for task 37bbc104 (and 15 other actionable tasks in the
+    /// same `merged PR + lobster evidence gate stuck` batch): the AC6
+    /// evidence annotation quoted a parenthetical inside the body —
+    /// `(🧪 testID: … pre-existing app.test.js (24 tests) untouched; full
+    /// suite 32/32 passes)` — and the old `[^)]+` body matcher stopped at
+    /// the inner `)`, leaving ` untouched; full suite 32/32 passes)`
+    /// attached to the description. That made
+    /// `task_acs_vs_delivery_pr_failures` report the AC as "text altered"
+    /// even when the only difference was a legitimate evidence annotation.
+    #[test]
+    fn strip_trailing_evidence_handles_nested_parens_in_body() {
+        let description_with_evidence = "Existing gymtrack-mcp vitest suite (24 tests) remains green; CI `gymtrack-mcp tests` job passes on a fresh PR branch. (🧪 testID: services/gymtrack-mcp/test/rateLimit.test.js — 8 new vitest cases; pre-existing app.test.js (24 tests) untouched; full suite 32/32 passes)";
+        assert_eq!(
+            strip_trailing_evidence(description_with_evidence),
+            "Existing gymtrack-mcp vitest suite (24 tests) remains green; CI `gymtrack-mcp tests` job passes on a fresh PR branch.",
+        );
+    }
+
+    #[test]
+    fn strip_trailing_evidence_handles_multiple_nested_parens() {
+        // Two levels of nested parens in the evidence body — still only
+        // one closing paren from the matcher, but the body itself quotes
+        // `(...)` twice.
+        let text = "Foo bar baz (note in middle) and more. (🔗 pr: #216 — covers (PR-1) and (PR-2))";
+        assert_eq!(strip_trailing_evidence(text), "Foo bar baz (note in middle) and more.");
     }
 
     // ---- parse_ac_line ----

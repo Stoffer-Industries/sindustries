@@ -85,13 +85,65 @@ fn regex_escape_literal(s: &str) -> String {
     escaped
 }
 
+/// Strip ANSI SGR (`\x1b[…m`) and OSC (`\x1b]…BEL`) escape sequences
+/// from `stdout` before regex-matching, so coloured vitest output (the
+/// default reporter when npm test detects a TTY) does not break the
+/// `Tests N passed` match. Without this, the literal `Tests\s+N\s+passed`
+/// regex only fires on uncoloured output, and every AC whose cited test
+/// actually runs and passes is mis-reported as `test failed (exit 1)`
+/// because the runner's `output.status.success() && has_passed_tests(&stdout)`
+/// short-circuit never returns exit 0 (this regressed task 37bbc104 AC1-5
+/// and the 15 other actionable `merged PR + lobster evidence gate stuck`
+/// tasks for ~36h after PR #649 cleared the text-altered check).
+fn strip_ansi(stdout: &str) -> String {
+    let mut out = String::with_capacity(stdout.len());
+    let mut chars = stdout.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            // Skip the CSI introducer (`\x1b[`) parameter block + final byte.
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+                continue;
+            }
+            // Skip OSC (`\x1b]…\x07` or `\x1b]…\x1b\\`) — vitest doesn't emit
+            // these today, but stripping them keeps the helper robust if it
+            // ever starts to.
+            if chars.peek() == Some(&']') {
+                chars.next();
+                let mut prev = None;
+                for c in chars.by_ref() {
+                    if c == '\x07' {
+                        break;
+                    }
+                    if prev == Some('\x1b') && c == '\\' {
+                        break;
+                    }
+                    prev = Some(c);
+                }
+                continue;
+            }
+            // Bare ESC (e.g. cursor moves): swallow the next byte if any.
+            chars.next();
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// True when vitest's default reporter output shows at least one test that
 /// actually ran and passed (`Tests  N passed` with N > 0, not just
 /// `N skipped`). A `-t` filter matching nothing still exits 0 with every
 /// test reported "skipped" — without this check that would read as a pass.
 fn has_passed_tests(stdout: &str) -> bool {
     let re = Regex::new(r"Tests\s+(\d+)\s+passed").unwrap();
-    re.captures(stdout)
+    let stripped = strip_ansi(stdout);
+    re.captures(&stripped)
         .and_then(|caps| caps.get(1))
         .and_then(|m| m.as_str().parse::<u32>().ok())
         .is_some_and(|n| n > 0)
@@ -146,8 +198,23 @@ pub(crate) fn resolve_npm_invocation(
     pr_files: &[String],
 ) -> Option<NpmInvocation> {
     for file in pr_files {
-        let package_dir =
-            crate::test_resolution::nearest_package_json_dir(repo_root, &repo_root.join(file))?;
+        // A PR often touches both JS/TS and non-JS files (tech design
+        // docs, system specs, scripts/, etc.). `nearest_package_json_dir`
+        // returns `None` for files that don't sit under any package —
+        // skip those so the loop continues to the next changed file
+        // instead of bailing out on the first non-JS path
+        // (`task_acs_vs_delivery_pr_failures` would then report
+        // `default_invocation = None` for *every* AC on a PR whose
+        // earliest changed file is a doc/spec, even though a later file
+        // in the same diff lives in a real workspace — this regressed
+        // task 37bbc104 AC5 and the 15 other actionable
+        // `merged PR + lobster evidence gate stuck` tasks for ~36h).
+        let Some(package_dir) = crate::test_resolution::nearest_package_json_dir(
+            repo_root,
+            &repo_root.join(file),
+        ) else {
+            continue;
+        };
         let Ok(contents) = std::fs::read_to_string(package_dir.join("package.json")) else {
             continue;
         };
@@ -1001,6 +1068,24 @@ mod tests {
         ));
     }
 
+    /// Regression for task 37bbc104 AC1-5 (and 15 other actionable tasks
+    /// in the same `merged PR + lobster evidence gate stuck` batch):
+    /// vitest's default reporter emits ANSI SGR escape sequences between
+    /// `Tests`, the number, and `passed` (e.g. `Tests\u{1b}[22m \u{1b}[32m1
+    /// passed`). The literal `Tests\s+(\d+)\s+passed` regex never matched
+    /// coloured output, so `NpmTestRunner` reported `test failed (exit 1)`
+    /// for every AC whose cited test actually ran and passed.
+    #[test]
+    fn has_passed_tests_true_when_output_is_ansi_coloured() {
+        // Vitest 4.x reporter — the exact shape the lobster sees when
+        // `npm test` is invoked from this repo's `verify_delivery`.
+        let stdout = "\u{1b}[2m RUN \u{1b}[22m \u{1b}[36mv4.1.10\u{1b}[39m services/gymtrack-mcp\n\
+             \n\
+             \u{1b}[2m Test Files \u{1b}[22m \u{1b}[1m\u{1b}[32m1 passed\u{1b}[39m\u{1b}[22m\n\
+             \u{1b}[2m      Tests \u{1b}[22m \u{1b}[1m\u{1b}[32m1 passed\u{1b}[39m\u{1b}[22m \u{1b}[2m | \u{1b}[22m \u{1b}[33m31 skipped\u{1b}[39m\u{1b}[90m (32)\u{1b}[39m\n";
+        assert!(has_passed_tests(stdout));
+    }
+
     
 
     /// Helpers used by the new `package_is_in_root_workspaces` and
@@ -1097,6 +1182,44 @@ mod tests {
         let docs_invocation =
             resolve_npm_invocation(root.path(), &["docs/specs/some-doc.md".to_string()]);
         assert_eq!(docs_invocation, None);
+    }
+
+    /// Regression for task 37bbc104 (and 15 other actionable tasks in the
+    /// same `merged PR + lobster evidence gate stuck` batch): the PR
+    /// mixed a doc/spec file with code files in `pr_files`, and the
+    /// previous `?` on `nearest_package_json_dir` returned `None` for
+    /// the first file (`docs/specs/...`) before walking the rest of the
+    /// list, so `npm_default_invocation` was `None` for the whole PR
+    /// even though a later file (`services/gymtrack-mcp/test/...`)
+    /// lived in a registered workspace. A filter citation whose `file`
+    /// was `None` then fell through to `default_invocation.clone()`,
+    /// got `None`, returned `exit_code: 1` from
+    /// `NpmTestRunner::run`, and the lobster reported
+    /// `test failed (exit 1)` for the AC.
+    #[test]
+    fn resolve_npm_invocation_skips_non_js_files_to_find_a_later_workspace_file() {
+        let root = tempdir().unwrap();
+        write_root_workspaces(root.path());
+        write_subpackage(
+            root.path(),
+            "services/gymtrack-mcp",
+            "@sindustries/gymtrack-mcp",
+        );
+
+        let invocation = resolve_npm_invocation(
+            root.path(),
+            &[
+                "docs/specs/gymtrack-mcp-oauth-rate-limit-tech-design.md".to_string(),
+                "services/gymtrack-mcp/src/app.js".to_string(),
+                "services/gymtrack-mcp/test/rateLimit.test.js".to_string(),
+            ],
+        );
+        assert_eq!(
+            invocation,
+            Some(NpmInvocation::Workspace(
+                "@sindustries/gymtrack-mcp".to_string()
+            ))
+        );
     }
 
     /// Regression for task 0b16dc37 lobster mechanical-evidence gate
