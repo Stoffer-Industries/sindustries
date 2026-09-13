@@ -11,6 +11,8 @@ on:
     paths:
       - 'services/gymtrack-mcp/**'
       - 'apps/gymtrack/server/agentData.js'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/gymtrack-mcp-deploy.yml'
   workflow_dispatch:
 

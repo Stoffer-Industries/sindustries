@@ -715,6 +715,13 @@ jobs:
       - name: Run Mission Control Vercel deployment contract test
         run: bash infra/cloud/scripts/tests/mission-control-deploy-fixtures.test.sh
 
+      - name: Run Fly deploy trigger paths test (task 2b66ae79, W38 T3)
+        # AC1 + AC2 regression guard for the Fly deploy `paths:` filters —
+        # closes the W38 audit finding where three staging workflows
+        # referenced pnpm-lock.yaml (not present at the repo root) and
+        # the MCP workflow referenced neither manifest nor lockfile.
+        run: bash infra/cloud/scripts/tests/fly-deploy-trigger-paths.test.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest

@@ -27,7 +27,7 @@ on:
       - 'services/budget-api/**'
       - 'packages/budget-domain/**'
       - 'package.json'
-      - 'pnpm-lock.yaml'
+      - 'package-lock.json'
       - 'infra/cloud/**'
       - '.github/workflows/deploy-staging-budget-api.yml'
   workflow_dispatch:
