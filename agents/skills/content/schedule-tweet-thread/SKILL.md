@@ -28,7 +28,7 @@ Any agent can use this. No theme picking, no arc drafting, no decision logic —
 - **`scheduledFor`** (ISO 8601 datetime) — when the thread publishes as a whole. Must be a valid ISO string with the correct `Pacific/Auckland` offset (see timezone note below).
 - **`source`** (enum, optional, default `manual`) — one of `ops_notes`, `cto_craft`, `manual`, `other`. Use `ops_notes` when the thread came from a weekly review or an ops signal.
 - **`sourceRef`** (string, optional) — a URL or file path pointing back to the source signal (e.g. `brain/content/sindustries-weekly-content/YYYY-MM-DD.md`).
-- **`actor`** (string, default = the calling agent's name) — sent as the `x-actor` header for audit attribution. It must match the actor bound to the caller's Tasks API credential.
+- **`actor`** (string, default = the calling agent's name) — sent as the `x-actor` header for audit attribution. It must match the actor bound to the caller's content-scheduler credential (i.e. the `actor` field of the matching entry in `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS`).
 
 ## Base URL
 
@@ -42,7 +42,7 @@ The default port is **4004** (prodlike content-scheduler-api, per `services/cont
 
 `CONTENT_SCHEDULER_API_APPROVAL_TOKEN` is mandatory. This is a **content-scheduler-specific** bearer credential, **not** a Tasks API token — the two services have intentionally separate credential stores (see `docs/specs/content-scheduler-auth-tech-design.md`). A leaked content-scheduler token does NOT unlock tasks-api and vice versa.
 
-Each agent has their own per-agent `CONTENT_SCHEDULER_API_APPROVAL_TOKEN`. Tokens are configured server-side in `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` as a JSON array of `{ token, actor, approvalTypes }` entries. Never borrow another agent's token. The content-scheduler does not derive actor from the bearer (unlike tasks-api); the actor is bound to the credential at server-config time.
+Each agent has their own per-agent `CONTENT_SCHEDULER_API_APPROVAL_TOKEN`. Tokens are configured server-side in `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` as a JSON array of `{ token, actor, approvalTypes }` entries. Never borrow another agent's token. `requireAuthenticatedUser` matches the Bearer against `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` and sets `req.user.actor` from the matched credential; `actor()` treats that authenticated value as authoritative (over the `x-actor` header, which is audit-only and triggers a `console.warn` on mismatch). This is the same model tasks-api uses — the actor is bound to the credential at server-config time, then derived from the bearer on every request.
 
 Fail before making a request when the token is missing:
 
