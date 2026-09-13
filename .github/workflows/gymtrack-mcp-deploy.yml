@@ -61,6 +61,64 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+      - name: Verify image build matches lockfile (gymtrack-mcp)
+        # Build the production Dockerfile locally, then assert that the
+        # installed graph inside the resulting image matches the root
+        # package-lock.json exactly (express + @supabase/supabase-js) and
+        # that the Dockerfile does not contain any unpinned `npm install`.
+        # Tracks task a858ffce (W38 audit F3) — see
+        # docs/specs/mcp-lockfile-frozen-image-tech-design.md.
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="gymtrack-mcp:ci-validate"
+          docker build \
+            --tag "$IMAGE_TAG" \
+            --file services/gymtrack-mcp/Dockerfile \
+            .
+
+          EXPECTED_JSON="$(node <<'NODE'
+          const p = require('./package-lock.json');
+          const out = {
+            express: p.packages['node_modules/express'].version,
+            '@supabase/supabase-js': p.packages['node_modules/@supabase/supabase-js'].version,
+          };
+          process.stdout.write(JSON.stringify(out));
+          NODE
+          )"
+          echo "Lockfile direct deps: $EXPECTED_JSON"
+
+          ACTUAL_JSON="$(docker run --rm "$IMAGE_TAG" sh -c 'npm ls --omit=dev --depth=0 --json')"
+          echo "Image npm ls: $ACTUAL_JSON"
+
+          if echo "$ACTUAL_JSON" | grep -q '"invalid": true'; then
+            echo "::error::npm ls inside the image reported an invalid dependency graph"
+            exit 1
+          fi
+
+          ACTUAL_EXPRESS="$(node -e "const j=JSON.parse(process.argv[1]);process.stdout.write(j.dependencies?.express?.version||'')" "$ACTUAL_JSON")"
+          ACTUAL_SUPABASE="$(node -e "const j=JSON.parse(process.argv[1]);process.stdout.write(j.dependencies?.['@supabase/supabase-js']?.version||'')" "$ACTUAL_JSON")"
+          EXPECTED_EXPRESS="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).express)" "$EXPECTED_JSON")"
+          EXPECTED_SUPABASE="$(node -e "process.stdout.write(JSON.parse(process.argv[1])['@supabase/supabase-js'])" "$EXPECTED_JSON")"
+
+          echo "Image: express@${ACTUAL_EXPRESS:-MISSING} @supabase/supabase-js@${ACTUAL_SUPABASE:-MISSING}"
+          echo "Lockfile: express@${EXPECTED_EXPRESS} @supabase/supabase-js@${EXPECTED_SUPABASE}"
+
+          if [ -z "$ACTUAL_EXPRESS" ] || [ -z "$ACTUAL_SUPABASE" ]; then
+            echo "::error::A direct dependency is missing from the built image."
+            exit 1
+          fi
+          if [ "$ACTUAL_EXPRESS" != "$EXPECTED_EXPRESS" ] || [ "$ACTUAL_SUPABASE" != "$EXPECTED_SUPABASE" ]; then
+            echo "::error::Image installed versions differ from package-lock.json."
+            exit 1
+          fi
+
+          echo "Verifying Dockerfile contains only 'npm ci', never 'npm install'."
+          if grep -nE '(^|\s)npm install(\s|$)' services/gymtrack-mcp/Dockerfile; then
+            echo "::error::Dockerfile contains an unpinned 'npm install' step."
+            exit 1
+          fi
+          echo "Lockfile fidelity + npm ci lint: OK."
+
       - name: Smoke check (/health)
         run: |
           set -euo pipefail
