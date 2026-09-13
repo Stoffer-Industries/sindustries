@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateMonthlyCardBudget } from './budgets';
+import { evaluateMonthlyCardBudget } from './budgets.js';
 
 describe('evaluateMonthlyCardBudget', () => {
   it('returns no stages when under 80%', () => {

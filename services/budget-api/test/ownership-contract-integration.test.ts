@@ -94,18 +94,23 @@ d('budget-api ownership contract — real Postgres (task 1eb22a09)', () => {
     // CASCADE truncate is the simplest correct primitive. Order is
     // leaf-first so foreign keys resolve cleanly even without CASCADE,
     // but CASCADE makes the order irrelevant.
+    // Tables are schema-qualified (`budget_api."PascalCase"`) because the
+    // migration set puts every Prisma model in the `budget_api` schema and
+    // uses quoted PascalCase identifiers. Without the schema prefix Postgres
+    // looks in `public`; without the correct casing the lookup is case-
+    // sensitive (the catalog preserves the quoted PascalCase form).
     await prisma.$executeRawUnsafe(`
       TRUNCATE TABLE
-        "categorization_feedback",
-        "balance_alert_config",
-        "notification_event",
-        "card_monthly_budget",
-        "transaction",
-        "account_balance_snapshot",
-        "akahu_connection",
-        "linked_card",
-        "session",
-        "user"
+        "budget_api"."CategorizationFeedback",
+        "budget_api"."BalanceAlertConfig",
+        "budget_api"."NotificationEvent",
+        "budget_api"."CardMonthlyBudget",
+        "budget_api"."Transaction",
+        "budget_api"."AccountBalanceSnapshot",
+        "budget_api"."AkahuConnection",
+        "budget_api"."LinkedCard",
+        "budget_api"."Session",
+        "budget_api"."User"
       RESTART IDENTITY CASCADE
     `);
 
@@ -190,12 +195,12 @@ d('budget-api ownership contract — real Postgres (task 1eb22a09)', () => {
     // this subset don't block the wipe.
     await prisma.$executeRawUnsafe(`
       TRUNCATE TABLE
-        "categorization_feedback",
-        "balance_alert_config",
-        "notification_event",
-        "card_monthly_budget",
-        "transaction",
-        "account_balance_snapshot"
+        "budget_api"."CategorizationFeedback",
+        "budget_api"."BalanceAlertConfig",
+        "budget_api"."NotificationEvent",
+        "budget_api"."CardMonthlyBudget",
+        "budget_api"."Transaction",
+        "budget_api"."AccountBalanceSnapshot"
       CASCADE
     `);
   });
