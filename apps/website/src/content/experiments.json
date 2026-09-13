@@ -35,10 +35,11 @@
       "Original cadence target (3-4 standalone posts per week) is being replaced by 1-2 distribution posts per week sourced from the weekly update. Quality and reliability matter more than raw post count.",
       "2026-06-17 X thread on the Lobster + Quinn state-handoff pattern shifted the channel from announcement-style posts to architecture-and-process posts. The thread landed because it explains a real design decision (where intelligence lives in an agent pipeline) rather than selling a product outcome \u2014 supporting the hypothesis that process posts are now the strongest format for the SIndustries audience, not just a planned pivot.",
       "Content Scheduler changes the experiment from manual posting cadence to an approval-and-scheduling loop. The next learning is whether scheduled posts sourced from weekly site updates create more consistent public signal without lowering specificity.",
-      "A reusable scheduling primitive and Ivy's themed weekly campaign workflow shift the cadence test from manual writing to whether a structured five-to-seven-post arc can preserve specificity across a week."
+      "A reusable scheduling primitive and Ivy's themed weekly campaign workflow shift the cadence test from manual writing to whether a structured five-to-seven-post arc can preserve specificity across a week.",
+      "Native X thread scheduling now treats a multi-part post as one content item, with a publish journal, retries, and rollback when a partial publish fails. This makes thread-based build-in-public updates possible without manually coordinating each post."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-07-25",
+    "updatedAt": "2026-09-10",
     "links": [],
     "image": "/brand/studio/social-content-hero.png",
     "visibility": "published"
@@ -96,10 +97,11 @@
       "The first end-to-end mobile build is now wired to live Akahu-backed bank data instead of mock screens.",
       "Accounts, cards, balances, balance alerts, spending breakdowns, category transaction views, recategorisation, and transaction detail sheets are functional in the MVP.",
       "The experiment has moved from market concept to product learning: the next useful evidence is whether the live-data flows make household decisions clearer in repeated use.",
-      "Stale-status review on 2026-07-25: no newer repeated-use evidence was available, so the experiment remains active but needs a fresh usage result or an explicit go/no-go decision."
+      "Stale-status review on 2026-07-25: no newer repeated-use evidence was available, so the experiment remains active but needs a fresh usage result or an explicit go/no-go decision.",
+      "Stale-status review on 2026-09-11 found no newer repeated-use evidence in the weekly signals. The next status decision has been routed for owner approval."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-07-25",
+    "updatedAt": "2026-09-11",
     "links": [],
     "image": "/brand/studio/nz-personal-banking-hero.png",
     "visibility": "published"
@@ -133,10 +135,11 @@
       "Live deployment is pending Supabase provisioning, making the next useful learning whether the app holds up in real repeated workout sessions.",
       "A secured planned-workout API now lets connected agents create workouts, moving the experiment from a standalone logging interface toward agents as first-class users.",
       "The first agent-facing feature moved from specification to main in 48 hours with 76 tests passing, providing an end-to-end test of the delivery workflow on a consumer product.",
-      "Public sign-up with Google and Apple OAuth made GymTrack multi-tenant on 2026-08-01: the first new account can now be created without manual provisioning. The agent-connect action shipped on 2026-08-06, wired to the live MCP OAuth server deployed on 2026-08-05, creating an in-product onboarding path for connected agents."
+      "Public sign-up with Google and Apple OAuth made GymTrack multi-tenant on 2026-08-01: the first new account can now be created without manual provisioning. The agent-connect action shipped on 2026-08-06, wired to the live MCP OAuth server deployed on 2026-08-05, creating an in-product onboarding path for connected agents.",
+      "The MCP server is live in production with dynamic client registration and rate limits on public OAuth write endpoints. The next evidence gate remains repeated use by people and connected agents, not deployment readiness."
     ],
     "startedAt": "2026-07-13",
-    "updatedAt": "2026-08-06",
+    "updatedAt": "2026-09-10",
     "links": [],
     "image": "/brand/studio/gymtrack-hero.jpg",
     "visibility": "published"

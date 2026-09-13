@@ -418,5 +418,60 @@
     "links": [],
     "evidence": "The delivery workflow now requires a passing agent-owned verification result before the review transition.",
     "visibility": "published"
+  },
+  {
+    "title": "Mission Control cloud staging",
+    "slug": "mission-control-cloud-staging",
+    "releasedAt": "2026-09-05",
+    "summary": "Mission Control and task management now run in a Fly staging environment, backed by repeatable deployment artifacts and fixture checks.",
+    "type": "system",
+    "links": [],
+    "evidence": "The staging deployment and its fixture checks shipped on 2026-09-05, with the deployment shape recorded in the Mission Control system documentation.",
+    "visibility": "published"
+  },
+  {
+    "title": "CTO Craft LangGraph Studio inspection",
+    "slug": "cto-craft-langgraph-studio-inspection",
+    "releasedAt": "2026-09-08",
+    "summary": "CTO Craft builders can launch LangGraph Studio locally to inspect graph state while developing agent workflows.",
+    "type": "system",
+    "links": [
+      {
+        "label": "Implementation pull request",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/575"
+      }
+    ],
+    "evidence": "Launchable local graph inspection shipped on 2026-09-08.",
+    "visibility": "published"
+  },
+  {
+    "title": "Mechanical evidence gate and Tom approval override",
+    "slug": "mechanical-evidence-gate-tom-approval-override",
+    "releasedAt": "2026-09-09",
+    "summary": "Feature delivery now stops on missing files, tests, or acceptance evidence before semantic review, while Tom can override stalled design and QA approvals.",
+    "type": "system",
+    "links": [],
+    "evidence": "The mechanical evidence gate and owner-scoped approval overrides shipped on 2026-09-09.",
+    "visibility": "published"
+  },
+  {
+    "title": "Content Scheduler X threads",
+    "slug": "content-scheduler-x-threads",
+    "releasedAt": "2026-09-09",
+    "summary": "Multi-part X threads can now be scheduled, published, retried, and rolled back as one content item.",
+    "type": "system",
+    "links": [],
+    "evidence": "Thread creation, scheduling, publishing, retry, and compensation shipped end to end on 2026-09-09.",
+    "visibility": "published"
+  },
+  {
+    "title": "GymTrack MCP production OAuth",
+    "slug": "gymtrack-mcp-production-oauth",
+    "releasedAt": "2026-09-09",
+    "summary": "GymTrack's MCP server is live in production with dynamic client registration and rate limits on public OAuth write endpoints.",
+    "type": "system",
+    "links": [],
+    "evidence": "The production deployment, dynamic client registration, and public OAuth rate limiting were live by 2026-09-10.",
+    "visibility": "published"
   }
 ]

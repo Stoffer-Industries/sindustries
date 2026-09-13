@@ -63,8 +63,8 @@
     "summary": "A system that turns daily operational signals into website updates and scheduled social posts \u2014 without manual coordination.",
     "problem": "Building a product studio generates constant signal: shipped work, decisions, experiments, lessons. None of it reaches a public audience unless someone manually converts notes into content. That conversion was the bottleneck.",
     "howItWorks": "Daily signals are captured automatically as work happens. Each week, those notes are distilled into a structured review that identifies what is worth publishing and who needs to approve it. Content tasks are created automatically, assigned for authoring, and tracked through a review-and-merge workflow. Content Scheduler now extends the loop into Mission Control, where approved website updates can become scheduled X posts with publication gates.",
-    "proof": "Pipeline shipped 2026-06-01. First full content cycle completed end-to-end on 2026-06-04: Quinn orchestration, Ivy authoring, Tom approval, and automated merge. The weekly review loop is still active as of 2026-07-17, producing source notes, approval buckets, and website-content tasks from current studio work. Content Scheduler shipped 2026-07-16 as the first self-publishing Mission Control surface, adding compose, approval, scheduling, and one-per-day publishing gates for X posts.",
-    "updatedAt": "2026-07-25",
+    "proof": "Pipeline shipped 2026-06-01. The first full content cycle completed end to end on 2026-06-04: review, authoring, approval, and automated merge. The weekly review loop remains active, producing source notes, approval buckets, and website-content tasks from current studio work. As of 2026-09-10, Content Scheduler can create, schedule, publish, retry, and compensate a multi-part X thread as one content item.",
+    "updatedAt": "2026-09-10",
     "links": [],
     "image": "/brand/systems/content-ops-pipeline.png",
     "visibility": "published"
