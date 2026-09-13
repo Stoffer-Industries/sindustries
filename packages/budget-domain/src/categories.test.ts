@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { Categories, isCategory } from './categories';
+import { Categories, isCategory } from './categories.js';
 
 describe('Categories taxonomy', () => {
   it('exposes the documented public list', () => {
