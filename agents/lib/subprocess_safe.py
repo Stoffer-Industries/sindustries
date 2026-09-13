@@ -5,12 +5,19 @@ by `agent-task-queue-gh-api-hang-2026-08-17` onto a single shared helper so the 
 script author cannot reintroduce the unguarded-`subprocess.run` class of bug.
 
 Public API:
-    DEFAULT_TIMEOUT_SECONDS: float = 25.0
-        Module-level default. Set 5s below the heartbeat's 30s exec timeout so that
-        `subprocess.TimeoutExpired` raises (and python3 flushes stdout) before the
-        parent exec timeout fires — incident `agent-task-queue-script-subprocess-timeout-race-2026-08-20`.
-        Long enough for normal GitHub-API tail latency, short enough that the
-        heartbeat's stuck state is bounded.
+    DEFAULT_TIMEOUT_SECONDS: float = 45.0
+        Module-level default. The previous 25s value (introduced by `d52c3ca` to give
+        5s margin below the heartbeat's 30s exec timeout — incident
+        `agent-task-queue-script-subprocess-timeout-race-2026-08-20`) was too tight
+        for the W37 A3 main.rs god-file carve tasks (10+ PRs, large comment history).
+        Recurrence `task-lobsters-cron-runner-termination-2026-09-13` hit task
+        `9b10c65a-0eb3-4ff2-92ca-d262e12c2e10` twice within 24h on the lobster
+        subprocess. The 5s-margin rationale applied to Lox's interactive exec context
+        where a 30s exec timeout could SIGKILL mid-run; the cron context (every 2h,
+        no per-tick exec-timeout race) does not have that constraint. 45s gives
+        larger tasks room without sacrificing fail-fast on genuinely stuck subprocesses.
+        Callers needing a different bound pass `timeout=` explicitly; the rest get
+        the new default.
 
     safe_run(cmd, *, timeout=DEFAULT_TIMEOUT_SECONDS, **kwargs) -> subprocess.CompletedProcess
         `subprocess.run` with a default timeout. **kwargs forwards verbatim, so
@@ -57,7 +64,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-DEFAULT_TIMEOUT_SECONDS: float = 25.0
+DEFAULT_TIMEOUT_SECONDS: float = 45.0
 
 
 def safe_run(
