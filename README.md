@@ -4,25 +4,32 @@ Sindustries is organized as a monorepo with explicit boundaries between product 
 
 ## Monorepo layout
 
-- `apps/` — user-facing runnable applications (primarily front-end surfaces)
-  - `apps/tasks/` — first product surface (initial focused app)
+- `apps/` — user-facing runnable applications (web + mobile surfaces)
+  - `apps/tasks/` — focused task-management web app
   - `apps/website/` — public-facing company website v1
-  - `apps/mission-control/` — future aggregate shell/orchestrator UI
+  - `apps/mission-control/` — cross-app aggregate shell/orchestrator UI
+  - `apps/gymtrack/` — GymTrack web app
+  - `apps/budget-mobile/` — Expo mobile app for Budget
 - `services/` — backend APIs, workers, and long-running service processes
+  - `services/tasks-api/` — Tasks domain API
+  - `services/budget-api/` — Budget domain API
+  - `services/content-scheduler-api/` — Content Scheduler service (extracted from tasks-api; runs its own HTTP app + BullMQ worker)
+  - `services/gymtrack-mcp/` — GymTrack Model Context Protocol server (OAuth 2.1 with PKCE)
 - `packages/` — shared libraries, types, utilities, and cross-cutting configs
 - `infra/` — infrastructure, environments, and deployment/runtime definitions
 - `docs/` — current system references, build specs, design notes, and repo audits
   - `docs/systems/` — current system and workflow references
   - `docs/specs/` — build-against specs and older planning artifacts
+  - `docs/repo-audits/` — weekly repository audits (the W3X ledger)
 
 ## Direction
 
-Current repo state is **early implementation**: documentation plus Milestone 1 backend foundation in `services/tasks-api`.
+Current repo state is **active product + agent operation**: Tasks, Budget, Content Scheduler, and GymTrack MCP all run as separate domain services with dedicated test matrices and deployment workflows; agent-driven delivery (Rust task workflow + Python content workflows) is wired through cron + heartbeat infrastructure. Runtime targets split across dev / prodlike local stacks and per-service Fly / Vercel staging deployments; production deployment of select services is in progress.
 
-Planned product evolution:
-1. Build and prove the focused `tasks` surface.
-2. Evolve `mission-control` into the aggregate shell that hosts cross-app workflows (including `tasks`, collaboration, and future surfaces).
-3. Keep domain boundaries strict so apps can ship independently while sharing stable packages/services.
+Product evolution:
+1. Tasks, Budget, and GymTrack each ship independently behind their own domain API.
+2. Mission Control hosts cross-app workflows that span those domains without owning their data.
+3. Domain boundaries stay strict so apps can ship independently while sharing stable packages/services.
 
 ## System references
 
