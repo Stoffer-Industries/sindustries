@@ -1,6 +1,8 @@
+---
 name: no-ai-slop
 
 description: Edit drafts into sharper, more human writing while preserving the writer's personal voice, or detect AI-slop patterns without rewriting. Use when a draft needs to be clearer, more direct, more opinionated, or less AI-sounding.
+---
 
 # No AI slop
 
