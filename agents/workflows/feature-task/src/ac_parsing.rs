@@ -69,6 +69,161 @@ pub(crate) struct AcEvidence {
     pub(crate) evidence: Option<Evidence>,
 }
 
+/// Normalize the presentation-only differences that are common when an
+/// acceptance criterion is copied into a PR body. Markdown code spans and
+/// line wrapping do not change the criterion's meaning, so they must not turn
+/// an otherwise valid delivery into a text-altered blocker. Deliberate word
+/// changes still fail because the normalized strings are compared in full.
+fn normalized_ac_text(text: &str) -> String {
+    text.replace('`', "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// CI job/check citations are valid evidence, but they are not local test
+/// names that the lobster can safely execute with npm/vitest. Ash verifies
+/// these against the recorded CI run before granting `qa_agent` approval.
+fn is_external_ci_evidence(raw: &str, test_id: &str) -> bool {
+    let value = raw.to_ascii_lowercase();
+    value.contains("ci job")
+        || value.contains("ci run")
+        || value.contains("github actions")
+        || value.contains("check run")
+        || (value.contains("job") && raw.contains(" — "))
+        || (value.contains("runs in") && raw.contains(" — "))
+        || is_external_ci_citation_name(test_id)
+}
+
+fn is_external_ci_citation_name(test_id: &str) -> bool {
+    let value = test_id.to_ascii_lowercase();
+    value.contains("ci job") || value.contains("ci run") || value.contains("github actions")
+}
+
+/// Parse checkbox ACs as logical list items rather than physical lines.
+/// Markdown permits a long list item to wrap over several lines; the old
+/// line-oriented parser silently dropped those continuations and compared a
+/// truncated sentence against the task AC.
+fn parse_ac_entries(section: &str) -> Vec<(String, String)> {
+    parse_ac_entries_filtered(section, false)
+}
+
+fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, String)> {
+    let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.*)$").unwrap();
+    let mut entries = Vec::new();
+    let mut current: Option<(String, String)> = None;
+
+    let flush = |current: &mut Option<(String, String)>, entries: &mut Vec<(String, String)>| {
+        if let Some((label, text)) = current.take() {
+            entries.push((label, text.trim().to_string()));
+        }
+    };
+
+    for line in section.lines() {
+        if let Some(cap) = ac_re.captures(line) {
+            flush(&mut current, &mut entries);
+            if !checked_only || cap[1].eq_ignore_ascii_case("x") {
+                current = Some((cap[2].to_string(), cap[3].to_string()));
+            }
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // A new heading or bullet ends the current logical list item. The
+        // continuation lines emitted by Markdown renderers are plain text.
+        if trimmed.starts_with('#')
+            || trimmed.starts_with('-')
+            || (trimmed.starts_with("**") && trimmed.ends_with("**"))
+        {
+            flush(&mut current, &mut entries);
+            continue;
+        }
+        if current
+            .as_ref()
+            .is_some_and(|(_, text)| parse_evidence(text).is_some())
+        {
+            flush(&mut current, &mut entries);
+            continue;
+        }
+        if let Some((_, text)) = current.as_mut() {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(trimmed);
+        }
+    }
+    flush(&mut current, &mut entries);
+    entries
+}
+
+/// Parse ACs in the subsection belonging to one task. A combined PR can use
+/// repeated AC labels under `### Task <id>` headings; sibling sections must
+/// not leak into this task's comparison.
+fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
+    let subsection_re = Regex::new(r"^\s*#{3,}\s+Task\s+(\S+)").unwrap();
+    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
+    let mut entries = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    let mut matching_section = true;
+    let mut saw_any_subsection = false;
+
+    let flush = |current: &mut Option<(String, String)>, entries: &mut Vec<(String, String)>| {
+        if let Some((label, text)) = current.take() {
+            entries.push((label, text.trim().to_string()));
+        }
+    };
+    let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.*)$").unwrap();
+
+    for line in section.lines() {
+        if let Some(cap) = subsection_re.captures(line) {
+            flush(&mut current, &mut entries);
+            let captured = &cap[1];
+            matching_section = captured == task_id || captured == task_short_id;
+            saw_any_subsection = true;
+            continue;
+        }
+        if let Some(cap) = ac_re.captures(line) {
+            flush(&mut current, &mut entries);
+            if matching_section && cap[1].eq_ignore_ascii_case("x") {
+                current = Some((cap[2].to_string(), cap[3].to_string()));
+            }
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with('#')
+            || trimmed.starts_with('-')
+            || (trimmed.starts_with("**") && trimmed.ends_with("**"))
+        {
+            flush(&mut current, &mut entries);
+            continue;
+        }
+        if saw_any_subsection && !matching_section {
+            continue;
+        }
+        if current
+            .as_ref()
+            .is_some_and(|(_, text)| parse_evidence(text).is_some())
+        {
+            flush(&mut current, &mut entries);
+            continue;
+        }
+        if let Some((_, text)) = current.as_mut() {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(trimmed);
+        }
+    }
+    flush(&mut current, &mut entries);
+    entries
+}
+
 /// Extract the Acceptance Criteria section from a PR body.
 ///
 /// Recognises `## Acceptance Criteria` and `## ACs` / `## AC` headings. When
@@ -249,14 +404,11 @@ pub(crate) fn parse_ac_line(line: &str) -> Option<AcEvidence> {
 pub(crate) fn verify_pr_acs_failures(body: &str) -> Vec<String> {
     let section = extract_ac_section(body);
     let mut failures = Vec::new();
-    for line in section.lines() {
-        if let Some(ac) = parse_ac_line(line) {
-            if ac.evidence.is_none() {
-                failures.push(format!(
-                    "AC {} — missing evidence. Use `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, `(🔗 pr: #<n>)` if covered by another merged PR, or `(✅ sign-off: <approver>)` for a human judgement call.",
-                    ac.ac_label
-                ));
-            }
+    for (label, raw) in parse_ac_entries_filtered(section, true) {
+        if parse_evidence(&raw).is_none() {
+            failures.push(format!(
+                "AC {label} — missing evidence. Use `(🧪 testID: <id>)` for e2e/unit tests (preferred), `(⚠️ not tested: <reason>)` when automation is impractical, `(📄 not code: <reason>)` for non-code ACs, `(🔗 pr: #<n>)` if covered by another merged PR, or `(✅ sign-off: <approver>)` for a human judgement call."
+            ));
         }
     }
     failures
@@ -276,9 +428,10 @@ pub(crate) struct DeliveryPrEvidence {
 /// Verify task AC coverage across the complete set of delivery PRs.
 ///
 /// An AC is satisfied when at least one delivery PR contains the same AC text
-/// and a recognised evidence annotation. This deliberately allows a later
-/// PR to carry a subset of the task's ACs while preserving the strict checks
-/// for coverage, exact text, and evidence. The caller decides which PRs are
+/// (after presentation-only normalization) and a recognised evidence
+/// annotation. This deliberately allows a later PR to carry a subset of the
+/// task's ACs while preserving the strict checks for coverage, full semantic
+/// text, and evidence. The caller decides which PRs are
 /// valid delivery (normally the latest PRs plus historical merged PRs).
 pub(crate) fn task_acs_vs_delivery_pr_failures(
     task_id: &str,
@@ -300,7 +453,7 @@ pub(crate) fn task_acs_vs_delivery_pr_failures(
         };
         let exact: Vec<_> = candidates
             .iter()
-            .filter(|(text, _, _)| text.eq_ignore_ascii_case(task_text))
+            .filter(|(text, _, _)| normalized_ac_text(text) == normalized_ac_text(task_text))
             .collect();
         if exact.is_empty() {
             let (pr_text, _, idx) = &candidates[0];
@@ -328,33 +481,16 @@ fn collect_delivery_ac_entries(
     task_id: &str,
     deliveries: &[DeliveryPrEvidence],
 ) -> HashMap<String, Vec<(String, Option<Evidence>, usize)>> {
-    let subsection_re = Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
-    let ac_re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
-    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
     let mut entries: HashMap<String, Vec<(String, Option<Evidence>, usize)>> = HashMap::new();
 
     for (idx, delivery) in deliveries.iter().enumerate() {
         let section = extract_ac_section(&delivery.body);
-        let mut matching_section = true;
-        let mut saw_any_subsection = false;
-        for line in section.lines() {
-            if let Some(cap) = subsection_re.captures(line) {
-                let captured = &cap[1];
-                matching_section = captured == task_id || captured == task_short_id;
-                saw_any_subsection = true;
-                continue;
-            }
-            if saw_any_subsection && !matching_section {
-                continue;
-            }
-            if let Some(cap) = ac_re.captures(line) {
-                let label = cap[2].to_string();
-                let raw = cap[3].trim().to_string();
-                entries
-                    .entry(label)
-                    .or_default()
-                    .push((strip_trailing_evidence(&raw), parse_evidence(&raw), idx));
-            }
+        for (label, raw) in scoped_ac_entries(task_id, section) {
+            entries.entry(label).or_default().push((
+                strip_trailing_evidence(&raw),
+                parse_evidence(&raw),
+                idx,
+            ));
         }
     }
     entries
@@ -384,9 +520,9 @@ pub(crate) fn winning_ac_evidence_sources(
         let Some(candidates) = entries.get(label) else {
             continue;
         };
-        let winner = candidates
-            .iter()
-            .find(|(text, evidence, _)| text.eq_ignore_ascii_case(task_text) && evidence.is_some());
+        let winner = candidates.iter().find(|(text, evidence, _)| {
+            normalized_ac_text(text) == normalized_ac_text(task_text) && evidence.is_some()
+        });
         if let Some((_, _, idx)) = winner {
             winners.insert(label.clone(), *idx);
         }
@@ -396,9 +532,9 @@ pub(crate) fn winning_ac_evidence_sources(
 
 /// Extract all ACs from a task description (both checked and unchecked), returning (label, text) pairs.
 pub(crate) fn task_description_acs(description: &str) -> Vec<(String, String)> {
-    let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
-    re.captures_iter(description)
-        .map(|cap| (cap[1].to_string(), strip_trailing_evidence(cap[2].trim())))
+    parse_ac_entries(description)
+        .into_iter()
+        .map(|(label, raw)| (label, strip_trailing_evidence(&raw)))
         .collect()
 }
 
@@ -458,39 +594,11 @@ pub(crate) fn task_ac_vs_open_pr_failures(
         return vec![];
     }
     let section = extract_ac_section(body);
-    // H3-or-deeper `Task <id>` subheadings carve the AC section into per-task
-    // subsections. The first whitespace-delimited token after `Task` is the id.
-    // Production task ids are full UUIDs (e.g. `e2e647b1-16d5-4b93-a92a-ac944b8bb48d`)
-    // but the convention documented in `agents/skills/dev/pr-open/SKILL.md` uses
-    // the 8-char branch-name short prefix in `### Task <id>` headings. Match
-    // either form so a single `### Task 513b3b02 — …` or `### Task 513b3b02-uuid — …`
-    // heading can identify the subsection.
-    let subsection_re = Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
-    let ac_re = Regex::new(r"(?m)^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.+)$").unwrap();
-    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
     let mut pr_ac_map: HashMap<String, (String, Option<Evidence>)> = HashMap::new();
-    let mut matching_section = true; // assume single-section (no `### Task`) until proven otherwise
-    let mut saw_any_subsection = false;
-    for line in section.lines() {
-        if let Some(cap) = subsection_re.captures(line) {
-            let captured = &cap[1];
-            matching_section = captured == task_id || captured == task_short_id;
-            saw_any_subsection = true;
-            continue;
-        }
-        if saw_any_subsection && !matching_section {
-            // AC line in a sibling task's subsection — ignore for this caller's
-            // HashMap. Without scoping, two tasks' ACs would collide on labels
-            // and the second subsection's text would silently overwrite the first.
-            continue;
-        }
-        if let Some(cap) = ac_re.captures(line) {
-            let label = cap[2].to_string();
-            let raw = cap[3].trim().to_string();
-            let evidence = parse_evidence(&raw);
-            let text = strip_trailing_evidence(&raw);
-            pr_ac_map.insert(label, (text, evidence));
-        }
+    for (label, raw) in scoped_ac_entries(task_id, section) {
+        let evidence = parse_evidence(&raw);
+        let text = strip_trailing_evidence(&raw);
+        pr_ac_map.insert(label, (text, evidence));
     }
     let mut failures = Vec::new();
     for (label, task_text) in task_acs {
@@ -499,7 +607,7 @@ pub(crate) fn task_ac_vs_open_pr_failures(
                 "{label} missing from open PR {pr_url} — include all task ACs with evidence."
             )),
             Some((pr_text, evidence)) => {
-                if task_text.to_lowercase() != pr_text.to_lowercase() {
+                if normalized_ac_text(task_text) != normalized_ac_text(pr_text) {
                     failures.push(format!(
                         "{label} text altered — task: \"{task_text}\", PR: \"{pr_text}\". Copy the AC text verbatim from the task description."
                     ));
@@ -561,27 +669,9 @@ pub(crate) fn mechanical_evidence_failures(
         return vec![];
     }
     let section = extract_ac_section(body);
-    let subsection_re = Regex::new(r"(?m)^\s*#{3,}\s+Task\s+(\S+)").unwrap();
-    let ac_re = Regex::new(r"(?m)^\s*-\s*\[[xX]\]\s+(AC\d+):\s*(.+)$").unwrap();
-    let task_short_id = task_id.split('-').next().unwrap_or(task_id);
-    let mut pr_ac_evidence: HashMap<String, Option<Evidence>> = HashMap::new();
-    let mut matching_section = true; // assume single-section until proven otherwise
-    let mut saw_any_subsection = false;
-    for line in section.lines() {
-        if let Some(cap) = subsection_re.captures(line) {
-            let captured = &cap[1];
-            matching_section = captured == task_id || captured == task_short_id;
-            saw_any_subsection = true;
-            continue;
-        }
-        if saw_any_subsection && !matching_section {
-            continue;
-        }
-        if let Some(cap) = ac_re.captures(line) {
-            let label = cap[1].to_string();
-            let raw = cap[2].trim().to_string();
-            pr_ac_evidence.insert(label, parse_evidence(&raw));
-        }
+    let mut pr_ac_evidence: HashMap<String, (String, Option<Evidence>)> = HashMap::new();
+    for (label, raw) in scoped_ac_entries(task_id, section) {
+        pr_ac_evidence.insert(label, (raw.clone(), parse_evidence(&raw)));
     }
 
     // File-path-shape detector for `TestId` values (matches Ash's
@@ -595,7 +685,7 @@ pub(crate) fn mechanical_evidence_failures(
 
     let mut failures = Vec::new();
     for (label, _task_text) in task_acs {
-        let evidence = match pr_ac_evidence.get(label) {
+        let (raw, evidence) = match pr_ac_evidence.get(label) {
             Some(ev) => ev,
             // AC missing from PR — handled by `task_ac_vs_open_pr_failures`.
             None => continue,
@@ -607,6 +697,12 @@ pub(crate) fn mechanical_evidence_failures(
         };
         match evidence {
             Evidence::TestId(test_id) => {
+                if is_external_ci_evidence(raw, test_id) {
+                    // This is intentionally an Ash-owned external check, not
+                    // a local test filter. The structured QA approval is the
+                    // authoritative verification for CI job/run citations.
+                    continue;
+                }
                 // A line citation points into a test file, but its line
                 // numbers are attached to the historical PR diff. Re-running
                 // the citation against today's main can select a different
@@ -1317,6 +1413,47 @@ Lead-in.
             "got: {}",
             failures[0]
         );
+    }
+
+    #[test]
+    fn delivery_ac_matching_accepts_wrapped_markdown_and_code_spans() {
+        let task_acs = vec![
+            (
+                "AC1".to_string(),
+                "All three staging Fly workflows and gymtrack-mcp-deploy include root package-lock.json; MCP includes root package.json.".to_string(),
+            ),
+            (
+                "AC2".to_string(),
+                "A dependency-input fixture check proves lockfile-only changes select all four affected deployments and unrelated docs do not select them.".to_string(),
+            ),
+        ];
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: All three staging Fly workflows and `gymtrack-mcp-deploy`\n\
+              include root package-lock.json; MCP includes root package.json.\n\
+              (🧪 testID: fly-deploy-trigger-paths > static assertions)\n\
+            - [x] AC2: A dependency-input fixture check proves lockfile-only changes\n\
+              select all four affected deployments and unrelated docs do not\n\
+              select them. (🧪 testID: fly-deploy-trigger-paths > synthetic event assertions)";
+        let deliveries = vec![DeliveryPrEvidence {
+            url: "https://github.com/org/repo/pull/677".to_string(),
+            body: body.to_string(),
+            files: vec![],
+        }];
+        assert!(task_acs_vs_delivery_pr_failures("task-1", &task_acs, &deliveries).is_empty());
+    }
+
+    #[test]
+    fn mechanical_evidence_accepts_external_ci_job_citation_for_qa() {
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: CI runs the checks (🧪 testID: budget-api-unit CI job — domain and mobile checks)";
+        let failures = mechanical_evidence_failures(
+            "task-1",
+            &single_ac("AC1", "CI runs the checks"),
+            body,
+            &[],
+            &AlwaysFailTestRunner { msg: "not run".to_string() },
+        );
+        assert!(failures.is_empty(), "external CI evidence must be Ash-owned: {failures:?}");
     }
 
     #[test]
