@@ -105,14 +105,37 @@ pub(crate) fn extract_ac_section(body: &str) -> &str {
 /// The prefix is matched by `[^a-zA-Z)]*` which accepts emojis, spaces, and
 /// punctuation but not letters or `)`.
 pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
-    // (not tested: <reason>) and (not code: <reason>) come first so the reason may contain colons.
-    let not_tested = Regex::new(r"\([^a-zA-Z)]*not tested:\s*([^)]+)\)\s*$").unwrap();
+    // Every body matcher here allows one level of nested parens so an
+    // annotation that quotes a parenthetical inside the body — e.g.
+    // `(🧪 testID: content-scheduler-api real client header set
+    // (no Bearer, no cookie) > imports 1 item with only
+    // x-content-ingest-secret and no Bearer)` (task afe1056c AC1-AC3) or
+    // `(⚠️ not tested: … task 2850c5ac dependency-blocked — … the
+    // tech design's OQ1 (whether the CTO-Craft cron currently runs
+    // against production at all) is still unanswered …)` (task afe1056c
+    // AC6) — is recognised as a single trailing annotation. PR #662
+    // fixed the equivalent breakage in `strip_trailing_evidence`
+    // (clearing the "text altered" complaint), but left the capture
+    // groups here as `[^)—]+?` / `[^)]+` which still stop at the first
+    // inner `)`; the lobster then reports `missing evidence` for these
+    // ACs even though the description text and the trailing annotation
+    // are legitimate. PR #649/#662 didn't unmask this site because
+    // every "merged PR + lobster evidence gate stuck" task in the
+    // original 16-task batch cited tests without nested parens in their
+    // bodies — only the subsequent CTO-Craft auth-boundary PR (task
+    // afe1056c, PR #633) hit it.
+    //
+    // `(not tested: <reason>)` and `(not code: <reason>)` come first
+    // so the reason may contain colons.
+    let not_tested =
+        Regex::new(r"\([^a-zA-Z)]*not tested:\s*((?:[^()]+|\([^()]*\))+?)\)\s*$").unwrap();
     if let Some(cap) = not_tested.captures(text) {
         return Some(Evidence::NotTested {
             reason: cap[1].trim().to_string(),
         });
     }
-    let not_code = Regex::new(r"\([^a-zA-Z)]*not code:\s*([^)]+)\)\s*$").unwrap();
+    let not_code =
+        Regex::new(r"\([^a-zA-Z)]*not code:\s*((?:[^()]+|\([^()]*\))+?)\)\s*$").unwrap();
     if let Some(cap) = not_code.captures(text) {
         return Some(Evidence::NotCode {
             reason: cap[1].trim().to_string(),
@@ -134,15 +157,21 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
     // other actionable `merged PR + lobster evidence gate stuck` tasks
     // for ~36h after PR #634 fixed the agents/* invocation; the missing
     // piece was the parser change below).
+    //
+    // The capture also allows one level of nested parens so a
+    // describe-block name with `(...)` (e.g. `real client header set
+    // (no Bearer, no cookie)` in task afe1056c AC1-AC3) is consumed
+    // inside the capture rather than being chopped at the inner `)`.
     let test_id = Regex::new(
-        r"\([^a-zA-Z)]*testID:\s*([^)—]+?)(?:\s+—\s+[^()]*+(?:\([^)]*\)[^()]*)*)?\)\s*$",
+        r"\([^a-zA-Z)]*testID:\s*((?:[^)—]+|\([^)—]*\))+?)(?:\s+—\s+(?:[^()]+|\([^()]*\))*)?\)\s*$",
     )
     .unwrap();
     if let Some(cap) = test_id.captures(text) {
         return Some(Evidence::TestId(cap[1].trim().to_string()));
     }
     // (pr: #<n> or url)
-    let pr_ref = Regex::new(r"\([^a-zA-Z)]*pr:\s*([^)]+)\)\s*$").unwrap();
+    let pr_ref =
+        Regex::new(r"\([^a-zA-Z)]*pr:\s*((?:[^()]+|\([^()]*\))+?)\)\s*$").unwrap();
     if let Some(cap) = pr_ref.captures(text) {
         return Some(Evidence::Pr {
             reference: cap[1].trim().to_string(),
@@ -150,7 +179,7 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
     }
     // (sign-off: <approver>) / (signoff: <approver>) — explicit human
     // judgement evidence, not a claim that a test or file proves the AC.
-    let signoff = Regex::new(r"\([^a-zA-Z)]*sign[- ]?off:\s*([^)]+)\)\s*$").unwrap();
+    let signoff = Regex::new(r"\([^a-zA-Z)]*sign[- ]?off:\s*((?:[^()]+|\([^()]*\))+?)\)\s*$").unwrap();
     if let Some(cap) = signoff.captures(text) {
         return Some(Evidence::Signoff {
             approver: cap[1].trim().to_string(),
@@ -721,6 +750,103 @@ mod tests {
         assert_eq!(
             parse_evidence("AC text (testID: simple-name — a — b — c)"),
             Some(Evidence::TestId("simple-name".to_string()))
+        );
+    }
+
+    /// Regression for task afe1056c (W34 T1.1, PR #633) and the
+    /// CTO-Craft import-route auth-boundary AC1-AC3/AC6 evidence: the
+    /// capture groups previously stopped at the first inner `)` inside
+    /// the annotation body. PR #662 fixed the same bug in
+    /// `strip_trailing_evidence` (clearing the "text altered" complaint)
+    /// but left `parse_evidence` capture groups as `[^)—]+?` / `[^)]+`,
+    /// so the lobster still reported `missing evidence` for these ACs.
+    /// The new capture `((?:[^)—]+|\([^)—]*\))+?)` allows one level of
+    /// nested parens so a describe-block name containing `(...)` —
+    /// `real client header set (no Bearer, no cookie)` — is consumed
+    /// inside the capture rather than chopping the annotation.
+    #[test]
+    fn parse_evidence_allows_nested_parens_in_test_id_body() {
+        // AC1 / AC2 / AC3 from PR #633 — vitest path with a
+        // describe-block name that contains nested parens.
+        assert_eq!(
+            parse_evidence(
+                "AC1: ... matches the real client's header set. (🧪 testID: \
+                 content-scheduler-api real client header set (no Bearer, \
+                 no cookie) > imports 1 item with only x-content-ingest-secret \
+                 and no Bearer)",
+            ),
+            Some(Evidence::TestId(
+                "content-scheduler-api real client header set (no Bearer, \
+                 no cookie) > imports 1 item with only x-content-ingest-secret \
+                 and no Bearer"
+                    .to_string()
+            ))
+        );
+        // Same shape, no emoji prefix.
+        assert_eq!(
+            parse_evidence(
+                "AC text (testID: real client header set (no Bearer, \
+                 no cookie) > imports 1 item)",
+            ),
+            Some(Evidence::TestId(
+                "real client header set (no Bearer, no cookie) > \
+                 imports 1 item"
+                    .to_string()
+            ))
+        );
+    }
+
+    /// Regression for task afe1056c AC6 — the `not_tested` body matcher
+    /// previously captured `[^)]+` which stopped at the inner `)` in
+    /// `(whether the CTO-Craft cron currently runs against production at
+    /// all)`, leaving the rest of the reason attached to the description.
+    /// New matcher allows one level of nested parens so the full reason
+    /// is captured.
+    #[test]
+    fn parse_evidence_allows_nested_parens_in_not_tested_body() {
+        assert_eq!(
+            parse_evidence(
+                "WS validation: ... succeeds end-to-end. (⚠️ not tested: \
+                 no staging environment is currently live — task 2850c5ac \
+                 \"Deploy cloud staging environment\" is dependency-blocked \
+                 — and the tech design's OQ1 (whether the CTO-Craft cron \
+                 currently runs against production at all) is still \
+                 unanswered.)",
+            ),
+            Some(Evidence::NotTested {
+                reason: "no staging environment is currently live — \
+                         task 2850c5ac \"Deploy cloud staging environment\" \
+                         is dependency-blocked — and the tech design's OQ1 \
+                         (whether the CTO-Craft cron currently runs against \
+                         production at all) is still unanswered."
+                    .to_string()
+            })
+        );
+    }
+
+    /// Regression for task afe1056c and any other PR whose evidence
+    /// annotation quotes a parenthetical — same nested-paren capture
+    /// pattern applied uniformly to `pr` and `sign-off` for consistency
+    /// (the existing PR #662 strip-only fix didn't apply to these
+    /// evidence kinds, but the underlying capture bug was the same).
+    #[test]
+    fn parse_evidence_allows_nested_parens_in_pr_and_signoff_bodies() {
+        assert_eq!(
+            parse_evidence("AC text (🔗 pr: #216 — covers (PR-1) and (PR-2))"),
+            Some(Evidence::Pr {
+                reference: "#216 — covers (PR-1) and (PR-2)".to_string()
+            })
+        );
+        assert_eq!(
+            parse_evidence(
+                "AC text (✅ sign-off: Tom — reviewed (acceptance evidence) \
+                 and (qa_agent verdict))",
+            ),
+            Some(Evidence::Signoff {
+                approver: "Tom — reviewed (acceptance evidence) and \
+                           (qa_agent verdict)"
+                    .to_string()
+            })
         );
     }
 
