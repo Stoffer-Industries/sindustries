@@ -820,6 +820,38 @@ jobs:
       - name: Run clippy (-D warnings)
         run: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
 
+  frontend-design-system-lint:
+    # Task da86ccd8 (Add @shadcn/lint to the frontend workspace).
+    # Smoke-test wiring for the dormant @shadcn/lint install — asserts the
+    # plugin loads cleanly against the configured web/React frontend
+    # surfaces. Rules are intentionally NOT enabled in this PR; rule
+    # activation is owned by follow-up task
+    # 7986eb43-dc85-4512-b76a-1cfecefd8be7 (Adopt Tailwind v4 in
+    # @sindustries/ui). See docs/systems/design-system.md 'Design-system
+    # linting' section for the rationale and the dormant-state policy.
+    name: frontend design-system lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Run frontend design-system lint smoke test
+        # Asserts @shadcn/lint plugin loads via oxlint. Runs against the
+        # checked-out working tree — no `npm ci` required (the wrapper
+        # uses npx --yes to resolve oxlint and the @shadcn/lint plugin
+        # on demand).
+        run: node scripts/check-design-system-lint.mjs
+
+      - name: Run frontend design-system lint unit tests
+        run: node --test scripts/test/check-design-system-lint.test.mjs
+
   merge-gate:
     name: merge gate
     if: always()
@@ -845,6 +877,7 @@ jobs:
       - infra-cloud-bootstrap-staging-tests
       - gitleaks
       - feature-task-clippy
+      - frontend-design-system-lint
     runs-on: ubuntu-latest
     env:
       REQUIRED_RESULTS: ${{ toJSON(needs) }}
