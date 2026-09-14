@@ -20,6 +20,7 @@ from cto_craft_workflow.state import MAX_SELECTED_ANGLES, MIN_QUALIFIED_CANDIDAT
 
 
 DEFAULT_TMW_ARCHIVE_URL = "https://www.techmanagerweekly.com/"
+DEFAULT_CONTENT_SCHEDULER_BASE_URL = "http://localhost:4004"
 DEFAULT_FETCH_TIMEOUT_SECONDS = 15.0
 DEFAULT_MODEL_TIMEOUT_SECONDS = 30.0
 DEFAULT_MIN_RESONANCE_SCORE = 0.55
@@ -125,7 +126,12 @@ def load_settings(*, require_secrets: bool = True) -> Settings:
     production ``run`` and ``replay`` commands always require secrets.
     """
 
-    base_url = _optional_env("CONTENT_SCHEDULER_BASE_URL", "http://localhost:4000")
+    # The prodlike Content Scheduler runs on :4004. Keep the fallback aligned
+    # with the local deployment so a missing cron injection cannot silently
+    # target the unrelated Tasks API port (or an unused port).
+    base_url = _optional_env(
+        "CONTENT_SCHEDULER_BASE_URL", DEFAULT_CONTENT_SCHEDULER_BASE_URL
+    )
     secret = _optional_env("CONTENT_SCHEDULER_INGEST_SECRET", "")
     require_ingest_secret = False
     if require_secrets:
@@ -184,6 +190,7 @@ __all__ = [
     "Settings",
     "load_settings",
     "DEFAULT_TMW_ARCHIVE_URL",
+    "DEFAULT_CONTENT_SCHEDULER_BASE_URL",
     "DEFAULT_FETCH_TIMEOUT_SECONDS",
     "DEFAULT_MODEL_TIMEOUT_SECONDS",
     "DEFAULT_MIN_RESONANCE_SCORE",
