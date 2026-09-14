@@ -115,6 +115,8 @@ for job_name in sorted(deploy_jobs):
         needs = [needs]
     if 'merge-gate' not in needs:
         fail(f'ci.yml: {job_name} does not depend on merge-gate')
+    if 'always()' not in str(job.get('if', '')):
+        fail(f'ci.yml: {job_name} must override skipped-ancestor propagation with always()')
 
 production_jobs = {name for name in deploy_jobs if name.endswith('production')}
 for job_name in sorted(production_jobs):
