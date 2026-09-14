@@ -26,9 +26,10 @@
 //! - `qa_agent_verified_failures` — failure strings for the `qa_agent`
 //!   gate (consumed by `verify_delivery`).
 //!
-//! All predicates read the structured `Task.approvals` table only;
-//! legacy approval-marker comments and AC-checkbox state are not
-//! consulted. Missing, revoked, and unknown states fail closed.
+//! Structured approvals are the primary gate source. The latest Ash QA
+//! verdict is also consulted as a safety invariant: a stale approved row must
+//! not survive a later `[qa-agent-deferred]` or `[qa-agent-blocked]` report.
+//! Missing, revoked, and unknown states fail closed.
 //!
 //! Spec drift is intentionally NOT blocked here. Tom owns the ACs
 //! during QA and may legitimately refine them; the spec-resync flow
@@ -85,6 +86,58 @@ pub(crate) fn accepted_structured_failures(task: &Task) -> Vec<String> {
 /// rows must be approved before the task can reach `done`.
 pub(crate) fn qa_agent_verified(task: &Task) -> bool {
     task_approval_granted(task, "qa_agent")
+        && !qa_agent_deferred(task)
+        && !qa_agent_blocked(task)
+}
+
+fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
+    task.comments.iter().rev().find_map(|comment| {
+        let text = comment
+            .text
+            .as_deref()
+            .or(comment.body.as_deref())
+            .unwrap_or_default();
+        let starts_with_tag = |tag: &str| {
+            text.lines()
+                .any(|line| line.trim_start().starts_with(tag))
+        };
+        if starts_with_tag("[qa-agent-deferred]") {
+            Some("deferred")
+        } else if starts_with_tag("[qa-agent-blocked]") {
+            Some("blocked")
+        } else if starts_with_tag("[qa-agent-verified]") {
+            Some("verified")
+        } else {
+            None
+        }
+    })
+}
+
+/// True when Ash has reported an unresolved capability gap. This is distinct
+/// from the approval row because older deployments allowed Ash to approve
+/// while also posting `[qa-agent-deferred]`; the report must invalidate that
+/// stale approval until a later all-verified report arrives.
+pub(crate) fn qa_agent_deferred(task: &Task) -> bool {
+    match latest_qa_verdict(task) {
+        Some("deferred") => true,
+        Some("verified") | Some("blocked") => false,
+        _ => task
+            .approvals
+            .iter()
+            .find(|approval| approval.approval_type == "qa_agent" && approval.state == "approved")
+            .and_then(|approval| approval.note.as_deref())
+            .is_some_and(|note| {
+                note.lines().any(|line| {
+                    let line = line.to_ascii_lowercase();
+                    line.contains("deferred") && !line.contains("no deferred")
+                })
+            }),
+    }
+}
+
+/// True when Ash has reported an evidence blocker after an older approval.
+pub(crate) fn qa_agent_blocked(task: &Task) -> bool {
+    matches!(latest_qa_verdict(task), Some("blocked"))
 }
 
 #[cfg(test)]
@@ -228,6 +281,42 @@ mod tests {
         let task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
         assert!(qa_agent_verified(&task));
         assert!(crate::verify_delivery::qa_agent_verified_failures(&task).is_empty());
+    }
+
+    #[test]
+    fn qa_agent_deferred_report_invalidates_a_stale_approval() {
+        let mut task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        task.comments.push(crate::TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some(
+                "[qa-agent-deferred] AC1: repository-admin setup is still outstanding."
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+
+        assert!(qa_agent_deferred(&task));
+        assert!(!qa_agent_verified(&task));
+        assert!(crate::verify_delivery::qa_agent_verified_failures(&task)[0]
+            .contains("deferred"));
+    }
+
+    #[test]
+    fn later_verified_report_reopens_a_previously_deferred_approval() {
+        let mut task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        task.comments.push(crate::TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-deferred] AC1: pending admin action.".to_string()),
+            ..Default::default()
+        });
+        task.comments.push(crate::TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-verified] All ACs verified.".to_string()),
+            ..Default::default()
+        });
+
+        assert!(!qa_agent_deferred(&task));
+        assert!(qa_agent_verified(&task));
     }
 
     #[test]

@@ -44,12 +44,13 @@ Repeated people across or within planes are meaningful and must remain visible.
    Preserve gate context and the escalation tail. Do **not** post the
    structured approval.
 5. If any AC is deferred (capability gap), post `[qa-agent-deferred]`
-   for those ACs and continue the loop. If at least one AC verified
-   and none blocked, post the structured `qa_agent` approval AND a
-   `[qa-agent-deferred]` comment summarising the deferred subset. If
-   the same gap recurs across two distinct tasks, propose a follow-up
-   feature task via the Tasks API on the second strike (do not
-   auto-create on the first deferral).
+   for those ACs and **do not** post the structured `qa_agent` approval.
+   Route the task to `Quinn` at `attentionOwners[0]`; keep `Tom` as a
+   dormant escalation slot only when Quinn cannot resolve the capability gap.
+   QA approval is allowed only after a later pass claims every AC addressed
+   and reaches `verified` for every AC. If the same gap recurs across two
+   distinct tasks, propose a follow-up feature task via the Tasks API on the
+   second strike (do not auto-create on the first deferral).
 6. If the blocker is tooling/systemic, route by capability:
    infrastructure, host, or network work may go to Lox;
    OpenClaw/runtime work goes to Quinn; otherwise choose the capable

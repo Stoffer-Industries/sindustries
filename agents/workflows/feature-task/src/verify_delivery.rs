@@ -94,6 +94,8 @@ pub(crate) fn verify_delivery_review_failure(
 pub(crate) fn qa_agent_verified_failures(task: &crate::Task) -> Vec<String> {
     if task_approvals::qa_agent_verified(task) {
         vec![]
+    } else if task_approvals::qa_agent_deferred(task) {
+        vec!["Ash reported deferred acceptance criteria; the structured `qa_agent` approval is invalid until every AC is claimed addressed and verified. OpenClaw must resolve the deferred items before QA can approve. See the latest `[qa-agent-deferred]` report.".to_string()]
     } else {
         vec!["Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.".to_string()]
     }
@@ -116,6 +118,13 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             return Ok(drift);
         }
         env = drift;
+    }
+    // A deferred Ash verdict is an explicit OpenClaw handoff. Set this before
+    // any later delivery/mechanical failure can return through the generic
+    // blocker so the persisted lobster state and queue routing agree.
+    if task_approvals::qa_agent_deferred(&env.task) {
+        env.lobster_state.openclaw_needed = true;
+        env.lobster_state.openclaw_done = false;
     }
     let manual_failures = manual_block_failures(&env.task);
     if !manual_failures.is_empty() {
@@ -354,18 +363,39 @@ let files = match pr_gates::pr_changed_files(url) {
         if !qa_agent_failures.is_empty() {
             if !args.dry_run {
                 let qa_fingerprint = qa_agent_failures.join("\n");
-                if env.lobster_state.failure_fingerprint.as_deref() != Some(&qa_fingerprint) {
+                let deferred = task_approvals::qa_agent_deferred(&env.task);
+                let fingerprint_changed =
+                    env.lobster_state.failure_fingerprint.as_deref() != Some(&qa_fingerprint);
+                if deferred {
+                    env.lobster_state.openclaw_needed = true;
+                    env.lobster_state.openclaw_done = false;
+                }
+                if fingerprint_changed {
                     env.lobster_state.failure_fingerprint = Some(qa_fingerprint.clone());
                     add_comment(
                         &args.base_url,
                         &env.task.id,
-                        &format!("[qa-agent-blocked]\n{}", qa_agent_failures.join("\n")),
+                        &format!(
+                            "{}\n{}",
+                            if deferred {
+                                "[openclaw-needed]"
+                            } else {
+                                "[qa-agent-blocked]"
+                            },
+                            qa_agent_failures.join("\n")
+                        ),
                     )?;
+                }
+                if fingerprint_changed || deferred {
                     write_state(&args.base_url, &env.task.id, &env.lobster_state, None)?;
                 }
             }
             env.criteria_met = false;
-            env.action_taken = "verify_delivery_qa_agent_blocked".to_string();
+            env.action_taken = if task_approvals::qa_agent_deferred(&env.task) {
+                "verify_delivery_openclaw_needed".to_string()
+            } else {
+                "verify_delivery_qa_agent_blocked".to_string()
+            };
             env.failures = qa_agent_failures;
             analytics::emit_gate_failure_events(&args, &env.task, "verify_delivery", &env.failures);
             return Ok(env);

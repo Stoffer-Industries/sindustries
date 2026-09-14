@@ -203,6 +203,8 @@ struct TaskApproval {
     #[serde(default)]
     owner: Option<String>,
     #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
     approved_at: Option<String>,
     #[serde(default)]
     revoked_at: Option<String>,

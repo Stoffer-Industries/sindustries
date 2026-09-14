@@ -43,10 +43,11 @@
       listing each blocked AC's reason. Do **not** post the structured
       approval.
    7. On a `deferred` AC: post `[qa-agent-deferred] AC<N>: <reason>`
-      for that AC and continue the loop for the rest. If at least one
-      AC was verified and none were blocked, post the structured
-      `qa_agent` approval AND a `[qa-agent-deferred]` comment
-      summarising the deferred subset.
+      for that AC and continue the loop for the rest, but do **not** post
+      the structured `qa_agent` approval. Route the task to Quinn at
+      `attentionOwners[0]`; Tom is only a dormant escalation target if Quinn
+      cannot resolve the capability gap. Approval is permitted only on a
+      later pass that claims every AC addressed and verifies every AC.
    8. If the same capability gap has been deferred across two distinct
       tasks (the two-strike rule), propose a follow-up feature task
       (create via Tasks API) describing the capability spec and link

@@ -62,10 +62,10 @@ tests + cited files, and reach a `verified` / `blocked` / `deferred`
 verdict per AC. On `verified` for all ACs, she posts the structured
 `qa_agent` approval via the Tasks API. On any `blocked` AC she posts
 `[qa-agent-blocked]` and routes back to the delivery assignee. On a
-`deferred` AC (capability gap) she posts `[qa-agent-deferred]` and
-continues; the structured approval still posts if the remaining ACs
-are clean. If the same capability gap recurs across two distinct
-tasks, Ash proposes a follow-up feature task on the second strike.
+`deferred` AC (capability gap) she posts `[qa-agent-deferred]`, withholds
+the structured approval, and routes the task to Quinn until every AC is
+addressed. If the same capability gap recurs across two distinct tasks, Ash
+proposes a follow-up feature task on the second strike.
 
 ## Tests
 
