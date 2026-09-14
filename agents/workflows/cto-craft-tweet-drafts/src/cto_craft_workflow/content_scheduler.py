@@ -117,10 +117,13 @@ class ImportClient:
                 headers=headers,
             )
         except httpx.TimeoutException as exc:
-            raise ImportError("TIMEOUT", f"timeout after {self._timeout_seconds}s") from exc
+            raise ImportError(
+                "TIMEOUT", f"timeout after {self._timeout_seconds}s against {self._base_url}"
+            ) from exc
         except httpx.HTTPError as exc:
             raise ImportError(
-                "TRANSPORT_ERROR", f"transport error: {exc.__class__.__name__}"
+                "TRANSPORT_ERROR",
+                f"transport error: {exc.__class__.__name__} against {self._base_url}",
             ) from exc
 
         if response.status_code >= 400:
