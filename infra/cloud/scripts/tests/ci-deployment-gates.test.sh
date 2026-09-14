@@ -54,6 +54,7 @@ expected_required = {
     'gymtrack-tests',
     'gymtrack-mcp-tests',
     'design-system-sync',
+    'frontend-design-system-lint',
     'no-absolute-paths-lint',
     'infra-cloud-bootstrap-staging-tests',
     'gitleaks',
