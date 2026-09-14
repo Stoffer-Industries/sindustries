@@ -1,17 +1,26 @@
 name: Website Deploy
 
 on:
-  push:
-    branches:
-      - '**'
-    paths:
-      - 'apps/website/**'
-      - 'packages/design-tokens/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vercel.json'
-      - '.github/workflows/website-deploy.yml'
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      target:
+        description: Deployment target (staging or production)
+        required: true
+        type: string
+      production-candidate:
+        description: Build staging with production configuration for later promotion
+        required: false
+        default: false
+        type: boolean
+      candidate-url:
+        description: Smoke-tested Vercel deployment URL to promote to production
+        required: false
+        default: ''
+        type: string
+    outputs:
+      deployment_url:
+        description: Vercel deployment URL
+        value: ${{ jobs.deploy.outputs.deployment_url }}
 
 permissions:
   contents: read
@@ -20,12 +29,18 @@ env:
   NODE_VERSION: '22'
   STAGING_DOMAIN: staging.sindustries.co.nz
   PRODUCTION_DOMAIN: www.sindustries.co.nz
+  VERCEL_CLI_VERSION: '54.2.0'
 
 jobs:
   deploy:
-    name: Deploy website to Vercel
+    name: Deploy website to Vercel ${{ inputs.target }}
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    environment: ${{ inputs.target }}
+    concurrency:
+      group: website-${{ inputs.target }}-${{ inputs.target == 'staging' && github.ref || 'production' }}
+      cancel-in-progress: ${{ inputs.target == 'staging' }}
+    outputs:
+      deployment_url: ${{ steps.staging_deploy.outputs.url || steps.production_promote.outputs.url }}
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -41,66 +56,97 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Install Vercel CLI
+        run: npm install --global vercel@${{ env.VERCEL_CLI_VERSION }}
+
       - name: Install workspace dependencies
+        if: inputs.target == 'staging'
         run: npm ci
 
       - name: Ensure Rollup Linux native binary is present
+        if: inputs.target == 'staging'
         run: npm install --no-save @rollup/rollup-linux-x64-gnu@4.59.0 --workspace apps/website
 
       - name: Test website
+        if: inputs.target == 'staging'
         run: npm test --workspace apps/website
 
       - name: Build website
+        if: inputs.target == 'staging'
         run: npm run build --workspace apps/website
 
-      - name: Install Vercel CLI
-        run: npm install --global vercel@54.2.0
-
       - name: Pull Vercel environment
+        if: inputs.target == 'staging'
         run: |
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+          if [ "${{ inputs.production-candidate }}" = "true" ]; then
             vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           else
             vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
           fi
 
       - name: Build Vercel output
+        if: inputs.target == 'staging'
         run: |
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+          if [ "${{ inputs.production-candidate }}" = "true" ]; then
             vercel build --prod --token="$VERCEL_TOKEN"
           else
             vercel build --token="$VERCEL_TOKEN"
           fi
 
-      - name: Deploy to Vercel
-        id: deploy
+      - name: Deploy candidate to staging
+        if: inputs.target == 'staging'
+        id: staging_deploy
         run: |
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
-            DEPLOY_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
-            vercel alias set "$DEPLOY_URL" "$PRODUCTION_DOMAIN" --token="$VERCEL_TOKEN"
-            TARGET="production"
-          else
-            DEPLOY_URL=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
-            if vercel alias set "$DEPLOY_URL" "$STAGING_DOMAIN" --token="$VERCEL_TOKEN"; then
-              STAGING_ALIAS_STATUS="assigned"
-            else
-              STAGING_ALIAS_STATUS="pending DNS/certificate setup"
-            fi
-            TARGET="staging"
-          fi
-
+          DEPLOY_URL=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          vercel alias set "$DEPLOY_URL" "$STAGING_DOMAIN" --token="$VERCEL_TOKEN"
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           {
-            echo "### Vercel deployment"
+            echo "### Vercel staging deployment"
             echo ""
-            echo "- Target: $TARGET"
             echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- URL: $DEPLOY_URL"
-            if [ "$TARGET" = "production" ]; then
-              echo "- Production URL: https://$PRODUCTION_DOMAIN"
+            echo "- Candidate URL: $DEPLOY_URL"
+            echo "- Stable staging URL: https://$STAGING_DOMAIN"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke check staging candidate
+        if: inputs.target == 'staging'
+        run: |
+          set -euo pipefail
+          URL="${{ steps.staging_deploy.outputs.url }}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error --max-time 15 "$URL" >/dev/null; then
+              echo "Smoke OK on attempt $attempt"
+              exit 0
             fi
-            if [ "$TARGET" = "staging" ]; then
-              echo "- Stable staging URL: https://$STAGING_DOMAIN"
-              echo "- Staging alias: $STAGING_ALIAS_STATUS"
-            fi
+            echo "Smoke attempt $attempt failed; retrying in 5s"
+            sleep 5
+          done
+          echo "::error::Website staging smoke check failed after 10 attempts"
+          exit 1
+
+      - name: Validate production candidate
+        if: inputs.target == 'production'
+        env:
+          CANDIDATE_URL: ${{ inputs.candidate-url }}
+        run: |
+          if [ -z "$CANDIDATE_URL" ]; then
+            echo "::error::Production requires the smoke-tested staging candidate URL."
+            exit 1
+          fi
+
+      - name: Promote smoke-tested candidate
+        if: inputs.target == 'production'
+        id: production_promote
+        env:
+          CANDIDATE_URL: ${{ inputs.candidate-url }}
+        run: |
+          vercel promote "$CANDIDATE_URL" --yes --token="$VERCEL_TOKEN"
+          vercel alias set "$CANDIDATE_URL" "$PRODUCTION_DOMAIN" --token="$VERCEL_TOKEN"
+          echo "url=$CANDIDATE_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Vercel production promotion"
+            echo ""
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Promoted deployment: $CANDIDATE_URL"
+            echo "- Production URL: https://$PRODUCTION_DOMAIN"
           } >> "$GITHUB_STEP_SUMMARY"

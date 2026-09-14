@@ -140,20 +140,28 @@ Once DNS lands, point `<service>.staging.sindustries.dev` CNAMEs at the matching
 The `.openclaw` boundary Quinn confirmed on the PR #508 review (merged `d6ee2d8`):
 
 - **Quinn owns** the live values: `FLY_API_TOKEN`, Neon `DATABASE_URL` / `DIRECT_URL`, Upstash `REDIS_URL` / `CONTENT_SCHEDULER_REDIS_URL`, DNS provider token. These never enter the repo.
-- **Quinn registers** the GitHub repo secrets under fixed names (`FLY_API_TOKEN` is the only one CI uses today). Workflow YAML references `secrets.FLY_API_TOKEN` by name.
+- **Quinn registers** `FLY_API_TOKEN` through GitHub's masked secret UI under the `staging` and `production` environments as applicable. Workflow YAML references `secrets.FLY_API_TOKEN` by name and performs a fail-fast presence check before installing or invoking Fly tooling.
 - **Rowan ships** only env-var names, Fly app specs, Dockerfiles, and deploy workflows. The workflow templates include `FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}` so the deploy job picks up Quinn's value at job time.
 - **Quinn runs** `infra/cloud/scripts/bootstrap-staging.sh` once. It reads `infra/cloud/.env.local` (gitignored) and applies Quinn's per-service `TASKS_API_*`, `BUDGET_API_*`, `AUTO_POST_WORKER_*` prefixed env vars via `fly secrets set`.
 - **Quinn rotates** any secret out-of-band. Rotation procedure for tokens with downstream ciphertext rows (e.g. Akahu) was previously `docs/runbooks/rotate-akahu-access-tokens.md` (retired in PR #583; the procedure steps should be regenerated as a new runbook at `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` if Quinn needs to rotate Akahu tokens); no rotation procedure is needed for non-derived secrets.
 
 A new operator joining Quinn's seat gets the same out-of-band onboarding path: 1Password (or equivalent) handoff for `FLY_API_TOKEN` + Neon + Upstash + DNS, plus the `infra/cloud/.env.local` template.
 
+If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only through **GitHub → Settings → Environments → staging/production → Environment secrets**. Never paste the value into an issue, task, PR, workflow-dispatch input, command argument, URL, or chat. Re-run the failed gated deployment after the masked value is restored.
+
 ---
 
 ## Deploy procedure (reference)
 
-Per-service deploy happens automatically on push to `main` via `.github/workflows/deploy-staging-<service>.yml` (path-filtered to the service's source + `infra/cloud/` + the workflow file itself). Manual override is via `workflow_dispatch`.
+`.github/workflows/ci.yml` is the deployment orchestrator. It detects changed deployable surfaces, runs CI, and emits one stable `CI / merge gate` result. The active `main` ruleset requires that result. Deploy workflows expose `workflow_call` only, so they cannot race or bypass the CI run for the same commit.
 
-The CI workflow runs `flyctl deploy --strategy canary` then a smoke check:
+- Pull-request website staging starts only after the merge gate succeeds.
+- A website change on `main` deploys a production-configured candidate to staging, smoke-checks that exact deployment URL, then promotes the same deployment to production.
+- Fly staging services, GymTrack, GymTrack MCP, and the budget-mobile EAS update start only from a successful `main` merge gate when their central changed-path filter matches.
+- The `production` GitHub environment accepts protected-branch deployments only. Staging remains available to pull-request branches.
+- Staging cancels superseded runs for the same target/ref. Production serializes runs and never cancels an in-progress deployment.
+
+Fly reusable workflows run a credential preflight, install a commit-pinned setup action and version-pinned `flyctl`, run `flyctl deploy --strategy canary`, then smoke-check:
 
 - **HTTP services** — curl `https://<app>.fly.dev/health` (10 retries, 5s apart). The `/health` route is mounted in `services/tasks-api/src/app.ts` (and the equivalent in budget-api); Fly's `[[services.http_checks]]` block in the `fly.toml` hits the same route on the 15s interval.
 - **Worker** — `flyctl logs --app <app> --no-tail | grep '\[content-scheduler-worker\] starting (adapter=bullmq)'`. A clean boot line means Prisma connected + the BullMQ worker registered. Fly's process supervisor handles PID liveness; there's no `http_service` block to monitor.
