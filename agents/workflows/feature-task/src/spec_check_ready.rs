@@ -29,9 +29,9 @@
 //!   tasks; runs the assignee + capacity gate only (the tech-design gate
 //!   already ran in the prior stage).
 //! - `workflow_attention_owner` — derive the workflow-owned head slot
-//!   (`Quinn` for unapproved tech design, `Ash` for unverified `qa_agent`,
-//!   `Tom` for unapproved `accepted`); returns `None` when the gate is
-//!   satisfied.
+//!   (`Quinn` for unapproved tech design or an unresolved Ash deferral,
+//!   `Ash` for unverified `qa_agent`, `Tom` for unapproved `accepted`);
+//!   returns `None` when the gate is satisfied.
 //! - `ash_was_last_commenter` — gate so Ash's own comments do not let a
 //!   stale `Ash` head persist into the next lobster sweep.
 //! - `managed_owner_reason_satisfied` — predicate for whether the head of
@@ -438,6 +438,12 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+                && task_approvals::qa_agent_deferred(task) =>
+        {
+            Some("Quinn".to_string())
+        }
+        "doing"
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && !task_approvals::qa_agent_verified(task)
                 && !ash_was_last_commenter(task) =>
         {
@@ -494,6 +500,13 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
             .first()
             .is_some_and(|owner| owner.eq_ignore_ascii_case(&desired))
         {
+            if task_approvals::qa_agent_deferred(task)
+                && !owners
+                    .iter()
+                    .any(|owner| owner.eq_ignore_ascii_case("Tom"))
+            {
+                owners.push("Tom".to_string());
+            }
             return owners;
         }
         if owners.first().is_some_and(|owner| {
@@ -505,6 +518,16 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
             owners[0] = desired.to_string();
         } else {
             owners.insert(0, desired.to_string());
+        }
+        // A deferred QA verdict is an OpenClaw handoff. Quinn acts first;
+        // Tom is a dormant escalation target only if Quinn cannot resolve the
+        // capability gap. Keep any existing tail and add Tom exactly once.
+        if task_approvals::qa_agent_deferred(task)
+            && !owners
+                .iter()
+                .any(|owner| owner.eq_ignore_ascii_case("Tom"))
+        {
+            owners.push("Tom".to_string());
         }
     } else if owners
         .first()
@@ -531,6 +554,22 @@ pub(crate) fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope)
     )?;
     env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
     Ok(())
+}
+
+fn latest_lobster_state_has_openclaw_needed(task: &Task) -> bool {
+    task.comments
+        .iter()
+        .rev()
+        .find_map(|comment| {
+            let text = comment
+                .text
+                .as_deref()
+                .or(comment.body.as_deref())
+                .unwrap_or_default();
+            text.starts_with("[lobster-state]")
+                .then(|| text.contains("\"openclawNeeded\": true"))
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn workflow_handoff(role_id: &str, gate: &str, reason: &str) -> ActiveWorkflowHandoff {
@@ -563,6 +602,8 @@ pub(crate) fn transition_or_block(
         // otherwise the acceptance state carries stale failure diagnostics
         // and a later sweep can appear blocked even though the gate passed.
         env.lobster_state.failure_fingerprint = None;
+        env.lobster_state.openclaw_needed = false;
+        env.lobster_state.openclaw_done = false;
         env.action_taken = if args.dry_run {
             format!("would_move_to_{next_status}")
         } else {
@@ -603,6 +644,10 @@ pub(crate) fn transition_or_block(
     } else {
         env.action_taken = format!("{action}_blocked");
         let fingerprint = failures.join("\n");
+        let fingerprint_changed =
+            env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint);
+        let openclaw_state_changed = env.lobster_state.openclaw_needed
+            && !latest_lobster_state_has_openclaw_needed(&env.task);
         if !args.dry_run {
             api_client::api_patch::<Task>(
                 &args.base_url,
@@ -611,8 +656,13 @@ pub(crate) fn transition_or_block(
             )?;
             env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
         }
-        if !args.dry_run && env.lobster_state.failure_fingerprint.as_deref() != Some(&fingerprint) {
+        if !args.dry_run && (fingerprint_changed || openclaw_state_changed) {
             env.lobster_state.failure_fingerprint = Some(fingerprint);
+            let comment_tag = if env.lobster_state.openclaw_needed {
+                format!("[openclaw-needed]\n{comment_tag}")
+            } else {
+                comment_tag.to_string()
+            };
             if let Err(err) = api_client::add_comment(
                 &args.base_url,
                 &env.task.id,
@@ -749,6 +799,55 @@ mod tests {
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
             vec!["Ash", "Tom"]
+        );
+    }
+
+    #[test]
+    fn routing_sends_deferred_qa_to_quinn_with_tom_as_dormant_escalation() {
+        let mut task = routing_task("doing", &["Rowan"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some(
+                "[qa-agent-deferred] AC1: repository-admin setup is outstanding.".to_string(),
+            ),
+            ..Default::default()
+        });
+        task.approvals.push(approval_row("qa_agent", "approved"));
+
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn", "Tom"]
+        );
+    }
+
+    #[test]
+    fn routing_keeps_existing_tom_tail_when_deferred_qa_replaces_rowan() {
+        let mut task = routing_task("doing", &["Rowan", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-deferred] AC1: pending admin action.".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn", "Tom"]
         );
     }
     #[test]

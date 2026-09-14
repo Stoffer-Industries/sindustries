@@ -5,9 +5,9 @@ A QA action is done only when:
 - each AC was reasoned over via the agent's own tool calls (PR diff, cited
   tests, cited code) and a `verified` / `blocked` / `deferred` verdict was
   reached per AC;
-- the structured `qa_agent` approval reflects the per-AC reasoning: posts when
-  every AC verified (or when at least one verified and the rest are deferred
-  capability gaps with no blockers); does not post when any AC is blocked;
+- the structured `qa_agent` approval reflects the per-AC reasoning: posts only
+  when every AC is claimed addressed and verified; does not post when any AC
+  is blocked or deferred;
 - capability gaps are reported via `[qa-agent-deferred]` task comments with a
   reason and (when known) a spec link; recurring gaps across two distinct
   tasks become a follow-up task, not a silent deferral;
