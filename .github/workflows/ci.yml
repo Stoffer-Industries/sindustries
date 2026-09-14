@@ -858,7 +858,7 @@ jobs:
   deploy-website-staging:
     name: website staging
     needs: [changes, merge-gate]
-    if: needs.merge-gate.result == 'success' && needs.changes.outputs.website == 'true'
+    if: always() && needs.merge-gate.result == 'success' && needs.changes.outputs.website == 'true'
     uses: ./.github/workflows/website-deploy.yml
     with:
       target: staging
@@ -869,6 +869,7 @@ jobs:
     name: website production
     needs: [changes, merge-gate, deploy-website-staging]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
@@ -884,6 +885,7 @@ jobs:
     name: tasks-api staging
     needs: [changes, merge-gate]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
@@ -895,6 +897,7 @@ jobs:
     name: budget-api staging
     needs: [changes, merge-gate]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
@@ -906,6 +909,7 @@ jobs:
     name: auto-post-worker staging
     needs: [changes, merge-gate]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
@@ -917,6 +921,7 @@ jobs:
     name: gymtrack production
     needs: [changes, merge-gate]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
@@ -928,6 +933,7 @@ jobs:
     name: gymtrack-mcp production
     needs: [changes, merge-gate]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
@@ -939,6 +945,7 @@ jobs:
     name: EAS update on main
     needs: [changes, merge-gate]
     if: >-
+      always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.merge-gate.result == 'success' &&
