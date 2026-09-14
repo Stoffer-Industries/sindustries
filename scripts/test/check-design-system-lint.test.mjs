@@ -3,11 +3,12 @@
 // Unit tests for scripts/check-design-system-lint.mjs. Run with:
 //   node --test scripts/test/check-design-system-lint.test.mjs
 //
-// These tests stub .oxlintrc.json and components.json in an isolated temp
-// directory and assert the wrapper's exit-code behaviour against each stub.
-// They do NOT exercise oxlint itself — that's the job of the live CI job
-// (`frontend-design-system-lint`), which runs the real @shadcn/lint plugin
-// against the repo's actual frontend surface.
+// These tests stub `.oxlintrc.json` and `components.json` in an isolated
+// temp directory and assert the wrapper's exit-code behaviour for each
+// contract violation. They do NOT exercise oxlint itself — that requires
+// `npm ci` in a non-temp directory; the live CI job
+// (`frontend-design-system-lint`) runs the real flow against the repo's
+// actual install.
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
@@ -34,7 +35,7 @@ function runScript(cwd) {
 
 const VALID_OXLINTRC = JSON.stringify(
   {
-    jsPlugins: [{ name: '@shadcn/lint', specifier: '0.1.0' }],
+    jsPlugins: ['@shadcn/lint'],
     settings: { 'shadcn-lint': { rulesEnabled: false } },
   },
   null,
@@ -43,62 +44,97 @@ const VALID_OXLINTRC = JSON.stringify(
 
 const VALID_COMPONENTS = JSON.stringify({ style: 'default', rsc: false, tsx: true });
 
-test('exits 2 when .oxlintrc.json is missing', () => {
+test('exits 1 when .oxlintrc.json is missing', () => {
   const dir = makeTree({ 'components.json': VALID_COMPONENTS });
   try {
     const r = runScript(dir);
-    assert.equal(r.status, 2, `expected exit 2\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stderr, /\.oxlintrc\.json missing/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('exits 2 when components.json is missing', () => {
+test('exits 1 when components.json is missing', () => {
   const dir = makeTree({ '.oxlintrc.json': VALID_OXLINTRC });
   try {
     const r = runScript(dir);
-    assert.equal(r.status, 2, `expected exit 2\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stderr, /components\.json missing/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('exits 2 when .oxlintrc.json is unparseable', () => {
+test('exits 1 when .oxlintrc.json is unparseable', () => {
   const dir = makeTree({
     '.oxlintrc.json': '{ this is not valid json',
     'components.json': VALID_COMPONENTS,
   });
   try {
     const r = runScript(dir);
-    // The wrapper reads the file with JSON.parse and exits 2 on a parse error.
-    assert.equal(r.status, 2, `expected exit 2\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stderr, /parse failed/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('configSummary surfaces @shadcn/lint plugin registration in stderr banner', () => {
-  // We can't run oxlint here (the script invokes `npx oxlint`), but the
-  // config summary prints before that. Verify the wrapper correctly reads
-  // the registered plugin specifier and reports rulesEnabled from settings.
+test('exits 1 when @shadcn/lint is not registered in jsPlugins', () => {
+  const dir = makeTree({
+    '.oxlintrc.json': JSON.stringify({ jsPlugins: ['some-other-plugin'] }),
+    'components.json': VALID_COMPONENTS,
+  });
+  try {
+    const r = runScript(dir);
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stderr, /NOT REGISTERED/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('exits 1 when rulesEnabled is not explicitly false', () => {
+  const dir = makeTree({
+    '.oxlintrc.json': JSON.stringify({
+      jsPlugins: ['@shadcn/lint'],
+      settings: { 'shadcn-lint': { rulesEnabled: true } },
+    }),
+    'components.json': VALID_COMPONENTS,
+  });
+  try {
+    const r = runScript(dir);
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stderr, /rulesEnabled is not explicitly false/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('configSummary surfaces @shadcn/lint registration + rulesEnabled=false in stderr banner', () => {
+  // The wrapper prints the config summary BEFORE attempting to invoke
+  // oxlint. Verify both fields surface correctly from a stub config.
+  // When oxlint is resolvable via npx (e.g. the test is run from a worktree
+  // where the repo has been npm-installed), the smoke test will pass with
+  // exit 0. When oxlint is not available, it exits 2. Either is acceptable
+  // for this assertion — we only care that the banner prints correctly.
   const dir = makeTree({
     '.oxlintrc.json': VALID_OXLINTRC,
     'components.json': VALID_COMPONENTS,
   });
   try {
     const r = runScript(dir);
-    // oxlint may not be installed in this isolated tempdir; either the script
-    // succeeds (status 0) or surfaces a meaningful stderr. We accept either
-    // path as long as the config summary prints plugin metadata.
     assert.ok(
-      r.stderr.includes('@shadcn/lint plugin'),
-      `expected plugin metadata in stderr; got: ${r.stderr}`,
+      r.status === 0 || r.status === 2,
+      `expected exit 0 (oxlint available) or 2 (no oxlint); got ${r.status}\nstderr: ${r.stderr}`,
+    );
+    assert.ok(
+      r.stderr.includes('@shadcn/lint plugin: registered'),
+      `expected plugin registration banner; got: ${r.stderr}`,
     );
     assert.ok(
       r.stderr.includes('rulesEnabled: false'),
-      `expected rulesEnabled=false in stderr; got: ${r.stderr}`,
+      `expected rulesEnabled=false in banner; got: ${r.stderr}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
