@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "_comment": "Dormant install for @shadcn/lint (task da86ccd8). Used by the lint:design-system script to point the linter at SIndustries' canonical React component surface. Rules are intentionally NOT enabled in this PR; see docs/systems/design-system.md 'Design-system linting' section and follow-up task 7986eb43-dc85-4512-b76a-1cfecefd8be7 (Adopt Tailwind v4 in @sindustries/ui).",
+  "style": "default",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "packages/design-tokens/styles.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@sindustries/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  },
+  "iconLibrary": "lucide"
+}

@@ -7,7 +7,8 @@
     "sync:design-systems-lib": "node scripts/design/sync-design-systems-lib.mjs",
     "check:design-sync": "node scripts/design/check-design-sync.mjs",
     "lint:no-legacy-approval-marker": "node scripts/check-no-legacy-approval-marker.mjs",
-    "test:lint": "node --test scripts/test/check-no-absolute-paths.test.mjs scripts/test/check-no-legacy-approval-marker.test.mjs"
+    "lint:design-system": "node scripts/check-design-system-lint.mjs",
+    "test:lint": "node --test scripts/test/check-no-absolute-paths.test.mjs scripts/test/check-no-legacy-approval-marker.test.mjs scripts/test/check-design-system-lint.test.mjs"
   },
   "workspaces": [
     "apps/*",
@@ -15,6 +16,8 @@
     "services/*"
   ],
   "devDependencies": {
-    "jsdom": "^29.0.1"
+    "@shadcn/lint": "0.1.0",
+    "jsdom": "^29.0.1",
+    "oxlint": "1.83.0"
   }
 }

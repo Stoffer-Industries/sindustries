@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/crates/oxc_linter/src/schemas/oxlintrc.schema.json",
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-unused-vars": "warn"
+  },
+  "jsPlugins": [
+    {
+      "name": "@shadcn/lint",
+      "specifier": "0.1.0"
+    }
+  ],
+  "settings": {
+    "shadcn-lint": {
+      "_comment": "Dormant install — see docs/systems/design-system.md 'Design-system linting' section and follow-up task 7986eb43-dc85-4512-b76a-1cfecefd8be7. Rules are intentionally NOT enabled in this PR: @shadcn/lint ships Tailwind-class-string rules and reads theme tokens from Tailwind v4 @theme blocks, but SIndustries frontend uses BEM-style CSS with @sindustries/design-tokens via CSS custom properties. Enabling rules before Tailwind v4 lands in @sindustries/ui produces zero findings — a false-signal that proves nothing. Rule activation is owned by follow-up task 7986eb43.",
+      "componentsRoot": "packages/ui/src/react",
+      "tokensStylesheet": "packages/design-tokens/styles.css",
+      "rulesEnabled": false
+    }
+  }
+}
