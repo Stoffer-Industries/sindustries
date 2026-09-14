@@ -2,9 +2,9 @@
 #
 # Mirror of .github/workflows/deploy-staging-tasks-api.yml adapted for
 # budget-api. Quinn-approved design (PR #508): FLY_API_TOKEN referenced as
-# a repo secret; the workflow YAML itself stays secret-name-only. Path filter
-# scopes the workflow to budget-api source + its infra/cloud deploy artefacts
-# + the workflow itself, so unrelated pushes don't redeploy.
+# a repo secret; the workflow YAML itself stays secret-name-only. The central
+# CI workflow owns changed-path selection and calls this workflow only after
+# the aggregate merge gate succeeds.
 #
 # `fly deploy --strategy canary` matches the rollback story in
 # docs/runbooks/cloud-deployment-rollback.md (Fly's image flag plus the
@@ -20,21 +20,11 @@
 name: Deploy budget-api (Fly.io staging)
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'services/budget-api/**'
-      - 'packages/budget-domain/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'infra/cloud/**'
-      - '.github/workflows/deploy-staging-budget-api.yml'
-  workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: deploy-budget-api-staging
-  cancel-in-progress: false
+  group: deploy-budget-api-staging-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -58,8 +48,19 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Require Fly deployment credential
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "::error::FLY_API_TOKEN is not configured for the staging GitHub environment. Add it through Settings > Environments > staging > Environment secrets."
+            exit 1
+          fi
+
       - name: Install Fly CLI
-        uses: superfly/flyctl-actions/setup-flyctl@master
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: 0.4.102
 
       - name: Validate fly.toml
         working-directory: .
@@ -91,7 +92,5 @@ jobs:
           echo "Smoke check failed after 10 attempts" >&2
           exit 1
 
-      # No PR-comment step: this workflow only triggers on push to main and
-      # workflow_dispatch, so `github.event_name == 'pull_request'` is never
-      # true here. Quinn raised this as a non-blocking nit on PR #528
-      # (auto-post-worker mirror) — removed in PR #4 (task b2f62c36).
+      # No PR-comment step: this reusable workflow is called only for gated
+      # main-branch staging deployments.

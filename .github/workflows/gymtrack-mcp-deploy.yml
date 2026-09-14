@@ -5,16 +5,7 @@
 name: GymTrack MCP Deploy
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'services/gymtrack-mcp/**'
-      - 'apps/gymtrack/server/agentData.js'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/gymtrack-mcp-deploy.yml'
-  workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: deploy-gymtrack-mcp-production
@@ -50,8 +41,19 @@ jobs:
       - name: Test GymTrack MCP
         run: npm test --workspace @sindustries/gymtrack-mcp
 
+      - name: Require Fly deployment credential
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "::error::FLY_API_TOKEN is not configured for the production GitHub environment. Add it through Settings > Environments > production > Environment secrets."
+            exit 1
+          fi
+
       - name: Install Fly CLI
-        uses: superfly/flyctl-actions/setup-flyctl@master
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: 0.4.102
 
       - name: Validate fly.toml
         run: flyctl config validate --config "$FLY_CONFIG"
