@@ -428,22 +428,24 @@ pub(crate) fn code_task_ready_checks(args: StageArgs) -> Result<Envelope> {
 /// post-merge test (`run_post_merge_worktree_cleanup`) consumes the
 /// helpers via `crate::git_worktree::*` paths per the W37 carve
 /// convention.
-pub(crate) fn workflow_attention_owner(task: &Task) -> Option<&'static str> {
+pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
     match task.status.as_str() {
         "ready"
             if !product_spec_parsing::tech_design_approved_structured(task)
                 && !product_spec_parsing::tech_design_waived(task) =>
         {
-            Some("Quinn")
+            Some("Quinn".to_string())
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && !task_approvals::qa_agent_verified(task)
                 && !ash_was_last_commenter(task) =>
         {
-            Some("Ash")
+            Some("Ash".to_string())
         }
-        "acceptance" if !task_approvals::accepted_structured(task) => Some("Tom"),
+        "doing" if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+            && task_approvals::qa_agent_verified(task) => task.assignee.clone(),
+        "acceptance" if !task_approvals::accepted_structured(task) => Some("Tom".to_string()),
         _ => None,
     }
 }
@@ -490,7 +492,7 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     if let Some(desired) = workflow_attention_owner(task) {
         if owners
             .first()
-            .is_some_and(|owner| owner.eq_ignore_ascii_case(desired))
+            .is_some_and(|owner| owner.eq_ignore_ascii_case(&desired))
         {
             return owners;
         }
@@ -557,6 +559,10 @@ pub(crate) fn transition_or_block(
     env.failures = failures.clone();
     env.criteria_met = failures.is_empty();
     if failures.is_empty() {
+        // A successful retry must retire the previous blocker fingerprint;
+        // otherwise the acceptance state carries stale failure diagnostics
+        // and a later sweep can appear blocked even though the gate passed.
+        env.lobster_state.failure_fingerprint = None;
         env.action_taken = if args.dry_run {
             format!("would_move_to_{next_status}")
         } else {
@@ -825,9 +831,9 @@ mod tests {
         );
     }
     /// A `doing`-status task whose `attentionOwners` is `[Tom, Quinn, Ash]`
-    /// and whose only closed gate is `qa_agent` should remove Tom, because
-    /// the accepted gate is not actionable until acceptance, without draining
-    /// the remaining owner stack across repeated reconcile calls.
+    /// and whose `qa_agent` gate is closed should route back to the delivery
+    /// assignee, because Tom's accepted gate is not actionable until
+    /// acceptance, without draining the remaining owner stack.
     #[test]
     fn routing_removes_tom_without_draining_remaining_managed_owners() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
@@ -845,7 +851,7 @@ mod tests {
             ..TaskApproval::default()
         });
         let once = crate::spec_check_ready::reconciled_attention_owners(&task);
-        assert_eq!(once, vec!["Quinn", "Ash"]);
+        assert_eq!(once, vec!["Rowan", "Quinn", "Ash"]);
         task.attention_owners = once.clone();
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),

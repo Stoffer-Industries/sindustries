@@ -764,12 +764,36 @@ pub(crate) fn repo_root_dir() -> PathBuf {
 pub(crate) struct ShellTestRunner;
 
 impl ShellTestRunner {
+    fn resolve_script(repo_root: &Path, citation: &str) -> Result<PathBuf, String> {
+        // Human-readable shell evidence often names a suite and assertion,
+        // e.g. `fly-deploy-trigger-paths > static assertions`, while the
+        // repository file is `fly-deploy-trigger-paths.test.sh`. Resolve the
+        // suite token and retain the assertion text as explanatory evidence.
+        let base = citation
+            .split_once(" > ")
+            .map(|(name, _)| name.trim())
+            .unwrap_or_else(|| citation.trim());
+        let mut candidates = vec![base.to_string()];
+        if !base.ends_with(".sh") {
+            candidates.push(format!("{base}.test.sh"));
+            candidates.push(format!("{base}.sh"));
+        }
+        let mut last_error = None;
+        for candidate in candidates {
+            match crate::test_resolution::resolve_repo_file_by_name(repo_root, &candidate) {
+                Ok(path) => return Ok(path),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| format!("could not resolve shell citation: {citation}")))
+    }
+
     pub(crate) fn run_in(
         &self,
         repo_root: &Path,
         test_name: &str,
     ) -> Result<ac_parsing::TestOutcome, String> {
-        let script_path = crate::test_resolution::resolve_repo_file_by_name(repo_root, test_name)?;
+        let script_path = Self::resolve_script(repo_root, test_name)?;
         let output = std::process::Command::new("bash")
             .arg(&script_path)
             .current_dir(repo_root)
@@ -919,6 +943,15 @@ fn looks_like_pytest_space_nodeid(test_name: &str) -> bool {
         .is_match(test_name.trim())
 }
 
+fn looks_like_shell_citation(test_name: &str) -> bool {
+    let prefix = test_name
+        .split_once(" > ")
+        .map(|(value, _)| value.trim())
+        .unwrap_or_else(|| test_name.trim());
+    prefix.ends_with(".sh")
+        || (test_name.contains(" > ") && !prefix.contains('/') && !prefix.contains('.'))
+}
+
 /// Choose which runner should execute a cited `testID` based on the shape
 /// of the name itself, not just which crate/workspace the PR happened to
 /// touch. A single PR can mix Rust, shell, Python, and JS ACs, so
@@ -927,7 +960,7 @@ fn looks_like_pytest_space_nodeid(test_name: &str) -> bool {
 pub(crate) fn select_test_runner_kind(test_name: &str, is_rust_pr: bool) -> TestRunnerKind {
     if test_name.contains(".py::") || looks_like_pytest_space_nodeid(test_name) {
         TestRunnerKind::Pytest
-    } else if test_name.ends_with(".sh") {
+    } else if looks_like_shell_citation(test_name) {
         TestRunnerKind::Shell
     } else if is_rust_pr {
         TestRunnerKind::Cargo
@@ -1663,6 +1696,14 @@ mod tests {
     }
 
     #[test]
+    fn select_test_runner_kind_picks_shell_for_named_suite_citation() {
+        assert_eq!(
+            select_test_runner_kind("fly-deploy-trigger-paths > static assertions", false),
+            TestRunnerKind::Shell
+        );
+    }
+
+    #[test]
     fn select_test_runner_kind_falls_back_to_cargo_or_npm_by_pr_flag() {
         assert_eq!(
             select_test_runner_kind("routing_does_not_drain_managed_owners", true),
@@ -1681,6 +1722,17 @@ mod tests {
         fs::write(&script, "#!/usr/bin/env bash\nexit 0\n").unwrap();
 
         let outcome = ShellTestRunner.run_in(root.path(), "pass.test.sh").unwrap();
+        assert_eq!(outcome.exit_code, 0);
+    }
+
+    #[test]
+    fn shell_test_runner_resolves_named_suite_without_extension() {
+        let root = tempdir().unwrap();
+        let script = root.path().join("fly-deploy-trigger-paths.test.sh");
+        fs::write(&script, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+        let outcome = ShellTestRunner
+            .run_in(root.path(), "fly-deploy-trigger-paths > static assertions")
+            .unwrap();
         assert_eq!(outcome.exit_code, 0);
     }
 

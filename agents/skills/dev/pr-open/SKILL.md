@@ -124,6 +124,15 @@ Every `- [x]` AC line must end with one of the following annotations, in priorit
 
 `file:` has been removed. If you wrote a unit test, reference it via `testID` or explain in `not tested` why it wasn't feasible to add a Playwright test. Emojis are optional but encouraged for visual clarity.
 
+Copy the task AC sentence exactly before appending the evidence annotation. The
+lobster ignores Markdown code-span markers and line-wrapping whitespace, but it
+still rejects omitted clauses, paraphrases, or shortened sentences. A CI job
+or GitHub Actions check may be cited as `testID: <job name> CI job — <what it
+verifies>`; Ash's structured QA approval is the verification for that external
+check. For shell fixture suites, cite the script (for example
+`testID: fly-deploy-trigger-paths > static assertions`) rather than a prose
+summary of its assertions.
+
 **Every task AC must appear in the PR body** — checked with evidence. Fix PRs must re-list all task ACs, not just the ones being addressed.
 
 Example:
@@ -182,4 +191,3 @@ TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
 ```
 
 If this PR covers only a subset of ACs, add a new workstream entry for the remaining ACs (still `Branch: (pending)`, `PR: (pending)`) so the task description reflects what's still outstanding.
-
