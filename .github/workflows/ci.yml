@@ -823,12 +823,12 @@ jobs:
   frontend-design-system-lint:
     # Task da86ccd8 (Add @shadcn/lint to the frontend workspace).
     # Smoke-test wiring for the dormant @shadcn/lint install — asserts the
-    # plugin loads cleanly against the configured web/React frontend
-    # surfaces. Rules are intentionally NOT enabled in this PR; rule
-    # activation is owned by follow-up task
-    # 7986eb43-dc85-4512-b76a-1cfecefd8be7 (Adopt Tailwind v4 in
-    # @sindustries/ui). See docs/systems/design-system.md 'Design-system
-    # linting' section for the rationale and the dormant-state policy.
+    # install + plugin registration + oxlint --print-config succeeds.
+    # Rules are intentionally NOT enabled in this PR; rule activation is
+    # owned by follow-up task 7986eb43-dc85-4512-b76a-1cfecefd8be7 (Adopt
+    # Tailwind v4 in @sindustries/ui). See docs/systems/design-system.md
+    # 'Design-system linting' section for the rationale and the dormant-
+    # state policy.
     name: frontend design-system lint
     runs-on: ubuntu-latest
     steps:
@@ -842,11 +842,18 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Install dependencies (oxlint + @shadcn/lint)
+        # oxlint needs the @shadcn/lint plugin to be resolvable from
+        # node_modules. `npm ci` is required for the --print-config
+        # smoke test to pass; we do NOT run the lint pass itself (the
+        # dormant install has rules off, so a real lint pass would surface
+        # unrelated oxlint-default offences on real frontend code and
+        # produce a false signal).
+        run: npm ci --no-audit --no-fund
+
       - name: Run frontend design-system lint smoke test
-        # Asserts @shadcn/lint plugin loads via oxlint. Runs against the
-        # checked-out working tree — no `npm ci` required (the wrapper
-        # uses npx --yes to resolve oxlint and the @shadcn/lint plugin
-        # on demand).
+        # Asserts .oxlintrc.json + components.json + @shadcn/lint plugin
+        # registration + rulesEnabled:false + oxlint --print-config clean.
         run: node scripts/check-design-system-lint.mjs
 
       - name: Run frontend design-system lint unit tests
