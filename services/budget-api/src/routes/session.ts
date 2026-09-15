@@ -9,7 +9,19 @@ export const sessionRouter = Router();
 
 // Local dev only: create a session and user. NOT gated by requireSession —
 // this is the endpoint that mints the bearer token in the first place.
+//
+// Hardened for staging/production (task 2850c5ac, cloud-staging-environment):
+// outside local development, the route returns 404 (preferred over 401/403 to
+// avoid advertising the existence of the route) and never touches the DB.
+// The cloud-staging smoke harness uses an internal CLI to mint a synthetic
+// session against the staging database; that path is documented in
+// docs/specs/cloud-staging-environment-tech-design.md and never reaches this
+// HTTP route.
 sessionRouter.post('/session/dev-login', async (req, res) => {
+  if (process.env.NODE_ENV !== 'development') {
+    return res.sendStatus(404);
+  }
+
   const email = typeof req.body?.email === 'string' ? req.body.email : null;
   if (!email) return jsonError(res, 400, 'BAD_REQUEST', 'email is required');
 
