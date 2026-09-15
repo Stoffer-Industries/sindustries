@@ -246,6 +246,11 @@ pub(crate) fn spec_checksum_mismatch_message(err: &anyhow::Error) -> Option<Stri
 mod tests {
     use super::*;
 
+    // These tests mutate process-global environment variables. Cargo runs
+    // unit tests in parallel, so without one shared lock the fallback test
+    // can clear FEATURE_TASK_LOBSTER_TOKEN while the preference test reads it.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn extracts_api_spec_checksum_mismatch_as_blocked_message() {
         let err = Err::<(), _>(ApiStatusError {
@@ -277,6 +282,7 @@ mod tests {
 
     #[test]
     fn api_patch_request_uses_tasks_api_approval_token() {
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let previous = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
         std::env::set_var("TASKS_API_APPROVAL_TOKEN", "test-service-token");
 
@@ -294,6 +300,7 @@ mod tests {
 
     #[test]
     fn lobster_service_token_prefers_feature_task_lobster_token() {
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let previous_lobster = std::env::var_os("FEATURE_TASK_LOBSTER_TOKEN");
         let previous_shared = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
         std::env::set_var("FEATURE_TASK_LOBSTER_TOKEN", "lobster-token");
@@ -314,6 +321,7 @@ mod tests {
 
     #[test]
     fn lobster_service_token_falls_back_to_shared_token() {
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let previous_lobster = std::env::var_os("FEATURE_TASK_LOBSTER_TOKEN");
         let previous_shared = std::env::var_os("TASKS_API_APPROVAL_TOKEN");
         std::env::remove_var("FEATURE_TASK_LOBSTER_TOKEN");
