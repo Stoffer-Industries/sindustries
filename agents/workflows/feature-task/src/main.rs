@@ -18,8 +18,6 @@ mod pr_gates;
 mod product_spec_parsing;
 mod spec_check_ready;
 mod task_approvals;
-mod test_resolution;
-mod test_runners;
 #[cfg(test)]
 mod tests_integration;
 mod verify_delivery;

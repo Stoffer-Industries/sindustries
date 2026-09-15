@@ -324,15 +324,9 @@ pub(crate) fn parse_evidence(text: &str) -> Option<Evidence> {
     // `(🧪 testID: reasoning loop over PR diff — \`agents/ash/test/foo.ts\` asserts ...)`
     // extracts only `reasoning loop over PR diff` as the testID rather
     // than the entire em-dash-joined string. The ` — <desc>` half is
-    // human-readable audit metadata, not part of the testID — the
-    // mechanical-evidence gate passes it to the test runner as a vitest
-    // `-t` filter, where it never matches any real `it()`/`test()`
-    // description and the runner's `has_passed_tests` guard then reports
-    // the AC as `test failed (exit 1)` regardless of whether the cited
-    // tests actually pass (this regressed task 0b16dc37's and the 16
-    // other actionable `merged PR + lobster evidence gate stuck` tasks
-    // for ~36h after PR #634 fixed the agents/* invocation; the missing
-    // piece was the parser change below).
+    // human-readable audit metadata, not part of the testID. Test execution
+    // is owned by CI/Ash; the lobster only uses test-file-shaped IDs for the
+    // structural PR-diff check below.
     //
     // The capture also allows one level of nested parens so a
     // describe-block name with `(...)` (e.g. `real client header set
@@ -647,34 +641,20 @@ pub(crate) fn task_ac_vs_open_pr_failures(
 // ---------------------------------------------------------------------------
 // Mechanical evidence checks (task 5e35dc25 PR #1).
 //
-// These run the deterministic file-existence + test-execution checks against
-// each per-task AC's parsed `Evidence`. Failures here surface as the
+// These run the deterministic file-existence checks against each per-task
+// AC's parsed `Evidence`. Test execution belongs to CI and Ash's external
+// check verification; the lobster must not rerun ordinary test names against
+// whatever checkout happens to be present locally. Failures here surface as the
 // `[feature-task-progress-checklist]` failures that the existing
 // `verify_delivery` path already aggregates — Ash's `qa_agent` should not
 // run until these pass. The mechanical checks are deliberately a strict
 // superset of Ash's `verify.ts` behaviour so the lobster's gate is at
 // least as strict as the agent's was.
 
-// Test runner abstraction — injectable so unit tests can fake pass/fail
-// outcomes without shelling out to `pnpm`. The production impl
-// (`PnpmTestRunner` in `main.rs`) shells out to `pnpm test --filter <name>`.
-pub(crate) trait TestRunner {
-    fn run(&self, test_name: &str) -> Result<TestOutcome, String>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TestOutcome {
-    pub exit_code: i32,
-    #[allow(dead_code)]
-    pub stdout: String,
-    #[allow(dead_code)]
-    pub stderr: String,
-}
-
 /// Mechanical evidence check failures for the `doing -> acceptance` gate.
 ///
 /// Returns one failure string per AC whose evidence is not mechanically
-/// satisfied (cited file not in the PR diff, cited test fails), or an
+/// satisfied (cited file not in the PR diff), or an
 /// empty Vec if every AC's evidence passes. Subsection scoping mirrors
 /// `task_ac_vs_open_pr_failures`: when the PR body contains
 /// `### Task <id>` subheadings, only the current task's subsection is
@@ -684,7 +664,6 @@ pub(crate) fn mechanical_evidence_failures(
     task_acs: &[(String, String)],
     body: &str,
     pr_files: &[String],
-    test_runner: &dyn TestRunner,
 ) -> Vec<String> {
     if task_acs.is_empty() {
         return vec![];
@@ -738,22 +717,8 @@ pub(crate) fn mechanical_evidence_failures(
                         ));
                     }
                 } else {
-                    // Test name: run it via the test runner.
-                    match test_runner.run(test_id) {
-                        Ok(outcome) => {
-                            if outcome.exit_code != 0 {
-                                failures.push(format!(
-                                    "{label} cites test \"{test_id}\" but the test failed (exit {}) \u{2014} fix the test before shipping.",
-                                    outcome.exit_code
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            failures.push(format!(
-                                "{label} cites test \"{test_id}\" but the test runner could not execute it: {e}"
-                            ));
-                        }
-                    }
+                    // A bare test name is evidence for CI/Ash, not a command
+                    // for the lobster to execute against its local checkout.
                 }
             }
             Evidence::NotTested { reason } => {
@@ -790,7 +755,7 @@ pub(crate) fn mechanical_evidence_failures(
             }
             Evidence::Signoff { approver: _ } => {
                 // Human sign-off is deliberately verified by the reviewer,
-                // not by a test runner or changed-file heuristic.
+                // not by a changed-file heuristic.
             }
         }
     }
@@ -1521,7 +1486,6 @@ Lead-in.
             &single_ac("AC1", "CI runs the checks"),
             body,
             &[],
-            &AlwaysFailTestRunner { msg: "not run".to_string() },
         );
         assert!(failures.is_empty(), "external CI evidence must be Ash-owned: {failures:?}");
     }
@@ -1758,49 +1722,6 @@ Lead-in.
 
     // ---- mechanical_evidence_failures (task 5e35dc25 PR #1) ----
 
-    /// Test runner that reports every test as passing.
-    struct AlwaysPassTestRunner;
-    impl TestRunner for AlwaysPassTestRunner {
-        fn run(&self, _test_name: &str) -> Result<TestOutcome, String> {
-            Ok(TestOutcome {
-                exit_code: 0,
-                stdout: String::new(),
-                stderr: String::new(),
-            })
-        }
-    }
-
-    /// Test runner that reports every test as failing, with a configurable
-    /// error message so tests can assert error propagation.
-    struct AlwaysFailTestRunner {
-        msg: String,
-    }
-    impl TestRunner for AlwaysFailTestRunner {
-        fn run(&self, _test_name: &str) -> Result<TestOutcome, String> {
-            Ok(TestOutcome {
-                exit_code: 1,
-                stdout: String::new(),
-                stderr: self.msg.clone(),
-            })
-        }
-    }
-
-    /// Test runner that records the names it was asked to run so tests can
-    /// assert the cited test name was actually dispatched.
-    struct RecordingTestRunner {
-        log: std::cell::RefCell<Vec<String>>,
-    }
-    impl TestRunner for RecordingTestRunner {
-        fn run(&self, test_name: &str) -> Result<TestOutcome, String> {
-            self.log.borrow_mut().push(test_name.to_string());
-            Ok(TestOutcome {
-                exit_code: 0,
-                stdout: String::new(),
-                stderr: String::new(),
-            })
-        }
-    }
-
     fn single_ac(label: &str, text: &str) -> Vec<(String, String)> {
         vec![(label.to_string(), text.to_string())]
     }
@@ -1815,7 +1736,6 @@ Lead-in.
             &single_ac("AC1", "Cited test file lives in the PR diff"),
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
@@ -1830,7 +1750,6 @@ Lead-in.
             &single_ac("AC1", "Cited test file lives in the PR diff"),
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert_eq!(failures.len(), 1, "got: {failures:?}");
         assert!(
@@ -1855,7 +1774,6 @@ Lead-in.
             &single_ac("AC1", "Cited test file lives in the PR diff"),
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected suffix match, got: {failures:?}");
     }
@@ -1865,68 +1783,32 @@ Lead-in.
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Historical test citation (testID: tests/foo.test.ts#L78-100)\n";
         let files = vec!["tests/foo.test.ts".to_string()];
-        let runner = RecordingTestRunner {
-            log: std::cell::RefCell::new(Vec::new()),
-        };
         let failures = mechanical_evidence_failures(
             "5e35dc25-aed5-4064-8f11-a99413d18612",
             &single_ac("AC1", "Historical test citation"),
             body,
             &files,
-            &runner,
         );
         assert!(
             failures.is_empty(),
             "expected stable file check, got: {failures:?}"
         );
-        assert!(
-            runner.log.borrow().is_empty(),
-            "line citations must not execute a stale current-line filter"
-        );
     }
 
     #[test]
-    fn mechanical_evidence_testid_test_name_runs_through_test_runner() {
-        // Cited value is a test name (no `.test.` extension) — must be
-        // dispatched to the test runner, not diff-checked.
+    fn mechanical_evidence_testid_test_name_is_deferred_to_ci_and_qa() {
+        // Cited test names are execution evidence for CI/Ash. The lobster
+        // validates the PR-body shape but must not run the name against its
+        // local checkout, which may not be the PR's merge commit.
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Cited test name runs (\u{1f9ea} testID: my_test_name)\n";
-        let runner = RecordingTestRunner {
-            log: std::cell::RefCell::new(Vec::new()),
-        };
         let failures = mechanical_evidence_failures(
             "5e35dc25-aed5-4064-8f11-a99413d18612",
             &single_ac("AC1", "Cited test name runs"),
             body,
             &[],
-            &runner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
-        assert_eq!(
-            runner.log.borrow().as_slice(),
-            &["my_test_name".to_string()],
-            "test runner must be invoked with the cited test name"
-        );
-    }
-
-    #[test]
-    fn mechanical_evidence_testid_test_name_failing_test_is_a_failure() {
-        let body = "## Acceptance Criteria\n\
-            - [x] AC1: Cited test name runs (\u{1f9ea} testID: my_test_name)\n";
-        let failures = mechanical_evidence_failures(
-            "5e35dc25-aed5-4064-8f11-a99413d18612",
-            &single_ac("AC1", "Cited test name runs"),
-            body,
-            &[],
-            &AlwaysFailTestRunner {
-                msg: "boom".to_string(),
-            },
-        );
-        assert_eq!(failures.len(), 1, "got: {failures:?}");
-        assert!(
-            failures[0].contains("my_test_name") && failures[0].contains("exit 1"),
-            "failure must name the test and exit code: {failures:?}"
-        );
     }
 
     #[test]
@@ -1939,7 +1821,6 @@ Lead-in.
             &single_ac("AC1", "Manual-only test"),
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
@@ -1953,7 +1834,6 @@ Lead-in.
             &single_ac("AC1", "Manual-only test"),
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert!(
             failures.is_empty(),
@@ -1972,7 +1852,6 @@ Lead-in.
             &single_ac("AC1", "Drag requires manual browser QA"),
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
@@ -1986,7 +1865,6 @@ Lead-in.
             &single_ac("AC1", "Spec only"),
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
@@ -2000,7 +1878,6 @@ Lead-in.
             &single_ac("AC1", "Covered by sibling PR"),
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
@@ -2014,7 +1891,6 @@ Lead-in.
             &single_ac("AC1", "Covered by external doc"),
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
@@ -2029,7 +1905,6 @@ Lead-in.
             &single_ac("AC1", "Tech design is documented"),
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert!(
             failures.is_empty(),
@@ -2046,7 +1921,6 @@ Lead-in.
             &single_ac("AC1", "Covered by edited file"),
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert_eq!(failures.len(), 1, "got: {failures:?}");
         assert!(
@@ -2078,7 +1952,6 @@ Lead-in.
             &task_acs,
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert_eq!(failures.len(), 1, "expected one failure, got: {failures:?}");
         assert!(
@@ -2106,7 +1979,6 @@ Lead-in.
             &task_acs,
             body,
             &files,
-            &AlwaysPassTestRunner,
         );
         assert!(
             failures.is_empty(),
@@ -2123,7 +1995,6 @@ Lead-in.
             &[],
             body,
             &[],
-            &AlwaysPassTestRunner,
         );
         assert!(failures.is_empty(), "no-task-ACs short-circuit failed");
     }

@@ -36,7 +36,7 @@ use crate::product_spec_parsing::{
     implementer_pr_urls, inspect_pr, latest_implementer_pr_urls, workstreams,
 };
 use crate::task_approvals;
-use crate::{ac_parsing, test_runners};
+use crate::ac_parsing;
 use crate::{
     analytics,
     api_client::{add_comment, read_envelope},
@@ -265,14 +265,10 @@ let files = match pr_gates::pr_changed_files(url) {
         failures.push("Task description must include at least one workstream.".to_string());
     }
     // AC1 of task 5e35dc25: mechanical evidence gate before `qa_agent`.
-    // The lobster runs the deterministic file-existence + test-execution
-    // checks first; only if those pass do we ask Ash for semantic judgment
-    // (AC2 of the same task). `PnpmTestRunner` shells out to
-    // `pnpm test --filter <name>` per AC3; `CargoTestRunner` shells out to
-    // `cargo test --bin feature-task <name>` for PRs touching this crate
-    // (task e67c8835 fix — pnpm has no manifest to filter against here, so
-    // it misreported every passing Rust test as a failure). Unit tests in
-    // `ac_parsing` substitute `AlwaysPassTestRunner` / `AlwaysFailTestRunner`.
+    // The lobster checks deterministic evidence structure first; test
+    // execution belongs to GitHub CI and Ash's external-check verification.
+    // In particular, the lobster must not run ordinary test-name citations
+    // against whichever local checkout happens to be present.
     //
     // Failures surface as `[feature-task-progress-checklist]` (the same
     // pattern every other lobster gate uses) and short-circuit the qa_agent
@@ -304,41 +300,12 @@ let files = match pr_gates::pr_changed_files(url) {
         // Mechanical checks run against each contributing PR's own files and
         // body. That prevents a multi-PR task from failing merely because its
         // final PR does not repeat a test file introduced by an earlier merge.
-        let is_rust_pr = pr_gates::touches_rust_feature_workflow(&delivery.files);
         let pr_files = &delivery.files;
-        // Compute the default `NpmInvocation` from the PR's changed files
-        // (rather than the previous name-only `resolve_npm_workspace`).
-        // The name-only path returned `@sindustries/ash` for agents/* PRs
-        // and the runner then built `Workspace("@sindustries/ash")`, which
-        // `npm --workspace` rejects with `npm error No workspaces found`
-        // because agents/* are intentionally outside the repo root's
-        // `workspaces`. `resolve_npm_invocation` emits `Prefix(dir)` for
-        // non-workspace packages, which is what CI itself uses (task
-        // 0b16dc37 lobster mechanical-evidence gate, second regression
-        // after PR #651).
-        let npm_default_invocation =
-            test_runners::resolve_npm_invocation(&test_runners::repo_root_dir(), pr_files);
-        // A single PR can cite Rust, shell, and Python tests across
-        // different ACs (tasks 5baf6809, 60971f78 — both blocked by the
-        // same underlying bug: `PnpmTestRunner` was the only runner and
-        // has no manifest to filter shell/pytest citations against
-        // either). `DispatchingTestRunner` picks a runner per citation by
-        // the test_id's own shape; `is_rust_pr` remains the disambiguator
-        // for bare Rust test names only (same predicate the clippy
-        // evidence gate above already uses — task e67c8835). When the
-        // file list is unknown we keep `is_rust_pr: true` so bare-Rust
-        // citations stay on the cargo runner.
-        let test_runner: Box<dyn ac_parsing::TestRunner> =
-            Box::new(test_runners::DispatchingTestRunner {
-                is_rust_pr,
-                npm_default_invocation,
-            });
         let mechanical_failures = ac_parsing::mechanical_evidence_failures(
             &env.task.id,
             &acs_won_by_this_delivery,
             &delivery.body,
             pr_files,
-            test_runner.as_ref(),
         );
         if !mechanical_failures.is_empty() {
             mechanical_gate_failed = true;
