@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# bin/rollback — operator-facing rollback wrapper for the SIndustries
+# staging cluster (task 2850c5ac, cloud-staging-environment).
+#
+# Rolls the requested service back to the previous release. By default
+# Fly's `fly releases rollback` walks back exactly one release; we do not
+# override that semantics here. If a different target version is needed,
+# pass --to-version <n> and Fly's CLI handles it.
+#
+# This script is a thin wrapper around the underlying `fly releases
+# rollback` command plus the same preflight + post-flight pattern as
+# `bin/deploy`. The post-rollback smoke check is identical to the deploy
+# one so an operator can confirm the rollback restored the prior good
+# state.
+#
+# Usage:
+#   infra/cloud/bin/rollback <service> [--to-version <n>] [--dry-run]
+#   infra/cloud/bin/rollback <service> --yes
+#
+# Required environment:
+#   FLY_API_TOKEN   — Fly.io API token with deploy rights (Quinn-owned).
+#
+# Exit codes:
+#   0  rollback completed, post-rollback smoke check green
+#   1  invalid usage
+#   2  preflight failed
+#   3  fly releases rollback failed
+#   4  post-rollback smoke check failed (the operator should investigate)
+
+set -euo pipefail
+
+# bin/ -> cloud/ -> infra/ -> repo root (3 levels up)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
+  REPO_ROOT="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
+fi
+
+declare -A FLY_APP_FOR=(
+  [tasks-api]="sindustries-tasks-api-staging"
+  [budget-api]="sindustries-budget-api-staging"
+  [auto-post-worker]="sindustries-auto-post-worker-staging"
+)
+declare -A FLY_CONFIG_FOR=(
+  [tasks-api]="infra/cloud/fly/tasks-api.fly.toml"
+  [budget-api]="infra/cloud/fly/budget-api.fly.toml"
+  [auto-post-worker]="infra/cloud/fly/auto-post-worker.fly.toml"
+)
+declare -A FLY_HEALTH_URL_FOR=(
+  [tasks-api]="https://sindustries-tasks-api-staging.fly.dev/health"
+  [budget-api]="https://sindustries-budget-api-staging.fly.dev/health"
+  [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
+)
+
+# ---------- argument parsing ------------------------------------------------
+
+SERVICE=""
+TO_VERSION=""
+ASSUME_YES=0
+DRY_RUN=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --to-version)
+      [[ $# -ge 2 ]] || { echo "ERROR: --to-version requires an argument" >&2; exit 1; }
+      TO_VERSION="$2"; shift 2 ;;
+    --yes)
+      ASSUME_YES=1; shift ;;
+    --dry-run)
+      DRY_RUN=1; shift ;;
+    --help|-h)
+      sed -n '2,32p' "$0"; exit 0 ;;
+    -*)
+      echo "ERROR: unknown flag: $1" >&2; exit 1 ;;
+    *)
+      if [[ -n "$SERVICE" ]]; then
+        echo "ERROR: only one service argument is accepted (got '$SERVICE' and '$1')" >&2
+        exit 1
+      fi
+      SERVICE="$1"; shift ;;
+  esac
+done
+
+if [[ -z "$SERVICE" ]]; then
+  echo "ERROR: service argument required (one of: ${!FLY_APP_FOR[*]})" >&2
+  exit 1
+fi
+if [[ -z "${FLY_APP_FOR[$SERVICE]:-}" ]]; then
+  echo "ERROR: unknown service '$SERVICE' (must be one of: ${!FLY_APP_FOR[*]})" >&2
+  exit 1
+fi
+
+FLY_APP="${FLY_APP_FOR[$SERVICE]}"
+FLY_CONFIG="${FLY_CONFIG_FOR[$SERVICE]}"
+HEALTH_URL="${FLY_HEALTH_URL_FOR[$SERVICE]}"
+
+# ---------- preflight -------------------------------------------------------
+
+info() { printf '\033[36m[rollback]\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[rollback]\033[0m %s\n' "$*" >&2; }
+fail() { printf '\033[31m[rollback]\033[0m %s\n' "$*" >&2; exit "${2:-1}"; }
+
+command -v flyctl >/dev/null 2>&1 || fail "flyctl not on PATH" 2
+if [[ -z "${FLY_API_TOKEN:-}" ]]; then
+  fail "FLY_API_TOKEN is not set. Source ~/.openclaw/.env (or operator .env.local) and retry." 2
+fi
+export FLY_API_TOKEN
+
+cd "$REPO_ROOT"
+[[ -f "$FLY_CONFIG" ]] || fail "fly.toml not found: $FLY_CONFIG" 2
+
+info "checking that $FLY_APP exists"
+if ! flyctl apps list --json 2>/dev/null | grep -q "\"Name\":\"$FLY_APP\""; then
+  fail "Fly app '$FLY_APP' is not provisioned" 2
+fi
+
+# Show the operator what they're about to do.
+RELEASES_JSON="$(flyctl releases --app "$FLY_APP" --json 2>/dev/null || true)"
+SUMMARY="$(FLY_APP="$FLY_APP" RELEASES_JSON="$RELEASES_JSON" python3 - <<'PY'
+import json, os
+try:
+    releases = json.loads(os.environ.get("RELEASES_JSON") or "[]")
+except Exception:
+    releases = []
+print(f"app: {os.environ['FLY_APP']}")
+if not releases:
+    print("releases: (none — nothing to roll back to)")
+else:
+    print(f"current:  v{releases[0].get('Version')} ({releases[0].get('CreatedAt')}) — {releases[0].get('Description','')[:80]}")
+    print(f"previous: v{releases[1].get('Version')} ({releases[1].get('CreatedAt')}) — {releases[1].get('Description','')[:80]}")
+PY
+)"
+echo "$SUMMARY"
+
+# If the operator did not pass --yes, prompt. (When run from automation the
+# caller must pass --yes; the script is non-interactive by default.)
+# Dry-run is exempt — it doesn't mutate state, so the TTY requirement is
+# overkill for it.
+if [[ "$ASSUME_YES" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+  if [[ ! -t 0 ]]; then
+    fail "stdin is not a TTY and --yes was not passed; refusing to roll back non-interactively" 1
+  fi
+  printf 'Roll back %s to the previous release? [y/N] ' "$FLY_APP"
+  read -r CONFIRM
+  case "$CONFIRM" in
+    y|Y|yes|YES) ;;
+    *) echo "Aborted."; exit 0 ;;
+  esac
+fi
+
+# ---------- build rollback args --------------------------------------------
+
+ROLLBACK_ARGS=(releases rollback --app "$FLY_APP")
+if [[ -n "$TO_VERSION" ]]; then
+  ROLLBACK_ARGS+=(--to-version "$TO_VERSION")
+fi
+
+# ---------- dry-run path --------------------------------------------------
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  printf "DRY-RUN flyctl"; printf ' %q' "${ROLLBACK_ARGS[@]}"; printf '\n'
+  printf "DRY-RUN would tail %s after rollback\n" "${HEALTH_URL:-flyctl logs --app $FLY_APP}"
+  exit 0
+fi
+
+# ---------- execute rollback -----------------------------------------------
+
+info "rolling back $FLY_APP"
+flyctl "${ROLLBACK_ARGS[@]}" || fail "flyctl releases rollback failed for $FLY_APP" 3
+
+# ---------- post-rollback identifiers --------------------------------------
+
+NEW_VERSION="$(flyctl releases --app "$FLY_APP" --json 2>/dev/null \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["Version"] if r else "unknown")')"
+
+MACHINES="$(flyctl machines list --app "$FLY_APP" --json 2>/dev/null \
+  | python3 -c 'import json,sys; ms=json.load(sys.stdin); print(",".join(m["id"] for m in ms))')"
+
+info "rollback complete"
+cat <<EOF
+app:    $FLY_APP
+version: $NEW_VERSION
+machines: ${MACHINES:-none}
+EOF
+
+# ---------- post-rollback smoke check --------------------------------------
+
+if [[ -n "$HEALTH_URL" ]]; then
+  info "smoke check: GET $HEALTH_URL"
+  if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null; then
+    info "smoke OK"
+  else
+    fail "smoke check failed for $HEALTH_URL after rollback — investigate manually" 4
+  fi
+else
+  info "smoke check: fly logs --app $FLY_APP (worker startup line)"
+  DEADLINE=$((SECONDS + 60))
+  SAW_STARTUP=0
+  while [[ $SECONDS -lt $DEADLINE ]]; do
+    if flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null \
+        | grep -q '\[content-scheduler-worker\] starting'; then
+      SAW_STARTUP=1
+      break
+    fi
+    sleep 5
+  done
+  if [[ "$SAW_STARTUP" -eq 1 ]]; then
+    info "smoke OK (worker startup log observed)"
+  else
+    fail "worker startup log not observed within 60s after rollback" 4
+  fi
+fi
+
+exit 0
