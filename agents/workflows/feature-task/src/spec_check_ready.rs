@@ -500,13 +500,6 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
             .first()
             .is_some_and(|owner| owner.eq_ignore_ascii_case(&desired))
         {
-            if task_approvals::qa_agent_deferred(task)
-                && !owners
-                    .iter()
-                    .any(|owner| owner.eq_ignore_ascii_case("Tom"))
-            {
-                owners.push("Tom".to_string());
-            }
             return owners;
         }
         if owners.first().is_some_and(|owner| {
@@ -519,16 +512,9 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
         } else {
             owners.insert(0, desired.to_string());
         }
-        // A deferred QA verdict is an OpenClaw handoff. Quinn acts first;
-        // Tom is a dormant escalation target only if Quinn cannot resolve the
-        // capability gap. Keep any existing tail and add Tom exactly once.
-        if task_approvals::qa_agent_deferred(task)
-            && !owners
-                .iter()
-                .any(|owner| owner.eq_ignore_ascii_case("Tom"))
-        {
-            owners.push("Tom".to_string());
-        }
+        // A deferred QA verdict is an OpenClaw handoff to Quinn. Preserve an
+        // existing escalation tail, but never create a Tom slot implicitly:
+        // Quinn adds Tom only when she cannot resolve the capability gap.
     } else if owners
         .first()
         .is_some_and(|owner| managed_owner_reason_satisfied(task, owner))
@@ -803,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_sends_deferred_qa_to_quinn_with_tom_as_dormant_escalation() {
+    fn routing_sends_deferred_qa_to_quinn_without_implicit_tom_escalation() {
         let mut task = routing_task("doing", &["Rowan"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -824,12 +810,12 @@ mod tests {
 
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Quinn", "Tom"]
+            vec!["Quinn"]
         );
     }
 
     #[test]
-    fn routing_keeps_existing_tom_tail_when_deferred_qa_replaces_rowan() {
+    fn routing_preserves_explicit_tom_tail_when_deferred_qa_replaces_rowan() {
         let mut task = routing_task("doing", &["Rowan", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
