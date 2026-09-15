@@ -42,6 +42,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { argv, env, exit, stdout } from 'node:process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { PrismaClient } from '../generated/prisma/index.js';
 import { hashSessionToken } from '../src/auth/session.js';
@@ -427,7 +428,23 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  fail(`unexpected failure: ${msg}`);
-});
+// Only invoke main() when this file is run directly. Importing the module
+// from a test (or any other consumer of the exported guards) must not run
+// argv parsing, which would call process.exit() and tear down the worker.
+function isMainModule(): boolean {
+  try {
+    const invoked = process.argv[1];
+    if (!invoked) return false;
+    return pathToFileURL(resolve(invoked)).href === fileURLToPath(import.meta.url)
+      || pathToFileURL(resolve(invoked)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  main().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    fail(`unexpected failure: ${msg}`);
+  });
+}
