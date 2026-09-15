@@ -35,6 +35,11 @@
       patch + the cited test results + the cited files (read via the
       agent's `read` / `exec` tools). Reach a verdict: `verified` /
       `blocked` / `deferred`.
+      Before `deferred`, run an execution preflight: execute any cited
+      repository command or script that is available, use green CI where it
+      is authoritative, and run a bounded live probe when the local service
+      can be started or the endpoint is reachable. A manual or inconvenient
+      check is not a capability gap; do not defer it without attempting it.
    5. On `verified` for all ACs: post the structured `qa_agent`
       approval via the Tasks API (Ash's `ASH_TASKS_API_APPROVAL_TOKEN`
       is in her agent env). A `[qa-agent-verified]` comment records the
@@ -42,9 +47,11 @@
    6. On any `blocked` AC: post `[qa-agent-blocked] AC<N>: <reason>`
       listing each blocked AC's reason. Do **not** post the structured
       approval.
-   7. On a `deferred` AC: post `[qa-agent-deferred] AC<N>: <reason>`
-      for that AC and continue the loop for the rest, but do **not** post
-      the structured `qa_agent` approval. Route the task to Quinn at
+   7. On a `deferred` AC: post `[qa-agent-deferred] AC<N>: <reason>` and a
+      matching `[qa-agent-capability-request] domain=<domain> AC<N>: need
+      <capability> to perform <check>; attempted <command/tool>; requested
+      action <next step>` entry. Continue the loop for the rest, but do **not**
+      post the structured `qa_agent` approval. Route the task to Quinn at
       `attentionOwners[0]`; Tom is only a dormant escalation target if Quinn
       cannot resolve the capability gap. Approval is permitted only on a
       later pass that claims every AC addressed and verifies every AC.
