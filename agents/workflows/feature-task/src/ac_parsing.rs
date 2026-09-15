@@ -110,7 +110,10 @@ fn parse_ac_entries(section: &str) -> Vec<(String, String)> {
 }
 
 fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, String)> {
-    let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.*)$").unwrap();
+    // GitHub/Claude-generated PR bodies commonly bold the AC label
+    // (`**AC1**:`), while task descriptions usually leave it plain. Accept
+    // both presentations; the label itself remains the same logical token.
+    let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(?:\*\*)?(AC\d+)(?:\*\*)?:\s*(.*)$").unwrap();
     let mut entries = Vec::new();
     let mut current: Option<(String, String)> = None;
     // Markdown ends a list item's lazy continuation at a blank line; an
@@ -187,7 +190,7 @@ fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
             entries.push((label, text.trim().to_string()));
         }
     };
-    let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.*)$").unwrap();
+    let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(?:\*\*)?(AC\d+)(?:\*\*)?:\s*(.*)$").unwrap();
 
     for line in section.lines() {
         if let Some(cap) = subsection_re.captures(line) {
@@ -559,7 +562,7 @@ pub(crate) fn task_description_acs(description: &str) -> Vec<(String, String)> {
 
 /// Returns the labels of ACs in the task description that are still unchecked (`- [ ] ACN:`).
 pub(crate) fn unchecked_task_ac_labels(description: &str) -> Vec<String> {
-    let re = Regex::new(r"(?m)^\s*-\s*\[ \]\s+(AC\d+):").unwrap();
+    let re = Regex::new(r"(?m)^\s*-\s*\[ \]\s+(?:\*\*)?(AC\d+)(?:\*\*)?:").unwrap();
     re.captures_iter(description)
         .map(|cap| cap[1].to_string())
         .collect()
@@ -569,7 +572,7 @@ pub(crate) fn unchecked_task_ac_labels(description: &str) -> Vec<String> {
 /// Used to determine which ACs a PR covers — if an AC label appears in the PR body it was
 /// included in that delivery, even if Tom hasn't checked it off the task yet.
 pub(crate) fn ac_labels_in_pr_body(body: &str) -> Vec<String> {
-    let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(AC\d+):").unwrap();
+    let re = Regex::new(r"(?m)^\s*-\s*\[[ xX]\]\s+(?:\*\*)?(AC\d+)(?:\*\*)?:").unwrap();
     re.captures_iter(body)
         .map(|cap| cap[1].to_string())
         .collect()
@@ -1292,6 +1295,23 @@ Lead-in.
         assert_eq!(acs[0], ("AC1".to_string(), "First thing".to_string()));
         assert_eq!(acs[1], ("AC2".to_string(), "Second thing".to_string()));
         assert_eq!(acs[2], ("AC3".to_string(), "Third thing".to_string()));
+    }
+
+    #[test]
+    fn delivery_ac_comparison_accepts_bold_ac_labels() {
+        let task_acs = vec![
+            ("AC1".to_string(), "First thing".to_string()),
+            ("AC2".to_string(), "Second thing".to_string()),
+        ];
+        let deliveries = vec![DeliveryPrEvidence {
+            url: "https://github.com/org/repo/pull/622".to_string(),
+            body: "## Acceptance Criteria\n\
+                - [x] **AC1**: First thing (📄 not code: verified in the merged UI)\n\
+                - [x] **AC2**: Second thing (🔗 pr: #622)\n"
+                .to_string(),
+            files: vec![],
+        }];
+        assert!(task_acs_vs_delivery_pr_failures("696f2487", &task_acs, &deliveries).is_empty());
     }
 
     #[test]
