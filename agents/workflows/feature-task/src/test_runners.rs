@@ -85,6 +85,19 @@ fn regex_escape_literal(s: &str) -> String {
     escaped
 }
 
+/// Convert a Vitest reporter-style `describe > it` citation into a safe
+/// test-name regex. Vitest displays nested names with ` > `, but its matcher
+/// does not expose that separator as a literal part of the name. The raw
+/// separator is also a shell metacharacter when npm reconstructs a package
+/// script command, so passing it through unchanged can redirect the command.
+fn vitest_filter_pattern(filter: &str) -> String {
+    filter
+        .split(" > ")
+        .map(regex_escape_literal)
+        .collect::<Vec<_>>()
+        .join(".*")
+}
+
 /// Strip ANSI SGR (`\x1b[…m`) and OSC (`\x1b]…BEL`) escape sequences
 /// from `stdout` before regex-matching, so coloured vitest output (the
 /// default reporter when npm test detects a TTY) does not break the
@@ -177,6 +190,36 @@ impl NpmInvocation {
             NpmInvocation::Prefix(dir) => dir,
         }
     }
+
+    /// Return the short package label sometimes prepended to a Vitest
+    /// `describe > it` citation by implementers (for example,
+    /// `content-scheduler-api real client header set ...`). The label is
+    /// useful human context but is not part of Vitest's test name.
+    fn package_label(&self) -> Option<&str> {
+        match self {
+            NpmInvocation::Workspace(name) => name.rsplit('/').next(),
+            NpmInvocation::Prefix(dir) => Path::new(dir).file_name()?.to_str(),
+        }
+    }
+}
+
+/// Remove an optional npm package label from a Vitest citation. Vitest
+/// reports the nested suite/test name (for example,
+/// `real client header set (...) > imports ...`), while evidence writers
+/// sometimes prefix that citation with the package directory label
+/// (`content-scheduler-api ...`). Keeping the label in the `-t` filter makes
+/// Vitest run zero tests and the mechanical gate reports a false failure.
+fn normalize_npm_filter_for_invocation(filter: &str, invocation: &NpmInvocation) -> String {
+    let Some(label) = invocation.package_label() else {
+        return filter.to_string();
+    };
+    let Some(rest) = filter.strip_prefix(label) else {
+        return filter.to_string();
+    };
+    if !rest.starts_with(' ') || !rest.contains(" > ") {
+        return filter.to_string();
+    }
+    rest.trim_start().to_string()
 }
 
 /// Decide how to invoke `npm test` for the first PR file (or supplied
@@ -314,12 +357,44 @@ impl ac_parsing::TestRunner for NpmTestRunner {
                     stderr,
                 });
             };
-            let filter = &resolved.filter;
-            let outcome = run_npm_filter(&invocation, &repo_root, filter)?;
+            let filter = normalize_npm_filter_for_invocation(&resolved.filter, &invocation);
+            let outcome = run_npm_filter(&invocation, &repo_root, &filter)?;
             stdout.push_str(&outcome.stdout);
             stdout.push('\n');
             if outcome.exit_code == 0 {
                 continue;
+            }
+            // Retry slash-joined test descriptions before failing outright.
+            // Implementers use ` / ` to cite two sibling `it()` names in a
+            // single AC (task afe1056c AC2); the whole-string filter cannot
+            // match either test because the slash is only citation prose.
+            if filter.contains(" / ") {
+                let sub_filters: Vec<&str> = filter
+                    .split(" / ")
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let mut all_sub_passed = !sub_filters.is_empty();
+                let mut sub_stderr = String::new();
+                for sub in &sub_filters {
+                    let sub_outcome = run_npm_filter(&invocation, &repo_root, sub)?;
+                    stdout.push_str(&sub_outcome.stdout);
+                    stdout.push('\n');
+                    if sub_outcome.exit_code != 0 {
+                        all_sub_passed = false;
+                        sub_stderr.push_str(&sub_outcome.stderr);
+                        sub_stderr.push('\n');
+                    }
+                }
+                if all_sub_passed {
+                    continue;
+                }
+                stderr.push_str(&sub_stderr);
+                return Ok(ac_parsing::TestOutcome {
+                    exit_code: 1,
+                    stdout,
+                    stderr,
+                });
             }
             // Retry as an AND of comma-joined sub-descriptions before
             // failing outright — implementers sometimes cite several
@@ -383,7 +458,7 @@ fn run_npm_filter(
     repo_root: &Path,
     filter: &str,
 ) -> Result<ac_parsing::TestOutcome, String> {
-    let pattern = regex_escape_literal(filter);
+    let pattern = vitest_filter_pattern(filter);
     let mut command = std::process::Command::new("npm");
     command.arg("test");
     match invocation {
@@ -1046,6 +1121,17 @@ mod tests {
     }
 
     #[test]
+    fn vitest_filter_pattern_turns_reporter_separator_into_a_regex_boundary() {
+        // Task afe1056c AC1-AC3: `describe > it` is the reporter's display
+        // shape, not a literal part of Vitest's filterable test name. The
+        // generated pattern must also contain no shell redirection operator.
+        assert_eq!(
+            vitest_filter_pattern("real client header set (no Bearer, no cookie) > imports 1 item"),
+            r"real client header set \(no Bearer, no cookie\).*imports 1 item"
+        );
+    }
+
+    #[test]
     fn unescape_js_string_undoes_an_escaped_apostrophe() {
         // Task 2c3bf69b AC3's real citation resolves into a description
         // captured from `it('renders Tom\'s tech_design ...', ...)` — the
@@ -1513,6 +1599,31 @@ mod tests {
         assert_eq!(
             filters,
             vec![resolved(None, "mission-control-vercel-deploy-fixtures")]
+        );
+    }
+
+    #[test]
+    fn normalize_npm_filter_strips_a_package_label_from_vitest_citation() {
+        // Task afe1056c AC1-AC3: the evidence citation includes the package
+        // label, but that label is not part of Vitest's nested describe/test
+        // name. Passing it through makes Vitest match zero tests.
+        let invocation = NpmInvocation::Workspace("@sindustries/content-scheduler-api".to_string());
+        assert_eq!(
+            normalize_npm_filter_for_invocation(
+                "content-scheduler-api real client header set (no Bearer, no cookie) > imports 1 item with only x-content-ingest-secret and no Bearer",
+                &invocation,
+            ),
+            "real client header set (no Bearer, no cookie) > imports 1 item with only x-content-ingest-secret and no Bearer"
+        );
+    }
+
+    #[test]
+    fn normalize_npm_filter_keeps_unlabelled_vitest_citation_unchanged() {
+        let invocation = NpmInvocation::Workspace("@sindustries/content-scheduler-api".to_string());
+        let citation = "real client header set (no Bearer, no cookie) > imports 1 item";
+        assert_eq!(
+            normalize_npm_filter_for_invocation(citation, &invocation),
+            citation
         );
     }
 
