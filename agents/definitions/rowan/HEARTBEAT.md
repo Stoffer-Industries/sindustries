@@ -18,7 +18,7 @@ The queue combines task and PR work and returns one deterministic `topCandidate`
 Read and follow the pr-process skill for both reviewer and assignee duties:
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
 
-When `topCandidate.kind` is `reviewRequest`, `authoredPrFeedback`, or `mergeCandidate`, process that one candidate through the matching reviewer or assignee path. Rowan merges only his own eligible PR after Quinn's blocking approval and green CI; Tom remains visibility-only unless explicitly required.
+When `topCandidate.kind` is `reviewRequest`, `authoredPrFeedback`, `authoredPrConflict`, or `mergeCandidate`, process that one candidate through the matching reviewer or assignee path. An `authoredPrConflict` follows the rebase procedure in `WORKFLOW.md`; it is actionable even when CI is green. Rowan merges only his own eligible PR after Quinn's blocking approval and green CI; Tom remains visibility-only unless explicitly required.
 
 If no open PRs or no unresolved comments: skip the assignee part.
 

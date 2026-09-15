@@ -54,6 +54,12 @@ checklist comments remain evidence. Without an attention stack, the exact
 current outstanding workflow-gate owner is actionable; assignee/PR
 classification remains the fallback when no current gate is outstanding.
 
+The unified queue includes `authoredPrConflict` for an agent's open PR where
+GitHub reports merge conflicts. This remains actionable even when CI is green
+and review feedback is absent: rebase onto the base branch, preserve both
+sides of content conflicts, push with `--force-with-lease`, and re-request the
+original reviewer because the push dismisses the approval.
+
 ### Attention owners: ordered action and escalation stack
 
 `attentionOwners` is the primary blocker/handoff control plane. It is an ordered
