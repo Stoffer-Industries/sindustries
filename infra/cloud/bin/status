@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# bin/status — operator-facing status check for the SIndustries staging
+# cluster (task 2850c5ac, cloud-staging-environment).
+#
+# Prints, per service:
+#   - current Fly app name + URL
+#   - latest release version + creation timestamp
+#   - process types (services defined in fly.toml vs running)
+#   - machine IDs, regions, and states
+#
+# By default reports all three staging services. Pass a service name to
+# scope the report. The --json flag emits a single JSON document (one
+# element per service) suitable for the staging-workflows harness or the
+# failure drill evidence record.
+#
+# Usage:
+#   infra/cloud/bin/status                    # all services, human-readable
+#   infra/cloud/bin/status <service>          # one service
+#   infra/cloud/bin/status --json [service]   # machine-readable
+#
+# Required environment:
+#   FLY_API_TOKEN   — Fly.io API token (Quinn-owned).
+#
+# Exit codes:
+#   0  all targeted services report a non-empty machine list and the
+#      expected process types
+#   1  invalid usage
+#   2  preflight failed (flyctl missing, FLY_API_TOKEN missing, app missing)
+#   3  one or more services have zero machines or a missing process type
+
+set -euo pipefail
+
+# bin/ -> cloud/ -> infra/ -> repo root (3 levels up)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
+  REPO_ROOT="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
+fi
+
+declare -A FLY_APP_FOR=(
+  [tasks-api]="sindustries-tasks-api-staging"
+  [budget-api]="sindustries-budget-api-staging"
+  [auto-post-worker]="sindustries-auto-post-worker-staging"
+)
+
+# Expected process types come from the matching fly.toml. We hardcode them
+# here so a missing process type is detectable without parsing TOML. If
+# these drift from infra/cloud/fly/*.fly.toml, the relevant test must be
+# updated.
+declare -A EXPECTED_PROCESS_TYPES=(
+  [tasks-api]="tasks-api"
+  [budget-api]="budget-api"
+  [auto-post-worker]="auto-post-worker"
+)
+
+# ---------- argument parsing ------------------------------------------------
+
+JSON=0
+TARGETS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json) JSON=1; shift ;;
+    --help|-h)
+      sed -n '2,28p' "$0"; exit 0 ;;
+    -*)
+      echo "ERROR: unknown flag: $1" >&2; exit 1 ;;
+    *)
+      TARGETS+=("$1"); shift ;;
+  esac
+done
+
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+  for s in tasks-api budget-api auto-post-worker; do TARGETS+=("$s"); done
+fi
+
+for s in "${TARGETS[@]}"; do
+  if [[ -z "${FLY_APP_FOR[$s]:-}" ]]; then
+    echo "ERROR: unknown service '$s' (must be one of: ${!FLY_APP_FOR[*]})" >&2
+    exit 1
+  fi
+done
+
+# ---------- preflight -------------------------------------------------------
+
+info() { [[ "$JSON" -eq 1 ]] || printf '\033[36m[status]\033[0m %s\n' "$*"; }
+warn() { [[ "$JSON" -eq 1 ]] || printf '\033[33m[status]\033[0m %s\n' "$*" >&2; }
+fail() { printf '\033[31m[status]\033[0m %s\n' "$*" >&2; exit "${2:-1}"; }
+
+command -v flyctl >/dev/null 2>&1 || fail "flyctl not on PATH" 2
+command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH (needed for JSON shaping)" 2
+if [[ -z "${FLY_API_TOKEN:-}" ]]; then
+  fail "FLY_API_TOKEN is not set. Source ~/.openclaw/.env (or operator .env.local) and retry." 2
+fi
+export FLY_API_TOKEN
+
+# ---------- collect per-service data ---------------------------------------
+
+# Emit either a human-readable block or one JSON object per service.
+declare -a JSON_OBJECTS=()
+ANY_DEGRADED=0
+
+for service in "${TARGETS[@]}"; do
+  FLY_APP="${FLY_APP_FOR[$service]}"
+  EXPECTED_PT="${EXPECTED_PROCESS_TYPES[$service]}"
+
+  info "checking $FLY_APP"
+
+  # `fly status --json` returns the canonical app status envelope: name,
+  # status, deployed, release, machines, services (process types).
+  if ! APP_JSON="$(flyctl status --app "$FLY_APP" --json 2>/dev/null)"; then
+    fail "flyctl status failed for $FLY_APP" 2
+  fi
+
+  # Shape into the report we want.
+  REPORT="$(APP_JSON="$APP_JSON" EXPECTED_PT="$EXPECTED_PT" SERVICE="$service" FLY_APP="$FLY_APP" \
+    python3 - <<'PY'
+import json, os, sys
+app = json.loads(os.environ["APP_JSON"])
+expected_pt = os.environ["EXPECTED_PT"]
+service = os.environ["SERVICE"]
+fly_app = os.environ["FLY_APP"]
+
+machines = []
+for m in app.get("Machines") or []:
+    machines.append({
+        "id": m.get("ID") or m.get("id") or "",
+        "region": m.get("Region") or "",
+        "state": m.get("State") or "",
+        "name": m.get("Name") or "",
+    })
+
+services_running = []
+for svc in app.get("Services") or []:
+    services_running.append({
+        "protocol": svc.get("Protocol") or "",
+        "port": svc.get("Port"),
+        "processTypes": [
+            ps.get("Type") or ps.get("type") or ""
+            for ps in (svc.get("Ports") or [])
+        ],
+    })
+
+# `fly status --json` historically puts process types under
+# `app["Services"][i]["Ports"][j]["Type"]`. Some Fly versions flatten into
+# `app["ProcessTypes"]`. Cover both.
+process_types_flat = set()
+for svc in services_running:
+    for pt in svc["processTypes"]:
+        if pt:
+            process_types_flat.add(pt)
+for pt in app.get("ProcessTypes") or []:
+    name = pt.get("Type") or pt.get("type") or pt.get("Name") or pt.get("name") or ""
+    if name:
+        process_types_flat.add(name)
+
+expected_present = expected_pt in process_types_flat
+degraded = (len(machines) == 0) or (not expected_present)
+
+out = {
+    "service": service,
+    "app": fly_app,
+    "name": app.get("Name") or "",
+    "status": app.get("Status") or "",
+    "deployed": app.get("Deployed") or False,
+    "version": app.get("Release", {}).get("Version") if isinstance(app.get("Release"), dict) else None,
+    "expectedProcessType": expected_pt,
+    "processTypesRunning": sorted(process_types_flat),
+    "expectedProcessTypePresent": expected_present,
+    "machines": machines,
+    "machineCount": len(machines),
+    "degraded": degraded,
+}
+print(json.dumps(out))
+PY
+  )"
+
+  if [[ "$JSON" -eq 1 ]]; then
+    JSON_OBJECTS+=("$REPORT")
+  else
+    echo "$REPORT" | python3 -m json.tool
+  fi
+
+  if echo "$REPORT" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["degraded"] else 1)'; then
+    ANY_DEGRADED=1
+  fi
+done
+
+if [[ "$JSON" -eq 1 ]]; then
+  # Emit a single JSON document. We strip the per-line break and join with
+  # commas so downstream parsers see a valid JSON array.
+  (
+    printf '['
+    for i in "${!JSON_OBJECTS[@]}"; do
+      if [[ "$i" -gt 0 ]]; then printf ','; fi
+      printf '%s' "${JSON_OBJECTS[$i]}"
+    done
+    printf ']\n'
+  )
+fi
+
+if [[ "$ANY_DEGRADED" -eq 1 ]]; then
+  exit 3
+fi
+exit 0

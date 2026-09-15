@@ -22,6 +22,11 @@ infra/cloud/
 │   ├── tasks-api.env.example
 │   ├── budget-api.env.example
 │   └── auto-post-worker.env.example
+├── bin/                        # Operator-facing deploy/status/rollback wrappers (task 2850c5ac)
+│   ├── deploy                  # Pin-and-deploy a single service
+│   ├── status                  # Check process types + machines across services
+│   ├── rollback                # Roll a single service back to a prior release
+│   └── tests/                  # Stub-flyctl tests for the bin/ scripts
 └── scripts/                    # Owner-supplied operational scripts (Quinn runs locally)
     └── bootstrap-staging.sh
 ```
@@ -84,6 +89,35 @@ fly deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary
 ```
 
 The CI workflow runs `--strategy canary` for every deploy. For HTTP services (tasks-api, budget-api) the post-deploy smoke check curls `/health`. For the auto-post-worker (no HTTP) the smoke check greps `fly logs` for the worker's structured startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section — the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
+
+## Operator wrappers (task 2850c5ac)
+
+The CI workflow above is the canonical deploy path. The `bin/` wrappers are
+for ad-hoc canaries, rehearsal, and incident-time hotfixes — they target
+the same Fly apps via the local `flyctl` CLI, not via GitHub Actions.
+
+```sh
+# Deploy a single service, pinning an immutable image tag (no :latest).
+# Without --image the deploy builds from local source (no registry push).
+infra/cloud/bin/deploy tasks-api --image registry/repo:abc123
+
+# Inspect the running state of all three staging services.
+infra/cloud/bin/status
+infra/cloud/bin/status tasks-api --json
+
+# Roll a service back to the previous release (or to a specific version).
+# Non-interactive callers must pass --yes; dry-run prints the command and
+# exits without invoking flyctl.
+infra/cloud/bin/rollback tasks-api --dry-run
+infra/cloud/bin/rollback budget-api --yes
+infra/cloud/bin/rollback auto-post-worker --yes --to-version 41
+```
+
+Each wrapper requires `FLY_API_TOKEN` in the environment (Quinn-owned).
+Run `infra/cloud/bin/{deploy,status,rollback} --help` for the full flag
+list. The tests under `infra/cloud/bin/tests/` stub `flyctl` and `curl`
+to assert each wrapper's contract (image pinning, smoke checks,
+degraded detection, rollback argv shape).
 
 ## First-time environment creation
 
