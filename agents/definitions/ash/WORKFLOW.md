@@ -23,10 +23,48 @@ Repeated people across or within planes are meaningful and must remain visible.
 
 ## When Ash is actionable
 
+### Verification domains
+
+Classify each AC by the system it needs to exercise. This determines the
+preflight path and the capability request if the check cannot be completed:
+
+- **Workflows / crons:** run the workflow or cron entry point, inspect its
+  bounded output/logs, and verify the resulting state or artifact.
+- **Apps:** use the app's staging environment for API, browser, and end-to-end
+  behaviour when staging exists; request browser/device control or a staging
+  test principal when required.
+- **Services:** leave the existing CI/unit/integration-test ownership intact.
+  Ash validates the authoritative CI result and only performs a targeted
+  black-box check when the AC explicitly requires runtime behaviour.
+- **Infrastructure / deployments:** inspect deployment health, logs, routes,
+  and configuration outcomes; request privileged operator capability for
+  mutations such as rulesets, environments, or production deploys.
+- **Integrations:** use sandbox/test endpoints and test credentials for OAuth,
+  webhooks, email, payments, and other external systems; never infer success
+  from a unit test when the AC is about the external boundary.
+- **Data / migrations:** use disposable or staging data for migration,
+  persistence, rollback, and seed checks; request database access when the
+  required environment is unavailable.
+- **Security / identity:** use scoped test principals and safe fixtures for
+  authn, authz, secrets, rate limits, and isolation checks; escalate requests
+  that need privileged identities or production data.
+
+Observability is cross-cutting: logs, metrics, traces, and alerts are evidence
+for whichever domain the AC belongs to, not a separate approval domain.
+
 1. Fetch the full task and current delivery PR.
 2. For a `doing` task with the current `qa_agent` gate, reason over the
    AC descriptions + the PR diff + cited tests + cited files via the
-   agent's own tool calls (no CLI invocation). Use
+   agent's own tool calls (no verifier CLI invocation). Before assigning a
+   `deferred` verdict, perform a capability preflight for every AC that needs
+   execution:
+   - run the exact repository command or script when it is available locally;
+   - use the authoritative CI result when the AC is covered by CI;
+   - perform a bounded live smoke/probe when the required service or endpoint
+     is available; start the repo-prescribed local service when that is all
+     that is missing.
+   Do not defer merely because a check is manual, inconvenient, nighttime, or
+   has not yet been attempted. Unblocked agent work continues 24/7. Use
    `extractAcLines` + `stripTrailingEvidence` from
    `agents/ash/src/verify.ts` to strip evidence annotations off the
    AC text before reasoning. Reach a per-AC verdict:
@@ -37,14 +75,17 @@ Repeated people across or within planes are meaningful and must remain visible.
    Ash's credential. A `[qa-agent-verified]` comment records the
    per-AC reasoning summary; the approval row is the gate source and
    the attention stack is the routing source.
-4. If any AC is blocked by an evidence failure (missing/failing
+4. If ordinary delivery evidence fails for any AC (missing/failing
    tests, missing artifact, fabricated or mismatched claim), post
    `[qa-agent-blocked]` listing each blocked AC's reason and route the
    task back to its delivery assignee at `attentionOwners[0]`.
    Preserve gate context and the escalation tail. Do **not** post the
    structured approval.
 5. If any AC is deferred (capability gap), post `[qa-agent-deferred]`
-   for those ACs and **do not** post the structured `qa_agent` approval.
+   for those ACs and a matching `[qa-agent-capability-request]` entry that
+   names the domain and AC, exact check, attempted command/tool, missing
+   capability, and concrete requested action. **Do not** post the structured
+   `qa_agent` approval.
    Route the task to `Quinn` at `attentionOwners[0]`; keep `Tom` as a
    dormant escalation slot only when Quinn cannot resolve the capability gap.
    QA approval is allowed only after a later pass claims every AC addressed
