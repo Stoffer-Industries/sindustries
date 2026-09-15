@@ -1,0 +1,36 @@
+{
+  "description": "Reference synthetic tag set used by tests/cloud/staging-workflows.mjs to find and remove the fixtures a given run creates. The harness derives its run tag from --run-id (or the default timestamp+random suffix) and reuses the same prefix during cleanup so a partial run never leaves orphan rows behind.",
+  "tagPrefix": "staging-validate",
+  "syntheticEmailDomain": "staging-smoke+@sindustries.invalid",
+  "minimumFixtureSet": {
+    "tasksApi": [
+      "tasks.create",
+      "tasks.read",
+      "tasks.comment",
+      "tasks.patch",
+      "tasks.archive",
+      "tasks.list_excludes_archived"
+    ],
+    "budgetApi": [
+      "budget.me",
+      "budget.deeper_workflow"
+    ],
+    "contentScheduler": [
+      "scheduler.auto_post_health",
+      "scheduler.create",
+      "scheduler.approve",
+      "scheduler.unapprove",
+      "scheduler.item_remove"
+    ]
+  },
+  "cleanupOrder": [
+    "scheduler.item_remove",
+    "tasks.archive",
+    "budget.unlink_token_file"
+  ],
+  "notes": [
+    "The harness's runTag prefix must be unique per run. Reusing a tag from a previous run that did not clean up will collide; reconcile --run-id values or manually remove leftover fixtures via the budget-api smoke-session CLI reconcile mode.",
+    "Bearer tokens are never written to this file. The token file referenced by --budget-token-file is mode 0600 and is unlinked by the harness before exit.",
+    "The deeper Budget API workflow (cards → budget / alert-config) is intentionally out of harness scope. See staging-workflows.mjs acceptedLimitations for the documented boundary and follow-up task reference."
+  ]
+}

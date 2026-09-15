@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sindustries.dev/schemas/staging-validation.schema.json",
+  "title": "Cloud staging validation result",
+  "description": "Machine-readable contract emitted by tests/cloud/staging-workflows.mjs and tests/cloud/staging-failure-drill.sh. A run is successful (verdict=pass) only when every required field below passes; see docs/specs/cloud-staging-environment-tech-design.md section 3 (Validation result contract) for the source of truth.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "intentCommit",
+    "environment",
+    "startedAt",
+    "endedAt",
+    "services",
+    "checks",
+    "cleanup",
+    "productionBlockers",
+    "acceptedLimitations",
+    "verdict"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bump when the contract changes incompatibly. Consumers should refuse results with an unknown schemaVersion."
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]+$",
+      "description": "Stable per-run identifier. Same value is used as the synthetic tag prefix on every fixture this run creates, so cleanup can find and remove them without guessing."
+    },
+    "intentCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$",
+      "description": "Commit SHA the run was supposed to validate. The harness compares this against each service's reported version."
+    },
+    "environment": {
+      "type": "object",
+      "required": ["id", "provider"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider environment identifier (e.g. Fly org+app names concatenated, or a managed-environment UUID). Never includes secrets."
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["fly.io"],
+          "description": "Cloud provider for the staging topology. Pinned to fly.io because the design's foundation task chose it; widen if a follow-up task onboards another provider."
+        }
+      }
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp the harness began the run."
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp the harness emitted the verdict. endedAt >= startedAt."
+    },
+    "services": {
+      "type": "object",
+      "description": "Version snapshot per service. Each entry MUST agree with intentCommit when the service exposes a version field.",
+      "required": ["tasksApi", "budgetApi", "contentScheduler"],
+      "additionalProperties": false,
+      "properties": {
+        "tasksApi": {
+          "type": "object",
+          "required": ["url", "version", "matchesIntent"],
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string", "format": "uri" },
+            "version": { "type": ["string", "null"] },
+            "matchesIntent": { "type": "boolean" }
+          }
+        },
+        "budgetApi": {
+          "type": "object",
+          "required": ["url", "version", "matchesIntent"],
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string", "format": "uri" },
+            "version": { "type": ["string", "null"] },
+            "matchesIntent": { "type": "boolean" }
+          }
+        },
+        "contentScheduler": {
+          "type": "object",
+          "required": ["url", "version", "matchesIntent"],
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string", "format": "uri" },
+            "version": { "type": ["string", "null"] },
+            "matchesIntent": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "description": "Ordered list of per-check results. Each entry carries the check name, outcome, timing, and redacted details.",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "startedAt", "endedAt"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable check name (e.g. tasks.create, budget.me, scheduler.approve, failure_drill.worker_restart)."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail", "skip"],
+            "description": "skip is reserved for checks deliberately disabled (e.g. failure-drill opted out). fail means the verdict is non-pass overall."
+          },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "endedAt": { "type": "string", "format": "date-time" },
+          "details": {
+            "type": "object",
+            "description": "Check-specific structured detail. Redacted by the harness — never contains bearer tokens, full emails, or row bodies.",
+            "additionalProperties": true,
+            "properties": {
+              "correlationId": {
+                "type": ["string", "null"],
+                "description": "Provider-side correlation id when the check produced one (workflow run id, request id, alert id)."
+              }
+            }
+          },
+          "error": {
+            "type": "object",
+            "description": "Present only when status=fail. Stable error code + short message.",
+            "required": ["code", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Stable error code, e.g. TASKS_CREATE_NON_2XX, BUDGET_ME_NON_2XX, SCHEDULER_HEALTH_ADAPTER_MISMATCH, CLEANUP_PARTIAL."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-readable message. Must NOT include bearer tokens, raw emails, or row payloads."
+              }
+            }
+          }
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "description": "Result of the unconditional post-run cleanup pass. cleanup.ok MUST be true for the overall verdict to be pass.",
+      "required": ["ok", "operations"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "ok"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Cleanup operation (e.g. tasks.archive, budget.session_revoke, scheduler.item_remove, scheduler.session_revoke_via_cli)."
+              },
+              "ok": { "type": "boolean" },
+              "error": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "productionBlockers": {
+      "type": "array",
+      "description": "Findings that block cutover. Empty array required for verdict=pass. Each entry carries owner, code, summary, and a stable reference.",
+      "items": {
+        "type": "object",
+        "required": ["code", "summary", "owner"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1, "description": "Human or role responsible for resolving the blocker (e.g. Quinn, Tom, Rowan)." },
+          "reference": { "type": ["string", "null"], "description": "Optional task id, issue number, or doc reference." }
+        }
+      }
+    },
+    "acceptedLimitations": {
+      "type": "array",
+      "description": "Findings the team has consciously accepted for this run. Required to have owner + rationale + follow-up. Allowed to be non-empty for verdict=pass.",
+      "items": {
+        "type": "object",
+        "required": ["code", "summary", "owner", "rationale", "followUp"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 },
+          "followUp": { "type": "string", "minLength": 1, "description": "Task id, ticket, or doc reference for the eventual fix." }
+        }
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"],
+      "description": "Final verdict. pass requires every required service version matches intentCommit, every check is pass or explicit skip, cleanup.ok=true, and productionBlockers=[]."
+    }
+  }
+}
