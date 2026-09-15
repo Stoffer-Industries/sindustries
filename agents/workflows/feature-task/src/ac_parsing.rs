@@ -113,6 +113,11 @@ fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, 
     let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(AC\d+):\s*(.*)$").unwrap();
     let mut entries = Vec::new();
     let mut current: Option<(String, String)> = None;
+    // Markdown ends a list item's lazy continuation at a blank line; an
+    // unindented paragraph after one (e.g. a trailing `**Effort:** ...
+    // **Risk:** ...` metadata line in a task description) starts a new
+    // block, not a continuation of the AC sentence above it.
+    let mut blank_since_ac = false;
 
     let flush = |current: &mut Option<(String, String)>, entries: &mut Vec<(String, String)>| {
         if let Some((label, text)) = current.take() {
@@ -123,6 +128,7 @@ fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, 
     for line in section.lines() {
         if let Some(cap) = ac_re.captures(line) {
             flush(&mut current, &mut entries);
+            blank_since_ac = false;
             if !checked_only || cap[1].eq_ignore_ascii_case("x") {
                 current = Some((cap[2].to_string(), cap[3].to_string()));
             }
@@ -130,6 +136,7 @@ fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, 
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
+            blank_since_ac = true;
             continue;
         }
         // A new heading or bullet ends the current logical list item. The
@@ -138,6 +145,10 @@ fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, 
             || trimmed.starts_with('-')
             || (trimmed.starts_with("**") && trimmed.ends_with("**"))
         {
+            flush(&mut current, &mut entries);
+            continue;
+        }
+        if blank_since_ac {
             flush(&mut current, &mut entries);
             continue;
         }
@@ -169,6 +180,7 @@ fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
     let mut current: Option<(String, String)> = None;
     let mut matching_section = true;
     let mut saw_any_subsection = false;
+    let mut blank_since_ac = false;
 
     let flush = |current: &mut Option<(String, String)>, entries: &mut Vec<(String, String)>| {
         if let Some((label, text)) = current.take() {
@@ -180,6 +192,7 @@ fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
     for line in section.lines() {
         if let Some(cap) = subsection_re.captures(line) {
             flush(&mut current, &mut entries);
+            blank_since_ac = false;
             let captured = &cap[1];
             matching_section = captured == task_id || captured == task_short_id;
             saw_any_subsection = true;
@@ -187,6 +200,7 @@ fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
         }
         if let Some(cap) = ac_re.captures(line) {
             flush(&mut current, &mut entries);
+            blank_since_ac = false;
             if matching_section && cap[1].eq_ignore_ascii_case("x") {
                 current = Some((cap[2].to_string(), cap[3].to_string()));
             }
@@ -194,6 +208,7 @@ fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
+            blank_since_ac = true;
             continue;
         }
         if trimmed.starts_with('#')
@@ -204,6 +219,10 @@ fn scoped_ac_entries(task_id: &str, section: &str) -> Vec<(String, String)> {
             continue;
         }
         if saw_any_subsection && !matching_section {
+            continue;
+        }
+        if blank_since_ac {
+            flush(&mut current, &mut entries);
             continue;
         }
         if current
@@ -1286,6 +1305,32 @@ Lead-in.
         let acs = task_description_acs(desc);
         assert_eq!(acs[0], ("AC1".to_string(), "Do the thing".to_string()));
         assert_eq!(acs[1], ("AC2".to_string(), "Other thing".to_string()));
+    }
+
+    #[test]
+    fn task_description_acs_does_not_absorb_trailing_metadata_after_blank_line() {
+        let desc = "## Acceptance Criteria\n\n- [ ] AC6: WS validation succeeds end-to-end.\n\n**Effort:** M. **Risk:** Med (auth boundary). **Deps:** none.\n";
+        assert_eq!(
+            task_description_acs(desc),
+            vec![(
+                "AC6".to_string(),
+                "WS validation succeeds end-to-end.".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn delivery_ac_comparison_ignores_trailing_metadata_after_blank_line() {
+        let task_acs = vec![(
+            "AC6".to_string(),
+            "WS validation succeeds end-to-end.".to_string(),
+        )];
+        let deliveries = vec![DeliveryPrEvidence {
+            url: "https://github.com/org/repo/pull/633".to_string(),
+            body: "## Acceptance Criteria\n\n- [x] AC6: WS validation succeeds end-to-end. (⚠️ not tested: staging is unavailable)\n\n**Effort:** M. **Risk:** Med (auth boundary). **Deps:** none.\n".to_string(),
+            files: vec![],
+        }];
+        assert!(task_acs_vs_delivery_pr_failures("afe1056c", &task_acs, &deliveries).is_empty());
     }
 
     // ---- task_ac_vs_open_pr_failures ----

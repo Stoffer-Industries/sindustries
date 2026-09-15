@@ -948,8 +948,20 @@ fn looks_like_shell_citation(test_name: &str) -> bool {
         .split_once(" > ")
         .map(|(value, _)| value.trim())
         .unwrap_or_else(|| test_name.trim());
-    prefix.ends_with(".sh")
-        || (test_name.contains(" > ") && !prefix.contains('/') && !prefix.contains('.'))
+    if prefix.ends_with(".sh") {
+        return true;
+    }
+    if !test_name.contains(" > ") {
+        return false;
+    }
+    // A shell suite citation names a bare kebab-case script stem (e.g.
+    // `fly-deploy-trigger-paths`), with no path separator, no dot, and no
+    // prose punctuation. Vitest/Jest `describe > it` citations are prose
+    // (e.g. `suite (no Bearer, no cookie) > test`) and must not match here
+    // even though they also lack a `/` or `.` in the prefix.
+    Regex::new(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+        .unwrap()
+        .is_match(prefix)
 }
 
 /// Choose which runner should execute a cited `testID` based on the shape
@@ -1700,6 +1712,20 @@ mod tests {
         assert_eq!(
             select_test_runner_kind("fly-deploy-trigger-paths > static assertions", false),
             TestRunnerKind::Shell
+        );
+    }
+
+    #[test]
+    fn select_test_runner_kind_does_not_misroute_vitest_describe_it_citation() {
+        // task afe1056c AC1/AC2: a Vitest `describe > it` citation with a
+        // prose suite name must dispatch to Npm, not Shell, even though its
+        // prefix (like a bare shell-suite name) contains neither `/` nor `.`.
+        assert_eq!(
+            select_test_runner_kind(
+                "real client header set (no Bearer, no cookie) > returns 201",
+                false
+            ),
+            TestRunnerKind::Npm
         );
     }
 
