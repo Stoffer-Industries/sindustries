@@ -75,6 +75,50 @@ interface ParsedArgs {
   json: boolean;
 }
 
+// Exported for unit tests; the CLI itself still owns argv parsing.
+export const SYNTHETIC_DOMAIN_FOR_TESTS = SYNTHETIC_DOMAIN;
+export const SYNTHETIC_PREFIX_FOR_TESTS = SYNTHETIC_PREFIX;
+export const PRODUCTION_DENY_SUBSTRINGS_FOR_TESTS = PRODUCTION_DENY_SUBSTRINGS;
+
+export function isProductionDatabaseUrl(url: string): boolean {
+  if (!url) return true; // refuse empty DATABASE_URL — guard against operator omission
+  for (const needle of PRODUCTION_DENY_SUBSTRINGS) {
+    if (url.includes(needle)) return true;
+  }
+  return false;
+}
+
+export function assertStagingEnvironmentForTests(
+  parsed: ParsedArgs,
+  stagingEnvValue: string | undefined
+): void {
+  if (!parsed.staging) {
+    throw new Error('--staging flag required (this CLI only operates against staging)');
+  }
+  if (stagingEnvValue !== STAGING_ENV_VALUE) {
+    throw new Error(
+      `BUDGET_STAGING_ENVIRONMENT must be set to '${STAGING_ENV_VALUE}'; refusing to operate against anything else.`
+    );
+  }
+  const url = env.DATABASE_URL ?? '';
+  if (url.length === 0) {
+    throw new Error('DATABASE_URL is required');
+  }
+  if (isProductionDatabaseUrl(url)) {
+    throw new Error(
+      `DATABASE_URL strongly suggests a production/main database; refusing to run.`
+    );
+  }
+}
+
+export function isSyntheticEmail(email: string): boolean {
+  return email.endsWith(SYNTHETIC_DOMAIN);
+}
+
+export function buildSyntheticEmailForTests(): string {
+  return buildSyntheticEmail();
+}
+
 function fail(message: string, code = 1): never {
   stderrWrite(`error: ${message}\n`);
   exit(code);
