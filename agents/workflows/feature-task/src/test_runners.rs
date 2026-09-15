@@ -557,7 +557,7 @@ fn resolve_arrow_citation(segment: &str) -> Option<ResolvedFilter> {
     let prefix = prefix.trim();
     is_test_file_path(prefix).then(|| ResolvedFilter {
         file: Some(prefix.to_string()),
-        filter: rest.trim().to_string(),
+        filter: rest.trim().trim_matches('`').to_string(),
     })
 }
 
@@ -570,7 +570,7 @@ fn resolve_leading_filename_citation(segment: &str) -> Option<ResolvedFilter> {
     let caps = re.captures(segment)?;
     Some(ResolvedFilter {
         file: Some(caps[1].to_string()),
-        filter: caps[2].trim().to_string(),
+        filter: caps[2].trim().trim_matches('`').to_string(),
     })
 }
 
@@ -1359,6 +1359,19 @@ mod tests {
             Some(resolved(
                 Some("ContentSchedulerTab.test.jsx"),
                 "thread surface"
+            ))
+        );
+    }
+
+    #[test]
+    fn resolve_leading_filename_citation_strips_markdown_code_span() {
+        assert_eq!(
+            resolve_leading_filename_citation(
+                "WorkoutsTab.test.jsx `shows real Claude + ChatGPT connector links`"
+            ),
+            Some(resolved(
+                Some("WorkoutsTab.test.jsx"),
+                "shows real Claude + ChatGPT connector links"
             ))
         );
     }
