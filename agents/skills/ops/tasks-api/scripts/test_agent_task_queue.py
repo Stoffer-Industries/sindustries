@@ -275,6 +275,7 @@ class AgentTaskQueueTest(unittest.TestCase):
                 "actionableTaskCount",
                 "techDesignApprovals",
                 "reviewRequests",
+                "authoredPrConflicts",
                 "authoredPrFeedback",
                 "mergeCandidates",
                 "attentionOwner",
@@ -363,6 +364,34 @@ class AgentTaskQueueTest(unittest.TestCase):
         queue = agent_task_queue.classify_github_prs("Rowan", [pr])
         self.assertEqual(["quinnstoffer"], queue["authoredPrFeedback"][0]["changesRequestedBy"])
         self.assertEqual([], queue["mergeCandidates"])
+
+    def test_authored_merge_conflict_is_actionable_queue_item(self):
+        pr = pull_request(mergeable=False, mergeable_state="dirty")
+
+        queue = agent_task_queue.classify_github_prs("Rowan", [pr])
+
+        self.assertEqual(
+            [{
+                "number": 42,
+                "title": "feat: example",
+                "url": "https://github.com/acme/repo/pull/42",
+                "mergeState": "dirty",
+                "reason": "authored PR has merge conflicts; rebase onto the base branch",
+                "nextAction": "rebase, preserve both sides of content conflicts, push, and re-request review",
+            }],
+            queue["authoredPrConflicts"],
+        )
+        self.assertEqual([], queue["mergeCandidates"])
+
+    def test_authored_merge_conflict_outranks_waiting_task(self):
+        pr = pull_request(mergeable=False, mergeable_state="dirty")
+
+        queue = agent_task_queue.build_work_queue(
+            [implementation_task(status="acceptance")], "Rowan", [pr]
+        )
+
+        self.assertEqual("authoredPrConflict", queue["topCandidate"]["kind"])
+        self.assertTrue(queue["topCandidate"]["actionable"])
 
     def test_github_pr_detail_retries_transient_null_mergeable(self):
         with (

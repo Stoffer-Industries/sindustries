@@ -74,13 +74,14 @@ CURRENT_GATE_BY_STATUS = {
     "acceptance": "accepted",
 }
 QUEUE_KIND_ORDER = {
-    "authoredPrFeedback": 0,
-    "mergeCandidate": 1,
-    "reviewRequest": 2,
-    "techDesignApproval": 3,
-    "task": 4,
-    "workflowGate": 5,
-    "attentionPage": 6,
+    "authoredPrConflict": 0,
+    "authoredPrFeedback": 1,
+    "mergeCandidate": 2,
+    "reviewRequest": 3,
+    "techDesignApproval": 4,
+    "task": 5,
+    "workflowGate": 6,
+    "attentionPage": 7,
 }
 TASK_PRIORITY_ORDER = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
 # Per-call budget for `_gh_api`. Down from `safe_run`'s 25s default; bounded so
@@ -605,9 +606,10 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
 
 
 def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Build read-only review, feedback, and merge queues from hydrated PR data."""
+    """Build read-only review, conflict, feedback, and merge queues from hydrated PR data."""
     login = GITHUB_IDENTITIES[agent.lower()][0].lower()
     review_requests = []
+    authored_conflicts = []
     authored_feedback = []
     merge_candidates = []
 
@@ -626,6 +628,16 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
             review_requests.append(summary)
         if author != login:
             continue
+
+        if str(pr.get("state") or "").lower() == "open" and pr.get("mergeable") is False:
+            authored_conflicts.append(
+                {
+                    **summary,
+                    "mergeState": pr.get("mergeable_state") or pr.get("mergeStateStatus") or "dirty",
+                    "reason": "authored PR has merge conflicts; rebase onto the base branch",
+                    "nextAction": "rebase, preserve both sides of content conflicts, push, and re-request review",
+                }
+            )
 
         latest = _latest_reviews(pr.get("reviews") or [])
         changes_requested_by = sorted(
@@ -654,6 +666,7 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
 
     return {
         "reviewRequests": review_requests,
+        "authoredPrConflicts": authored_conflicts,
         "authoredPrFeedback": authored_feedback,
         "mergeCandidates": merge_candidates,
     }
@@ -834,6 +847,8 @@ def build_unified_queue(
 ) -> list[dict[str, Any]]:
     """Normalize every read-only heartbeat input into one deterministic queue."""
     items: list[dict[str, Any]] = []
+    for item in github_queue["authoredPrConflicts"]:
+        items.append({"kind": "authoredPrConflict", "actionable": True, **item})
     for item in github_queue["authoredPrFeedback"]:
         items.append({"kind": "authoredPrFeedback", "actionable": True, **item})
     for item in github_queue["mergeCandidates"]:
@@ -998,6 +1013,7 @@ def main() -> None:
         )
         print(f"Tech-design approvals: {len(queue['techDesignApprovals'])}")
         print(f"Review requests: {len(queue['reviewRequests'])}")
+        print(f"Authored PRs with merge conflicts: {len(queue['authoredPrConflicts'])}")
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
         if args.attention_owner:
