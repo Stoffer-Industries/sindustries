@@ -456,3 +456,100 @@ def test_studio_graph_with_custom_fixtures_uses_them() -> None:
     )
     assert final.get("outcome") in ("created", "noop", "failed")
     # Either way, no exception escaped the graph.
+
+
+# ---------------------------------------------------------------------------
+# AC2 (post-fix) — regression sentinels pinning the lift that moved the
+# fixture bytes out of ``_load_studio_fixture``'s request-path synchronous
+# file I/O into module-level cached constants populated once at import.
+# Mirrors the ``test_load_prompts_returns_module_constants`` /
+# ``test_load_prompts_is_idempotent_across_calls`` pair added for the
+# ``angle_model.load_prompts`` wiring change in PR #588 (task 88eb3ffe
+# WS1). These guards prevent the old behaviour from silently regressing
+# into the Studio request path again.
+
+
+def test_studio_fixture_archive_returns_module_constant() -> None:
+    """``_load_studio_fixture('archive.html')`` returns the cached module bytes.
+
+    Pins the contract that ``_ARCHIVE_HTML_BYTES`` (populated once at
+    module import via ``_load_studio_fixture_or_empty``) is the only
+    source of the archive body — no synchronous ``Path.read_bytes()``
+    on the Studio request path.
+    """
+
+    from cto_craft_workflow import studio
+
+    body = studio._load_studio_fixture("archive.html")
+    assert body is studio._ARCHIVE_HTML_BYTES, (
+        "_load_studio_fixture('archive.html') must return the cached module "
+        "constant so LangGraph Studio's async request path never triggers "
+        "blockbuster.BlockingError on a synchronous Path.read_bytes()."
+    )
+
+
+def test_studio_fixture_issue_returns_module_constant() -> None:
+    """``_load_studio_fixture('issue.html')`` returns the cached module bytes.
+
+    Pins the contract that ``_ISSUE_HTML_BYTES`` (populated once at
+    module import) is the only source of the issue body — no synchronous
+    ``Path.read_bytes()`` on the Studio request path.
+    """
+
+    from cto_craft_workflow import studio
+
+    body = studio._load_studio_fixture("issue.html")
+    assert body is studio._ISSUE_HTML_BYTES, (
+        "_load_studio_fixture('issue.html') must return the cached module "
+        "constant so LangGraph Studio's async request path never triggers "
+        "blockbuster.BlockingError on a synchronous Path.read_bytes()."
+    )
+
+
+def test_studio_fixture_module_constants_populated_at_import() -> None:
+    """Module-level fixture bytes are non-empty when shipped fixtures exist.
+
+    The shipped fixtures under ``tests/fixtures/`` (archive.html, issue.html)
+    are part of the package; if they go missing the studio graph would
+    silently fall into the no-op branch. Pin the contract that they are
+    populated at import time so the regression is visible at unit-test
+    time, not at Studio runtime.
+    """
+
+    from cto_craft_workflow import studio
+
+    assert studio._ARCHIVE_HTML_BYTES, "archive.html must ship populated"
+    assert studio._ISSUE_HTML_BYTES, "issue.html must ship populated"
+
+
+def test_studio_fetcher_init_does_not_read_files_on_request_path() -> None:
+    """``StubSafeFetcher.__init__`` performs no synchronous file I/O.
+
+    ``build_studio_graph`` instantiates ``StubSafeFetcher`` on the
+    Studio request path. If the class body or ``__init__`` ever
+    regresses to a synchronous ``Path.read_bytes`` call, this guard
+    catches it at unit-test time and prevents a second
+    ``blockbuster.BlockingError`` incident from shipping.
+    """
+
+    from pathlib import Path
+
+    from cto_craft_workflow import studio
+
+    original_read_bytes = Path.read_bytes
+
+    def fail_on_read_bytes(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError(
+            "Path.read_bytes() called on Studio request path; "
+            "fixture bytes must come from module-level cached constants."
+        )
+
+    Path.read_bytes = fail_on_read_bytes  # type: ignore[assignment]
+    try:
+        fetcher = studio.StubSafeFetcher()
+        # Both the archive and issue routes must be registered from cached
+        # bytes — no synchronous read should have happened.
+        assert "https://www.techmanagerweekly.com/" in fetcher._ROUTES
+        assert "https://www.techmanagerweekly.com/tmw-495/" in fetcher._ROUTES
+    finally:
+        Path.read_bytes = original_read_bytes  # type: ignore[assignment]
