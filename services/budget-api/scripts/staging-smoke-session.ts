@@ -41,7 +41,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { argv, env, exit, stdout } from 'node:process';
+import { argv, exit, stdout } from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { PrismaClient } from '../generated/prisma/index.js';
@@ -101,7 +101,10 @@ export function assertStagingEnvironmentForTests(
       `BUDGET_STAGING_ENVIRONMENT must be set to '${STAGING_ENV_VALUE}'; refusing to operate against anything else.`
     );
   }
-  const url = env.DATABASE_URL ?? '';
+  // Read through `process.env` (live) rather than the destructured `env` import,
+  // which is captured at module-load time and is therefore stale across the
+  // `withEnv(...)` swaps in test/scripts/staging-smoke-session.test.ts.
+  const url = process.env.DATABASE_URL ?? '';
   if (url.length === 0) {
     throw new Error('DATABASE_URL is required');
   }
@@ -227,13 +230,16 @@ function assertStagingEnvironment(parsed: ParsedArgs): void {
   if (!parsed.staging) {
     fail('--staging flag required (this CLI only operates against staging)');
   }
-  if (env.BUDGET_STAGING_ENVIRONMENT !== STAGING_ENV_VALUE) {
+  // Read through `process.env` (live) rather than the destructured `env`
+  // import; the latter is captured at module-load time and stale once the
+  // CI shell exports its own variables.
+  if (process.env.BUDGET_STAGING_ENVIRONMENT !== STAGING_ENV_VALUE) {
     fail(
       `BUDGET_STAGING_ENVIRONMENT must be set to '${STAGING_ENV_VALUE}'; ` +
         `refusing to operate against anything else.`
     );
   }
-  const url = env.DATABASE_URL ?? '';
+  const url = process.env.DATABASE_URL ?? '';
   if (url.length === 0) fail('DATABASE_URL is required');
   for (const needle of PRODUCTION_DENY_SUBSTRINGS) {
     if (url.includes(needle)) {
