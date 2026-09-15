@@ -1,0 +1,14 @@
+{
+  "name": "tests-cloud-staging-validation",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Black-box staging validation harness for task 2850c5ac (cloud-staging-environment). Pure Node 22 ESM — no install step on the staging runner.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "validate:workflows": "node staging-workflows.mjs",
+    "validate:schema": "node scripts/check-schema.mjs"
+  }
+}
