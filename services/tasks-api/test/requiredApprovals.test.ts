@@ -48,7 +48,7 @@ describe('parseRequiredApprovalsYaml', () => {
       'mappings:',
       '  feature: [spec, tech_design, qa_agent, accepted]',
       '  code: [tech_design, qa_agent, accepted]',
-      '  content: [spec, qa_agent, accepted]',
+      '  content: []',
       '  research: []'
     ].join('\n');
 
@@ -58,7 +58,7 @@ describe('parseRequiredApprovalsYaml', () => {
     expect(parsed.mappings).toEqual({
       feature: ['spec', 'tech_design', 'qa_agent', 'accepted'],
       code: ['tech_design', 'qa_agent', 'accepted'],
-      content: ['spec', 'qa_agent', 'accepted'],
+      content: [],
       research: []
     });
     expect(parsed.source).toBe('config-file');
@@ -189,7 +189,7 @@ describe('loadRequiredApprovalsConfig', () => {
     expect(config.mappings.feature).toEqual(['accepted']);
     // Untouched task types keep their default values.
     expect(config.mappings.code).toEqual(['tech_design', 'qa_agent', 'accepted']);
-    expect(config.mappings.content).toEqual(['spec', 'qa_agent', 'accepted']);
+    expect(config.mappings.content).toEqual([]);
     expect(config.mappings.research).toEqual([]);
     expect(config.path).toBe(path);
     expect(config.hash).toMatch(/^[0-9a-f]{64}$/);
@@ -342,7 +342,7 @@ describe('requiredApprovalsFor', () => {
 
   it('returns the configured list for known task types', () => {
     expect(requiredApprovalsFor(config, 'feature')).toEqual(['spec', 'tech_design', 'qa_agent', 'accepted']);
-    expect(requiredApprovalsFor(config, 'content')).toEqual(['spec', 'qa_agent', 'accepted']);
+    expect(requiredApprovalsFor(config, 'content')).toEqual([]);
     expect(requiredApprovalsFor(config, 'code')).toEqual(['tech_design', 'qa_agent', 'accepted']);
     expect(requiredApprovalsFor(config, 'research')).toEqual([]);
   });

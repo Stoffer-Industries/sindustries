@@ -105,11 +105,11 @@ version: 1
 mappings:
   feature: [spec, tech_design, qa]
   code: [tech_design, qa]
-  content: [spec, qa]
+  content: []
   research: []
 ```
 
-The Tasks API loads this file at startup; if the file is missing it falls back to a built-in default (the contents of the file as shown above, hard-coded in `services/tasks-api/src/config/requiredApprovals.ts`). The fallback is logged at WARN level so an accidental `.openclaw` edit that breaks the YAML is loud.
+The Tasks API loads this file at startup; if the file is missing it falls back to a built-in default (the contents of the file as shown above, hard-coded in `services/tasks-api/src/config/requiredApprovals.ts`). The fallback is logged at WARN level so an accidental `.openclaw` edit that breaks the YAML is loud. Content tasks intentionally have no native approval rows: the content-task Lobster owns their format, capacity, PR/CI/AC/review, and merge checks.
 
 **`services/tasks-api/src/config/requiredApprovals.ts`** — small wrapper:
 

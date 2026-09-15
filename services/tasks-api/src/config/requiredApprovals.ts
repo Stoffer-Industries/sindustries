@@ -6,7 +6,7 @@
 // logs a WARN. The default values match the task spec defaults:
 //   feature: [spec, tech_design, qa_agent, accepted]
 //   code:    [tech_design, qa_agent, accepted]
-//   content: [spec, qa_agent, accepted]
+//   content: []
 //   research: []
 //
 // Each approval type also has a configured owner used by the workflow-gate
@@ -95,7 +95,11 @@ export const DEFAULT_REQUIRED_APPROVALS: RequiredApprovalsConfig = (() => {
   const mappings = {
     feature: ['spec', 'tech_design', 'qa_agent', 'accepted'],
     code: ['tech_design', 'qa_agent', 'accepted'],
-    content: ['spec', 'qa_agent', 'accepted'],
+    // Content tasks are governed by the content-task Lobster's own
+    // format/capacity/PR/CI/review/merge checks. It does not consume
+    // TaskApproval rows, so exposing native approval gates here creates
+    // phantom spec/QA/accepted gates in the Tasks UI.
+    content: [],
     research: []
   };
   const owners = { ...DEFAULT_APPROVAL_OWNERS };
