@@ -114,7 +114,7 @@ Document the rollback path in the migration's comment block: re-adding `'qa'` to
   ```ts
   feature: ['spec', 'tech_design', 'qa_agent', 'accepted'],
   code:    ['tech_design', 'qa_agent', 'accepted'],
-  content: ['spec', 'qa_agent', 'accepted'],
+  content: [],
   research: [],
   ```
 - Update the `validApprovalTypes` set in `routes/tasks/_constants.ts` to match.

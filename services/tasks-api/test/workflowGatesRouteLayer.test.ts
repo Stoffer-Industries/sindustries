@@ -661,7 +661,7 @@ describe('explicit workflow handoffs', () => {
     expect(buildWorkflowGateOwnerWhere('quinn')).toEqual([]);
     expect(buildWorkflowGateOwnerWhere('Tom')).toEqual([{ OR: [{
       status: 'open',
-      taskType: { in: ['feature', 'content'] },
+      taskType: { in: ['feature'] },
       approvals: { none: { type: 'spec', state: 'approved', revokedAt: null } }
     }] }]);
     expect(buildWorkflowGateOwnerWhere('Nobody')).toEqual([]);

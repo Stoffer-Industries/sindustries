@@ -213,7 +213,9 @@ version: 1
 mappings:
   feature: [spec, tech_design, qa]
   code:    [tech_design, qa]
-  content: [spec, qa]
+  # Content tasks use the content-task Lobster's own transition checks;
+  # they have no Tasks API approval gates.
+  content: []
   research: []
 owners:
   spec: Tom
@@ -221,7 +223,9 @@ owners:
   qa: Tom
 ```
 
-- `mappings:` — `taskType` → ordered list of required approval types.
+- `mappings:` — `taskType` → ordered list of required approval types. Content
+  tasks intentionally resolve to `[]`: their Lobster gates are format, Ivy
+  capacity, PR/CI/AC/review routing, and merged PR, not TaskApproval rows.
 - `owners:` — `approvalType` → configured owner (global per type, not per task type).
 - Both blocks are deltas over the built-in defaults (`feature: [spec, tech_design, qa]`, etc.; `spec: Tom`, `tech_design: Quinn`, `qa: Tom`). A partial config still resolves unknown `taskType`s to the default list and unknown approval types to the default owner.
 - Missing or malformed files log a WARN and fall back to the built-in default. The resolved policy is hashed (`hash` field on the snapshot) and emitted to the startup log so operators can spot drift between environments on the same commit.
