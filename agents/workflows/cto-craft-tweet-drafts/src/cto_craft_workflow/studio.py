@@ -93,12 +93,15 @@ class _FixtureRoute:
     final_url: str | None = None  # when set, returned as ``final_url`` instead of input url
 
 
-def _load_studio_fixture(name: str) -> bytes:
-    """Load a fixture file from the package ``tests/fixtures`` directory.
+def _load_studio_fixture_or_empty(name: str) -> bytes:
+    """Read a fixture file at module import time, returning empty bytes on missing files.
 
-    Falls back to an empty body when the fixture is missing so the Studio
-    graph still compiles during development before fixtures exist; the
-    unit tests assert fixture presence separately.
+    Called once per fixture name at module import so the result is cached
+    in module-level constants and no synchronous file I/O occurs on the
+    LangGraph Studio request path. Mirrors the original
+    ``_load_studio_fixture`` fall-back-to-empty-body contract for
+    missing fixtures (development-time convenience before fixtures
+    exist); the unit tests assert fixture presence separately.
     """
 
     path = STUDIO_FIXTURES_DIR / name
@@ -106,6 +109,39 @@ def _load_studio_fixture(name: str) -> bytes:
         log.warning("studio fixture missing: %s", path)
         return b""
     return path.read_bytes()
+
+
+# Loaded once at import; cached for the lifetime of the process.
+# This is the key behaviour change vs the previous _load_studio_fixture
+# implementation: callers on async request paths (e.g. LangGraph
+# Studio's graph inspection via get_assistant_subgraphs) no longer
+# trigger blockbuster.BlockingError on a synchronous Path.read_bytes()
+# call. The bytes are read once here at module import; the
+# ``_load_studio_fixture`` wrapper below returns the cached bytes for
+# the two preloaded names and falls through to a single disk read for
+# any other name (preserves the test-facing surface that loads custom
+# fixture names via ``register`` and direct helper calls).
+_ARCHIVE_HTML_BYTES: bytes = _load_studio_fixture_or_empty("archive.html")
+_ISSUE_HTML_BYTES: bytes = _load_studio_fixture_or_empty("issue.html")
+
+
+def _load_studio_fixture(name: str) -> bytes:
+    """Return the cached fixture bytes for ``name``, or read once if uncached.
+
+    The two preloaded names (`` ``archive.html`` `` and `` ``issue.html`` ``)
+    return the module-level cached bytes populated so callers on the
+    LangGraph Studio request path do not trigger a ``blockbuster``
+    guard on a synchronous ``Path.read_bytes()``. Other names fall
+    through to a single disk read so callers / tests that pass a custom
+    fixture name continue to work without rewiring the cache. The
+    fall-back-to-empty-body contract for missing fixtures is preserved.
+    """
+
+    if name == "archive.html":
+        return _ARCHIVE_HTML_BYTES
+    if name == "issue.html":
+        return _ISSUE_HTML_BYTES
+    return _load_studio_fixture_or_empty(name)
 
 
 class StubSafeFetcher:
@@ -122,9 +158,13 @@ class StubSafeFetcher:
     # Per-URL canned responses. Keys are the canonical URLs the graph
     # will request; values are the fixture body + content type. Keeping
     # the fixture list small exercises the no-op branch naturally.
+    # The class-body dict references the module-level cached bytes
+    # (loaded once at import), so class definition itself performs no
+    # synchronous file I/O. Per-instance state (and the issue route
+    # registration) lives in ``__init__`` below.
     _ROUTES: dict[str, _FixtureRoute] = {
         "https://www.techmanagerweekly.com/": _FixtureRoute(
-            body=_load_studio_fixture("archive.html"),
+            body=_ARCHIVE_HTML_BYTES,
             final_url="https://www.techmanagerweekly.com/",
         ),
         # Issue URLs the stub advertises. Tests inject extra URLs via
@@ -139,11 +179,13 @@ class StubSafeFetcher:
         # without a custom caller. The archive parser resolves the
         # issue href ``/tmw-495/`` against the archive URL to produce
         # ``https://www.techmanagerweekly.com/tmw-495/``; that is the
-        # URL ``extract_public_links`` will request.
-        issue_body = _load_studio_fixture("issue.html")
-        if issue_body:
+        # URL ``extract_public_links`` will request. ``__init__`` now
+        # references the module-level cached bytes so the per-instance
+        # fixture registration performs no synchronous file I/O on the
+        # Studio request path.
+        if _ISSUE_HTML_BYTES:
             self._ROUTES["https://www.techmanagerweekly.com/tmw-495/"] = _FixtureRoute(
-                body=issue_body,
+                body=_ISSUE_HTML_BYTES,
                 final_url="https://www.techmanagerweekly.com/tmw-495/",
             )
 
