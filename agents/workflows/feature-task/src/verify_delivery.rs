@@ -28,6 +28,7 @@
 //! block at the bottom of this file; the stage handler's higher-level
 //! integration coverage stays in `main.rs`.
 
+use crate::ac_parsing;
 use crate::brain_spec_lifecycle::{
     block_on_spec_drift_fluid, block_with_manual_block, manual_block_failures,
 };
@@ -36,7 +37,6 @@ use crate::product_spec_parsing::{
     implementer_pr_urls, inspect_pr, latest_implementer_pr_urls, workstreams,
 };
 use crate::task_approvals;
-use crate::ac_parsing;
 use crate::{
     analytics,
     api_client::{add_comment, read_envelope},
@@ -122,8 +122,15 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // A deferred Ash verdict is an explicit OpenClaw handoff. Set this before
     // any later delivery/mechanical failure can return through the generic
     // blocker so the persisted lobster state and queue routing agree.
-    if task_approvals::qa_agent_deferred(&env.task) {
+    if task_approvals::qa_agent_deferred(&env.task)
+        && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task)
+    {
         env.lobster_state.openclaw_needed = true;
+        env.lobster_state.openclaw_done = false;
+    } else if task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task) {
+        // The capability task is now the actionable work item. Clear any
+        // stale OpenClaw handoff left by the pre-dependency deferral.
+        env.lobster_state.openclaw_needed = false;
         env.lobster_state.openclaw_done = false;
     }
     let manual_failures = manual_block_failures(&env.task);
@@ -203,7 +210,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 false
             }
         };
-if docs_only {
+        if docs_only {
             continue;
         }
         let body = match cli_utils::pr_body(url) {
@@ -215,7 +222,7 @@ if docs_only {
                 continue;
             }
         };
-let files = match pr_gates::pr_changed_files(url) {
+        let files = match pr_gates::pr_changed_files(url) {
             Ok(files) => files,
             Err(err) => {
                 failures.push(format!(
@@ -331,14 +338,18 @@ let files = match pr_gates::pr_changed_files(url) {
             if !args.dry_run {
                 let qa_fingerprint = qa_agent_failures.join("\n");
                 let deferred = task_approvals::qa_agent_deferred(&env.task);
+                let waiting_on_capability_extension =
+                    task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task);
                 let fingerprint_changed =
                     env.lobster_state.failure_fingerprint.as_deref() != Some(&qa_fingerprint);
-                if deferred {
+                if deferred && !waiting_on_capability_extension {
                     env.lobster_state.openclaw_needed = true;
                     env.lobster_state.openclaw_done = false;
                 }
                 if fingerprint_changed {
                     env.lobster_state.failure_fingerprint = Some(qa_fingerprint.clone());
+                }
+                if fingerprint_changed && !waiting_on_capability_extension {
                     add_comment(
                         &args.base_url,
                         &env.task.id,
@@ -358,11 +369,14 @@ let files = match pr_gates::pr_changed_files(url) {
                 }
             }
             env.criteria_met = false;
-            env.action_taken = if task_approvals::qa_agent_deferred(&env.task) {
-                "verify_delivery_openclaw_needed".to_string()
-            } else {
-                "verify_delivery_qa_agent_blocked".to_string()
-            };
+            env.action_taken =
+                if task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task) {
+                    "verify_delivery_capability_extension_pending".to_string()
+                } else if task_approvals::qa_agent_deferred(&env.task) {
+                    "verify_delivery_openclaw_needed".to_string()
+                } else {
+                    "verify_delivery_qa_agent_blocked".to_string()
+                };
             env.failures = qa_agent_failures;
             analytics::emit_gate_failure_events(&args, &env.task, "verify_delivery", &env.failures);
             return Ok(env);
