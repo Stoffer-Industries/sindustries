@@ -88,10 +88,13 @@ for whichever domain the AC belongs to, not a separate approval domain.
    `qa_agent` approval.
    Route the task to `Quinn` at `attentionOwners[0]`; keep `Tom` as a
    dormant escalation slot only when Quinn cannot resolve the capability gap.
-   QA approval is allowed only after a later pass claims every AC addressed
-   and reaches `verified` for every AC. If the same gap recurs across two
-   distinct tasks, propose a follow-up feature task via the Tasks API on the
-   second strike (do not auto-create on the first deferral).
+   Quinn's resolution is a capability-extension task, not a QA approval or a
+   delivery failure. The original task depends on that extension task, while
+   the extension task remains unblocked and has no dependency back to the
+   original. After the extension is complete, Ash reruns the original task and
+   approves or blocks it from fresh evidence. If the same gap recurs across
+   two distinct tasks, propose a follow-up feature task via the Tasks API on
+   the second strike (do not auto-create on the first deferral).
 6. If the blocker is tooling/systemic, route by capability:
    infrastructure, host, or network work may go to Lox;
    OpenClaw/runtime work goes to Quinn; otherwise choose the capable

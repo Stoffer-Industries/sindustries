@@ -47,14 +47,18 @@
    6. On any `blocked` AC: post `[qa-agent-blocked] AC<N>: <reason>`
       listing each blocked AC's reason. Do **not** post the structured
       approval.
-   7. On a `deferred` AC: post `[qa-agent-deferred] AC<N>: <reason>` and a
-      matching `[qa-agent-capability-request] domain=<domain> AC<N>: need
-      <capability> to perform <check>; attempted <command/tool>; requested
-      action <next step>` entry. Continue the loop for the rest, but do **not**
-      post the structured `qa_agent` approval. Route the task to Quinn at
-      `attentionOwners[0]`; Tom is only a dormant escalation target if Quinn
-      cannot resolve the capability gap. Approval is permitted only on a
-      later pass that claims every AC addressed and verifies every AC.
+   7. On a `deferred` AC caused by a missing Ash/codebase capability: post
+      `[qa-agent-deferred] AC<N>: <reason>` and a matching
+      `[qa-agent-capability-request] domain=<domain> AC<N>: need <capability>
+      to perform <check>; attempted <command/tool>; requested action <next
+      step>` entry. Continue the loop for the rest, but do **not** post the
+      structured `qa_agent` approval. Route the task to Quinn at
+      `attentionOwners[0]` until Quinn approves and creates a capability-
+      extension task. Then the original task must depend on that new task; the
+      capability task must have no dependency back to the original. Once that
+      task completes, Ash reruns the original task and approves or blocks it
+      from fresh evidence. Do not classify a capability gap as a delivery
+      failure merely to route it back to Rowan.
    8. If the same capability gap has been deferred across two distinct
       tasks (the two-strike rule), propose a follow-up feature task
       (create via Tasks API) describing the capability spec and link

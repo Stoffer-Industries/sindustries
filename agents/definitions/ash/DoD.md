@@ -12,8 +12,10 @@ A QA action is done only when:
   when every AC is claimed addressed and verified; does not post when any AC
   is blocked or deferred;
 - capability gaps are reported via `[qa-agent-deferred]` task comments with a
-  reason and (when known) a spec link; recurring gaps across two distinct
-  tasks become a follow-up task, not a silent deferral;
+  reason and (when known) a spec link; a capability-extension task leaves the
+  original task depending on the extension, with no dependency back; recurring
+  gaps across two distinct tasks become a follow-up task, not a silent
+  deferral;
 - blockers are routed through `attentionOwners[0]` to the correct next actor;
 - delivery assignee and gate context remain intact;
 - repeated and dormant escalation slots are preserved;

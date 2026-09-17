@@ -85,9 +85,7 @@ pub(crate) fn accepted_structured_failures(task: &Task) -> Vec<String> {
 /// Distinct from `accepted_structured` above (Tom's human sign-off); both
 /// rows must be approved before the task can reach `done`.
 pub(crate) fn qa_agent_verified(task: &Task) -> bool {
-    task_approval_granted(task, "qa_agent")
-        && !qa_agent_deferred(task)
-        && !qa_agent_blocked(task)
+    task_approval_granted(task, "qa_agent") && !qa_agent_deferred(task) && !qa_agent_blocked(task)
 }
 
 fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
@@ -97,10 +95,8 @@ fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
             .as_deref()
             .or(comment.body.as_deref())
             .unwrap_or_default();
-        let starts_with_tag = |tag: &str| {
-            text.lines()
-                .any(|line| line.trim_start().starts_with(tag))
-        };
+        let starts_with_tag =
+            |tag: &str| text.lines().any(|line| line.trim_start().starts_with(tag));
         if starts_with_tag("[qa-agent-deferred]") {
             Some("deferred")
         } else if starts_with_tag("[qa-agent-blocked]") {
@@ -133,6 +129,14 @@ pub(crate) fn qa_agent_deferred(task: &Task) -> bool {
                 })
             }),
     }
+}
+
+/// True when a deferred Ash capability gap has been captured as a real
+/// capability-extension dependency. The original task must remain unapproved
+/// until the extension lands, but Quinn is no longer the active owner once
+/// the dependency edge exists.
+pub(crate) fn qa_agent_deferred_waiting_on_capability_extension(task: &Task) -> bool {
+    task.dependency_blocked && qa_agent_deferred(task)
 }
 
 /// True when Ash has reported an evidence blocker after an older approval.
@@ -289,16 +293,14 @@ mod tests {
         task.comments.push(crate::TaskComment {
             author: Some("Ash".to_string()),
             text: Some(
-                "[qa-agent-deferred] AC1: repository-admin setup is still outstanding."
-                    .to_string(),
+                "[qa-agent-deferred] AC1: repository-admin setup is still outstanding.".to_string(),
             ),
             ..Default::default()
         });
 
         assert!(qa_agent_deferred(&task));
         assert!(!qa_agent_verified(&task));
-        assert!(crate::verify_delivery::qa_agent_verified_failures(&task)[0]
-            .contains("deferred"));
+        assert!(crate::verify_delivery::qa_agent_verified_failures(&task)[0].contains("deferred"));
     }
 
     #[test]

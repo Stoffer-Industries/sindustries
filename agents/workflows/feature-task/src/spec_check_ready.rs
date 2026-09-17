@@ -438,7 +438,8 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
-                && task_approvals::qa_agent_deferred(task) =>
+                && task_approvals::qa_agent_deferred(task)
+                && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(task) =>
         {
             Some("Quinn".to_string())
         }
@@ -449,8 +450,12 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         {
             Some("Ash".to_string())
         }
-        "doing" if !product_spec_parsing::implementer_pr_urls(task).is_empty()
-            && task_approvals::qa_agent_verified(task) => task.assignee.clone(),
+        "doing"
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+                && task_approvals::qa_agent_verified(task) =>
+        {
+            task.assignee.clone()
+        }
         "acceptance" if !task_approvals::accepted_structured(task) => Some("Tom".to_string()),
         _ => None,
     }
@@ -478,7 +483,8 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         // `workflow_attention_owner` already handles replacement of a stale
         // Quinn/Ash/Tom head in any other state via the `Some(desired)` arm.
         "Quinn" => {
-            product_spec_parsing::tech_design_approved_structured(task)
+            task_approvals::qa_agent_deferred_waiting_on_capability_extension(task)
+                || product_spec_parsing::tech_design_approved_structured(task)
                 || product_spec_parsing::tech_design_waived(task)
         }
         "Ash" => task_approvals::qa_agent_verified(task),
@@ -512,9 +518,10 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
         } else {
             owners.insert(0, desired.to_string());
         }
-        // A deferred QA verdict is an OpenClaw handoff to Quinn. Preserve an
-        // existing escalation tail, but never create a Tom slot implicitly:
-        // Quinn adds Tom only when she cannot resolve the capability gap.
+        // An unresolved deferred QA verdict is an OpenClaw handoff to Quinn.
+        // Once the original task is dependency-blocked on a capability
+        // extension, `workflow_attention_owner` returns None and the managed
+        // Quinn slot is removed instead of being re-added on every sweep.
     } else if owners
         .first()
         .is_some_and(|owner| managed_owner_reason_satisfied(task, owner))
@@ -835,6 +842,30 @@ mod tests {
             crate::spec_check_ready::reconciled_attention_owners(&task),
             vec!["Quinn", "Tom"]
         );
+    }
+
+    #[test]
+    fn routing_removes_quinn_after_capability_extension_dependency_is_linked() {
+        let mut task = routing_task("doing", &["Quinn", "Tom"]);
+        task.dependency_blocked = true;
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some(
+                "[qa-agent-deferred] AC1: the required verifier capability is unavailable."
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+
+        assert_eq!(reconciled_attention_owners(&task), vec!["Tom"]);
     }
     #[test]
     fn routing_preserves_rowan_handoff_when_ash_is_last_commenter() {
