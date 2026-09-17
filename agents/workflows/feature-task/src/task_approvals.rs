@@ -139,6 +139,18 @@ pub(crate) fn qa_agent_deferred_waiting_on_capability_extension(task: &Task) -> 
     task.dependency_blocked && qa_agent_deferred(task)
 }
 
+/// True when the dependency that carried a deferred capability gap has
+/// completed. The original task is ready for Ash to rerun; the stale Quinn
+/// handoff must not survive the completed dependency.
+pub(crate) fn qa_agent_deferred_capability_extension_complete(task: &Task) -> bool {
+    qa_agent_deferred(task)
+        && !task.dependency_blocked
+        && task
+            .depends_on
+            .iter()
+            .any(|dependency| dependency.status == "done")
+}
+
 /// True when Ash has reported an evidence blocker after an older approval.
 pub(crate) fn qa_agent_blocked(task: &Task) -> bool {
     matches!(latest_qa_verdict(task), Some("blocked"))
@@ -243,6 +255,7 @@ mod tests {
             assignee: Some("Rowan".to_string()),
             blocked: false,
             dependency_blocked: false,
+            depends_on: Vec::new(),
             task_type: Some("code".to_string()),
             spec_checksum: None,
             tags: Vec::new(),
