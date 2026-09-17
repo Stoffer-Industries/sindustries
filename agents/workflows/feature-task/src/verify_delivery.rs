@@ -122,12 +122,15 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // A deferred Ash verdict is an explicit OpenClaw handoff. Set this before
     // any later delivery/mechanical failure can return through the generic
     // blocker so the persisted lobster state and queue routing agree.
-    if task_approvals::qa_agent_deferred(&env.task)
-        && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task)
-    {
+    let deferred = task_approvals::qa_agent_deferred(&env.task);
+    let waiting_on_capability_extension =
+        task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task);
+    let capability_extension_complete =
+        task_approvals::qa_agent_deferred_capability_extension_complete(&env.task);
+    if deferred && !waiting_on_capability_extension && !capability_extension_complete {
         env.lobster_state.openclaw_needed = true;
         env.lobster_state.openclaw_done = false;
-    } else if task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task) {
+    } else if waiting_on_capability_extension || capability_extension_complete {
         // The capability task is now the actionable work item. Clear any
         // stale OpenClaw handoff left by the pre-dependency deferral.
         env.lobster_state.openclaw_needed = false;
@@ -340,16 +343,21 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 let deferred = task_approvals::qa_agent_deferred(&env.task);
                 let waiting_on_capability_extension =
                     task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task);
+                let capability_extension_complete =
+                    task_approvals::qa_agent_deferred_capability_extension_complete(&env.task);
                 let fingerprint_changed =
                     env.lobster_state.failure_fingerprint.as_deref() != Some(&qa_fingerprint);
-                if deferred && !waiting_on_capability_extension {
+                if deferred && !waiting_on_capability_extension && !capability_extension_complete {
                     env.lobster_state.openclaw_needed = true;
                     env.lobster_state.openclaw_done = false;
                 }
                 if fingerprint_changed {
                     env.lobster_state.failure_fingerprint = Some(qa_fingerprint.clone());
                 }
-                if fingerprint_changed && !waiting_on_capability_extension {
+                if fingerprint_changed
+                    && !waiting_on_capability_extension
+                    && !capability_extension_complete
+                {
                     add_comment(
                         &args.base_url,
                         &env.task.id,
@@ -372,6 +380,9 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             env.action_taken =
                 if task_approvals::qa_agent_deferred_waiting_on_capability_extension(&env.task) {
                     "verify_delivery_capability_extension_pending".to_string()
+                } else if task_approvals::qa_agent_deferred_capability_extension_complete(&env.task)
+                {
+                    "verify_delivery_capability_extension_ready".to_string()
                 } else if task_approvals::qa_agent_deferred(&env.task) {
                     "verify_delivery_openclaw_needed".to_string()
                 } else {

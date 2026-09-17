@@ -439,9 +439,16 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && task_approvals::qa_agent_deferred(task)
-                && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(task) =>
+                && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(task)
+                && !task_approvals::qa_agent_deferred_capability_extension_complete(task) =>
         {
             Some("Quinn".to_string())
+        }
+        "doing"
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+                && task_approvals::qa_agent_deferred_capability_extension_complete(task) =>
+        {
+            Some("Ash".to_string())
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
@@ -866,6 +873,32 @@ mod tests {
         });
 
         assert_eq!(reconciled_attention_owners(&task), vec!["Tom"]);
+    }
+
+    #[test]
+    fn routing_returns_to_ash_after_capability_extension_completes() {
+        let mut task = routing_task("doing", &["Quinn", "Tom"]);
+        task.depends_on = vec![crate::TaskDependency {
+            status: "done".to_string(),
+        }];
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some(
+                "[qa-agent-deferred] AC1: the required verifier capability is unavailable."
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+
+        assert_eq!(reconciled_attention_owners(&task), vec!["Ash", "Tom"]);
     }
     #[test]
     fn routing_preserves_rowan_handoff_when_ash_is_last_commenter() {

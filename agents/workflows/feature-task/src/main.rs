@@ -145,6 +145,8 @@ pub(crate) struct Task {
     #[serde(default)]
     dependency_blocked: bool,
     #[serde(default)]
+    depends_on: Vec<TaskDependency>,
+    #[serde(default)]
     task_type: Option<String>,
     #[serde(default)]
     spec_checksum: Option<String>,
@@ -162,6 +164,12 @@ pub(crate) struct Task {
     /// later entries are escalation targets and repeated people are valid.
     #[serde(default)]
     attention_owners: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TaskDependency {
+    status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
