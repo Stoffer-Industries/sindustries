@@ -73,13 +73,20 @@ When Quinn is top owner:
 2. Apply or decide the requested action. For `~/.openclaw/`, retain the normal
    safety and product-behaviour approval checks.
 3. Post evidence as a task comment.
-4. Advance the ordered stack by removing the resolved first slot while
-   preserving every later slot exactly, including repeated people. Never
-   deduplicate the list or clear all owners.
-5. Quinn is the highest agent escalation. If Quinn cannot resolve the blocker,
-   set/advance Tom to position 0. `attentionOwners=["Tom"]` is valid: Tom is the
-   terminal human actor, no dormant fallback is required, and no escalation
-   exists beyond him. Tom appearing later in a tail is dormant context only.
+4. If the work is resolved, advance the ordered stack by removing the resolved
+   first slot while preserving every later slot exactly, including repeated
+   people. Never deduplicate the list or clear all owners.
+5. If Quinn hits a genuine external blocker (missing access, owner-only
+   approval, unavailable credential, or an unresolved product decision), do not
+   silently remove Quinn or let Rowan route around her. Preserve the existing
+   ordered handoff chain (normally `["Quinn", "Tom"]`), post the concrete
+   blocker evidence, and page Tom directly and immediately. Do not collapse the
+   stack to `["Tom"]` merely to notify him; the unchanged stack makes the
+   Rowan → Quinn → Tom routing visible. This is a real escalation, not a
+   duplicate PR/state-assistance request.
+6. Do not escalate when the only possible action is duplicate state help, such
+   as repeating PR assistance or restating evidence already recorded elsewhere.
+   Leave the existing stack unchanged and avoid a second page.
 
 Delivery assignee and structured gate owner remain independent context. Ash may
 remain the QA gate owner while Quinn or Rowan is the top attention owner.
