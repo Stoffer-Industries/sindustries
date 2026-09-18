@@ -62,6 +62,12 @@ Sindustries products should share one canonical identity plane rather than each 
 
 This is an architectural direction for future work, not a description of a shipped identity system. Until a shared identity plane exists, tech designs must call out any temporary app-owned authentication and its migration path.
 
+**Decision (2026-09-19): the canonical identity issuer is Clerk.** Every product verifies Clerk-issued session tokens rather than running its own password/OAuth stack; no product service issues tokens itself. Clerk was chosen over Supabase Auth and WorkOS because it now offers feature parity on enterprise SSO (SAML and OIDC, plus SCIM directory sync) while including one free enterprise SSO+SCIM connection in its free tier — WorkOS charges per connection from the first one, and Supabase Auth's SSO tier is a $599/mo jump. Clerk's "organizations" primitive also maps directly onto this doc's identity / product-membership / organisation-membership split.
+
+Product databases stay independent of the issuer: GymTrack's data remains in Supabase, wired to Clerk via Supabase's [Third-Party Auth](https://supabase.com/docs/guides/auth/third-party/overview) integration (Supabase verifies Clerk's asymmetric JWTs; RLS keys on the Clerk subject via `auth.jwt()`/`auth.uid()`). Migrating GymTrack off Supabase's native Auth requires re-pointing its `auth.users(id)` foreign keys at a new `public.profiles` table (third-party-authenticated users never get a Supabase `auth.users` row), re-registering the Google/Apple OAuth redirect URIs at Clerk instead of Supabase, and linking existing Google-login users to their profile by verified email on first post-migration login. Tracking task: see `docs/repo-audits/2026-W35.md` OQ2.
+
+This decision covers **user-facing (browser) authentication only**. Machine-to-machine service calls (for example `tasks-api` → `content-scheduler-api`) are a separate concern and are not issued Clerk user tokens; they continue to use a service credential (shared secret / actor-secret header), matching the pattern already used elsewhere in the codebase.
+
 ### Separate identity from access
 
 Treat these as distinct concepts:
