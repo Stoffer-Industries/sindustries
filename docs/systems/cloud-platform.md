@@ -2,7 +2,7 @@
 
 **Type:** System reference (handover)
 **Status:** Implemented for staging
-**Last updated:** 2026-08-25
+**Last updated:** 2026-09-18
 **Owner:** Rowan (engineering); Quinn owns the live cloud account + secrets
 **Repos:** `Stoffer-Industries/sindustries`
 **App:** Staging target on Fly.io (Sydney region) for `tasks-api`, `budget-api`, `auto-post-worker`
@@ -205,3 +205,23 @@ The script is **idempotent** — re-running it does not destroy existing apps or
 - [`infra/cloud/scripts/bootstrap-staging.sh`](../../infra/cloud/scripts/bootstrap-staging.sh) — Quinn-runnable first-time setup.
 - `~/.openclaw/workspace/docs/infra/runbooks/cloud-deployment-rollback.md` — rollback procedure (was at `docs/runbooks/cloud-deployment-rollback.md`; retired in PR #583 — re-create in workspace if Quinn needs to roll back a deploy without re-deriving from `docs/specs/cloud-deployment-foundation-tech-design.md`).
 - `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` — secret rotation precedent (was at `docs/runbooks/rotate-akahu-access-tokens.md`; retired in PR #583 — re-create in workspace before rotating an Akahu token with downstream ciphertext rows).
+
+---
+
+## Server-side enforcement evidence index (task `02c5475c`)
+
+The merge-gate hardening (task `02c5475c-b4c9-420b-800b-7d6a9ecb0eb6`, PR #680) is code-complete on `main`; the residual server-side enforcement evidence that lives outside the repo (rulesets, environments, masked secrets) is tracked here so AC1/AC3/AC4 have a single point of read-back rather than living in a task comment.
+
+| AC   | Server-side artifact                                                                                                                                                          | Last read-back     | Where the contract is enforced (workflow)                                                                                                                                                                                                                          |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AC1  | Repository ruleset `13513816` (`main`) — `required_status_checks` = `CI / merge gate`, `enforcement: active`                                                                    | 2026-09-17 (Quinn) | `.github/workflows/ci.yml` `merge gate` job under `if: always()`; `infra/cloud/scripts/check-ci-results.py` accepts only `success` / `skipped`                                                                                                                       |
+| AC3  | Production GitHub environment accepts `main`-only deploy jobs; production jobs gate on `github.ref == 'refs/heads/main'`                                                       | 2026-09-18 (Ash)   | `deploy-website-production` / `deploy-gymtrack-production` / `deploy-gymtrack-mcp-production` / `eas-update-production` `if:` clauses                                                                                                                                |
+| AC4  | `FLY_API_TOKEN` provisioned in the `staging` environment (created 2026-09-15); masked repair procedure documented in the "Credential boundary" section above                   | 2026-09-15 (Quinn) | Fly deploy workflows' "Require Fly deployment credential" preflight step (`::error::FLY_API_TOKEN is not configured for the …`)                                                                                                                                      |
+
+Read-back procedure for future drift:
+
+1. `gh api repos/Stoffer-Industries/sindustries/rulesets/13513816` — confirm `required_status_checks[*].context == "CI / merge gate"` and `enforcement == "active"`.
+2. `gh api repos/Stoffer-Industries/sindustries/environments/production` — confirm production deploy jobs still hit the `main` branch restriction (workflow-level `if:` is the active control until the server-side `deployment_branch_policy` is added; that enhancement is not in scope for `02c5475c`).
+3. `gh api repos/Stoffer-Industries/sindustries/environments/staging/secrets/public-key` (or the equivalent secrets list endpoint) — confirm `FLY_API_TOKEN` exists in the staging environment. The production secret is Quinn-owned out-of-band per the Credential boundary section; the workflow preflight guarantees a clean fail-fast until it lands.
+
+Update this table whenever any of the three artifacts changes; the `Last read-back` field is the source of truth for what the lobster should cite when the AC entry needs a `(📄 not code: …)` evidence pointer.
