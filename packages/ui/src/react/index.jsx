@@ -261,10 +261,51 @@ CardContainer.Header = CardContainerHeader;
 CardContainer.Content = CardContainerContent;
 CardContainer.Actions = CardContainerActions;
 
+/**
+ * Field variant factory.
+ *
+ * Maps the legacy `si-field` BEM class to Tailwind v4 utility classes
+ * (sourced from `tailwind-theme.css` `@theme inline` bridge). The
+ * wrapper is a 1-column grid with `gap-1` — equivalent to
+ * `display: grid; gap: var(--si-space-1)` in the original CSS. The
+ * inner label uses `text-text-muted`, `font-ui`, `text-[0.8rem]`,
+ * `font-medium` to match the legacy `si-field__label` rule. Both
+ * legacy BEM classes retire in slices 4 + 5.
+ */
+const fieldClasses = defineVariants({
+  base: ['grid gap-1']
+});
+
+const fieldLabelClasses = defineVariants({
+  base: ['font-ui text-[0.8rem] font-medium text-text-muted']
+});
+
 export function Field({ label, className, children, ...props }) {
   return (
-    <label className={cx('si-field', className)} {...props}>
-      {label ? <span className="si-field__label">{label}</span> : null}
+    <label
+      className={cn(
+        fieldClasses(),
+        // Legacy BEM class retained so the `si-field` rule in `base.css`
+        // continues to match any downstream kit overrides that key off
+        // the legacy selector. Retires in slices 4 + 5.
+        'si-field',
+        className
+      )}
+      {...props}
+    >
+      {label ? (
+        <span
+          className={cn(
+            fieldLabelClasses(),
+            // Legacy BEM class retained so the `si-field__label` rule in
+            // `base.css` continues to match any downstream kit overrides
+            // that key off the legacy selector. Retires in slices 4 + 5.
+            'si-field__label'
+          )}
+        >
+          {label}
+        </span>
+      ) : null}
       {children}
     </label>
   );
