@@ -151,8 +151,44 @@ export function Badge({ as: Component = 'span', variant = 'neutral', tone, class
   );
 }
 
+/**
+ * Tooltip variant factory.
+ *
+ * Maps the legacy `si-tooltip` BEM class to Tailwind v4 utility classes
+ * (sourced from `tailwind-theme.css` `@theme inline` bridge). The shadow
+ * is a custom literal (`0 2px 3.5px -1px rgb(0 0 0 / 0.06)`) emitted via
+ * an arbitrary-value utility class — `--si-shadow-soft` / `--si-shadow-hard`
+ * are too coarse for this surface, and an `@utility` declaration is out
+ * of scope for slice 3 (slice 5 may collapse it).
+ */
+const tooltipClasses = defineVariants({
+  base: [
+    'inline-flex items-center justify-center',
+    'bg-cta-secondary border border-border-subtle rounded-pill',
+    'font-ui font-bold text-sm text-text-primary',
+    'shadow-[0_2px_3.5px_-1px_rgb(0_0_0/0.06)]',
+    'py-[3px] px-3'
+  ]
+});
+
 export function Tooltip({ className, ...props }) {
-  return <span className={cx('si-tooltip', className)} {...props} />;
+  return (
+    <span
+      className={cn(
+        tooltipClasses(),
+        // Legacy BEM class retained so:
+        // (a) the `si-tooltip` rule in `base.css` continues to match any
+        //     downstream kit overrides that key off the legacy selector,
+        // (b) the consumer test in `index.test.jsx` (`toHaveClass('si-tooltip')`)
+        //     stays green during the slice-3 migration. Both retire in
+        //     slices 4 + 5 when the kit CSS collapses to utility classes
+        //     (or `@utility` declarations land).
+        'si-tooltip',
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 export const Card = React.forwardRef(function Card({
