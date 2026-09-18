@@ -103,10 +103,49 @@ export function Button({
   );
 }
 
+/**
+ * Badge variant factory.
+ *
+ * Every `si-badge--<variant>` color rule in `base.css` uses
+ * `color-mix()` to blend the variant hue with
+ * `--si-color-bg-section` (e.g. `urgent` blends `--si-color-status-danger`
+ * 22% with `--si-color-bg-section`). That blend does not translate
+ * cleanly to a Tailwind utility class without an `@utility`
+ * declaration (out of scope for slice 3 partial — slice 5 collapses
+ * the kit CSS into utility classes or `@utility` declarations land).
+ *
+ * Slice 3 migrates the **layout/typography** surface to Tailwind
+ * utility classes — `inline-flex`, `items-center`, `font-ui`,
+ * `font-extrabold`, `leading-none`, `capitalize`, `rounded-pill`,
+ * `border`, `text-xs`, `min-h-[22px]`, `px-2` — and keeps the legacy
+ * `si-badge--<variant>` class as the source of color so the existing
+ * `base.css` / `kit-pulse.css` rules continue to match. The legacy
+ * classes retire when slices 4 + 5 land. `defineVariants` is wired so
+ * future variants with non-color-mix colors can extend this factory
+ * without changing the call site.
+ */
+const badgeClasses = defineVariants({
+  base: [
+    'inline-flex items-center',
+    'font-ui font-extrabold leading-none capitalize',
+    'rounded-pill border',
+    'text-xs min-h-[22px] px-2'
+  ]
+});
+
 export function Badge({ as: Component = 'span', variant = 'neutral', tone, className, ...props }) {
   return (
     <Component
-      className={cx('si-badge', `si-badge--${variant}`, tone ? `si-badge--${tone}` : null, className)}
+      className={cn(
+        badgeClasses({ variant, tone }),
+        // Legacy color classes (color-mix blends) + tone='pulse'
+        // kit-pulse overrides. Retired in slices 4 + 5 when the kit CSS
+        // collapses to utility classes (or `@utility` declarations land).
+        'si-badge',
+        `si-badge--${variant}`,
+        tone ? `si-badge--${tone}` : null,
+        className
+      )}
       {...props}
     />
   );
