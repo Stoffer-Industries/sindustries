@@ -297,16 +297,108 @@ export const SearchInput = React.forwardRef(function SearchInput({
   );
 });
 
+/**
+ * Dropdown variant factory.
+ *
+ * Maps the legacy `si-dropdown` BEM class to Tailwind v4 utility classes
+ * (sourced from `tailwind-theme.css` `@theme inline` bridge). The
+ * surface — `bg-section`, `border-2 border-border-subtle`, `rounded-md`,
+ * `shadow-soft`, `gap-1`, `min-w-[220px]`, `p-2` — matches the original
+ * 1:1 and the legacy `si-dropdown` rule in `base.css` continues to
+ * match as an additive class string. Retires in slices 4 + 5.
+ */
+const dropdownClasses = defineVariants({
+  base: [
+    'grid gap-1 min-w-[220px] p-2',
+    'bg-bg-section border-2 border-border-subtle rounded-md',
+    'shadow-soft'
+  ]
+});
+
 export function Dropdown({ className, ...props }) {
-  return <div className={cx('si-dropdown', className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        dropdownClasses(),
+        // Legacy BEM class retained so the `si-dropdown` rule in `base.css`
+        // continues to match any downstream kit overrides that key off the
+        // legacy selector. Retires in slices 4 + 5 when the kit CSS
+        // collapses to utility classes (or `@utility` declarations land).
+        'si-dropdown',
+        className
+      )}
+      {...props}
+    />
+  );
 }
+
+/**
+ * DropdownOption variant factory.
+ *
+ * Maps the legacy `si-dropdown__option` BEM class to Tailwind v4 utility
+ * classes (sourced from `tailwind-theme.css` `@theme inline` bridge). The
+ * hover treatment is `:hover:bg-text-primary/8` via Tailwind v4's native
+ * opacity modifier syntax (`bg-text-primary/8`) — `color-mix(in srgb,
+ * var(--si-color-text-primary) 8%, transparent)` in the original CSS
+ * reduces to the same final value once Tailwind resolves the alpha
+ * modifier against the CSS variable. Retires in slices 4 + 5.
+ */
+const dropdownOptionClasses = defineVariants({
+  base: [
+    'flex items-center gap-2',
+    'bg-transparent border-0 rounded-sm',
+    'text-text-primary text-[0.85rem] font-extrabold uppercase',
+    'min-h-8 p-2 text-left w-full cursor-pointer',
+    'hover:bg-text-primary/[0.08]'
+  ]
+});
 
 export function DropdownOption({ as: Component = 'button', className, ...props }) {
-  return <Component className={cx('si-dropdown__option', className)} {...props} />;
+  return (
+    <Component
+      className={cn(
+        dropdownOptionClasses(),
+        // Legacy BEM class retained so the `si-dropdown__option` rule
+        // (and its `:hover` rule) in `base.css` continues to match any
+        // downstream kit overrides that key off the legacy selector.
+        // Retires in slices 4 + 5 when the kit CSS collapses to utility
+        // classes (or `@utility` declarations land).
+        'si-dropdown__option',
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
+/**
+ * DropdownDivider variant factory.
+ *
+ * Maps the legacy `si-dropdown__divider` BEM class to Tailwind v4 utility
+ * classes (sourced from `tailwind-theme.css` `@theme inline` bridge). The
+ * divider itself is a 1px tall `bg-border-subtle` block with `my-1` for
+ * spacing — equivalent to `height: 1px; margin: var(--si-space-1)` in
+ * the original CSS. Retires in slices 4 + 5.
+ */
+const dropdownDividerClasses = defineVariants({
+  base: ['h-px my-1 bg-border-subtle']
+});
+
 export function DropdownDivider(props) {
-  return <div className="si-dropdown__divider" aria-hidden="true" {...props} />;
+  return (
+    <div
+      className={cn(
+        dropdownDividerClasses(),
+        // Legacy BEM class retained so the `si-dropdown__divider` rule in
+        // `base.css` continues to match any downstream kit overrides that
+        // key off the legacy selector. Retires in slices 4 + 5.
+        'si-dropdown__divider',
+        props.className
+      )}
+      aria-hidden="true"
+      {...props}
+    />
+  );
 }
 
 /**
