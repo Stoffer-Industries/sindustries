@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 
+import { cn } from './lib/cn.js';
+import { defineVariants } from './lib/variants.js';
+
 export function cx(...values) {
   return values.flatMap((value) => {
     if (!value) return [];
@@ -12,6 +15,54 @@ export function cx(...values) {
     return [value];
   }).join(' ');
 }
+
+/**
+ * Button variant factory.
+ *
+ * Maps the legacy `si-button--<variant>` BEM classes to Tailwind v4
+ * utility classes (sourced from `tailwind-theme.css` `@theme inline`
+ * bridge). Per-variant hover border-color overrides stay in
+ * `kit-pulse.css` / `base.css` because they use `color-mix()` rules
+ * that don't translate cleanly to utility-class composition without
+ * `@utility` declarations (out of scope for slice 3).
+ *
+ * Kit-specific overrides:
+ * - `tone='pulse' | 'display'` — handled in `kit-pulse.css` via the
+ *   `.si-button--pulse` / `.si-button--display` selectors, which key
+ *   off the legacy class. We keep the legacy `si-button--pulse` /
+ *   `si-button--display` classes emitted by this factory so the kit
+ *   CSS keeps working without rewrite.
+ * - `[data-si-pack='brand']` — handled in `kit-brand.css`. The
+ *   migrated utility classes compose with the brand-kit overrides
+ *   via the cascade.
+ */
+const buttonClasses = defineVariants({
+  base: [
+    'inline-flex items-center justify-center gap-2',
+    'font-ui font-extrabold leading-none no-underline uppercase',
+    'rounded-pill border-2 border-border-subtle cursor-pointer',
+    'min-h-10 px-4',
+    'transition-[background,border-color,box-shadow,color,transform] duration-150 ease-out'
+  ],
+  variants: {
+    variant: {
+      primary: 'bg-cta-primary border-cta-primary text-cta-primary-text',
+      secondary: 'bg-cta-secondary border-cta-secondary text-text-primary',
+      outline: 'bg-transparent border-border-subtle text-text-primary',
+      ghost: 'bg-bg-field border-transparent text-text-primary',
+      destructive: 'bg-accent-500 border-accent-500 text-on-danger-fg',
+      nav: 'bg-bg-section border-border-subtle text-text-primary',
+      filter:
+        'bg-bg-section border-border-subtle text-text-primary justify-between min-w-0 w-full overflow-hidden pr-3 text-left'
+    },
+    size: {
+      sm: 'min-h-8 px-3',
+      md: 'min-h-10 px-4',
+      lg: 'min-h-12 px-5'
+    }
+  },
+  defaults: { variant: 'secondary', size: 'md' }
+});
 
 export const PULSE_TILT_CLASSES = ['si-card-tilt-0', 'si-card-tilt-1', 'si-card-tilt-2'];
 
@@ -30,11 +81,20 @@ export function Button({
 }) {
   return (
     <Component
-      className={cx(
+      className={cn(
+        buttonClasses({ variant, size }),
+        // Emit the legacy BEM classes alongside the Tailwind utilities so
+        // (a) kit CSS rules in `base.css`, `kit-pulse.css`, and
+        // `kit-brand.css` continue to match (`:hover`, `::after`, etc.),
+        // (b) existing consumer tests that assert on `si-button--<variant>`
+        // stay green during the slice-3 migration. The `si-button--<variant>`
+        // emissions will be retired once slices 4 + 5 collapse the kit CSS
+        // into utility classes and the snapshot tests in
+        // `__snapshots__/` cover the variant matrix instead.
         'si-button',
         `si-button--${variant}`,
         `si-button--${size}`,
-        tone ? `si-button--${tone}` : null,
+        tone && `si-button--${tone}`,
         active && 'is-active',
         className
       )}
