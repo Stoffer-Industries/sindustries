@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -100,7 +101,7 @@ function brainStateApi() {
 }
 
 export default defineConfig({
-  plugins: [react(), brainStateApi()],
+  plugins: [tailwindcss(), react(), brainStateApi()],
   resolve: {
     alias: {
       '@sindustries/ui/react/styles.css': fileURLToPath(new URL('../../packages/ui/src/react/styles.css', import.meta.url)),
