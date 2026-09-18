@@ -309,8 +309,53 @@ export function DropdownDivider(props) {
   return <div className="si-dropdown__divider" aria-hidden="true" {...props} />;
 }
 
+/**
+ * Divider variant factory.
+ *
+ * Maps the legacy `si-divider` / `si-divider--<variant>` BEM classes to
+ * Tailwind v4 utility classes (sourced from `tailwind-theme.css`
+ * `@theme inline` bridge). Two variants match the original surface:
+ *
+ * - `subtle` — 1px top border in `--color-border-subtle`
+ * - `dashed` — 2px dashed top border in `--color-ink-950`
+ *
+ * The legacy BEM classes are kept as an additive class string for the
+ * slice-3 migration: existing kit CSS in `base.css` continues to match
+ * `si-divider` selectors, and consumer tests that assert on the legacy
+ * class stay green. Both retire in slices 4 + 5 when the kit CSS
+ * collapses to utility classes (or `@utility` declarations land).
+ */
+const dividerClasses = defineVariants({
+  base: ['border-0 m-0 w-full'],
+  variants: {
+    variant: {
+      subtle: 'border-t border-border-subtle',
+      dashed: 'border-t-2 border-dashed border-ink-950'
+    }
+  },
+  defaults: { variant: 'subtle' }
+});
+
 export function Divider({ variant = 'subtle', className, ...props }) {
-  return <hr className={cx('si-divider', `si-divider--${variant}`, className)} aria-hidden="true" {...props} />;
+  return (
+    <hr
+      className={cn(
+        dividerClasses({ variant }),
+        // Legacy BEM class retained so:
+        // (a) the `si-divider` rule in `base.css` continues to match any
+        //     downstream kit overrides that key off the legacy selector,
+        // (b) the consumer test in `index.test.jsx`
+        //     (`toHaveClass('si-divider')`) stays green during the slice-3
+        //     migration. Both retire in slices 4 + 5 when the kit CSS
+        //     collapses to utility classes (or `@utility` declarations land).
+        'si-divider',
+        `si-divider--${variant}`,
+        className
+      )}
+      aria-hidden="true"
+      {...props}
+    />
+  );
 }
 
 export function Avatar({ src, alt, children, className, onError, ...props }) {
