@@ -11,9 +11,23 @@
  * runtime through the same `var()` chain, so
  * @sindustries/design-tokens remains the single source of truth and
  * Tailwind never defines its own token values.
+ *
+ * The `@source` directive below is load-bearing. Tailwind v4's content
+ * detection does not cross workspace package boundaries by default — a
+ * utility class string emitted from `packages/ui/src/react/**` is
+ * invisible to consumers that import this stylesheet through the
+ * `@sindustries/ui/react` subpath, because Tailwind's scanner treats
+ * the ui package as an external dependency. `@source` opts the ui
+ * package back into the scanner for every consumer that compiles this
+ * file (apps/website, apps/tasks, apps/mission-control, apps/gymtrack,
+ * the specimen shell, vitest's jsdom environment). See
+ * https://tailwindcss.com/docs/detecting-classes-in-source-files for
+ * the rationale and the v3 → v4 migration story.
  */
 
 @import "tailwindcss";
+
+@source "../**/*.{js,jsx,ts,tsx}";
 
 @theme inline {
   /* color — sourced from 62 --si-color-* token(s) */
