@@ -1,0 +1,111 @@
+/*
+ * GENERATED FILE — do not edit by hand.
+ * Source of truth: packages/design-tokens/styles.css.
+ * Regenerate with `npm run build:tailwind-theme`.
+ *
+ * This file bridges @sindustries/design-tokens into a Tailwind v4
+ * `@theme inline` block. Each `--si-*` CSS custom property declared
+ * in `styles.css` is re-exported here as a `--<namespace>-*` Tailwind
+ * theme variable backed by a `var()` reference. Tailwind utility
+ * classes (`bg-cta-primary`, `text-ink-900`, `p-4`, …) resolve at
+ * runtime through the same `var()` chain, so
+ * @sindustries/design-tokens remains the single source of truth and
+ * Tailwind never defines its own token values.
+ */
+
+@import "tailwindcss";
+
+@theme inline {
+  /* color — sourced from 62 --si-color-* token(s) */
+  --color-accent-200: var(--si-color-accent-200);
+  --color-accent-500: var(--si-color-accent-500);
+  --color-bg-canvas: var(--si-color-bg-canvas);
+  --color-bg-field: var(--si-color-bg-field);
+  --color-bg-glass: var(--si-color-bg-glass);
+  --color-bg-image-placeholder: var(--si-color-bg-image-placeholder);
+  --color-bg-pagination-active: var(--si-color-bg-pagination-active);
+  --color-bg-section: var(--si-color-bg-section);
+  --color-bg-section-header: var(--si-color-bg-section-header);
+  --color-bg-surface: var(--si-color-bg-surface);
+  --color-bone-100: var(--si-color-bone-100);
+  --color-bone-150: var(--si-color-bone-150);
+  --color-bone-200: var(--si-color-bone-200);
+  --color-bone-250: var(--si-color-bone-250);
+  --color-bone-300: var(--si-color-bone-300);
+  --color-bone-400: var(--si-color-bone-400);
+  --color-bone-50: var(--si-color-bone-50);
+  --color-bone-ui: var(--si-color-bone-ui);
+  --color-border-strong: var(--si-color-border-strong);
+  --color-border-subtle: var(--si-color-border-subtle);
+  --color-brand-200: var(--si-color-brand-200);
+  --color-brand-500: var(--si-color-brand-500);
+  --color-brand-700: var(--si-color-brand-700);
+  --color-cta-primary: var(--si-color-cta-primary);
+  --color-cta-primary-text: var(--si-color-cta-primary-text);
+  --color-cta-secondary: var(--si-color-cta-secondary);
+  --color-danger-500: var(--si-color-danger-500);
+  --color-focus: var(--si-color-focus);
+  --color-glass-dark: var(--si-color-glass-dark);
+  --color-glass-light: var(--si-color-glass-light);
+  --color-graphite-400: var(--si-color-graphite-400);
+  --color-graphite-500: var(--si-color-graphite-500);
+  --color-graphite-600: var(--si-color-graphite-600);
+  --color-graphite-700: var(--si-color-graphite-700);
+  --color-graphite-800: var(--si-color-graphite-800);
+  --color-info-200: var(--si-color-info-200);
+  --color-info-500: var(--si-color-info-500);
+  --color-ink-800: var(--si-color-ink-800);
+  --color-ink-900: var(--si-color-ink-900);
+  --color-ink-950: var(--si-color-ink-950);
+  --color-label-blue: var(--si-color-label-blue);
+  --color-label-gray: var(--si-color-label-gray);
+  --color-label-green: var(--si-color-label-green);
+  --color-label-orange: var(--si-color-label-orange);
+  --color-label-purple: var(--si-color-label-purple);
+  --color-neutral-0: var(--si-color-neutral-0);
+  --color-neutral-200: var(--si-color-neutral-200);
+  --color-neutral-300: var(--si-color-neutral-300);
+  --color-on-danger-fg: var(--si-color-on-danger-fg);
+  --color-paper-200: var(--si-color-paper-200);
+  --color-sage-500: var(--si-color-sage-500);
+  --color-status-danger: var(--si-color-status-danger);
+  --color-status-info: var(--si-color-status-info);
+  --color-status-success: var(--si-color-status-success);
+  --color-success-200: var(--si-color-success-200);
+  --color-success-500: var(--si-color-success-500);
+  --color-text-muted: var(--si-color-text-muted);
+  --color-text-on-dark: var(--si-color-text-on-dark);
+  --color-text-on-dark-secondary: var(--si-color-text-on-dark-secondary);
+  --color-text-primary: var(--si-color-text-primary);
+  --color-text-secondary: var(--si-color-text-secondary);
+  --color-text-tertiary: var(--si-color-text-tertiary);
+
+  /* font — sourced from 3 --si-font-* token(s) */
+  --font-body: var(--si-font-body);
+  --font-display: var(--si-font-display);
+  --font-ui: var(--si-font-ui);
+
+  /* radius — sourced from 7 --si-radius-* token(s) */
+  --radius-2xl: var(--si-radius-2xl);
+  --radius-lg: var(--si-radius-lg);
+  --radius-md: var(--si-radius-md);
+  --radius-pill: var(--si-radius-pill);
+  --radius-sm: var(--si-radius-sm);
+  --radius-xl: var(--si-radius-xl);
+  --radius-xs: var(--si-radius-xs);
+
+  /* shadow — sourced from 2 --si-shadow-* token(s) */
+  --shadow-hard: var(--si-shadow-hard);
+  --shadow-soft: var(--si-shadow-soft);
+
+  /* spacing — sourced from 9 --si-space-* token(s) */
+  --spacing-1: var(--si-space-1);
+  --spacing-10: var(--si-space-10);
+  --spacing-2: var(--si-space-2);
+  --spacing-3: var(--si-space-3);
+  --spacing-4: var(--si-space-4);
+  --spacing-5: var(--si-space-5);
+  --spacing-6: var(--si-space-6);
+  --spacing-7: var(--si-space-7);
+  --spacing-8: var(--si-space-8);
+}
