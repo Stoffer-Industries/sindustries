@@ -879,6 +879,80 @@ export function Avatar({ src, alt, children, className, onError, ...props }) {
   );
 }
 
+/**
+ * Toast / ToastViewport / ToastIcon variant factories.
+ *
+ * Map the legacy `si-toast` / `si-toast__*` / `si-toast--<type>` /
+ * `si-toast-viewport` / `si-toast__icon--<type>` BEM classes to
+ * Tailwind v4 utility classes (sourced from `tailwind-theme.css`
+ * `@theme inline` bridge).
+ *
+ * Toast chrome — `bg-bg-section border-0 rounded-md text-text-primary
+ * font-ui flex items-start max-w-[640px] w-full gap-3 py-4 px-6
+ * animate-[si-toast-slide-in_200ms_ease]` — matches the legacy rule in
+ * `base.css`. The accent border-left (`border-l-2 border-l-solid`)
+ * stays; the colour comes from the per-type CSS variable
+ * `--si-toast-accent` which is read via `border-l-current` and the
+ * `si-toast--<type>` rule that sets `--si-toast-accent` to the per-type
+ * token (`--si-color-info-500`, `--si-color-success-500`,
+ * `--si-color-brand-500`, `--si-color-danger-500`).
+ *
+ * Type variants (`info` / `success` / `warning` / `error`):
+ * - `info` → `border-l-info-500`
+ * - `success` → `border-l-success-500`
+ * - `warning` → `border-l-brand-500`
+ * - `error` → `border-l-danger-500`
+ *
+ * Body / title / description / icon / viewport sub-elements migrate
+ * layout + typography (grid / flex / text size / colour / spacing)
+ * to utility classes. The `si-toast-slide-in` keyframes stay in
+ * `base.css` (animation is non-trivial to express as utility classes
+ * without an `@utility` declaration).
+ *
+ * Legacy BEM classes retained as additive emissions so `base.css`
+ * rules (`:focus`, the `--si-toast-accent` variable assignment,
+ * `@keyframes si-toast-slide-in`, the mobile media-query override on
+ * `si-toast-viewport`) and existing consumer tests stay green during
+ * the slice-3 migration. Retires in slices 4 + 5.
+ */
+const toastClasses = defineVariants({
+  base: [
+    'bg-bg-section border-0 rounded-md text-text-primary',
+    'font-ui flex items-start max-w-[640px] w-full gap-3',
+    'py-4 px-6',
+    'animate-[si-toast-slide-in_200ms_ease]'
+  ],
+  variants: {
+    type: {
+      info: 'border-l-2 border-l-solid border-l-info-500',
+      success: 'border-l-2 border-l-solid border-l-success-500',
+      warning: 'border-l-2 border-l-solid border-l-brand-500',
+      error: 'border-l-2 border-l-solid border-l-danger-500'
+    }
+  },
+  defaults: { type: 'info' }
+});
+
+const toastIconClasses = defineVariants({
+  base: ['inline-flex flex-shrink-0 w-6 h-6 text-[var(--si-toast-accent)]']
+});
+
+const toastBodyClasses = defineVariants({
+  base: ['grid flex-1 gap-1 min-w-0']
+});
+
+const toastTitleClasses = defineVariants({
+  base: ['text-base font-medium leading-normal m-0']
+});
+
+const toastDescriptionClasses = defineVariants({
+  base: ['text-text-secondary text-base font-normal leading-normal m-0']
+});
+
+const toastViewportClasses = defineVariants({
+  base: ['flex flex-col gap-2 fixed bottom-5 right-5 z-[100] md:bottom-20 md:left-5 md:right-5']
+});
+
 function ToastIcon({ type }) {
   const icons = {
     info: (
@@ -921,23 +995,90 @@ function ToastIcon({ type }) {
     )
   };
 
-  return <span className={cx('si-toast__icon', `si-toast__icon--${type}`)}>{icons[type] ?? icons.info}</span>;
+  return (
+    <span
+      className={cn(
+        toastIconClasses(),
+        // Legacy BEM classes retained so the `si-toast__icon` /
+        // `si-toast__icon--<type>` rules in `base.css` continue to
+        // match. Retires in slices 4 + 5.
+        'si-toast__icon',
+        `si-toast__icon--${type}`
+      )}
+    >
+      {icons[type] ?? icons.info}
+    </span>
+  );
 }
 
 export function Toast({ type = 'info', title, description, className, children, ...props }) {
   const heading = title ?? children;
 
   return (
-    <div className={cx('si-toast', `si-toast--${type}`, className)} role="status" {...props}>
+    <div
+      className={cn(
+        toastClasses({ type }),
+        // Legacy BEM classes retained so the `si-toast` /
+        // `si-toast--<type>` rules in `base.css` (--si-toast-accent
+        // assignment, slide-in animation) continue to match. Retires
+        // in slices 4 + 5.
+        'si-toast',
+        `si-toast--${type}`,
+        className
+      )}
+      role="status"
+      {...props}
+    >
       <ToastIcon type={type} />
-      <div className="si-toast__body">
-        {heading ? <p className="si-toast__title">{heading}</p> : null}
-        {description ? <p className="si-toast__description">{description}</p> : null}
+      <div
+        className={cn(
+          toastBodyClasses(),
+          // Legacy BEM class retained for kit override selector
+          // matching. Retires in slices 4 + 5.
+          'si-toast__body'
+        )}
+      >
+        {heading ? (
+          <p
+            className={cn(
+              toastTitleClasses(),
+              // Legacy BEM class retained for kit override selector
+              // matching. Retires in slices 4 + 5.
+              'si-toast__title'
+            )}
+          >
+            {heading}
+          </p>
+        ) : null}
+        {description ? (
+          <p
+            className={cn(
+              toastDescriptionClasses(),
+              // Legacy BEM class retained for kit override selector
+              // matching. Retires in slices 4 + 5.
+              'si-toast__description'
+            )}
+          >
+            {description}
+          </p>
+        ) : null}
       </div>
     </div>
   );
 }
 
 export function ToastViewport({ className, ...props }) {
-  return <div className={cx('si-toast-viewport', className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        toastViewportClasses(),
+        // Legacy BEM class retained so the `si-toast-viewport` rule
+        // and its mobile media-query override in `base.css` continue
+        // to match. Retires in slices 4 + 5.
+        'si-toast-viewport',
+        className
+      )}
+      {...props}
+    />
+  );
 }
