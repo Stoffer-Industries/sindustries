@@ -311,16 +311,139 @@ export function Field({ label, className, children, ...props }) {
   );
 }
 
-export const Input = React.forwardRef(function Input({ className, ...props }, ref) {
-  return <input ref={ref} className={cx('si-input', className)} {...props} />;
+/**
+ * Input variant factory.
+ *
+ * Maps the legacy `si-input` BEM class to Tailwind v4 utility classes
+ * (sourced from `tailwind-theme.css` `@theme inline` bridge). The chrome
+ * — `bg-bg-field`, `border-2 border-border-subtle`, `rounded-sm`,
+ * `text-text-secondary`, `min-h-10`, `py-2 px-3`, `w-full` — matches the
+ * original CSS 1:1, plus placeholder color (`placeholder:text-text-muted`)
+ * and focus border (`focus:border-cta-primary focus:outline-none`). The
+ * legacy `si-input` class is retained as an additive class string so the
+ * `base.css` rules for `:focus-visible` outline continue to match. Retires
+ * in slices 4 + 5.
+ */
+const inputBaseClasses = [
+  'font-ui',
+  'bg-bg-field border-2 border-border-subtle rounded-sm',
+  'text-text-secondary min-h-10 py-2 px-3 w-full',
+  'placeholder:text-text-muted',
+  'focus:border-cta-primary focus:outline-none'
+];
+
+const inputClasses = defineVariants({
+  base: inputBaseClasses
 });
 
+export const Input = React.forwardRef(function Input({ className, ...props }, ref) {
+  return (
+    <input
+      ref={ref}
+      className={cn(
+        inputClasses(),
+        // Legacy BEM class retained so:
+        // (a) the `si-input` rule in `base.css` (font-family + focus
+        //     outline) continues to match,
+        // (b) the consumer test in `index.test.jsx`
+        //     (`toHaveClass('si-input')`) stays green. Retires in
+        //     slices 4 + 5 when the kit CSS collapses to utility
+        //     classes (or `@utility` declarations land).
+        'si-input',
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
+/**
+ * Select shares the Input chrome — `base.css` declares `si-input` and
+ * `si-select` in the same font-family rule and gives Select no
+ * variant-specific styling beyond inheriting Input's chrome. We re-use
+ * `inputClasses()` and add the legacy `si-select` class for any future
+ * kit overrides that key off the selector. Retires in slices 4 + 5.
+ */
 export const Select = React.forwardRef(function Select({ className, ...props }, ref) {
-  return <select ref={ref} className={cx('si-input', 'si-select', className)} {...props} />;
+  return (
+    <select
+      ref={ref}
+      className={cn(
+        inputClasses(),
+        // Legacy BEM class retained for kit override selector matching.
+        'si-input',
+        'si-select',
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
+/**
+ * Textarea variant factory.
+ *
+ * Inherits the Input chrome and adds `resize-y` to mirror the legacy
+ * `si-textarea { resize: vertical; }` rule in `base.css`. The legacy
+ * `si-textarea` class is retained for `base.css` `:focus` border-color
+ * matching (`si-input:focus, .si-textarea:focus`). Retires in
+ * slices 4 + 5.
+ */
+const textareaClasses = defineVariants({
+  base: [...inputBaseClasses, 'resize-y']
 });
 
 export const Textarea = React.forwardRef(function Textarea({ className, ...props }, ref) {
-  return <textarea ref={ref} className={cx('si-input', 'si-textarea', className)} {...props} />;
+  return (
+    <textarea
+      ref={ref}
+      className={cn(
+        textareaClasses(),
+        // Legacy BEM class retained for kit override selector matching
+        // (the `base.css` rule pairs `si-input:focus, .si-textarea:focus`
+        // for the focus border-color).
+        'si-input',
+        'si-textarea',
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
+/**
+ * SearchInput variant factories.
+ *
+ * Three coordinated surfaces — wrapper (label), icon (span), and inner
+ * input. The wrapper uses `inline-flex items-center min-w-[260px] relative`
+ * to mirror `base.css` `si-search`. The icon is absolutely positioned at
+ * `left-3` with `text-[1.1rem] leading-none pointer-events-none z-1` —
+ * preserves the original CSS coordinates exactly (no vertical centering,
+ * matching the legacy icon's `position: absolute; left: var(--si-space-3)`
+ * with no `top` property; the icon sits at the top of the wrapper because
+ * the input below it determines the wrapper height via the input's own
+ * min-h-10). The inner input keeps `bg-bg-section` (overrides Input's
+ * `bg-bg-field`), `rounded-pill` (overrides Input's `rounded-sm`), and
+ * `pl-[2.5rem]` — equivalent to the legacy
+ * `padding-left: calc(var(--si-space-3) + 1.25rem + var(--si-space-2))`
+ * (0.75rem + 1.25rem + 0.5rem = 2.5rem).
+ */
+const searchClasses = defineVariants({
+  base: ['inline-flex items-center min-w-[260px] relative']
+});
+
+const searchIconClasses = defineVariants({
+  base: ['absolute left-3 text-text-muted text-[1.1rem] leading-none pointer-events-none z-1']
+});
+
+const searchInputClasses = defineVariants({
+  base: [
+    'font-ui',
+    'bg-bg-section border-2 border-border-subtle rounded-pill',
+    'text-text-secondary min-h-10 py-2 pr-3 pl-[2.5rem] w-full',
+    'placeholder:text-text-muted',
+    'focus:border-cta-primary focus:outline-none'
+  ]
 });
 
 export const SearchInput = React.forwardRef(function SearchInput({
@@ -331,9 +454,41 @@ export const SearchInput = React.forwardRef(function SearchInput({
   ...props
 }, ref) {
   return (
-    <label className={cx('si-search', className)}>
-      <span className="si-search__icon" aria-hidden="true">{icon}</span>
-      <Input ref={ref} className={cx('si-search__input', inputClassName)} aria-label={label} {...props} />
+    <label
+      className={cn(
+        searchClasses(),
+        // Legacy BEM class retained for kit override selector matching.
+        'si-search',
+        className
+      )}
+    >
+      <span
+        className={cn(
+          searchIconClasses(),
+          // Legacy BEM class retained for kit override selector matching.
+          'si-search__icon'
+        )}
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
+      <Input
+        ref={ref}
+        className={cn(
+          searchInputClasses(),
+          // Legacy BEM class retained so:
+          // (a) the `si-search__input` rule in `base.css` (rounded-pill +
+          //     padding-left) continues to match,
+          // (b) the consumer test in `index.test.jsx`
+          //     (`toHaveClass('si-search__input')`) stays green. The
+          //     utility classes compose with the legacy rule; the legacy
+          //     rule retires in slices 4 + 5.
+          'si-search__input',
+          inputClassName
+        )}
+        aria-label={label}
+        {...props}
+      />
     </label>
   );
 });
