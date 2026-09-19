@@ -191,6 +191,66 @@ export function Tooltip({ className, ...props }) {
   );
 }
 
+/**
+ * Card variant factory.
+ *
+ * Maps the legacy `si-card` BEM class to Tailwind v4 utility classes
+ * (sourced from `tailwind-theme.css` `@theme inline` bridge).
+ *
+ * Layout/typography surface:
+ * - `bg-bg-section border border-border-subtle rounded-lg text-text-primary p-5`
+ *   is the default card chrome, equivalent to the legacy `.si-card` rule.
+ * - `pulse` variant overrides background / border / radius / padding to
+ *   match `.si-card--pulse` in `kit-pulse.css` (`bg-bg-surface`,
+ *   `border-2 border-bg-canvas`, `rounded-none`, `shadow-hard`,
+ *   `py-[14px] px-4`).
+ *
+ * State surface (`.si-card--ready`, `.si-card--blocked`,
+ * `.si-card--archived`, `.si-card--editing`):
+ * - `ready` → `border-status-success`
+ * - `blocked` → `bg-accent-500 border-accent-500 text-on-danger-fg`
+ * - `archived` → `grayscale-[0.7] opacity-55`
+ * - `editing` → `border-cta-primary`
+ *
+ * `:focus-within` rule (`border-color: var(--si-color-cta-primary)` in
+ * `base.css`) becomes `focus-within:border-cta-primary` on the base
+ * so the editing-state and the focus-within pseudo both resolve.
+ *
+ * Interactive (`.si-card--interactive` + `:hover`): handled as an
+ * additive boolean class string rather than a variant axis because the
+ * `:hover` rule is one declaration. `tilt` stays as a CSS-variable
+ * setter (`.si-card-tilt-<n>`) — those rules only set `--si-card-rotate`
+ * / `--si-card-rotate-hover` and are read by the pulse variant's
+ * `transform rotate(var(--si-card-rotate, 0deg))`. They retire when
+ * slice 5 collapses the kit CSS into utility classes or `@utility`
+ * declarations.
+ *
+ * Legacy BEM classes retained as additive emissions so `base.css` /
+ * `kit-pulse.css` kit overrides and existing consumer tests stay green
+ * during the slice-3 migration. Retires in slices 4 + 5.
+ */
+const cardClasses = defineVariants({
+  base: [
+    'bg-bg-section border border-border-subtle rounded-lg',
+    'text-text-primary',
+    'p-5',
+    'focus-within:border-cta-primary'
+  ],
+  variants: {
+    variant: {
+      default: '',
+      ink: '',
+      pulse: 'bg-bg-surface border-2 border-bg-canvas rounded-none shadow-hard py-[14px] px-4'
+    },
+    state: {
+      ready: 'border-status-success',
+      blocked: 'bg-accent-500 border-accent-500 text-on-danger-fg',
+      archived: 'grayscale-[0.7] opacity-55',
+      editing: 'border-cta-primary'
+    }
+  }
+});
+
 export const Card = React.forwardRef(function Card({
   as: Component = 'article',
   variant = 'default',
@@ -203,12 +263,17 @@ export const Card = React.forwardRef(function Card({
   return (
     <Component
       ref={ref}
-      className={cx(
+      className={cn(
+        cardClasses({ variant, state }),
+        interactive &&
+          'cursor-pointer transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-border-strong',
+        typeof tilt === 'number' ? PULSE_TILT_CLASSES[tilt % PULSE_TILT_CLASSES.length] : tilt,
+        // Legacy BEM classes retained for kit overrides + existing tests.
+        // Retires in slices 4 + 5.
         'si-card',
         `si-card--${variant}`,
         dataStateClass('si-card', state),
         interactive && 'si-card--interactive',
-        typeof tilt === 'number' ? PULSE_TILT_CLASSES[tilt % PULSE_TILT_CLASSES.length] : tilt,
         className
       )}
       {...props}
