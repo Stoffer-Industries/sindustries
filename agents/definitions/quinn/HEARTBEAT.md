@@ -125,7 +125,7 @@ Run this check every heartbeat. Write at most 1 ops note per run.
 
 OPS STATE MANAGEMENT
 
-Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` but for workflow/pipeline anomalies rather than infra issues.
+Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` for agent/runtime and pipeline-operation anomalies. It is **not** a second task queue: task blockers, workflow gates, backlog hygiene, and task escalation belong in the Tasks API, using `attentionOwners`.
 
 **Schema (task 75ec1c8c — unified with Lox):** The state file uses the **unified agent incident schema** described in `docs/systems/agent-incidents.md`. Top-level key is `incidents` (renamed from the legacy `ops` key). The schema marks only `owner` and `status` as required; the rest default to safe values on read.
 
@@ -166,15 +166,18 @@ for inc in needs_tom(all_incidents):
 **What to write entries for** (after each heartbeat section above):
 - Guardrail skips on the same item for 2+ consecutive heartbeats
 - State drift that couldn't be auto-fixed
-- Pipeline stalls — tasks/items stuck with no forward movement
+- Lobster/cron/runtime failures or pipeline execution stalls that are not one task's ordinary gate state
 - Validate steps that silently no-op when they should have processed something
 - Any finding that couldn't be resolved in this heartbeat pass
 
 **What NOT to write entries for:**
 - Routine "no items" / "0 candidates" outcomes
 - Things successfully resolved in this heartbeat pass (mark existing entries resolved instead)
+- A task's missing spec, tech design, QA/acceptance approval, dependency, assignee capacity, or other ordinary workflow gate
+- A task-level blocker or handoff that can be represented by `attentionOwners[0]`
+- Backlog classification/spec hygiene findings; use task comments/metadata and `attentionOwners` when a human must act
 
-**Incident identity invariant:** one active entry represents one logical task/gate failure. Incident slugs are stable and date-free (for example `feature-task-<task-id-prefix>-ready_checks` or `backlog-untyped-<task-id-prefix>`). Never create `slug-YYYY-MM-DD` copies. When the same finding is observed again, update the existing entry in place and increment `attempts`; use `recurrenceCount` only when a resolved incident reappears.
+**Incident identity invariant:** one active entry represents one logical agent/runtime or pipeline-operation failure. Incident slugs are stable and date-free. Do not create incident entries for individual task gates or backlog items; those are keyed by the Tasks API task ID and routed through `attentionOwners`. When the same operational finding is observed again, update the existing entry in place and increment `attempts`; use `recurrenceCount` only when a resolved incident reappears.
 
 **Update rules:**
 1. Read `brain/state/quinn-ops-state.json` at the start of heartbeat
@@ -187,7 +190,7 @@ for inc in needs_tom(all_incidents):
 After completing all sections, check both `quinn-ops-state.json` and `brain/state/lox-incident-state.json`:
 
 **Before escalating any `needsTom` entry, re-validate it is still a real problem:**
-- For feature task stalls: re-check the lobster output. If the task is no longer in the reported state, mark resolved.
+- For task-level blockers: re-check the Tasks API task and its `attentionOwners`; do not escalate through incident state.
 - For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
 - Only escalate if the condition is confirmed present in live state this pass.
 

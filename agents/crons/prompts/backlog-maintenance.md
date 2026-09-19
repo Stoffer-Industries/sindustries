@@ -29,13 +29,14 @@ PATCH the task type and post a comment: `[backlog-maintenance] Auto-typed as \`<
 
 For every task typed as `feature`: follow the feature-task-create skill end-to-end (spec + description format + API). Only write a spec if one doesn't already exist at the linked path. Post comment: `[backlog-maintenance] Reformatted to feature format. Spec at <path>.`
 
-## Step 4 — Log ambiguous tasks as incidents
+## Step 4 — Handle ambiguous tasks without incident entries
 
-Write or update a watching entry in `brain/state/quinn-ops-state.json`:
-- Slug: `backlog-untyped-<task-id-prefix>` (stable; **never append a date**), severity: `low`, needsTom: false
-- This is one logical incident per task. If the stable slug already exists, update it in place: increment `attempts`, update `lastCheckedAt` and `lastAction`, and preserve its `firstSeen`/escalation history. Do not create a dated copy.
-
-Use the ops state pattern from HEARTBEAT.md.
+Do not write ambiguous task classification into `brain/state/quinn-ops-state.json`.
+Post a task comment explaining why classification is ambiguous. If the ambiguity
+requires a human decision, route the task through the Tasks API by putting the
+appropriate person at `attentionOwners[0]` (preserving any later owners); otherwise
+leave it un-routed for a later backlog pass. Task state and task comments are the
+source of truth for backlog work, not the agent incident registry.
 
 ## Step 5 — Spec integrity: feature tasks missing a spec
 
@@ -56,7 +57,7 @@ print(json.dumps(problems, indent=2))
 "
 ```
 
-For each problem, apply the feature-task-create skill. If the description has enough substance (what + why or ACs), write the spec and reformat the description. If too thin to derive a spec, log or update a watching incident with the stable slug `backlog-spec-missing-<task-id-prefix>` (no date suffix, severity: `medium`) and post: `[backlog-maintenance] Description too thin to auto-write spec. Needs manual spec authoring.` Re-observations update `attempts`, `lastCheckedAt`, and `lastAction`; they must not create another incident for the same task/gate.
+For each problem, apply the feature-task-create skill. If the description has enough substance (what + why or ACs), write the spec and reformat the description. If too thin to derive a spec, post: `[backlog-maintenance] Description too thin to auto-write spec. Needs manual spec authoring.` If manual authoring or approval is required from a named person, route that task through `attentionOwners`; do not create an incident for the missing spec.
 
 ## Step 6 — Spec integrity: spec files with no task
 
@@ -84,7 +85,7 @@ EOF
 ```
 
 For real specs (has `## Outcome` or `## Acceptance Criteria`): follow the feature-task-create skill to create the task. Post comment: `[backlog-maintenance] Task created from orphaned spec file.`
-For stubs: log or update a watching incident with the stable slug `backlog-orphan-spec-<filename-prefix>` (no date suffix, severity: `low`).
+For stubs: leave a backlog-maintenance comment or note for the next backlog pass. Do not create an incident; if a person must act, route the owning task through `attentionOwners`.
 
 ## Step 7 — Report
 
