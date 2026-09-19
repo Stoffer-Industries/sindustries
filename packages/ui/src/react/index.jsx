@@ -810,6 +810,36 @@ export function Divider({ variant = 'subtle', className, ...props }) {
   );
 }
 
+/**
+ * Avatar variant factory.
+ *
+ * Maps the legacy `si-avatar` BEM class to Tailwind v4 utility classes
+ * (sourced from `tailwind-theme.css` `@theme inline` bridge). The
+ * chrome — `inline-flex items-center justify-center bg-status-info
+ * rounded-pill text-bg-canvas font-ui text-[0.7rem] font-black
+ * uppercase overflow-hidden w-6 h-6` — matches the legacy rule in
+ * `base.css`. The inner `<img>` (`si-avatar__img`) keeps its
+ * `border-radius: inherit; display: block; height: 100%; object-fit:
+ * cover; width: 100%` as `block h-full w-full object-cover rounded-[inherit]`.
+ *
+ * Legacy BEM classes retained as additive emissions so kit overrides
+ * (`.si-card--pulse .si-avatar` in `kit-pulse.css`) and existing
+ * consumer tests stay green during the slice-3 migration. Retires in
+ * slices 4 + 5.
+ */
+const avatarClasses = defineVariants({
+  base: [
+    'inline-flex items-center justify-center',
+    'bg-status-info rounded-pill text-bg-canvas',
+    'font-ui text-[0.7rem] font-black uppercase',
+    'overflow-hidden w-6 h-6'
+  ]
+});
+
+const avatarImgClasses = defineVariants({
+  base: ['block h-full w-full object-cover rounded-[inherit]']
+});
+
 export function Avatar({ src, alt, children, className, onError, ...props }) {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = Boolean(src) && !imageFailed;
@@ -820,10 +850,24 @@ export function Avatar({ src, alt, children, className, onError, ...props }) {
   }
 
   return (
-    <span className={cx('si-avatar', className)} {...props}>
+    <span
+      className={cn(
+        avatarClasses(),
+        // Legacy BEM class retained for kit overrides + existing tests.
+        // Retires in slices 4 + 5.
+        'si-avatar',
+        className
+      )}
+      {...props}
+    >
       {showImage ? (
         <img
-          className="si-avatar__img"
+          className={cn(
+            avatarImgClasses(),
+            // Legacy BEM class retained for kit overrides + existing tests.
+            // Retires in slices 4 + 5.
+            'si-avatar__img'
+          )}
           src={src}
           alt={alt ?? ''}
           onError={handleImageError}
