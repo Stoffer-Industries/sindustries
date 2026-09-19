@@ -19,7 +19,9 @@ shipped_date: 2026-07-11
 
 ## Purpose
 
-Quinn (workflow/pipeline anomalies) and Lox (infra/host reliability) both maintain operational incident state files in the workspace. Before task 75ec1c8c, the two files used divergent shapes — Quinn's `brain/state/quinn-ops-state.json` used an `ops` key and lacked `recurrenceCount`/`nextRetryAt`/`details`; Lox's `brain/state/lox-incident-state.json` already used an `incidents` key but lacked `firstSeen`/`attempts`/`needsTom`/`severity`. Quinn's heartbeat had to branch on the two formats to roll up cross-agent incidents. This system doc is the durable record of the unified schema and the shared parser.
+Quinn (agent/runtime and pipeline-operation anomalies) and Lox (infra/host reliability) both maintain operational incident state files in the workspace. Before task 75ec1c8c, the two files used divergent shapes — Quinn's `brain/state/quinn-ops-state.json` used an `ops` key and lacked `recurrenceCount`/`nextRetryAt`/`details`; Lox's `brain/state/lox-incident-state.json` already used an `incidents` key but lacked `firstSeen`/`attempts`/`needsTom`/`severity`. Quinn's heartbeat had to branch on the two formats to roll up cross-agent incidents. This system doc is the durable record of the unified schema and the shared parser.
+
+Task-level gates, blockers, and handoffs are deliberately outside this system. They belong to the Tasks API and its ordered `attentionOwners` stack; an ordinary task waiting for a spec, tech design, QA/acceptance approval, dependency, or implementer is not an agent incident.
 
 Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/systems/tasks.md` (feature-task gates; unrelated but co-located).
 
@@ -33,7 +35,7 @@ Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/system
 
 ## Runtime behaviour
 
-1. When an agent detects an incident (failed cron, blocked workflow, stale pipeline item), it upserts a stable slug-keyed entry in its `incidents` map. A logical task/gate failure has at most one active entry; repeated observations increment `attempts` and refresh `lastCheckedAt` rather than creating a new dated key.
+1. When an agent detects an operational incident (failed cron, lobster/runtime failure, host problem, or pipeline execution fault), it upserts a stable slug-keyed entry in its `incidents` map. Task-level gate state is written to the Tasks API instead. Repeated operational observations increment `attempts` and refresh `lastCheckedAt` rather than creating a new dated key.
 2. Each entry carries enough context (`lastAction`, `details`, `linkedPr`, `linkedRunbook`) for Tom to triage without opening the agent's logs.
 3. On every heartbeat tick, Quinn calls `agents.lib.incident_state.load_all_incidents()`, reports the queue as separate actionable and monitored counts, and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`). Resolved and false-positive entries are excluded from both counts.
 4. Lox's daily-review script is the source of most Lox entries; Lox's heartbeat updates existing entries (increments `attempts`, refreshes `lastCheckedAt`, sets `nextRetryAt`, marks resolved) but does not create new entries outside of the daily review.

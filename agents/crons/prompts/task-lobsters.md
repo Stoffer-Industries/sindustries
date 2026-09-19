@@ -29,7 +29,7 @@ The runner discovers active tasks in `open`, `ready`, `doing`, and `acceptance` 
   `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status doing --summary`
 - If Rowan is free: read the tech-design skill and spawn Rowan as a background subagent to write the tech design:
   `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/tech-design/SKILL.md`
-- If Rowan is busy: log or update one watching entry in `brain/state/quinn-ops-state.json` with the stable slug `feature-task-<task-id-prefix>-ready_checks` (**never append a date**). Re-observations increment `attempts` and update `lastCheckedAt`/`lastAction`; they must not create another incident for the same task and gate.
+- If Rowan is busy: do **not** create or update an incident. The task's `attentionOwners[0]` is the authoritative handoff surface; the feature-task lobster's workflow-attention reconciliation should route the missing tech-design gate to Quinn. If the task still has no attention owner after the lobster run, use the Tasks API attention-owner helper to add Quinn while preserving the existing ordered stack, then leave an audit comment on the task. A task gate failure belongs in Tasks API state, not the agent incident registry.
 
 ## 2. Content Task Lobster
 
@@ -42,5 +42,5 @@ Report only failures, blocked closed-unmerged PRs, or meaningful transitions.
 ## Soft-fail handling
 
 Read /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md and follow it.
-If either lobster exits non-zero or returns `ok: false`, escalate to Lox's main session.
+If either lobster exits non-zero or returns `ok: false`, escalate the **lobster/runtime failure** to Lox's main session. Do not turn an individual task's blocked gate or missing prerequisite into an incident; those route through `attentionOwners`.
 If both succeed with no actionable output, say exactly: NO_REPLY
