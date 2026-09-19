@@ -281,6 +281,53 @@ export const Card = React.forwardRef(function Card({
   );
 });
 
+/**
+ * CardContainer variant factory.
+ *
+ * Maps the legacy `si-card-container` BEM class to Tailwind v4 utility
+ * classes (sourced from `tailwind-theme.css` `@theme inline` bridge).
+ * The chrome — `bg-bg-section border-2 border-ink-950 rounded-none
+ * grid overflow-hidden` — matches the legacy `.si-card-container` rule
+ * in `kit-pulse.css`. The `column` variant adds `grid-rows-[auto_1fr]
+ * h-full min-h-full w-full` to fill available height. The `filter`
+ * variant uses `bg-bg-surface border-l-0 border-r-0 border-t-2
+ * border-b-2 border-ink-950 shadow-none h-auto mb-4 max-w-none
+ * min-h-0 overflow-visible relative w-full z-20` to match the
+ * filter-bar override; the column descendant selectors stay in
+ * `kit-pulse.css` for now and retire in slice 5.
+ *
+ * Legacy BEM classes retained as additive emissions so kit overrides
+ * (`.si-card-container--column .si-card-container__header` etc.) and
+ * existing consumer tests stay green during the slice-3 migration.
+ * Retires in slices 4 + 5.
+ */
+const cardContainerClasses = defineVariants({
+  base: ['bg-bg-section border-2 border-ink-950 rounded-none grid overflow-hidden text-text-primary'],
+  variants: {
+    variant: {
+      column: 'grid-rows-[auto_1fr] h-full min-h-full w-full',
+      filter: 'bg-bg-surface border-l-0 border-r-0 border-t-2 border-b-2 border-ink-950 shadow-none h-auto mb-4 max-w-none min-h-0 overflow-visible relative w-full z-20',
+      hidden: 'hidden'
+    }
+  }
+});
+
+const cardContainerHeaderClasses = defineVariants({
+  base: ['bg-bg-section-header p-3']
+});
+
+const cardContainerTitleClasses = defineVariants({
+  base: ['font-display text-base font-bold leading-normal m-0 text-text-primary']
+});
+
+const cardContainerContentClasses = defineVariants({
+  base: ['bg-bg-section grid gap-4 p-3']
+});
+
+const cardContainerActionsClasses = defineVariants({
+  base: ['flex flex-wrap items-center gap-2 p-3']
+});
+
 export const CardContainer = React.forwardRef(function CardContainer({
   as: Component = 'article',
   variant,
@@ -291,7 +338,14 @@ export const CardContainer = React.forwardRef(function CardContainer({
   return (
     <Component
       ref={ref}
-      className={cx('si-card-container', variant && `si-card-container--${variant}`, className)}
+      className={cn(
+        cardContainerClasses({ variant }),
+        // Legacy BEM classes retained for kit overrides + existing tests.
+        // Retires in slices 4 + 5.
+        'si-card-container',
+        variant && `si-card-container--${variant}`,
+        className
+      )}
       {...props}
     >
       {children}
@@ -308,18 +362,63 @@ function CardContainerHeader({
   ...props
 }) {
   return (
-    <Component className={cx('si-card-container__header', className)} {...props}>
-      {title ? <TitleComponent className="si-card-container__title">{title}</TitleComponent> : children}
+    <Component
+      className={cn(
+        cardContainerHeaderClasses(),
+        // Legacy BEM class retained for kit overrides + existing tests.
+        // Retires in slices 4 + 5.
+        'si-card-container__header',
+        className
+      )}
+      {...props}
+    >
+      {title ? (
+        <TitleComponent
+          className={cn(
+            cardContainerTitleClasses(),
+            // Legacy BEM class retained for kit overrides + existing tests.
+            // Retires in slices 4 + 5.
+            'si-card-container__title',
+            className
+          )}
+        >
+          {title}
+        </TitleComponent>
+      ) : (
+        children
+      )}
     </Component>
   );
 }
 
 function CardContainerContent({ className, ...props }) {
-  return <div className={cx('si-card-container__content', className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        cardContainerContentClasses(),
+        // Legacy BEM class retained for kit overrides + existing tests.
+        // Retires in slices 4 + 5.
+        'si-card-container__content',
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 function CardContainerActions({ className, ...props }) {
-  return <div className={cx('si-card-container__actions', className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        cardContainerActionsClasses(),
+        // Legacy BEM class retained for kit overrides + existing tests.
+        // Retires in slices 4 + 5.
+        'si-card-container__actions',
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 CardContainer.Header = CardContainerHeader;
