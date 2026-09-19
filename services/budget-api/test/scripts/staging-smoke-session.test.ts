@@ -17,8 +17,14 @@ import {
 
 describe('staging-smoke-session guards (pure helpers)', () => {
   describe('PRODUCTION_DENY_SUBSTRINGS', () => {
-    it('contains the known production app identifier', () => {
-      expect(PRODUCTION_DENY_SUBSTRINGS_FOR_TESTS).toContain('sindustries-budget-api');
+    it('contains the production Fly internal DNS host', () => {
+      // Regression (Stoff81 review 2026-09-15): the bare `sindustries-budget-api`
+      // substring matched the staging Fly app `sindustries-budget-api-staging`
+      // via prefix overlap. The deny list now uses the production-only
+      // internal-DNS host suffix `.internal` to avoid the false positive.
+      expect(PRODUCTION_DENY_SUBSTRINGS_FOR_TESTS).toContain(
+        'sindustries-budget-api.internal'
+      );
     });
 
     it('matches a URL that mentions the production schema', () => {
@@ -26,12 +32,21 @@ describe('staging-smoke-session guards (pure helpers)', () => {
       expect(isProductionDatabaseUrl(url)).toBe(true);
     });
 
-    it('matches the production Fly app substring', () => {
+    it('matches the production Fly internal DNS host', () => {
       expect(
         isProductionDatabaseUrl(
           'postgresql://app:pass@sindustries-budget-api.internal:5432/budget?schema=public'
         )
       ).toBe(true);
+    });
+
+    it('does not flag the staging Fly app URL (production guard is exact)', () => {
+      // Staging Fly internal DNS: `sindustries-budget-api-staging.internal`
+      // (note the `-staging` segment between `budget-api` and `.internal`).
+      // The deny substring `sindustries-budget-api.internal` does NOT match.
+      const url =
+        'postgresql://app:pass@sindustries-budget-api-staging.internal:5432/budget?schema=public';
+      expect(isProductionDatabaseUrl(url)).toBe(false);
     });
 
     it('does not flag a clearly-staging URL', () => {
