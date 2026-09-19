@@ -53,11 +53,17 @@ const STAGING_ENV_VALUE = 'staging';
 
 // DATABASE_URL substrings that strongly imply production/main. The list is
 // intentionally narrow — we only refuse to operate against databases whose
-// Fly app name or schema name makes their role obvious. The staging Fly app
-// for budget-api is `sindustries-budget-api-staging`; the production app is
-// `sindustries-budget-api`. Adjust if those names change.
+// Fly app name or schema name makes their role obvious.
+//
+// IMPORTANT: the staging Fly app for budget-api is `sindustries-budget-api-staging`
+// and the production app is `sindustries-budget-api`. Their Fly internal
+// DNS hostnames are `sindustries-budget-api-staging.internal` and
+// `sindustries-budget-api.internal` respectively. Using `sindustries-budget-api`
+// as a bare substring incorrectly matched the staging URL (Stoff81 review
+// 2026-09-15); the deny list below uses the production-only internal-DNS
+// host (`...budget-api.internal`) so staging URLs are accepted.
 const PRODUCTION_DENY_SUBSTRINGS = [
-  'sindustries-budget-api', // production Fly app name (substring match)
+  'sindustries-budget-api.internal', // production Fly internal DNS host
   'budget-api-prod',
   'budget-api-production',
   ':5432/main', // production Postgres schema in our existing deployments

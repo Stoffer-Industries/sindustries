@@ -53,7 +53,6 @@ jobs:
       SCHEDULER_API_URL: ${{ vars.STAGING_SCHEDULER_API_URL }}
       FLY_ORG: ${{ vars.STAGING_FLY_ORG }}
       FLY_APP_WORKER: ${{ vars.STAGING_FLY_APP_WORKER }}
-      INTEND_COMMIT: ${{ github.event.inputs.intent_commit || github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,19 +61,46 @@ jobs:
 
       - name: Resolve intent commit
         id: intent
+        env:
+          # Surface the raw dispatch input via env so we never put ${{ }}
+          # expressions inside bash [[ ]] (Codex P1: bash parser confusion
+          # when the input literal expands adjacent to bash conditionals).
+          INPUT_COMMIT: ${{ github.event.inputs.intent_commit }}
         run: |
-          if [[ -z "${{ env.INTEND_COMMIT }}" ]]; then
-            echo "intent_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          else
-            echo "intent_commit=${{ env.INTEND_COMMIT }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          input_commit="${INPUT_COMMIT}"
+          if [[ -z "${input_commit}" ]]; then
+            input_commit="${{ github.sha }}"
           fi
+          if [[ ! "${input_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::intent_commit must be a 40-character hex SHA; received '${input_commit}'. Re-dispatch with an empty value to default to the workflow-triggering SHA." >&2
+            exit 1
+          fi
+          echo "intent_commit=${input_commit}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Install workspace dependencies
+        run: |
+          # GitHub-hosted runners start from a clean checkout; tsx and the
+          # Prisma generated client are not tracked (Codex P1: `npx --no-install
+          # tsx` fails on a fresh runner). Install the monorepo so the
+          # budget-api smoke-session CLI and the AC2/AC3 harness scripts
+          # resolve their workspace + generated imports.
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm --workspace services/budget-api run prisma:generate
+
       - name: Validate required inputs
+        env:
+          # Map the staging secret into this step's env so the check below
+          # sees it (Codex P1: GitHub environment secrets are not auto-exported
+          # into `run:`; later steps that map the secret explicitly do not
+          # help this preflight).
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           set -euo pipefail
           missing=()
@@ -86,7 +112,7 @@ jobs:
             echo "Configure them via Settings > Environments > staging > Environment variables." >&2
             exit 1
           fi
-          if [[ -z "${FLY_API_TOKEN:-}" ]]; then
+          if [[ -z "${FLY_API_TOKEN}" ]]; then
             echo "::error::FLY_API_TOKEN is not configured for the staging GitHub environment. Add it through Settings > Environments > staging > Environment secrets." >&2
             exit 1
           fi
@@ -109,13 +135,21 @@ jobs:
         run: |
           set -euo pipefail
           cd services/budget-api
-          npx --no-install tsx scripts/staging-smoke-session.ts mint \
+          # Capture the mint result as JSON so downstream cleanup can revoke
+          # the exact fixture pair (Codex P2 + Stoff81 Critical #4: prior code
+          # only deleted the token file and left a live session row behind).
+          mint_json=$(npx tsx scripts/staging-smoke-session.ts mint \
             --staging \
-            --token-out "$BUDGET_TOKEN_FILE"
+            --token-out "$BUDGET_TOKEN_FILE" \
+            --json)
           chmod 0600 "$BUDGET_TOKEN_FILE"
-          # Print the user/session ids as a single-line masked summary so
-          # the workflow log carries a non-secret pointer to the fixture.
-          cat "$BUDGET_TOKEN_FILE" | wc -c | awk '{print "tokenBytes=" $0}'
+          mint_user_id=$(printf '%s' "${mint_json}" | jq -r '.userId')
+          mint_session_id=$(printf '%s' "${mint_json}" | jq -r '.sessionId')
+          mint_email=$(printf '%s' "${mint_json}" | jq -r '.email')
+          echo "mint_token_bytes=$(wc -c <"${BUDGET_TOKEN_FILE}" | tr -d ' ')"
+          echo "mint_user_id=${mint_user_id}" >> "$GITHUB_OUTPUT"
+          echo "mint_session_id=${mint_session_id}" >> "$GITHUB_OUTPUT"
+          echo "mint_email=${mint_email}" >> "$GITHUB_OUTPUT"
 
       - name: Run AC2 black-box harness
         id: workflows
@@ -135,12 +169,44 @@ jobs:
           workflows_exit=$?
           set -e
           echo "workflows_exit=$workflows_exit" >> "$GITHUB_OUTPUT"
-          if [[ -f /tmp/budget-smoke-bearer ]]; then
-            rm -f /tmp/budget-smoke-bearer
-          fi
           # Always upload the artifact, even on harness exit 1 — the verdict
           # lives in the JSON, not the exit code.
           exit $workflows_exit
+
+      # Best-effort revoke of the synthetic budget session. Runs on success,
+      # failure, and cancellation (Codex P2 + Stoff81 Critical #4: prior code
+      # only deleted the token file, leaving live credentials/rows behind and
+      # creating an unsafe deletion path). If the mint step never produced
+      # IDs (the mint step failed), reconcile-mode sweeps every known smoke
+      # fixture as a safety net.
+      - name: Cleanup synthetic budget session
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+          BUDGET_STAGING_ENVIRONMENT: staging
+          MINT_USER_ID: ${{ steps.budget-mint.outputs.mint_user_id }}
+          MINT_SESSION_ID: ${{ steps.budget-mint.outputs.mint_session_id }}
+          MINT_EMAIL: ${{ steps.budget-mint.outputs.mint_email }}
+        run: |
+          set -euo pipefail
+          cd services/budget-api
+          if [[ -n "${MINT_USER_ID:-}" && -n "${MINT_SESSION_ID:-}" ]]; then
+            npx tsx scripts/staging-smoke-session.ts revoke \
+              --staging \
+              --user-id "${MINT_USER_ID}" \
+              --session-id "${MINT_SESSION_ID}" \
+              --json
+          elif [[ -n "${MINT_EMAIL:-}" ]]; then
+            npx tsx scripts/staging-smoke-session.ts revoke \
+              --staging \
+              --email "${MINT_EMAIL}" \
+              --json
+          else
+            npx tsx scripts/staging-smoke-session.ts reconcile \
+              --staging \
+              --json
+          fi
+          rm -f /tmp/budget-smoke-bearer
 
       - name: Run AC3 failure drill
         id: drill
@@ -152,14 +218,22 @@ jobs:
           STAGING_SCHEDULER_API_URL: ${{ env.SCHEDULER_API_URL }}
           STAGING_SCHEDULER_TOKEN: ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           STAGING_INTENT_COMMIT: ${{ steps.intent.outputs.intent_commit }}
+          MAX_DURATION_SECONDS: ${{ github.event.inputs.max_duration_seconds || '600' }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
           set +e
+          # Validate the dispatch input as a 60-3600 integer (Codex P1 #6 +
+          # Stoff81 Important #6: prior code interpolated the input directly
+          # into the shell, allowing trivial shell injection).
+          if [[ ! "${MAX_DURATION_SECONDS}" =~ ^[0-9]+$ ]] || (( MAX_DURATION_SECONDS < 60 || MAX_DURATION_SECONDS > 3600 )); then
+            echo "::error::max_duration_seconds must be an integer in [60, 3600]; received '${MAX_DURATION_SECONDS}'." >&2
+            exit 2
+          fi
           tests/cloud/staging-failure-drill.sh \
             --confirm-staging \
             --output artifacts/staging-failure-drill.json \
-            --max-duration-seconds "${{ github.event.inputs.max_duration_seconds || '600' }}"
+            --max-duration-seconds "${MAX_DURATION_SECONDS}"
           drill_exit=$?
           set -e
           echo "drill_exit=$drill_exit" >> "$GITHUB_OUTPUT"
