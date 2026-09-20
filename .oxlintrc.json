@@ -4,17 +4,27 @@
     "correctness": "error"
   },
   "rules": {
-    "no-unused-vars": "warn"
+    "no-unused-vars": "warn",
+    "shadcn/no-restyle": [
+      "warn",
+      {
+        "allow": ["layout"],
+        "contracts": []
+      }
+    ],
+    "shadcn/no-arbitrary-values": "warn",
+    "shadcn/no-raw-colors": "warn",
+    "shadcn/no-inline-styles": "warn",
+    "shadcn/no-unknown-classes": "warn",
+    "shadcn/require-static-classes": "warn"
   },
   "jsPlugins": [
     "@shadcn/lint"
   ],
   "settings": {
-    "shadcn-lint": {
-      "_comment": "Dormant install — see docs/systems/design-system.md 'Design-system linting' section and follow-up task 7986eb43-dc85-4512-b76a-1cfecefd8be7. Rules are intentionally NOT enabled in this PR: @shadcn/lint ships Tailwind-class-string rules and reads theme tokens from Tailwind v4 @theme blocks, but SIndustries frontend uses BEM-style CSS with @sindustries/design-tokens via CSS custom properties. Enabling rules before Tailwind v4 lands in @sindustries/ui produces zero findings — a false-signal that proves nothing. Rule activation is owned by follow-up task 7986eb43.",
-      "componentsRoot": "packages/ui/src/react",
-      "tokensStylesheet": "packages/design-tokens/styles.css",
-      "rulesEnabled": false
+    "shadcn": {
+      "ui": ["@sindustries/ui"],
+      "_comment": "ACTIVE install — task 7986eb43 slice 4 baseline. The settings key moved from `shadcn-lint` (dormant-install placeholder) to `shadcn` (the key @shadcn/lint 0.1.0 actually reads); the dormant-install contract used the wrong key path, so flipping `rulesEnabled` was never enough to activate the rules. All six shadcn rules run at warn level so the baseline triage captures offences without blocking CI. Slice 5 promotes them to error after each rule has an Accepted-baseline entry in docs/systems/design-system.md."
     }
   }
 }
