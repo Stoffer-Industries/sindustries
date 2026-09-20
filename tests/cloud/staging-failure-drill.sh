@@ -137,6 +137,10 @@ if [[ -z "${FLY_API_TOKEN:-}" ]]; then
   echo "error: FLY_API_TOKEN must be set in the caller environment" >&2
   exit 2
 fi
+if [[ ! "$intent_commit" =~ ^[0-9a-f]{7,64}$ ]]; then
+  echo "error: --intent-commit must be a 7-64 character lowercase hex SHA" >&2
+  exit 2
+fi
 
 # Generate run-id if still empty.
 if [[ -z "$run_id" ]]; then
@@ -161,14 +165,18 @@ redact_token() {
 }
 
 started_iso() {
-  date -u +%Y-%m-%dT%H:%M:%S.%3NZ
+  date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
 record_check() {
   local name="$1" status="$2" started="$3" ended="$4" details_json="$5" error_json="${6:-null}"
-  cat <<JSON
-{"name":"${name}","status":"${status}","startedAt":"${started}","endedAt":"${ended}","details":${details_json},"error":${error_json}}
-JSON
+  if [[ "$error_json" == "null" ]]; then
+    printf '{"name":"%s","status":"%s","startedAt":"%s","endedAt":"%s","details":%s}\n' \
+      "$name" "$status" "$started" "$ended" "$details_json"
+  else
+    printf '{"name":"%s","status":"%s","startedAt":"%s","endedAt":"%s","details":%s,"error":%s}\n' \
+      "$name" "$status" "$started" "$ended" "$details_json" "$error_json"
+  fi
 }
 
 # curl wrapper: returns a single-line "STATUS\nBODY" pair; sets STATUS to 0
@@ -196,10 +204,11 @@ declare -a CLEANUP_JSONL=()
 declare -a PRODUCTION_BLOCKERS_JSONL=()
 
 drill_step() {
-  # usage: drill_step <name> <bash-fn>
-  # bash-fn returns 0 on pass (appends JSON line to CHECKS_JSONL) or
-  # non-zero on fail (error JSON line). Always records both started and
-  # ended timestamps in ISO 8601.
+  # usage: drill_step <name> <bash-fn> [args...]
+  # bash-fn returns 0 on pass (appends JSON line to CHECKS_JSONL),
+  # 99 on skip (records a skip entry, returns 0), or any other non-zero
+  # on fail (records a fail entry and returns the same code). Always
+  # records both started and ended timestamps in ISO 8601.
   local name="$1"; shift
   local started ended details_json status error_json
   started="$(started_iso)"
@@ -211,6 +220,11 @@ drill_step() {
   if [[ $rc -eq 0 ]]; then
     status="pass"
     error_json="null"
+  elif [[ $rc -eq 99 ]]; then
+    status="skip"
+    details_json="{}"
+    error_json="null"
+    rc=0
   else
     status="fail"
     error_json="{\"code\":\"DRILL_STEP_FAILED\",\"message\":\"step $name exited $rc\"}"
@@ -229,64 +243,103 @@ pre_drill_status() {
 }
 
 kill_one_worker() {
-  # Pick the first worker machine and stop it. fly machines stop is
-  # reversible via fly machines start.
+  # Pick the first worker machine and stop it. flyctl machines stop is
+  # reversible via flyctl machines start. The workflow installs the CLI as
+  # `flyctl` (Stoff81 Critical #3: prior code mixed `fly` and `flyctl`;
+  # the kill/restart steps would fail on the runner because only `flyctl`
+  # is on PATH).
   local target
-  target="$(fly machines list --json --app "$fly_app_worker" 2>/dev/null \
-    | jq -r '.[] | select(.config.metadata."fly-process-group" == "worker" or .name | test("worker")) | .id' \
+  target="$(flyctl machines list --json --app "$fly_app_worker" 2>/dev/null \
+    | jq -r '.[] | select((.config.metadata."fly-process-group" == "worker") or (.name | test("worker"))) | .id' \
     | head -n1)"
   if [[ -z "$target" ]]; then
     # Fallback: pick the first non-nginx machine.
-    target="$(fly machines list --json --app "$fly_app_worker" 2>/dev/null \
+    target="$(flyctl machines list --json --app "$fly_app_worker" 2>/dev/null \
       | jq -r '.[] | select(.name | test("worker|scheduler"; "i")) | .id' | head -n1)"
   fi
   if [[ -z "$target" ]]; then
     echo "error: no worker machine found in app $fly_app_worker" >&2
     return 1
   fi
-  fly machines stop "$target" --app "$fly_app_worker" >/dev/null 2>&1 \
+  flyctl machines stop "$target" --app "$fly_app_worker" >/dev/null 2>&1 \
     && printf '{"stoppedMachineId":"%s"}\n' "$target" \
     || return 1
 }
 
 restart_stopped_machine() {
   local machine_id="$1"
-  fly machines start "$machine_id" --app "$fly_app_worker" >/dev/null 2>&1 \
+  flyctl machines start "$machine_id" --app "$fly_app_worker" >/dev/null 2>&1 \
     && printf '{"startedMachineId":"%s"}\n' "$machine_id" \
     || return 1
 }
 
-# Polls /api/v1/content-scheduler/auto-post/health for an `overdue` count
-# that reflects the terminated worker. Returns the count delta or 0 on
-# timeout (which is still acceptable for the drill — the worker can
-# survive a stop without an immediate queue overflow).
-poll_post_drill_health() {
-  local tries=12 delay=5 baseline_json current_json overdue_count
-  baseline_json="$(http_get "${scheduler_api_url}/api/v1/content-scheduler/auto-post/health" "$scheduler_token")"
-  if [[ "$baseline_json" == "0" ]]; then
-    return 1
+# Verifies the killed machine is actually in state=stopped via flyctl.
+# Returns 0 if stopped, non-zero otherwise. Returns 99 (skip) if the
+# kill never produced a STOPPED_MACHINE_ID. This is the post-kill
+# truth check Stoff81 Critical #2 demanded: prior code only polled
+# the HTTP health endpoint and treated timeout as acceptable, which
+# could let a "passing-looking" health poll hide an unverified kill.
+verify_killed_stopped() {
+  local target="$1"
+  if [[ -z "$target" ]]; then
+    return 99
   fi
-  for ((i = 1; i <= tries; i++)); do
-    sleep "$delay"
-    current_json="$(http_get "${scheduler_api_url}/api/v1/content-scheduler/auto-post/health" "$scheduler_token")"
-    if [[ "$current_json" == "0" ]]; then
-      return 1
-    fi
-  done
-  echo "$current_json"
-  return 0
+  flyctl machines list --json --app "$fly_app_worker" 2>/dev/null \
+    | jq -r --arg id "$target" '.[] | select(.id == $id) | .state' \
+    | grep -qx 'stopped' \
+    || return 1
+  printf '{"machineId":"%s","state":"stopped"}\n' "$target"
 }
 
+# Verifies the machine the drill restarted is back in state=started via
+# flyctl. Returns 0 if started, non-zero otherwise. Returns 99 (skip)
+# if the kill never produced a STOPPED_MACHINE_ID (so there is nothing
+# to recover).
+verify_recovered_started() {
+  local target="$1"
+  if [[ -z "$target" ]]; then
+    return 99
+  fi
+  flyctl machines list --json --app "$fly_app_worker" 2>/dev/null \
+    | jq -r --arg id "$target" '.[] | select(.id == $id) | .state' \
+    | grep -qx 'started' \
+    || return 1
+  printf '{"machineId":"%s","state":"started"}\n' "$target"
+}
+
+# AC3 requires evidence that an alert fired, logs identify the terminated
+# process/environment, startup reconciliation completed, and the alert
+# resolved. The prerequisite hosted-observability work has not exposed an
+# authenticated machine-readable contract for those assertions yet. Record
+# this as a failing check instead of treating an HTTP health poll or timeout
+# as success (Stoff81 Critical #2).
+observability_verification_unimplemented() {
+  echo "hosted alert/log/reconciliation verification contract is not implemented" >&2
+  return 1
+}
+
+# Idempotent cleanup: called directly before the verdict is built and
+# again on EXIT (in case the script is interrupted by SIGINT/SIGTERM).
+# CLEANUP_RAN guards against double-restart; the direct call populates
+# CLEANUP_JSONL so the verdict can include the actual restart result
+# instead of treating "cleanup not yet executed" as a failure (Stoff81
+# Critical #1: prior code wrote the result JSON before the EXIT trap
+# fired, so cleanup_ok was always computed against an empty array).
+CLEANUP_RAN=0
 cleanup() {
-  # Always try to restart the worker the drill stopped, even on failure.
+  if [[ "$CLEANUP_RAN" -eq 1 ]]; then
+    return
+  fi
+  CLEANUP_RAN=1
   if [[ -n "${STOPPED_MACHINE_ID:-}" ]]; then
     started="$(started_iso)"
-    if restart_stopped_machine "$STOPPED_MACHINE_ID"; then
+    if restart_stopped_machine "$STOPPED_MACHINE_ID" >/dev/null; then
       ended="$(started_iso)"
-      CLEANUP_JSONL+=("$(record_check "drill.worker_restart" "pass" "$started" "$ended" "{\"machineId\":\"[REDACTED]\"}" "null")")
+      CLEANUP_JSONL+=('{"name":"drill.worker_restart","ok":true,"error":null}')
+      STOPPED_MACHINE_ID=""  # Clear so a re-entrant EXIT trap is a no-op.
     else
       ended="$(started_iso)"
-      CLEANUP_JSONL+=("$(record_check "drill.worker_restart" "fail" "$started" "$ended" "{}" "{\"code\":\"WORKER_RESTART_FAILED\",\"message\":\"could not restart machine ${STOPPED_MACHINE_ID}\"}")")
+      CLEANUP_JSONL+=('{"name":"drill.worker_restart","ok":false,"error":"could not restart stopped worker machine"}')
     fi
   fi
 }
@@ -312,33 +365,39 @@ drill_step drill.baseline_health pre_drill_status || true
 
 # Step 2: stop one worker.
 STOPPED_MACHINE_ID=""
+RECOVERY_MACHINE_ID=""
 drill_step drill.kill_one_worker kill_one_worker
 if [[ ${#CHECKS_JSONL[@]} -gt 0 ]]; then
   last_line="${CHECKS_JSONL[-1]}"
   if [[ "$last_line" == *'"status":"pass"'* ]]; then
     STOPPED_MACHINE_ID="$(printf '%s' "$last_line" | jq -r '.details.stoppedMachineId // empty')"
+    RECOVERY_MACHINE_ID="$STOPPED_MACHINE_ID"
   fi
 fi
 
-# Step 3: poll post-drill health (best-effort).
-drill_step drill.post_drill_health poll_post_drill_health || true
+# Step 3: confirm the killed machine is actually in state=stopped.
+# This is the post-kill truth check (Stoff81 Critical #2); it fails
+# the drill if flyctl shows the machine still running. Skipped when
+# the kill itself never produced a STOPPED_MACHINE_ID (kill failed).
+drill_step drill.verify_killed_machine_stopped verify_killed_stopped "$STOPPED_MACHINE_ID" || true
 
-# The trap on EXIT will restart the worker via cleanup() and append to
-# CLEANUP_JSONL. Wait long enough for the restart to take effect before
-# we emit the final JSON.
-if [[ -n "$STOPPED_MACHINE_ID" ]]; then
-  for ((i = 0; i < 30; i++)); do
-    sleep 2
-    deadline_reached && break
-  done
-fi
+# Step 4: explicitly fail until the hosted observability prerequisite exposes
+# an authenticated alert/log/reconciliation verification contract.
+drill_step drill.observability_alert_logs_and_reconciliation observability_verification_unimplemented || true
+
+# Run cleanup() directly so CLEANUP_JSONL is populated before the
+# verdict is computed. The EXIT trap will see CLEANUP_RAN=1 and be
+# a no-op; if the script is interrupted before reaching here, the
+# EXIT trap still runs cleanup() once (Stoff81 Critical #1).
+cleanup
+
+# Step 5: confirm the machine is back to state=started after the
+# restart. Skipped when no kill ever produced a STOPPED_MACHINE_ID.
+drill_step drill.verify_recovered_machine_started verify_recovered_started "$RECOVERY_MACHINE_ID" || true
 
 cleanup_ok=1
-if [[ ${#CLEANUP_JSONL[@]} -eq 0 ]]; then
-  cleanup_ok=0
-fi
 for line in "${CLEANUP_JSONL[@]}"; do
-  if [[ "$line" != *'"status":"pass"'* ]]; then
+  if [[ "$line" != *'"ok":true'* ]]; then
     cleanup_ok=0
   fi
 done
@@ -359,35 +418,24 @@ fi
 checks_array="$(printf '%s\n' "${CHECKS_JSONL[@]}" | jq -s '.')"
 cleanup_array="$(printf '%s\n' "${CLEANUP_JSONL[@]}" | jq -s '.')"
 if [[ ${#CLEANUP_JSONL[@]} -eq 0 ]]; then
-  cleanup_array='[{"name":"drill.worker_restart","status":"skip","startedAt":"-","endedAt":"-","details":{},"error":{"code":"DRILL_NOT_EXECUTED","message":"no worker was stopped during the drill"}}]'
-  cleanup_ok=0
+  cleanup_array='[{"name":"drill.worker_restart_not_needed","ok":true,"error":null}]'
 fi
 
-# acceptedLimitations — the failure drill documents one explicit limitation:
-# hosted observability correlation is best-effort unless
-# --observability-url is supplied.
 accepted_limitations='[]'
-if [[ -z "$observability_url" ]]; then
-  accepted_limitations=$(cat <<JSON
-[
-  {
-    "code": "OBSERVABILITY_CORRELATION_NOT_VERIFIED",
-    "summary": "Drill did not query the hosted observability surface for the alert correlator; pass/fail was derived from auto-post/health only.",
-    "owner": "Rowan",
-    "rationale": "STAGING_OBSERVABILITY_URL was not provided to this run. The drill surfaces a stable accepted limitation rather than fabricating an alert-correlation that was never measured.",
-    "followUp": "docs/runbooks/cloud-staging.md#failure-drill"
-  }
-]
-JSON
-)
-fi
+production_blockers='[{"code":"AC3_OBSERVABILITY_VERIFICATION_UNIMPLEMENTED","summary":"The drill cannot yet verify alert firing/resolution, correlated logs, or startup reconciliation through a machine-readable hosted-observability contract.","owner":"Rowan","reference":"docs/specs/cloud-staging-environment-tech-design.md#4-verify-failure-alerting-and-recovery"}]'
 
 ended_iso="$(started_iso)"
+# intentCommit is either a quoted string or null. The prior in-heredoc
+# concatenation `${intent_commit:+"\"$intent_commit\""}${intent_commit:-null}`
+# produced invalid JSON like `"abc123"abc123` when intent_commit was set
+# (Codex P1 #4). Build the token here so jq can parse the result without
+# the trailing-literal bug.
+intent_commit_json="\"$intent_commit\""
 services_json=$(cat <<JSON
 {
-  "tasksApi": {"url":"[REDACTED]","version":null,"matchesIntent":null},
-  "budgetApi": {"url":"[REDACTED]","version":null,"matchesIntent":null},
-  "contentScheduler": {"url":"${scheduler_api_url}","version":null,"matchesIntent":null}
+  "tasksApi": {"url":"https://not-checked.invalid","version":null,"matchesIntent":false},
+  "budgetApi": {"url":"https://not-checked.invalid","version":null,"matchesIntent":false},
+  "contentScheduler": {"url":"${scheduler_api_url}","version":null,"matchesIntent":false}
 }
 JSON
 )
@@ -396,14 +444,14 @@ result=$(cat <<JSON
 {
   "schemaVersion": ${SCHEMA_VERSION},
   "runId": "${run_id}",
-  "intentCommit": ${intent_commit:+"\"$intent_commit\""}${intent_commit:-null},
+  "intentCommit": ${intent_commit_json:-null},
   "environment": { "id": "${fly_org}/${fly_app_worker}", "provider": "fly.io" },
   "startedAt": "${START_EPOCH:-}",
   "endedAt": "${ended_iso}",
   "services": ${services_json},
   "checks": ${checks_array},
   "cleanup": { "ok": $([[ $cleanup_ok -eq 1 ]] && echo true || echo false), "operations": ${cleanup_array} },
-  "productionBlockers": [],
+  "productionBlockers": ${production_blockers},
   "acceptedLimitations": ${accepted_limitations},
   "verdict": "${verdict}"
 }
@@ -411,7 +459,7 @@ JSON
 )
 
 # Replace startedAt with the real ISO timestamp captured at the start.
-real_started="$(date -u -d "@${START_EPOCH}" +%Y-%m-%dT%H:%M:%S.%3NZ 2>/dev/null || date -u -r "${START_EPOCH}" +%Y-%m-%dT%H:%M:%S.%3NZ)"
+real_started="$(date -u -d "@${START_EPOCH}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "${START_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
 result="$(printf '%s' "$result" | jq --arg s "$real_started" '.startedAt = $s')"
 
 # Pretty-print and write.

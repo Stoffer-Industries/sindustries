@@ -15,7 +15,7 @@
 //   --scheduler-token <bearer>[env STAGING_SCHEDULER_TOKEN]    required
 //   --budget-token-file <path>[env STAGING_BUDGET_TOKEN_FILE]  required
 //   --run-id <id>             [env STAGING_RUN_ID]             optional (auto)
-//   --intent-commit <sha>     [env STAGING_INTENT_COMMIT]      optional
+//   --intent-commit <sha>     [env STAGING_INTENT_COMMIT]      required
 //   --output <path>                                               optional
 //
 // Inputs are never logged: bearer tokens are read from flag/env/process and
@@ -90,7 +90,8 @@ function parseArgs() {
     '--scheduler-api-url': out.schedulerApiUrl,
     '--tasks-token': out.tasksToken,
     '--scheduler-token': out.schedulerToken,
-    '--budget-token-file': out.budgetTokenFile
+    '--budget-token-file': out.budgetTokenFile,
+    '--intent-commit': out.intentCommit
   };
   const missing = Object.entries(required)
     .filter(([, v]) => v === null || v === '')
@@ -98,6 +99,10 @@ function parseArgs() {
   if (missing.length > 0) {
     stderr.write(`error: missing required inputs: ${missing.join(', ')}\n`);
     stderr.write('Run with --help for usage.\n');
+    exit(2);
+  }
+  if (!/^[0-9a-f]{7,64}$/.test(out.intentCommit)) {
+    stderr.write('error: --intent-commit must be a 7-64 character lowercase hex SHA\n');
     exit(2);
   }
   if (out.runId === null) {
@@ -601,9 +606,9 @@ async function main() {
   const cleanupResults = await cleanup.runAll();
 
   const servicesByName = {
-    tasksApi: { url: ctx.tasksApiUrl, version: null, matchesIntent: null },
-    budgetApi: { url: ctx.budgetApiUrl, version: null, matchesIntent: null },
-    contentScheduler: { url: ctx.schedulerApiUrl, version: null, matchesIntent: null }
+    tasksApi: { url: ctx.tasksApiUrl, version: null, matchesIntent: false },
+    budgetApi: { url: ctx.budgetApiUrl, version: null, matchesIntent: false },
+    contentScheduler: { url: ctx.schedulerApiUrl, version: null, matchesIntent: false }
   };
   for (const [check, key] of [
     ['tasks.health', 'tasksApi'],
@@ -613,10 +618,7 @@ async function main() {
     const c = runner.checks.find((x) => x.name === check);
     if (c?.status === 'pass') {
       servicesByName[key].version = c.details?.version ?? null;
-      servicesByName[key].matchesIntent =
-        ctx.intentCommit !== null
-          ? (c.details?.version === ctx.intentCommit)
-          : null;
+      servicesByName[key].matchesIntent = c.details?.version === ctx.intentCommit;
     } else {
       servicesByName[key].matchesIntent = false;
     }
@@ -624,7 +626,17 @@ async function main() {
 
   const cleanupOk = cleanupResults.every((op) => op.ok);
   const checksOk = runner.checks.every((c) => c.status !== 'fail');
-  const verdict = checksOk && cleanupOk ? 'pass' : 'fail';
+  // Codex P1 #5: every run declares an intentCommit, and every
+  // service's reported version must match it for the verdict to be
+  // pass. Prior code only factored checksOk && cleanupOk, which let a
+  // green check set return verdict=pass even when the deployed
+  // version was stale or unrelated. Missing or invalid intentCommit
+  // values are rejected during argument validation.
+  const allServicesMatchIntent = Object.values(servicesByName).every(
+    (s) => s.matchesIntent === true
+  );
+  const verdict =
+    checksOk && cleanupOk && allServicesMatchIntent ? 'pass' : 'fail';
 
   // Accepted limitations surfaced for this run; the deeper Budget write
   // path is documented here per design open question #2.
