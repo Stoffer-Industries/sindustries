@@ -96,7 +96,7 @@ make test-e2e
 
 CI currently covers:
 - `services/tasks-api` unit + DB integration tests
-- `services/budget-api` unit + DB integration tests (DB integration currently uses mocked Prisma — see W38 audit F4 for the verified gap)
+- `services/budget-api` unit tests (`budget-api-unit` job also runs `packages/budget-domain` test + typecheck and `apps/budget-mobile` typecheck) plus DB integration tests (`budget-api-db-integration` job runs the ownership-contract suite against real Postgres; previously ran with mocked Prisma — see W38 audit F4 for the historical gap)
 - `services/content-scheduler-api` vitest
 - `services/gymtrack-mcp` tests
 - `apps/tasks` unit/component tests + Playwright e2e (UI + API + DB)
@@ -113,11 +113,11 @@ CI currently covers:
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
 - `eas-update-on-main` (mobile OTA publishing)
 
-Cross-package / domain checks (declared but **not** currently invoked by CI):
+Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
 - `apps/budget-mobile` typecheck (`apps/budget-mobile/package.json`)
 
-See `docs/repo-audits/2026-W38.md` F4 for the verified gap and the in-flight task (`1eb22a09`) that closes it.
+Closed: see `docs/repo-audits/2026-W38.md` F4 and PR #673.
 
 ## System spec maintenance
 
