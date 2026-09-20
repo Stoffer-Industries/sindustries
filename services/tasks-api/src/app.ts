@@ -99,7 +99,15 @@ export function createApp() {
   );
 
   app.get('/health', (_req, res) => {
-    res.status(200).json({ status: 'ok', service: 'tasks-api' });
+    // `version` exposes the deployed commit SHA so the cloud-staging
+    // validation harness (tests/cloud/staging-workflows.mjs) can confirm
+    // `matchesIntent === true`. Set by infra/cloud/bin/deploy at deploy
+    // time via `--env GIT_COMMIT_SHA=<sha>`; null in local dev.
+    res.status(200).json({
+      status: 'ok',
+      service: 'tasks-api',
+      version: process.env.GIT_COMMIT_SHA ?? null
+    });
   });
 
   app.use('/api/v1', healthRouter);

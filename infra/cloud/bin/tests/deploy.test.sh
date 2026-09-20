@@ -154,10 +154,10 @@ assert_log_absent "INVOKED: deploy"
 
 echo "test: --image pinned tag is forwarded"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:abc123 2>&1
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:abc1234def5678 2>&1
 assert_eq "deploy tasks-api exit code" "0" "$?"
 assert_log_contains "INVOKED: config validate --config infra/cloud/fly/tasks-api.fly.toml"
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 --image registry/repo:abc123"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=abc1234def5678 --image registry/repo:abc1234def5678"
 assert_log_contains "INVOKED: releases --app sindustries-tasks-api-staging --json"
 assert_log_contains "INVOKED: machines list --app sindustries-tasks-api-staging --json"
 assert_log_contains "INVOKED: curl"
@@ -171,7 +171,7 @@ if grep -E "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml .*--ima
   echo "FAIL: budget-api deploy should not pass --image when caller didn't pass one" >&2
   exit 1
 fi
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml --strategy canary --wait-timeout 600"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA="
 
 echo "test: missing FLY_API_TOKEN fails preflight"
 reset_log
@@ -185,13 +185,21 @@ assert_log_absent "INVOKED: deploy"
 
 echo "test: auto-post-worker smoke check tails logs"
 reset_log
-FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" auto-post-worker --image registry/repo:def456 2>&1
+FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" auto-post-worker --image registry/repo:def4567abc8901 2>&1
 assert_eq "deploy worker exit code" "0" "$?"
 assert_log_contains "INVOKED: logs --app sindustries-auto-post-worker-staging --no-tail"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=def4567abc8901 --image registry/repo:def4567abc8901"
+
+echo "test: --env GIT_COMMIT_SHA uses local HEAD when no --image is given"
+reset_log
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api 2>&1
+assert_eq "deploy tasks-api (no image) exit code" "0" "$?"
+HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=$HEAD_SHA"
 
 echo "test: --dry-run prints deploy command and exits 0"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run --image registry/repo:abc123 2>&1
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run --image registry/repo:abc1234def5678 2>&1
 assert_eq "dry-run exit code" "0" "$?"
 assert_log_absent "INVOKED: deploy"
 
