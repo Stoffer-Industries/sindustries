@@ -266,7 +266,7 @@ export const Card = React.forwardRef(function Card({
       className={cn(
         cardClasses({ variant, state }),
         interactive &&
-          'cursor-pointer transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-border-strong',
+          'cursor-pointer transition duration-150 ease-out hover:border-border-strong',
         typeof tilt === 'number' ? PULSE_TILT_CLASSES[tilt % PULSE_TILT_CLASSES.length] : tilt,
         // Legacy BEM classes retained for kit overrides + existing tests.
         // Retires in slices 4 + 5.
