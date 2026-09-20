@@ -4,17 +4,27 @@
     "correctness": "error"
   },
   "rules": {
-    "no-unused-vars": "warn"
+    "no-unused-vars": "warn",
+    "shadcn/no-restyle": [
+      "warn",
+      {
+        "allow": ["layout"],
+        "contracts": []
+      }
+    ],
+    "shadcn/no-arbitrary-values": "error",
+    "shadcn/no-raw-colors": "error",
+    "shadcn/no-inline-styles": "warn",
+    "shadcn/no-unknown-classes": "warn",
+    "shadcn/require-static-classes": "warn"
   },
   "jsPlugins": [
     "@shadcn/lint"
   ],
   "settings": {
-    "shadcn-lint": {
-      "_comment": "Dormant install — see docs/systems/design-system.md 'Design-system linting' section and follow-up task 7986eb43-dc85-4512-b76a-1cfecefd8be7. Rules are intentionally NOT enabled in this PR: @shadcn/lint ships Tailwind-class-string rules and reads theme tokens from Tailwind v4 @theme blocks, but SIndustries frontend uses BEM-style CSS with @sindustries/design-tokens via CSS custom properties. Enabling rules before Tailwind v4 lands in @sindustries/ui produces zero findings — a false-signal that proves nothing. Rule activation is owned by follow-up task 7986eb43.",
-      "componentsRoot": "packages/ui/src/react",
-      "tokensStylesheet": "packages/design-tokens/styles.css",
-      "rulesEnabled": false
+    "shadcn": {
+      "ui": ["@sindustries/ui"],
+      "_comment": "ACTIVE install — task 7986eb43 slice 5 baseline. Slice 4 moved the settings key from `shadcn-lint` (dormant-install placeholder) to `shadcn` (the key @shadcn/lint 0.1.0 actually reads) and registered all six shadcn rules at warn so the baseline triage could capture offences without blocking CI. Slice 5 promotes `no-raw-colors` and `no-arbitrary-values` to error (zero offences after the slice-5 fix on `transition-[border-color,box-shadow,transform]` in `packages/ui/src/react/index.jsx`). The other four rules (`no-restyle` 41, `no-inline-styles` 23, `no-unknown-classes` 685, `require-static-classes` 3) stay at warn with a documented Accepted baseline in `docs/systems/design-system.md` \"Design-system linting\" section; they promote to error after the kit CSS retirement task collapses the BEM/legacy class emissions and the per-app kit CSS contracts."
     }
   }
 }

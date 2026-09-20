@@ -43,3 +43,6 @@ infra/cloud/.env.local
 # it does not belong in this codebase repo. Accidentally committed once
 # (cd2ad2a19ea098c860facf25418aecf06a8f486a); ignore to prevent recurrence.
 /brain/
+
+# Local heartbeat evidence (not committed; referenced from task comments)
+.heartbeat-evidence/
