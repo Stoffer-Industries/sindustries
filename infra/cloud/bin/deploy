@@ -126,12 +126,36 @@ fi
 
 # ---------- build the deploy command ---------------------------------------
 
+# Resolve the deployed commit SHA. Source deployments build from the
+# repo's HEAD; image deployments reuse the SHA baked into the image tag
+# (e.g. `ghcr.io/foo/bar:26e0492218abc...`). Injecting it as a
+# `GIT_COMMIT_SHA` env var lets the service `/health` endpoints expose
+# the SHA so the cloud-staging validation harness can assert
+# `matchesIntent === true` against `intent_commit` (task 2850c5ac).
+GIT_COMMIT_SHA=""
+if [[ -n "$IMAGE" ]]; then
+  GIT_COMMIT_SHA="${IMAGE##*:}"
+else
+  if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    GIT_COMMIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  fi
+fi
+if [[ -n "$GIT_COMMIT_SHA" ]]; then
+  if [[ ! "$GIT_COMMIT_SHA" =~ ^[0-9a-f]{7,64}$ ]]; then
+    fail "resolved GIT_COMMIT_SHA '$GIT_COMMIT_SHA' is not a valid hex SHA; refusing to deploy without a version signal" 1
+  fi
+  info "deploying with GIT_COMMIT_SHA=$GIT_COMMIT_SHA"
+fi
+
 DEPLOY_ARGS=(
   deploy
   --config "$FLY_CONFIG"
   --strategy canary
   --wait-timeout 600
 )
+if [[ -n "$GIT_COMMIT_SHA" ]]; then
+  DEPLOY_ARGS+=(--env "GIT_COMMIT_SHA=$GIT_COMMIT_SHA")
+fi
 if [[ -n "$IMAGE" ]]; then
   # Pin to the immutable image tag the caller supplied. Refuse anything
   # that looks like a moving tag (`latest`, empty).
