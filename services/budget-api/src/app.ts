@@ -58,7 +58,15 @@ export function createApp() {
   app.use('/api/v1/session/dev-login', sensitiveEndpointRateLimit);
 
   app.get('/health', (_req, res) => {
-    res.status(200).json({ status: 'ok', service: 'budget-api' });
+    // `version` exposes the deployed commit SHA so the cloud-staging
+    // validation harness (tests/cloud/staging-workflows.mjs) can confirm
+    // `matchesIntent === true`. Set by infra/cloud/bin/deploy at deploy
+    // time via `--env GIT_COMMIT_SHA=<sha>`; null in local dev.
+    res.status(200).json({
+      status: 'ok',
+      service: 'budget-api',
+      version: process.env.GIT_COMMIT_SHA ?? null
+    });
   });
 
   // /session is mounted WITHOUT requireSession — the dev-login endpoint mints
