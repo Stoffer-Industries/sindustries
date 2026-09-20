@@ -821,14 +821,21 @@ jobs:
         run: cargo clippy --manifest-path agents/workflows/feature-task/Cargo.toml --all-targets -- -D warnings
 
   frontend-design-system-lint:
-    # Task da86ccd8 (Add @shadcn/lint to the frontend workspace).
-    # Smoke-test wiring for the dormant @shadcn/lint install — asserts the
-    # install + plugin registration + oxlint --print-config succeeds.
-    # Rules are intentionally NOT enabled in this PR; rule activation is
-    # owned by follow-up task 7986eb43-dc85-4512-b76a-1cfecefd8be7 (Adopt
-    # Tailwind v4 in @sindustries/ui). See docs/systems/design-system.md
-    # 'Design-system linting' section for the rationale and the dormant-
-    # state policy.
+    # Task da86ccd8 (Add @shadcn/lint to the frontend workspace) +
+    # task 7986eb43 slice 4 (Adopt Tailwind v4 in @sindustries/ui —
+    # activates @shadcn/lint rules).
+    #
+    # Active install — asserts the install + plugin registration +
+    # at least one shadcn/* rule in the top-level rules block +
+    # settings.shadcn key path (NOT settings.shadcn-lint — that was the
+    # dormant-install key path; @shadcn/lint 0.1.0 reads settings.shadcn)
+    # + oxlint --print-config clean. Then runs the actual lint pass on
+    # packages/ui/src/react + the four frontend apps and exits non-zero
+    # if any shadcn/* offence is found.
+    #
+    # See docs/systems/design-system.md 'Design-system linting' section
+    # for the rule policy and the Accepted-baseline triage that follows
+    # slice 4.
     name: frontend design-system lint
     runs-on: ubuntu-latest
     steps:
@@ -844,16 +851,14 @@ jobs:
 
       - name: Install dependencies (oxlint + @shadcn/lint)
         # oxlint needs the @shadcn/lint plugin to be resolvable from
-        # node_modules. `npm ci` is required for the --print-config
-        # smoke test to pass; we do NOT run the lint pass itself (the
-        # dormant install has rules off, so a real lint pass would surface
-        # unrelated oxlint-default offences on real frontend code and
-        # produce a false signal).
+        # node_modules. `npm ci` is required for the actual lint pass
+        # to resolve the plugin and apply shadcn/* rules.
         run: npm ci --no-audit --no-fund
 
-      - name: Run frontend design-system lint smoke test
-        # Asserts .oxlintrc.json + components.json + @shadcn/lint plugin
-        # registration + rulesEnabled:false + oxlint --print-config clean.
+      - name: Run frontend design-system lint
+        # Asserts the slice-4 contract (settings.shadcn + at least one
+        # shadcn/* rule) and runs the active lint pass; exits non-zero
+        # when shadcn/* offences exist.
         run: node scripts/check-design-system-lint.mjs
 
       - name: Run frontend design-system lint unit tests
