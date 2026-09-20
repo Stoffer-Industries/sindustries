@@ -172,4 +172,6 @@ test('harness source includes the redaction contract', () => {
   const harness = readFileSync(HARNESS, 'utf8');
   assert.match(harness, /REDACTED/);
   assert.match(harness, /\[A-Fa-f0-9\]\{32,\}/);
+  assert.match(harness, /allServicesMatchIntent/);
+  assert.match(harness, /checksOk && cleanupOk && allServicesMatchIntent/);
 });
