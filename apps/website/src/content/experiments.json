@@ -36,10 +36,11 @@
       "2026-06-17 X thread on the Lobster + Quinn state-handoff pattern shifted the channel from announcement-style posts to architecture-and-process posts. The thread landed because it explains a real design decision (where intelligence lives in an agent pipeline) rather than selling a product outcome \u2014 supporting the hypothesis that process posts are now the strongest format for the SIndustries audience, not just a planned pivot.",
       "Content Scheduler changes the experiment from manual posting cadence to an approval-and-scheduling loop. The next learning is whether scheduled posts sourced from weekly site updates create more consistent public signal without lowering specificity.",
       "A reusable scheduling primitive and Ivy's themed weekly campaign workflow shift the cadence test from manual writing to whether a structured five-to-seven-post arc can preserve specificity across a week.",
-      "Native X thread scheduling now treats a multi-part post as one content item, with a publish journal, retries, and rollback when a partial publish fails. This makes thread-based build-in-public updates possible without manually coordinating each post."
+      "Native X thread scheduling now treats a multi-part post as one content item, with a publish journal, retries, and rollback when a partial publish fails. This makes thread-based build-in-public updates possible without manually coordinating each post.",
+      "The X thread loop has now run end to end: a full themed weekly campaign published as linked replies, with scheduling, publishing, retry, and rollback handled as one content item. The cadence test now asks whether a scheduled thread arc can stay specific across a full week."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-09-10",
+    "updatedAt": "2026-09-18",
     "links": [],
     "image": "/brand/studio/social-content-hero.png",
     "visibility": "published"
