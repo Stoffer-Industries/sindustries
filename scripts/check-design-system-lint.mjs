@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // scripts/check-design-system-lint.mjs
 //
-// Lint pass for the ACTIVE @shadcn/lint install (task 7986eb43, slice 4).
+// Lint pass for the ACTIVE @shadcn/lint install (task 7986eb43, slice 5).
 //
 // What this script does:
 //   1. Asserts `.oxlintrc.json` exists and parses.
 //   2. Asserts `components.json` exists.
 //   3. Asserts the @shadcn/lint jsPlugin is registered in oxlintrc.json.
-//   4. Asserts the new (slice 4) contract is in place:
+//   4. Asserts the slice-4 contract is in place:
 //        - `settings.shadcn` exists (not `settings.shadcn-lint` — the
 //          dormant-install key path was the wrong one; @shadcn/lint 0.1.0
 //          reads `settings.shadcn` per its README + index.js).
@@ -17,23 +17,36 @@
 //   5. Runs `oxlint --print-config` to prove oxlint can load the jsPlugin
 //      from node_modules and resolve it cleanly.
 //   6. Runs the actual lint pass on packages/ui/src/react + the four
-//      frontend apps. Surfaces shadcn/* offence counts grouped by rule.
+//      frontend apps using `--format=json`, parses the diagnostic array,
+//      separates shadcn/* errors from warnings, and exits based on
+//      severity:
+//        - exit 1 if any shadcn/* diagnostic has severity `error`
+//          (i.e. an error-level rule fired — merge-blocking)
+//        - exit 0 if all shadcn/* diagnostics are at severity `warning`
+//          (Accepted baseline; rules active locally so devs see the
+//          offences but CI doesn't block on them)
+//        - exit 0 if zero diagnostics
+//      The slice-5 closeout of task 7986eb43 promotes the zero-offence
+//      rules (`shadcn/no-raw-colors`, `shadcn/no-arbitrary-values`) to
+//      `error`; the rules with Accepted baseline stay at `warn` and
+//      promote only after the kit CSS retirement task collapses the
+//      BEM/legacy class emissions.
 //
 // The dormant-install contract (`rulesEnabled: false`, exit 1 if not
-// false) is GONE. The wrapper now asserts ACTIVE state and exits
-// non-zero on any shadcn/* offence; it is the slice-4+ signal for the
-// baseline-triage pass that the design calls for.
+// false) is GONE. The wrapper asserts ACTIVE state and surfaces the
+// per-rule shadcn/* offence counts grouped by severity.
 //
 // Usage:
 //   node scripts/check-design-system-lint.mjs
 //
 // Exit codes:
-//   0 — install valid, rules active, zero shadcn/* offences
-//   1 — shadcn/* offences present (baseline-triage pending) OR install contract violated
+//   0 — install valid, rules active, zero shadcn/* errors (warnings allowed)
+//   1 — shadcn/* error-level offence(s) present OR install contract violated
 //   2 — invocation / IO error
 //
 // Refs: docs/systems/design-system.md 'Design-system linting' section
-// (status flipped DORMANT → ACTIVE in this commit). Task 7986eb43 slice 4.
+// (status flipped DORMANT → ACTIVE in slice 4; baseline triage landed in
+// slice 5). Task 7986eb43 slice 5.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -108,12 +121,12 @@ function runOxlintPrintConfig() {
 function runOxlintLint() {
   return spawnSync(
     'npx',
-    ['--no-install', 'oxlint', '--config', '.oxlintrc.json', ...LINT_TARGETS],
+    ['--no-install', 'oxlint', '--config', '.oxlintrc.json', '--format=json', ...LINT_TARGETS],
     { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
   );
 }
 
-banner('check-design-system-lint — ACTIVE lint pass (task 7986eb43, slice 4)');
+banner('check-design-system-lint — ACTIVE lint pass (task 7986eb43, slice 5)');
 
 const cfg = loadConfig();
 if (!cfg) {
@@ -192,37 +205,88 @@ if (lintResult.error) {
 const lintStdout = lintResult.stdout ?? '';
 const lintStderr = lintResult.stderr ?? '';
 
-// Extract shadcn/* offence count from formatted output. Format:
-//   "  ! shadcn(rule-name): ..."
-const shadcnOffenceLines = lintStdout
-  .split('\n')
-  .filter((line) => /^\s+! shadcn\([a-z-]+\):/.test(line));
-const shadcnOffenceCount = shadcnOffenceLines.length;
-
-const offencesByRule = new Map();
-for (const line of shadcnOffenceLines) {
-  const match = line.match(/^\s+! (shadcn\([a-z-]+\)):/);
-  if (!match) continue;
-  const rule = match[1];
-  offencesByRule.set(rule, (offencesByRule.get(rule) ?? 0) + 1);
+// Parse the JSON diagnostic stream. `--format=json` emits a single
+// object on stdout: `{ "diagnostics": [...], "number_of_files": N,
+// "number_of_rules": N, ... }`. Each diagnostic carries
+// `severity: "warning" | "error"`, `code: "shadcn(rule-name)"`,
+// `filename`, `message`, and `labels`.
+let shadcnDiagnostics = [];
+let lintParseError = null;
+try {
+  const parsed = JSON.parse(lintStdout);
+  const diagnostics = Array.isArray(parsed?.diagnostics) ? parsed.diagnostics : [];
+  shadcnDiagnostics = diagnostics.filter(
+    (d) => typeof d?.code === 'string' && d.code.startsWith('shadcn('),
+  );
+} catch (err) {
+  lintParseError = err;
 }
 
-if (shadcnOffenceCount > 0) {
-  console.error(`  result: FAIL — ${shadcnOffenceCount} shadcn/* offence(s) found.`);
-  for (const [rule, count] of [...offencesByRule.entries()].sort((a, b) => b[1] - a[1])) {
-    console.error(`    - ${rule}: ${count}`);
+// Group shadcn diagnostics by rule + severity so the summary surfaces
+// both the merge-blocking errors and the Accepted-baseline warnings.
+const errorsByRule = new Map();
+const warningsByRule = new Map();
+for (const d of shadcnDiagnostics) {
+  const rule = d.code; // already `shadcn(rule-name)` form
+  if (d.severity === 'error') {
+    errorsByRule.set(rule, (errorsByRule.get(rule) ?? 0) + 1);
+  } else if (d.severity === 'warning') {
+    warningsByRule.set(rule, (warningsByRule.get(rule) ?? 0) + 1);
+  }
+}
+
+const errorCount = [...errorsByRule.values()].reduce((a, b) => a + b, 0);
+const warningCount = [...warningsByRule.values()].reduce((a, b) => a + b, 0);
+
+if (lintParseError) {
+  console.error(
+    `::error::oxlint --format=json parse failed: ${lintParseError.message}`,
+  );
+  console.error('--- oxlint stdout (first 4 KB) ---');
+  console.error(lintStdout.slice(0, 4096));
+  if (lintStderr.trim().length > 0) {
+    console.error('--- oxlint stderr ---');
+    console.error(lintStderr);
+  }
+  process.exit(2);
+}
+
+if (errorCount > 0) {
+  console.error(
+    `  result: FAIL — ${errorCount} shadcn/* error(s) and ${warningCount} shadcn/* warning(s).`,
+  );
+  for (const [rule, count] of [...errorsByRule.entries()].sort((a, b) => b[1] - a[1])) {
+    console.error(`    - ${rule}: ${count} (error)`);
+  }
+  for (const [rule, count] of [...warningsByRule.entries()].sort((a, b) => b[1] - a[1])) {
+    console.error(`    - ${rule}: ${count} (warning)`);
   }
   console.error(
-    '\n  Baseline triage pending. See docs/systems/design-system.md ' +
-      '"Design-system linting" section and .heartbeat-evidence/ for the latest ' +
-      'baseline scan.\n',
+    '\n  Error-level shadcn/* offences are merge-blocking. ' +
+      'See docs/systems/design-system.md "Design-system linting" section for the rule policy.\n',
   );
-  // Surface the raw output so reviewers can see the actual offences.
-  process.stdout.write(lintStdout);
   if (lintStderr.trim().length > 0) {
     process.stderr.write(lintStderr);
   }
   process.exit(1);
+}
+
+if (warningCount > 0) {
+  console.error(
+    `  result: PASS — ${shadcnRules.length} shadcn/* rule(s) active; ${warningCount} Accepted-baseline warning(s), zero errors.`,
+  );
+  for (const [rule, count] of [...warningsByRule.entries()].sort((a, b) => b[1] - a[1])) {
+    console.error(`    - ${rule}: ${count} (warning)`);
+  }
+  console.error(
+    '\n  Warnings reflect the Accepted baseline documented in ' +
+      'docs/systems/design-system.md "Design-system linting" section. ' +
+      'They surface locally for visibility but do not block CI.\n',
+  );
+  if (lintStderr.trim().length > 0) {
+    process.stderr.write(lintStderr);
+  }
+  process.exit(0);
 }
 
 console.error(`  result: PASS — ${shadcnRules.length} shadcn/* rule(s) active, zero offences.`);
