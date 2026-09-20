@@ -807,6 +807,12 @@ jobs:
       - name: Run bin/rollback contract test
         run: bash infra/cloud/bin/tests/rollback.test.sh
 
+      - name: Run cloud staging workflow harness tests
+        run: node --test tests/cloud/tests/staging-workflows.test.mjs
+
+      - name: Run cloud staging failure-drill contract tests
+        run: bash tests/cloud/tests/staging-failure-drill.test.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest
