@@ -473,5 +473,25 @@
     "links": [],
     "evidence": "The production deployment, dynamic client registration, and public OAuth rate limiting were live by 2026-09-10.",
     "visibility": "published"
+  },
+  {
+    "title": "DNS-rebinding protection for URL fetches",
+    "slug": "safe-fetch-dns-rebinding-protection",
+    "releasedAt": "2026-09-12",
+    "summary": "URL fetches now resolve a host once, validate the resulting address, and keep that address pinned for the connection so DNS cannot redirect a validated request to a private network.",
+    "type": "system",
+    "links": [],
+    "evidence": "Resolve-once address validation and connection pinning shipped on 2026-09-12, closing the medium-severity DNS-rebinding finding from the week 34 audit.",
+    "visibility": "published"
+  },
+  {
+    "title": "CI merge gate and deployment chain",
+    "slug": "ci-merge-gate-deployment-chain",
+    "releasedAt": "2026-09-15",
+    "summary": "Eight deployment workflows now report one aggregate merge gate, require staging checks before production, and use pinned deployment tooling.",
+    "type": "system",
+    "links": [],
+    "evidence": "The aggregate merge gate, staging-to-production dependency chain, main-branch restriction, staging smoke gate, and pinned Fly, flyctl, and Supabase tooling shipped across all eight deployment workflows on 2026-09-15.",
+    "visibility": "published"
   }
 ]
