@@ -75,6 +75,8 @@ jobs:
             budget_mobile:
               - 'apps/budget-mobile/**'
               - 'packages/budget-domain/**'
+              - 'packages/ui/**'
+              - 'packages/design-tokens/**'
               - 'package.json'
               - 'package-lock.json'
             feature_task:
@@ -767,6 +769,14 @@ jobs:
 
       - name: Run CI and deployment gate contract test
         run: bash infra/cloud/scripts/tests/ci-deployment-gates.test.sh
+
+      - name: Run Budget mobile OTA input paths test (task 74503fe7, W39 F3)
+        # AC1 + AC2 regression guard for the `budget_mobile` change filter —
+        # closes the W39 audit finding where the filter omitted
+        # packages/ui/** and packages/design-tokens/** even though the
+        # mobile dashboard imports both and the native UI export points
+        # at source.
+        run: bash infra/cloud/scripts/tests/budget-mobile-ota-inputs.test.sh
 
   gitleaks:
     name: gitleaks secret scan
