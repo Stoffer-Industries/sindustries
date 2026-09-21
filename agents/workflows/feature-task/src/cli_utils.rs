@@ -5,9 +5,9 @@
 //! — second tranche required to bring `main.rs` below ~3,000 lines").
 //! This module hosts the three small CLI-adjacency helpers that don't
 //! fit into any of the per-stage carved modules:
-//! - `gh_command()` — build a `std::process::Command` for `gh`, falling
-//!   back to `~/.openclaw/.env` (`LOBSTER_GITHUB_TOKEN`) when no env
-//!   token is present. Used by `pr_body`, `product_spec_parsing::inspect_pr`,
+//! - `gh_command()` — build a `std::process::Command` for `gh` using the
+//!   explicit feature-task CLI identity. Used by `pr_body`,
+//!   `product_spec_parsing::inspect_pr`,
 //!   and `analytics::gh_pr_body`.
 //! - `pr_body(url)` — fetch the body of a GitHub PR via `gh pr view`,
 //!   routed through `pr_gates::decode_pr_body_output` for the markdown
@@ -32,19 +32,23 @@ use crate::lobster_state;
 use crate::pr_gates;
 use crate::{Envelope, Task};
 
-/// Build a `std::process::Command` for `gh`, falling back to
-/// `~/.openclaw/.env` (`LOBSTER_GITHUB_TOKEN`) when no env token is
-/// present. The cron/lobster invocation chain repeatedly drops
-/// `GH_TOKEN` / `GITHUB_TOKEN`; without this fallback `gh` silently
-/// fails with a 401 and the lobster emits a noisy traceback. Kept as
-/// `pub(crate)` because four sibling modules read it.
+/// Build a `std::process::Command` for `gh` using the feature-task identity.
+/// `gh` gives token environment variables precedence over `GH_CONFIG_DIR`, so
+/// remove them to prevent an ambient gateway credential from changing the
+/// account that owns the read. Kept as `pub(crate)` because four sibling
+/// modules read it.
 pub(crate) fn gh_command() -> Command {
     let mut cmd = Command::new("gh");
-    if std::env::var("GH_TOKEN").is_err() && std::env::var("GITHUB_TOKEN").is_err() {
-        if let Some(token) = crate::analytics_replay::load_dotenv_token("LOBSTER_GITHUB_TOKEN") {
-            cmd.env("GH_TOKEN", token);
-        }
-    }
+    let config_dir = std::env::var("FEATURE_TASK_GH_CONFIG_DIR")
+        .unwrap_or_else(|_| "~/.config/gh-quinn".to_string());
+    let config_dir = if let Some(home) = std::env::var_os("HOME") {
+        config_dir.replace('~', &home.to_string_lossy())
+    } else {
+        config_dir
+    };
+    cmd.env("GH_CONFIG_DIR", config_dir)
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN");
     cmd
 }
 

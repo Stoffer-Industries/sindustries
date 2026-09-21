@@ -32,7 +32,7 @@ REPO = Path(os.environ.get("SINDUSTRIES_REPO") or CODEBASE_REPO)
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common import dump_json, list_tasks, log_debug  # noqa: E402
+from common import dump_json, github_cli_env, list_tasks, log_debug  # noqa: E402
 
 
 def _stream_reader(pipe, prefix: str, sink: list[str]) -> None:
@@ -54,16 +54,7 @@ def run_workflow(task_id: str, capacity_limit: int) -> dict:
     )
     cmd = ["lobster", "run", "--mode", "tool", str(PIPELINE), "--args-json", args_json]
     log_debug("starting content-task pass for " + task_id)
-    env = os.environ.copy()
-    if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
-        dotenv = Path.home() / ".openclaw" / ".env"
-        try:
-            for line in dotenv.read_text().splitlines():
-                if line.startswith("QUINN_GITHUB_TOKEN="):
-                    env["GH_TOKEN"] = line.split("=", 1)[1].strip()
-                    break
-        except Exception:
-            pass
+    env = github_cli_env()
     proc = safe_popen(
         cmd,
         text=True,
