@@ -19,7 +19,24 @@ kill_port_listener() {
   echo "Found stale $label listener on :$port. Stopping it..."
   while IFS= read -r pid; do
     [[ -n "$pid" ]] || continue
-    kill "$pid" 2>/dev/null || true
+    local parent_pid
+    local parent_command
+    parent_pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ -n "$parent_pid" ]]; then
+      parent_command="$(ps -o command= -p "$parent_pid" 2>/dev/null || true)"
+    else
+      parent_command=""
+    fi
+
+    # `tsx watch` supervises the actual Node listener. Killing only the child
+    # makes the watcher immediately respawn it, racing the replacement Tilt
+    # resource and producing EADDRINUSE. Stop the watcher when it is the direct
+    # parent; otherwise retain the original listener-only behavior.
+    if [[ "$parent_command" == *"tsx watch"* ]]; then
+      kill "$parent_pid" 2>/dev/null || true
+    else
+      kill "$pid" 2>/dev/null || true
+    fi
   done <<< "$pids"
 
   sleep 1
@@ -43,8 +60,8 @@ cleanup_mode_ports() {
   kill_port_listener "${BUDGET_API_PORT:-4002}" "budget api"
   kill_port_listener "${CONTENT_SCHEDULER_API_PORT:-4003}" "content scheduler api"
   kill_port_listener "$TILT_PORT" "Tilt"
-  # Redis (CONTENT_SCHEDULER_JOB_ADAPTER=bullmq). Stopped on `make down`
-  # by `docker compose down`, but if a previous stack leaked the
-  # host-side port forward, this catches it before Tilt rebinds.
-  kill_port_listener "${REDIS_PORT:-6379}" "redis"
+  # Do not kill Redis/Postgres listeners here. Under Colima they are SSH
+  # forwards owned by Lima's shared ControlMaster; killing one tears down the
+  # Docker socket and every forwarded container port. Compose reconciles those
+  # resources after Tilt connects to the daemon.
 }

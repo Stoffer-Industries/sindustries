@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 API_DIR="$ROOT_DIR/services/tasks-api"
 BUDGET_API_DIR="$ROOT_DIR/services/budget-api"
+CONTENT_SCHEDULER_API_DIR="$ROOT_DIR/services/content-scheduler-api"
 
 # shellcheck source=./mode-env.sh
 source "$ROOT_DIR/scripts/dev/mode-env.sh"
@@ -28,6 +29,18 @@ ensure_budget_api_deps() {
   echo "Prisma CLI not found in services/budget-api/node_modules; installing dependencies..."
   (
     cd "$BUDGET_API_DIR"
+    npm install
+  )
+}
+
+ensure_content_scheduler_api_deps() {
+  if [[ -x "$CONTENT_SCHEDULER_API_DIR/node_modules/.bin/prisma" ]]; then
+    return 0
+  fi
+
+  echo "Prisma CLI not found in services/content-scheduler-api/node_modules; installing dependencies..."
+  (
+    cd "$CONTENT_SCHEDULER_API_DIR"
     npm install
   )
 }
@@ -91,6 +104,8 @@ DROP SCHEMA IF EXISTS tasks_app CASCADE;
 CREATE SCHEMA tasks_app;
 DROP SCHEMA IF EXISTS budget_api CASCADE;
 CREATE SCHEMA budget_api;
+DROP SCHEMA IF EXISTS content_scheduler CASCADE;
+CREATE SCHEMA content_scheduler;
 SQL
 
 (
@@ -122,6 +137,13 @@ SQL
   else
     echo "Skipping budget-api seed (SEED_DB=$SEED_DB)."
   fi
+)
+
+(
+  cd "$CONTENT_SCHEDULER_API_DIR"
+  ensure_content_scheduler_api_deps
+  DATABASE_URL="$CONTENT_SCHEDULER_DATABASE_URL" npm run prisma:generate
+  DATABASE_URL="$CONTENT_SCHEDULER_DATABASE_URL" npm run prisma:migrate
 )
 
 echo "Database reset complete for MODE=$MODE."
