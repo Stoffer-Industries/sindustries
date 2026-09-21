@@ -24,13 +24,15 @@ ports) and embeds it via iframe. The Tasks API base URL is resolved
 automatically from the dev-server port, or overridden with
 `VITE_TASKS_API_BASE_URL`.
 
-The Bookmarks tab reads `brain/state/bookmark-review-state.json` and
-`brain/state/bookmark-transitions.jsonl` via the dev-only Vite plugin in
-`vite.config.js`. The plugin resolves the workspace `brain/` directory
-via the `WORKSPACE_ROOT` env var, falling back to three levels up from
-the Vite config. On a fresh checkout without `brain/`, the tab renders
-an empty state rather than failing. Override the API base with
-`VITE_BOOKMARK_STATE_BASE_URL` for non-local setups.
+The Bookmarks tab reads `brain/state/bookmark-review-state.json` via the
+dev-only Vite plugin's `/api/state` endpoint, and reads transitions from
+`analytics.bookmark_transitions` in Postgres via `/api/transitions`. The
+plugin resolves the workspace `brain/` directory via the `WORKSPACE_ROOT`
+env var, falling back to three levels up from the Vite config. When
+`DATABASE_URL` is unset or the Postgres query fails, `/api/transitions`
+falls back to `brain/state/bookmark-transitions.jsonl` so a fresh
+checkout (or a database outage) never breaks the tab. Override the API
+base with `VITE_BOOKMARK_STATE_BASE_URL` for non-local setups.
 
 The Bookmarks tab also renders a Sankey diagram of the curation pipeline
 (collapsed by default; click Expand) and a states-over-time line chart
