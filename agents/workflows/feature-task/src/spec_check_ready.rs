@@ -496,9 +496,10 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         }
         "Ash" => task_approvals::qa_agent_verified(task),
         // Tom owns the accepted gate only once the task reaches acceptance.
-        // While still doing, a pending accepted approval must not leave Tom
-        // blocking delivery-owner routing.
-        "Tom" => task.status != "acceptance" || task_approvals::accepted_structured(task),
+        // While still doing, keep Tom as a dormant escalation slot so Quinn
+        // can act first; `ensure_quinn_precedes_tom_during_doing` enforces the
+        // ordering.
+        "Tom" => task.status == "acceptance" && task_approvals::accepted_structured(task),
         _ => false,
     }
 }
@@ -513,13 +514,14 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
             .first()
             .is_some_and(|owner| owner.eq_ignore_ascii_case(&desired))
         {
+            ensure_quinn_precedes_tom_during_doing(task, &mut owners);
             return owners;
         }
         if owners.first().is_some_and(|owner| {
             task.assignee
                 .as_deref()
                 .is_some_and(|assignee| owner.eq_ignore_ascii_case(assignee))
-                || matches!(owner.as_str(), "Quinn" | "Ash" | "Tom")
+                || matches!(owner.as_str(), "Quinn" | "Ash")
         }) {
             owners[0] = desired.to_string();
         } else {
@@ -535,7 +537,41 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     {
         owners.remove(0);
     }
+    ensure_quinn_precedes_tom_during_doing(task, &mut owners);
     owners
+}
+
+/// Tom is a dormant escalation target while a task is still being implemented.
+/// If a workflow or a manual handoff has put Tom on a `doing` task's stack,
+/// Quinn must appear before him so the agent gets the first chance to resolve
+/// the blocker. Preserve an existing Quinn slot rather than duplicating it.
+fn ensure_quinn_precedes_tom_during_doing(task: &Task, owners: &mut Vec<String>) {
+    if task.status != "doing" {
+        return;
+    }
+    let Some(tom_index) = owners
+        .iter()
+        .position(|owner| owner.eq_ignore_ascii_case("Tom"))
+    else {
+        return;
+    };
+    if owners[..tom_index]
+        .iter()
+        .any(|owner| owner.eq_ignore_ascii_case("Quinn"))
+    {
+        return;
+    }
+    if let Some(quinn_index) = owners
+        .iter()
+        .enumerate()
+        .skip(tom_index + 1)
+        .find_map(|(index, owner)| owner.eq_ignore_ascii_case("Quinn").then_some(index))
+    {
+        let quinn = owners.remove(quinn_index);
+        owners.insert(tom_index, quinn);
+    } else {
+        owners.insert(tom_index, "Quinn".to_string());
+    }
 }
 
 pub(crate) fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<()> {
@@ -782,7 +818,16 @@ mod tests {
         let task = routing_task("doing", &["Rowan", "Tom"]);
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Rowan", "Tom"]
+            vec!["Rowan", "Quinn", "Tom"]
+        );
+    }
+
+    #[test]
+    fn routing_puts_quinn_before_explicit_tom_handoff_while_doing() {
+        let task = routing_task("doing", &["Tom"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn", "Tom"]
         );
     }
     #[test]
@@ -798,7 +843,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Ash", "Tom"]
+            vec!["Ash", "Quinn", "Tom"]
         );
     }
 
@@ -872,7 +917,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(reconciled_attention_owners(&task), vec!["Tom"]);
+        assert_eq!(reconciled_attention_owners(&task), vec!["Quinn", "Tom"]);
     }
 
     #[test]
@@ -898,7 +943,10 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(reconciled_attention_owners(&task), vec!["Ash", "Tom"]);
+        assert_eq!(
+            reconciled_attention_owners(&task),
+            vec!["Ash", "Quinn", "Tom"]
+        );
     }
     #[test]
     fn routing_preserves_rowan_handoff_when_ash_is_last_commenter() {
@@ -918,7 +966,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Rowan", "Tom"]
+            vec!["Rowan", "Quinn", "Tom"]
         );
     }
     #[test]
@@ -944,7 +992,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Ash", "Tom"]
+            vec!["Ash", "Quinn", "Tom"]
         );
     }
     #[test]
@@ -981,10 +1029,10 @@ mod tests {
     }
     /// A `doing`-status task whose `attentionOwners` is `[Tom, Quinn, Ash]`
     /// and whose `qa_agent` gate is closed should route back to the delivery
-    /// assignee, because Tom's accepted gate is not actionable until
-    /// acceptance, without draining the remaining owner stack.
+    /// assignee, while keeping Quinn before Tom as the dormant escalation
+    /// path and without draining the remaining owner stack.
     #[test]
-    fn routing_removes_tom_without_draining_remaining_managed_owners() {
+    fn routing_keeps_quinn_before_tom_without_draining_remaining_owners() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
         task.comments.push(TaskComment {
             text: Some(
@@ -1000,7 +1048,7 @@ mod tests {
             ..TaskApproval::default()
         });
         let once = crate::spec_check_ready::reconciled_attention_owners(&task);
-        assert_eq!(once, vec!["Rowan", "Quinn", "Ash"]);
+        assert_eq!(once, vec!["Rowan", "Quinn", "Tom", "Ash"]);
         task.attention_owners = once.clone();
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
@@ -1008,10 +1056,10 @@ mod tests {
         );
     }
     /// Tom's accepted gate is only actionable in acceptance. A pending
-    /// accepted approval must not leave Tom as the head owner while a task is
-    /// still doing.
+    /// accepted approval must leave Quinn before Tom while a task is still
+    /// doing.
     #[test]
-    fn routing_removes_tom_head_before_acceptance() {
+    fn routing_moves_quinn_before_tom_head_before_acceptance() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
         task.approvals.push(TaskApproval {
             approval_type: "tech_design".to_string(),
@@ -1020,7 +1068,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Quinn", "Ash"]
+            vec!["Quinn", "Tom", "Ash"]
         );
     }
     #[test]
