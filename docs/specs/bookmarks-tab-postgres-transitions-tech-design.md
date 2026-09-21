@@ -1,8 +1,8 @@
 ---
-status: draft
+status: shipped
 task_id: 5c87ea16-bc06-4069-bed1-73f2916b48a2
 product_spec: brain/tasks/specs/done/bookmark-analytics-postgres.md
-shipped_pr: null
+shipped_pr: (pending — opened from branch `task-5c87ea16-tech-design`; PR URL added on merge)
 shipped_date: null
 ---
 
