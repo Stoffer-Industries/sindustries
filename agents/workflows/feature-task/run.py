@@ -84,6 +84,27 @@ def workflow_env() -> dict[str, str]:
     env["GH_CONFIG_DIR"] = str(Path(configured_gh_dir).expanduser())
     env.pop("GH_TOKEN", None)
     env.pop("GITHUB_TOKEN", None)
+    # The Rust worker needs Quinn's authenticated Tasks API credential for
+    # status, attention-owner, and workflow-handoff PATCHes. Cron environments
+    # expose the per-agent name, while the worker's stable interface is the
+    # generic TASKS_API_APPROVAL_TOKEN. Copy the explicit Quinn credential
+    # into that child-only name; never substitute the lobster service token,
+    # which is intentionally limited to the lobster's own API operations.
+    if not env.get("TASKS_API_APPROVAL_TOKEN"):
+        quinn_token = env.get("QUINN_TASKS_API_APPROVAL_TOKEN")
+        if quinn_token:
+            env["TASKS_API_APPROVAL_TOKEN"] = quinn_token
+        else:
+            token = _load_dotenv_token("TASKS_API_APPROVAL_TOKEN")
+            if token:
+                env["TASKS_API_APPROVAL_TOKEN"] = token
+
+    # The lobster service credential is separate from Quinn's approval token;
+    # hydrate it as well when a cron environment did not inherit it.
+    if not env.get("FEATURE_TASK_LOBSTER_TOKEN"):
+        token = _load_dotenv_token("FEATURE_TASK_LOBSTER_TOKEN")
+        if token:
+            env["FEATURE_TASK_LOBSTER_TOKEN"] = token
     # The reconciliation command acts only on Tom's explicit checked marker
     # in a brain spec file, using the dedicated `brain_spec_reconciler`
     # service credential (server-scoped to `spec` only, never `Tom` — see
