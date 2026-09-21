@@ -79,7 +79,7 @@ run_shim() {
     # Minimal PATH so the stub is the only `gh` on PATH. The shim still calls
     # `command gh`, which resolves via PATH.
     export PATH="${STUB_DIR}:/usr/bin:/bin"
-    export HOME="${TMPDIR_TEST}/home"
+    export HOME="${TMPDIR_TEST}/agent-home"
     mkdir -p "${HOME}"
     # Apply caller-supplied env (PATH, agent identity, token vars, ambient
     # overrides).
@@ -143,7 +143,7 @@ assert_log_not_contains 'GITHUB_TOKEN=ghp_quinn_ambient'
 assert_log_not_contains 'GH_TOKEN=ghp_quinn_ambient_via_legacy'
 assert_log_contains 'GITHUB_TOKEN=<unset>'
 assert_log_contains 'GH_TOKEN=ghp_rowan_scoped'
-assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/home/.config/gh-rowan"
+assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-rowan"
 pass "rowan: ambient vars unset, GH_TOKEN set to ROWAN_GITHUB_TOKEN, GH_CONFIG_DIR scoped"
 
 # Case 4: Ash with per-agent token — same shape as Rowan, different identity.
@@ -154,7 +154,7 @@ run_shim \
 assert_log_not_contains 'GITHUB_TOKEN=ghp_quinn_ambient'
 assert_log_contains 'GITHUB_TOKEN=<unset>'
 assert_log_contains 'GH_TOKEN=ghp_ash_scoped'
-assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/home/.config/gh-ash"
+assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-ash"
 pass "ash: scoped identity applied (AC1 cross-agent)"
 
 # Case 5: Ivy with per-agent token.
@@ -164,7 +164,7 @@ run_shim \
   "IVY_GITHUB_TOKEN=ghp_ivy_scoped"
 assert_log_not_contains 'GITHUB_TOKEN=ghp_quinn_ambient'
 assert_log_contains 'GH_TOKEN=ghp_ivy_scoped'
-assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/home/.config/gh-ivy"
+assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-ivy"
 pass "ivy: scoped identity applied (AC1 cross-agent)"
 
 # Case 6: Rowan but ROWAN_GITHUB_TOKEN is unset (gateway hasn't propagated it
@@ -187,7 +187,7 @@ run_shim \
   "GITHUB_TOKEN=ghp_quinn_ambient" \
   "ASH_GITHUB_TOKEN=ghp_ash_scoped"
 assert_log_contains 'GH_TOKEN=ghp_ash_scoped'
-assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/home/.config/gh-ash"
+assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-ash"
 assert_log_not_contains 'GH_TOKEN=ghp_rowan'
 pass "GH_SHIM_AGENT override beats AGENT_ID"
 
@@ -200,7 +200,7 @@ STDERR_FILE="${TMPDIR_TEST}/stderr"
 : >"${STDERR_FILE}"
 (
   export PATH="${STUB_DIR}:/usr/bin:/bin"
-  export HOME="${TMPDIR_TEST}/home"
+  export HOME="${TMPDIR_TEST}/agent-home"
   export GITHUB_TOKEN=ghp_quinn_ambient
   unset GH_SHIM_AGENT AGENT_ID
   source "${SHIM}"

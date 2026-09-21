@@ -89,17 +89,22 @@ gh() {
   local -r token_value="${!token_var:-}"
 
   if [[ -z "${token_value}" ]]; then
-    # Per-agent token missing — fall back to `command gh` after `unset
-    # GITHUB_TOKEN GH_TOKEN` so the user still does not silently authenticate
-    # as the wrong identity (matches the documented manual workaround).
-    env -u GITHUB_TOKEN -u GH_TOKEN command gh "$@"
+    # Per-agent token missing — fall back to the system `gh` after
+    # `unset GITHUB_TOKEN GH_TOKEN` so the user still does not silently
+    # authenticate as the wrong identity (matches the documented manual
+    # workaround). `env` runs the target in a fresh subprocess, so there
+    # is no function table to bypass — we call `gh` directly, NOT
+    # `command gh`. `command` is a bash builtin and is not a real
+    # executable on Linux, so passing it to `env` would fail with exit
+    # 127 ("command not found") on GitHub Actions runners.
+    env -u GITHUB_TOKEN -u GH_TOKEN gh "$@"
     return $?
   fi
 
   env -u GITHUB_TOKEN -u GH_TOKEN \
       GH_CONFIG_DIR="${HOME}/.config/gh-${agent}" \
       GH_TOKEN="${token_value}" \
-      command gh "$@"
+      gh "$@"
 }
 
 # Direct alias — scripts that need to bypass the function (e.g. to escape a
