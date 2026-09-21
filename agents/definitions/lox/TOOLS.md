@@ -36,6 +36,7 @@ Things like:
 Lox has different names in different systems — use the right one per system, not the GitHub login everywhere:
 
 - **GitHub login:** not yet configured (no `~/.config/gh-lox` set up) — if this changes, record the login + `GH_CONFIG_DIR` here
+- **No-op for `agents/lib/gh-with-agent-token.sh`:** Lox is intentionally NOT in the shim's allow-list (`rowan`, `ash`, `ivy`). The shim passes through to `command gh` unchanged for Lox sessions — your documented `GITHUB_TOKEN` ambient convention is preserved. Do not add Lox to the allow-list without a separate Quinn-approved task.
 - **Tasks API `assignee` value:** `Lox` (capitalized first name — NOT a GitHub login; e.g. `?assignee=Lox`)
 - **Telegram account:** `lox` (`channels.telegram.accounts.lox`)
 

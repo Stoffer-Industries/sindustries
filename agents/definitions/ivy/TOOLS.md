@@ -56,11 +56,11 @@ Ivy has different names in different systems — use the right one per system, n
 
 - **Account:** ivystoffer
 - **GH_CONFIG_DIR:** `~/.config/gh-ivy`
-- **CRITICAL: Prefix ALL `gh` commands with `GH_CONFIG_DIR=~/.config/gh-ivy`** — no exceptions. This includes `gh pr create`, `gh pr comment`, `gh pr review`, `gh pr view`, and any other `gh` subcommand. Without this prefix, commands fall back to the default identity (rowanstoffer) and your actions appear as the wrong user.
+- **The shared shim `agents/lib/gh-with-agent-token.sh` (sourced at session-init) wraps every `gh` invocation so the ambient `GITHUB_TOKEN` does not silently authenticate as the wrong identity.** Just call `gh ...` — do **not** prefix with `GH_CONFIG_DIR=...` or invoke `command gh` directly; do not rely on the legacy prefix pattern below. The shim drops the bare `GITHUB_TOKEN` / `GH_TOKEN` and re-exports `GH_TOKEN=$IVY_GITHUB_TOKEN` + `GH_CONFIG_DIR=~/.config/gh-ivy` for the child process.
 - Token: stored in `~/.openclaw/.env` as `IVY_GITHUB_TOKEN`
 - Repo access: Stoffer-Industries/sindustries (Contents R/W, Pull requests R/W)
 
-### Examples
+### Examples (legacy prefix pattern — preferred path is the shim now)
 ```
 GH_CONFIG_DIR=~/.config/gh-ivy gh pr create ...
 GH_CONFIG_DIR=~/.config/gh-ivy gh pr comment <url> --body "..."

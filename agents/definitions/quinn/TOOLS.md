@@ -58,6 +58,7 @@ Quinn has different names in different systems — use the right one per system,
 - Repo access: Stoffer-Industries/workspace (Pull requests R/W, Contents R/W)
 - **Usage:** Prefix read commands with `GH_CONFIG_DIR=~/.config/gh-quinn gh ...`
 - **For write operations** (PR review, merge): use `GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" gh ...` — the classic PAT lacks `read:org` so can't be stored in gh-quinn config, but works fine via env var
+- **No-op for `agents/lib/gh-with-agent-token.sh`:** Quinn is intentionally NOT in the shim's allow-list (`rowan`, `ash`, `ivy`). The shim passes through to `command gh` unchanged for Quinn sessions — your documented write-op convention (`GITHUB_TOKEN=$QUINN_GITHUB_TOKEN gh ...`) keeps the ambient `GITHUB_TOKEN` authoritative, which is exactly what your workflow expects. Do not source the shim from Quinn's session-init; the allow-list is the contract.
 
 ## Why Separate?
 

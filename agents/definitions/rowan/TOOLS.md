@@ -51,8 +51,8 @@ Rowan has different names in different systems — use the right one per system,
 - **GH_CONFIG_DIR:** `~/.config/gh-rowan`
 - **Token:** stored in `~/.openclaw/.env` as `ROWAN_GITHUB_TOKEN` (fine-grained PAT)
 - Repo access: Stoffer-Industries/sindustries (Contents R/W, Pull requests R/W)
-- **Usage:** `GH_CONFIG_DIR=~/.config/gh-rowan gh ...`
-- **For write operations:** `GITHUB_TOKEN="$ROWAN_GITHUB_TOKEN" gh ...`
+- **Usage:** the shared shim `agents/lib/gh-with-agent-token.sh` (sourced at session-init) wraps `gh` to drop the ambient `GITHUB_TOKEN` and route every invocation through Rowan's own token + `GH_CONFIG_DIR`. Just call `gh ...` — do **not** prefix with `GH_CONFIG_DIR=...` or `env -u GITHUB_TOKEN ...` yourself, and do **not** invoke `command gh` directly (that bypasses the shim and re-introduces the ambient-token override). The legacy `GH_CONFIG_DIR=~/.config/gh-rowan gh ...` pattern still works for one-off scripts that have not yet been updated, but new code should rely on the shim.
+- **For write operations:** no prefix needed — the shim sets `GH_TOKEN=$ROWAN_GITHUB_TOKEN` and unsets the bare `GITHUB_TOKEN` automatically.
 
 ### Git commits and pushes (sindustries repo)
 
