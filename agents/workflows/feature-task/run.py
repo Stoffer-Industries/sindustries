@@ -77,10 +77,13 @@ def workflow_env() -> dict[str, str]:
     if existing_path:
         path_parts.append(existing_path)
     env["PATH"] = os.pathsep.join(path_parts)
-    if not env.get("GH_TOKEN") and not env.get("GITHUB_TOKEN"):
-        token = _load_dotenv_token("LOBSTER_GITHUB_TOKEN")
-        if token:
-            env["GH_TOKEN"] = token
+    # Feature-task GitHub reads must use Quinn's explicitly configured CLI
+    # identity. gh gives GH_TOKEN/GITHUB_TOKEN precedence over GH_CONFIG_DIR,
+    # so remove ambient credentials rather than risking the default account.
+    configured_gh_dir = env.get("FEATURE_TASK_GH_CONFIG_DIR", "~/.config/gh-quinn")
+    env["GH_CONFIG_DIR"] = str(Path(configured_gh_dir).expanduser())
+    env.pop("GH_TOKEN", None)
+    env.pop("GITHUB_TOKEN", None)
     # The reconciliation command acts only on Tom's explicit checked marker
     # in a brain spec file, using the dedicated `brain_spec_reconciler`
     # service credential (server-scoped to `spec` only, never `Tom` — see
