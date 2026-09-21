@@ -65,6 +65,7 @@ ensure_dev_workspace_deps() {
   for path in \
     "$ROOT_DIR/node_modules/.bin/tsx" \
     "$ROOT_DIR/node_modules/.bin/vite" \
+    "$ROOT_DIR/node_modules/@tailwindcss/vite/package.json" \
     "$ROOT_DIR/node_modules/@vitejs/plugin-react/package.json"; do
     if [[ ! -e "$path" ]]; then
       missing=1
@@ -80,6 +81,7 @@ ensure_dev_workspace_deps() {
   (
     cd "$ROOT_DIR"
     npm install \
+      --include-workspace-root \
       --workspace @sindustries/tasks-api \
       --workspace @sindustries/budget-api \
       --workspace @sindustries/content-scheduler-api \
