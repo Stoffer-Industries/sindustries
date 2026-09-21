@@ -778,6 +778,23 @@ jobs:
         # at source.
         run: bash infra/cloud/scripts/tests/budget-mobile-ota-inputs.test.sh
 
+  gh-with-agent-token-tests:
+    # Task b0d1b42e (Fix Ambient GITHUB_TOKEN Overriding Per-Agent GH Config
+    # Precedence). AC1 + AC2 regression guard for the agents/lib
+    # gh-with-agent-token.sh shim. Stages a stub `gh` on PATH that records
+    # argv and the relevant environment so the assertions can verify the
+    # shim unscoped ambient GITHUB_TOKEN/GH_TOKEN, sets GH_CONFIG_DIR to the
+    # per-agent config dir, and exports GH_TOKEN=$<AGENT>_GITHUB_TOKEN.
+    # No live GitHub auth or network required; runs in seconds.
+    name: agents/lib gh-with-agent-token shim tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run gh-with-agent-token shim tests
+        run: bash agents/lib/tests/test_gh_with_agent_token.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest

@@ -6,7 +6,7 @@
 - Tasks API identity: `Ash`
 - Tasks API credential env: `ASH_TASKS_API_APPROVAL_TOKEN`
 - GitHub credential env: `ASH_GITHUB_TOKEN`
-- GitHub config dir: `~/.config/gh-ash`
+- GitHub config dir: `~/.config/gh-ash` (the shared shim at `agents/lib/gh-with-agent-token.sh` wraps every `gh` invocation so the ambient `GITHUB_TOKEN` does not silently authenticate as the wrong identity — just call `gh ...`, do not prefix with `GH_CONFIG_DIR=...` or invoke `command gh` directly)
 
 Credentials and runtime registration are provisioned by the OpenClaw operator;
 never write or rotate them from an ordinary QA pass.
