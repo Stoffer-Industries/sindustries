@@ -39,6 +39,22 @@ if str(TASKS_CLIENT_DIR) not in sys.path:
 
 from tasks_api_client import api_request, get_base_url, get_task, list_tasks, service_token_env  # noqa: E402
 
+DEFAULT_GH_CONFIG_DIR = "~/.config/gh-ivy"
+
+
+def github_cli_env() -> dict[str, str]:
+    """Run content-task GitHub reads as Ivy, never as an ambient account."""
+    env = dict(os.environ)
+    configured_dir = env.get("CONTENT_TASKS_GH_CONFIG_DIR", DEFAULT_GH_CONFIG_DIR)
+    env["GH_CONFIG_DIR"] = str(Path(configured_dir).expanduser())
+    # A GH_TOKEN/GITHUB_TOKEN takes precedence over GH_CONFIG_DIR in gh. Remove
+    # ambient values so a gateway or parent shell cannot silently impersonate
+    # another agent.
+    env.pop("GH_TOKEN", None)
+    env.pop("GITHUB_TOKEN", None)
+    return env
+
+
 STATE_TAG = "[lobster-state]"
 IVY_PRS_TAG = "[ivy-prs]"
 IVY_TWEETS_QUEUED_TAG = "[ivy-tweets-queued]"
@@ -386,13 +402,8 @@ def parse_pr_url(url: str) -> tuple[str, str, str] | None:
 
 
 def _run_gh_json(cmd: list[str]) -> Any:
-    proc = safe_run(cmd, text=True, capture_output=True)
+    proc = safe_run(cmd, text=True, capture_output=True, env=github_cli_env())
     error = (proc.stderr or proc.stdout or "").strip()
-    if proc.returncode != 0 and os.environ.get("GITHUB_TOKEN") and ("HTTP 401" in error or "Bad credentials" in error):
-        env = dict(os.environ)
-        env.pop("GITHUB_TOKEN", None)
-        proc = safe_run(cmd, text=True, capture_output=True, env=env)
-        error = (proc.stderr or proc.stdout or "").strip()
     if proc.returncode != 0:
         raise RuntimeError(error or "gh command failed")
     return json.loads(proc.stdout or "null")

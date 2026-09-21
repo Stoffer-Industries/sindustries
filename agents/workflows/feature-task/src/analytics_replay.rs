@@ -6,18 +6,13 @@
 //! This module hosts the `analytics replay` subcommand and the small
 //! helpers it composes: the JSON envelope builder, the human-readable
 //! replay printer, two pure formatting helpers (`format_seconds` /
-//! `format_evidence`), and `load_dotenv_token` (the `.env`-file fallback
-//! for `GH_TOKEN` / `GITHUB_TOKEN` that the cron/lobster invocation
-//! chain repeatedly dropped, causing silent 401s).
+//! `format_evidence`).
 //!
 //! `pub(crate)` surface (only `main.rs` and sibling modules consume
 //! these):
 //! - `analytics_replay(args)` — `analytics replay` subcommand handler;
 //!   fetches `/feature-task-analytics/tasks/{id}/events`, prints a
 //!   human-readable replay, and returns the JSON envelope.
-//! - `load_dotenv_token(key)` — read a key from `~/.openclaw/.env`.
-//!   Also consumed by `main.rs`'s `gh_command` (which lives in
-//!   `cli_utils.rs` after Slice 2 but currently stays in `main.rs`).
 //!
 //! Pure helpers (`format_seconds`, `format_evidence`, `replay_envelope`,
 //! `print_replay`) are `pub(crate)` for testability and for the same
@@ -31,7 +26,6 @@
 use anyhow::{anyhow, Result};
 use regex::Regex;
 use serde_json::{Map, Value};
-use std::{fs, path::Path};
 
 use crate::{
     analytics::chrono_like_now_iso, api_client::handle_api_result, AnalyticsAction, AnalyticsArgs,
@@ -191,51 +185,4 @@ fn format_evidence(map: &Map<String, Value>) -> String {
         .collect();
     parts.sort();
     format!("{{{}}}", parts.join(","))
-}
-
-// Mirrors `_load_dotenv_token` in agents/workflows/feature-task/run.py.
-// gh calls here are made directly by this binary (not always spawned through
-// run.py's workflow_env()), so they can't rely on ambient env inheritance
-// alone — the cron/lobster invocation chain has repeatedly dropped GH_TOKEN
-// somewhere between run.py and this process, causing silent 401s.
-pub(crate) fn load_dotenv_token(key: &str) -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
-    let dotenv = Path::new(&home).join(".openclaw").join(".env");
-    let contents = fs::read_to_string(dotenv).ok()?;
-    for line in contents.lines() {
-        if let Some(value) = line.strip_prefix(&format!("{key}=")) {
-            return Some(value.trim().to_string());
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    // Single test covering both cases: load_dotenv_token mutates the
-    // process-global HOME env var, which cargo's multithreaded test runner
-    // would race on if split across separate #[test] fns.
-    #[test]
-    fn load_dotenv_token_reads_matching_key_and_none_when_absent() {
-        let home = tempdir().unwrap();
-        fs::create_dir(home.path().join(".openclaw")).unwrap();
-        fs::write(
-            home.path().join(".openclaw").join(".env"),
-            "OTHER_TOKEN=nope\nLOBSTER_GITHUB_TOKEN=abc123\n",
-        )
-        .unwrap();
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", home.path());
-        let found = load_dotenv_token("LOBSTER_GITHUB_TOKEN");
-        let missing = load_dotenv_token("NOT_A_REAL_KEY");
-        match original_home {
-            Some(value) => std::env::set_var("HOME", value),
-            None => std::env::remove_var("HOME"),
-        }
-        assert_eq!(found, Some("abc123".to_string()));
-        assert_eq!(missing, None);
-    }
 }
