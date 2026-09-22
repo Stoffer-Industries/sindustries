@@ -77,6 +77,23 @@ def dump_json(data: Any) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+def summary_doc_path(item: dict[str, Any] | None) -> str:
+    """Return the primary summary artifact path for an item, or "" if none.
+
+    Canonical helper for new-pipeline code that needs a bookmark's durable
+    summary artifact (the `summaryDoc` field). Deliberately does NOT fall
+    back to the legacy `reviewDoc` field — legacy-only records have no
+    summary, and treating `reviewDoc` as a routing prerequisite
+    reintroduces the dual-path bug fixed in task b38f70bb.
+
+    Returns "" when the item is None or has no non-empty `summaryDoc`.
+    """
+    if not item:
+        return ""
+    value = item.get("summaryDoc")
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
 def get_approval_topic(item: dict[str, Any] | None) -> str:
     """Return the topic used by the approval gate for an item.
 

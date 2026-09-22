@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from common import BOOKMARKS_ROOT, SPECS_ROOT, STATE_PATH, WORKSPACE, bookmark_record, dump_json, find_bookmark_files, load_state, log_transition, now_iso, save_state, transition_log_path
+from common import BOOKMARKS_ROOT, SPECS_ROOT, STATE_PATH, WORKSPACE, bookmark_record, dump_json, find_bookmark_files, load_state, log_transition, now_iso, save_state, summary_doc_path, transition_log_path
 
 try:
     from tasks_api_client import get_base_url, list_tasks
@@ -113,7 +113,12 @@ def _reconcile_stale_pending_with_existing_tasks(items: dict) -> int:
 
 
 def main() -> int:
-    # Clean up stale reviewDoc and specDoc references (files that no longer exist)
+    # Clean up stale summaryDoc / specDoc references (files that no longer exist).
+    # The legacy reviewDoc cleanup branch is intentionally retained for records
+    # that still carry a reviewDoc without summaryDoc; it does not act as a
+    # routing signal. Stale duplicate reviewDoc fields on summaryDoc records
+    # are removed by the `migrate_reviewdoc_fields.py` utility — see
+    # `docs/systems/bookmark-workflow.md` for the one-shot runbook.
     state = load_state(Path(STATE_PATH))
     items = state.get("items", {})
     # Index spec files by bookmark key suffix in filename (*-<bookmarkKey>.md)
@@ -130,23 +135,39 @@ def main() -> int:
     repaired_pending = _reconcile_stale_pending_with_existing_tasks(items)
     cleaned += repaired_pending
     for key, item in items.items():
-        # Check reviewDoc - if it exists but file is gone, clear everything
-        if item.get("reviewDoc"):
+        # Check summaryDoc - if it exists but file is gone, clear everything.
+        # This is the canonical primary signal (task b38f70bb).
+        if item.get("summaryDoc"):
+            summary_path = WORKSPACE / item["summaryDoc"]
+            if not summary_path.exists():
+                item.pop("summaryDoc", None)
+                item.pop("analysis", None)
+                item.pop("reviewProvenance", None)
+                item.pop("reviewedAt", None)
+                if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("taskIds"):
+                    item.pop("reviewStatus", None)
+                cleaned += 1
+        # Legacy reviewDoc cleanup. Kept for backward compatibility with
+        # records that still carry reviewDoc-only fields (no summaryDoc).
+        # The migration utility removes reviewDoc when summaryDoc is present;
+        # this branch handles records that are reviewDoc-only. Do NOT use
+        # this field as a routing signal — see `summary_doc_path()` in common.py.
+        elif item.get("reviewDoc"):
             review_path = WORKSPACE / item["reviewDoc"]
             if not review_path.exists():
                 item.pop("reviewDoc", None)
                 item.pop("analysis", None)
                 item.pop("reviewProvenance", None)
                 item.pop("reviewedAt", None)
-                if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("summaryDoc") and not item.get("taskIds"):
+                if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("taskIds"):
                     item.pop("reviewStatus", None)
                 cleaned += 1
-        # Also check if reviewStatus exists but reviewDoc doesn't.
+        # Also check if reviewStatus exists but no primary doc.
         # In the new curation pipeline, items in summarized/monitoring/spec states
-        # don't need a reviewDoc — curation score is the signal. Only clear status
+        # don't need a summaryDoc — curation score is the signal. Only clear status
         # on items that used the old review classification system and now have no doc.
         elif item.get("reviewStatus"):
-            if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("summaryDoc") and not item.get("taskIds"):
+            if item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES and not item.get("taskIds"):
                 item.pop("reviewStatus", None)
                 cleaned += 1
         # Check specDocs - keep only valid paths
@@ -154,11 +175,10 @@ def main() -> int:
             valid_specs = [s for s in item.get("specDocs", []) if _spec_doc_path(s).exists()]
             if len(valid_specs) != len(item.get("specDocs", [])):
                 item["specDocs"] = valid_specs
-                # If specs are missing but review exists, keep the review - just allow specs to regenerate
-                # Only clear reviewStatus if there's no reviewDoc either
+                # If specs are missing but a summary doc exists, keep it - just allow specs to regenerate
+                # Only clear reviewStatus if there's no summaryDoc either
                 if (
                     not valid_specs
-                    and not item.get("reviewDoc")
                     and not item.get("summaryDoc")
                     and item.get("reviewStatus") not in CURRENT_REVIEW_STATUSES
                 ):
@@ -216,17 +236,20 @@ def main() -> int:
         seen_keys.add(bk)
         existing = items.get(bk, {})
 
-        # Check if we have a valid review or summary on disk - if so, skip (never rewrite).
-        # summaryDoc is the new-pipeline equivalent of reviewDoc.
-        _active_doc = existing.get("reviewDoc") or existing.get("summaryDoc")
-        if _active_doc:
-            review_path = WORKSPACE / _active_doc
-            if review_path.exists():
-                # Review exists - check content to see if it's "implement" but no specs.
+        # Check if we have a valid summary on disk - if so, skip (never rewrite).
+        # summaryDoc is the canonical primary signal (task b38f70bb):
+        # reviewDoc was removed from new-pipeline routing because the dual
+        # `reviewDoc || summaryDoc` expression let legacy records outrank
+        # summary-only items in priority recovery.
+        active_doc = summary_doc_path(existing)
+        if active_doc:
+            summary_path = WORKSPACE / active_doc
+            if summary_path.exists():
+                # Summary exists - check content to see if it's "implement" but no specs.
                 # Two signals: old explicit classification OR new curation score.
                 # summaryDoc format never contains the classification string, so this
                 # safely falls through to the curation-score check.
-                content = review_path.read_text()
+                content = summary_path.read_text()
                 has_implement_classification = (
                     "Classified as 'implement'" in content
                     or str((existing.get('analysis') or {}).get('classification') or '').strip().lower() == 'implement'
@@ -259,10 +282,10 @@ def main() -> int:
                             priority_candidates.append(record)
                         # else: fully processed, skip
                 else:
-                    # Not implement - skip entirely, review already exists
+                    # Not implement - skip entirely, summary already exists
                     pass
         else:
-            # If no review on disk, allow processing
+            # If no summary on disk, allow processing
             record["existingState"] = existing
             normal_candidates.append(record)
 

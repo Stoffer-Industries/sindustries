@@ -489,7 +489,7 @@ def _main_locked(data: dict[str, Any]) -> int:
             previous_status = state_item.get("reviewStatus")
             proposed_tasks = item.get("proposedTasks") or hydrate_proposed_tasks_from_state(state_item)
             spec_docs = item.get("specDocs") or state_item.get("specDocs") or []
-            review_doc = item.get("reviewDoc") or state_item.get("reviewDoc")
+            summary_doc = item.get("summaryDoc") or state_item.get("summaryDoc")
             title = item.get("title") or state_item.get("title")
             topic_value = state_item.get("topic") or item.get("topic") or topic
             spec_proposals = state_item.get("specProposals") or []
@@ -513,7 +513,7 @@ def _main_locked(data: dict[str, Any]) -> int:
                 "title": title,
                 "summary": item.get("summary") or state_item.get("summary"),
                 "whyItMatters": item.get("whyItMatters") or state_item.get("whyItMatters"),
-                "reviewDoc": review_doc,
+                "summaryDoc": summary_doc,
                 "specDocs": spec_docs,
                 "proposedTasks": proposed_tasks,
             })

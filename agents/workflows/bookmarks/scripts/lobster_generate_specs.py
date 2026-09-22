@@ -177,7 +177,7 @@ def next_revised_live_spec_doc(spec_doc: str) -> str:
     return str(path.with_name(f"{stem}-rev1{suffix}"))
 
 
-def build_spec_md(item: dict[str, Any], spec: dict[str, Any], spec_rel: str, review_doc: str, previous_spec: str | None = None) -> str:
+def build_spec_md(item: dict[str, Any], spec: dict[str, Any], spec_rel: str, summary_doc: str, previous_spec: str | None = None) -> str:
     stack_md = "\n".join(f"- {entry}" for entry in spec["stackTouchpoints"])
     scope_md = "\n".join(f"- {entry}" for entry in spec["scopeBoundaries"])
     risks_md = "\n".join(f"- {entry}" for entry in spec["risksAndUnknowns"])
@@ -200,7 +200,7 @@ def build_spec_md(item: dict[str, Any], spec: dict[str, Any], spec_rel: str, rev
 
 ## Source
 - **Bookmark:** {to_wiki_link(item["path"])}
-- **Review:** {to_wiki_link(review_doc)}
+- **Summary:** {to_wiki_link(summary_doc)}
 - **Topic:** `{item["topic"]}`
 - **Spec Path:** {to_wiki_link(spec_rel)}
 {previous_spec_line}- **Spec Type:** `{spec["specType"]}`
@@ -247,7 +247,7 @@ def build_spec_md(item: dict[str, Any], spec: dict[str, Any], spec_rel: str, rev
 '''
 
 
-def render_task_description(task: dict[str, Any], spec_doc: str, review_doc: str) -> str:
+def render_task_description(task: dict[str, Any], spec_doc: str, summary_doc: str) -> str:
     ac_lines = "\n".join(f"- [ ] {line}" for line in task["acceptanceCriteria"])
     return (
         f"**What:** {task['title']}\n"
@@ -255,7 +255,7 @@ def render_task_description(task: dict[str, Any], spec_doc: str, review_doc: str
         f"**Deliverable:** {task['deliverable']}\n\n"
         f"**AC:**\n{ac_lines}\n\n"
         f"**Spec:** {spec_doc}\n"
-        f"**Source Review:** {review_doc}"
+        f"**Source Summary:** {summary_doc}"
     )
 
 
@@ -401,7 +401,7 @@ REVISION_SCHEMA: dict[str, Any] = {
 }
 
 
-def apply_revision_request_to_spec_proposals(item: dict[str, Any], spec_proposals: list[dict[str, Any]], revision_text: str, existing_spec_docs: list[str], review_doc: str) -> tuple[list[dict[str, Any]], list[str]]:
+def apply_revision_request_to_spec_proposals(item: dict[str, Any], spec_proposals: list[dict[str, Any]], revision_text: str, existing_spec_docs: list[str], summary_doc: str) -> tuple[list[dict[str, Any]], list[str]]:
     if not revision_text:
         return spec_proposals, existing_spec_docs
 
@@ -470,7 +470,7 @@ def apply_revision_request_to_spec_proposals(item: dict[str, Any], spec_proposal
                     "summary": summary,
                     "deliverable": deliverable,
                     "acceptanceCriteria": acceptance,
-                }, spec_doc, review_doc),
+                }, spec_doc, summary_doc),
             })
 
         original_spec_path = WORKSPACE / original_spec_doc
@@ -499,7 +499,7 @@ def apply_revision_request_to_spec_proposals(item: dict[str, Any], spec_proposal
             "incrementalRollout": expect_string_list(spec.get("incrementalRollout"), f"revision specs[{spec_index}].incrementalRollout", min_items=1),
             "successChecks": expect_string_list(spec.get("successChecks"), f"revision specs[{spec_index}].successChecks", min_items=1),
             "proposedTasks": renderable_tasks,
-        }, spec_doc, review_doc, previous_spec=previous_spec_rel)
+        }, spec_doc, summary_doc, previous_spec=previous_spec_rel)
         spec_path.write_text(spec_md, encoding="utf-8")
 
         normalized_proposals.append({
@@ -510,11 +510,16 @@ def apply_revision_request_to_spec_proposals(item: dict[str, Any], spec_proposal
     return normalized_proposals, spec_docs
 
 
-def extract_tasks_from_spec_md(spec_path: Path, review_doc: str) -> list[dict[str, Any]]:
+def extract_tasks_from_spec_md(spec_path: Path) -> list[dict[str, Any]]:
     """Parse a spec markdown file on disk and extract current proposed tasks.
 
     Handles the case where Tom manually edited the spec file — the bookmark's
     specProposals are stale but the spec on disk is authoritative.
+
+    Historical spec files generated before task b38f70bb may still contain
+    a `**Source Review:**` line. That label is parsed by callers that
+    pre-date the migration (no current caller relies on it) and is ignored
+    by this function — it returns the structured task list regardless.
     """
     import re
     text = load_text(spec_path)
@@ -582,7 +587,7 @@ def main() -> int:
         has_existing_spec_work = bool(valid_existing_spec_docs)
         pending_or_tasked = bool(state_item.get("reviewStatus") in {"approval_pending", "revision_staged"} or state_item.get("taskIds"))
         if has_existing_spec_work and not pending_or_tasked:
-            review_doc = state_item.get("reviewDoc") or item.get("reviewDoc", "")
+            summary_doc = state_item.get("summaryDoc") or item.get("summaryDoc", "")
             revision_text = str(state_item.get("latestRevisionRequest") or "").strip()
             if state_item.get("reviewStatus") == "revision_requested" and revision_text:
                 # Route revision to Quinn's heartbeat — same pattern as fresh spec generation.
@@ -597,7 +602,7 @@ def main() -> int:
             for spec_doc in existing_spec_docs:
                 spec_path = WORKSPACE / spec_doc
                 if spec_path.exists():
-                    disk_total_tasks += len(extract_tasks_from_spec_md(spec_path, review_doc))
+                    disk_total_tasks += len(extract_tasks_from_spec_md(spec_path))
             stored_total_tasks = sum(
                 len(p.get("proposedTasks", [])) for p in existing_spec_proposals
             )
@@ -614,7 +619,7 @@ def main() -> int:
                 for spec_doc in existing_spec_docs:
                     spec_path = WORKSPACE / spec_doc
                     if spec_path.exists():
-                        tasks = extract_tasks_from_spec_md(spec_path, review_doc)
+                        tasks = extract_tasks_from_spec_md(spec_path)
                         import re
                         spec_text = load_text(spec_path)
                         title_match = re.search(r'^# Spec - (.+)$', spec_text, re.MULTILINE)

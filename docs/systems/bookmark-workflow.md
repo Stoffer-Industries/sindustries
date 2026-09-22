@@ -1,7 +1,7 @@
 # Bookmark Workflow
 
 **Type:** System reference (keep updated as the pipeline evolves)
-**Last updated:** 2026-08-14
+**Last updated:** 2026-09-22 (task b38f70bb — reviewDoc legacy cleanup)
 **Repo:** `Stoffer-Industries/sindustries` · `agents/workflows/bookmarks/`
 
 ---
@@ -330,6 +330,97 @@ never raised, so the JSONL path is unaffected.
   migration but stays empty until the feature-task workflow wires its
   equivalent helper. It exists now so Pulse can build queries against the
   full pipeline shape without a second migration.
+
+---
+
+## Artifact Contract: `summaryDoc` is the canonical primary signal
+
+Pipeline routing and approval packaging now use `summaryDoc` as the
+sole primary document signal. The legacy `reviewDoc` field is no
+longer read by any routing path; only an isolated, explicitly
+documented cleanup branch in `lobster_list_curate_candidates.py`
+still references it (and only for legacy-only records with no
+`summaryDoc`).
+
+- **`summaryDoc: string`** — durable summary artifact path; written by `lobster_summarize.py`.
+  Routing uses `common.summary_doc_path(item)` — returns "" when the
+  field is missing or empty. The helper deliberately does **not**
+  fall back to `reviewDoc`.
+- **`curation: object`** — relevance + routing decision; owned by `validate_curate_output.py`.
+- **`reviewDoc: string`** — deprecated. Removed from records that also
+  contain `summaryDoc`; not written by any current script. Records
+  that only carry `reviewDoc` (no `summaryDoc`) remain terminal
+  history until normal summarization backfills them.
+
+### Why `summaryDoc` is sole primary (PR #275 workaround)
+
+The previous `_active_doc = reviewDoc || summaryDoc` expression let
+legacy reviewDoc-only records outrank summary-only items in priority
+recovery — newly-curated items dropped out of approval packaging.
+Replacing the dual expression with `summary_doc_path(existing)`
+restores the intended ordering: priority recovery is reserved for
+items the current pipeline has summarized, regardless of any legacy
+field they may still carry.
+
+### One-time state cleanup
+
+Runbook for `agents/workflows/bookmarks/scripts/migrate_reviewdoc_fields.py`:
+
+1. **Dry-run first** (always safe, never mutates):
+   ```bash
+   python3 agents/workflows/bookmarks/scripts/migrate_reviewdoc_fields.py
+   ```
+   Inspect `eligible` (records that will lose `reviewDoc`),
+   `skippedMissingSummary` (records whose `summaryDoc` file is gone —
+   left untouched to avoid erasing the only pointer to a recoverable
+   record), and `reviewDocOnly` (legacy-only records that are
+   intentionally preserved).
+
+2. **Apply**:
+   ```bash
+   python3 agents/workflows/bookmarks/scripts/migrate_reviewdoc_fields.py --apply
+   ```
+   The script writes a timestamped backup
+   (`bookmark-review-state.json.bak.<UTC-timestamp>`) next to the
+   state file before mutating. State changes are written to a
+   same-directory temporary file, fsync'd, and atomically replaced via
+   `os.replace` — a crash mid-write cannot corrupt live state.
+
+3. **Verify idempotence**:
+   ```bash
+   python3 agents/workflows/bookmarks/scripts/migrate_reviewdoc_fields.py
+   ```
+   A clean re-run reports `eligible=0, changed=0`. The script
+   preserves every other field (`summaryDoc`, `reviewStatus`,
+   `approvals`, `curation`, `taskIds`, transition history,
+   `lastUpdatedAt`, …) verbatim.
+
+4. **Smoke-test the pipeline**:
+   ```bash
+   python3 agents/skills/bookmarks/state/bookmark_state_analyzer.py   # read-only summary
+   python3 agents/workflows/bookmarks/scripts/lobster_list_curate_candidates.py --json | jq '.count'
+   ```
+   Both should run without surprises; no new priority candidates
+   should appear, and no records should have lost curation, approvals,
+   or task IDs.
+
+### Rollback
+
+If the apply mutates something it should not have:
+
+1. Stop the bookmark review cron.
+2. `cp brain/state/bookmark-review-state.json.bak.<UTC-timestamp> brain/state/bookmark-review-state.json`
+3. Inspect the diff; re-run the analyzer; restart the cron.
+
+The script touches only the `reviewDoc` field on records that have
+both `summaryDoc` AND a valid `summaryDoc` file on disk. No other
+field is ever modified, so a partial rollback (copy specific keys
+back) is also straightforward.
+
+### Tests
+
+- `agents/workflows/bookmarks/scripts/tests/test_migrate_reviewdoc_fields.py` — 5 tests: dry-run no-mutation, apply-removes-only-reviewDoc, missing-summary skip, idempotence, reviewDoc-only preservation.
+- `agents/workflows/bookmarks/scripts/tests/test_summary_only_priority_recovery.py` — 2 tests: summaryDoc-only item with spec work enters priority candidates; reviewDoc-only item does NOT take priority slots.
 
 ---
 
