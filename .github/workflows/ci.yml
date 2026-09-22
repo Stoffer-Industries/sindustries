@@ -227,6 +227,15 @@ jobs:
       - name: Run observability provisioning contract test
         run: bash infra/cloud/scripts/tests/observability-provisioning.test.sh
 
+      - name: Run observability bootstrap / evidence / failure-inject contract test (task 31233a0a)
+        # AC2/AC3 evidence-pack helper regression guard — exercises the
+        # subcommand dispatch + --dry-run surfaces of bootstrap-observability.sh,
+        # evidence-capture.sh, and failure-inject.sh without requiring Fly or
+        # Grafana access. Closes the gap where the operator scripts Quinn
+        # runs could silently regress while the dashboard/alert JSONs stayed
+        # in sync.
+        run: bash infra/cloud/scripts/tests/observability-bootstrap.test.sh
+
   mission-control-tests:
     name: mission-control tests
     runs-on: ubuntu-latest
