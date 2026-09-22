@@ -101,7 +101,7 @@ def reset_to_approval_ready(bookmark_key: str) -> dict:
             "bodyExcerpt": item.get("bodyExcerpt") or "",
             "body": item.get("body") or "",
             "analysis": item.get("analysis") or {},
-            "reviewDoc": item.get("reviewDoc") or "",
+            "summaryDoc": item.get("summaryDoc") or "",
             "specDocs": [],
             "specProposals": [],
         }],

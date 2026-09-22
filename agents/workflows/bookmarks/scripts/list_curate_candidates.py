@@ -45,6 +45,7 @@ from common import (
     WORKSPACE,
     dump_json,
     load_state,
+    summary_doc_path,
 )
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -67,11 +68,11 @@ def load_focus_config() -> dict[str, Any]:
 def needs_curation(item: dict[str, Any], recuration_days: int) -> bool:
     """True iff the item has been through summarize AND its curation is missing or stale.
 
-    "Has been through summarize" = has a `summary` in state OR a `reviewDoc`
+    "Has been through summarize" = has a `summary` in state OR a `summaryDoc`
     path on disk. The summary cache in state is optional (summarize writes
-    the review doc to disk; the state cache is for fast lookup).
+    the summary doc to disk; the state cache is for fast lookup).
     """
-    if not (item.get("summary") or item.get("reviewDoc")):
+    if not (item.get("summary") or summary_doc_path(item)):
         return False
     curation = item.get("curation")
     if not curation:
@@ -97,7 +98,7 @@ def hydrate_candidate(item: dict[str, Any]) -> dict[str, Any]:
         "topic": item.get("topic", "general"),
         "reviewStatus": item.get("reviewStatus"),
         "curationAgeDays": _curation_age_days(curation) if curation else None,
-        "reviewDoc": item.get("reviewDoc", ""),
+        "summaryDoc": summary_doc_path(item),
         "summary": item.get("summary") or {},
         "previousCuration": curation if curation else None,
     }

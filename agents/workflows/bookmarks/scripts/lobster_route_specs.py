@@ -73,7 +73,7 @@ def _build_item_summary(item: dict) -> dict:
         "path": item.get("path"),
         "topic": item.get("topic"),
         "title": item.get("title"),
-        "reviewDoc": item.get("reviewDoc"),
+        "summaryDoc": item.get("summaryDoc"),
         "specDocs": spec_docs,
         "proposedTasks": proposed_tasks,
         "headline": analysis.get("headline"),
