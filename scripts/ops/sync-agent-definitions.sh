@@ -185,10 +185,20 @@ for shim_agent in "${SHIM_AGENTS[@]}"; do
 # The shim wraps every \`gh\` invocation so the ambient GITHUB_TOKEN from
 # ~/.openclaw/.env no longer silently authenticates as a different agent.
 # Sourcing is idempotent — the shim guards itself against re-stacking.
+#
+# IMPORTANT: AGENT_ID is exported on its own line BEFORE the source call.
+# A prefix-assignment like \`AGENT_ID=\"$shim_agent\" source ...\` would only
+# set AGENT_ID transiently for the source call and the wrapper would then
+# fail to resolve the agent identity at function-call time — leaving the
+# shim as dead code and re-introducing the ambient-gh-token-overrides-profile
+# pattern. Keep the assignment and the source on separate lines so AGENT_ID
+# persists in the parent shell after sourcing.
+#
 # Host-side wiring (Quinn-routed, .openclaw boundary): add a single line
 # to ~/.zshenv that sources this file:
 #   [[ -f \"\$HOME/.openclaw/workspace/agents/$shim_agent/.gh-shim.sh\" ]] && source \"\$HOME/.openclaw/workspace/agents/$shim_agent/.gh-shim.sh\"
-AGENT_ID=\"$shim_agent\" source \"\$HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh\"
+export AGENT_ID=\"$shim_agent\"
+source \"\$HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh\"
 "
   shim_staged_snippet=$(mktemp "${TMPDIR:-/tmp}/agent-shim-snippet.XXXXXX")
   printf '%s' "$shim_snippet_body" > "$shim_staged_snippet"
