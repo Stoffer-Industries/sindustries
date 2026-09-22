@@ -10,11 +10,12 @@
 #   4. When the per-agent token env var is unset, the shim still unsets the
 #      bare ambient vars before falling back to `command gh` (AC2 graceful
 #      degradation).
-#   5. `GH_SHIM_AGENT` explicit override beats `AGENT_ID`.
+#   5. `GH_SHIM_AGENT` explicit override beats runtime-derived identity.
+#   6. The production zsh sourcing path stays silent and routes by CODEX_HOME.
 #
-# The test runs under `bash` only; `python3` is not required. Stub `gh`
-# records argv + env to a temp log so the assertions can read what the shim
-# actually forwarded.
+# The harness runs under bash and includes a production-parity zsh subprocess;
+# `python3` is not required. Stub `gh` records argv + env to a temp log so the
+# assertions can read what the shim actually forwarded.
 
 set -euo pipefail
 
@@ -202,7 +203,7 @@ STDERR_FILE="${TMPDIR_TEST}/stderr"
   export PATH="${STUB_DIR}:/usr/bin:/bin"
   export HOME="${TMPDIR_TEST}/agent-home"
   export GITHUB_TOKEN=ghp_quinn_ambient
-  unset GH_SHIM_AGENT AGENT_ID
+  unset GH_SHIM_AGENT OPENCLAW_AGENT_ID CODEX_HOME AGENT_ID
   source "${SHIM}"
   gh api user --jq .login
 ) >"${STDOUT_FILE}" 2>"${STDERR_FILE}" || true
@@ -228,6 +229,32 @@ run_shim \
   "ROWAN_GITHUB_TOKEN=ghp_rowan_scoped"
 assert_log_contains 'argv: api|user|--jq|.login'
 pass "argv passes through unchanged"
+
+# Case 10: production shells are zsh. Sourcing under `set -u` must stay silent,
+# must not emit function bodies, and CODEX_HOME must beat a stale AGENT_ID left
+# by a previous broken ~/.zshenv installation.
+if command -v zsh >/dev/null 2>&1; then
+  ZSH_LOG="${TMPDIR_TEST}/zsh.log"
+  env -i \
+    HOME="${TMPDIR_TEST}/agent-home" \
+    PATH="${STUB_DIR}:/usr/bin:/bin" \
+    SHIM="${SHIM}" \
+    CODEX_HOME="${TMPDIR_TEST}/.openclaw/agents/rowan/agent/codex-home" \
+    AGENT_ID=ivy \
+    GITHUB_TOKEN=ghp_quinn_ambient \
+    ROWAN_GITHUB_TOKEN=ghp_rowan_scoped \
+    zsh -f -c 'set -u; source "$SHIM"; gh api user --jq .login' >"${ZSH_LOG}" 2>&1
+  if grep -qE 'bad substitution|BASH_SOURCE|^gh \(\)' "${ZSH_LOG}"; then
+    cat "${ZSH_LOG}" >&2
+    fail "zsh sourcing emitted an error or function dump"
+  fi
+  if ! grep -qF 'GH_TOKEN=ghp_rowan_scoped' "${ZSH_LOG}" || \
+     ! grep -qF "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-rowan" "${ZSH_LOG}"; then
+    cat "${ZSH_LOG}" >&2
+    fail "zsh did not resolve Rowan from CODEX_HOME"
+  fi
+  pass "zsh: silent sourcing and CODEX_HOME-scoped Rowan identity"
+fi
 
 echo
 echo "All gh-with-agent-token.sh tests passed."

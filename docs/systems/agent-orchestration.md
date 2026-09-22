@@ -2,7 +2,7 @@
 
 > The high-level map of how work flows through our setup. If something looks weird, start here, then drill into the linked system doc.
 
-**Last reviewed:** 2026-08-14
+**Last reviewed:** 2026-09-23
 **Owner:** Quinn (chief of staff)
 **Audience:** Tom — when you need to remember what runs where
 
@@ -422,6 +422,44 @@ Tom's machine
 
 **`.openclaw/` write boundary:** Only Quinn can write to `~/.openclaw/`. When Rowan or another agent needs a gateway config change, they post `[openclaw-needed]` on the task; Quinn applies it during heartbeat and posts `[openclaw-done]`.
 
+### Per-agent GitHub identity
+
+Rowan, Ash, and Ivy share the host shell environment but must author and review
+GitHub work as their own accounts. Shell init sources
+`~/.openclaw/workspace/agents/<agent>/.gh-shim.sh`, which loads the shared
+`agents/lib/gh-with-agent-token.sh` wrapper. The generated snippets do **not**
+export `AGENT_ID`: `~/.zshenv` is host-global and sourcing several identity
+exports would make the last agent win for every session.
+
+At each `gh` call, the wrapper resolves identity in this order:
+
+1. `GH_SHIM_AGENT` — explicit override for cron or isolated scripts.
+2. `OPENCLAW_AGENT_ID` — runtime identity when OpenClaw exposes it directly.
+3. The agent segment in per-agent `CODEX_HOME`.
+4. `AGENT_ID` — legacy fallback.
+
+For allow-listed agents (`rowan`, `ash`, `ivy`), it removes ambient
+`GITHUB_TOKEN`/`GH_TOKEN` from the child environment, selects
+`~/.config/gh-<agent>`, and supplies `<AGENT>_GITHUB_TOKEN` as `GH_TOKEN` when
+available. Quinn and Lox are intentionally outside the allow-list, preserving
+their explicit ambient-token workflow. The wrapper is compatible with both
+bash and zsh and must not change caller shell options or print function bodies
+during shell startup.
+
+**Failure modes and checks:**
+
+- `gh auth status` reports `quinnstoffer` in Rowan/Ash/Ivy: verify `CODEX_HOME`
+  identifies the current agent and that the matching `*_GITHUB_TOKEN` or
+  keyring profile is available.
+- Shell startup prints `bad substitution`, `BASH_SOURCE`, or function bodies:
+  the installed shared shim is stale; rerun
+  `scripts/ops/sync-agent-definitions.sh` from current `main`.
+- A cron has no per-agent runtime context: set `GH_SHIM_AGENT=<agent>` before
+  sourcing the shared shim.
+
+Operational recovery and credential-precedence detail live in
+`infra/runbooks/github-ambient-token-override.md`.
+
 **Config:** `openclaw.json` — edit via `openclaw config set <field> <value>` or direct JSON edit. Restart after changes: `openclaw gateway restart`. Key fields: `agents.defaults.workspace`, `agents.defaults.heartbeat.every`, `channels.telegram.allowFrom`, `crons`.
 
 **Cron jobs:** Defined in `agents/crons/prompts/` as `.md` files. Registered in `openclaw.json`. Run `cron list` to verify. `openclaw gateway status` / `openclaw gateway restart` for health.
@@ -432,6 +470,7 @@ Tom's machine
 
 - `docs/systems/bookmark-workflow.md` — bookmark workflow state machine and script map
 - `docs/systems/tasks.md` — Tasks API data model, comment tag protocol, dependency system, all three workflows
+- `infra/runbooks/github-ambient-token-override.md` — per-agent GitHub credential recovery and diagnostics
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
 - `agents/rowan/SOUL.md` — Rowan's operating contract

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: b0d1b42e-9fc3-40f4-86d1-af9125c6454f
 product_spec: brain/tasks/specs/in-progress/ambient-gh-token-overrides-profile-2026-09-14.md
 shipped_pr: null
@@ -64,17 +64,17 @@ Rowan cannot write to `~/.openclaw/`; any direct edit to `~/.openclaw/.env` or O
 
 ### Surface 1 — shared shim: `agents/lib/gh-with-agent-token.sh`
 
-A POSIX-shell function file sourced by each agent's session-init that wraps `gh` invocations. The shim:
+A bash/zsh-compatible function file sourced by each agent's session-init that wraps `gh` invocations. The shim:
 
-1. Detects the agent from `AGENT_ID` (or `$AGENT`-style env var) — fallback to reading the calling process's argv[0] basename when AGENT_ID is unset.
+1. Detects the agent from session-scoped runtime context: explicit `GH_SHIM_AGENT`, `OPENCLAW_AGENT_ID`, the agent segment in `CODEX_HOME`, then legacy `AGENT_ID`. Generated snippets never export `AGENT_ID`, because the host's `~/.zshenv` is shared across all local agents.
 2. Looks up the per-agent token via `<AGENT>_GITHUB_TOKEN` (uppercased). For `rowan`, that's `ROWAN_GITHUB_TOKEN`; for `ash`, `ASH_GITHUB_TOKEN`; etc.
 3. Constructs the invocation as:
 
    ```sh
    env -u GITHUB_TOKEN -u GH_TOKEN \
-       GH_CONFIG_DIR="$HOME/.config/gh-${AGENT_ID}" \
+       GH_CONFIG_DIR="$HOME/.config/gh-${agent}" \
        GH_TOKEN="$AGENT_GITHUB_TOKEN" \
-       command gh "$@"
+       gh "$@"
    ```
 
    This guarantees: (a) bare `GITHUB_TOKEN` is unset for the child process, so the per-agent `GH_TOKEN` wins; (b) `GH_CONFIG_DIR` is correctly scoped to the agent; (c) `GH_TOKEN` is the agent's own token.
@@ -122,11 +122,11 @@ AC3 cannot be unit-tested because it is observational (a 7-day window). The slug
 
 ## Open questions / risks
 
-1. **Quinn/Lox session identity.** The shim must not regress Quinn's or Lox's existing write-op convention. Risk: if `AGENT_ID` detection is wrong for a Quinn or Lox session, the shim could unset their authoritative `GITHUB_TOKEN`. Mitigation: the shim has an explicit allow-list (`rowan`, `ash`, `ivy` etc.); Quinn and Lox are NOT in the allow-list and the shim passes through to `command gh` unchanged for them. This makes the shim behavior a no-op for Quinn/Lox and a behavior change only for the agents who actually have the bug.
+1. **Quinn/Lox session identity.** The shim must not regress Quinn's or Lox's existing write-op convention. Risk: if runtime identity detection is wrong for a Quinn or Lox session, the shim could unset their authoritative `GITHUB_TOKEN`. Mitigation: the shim has an explicit allow-list (`rowan`, `ash`, `ivy` etc.); Quinn and Lox are NOT in the allow-list and the shim passes through to `command gh` unchanged for them. This makes the shim behavior a no-op for Quinn/Lox and a behavior change only for the agents who actually have the bug.
 
-2. **Cron jobs and external scripts.** Crons that run `gh` inherit whatever env was set when the cron was spawned. The shim only helps if the cron inherits `AGENT_ID` and `*_GITHUB_TOKEN`. Risk: a cron spawned without the agent's identity env vars falls back to the existing manual unset pattern. Mitigation: the runbook update explicitly tells cron authors to source `agents/lib/gh-with-agent-token.sh` before any `gh` invocation. Existing crons are out of scope for this PR; a follow-up coordination comment flags them.
+2. **Cron jobs and external scripts.** Crons that run `gh` inherit whatever env was set when the cron was spawned. The shim only helps if the cron exposes agent runtime context and `*_GITHUB_TOKEN`. Risk: a cron spawned without either falls through unchanged and warns when an ambient token exists. Mitigation: cron authors can set the explicit `GH_SHIM_AGENT` override before sourcing `agents/lib/gh-with-agent-token.sh`. Existing crons are out of scope for this PR.
 
-3. **Test coverage of the shim itself.** Shell shims are notoriously hard to unit-test. Risk: a bug in the shim (e.g., a quoting issue with `env -u …`) defeats the whole purpose. Mitigation: the unit tests use `env -i PATH=/usr/bin:/bin /path/to/gh-with-agent-token.sh gh api user --jq .login` in a fully isolated env, and assert on the exit code + stdout. Three test cases: (a) agent identity resolves correctly; (b) bare `GITHUB_TOKEN` is unset; (c) Quinn/Lox fall through unchanged.
+3. **Test coverage of the shim itself.** Shell shims are notoriously hard to unit-test. Risk: a quoting or shell-compatibility bug defeats the whole purpose. Mitigation: tests use a fully isolated environment and stub `gh`, covering identity routing, token cleanup, Quinn/Lox passthrough, and a production-parity zsh + `set -u` case that asserts silent sourcing and `CODEX_HOME` precedence over stale `AGENT_ID`.
 
 4. **Coordination with the gateway team.** The structural fix is in OpenClaw (separate repo, separate PR, Quinn-orchestrated). This PR doesn't depend on that, but AC3's 7-day window is only meaningful once the gateway fix lands — otherwise the shim's fallback path (existing unset) is what runs and the slug would still appear whenever an agent forgets the unset. Mitigation: AC3 is gated on both PRs landing + 7 days; the shim PR can land independently and the gateway PR is tracked as a follow-up coordination task.
 
