@@ -127,4 +127,49 @@ assert_create_args "$TMP/fly.substring.log" "sindustries-tasks-api-staging --org
 run_case "lowercase" '[{"name":"sindustries-tasks-api-staging","status":"running"}]'
 assert_no_create "$TMP/fly.lowercase.log" "case=lowercase"
 
-echo "bootstrap-staging: ok (4 cases)"
+# ---------- case 5: budget-api migration is invoked with --migrate ---------
+
+# Regression guard for task 2850c5ac AC1 — budget-api has its own Prisma
+# schema (services/budget-api/prisma with 6 migrations), so the bootstrap
+# script must ssh-console into the budget-api Fly app and run
+# `npx prisma migrate deploy` against /app/services/budget-api when
+# `--migrate` is passed. Without this row, the budget-api DB ends up
+# empty and the staging smoke-session mint step fails with
+# `Error: The table 'budget_api.User' does not exist in the current database.`
+cat >"$TMP/.env.local.budget" <<'ENV'
+TASKS_API_DATABASE_URL=postgres://stub:stub@localhost:5432/stub
+BUDGET_API_DATABASE_URL=postgres://stub:stub@localhost:5432/stub
+ENV
+
+FLY_LOG="$TMP/fly.budget-migrate.log" \
+FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging","Status":"running"},{"Name":"sindustries-budget-api-staging","Status":"running"}]' \
+PATH="$TMP/bin:$PATH" \
+  bash "$SCRIPT" --yes --migrate --service budget-api --env-local "$TMP/.env.local.budget" \
+    >"$TMP/out.budget-migrate" 2>"$TMP/err.budget-migrate" \
+    || true
+
+if ! grep -qF 'INVOKED: ssh console --app sindustries-budget-api-staging -C cd /app/services/budget-api && npx prisma migrate deploy' "$TMP/fly.budget-migrate.log"; then
+  echo "FAIL: case=budget-migrate — expected budget-api ssh console + prisma migrate deploy, but it was not invoked" >&2
+  sed 's/^/  /' "$TMP/fly.budget-migrate.log" >&2
+  exit 1
+fi
+
+# ---------- case 6: budget-api migration is NOT invoked without --migrate --
+
+# Sanity counterpart to case 5: omitting --migrate must skip the
+# `prisma migrate deploy` ssh console call entirely. Default behaviour is
+# no migrations; passing --migrate is the opt-in.
+FLY_LOG="$TMP/fly.budget-nomigrate.log" \
+FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging","Status":"running"},{"Name":"sindustries-budget-api-staging","Status":"running"}]' \
+PATH="$TMP/bin:$PATH" \
+  bash "$SCRIPT" --yes --service budget-api --env-local "$TMP/.env.local.budget" \
+    >"$TMP/out.budget-nomigrate" 2>"$TMP/err.budget-nomigrate" \
+    || true
+
+if grep -qF 'INVOKED: ssh console --app sindustries-budget-api-staging' "$TMP/fly.budget-nomigrate.log"; then
+  echo "FAIL: case=budget-nomigrate — ssh console should not be invoked when --migrate is omitted" >&2
+  sed 's/^/  /' "$TMP/fly.budget-nomigrate.log" >&2
+  exit 1
+fi
+
+echo "bootstrap-staging: ok (6 cases)"
