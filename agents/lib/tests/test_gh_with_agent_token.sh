@@ -8,8 +8,8 @@
 #   3. The shim exports `GH_CONFIG_DIR=~/.config/gh-<agent>` and
 #      `GH_TOKEN=$<AGENT>_GITHUB_TOKEN` for an allowed agent.
 #   4. When the per-agent token env var is unset, the shim still unsets the
-#      bare ambient vars before falling back to `command gh` (AC2 graceful
-#      degradation).
+#      bare ambient vars and scopes `GH_CONFIG_DIR` so the agent's keyring
+#      profile is used instead of the host default (AC2 graceful degradation).
 #   5. `GH_SHIM_AGENT` explicit override beats runtime-derived identity.
 #   6. The production zsh sourcing path stays silent and routes by CODEX_HOME.
 #
@@ -168,9 +168,9 @@ assert_log_contains 'GH_TOKEN=ghp_ivy_scoped'
 assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-ivy"
 pass "ivy: scoped identity applied (AC1 cross-agent)"
 
-# Case 6: Rowan but ROWAN_GITHUB_TOKEN is unset (gateway hasn't propagated it
-# yet). Shim must still unset the ambient vars — fallback to `command gh`
-# without leaking Quinn's identity (AC2 graceful degradation).
+# Case 6: Rowan but ROWAN_GITHUB_TOKEN is unset. Shim must still unset the
+# ambient vars and select Rowan's config/keyring profile, never the host's
+# default Quinn profile (AC2 graceful degradation).
 run_shim \
   "GH_SHIM_AGENT=rowan" \
   "GITHUB_TOKEN=ghp_quinn_ambient" \
@@ -178,8 +178,8 @@ run_shim \
 # Both ambient vars must be unset even though no per-agent token was found.
 assert_log_contains 'GITHUB_TOKEN=<unset>'
 assert_log_contains 'GH_TOKEN=<unset>'
-assert_log_contains 'GH_CONFIG_DIR=<unset>'
-pass "rowan without token: ambient vars unset, no GH_CONFIG_DIR (fallback path)"
+assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-rowan"
+pass "rowan without token: ambient vars unset, Rowan GH_CONFIG_DIR retained"
 
 # Case 7: GH_SHIM_AGENT overrides AGENT_ID (explicit override beats env).
 run_shim \
