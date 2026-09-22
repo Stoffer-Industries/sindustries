@@ -50,8 +50,23 @@ cmp "$repo_root/agents/lib/gh-with-agent-token.sh" "$shim_dest"
 for shim_agent in rowan ash ivy; do
   snippet="$OPENCLAW_WORKSPACE_ROOT/agents/$shim_agent/.gh-shim.sh"
   [[ -f "$snippet" ]]
-  grep -F "AGENT_ID=\"$shim_agent\" source" "$snippet" >/dev/null
+  # Regression guard (task b0d1b42e follow-up): AGENT_ID MUST be exported on
+  # its own line BEFORE the source call, never as a prefix-assignment.
+  # `AGENT_ID="rowan" source ...` only sets AGENT_ID transiently for the
+  # builtin and leaves it unset in the parent shell, which makes the shim
+  # silently fall through to `command gh` with the ambient GITHUB_TOKEN
+  # (the exact `ambient-gh-token-overrides-profile` pattern this task was
+  # meant to fix).
+  grep -F "export AGENT_ID=\"$shim_agent\"" "$snippet" >/dev/null
   grep -F '$HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh' "$snippet" >/dev/null
+  # The negative check must exclude comment lines — the snippet body
+  # documents the broken pattern inside a comment, and a naive grep would
+  # false-positive on that documentation.
+  if grep -nE "^[[:space:]]*AGENT_ID=\"$shim_agent\" source" "$snippet" >/dev/null; then
+    echo "FAIL: $snippet uses the broken prefix-assignment pattern (AGENT_ID=... source ...)" >&2
+    echo "      AGENT_ID does not persist in the parent shell, leaving the shim dead." >&2
+    exit 1
+  fi
 done
 
 [[ ! -f "$OPENCLAW_WORKSPACE_ROOT/agents/quinn/.gh-shim.sh" ]]
@@ -62,6 +77,30 @@ before_shim=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -type f | wc -l | tr -d ' 
 "$SCRIPT" >/dev/null
 after_shim=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -type f | wc -l | tr -d ' ')
 [[ "$before_shim" == "$after_shim" ]]
+
+# Regression guard (task b0d1b42e follow-up): sourcing the actual emitted
+# .gh-shim.sh in a clean subshell MUST leave AGENT_ID set in the parent
+# shell and wrap `gh` so it scopes to the per-agent identity. The previous
+# template (`AGENT_ID="rowan" source ...`) only set AGENT_ID transiently
+# for the source builtin, leaving the wrapper dead in production — the
+# AC1/AC2 regression Quinn's host install failed to catch.
+emitted_snippet="$OPENCLAW_WORKSPACE_ROOT/agents/rowan/.gh-shim.sh"
+AGENT_ID_AFTER=$(bash -c "source '$emitted_snippet'; printf '%s' \"\${AGENT_ID-<unset>}\"")
+if [[ "$AGENT_ID_AFTER" != "rowan" ]]; then
+  echo "FAIL: sourcing $emitted_snippet did not persist AGENT_ID in the parent shell" >&2
+  echo "      got: '$AGENT_ID_AFTER' (expected: 'rowan')" >&2
+  echo "      this is the ambient-gh-token-overrides-profile regression" >&2
+  exit 1
+fi
+# Also confirm the wrapper is registered as a shell function (not the
+# system binary), so a future `gh` invocation in the same shell will go
+# through the shim.
+WRAPPER_KIND=$(bash -c "source '$emitted_snippet'; type gh" | head -1)
+if [[ "$WRAPPER_KIND" != "gh is a function" && "$WRAPPER_KIND" != "gh is a shell function"* ]]; then
+  echo "FAIL: sourcing $emitted_snippet did not register gh as a shell function" >&2
+  echo "      got: '$WRAPPER_KIND'" >&2
+  exit 1
+fi
 
 # Functional check: sourcing the snippet with HOME pointed at the test
 # workspace must wrap `gh` so that calling `gh pr view` (a stubbed no-op
