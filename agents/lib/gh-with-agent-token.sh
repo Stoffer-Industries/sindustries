@@ -18,27 +18,40 @@
 # because their documented write-op convention (`GITHUB_TOKEN=$QUINN_GITHUB_TOKEN
 # gh ...`) depends on the ambient `GITHUB_TOKEN` being authoritative.
 #
-# Sourcing: each agent's session-init sources this file. Sourcing is idempotent
-# — repeated source calls do not stack wrapper functions. Tests live at
-# `agents/lib/tests/test_gh_with_agent_token.sh` and run under bash with a
-# stubbed `gh` binary on PATH.
-
-set -euo pipefail
+# Sourcing: each agent's session-init sources this file. The implementation is
+# deliberately compatible with both bash and zsh because macOS loads it from
+# ~/.zshenv. It must not mutate the caller's shell options. Tests live at
+# `agents/lib/tests/test_gh_with_agent_token.sh` with a stubbed `gh` on PATH.
 
 # Allow-list of agents whose `gh` calls this shim re-scopes. Quinn and Lox
 # are intentionally absent — see the file header comment.
-__GH_SHIM_AGENTS=(rowan ash ivy)
-
 # Detect the calling agent. Resolution order:
 #   1. `GH_SHIM_AGENT` env var (explicit override; tests use this).
-#   2. `AGENT_ID` env var (set by OpenClaw session-init when available).
-#   3. argv[0] basename when the script is invoked as a wrapper.
+#   2. `OPENCLAW_AGENT_ID` when the runtime exposes it directly.
+#   3. The agent segment in Codex's per-agent `CODEX_HOME`.
+#   4. `AGENT_ID` as a legacy fallback.
 # Returns empty when no agent can be resolved — callers fall through to
 # `command gh` unchanged.
 __gh_shim_resolve_agent() {
   if [[ -n "${GH_SHIM_AGENT:-}" ]]; then
     printf '%s\n' "${GH_SHIM_AGENT}"
     return 0
+  fi
+  if [[ -n "${OPENCLAW_AGENT_ID:-}" ]]; then
+    printf '%s\n' "${OPENCLAW_AGENT_ID}"
+    return 0
+  fi
+  if [[ -n "${CODEX_HOME:-}" ]]; then
+    case "${CODEX_HOME}" in
+      */.openclaw/agents/*/agent/codex-home*)
+        local codex_agent="${CODEX_HOME#*/.openclaw/agents/}"
+        codex_agent="${codex_agent%%/*}"
+        if [[ -n "${codex_agent}" ]]; then
+          printf '%s\n' "${codex_agent}"
+          return 0
+        fi
+        ;;
+    esac
   fi
   if [[ -n "${AGENT_ID:-}" ]]; then
     printf '%s\n' "${AGENT_ID}"
@@ -54,13 +67,10 @@ __gh_shim_agent_allowed() {
   if [[ -z "${agent}" ]]; then
     return 1
   fi
-  local allowed
-  for allowed in "${__GH_SHIM_AGENTS[@]}"; do
-    if [[ "${agent}" == "${allowed}" ]]; then
-      return 0
-    fi
-  done
-  return 1
+  case "${agent}" in
+    rowan|ash|ivy) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Warn once per process when an override is in effect but the agent identity
@@ -86,7 +96,10 @@ gh() {
   agent="$(__gh_shim_resolve_agent)"
   local -r agent_upper="$(printf '%s' "${agent}" | tr '[:lower:]' '[:upper:]')"
   local -r token_var="${agent_upper}_GITHUB_TOKEN"
-  local -r token_value="${!token_var:-}"
+  # `printenv` is portable across bash and zsh. Bash's `${!name}` indirect
+  # expansion aborts in zsh with "bad substitution".
+  local token_value
+  token_value="$(command printenv "${token_var}" 2>/dev/null || true)"
 
   if [[ -z "${token_value}" ]]; then
     # Per-agent token missing — fall back to the system `gh` after
@@ -114,16 +127,17 @@ gh-with-agent-token() {
   gh "$@"
 }
 
-# Export the functions so they survive subshell boundaries (cron jobs, helper
-# scripts that re-exec `bash -c`). Without `export -f`, the function is only
-# visible inside the sourcing shell.
-export -f gh gh-with-agent-token 2>/dev/null || true
-export -f __gh_shim_resolve_agent __gh_shim_agent_allowed __gh_shim_warn_unresolved 2>/dev/null || true
+# Export functions only in bash. In zsh, `export -f` prints function bodies to
+# stdout instead of exporting them, polluting every shell startup.
+if [[ -n "${BASH_VERSION:-}" ]]; then
+  export -f gh gh-with-agent-token 2>/dev/null || true
+  export -f __gh_shim_resolve_agent __gh_shim_agent_allowed __gh_shim_warn_unresolved 2>/dev/null || true
+fi
 
 # Self-test hook — when `gh-with-agent-token.sh` is invoked as a command (not
 # sourced), print the resolved agent and exit 0. This makes the file safely
 # executable in isolation and provides a smoke check in production shells.
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ -n "${BASH_VERSION:-}" && "${BASH_SOURCE:-}" == "${0}" ]]; then
   if agent="$(__gh_shim_resolve_agent 2>/dev/null)"; then
     printf 'agent=%s allowed=%s\n' "${agent}" "$(__gh_shim_agent_allowed && echo yes || echo no)"
   else

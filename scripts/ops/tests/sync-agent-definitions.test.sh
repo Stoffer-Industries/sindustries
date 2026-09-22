@@ -38,8 +38,8 @@ after=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -type f | wc -l | tr -d ' ')
 #   1. Materialise the shim at $OPENCLAW_WORKSPACE_ROOT/agents/lib/gh-with-agent-token.sh
 #      matching the repo source (file mode 0755).
 #   2. Emit .gh-shim.sh snippets for each allow-listed agent (rowan, ash,
-#      ivy) with AGENT_ID pinned to that agent's name and the shim path
-#      correctly referenced. Quinn and Lox snippets must NOT be emitted.
+#      ivy) that source the shim without mutating global AGENT_ID. Quinn and
+#      Lox snippets must NOT be emitted.
 #   3. Treat re-runs as no-ops when source and destination byte-match (the
 #      backup count stays unchanged across reruns).
 shim_dest="$OPENCLAW_WORKSPACE_ROOT/agents/lib/gh-with-agent-token.sh"
@@ -50,23 +50,13 @@ cmp "$repo_root/agents/lib/gh-with-agent-token.sh" "$shim_dest"
 for shim_agent in rowan ash ivy; do
   snippet="$OPENCLAW_WORKSPACE_ROOT/agents/$shim_agent/.gh-shim.sh"
   [[ -f "$snippet" ]]
-  # Regression guard (task b0d1b42e follow-up): AGENT_ID MUST be exported on
-  # its own line BEFORE the source call, never as a prefix-assignment.
-  # `AGENT_ID="rowan" source ...` only sets AGENT_ID transiently for the
-  # builtin and leaves it unset in the parent shell, which makes the shim
-  # silently fall through to `command gh` with the ambient GITHUB_TOKEN
-  # (the exact `ambient-gh-token-overrides-profile` pattern this task was
-  # meant to fix).
-  grep -F "export AGENT_ID=\"$shim_agent\"" "$snippet" >/dev/null
-  grep -F '$HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh' "$snippet" >/dev/null
-  # The negative check must exclude comment lines — the snippet body
-  # documents the broken pattern inside a comment, and a naive grep would
-  # false-positive on that documentation.
-  if grep -nE "^[[:space:]]*AGENT_ID=\"$shim_agent\" source" "$snippet" >/dev/null; then
-    echo "FAIL: $snippet uses the broken prefix-assignment pattern (AGENT_ID=... source ...)" >&2
-    echo "      AGENT_ID does not persist in the parent shell, leaving the shim dead." >&2
+  # ~/.zshenv is shared across local agents and may source every emitted
+  # snippet. None may overwrite another session's identity.
+  if grep -nE '^[[:space:]]*(export[[:space:]]+)?AGENT_ID=' "$snippet" >/dev/null; then
+    echo "FAIL: $snippet mutates global AGENT_ID" >&2
     exit 1
   fi
+  grep -F '$HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh' "$snippet" >/dev/null
 done
 
 [[ ! -f "$OPENCLAW_WORKSPACE_ROOT/agents/quinn/.gh-shim.sh" ]]
@@ -78,18 +68,13 @@ before_shim=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -type f | wc -l | tr -d ' 
 after_shim=$(find "$OPENCLAW_AGENT_DEFS_BACKUP_ROOT" -type f | wc -l | tr -d ' ')
 [[ "$before_shim" == "$after_shim" ]]
 
-# Regression guard (task b0d1b42e follow-up): sourcing the actual emitted
-# .gh-shim.sh in a clean subshell MUST leave AGENT_ID set in the parent
-# shell and wrap `gh` so it scopes to the per-agent identity. The previous
-# template (`AGENT_ID="rowan" source ...`) only set AGENT_ID transiently
-# for the source builtin, leaving the wrapper dead in production — the
-# AC1/AC2 regression Quinn's host install failed to catch.
+# Regression guard: sourcing every emitted snippet, as the shared host
+# ~/.zshenv does, must not change a session-scoped identity.
 emitted_snippet="$OPENCLAW_WORKSPACE_ROOT/agents/rowan/.gh-shim.sh"
-AGENT_ID_AFTER=$(bash -c "source '$emitted_snippet'; printf '%s' \"\${AGENT_ID-<unset>}\"")
+AGENT_ID_AFTER=$(AGENT_ID=rowan bash -c "source '$OPENCLAW_WORKSPACE_ROOT/agents/rowan/.gh-shim.sh'; source '$OPENCLAW_WORKSPACE_ROOT/agents/ash/.gh-shim.sh'; source '$OPENCLAW_WORKSPACE_ROOT/agents/ivy/.gh-shim.sh'; printf '%s' \"\${AGENT_ID-<unset>}\"")
 if [[ "$AGENT_ID_AFTER" != "rowan" ]]; then
-  echo "FAIL: sourcing $emitted_snippet did not persist AGENT_ID in the parent shell" >&2
+  echo "FAIL: sourcing emitted snippets changed AGENT_ID" >&2
   echo "      got: '$AGENT_ID_AFTER' (expected: 'rowan')" >&2
-  echo "      this is the ambient-gh-token-overrides-profile regression" >&2
   exit 1
 fi
 # Also confirm the wrapper is registered as a shell function (not the
@@ -124,7 +109,7 @@ chmod +x "$SHIM_STUB_DIR/gh"
 TMP_SNIPPET="$TMP_SHIM_HOME/snip.sh"
 cat >"$TMP_SNIPPET" <<EOF
 export PATH="$SHIM_STUB_DIR:\$PATH"
-export AGENT_ID="rowan"
+export CODEX_HOME="$TMP_SHIM_HOME/.openclaw/agents/rowan/agent/codex-home"
 source "$TMP_SHIM_HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh"
 EOF
 # Fallback path: when the per-agent token env var is unset, the shim must

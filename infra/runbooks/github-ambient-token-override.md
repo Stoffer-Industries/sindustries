@@ -42,13 +42,15 @@ Substitute the agent token env var for the agent actually running the command (`
 
 ## Structural fix (PR #TBD, task b0d1b42e)
 
-A shared shell shim at `agents/lib/gh-with-agent-token.sh` is sourced at every agent's session-init. It wraps `gh` so that:
+A bash/zsh-compatible shared shell shim at `agents/lib/gh-with-agent-token.sh` is sourced at every agent's session-init. It resolves the current agent from session-scoped runtime context (`OPENCLAW_AGENT_ID`, then the agent segment in `CODEX_HOME`, with `AGENT_ID` as a legacy fallback) and wraps `gh` so that:
 
 - `GITHUB_TOKEN` and `GH_TOKEN` are unset in the child process (so the per-agent `GH_TOKEN` wins).
 - `GH_CONFIG_DIR` is set to `~/.config/gh-<agent>`.
 - `GH_TOKEN` is set to `$<AGENT>_GITHUB_TOKEN` (already part of the env contract).
 
 Allow-list: `rowan`, `ash`, `ivy`. Quinn and Lox are intentionally absent — their documented write-op convention depends on the ambient `GITHUB_TOKEN` being authoritative.
+
+The generated `.gh-shim.sh` files only source the shared wrapper; they do not export `AGENT_ID`. The host's `~/.zshenv` is shared, so exporting a different identity from every snippet would make the last sourced agent win globally. The wrapper also avoids Bash-only indirect expansion and `export -f` when running under zsh.
 
 Graceful degradation: when `<AGENT>_GITHUB_TOKEN` is unset (gateway hasn't propagated the per-agent scope yet), the shim still unsets the ambient vars before falling back to `command gh`, so the agent does not silently authenticate as the wrong identity — they get a `gh auth required` error instead of an attribution bug.
 
