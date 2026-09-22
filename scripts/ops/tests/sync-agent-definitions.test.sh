@@ -113,13 +113,13 @@ export CODEX_HOME="$TMP_SHIM_HOME/.openclaw/agents/rowan/agent/codex-home"
 source "$TMP_SHIM_HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh"
 EOF
 # Fallback path: when the per-agent token env var is unset, the shim must
-# still unset GITHUB_TOKEN/GH_TOKEN before exec'ing `gh` (AC2 graceful
-# degradation). GH_CONFIG_DIR is intentionally not set in this branch.
+# still unset GITHUB_TOKEN/GH_TOKEN and retain the resolved agent's
+# GH_CONFIG_DIR so `gh` cannot fall through to the host-default keyring.
 out=$(bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")
 printf '%s\n' "$out" | grep -q '^argv=pr view 1$'
 printf '%s\n' "$out" | grep -q '^GITHUB_TOKEN=<unset>$'
 printf '%s\n' "$out" | grep -q '^GH_TOKEN=<unset>$'
-printf '%s\n' "$out" | grep -q '^GH_CONFIG_DIR=<unset>$'
+printf '%s\n' "$out" | grep -q "^GH_CONFIG_DIR=$TMP_SHIM_HOME/.config/gh-rowan$"
 # Full shim path: when ROWAN_GITHUB_TOKEN is set, the shim must rewrite
 # GITHUB_TOKEN=unset, GH_TOKEN=$ROWAN_GITHUB_TOKEN, GH_CONFIG_DIR=$HOME/.config/gh-rowan.
 out_with_token=$(env -i HOME="$TMP_SHIM_HOME" PATH="$SHIM_STUB_DIR:/usr/bin:/bin" ROWAN_GITHUB_TOKEN="ghp_rowan_test_token" bash -c 'source "$1"; gh pr view 1' _ "$TMP_SNIPPET")

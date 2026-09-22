@@ -102,15 +102,15 @@ gh() {
   token_value="$(command printenv "${token_var}" 2>/dev/null || true)"
 
   if [[ -z "${token_value}" ]]; then
-    # Per-agent token missing — fall back to the system `gh` after
-    # `unset GITHUB_TOKEN GH_TOKEN` so the user still does not silently
-    # authenticate as the wrong identity (matches the documented manual
-    # workaround). `env` runs the target in a fresh subprocess, so there
-    # is no function table to bypass — we call `gh` directly, NOT
-    # `command gh`. `command` is a bash builtin and is not a real
-    # executable on Linux, so passing it to `env` would fail with exit
-    # 127 ("command not found") on GitHub Actions runners.
-    env -u GITHUB_TOKEN -u GH_TOKEN gh "$@"
+    # Per-agent token missing — unset ambient token overrides but keep the
+    # resolved agent's config directory. This lets `gh` use that profile's
+    # own keyring credential instead of silently falling through to the host's
+    # default Quinn profile. `env` runs the target in a fresh subprocess, so
+    # there is no function table to bypass — call `gh` directly, not the bash
+    # builtin `command` (which is not an executable on Linux).
+    env -u GITHUB_TOKEN -u GH_TOKEN \
+        GH_CONFIG_DIR="${HOME}/.config/gh-${agent}" \
+        gh "$@"
     return $?
   fi
 

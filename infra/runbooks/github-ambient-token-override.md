@@ -52,7 +52,7 @@ Allow-list: `rowan`, `ash`, `ivy`. Quinn and Lox are intentionally absent — th
 
 The generated `.gh-shim.sh` files only source the shared wrapper; they do not export `AGENT_ID`. The host's `~/.zshenv` is shared, so exporting a different identity from every snippet would make the last sourced agent win globally. The wrapper also avoids Bash-only indirect expansion and `export -f` when running under zsh.
 
-Graceful degradation: when `<AGENT>_GITHUB_TOKEN` is unset (gateway hasn't propagated the per-agent scope yet), the shim still unsets the ambient vars before falling back to `command gh`, so the agent does not silently authenticate as the wrong identity — they get a `gh auth required` error instead of an attribution bug.
+Graceful degradation: when `<AGENT>_GITHUB_TOKEN` is unset, the shim still unsets the ambient vars and sets `GH_CONFIG_DIR=~/.config/gh-<agent>`. `gh` can then use that agent profile's own keyring credential; if the profile has none, it fails authentication. It must never fall through to the host-default Quinn keyring profile.
 
 ## Observability (AC3)
 

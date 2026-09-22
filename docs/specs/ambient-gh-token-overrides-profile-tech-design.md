@@ -46,7 +46,7 @@ This design proposes a fix that lives **at the gateway/process-spawn boundary**,
 1. **Inside this repo (sindustries PR):** a shared shim helper at `agents/lib/gh-with-agent-token.sh` plus per-agent documentation touch-ups (HEARTBEAT.md / SOUL.md / TOOLS.md / WORKFLOW.md per agent).
 2. **Outside this repo (OpenClaw gateway PR — separate workstream):** per-agent token scoping at session-spawn so the shim has the correct input env to work with.
 
-The PR for this task delivers (1) and a coordination comment for (2); it does not require (2) to land before this PR can merge, because the shim gracefully falls back to the existing per-command unset workaround if the per-agent token env var is unset. Once (2) lands in the gateway, this PR's shim becomes the long-term structural answer; until then, the shim still works (it just falls back to the existing documented workaround).
+The PR for this task delivers (1) and a coordination comment for (2); it does not require (2) to land before this PR can merge. When the per-agent token env var is unset, the shim removes ambient token overrides while retaining the resolved agent's `GH_CONFIG_DIR`, allowing that profile's own keyring credential to authenticate without falling through to the host-default Quinn profile.
 
 Rowan cannot write to `~/.openclaw/`; any direct edit to `~/.openclaw/.env` or OpenClaw session-spawn helper is out of scope. Quinn owns the gateway config touch-up (separate task; Quinn-orchestrated).
 
@@ -89,12 +89,12 @@ This is a docs-only change in each agent's workspace. The shim is the behavioral
 
 ### Surface 3 — coordination comment for the OpenClaw gateway fix
 
-A single coordination comment on this task (and on the brain spec) noting that the **structural** fix is the gateway exposing per-agent tokens as `GH_TOKEN_<AGENT_ID>` scoped only to that agent's own session/process. Until the gateway change lands, the shim's per-agent token lookup degrades gracefully — it falls back to `command gh` after unset (the documented manual workaround). This makes the PR mergeable independently and gives the gateway team a clear target.
+A single coordination comment on this task (and on the brain spec) noting that the gateway may expose per-agent tokens as `GH_TOKEN_<AGENT_ID>` scoped only to that agent's own session/process. Until then, the shim degrades safely by unsetting ambient tokens and selecting the resolved agent's `GH_CONFIG_DIR`, so `gh` uses that profile's keyring credential rather than the host default.
 
 ## Surface 4 — implementation PRs and split
 
 - **PR 1 (this task, in scope):** shim + per-agent docs. Tests for the shim. Coordination comment. AC1 demonstrable via the new `gh` shim path; AC2 demonstrable via the test suite; AC3 demonstrable by 7-day retro-notes observation post-merge.
-- **PR 2 (separate workstream, out of scope for this task but tracked in a Quinn-orchestrated follow-up):** OpenClaw gateway exposes per-agent tokens as `GH_TOKEN_<AGENT_ID>` scoped only to that agent's own session/process. The shim's lookup picks this up automatically when present; the fallback path remains for agents whose gateway hasn't yet rolled out.
+- **PR 2 (optional separate workstream):** OpenClaw gateway exposes per-agent tokens as `GH_TOKEN_<AGENT_ID>` scoped only to that agent's own session/process. The shim uses that token when present; otherwise the per-agent `GH_CONFIG_DIR` keyring profile remains authoritative.
 
 ## Data model / API contract changes
 
