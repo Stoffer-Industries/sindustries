@@ -142,6 +142,16 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
         const initial = assigneeInitial(entry.owner);
         const ariaLabel = buildAvatarAriaLabel(entry);
         const roleDepth = entry.role === 'attention' ? 300 : entry.role === 'workflow-gate' ? 200 : 100;
+        // Within a role tier, the rightmost avatar (highest DOM index in the
+        // visible slice) is the most recently added slot and should render
+        // above the avatars to its left so it stays visible in the overlap.
+        // The role-tier baseline (delivery < workflow-gate < attention) is
+        // preserved by keeping `roleDepth` as the dominant term; the
+        // `+ index` only adjusts ordering within a tier. The separation
+        // between tiers stays strict because the roleDepth gaps (100/200/300)
+        // are wider than any realistic index within a tier under the
+        // "exactly one status-actionable gate" invariant. If that invariant
+        // is ever relaxed, re-check that the tier gaps still dominate.
         // The `data-role` attribute lets the task-details surface and the
         // accessibility script read the role without re-parsing the label.
         return (
@@ -151,7 +161,7 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
             data-role={entry.role}
             data-owner-key={entry.key}
             aria-label={ariaLabel}
-            style={{ zIndex: roleDepth - index }}
+            style={{ zIndex: roleDepth + index }}
           >
             <Avatar
               src={user?.avatarSrc ?? undefined}
