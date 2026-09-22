@@ -452,7 +452,17 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+                && task_approvals::qa_agent_blocked_after_latest_delivery(task) =>
+        {
+            // Ordinary evidence failures belong to the delivery owner. A
+            // blocked QA verdict is not an OpenClaw capability handoff and
+            // must not fall through to Ash/Quinn/Tom escalation.
+            task.assignee.clone()
+        }
+        "doing"
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && !task_approvals::qa_agent_verified(task)
+                && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(task)
                 && !ash_was_last_commenter(task) =>
         {
             Some("Ash".to_string())
@@ -468,11 +478,9 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
     }
 }
 
-/// Ash routes ordinary verification failures back to the delivery assignee by
-/// removing herself from the attention stack. Keep that handoff intact until
-/// someone else comments; otherwise the next lobster sweep immediately
-/// derives Ash again from the still-open `qa_agent` gate and overwrites the
-/// delivery owner's slot.
+/// Retained as a small audit helper for existing routing tests. The reconciler
+/// now routes explicit `[qa-agent-blocked]` verdicts by verdict type rather
+/// than relying on comment adjacency.
 pub(crate) fn ash_was_last_commenter(task: &Task) -> bool {
     task.comments
         .last()
@@ -870,6 +878,58 @@ mod tests {
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
             vec!["Quinn"]
+        );
+    }
+
+    #[test]
+    fn routing_sends_ordinary_qa_block_back_to_rowan_after_lobster_comment() {
+        let mut task = routing_task("doing", &["Ash", "Quinn", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] AC2: cited test fails.".to_string()),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("feature_task_lobster".to_string()),
+            text: Some("[lobster-state] {\"openclawNeeded\": false}".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Rowan", "Quinn", "Tom"]
+        );
+    }
+
+    #[test]
+    fn routing_never_surfaces_pending_acceptance_to_tom_while_doing() {
+        let mut task = routing_task("doing", &["Tom"]);
+        task.approvals.push(approval_row("accepted", "pending"));
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] AC1: missing regression evidence.".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Rowan", "Quinn", "Tom"]
         );
     }
 

@@ -69,8 +69,10 @@ for whichever domain the AC belongs to, not a separate approval domain.
    `agents/ash/src/verify.ts` to strip evidence annotations off the
    AC text before reasoning. Reach a per-AC verdict:
    `verified` / `blocked` / `deferred` (capability gap). Defer with
-   a precise reason on a capability gap; block on a real evidence
-   failure; verify on a clean run.
+   a precise reason only when the verifier genuinely lacks a required
+   capability; if the implementation or evidence is incomplete, block it
+   and route back to Rowan. A missing feature is not an OpenClaw/runtime
+   capability gap.
 3. If all ACs verify, write the structured `qa_agent` approval with
    Ash's credential. A `[qa-agent-verified]` comment records the
    per-AC reasoning summary; the approval row is the gate source and
