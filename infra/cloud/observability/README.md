@@ -48,7 +48,7 @@ Hosted Grafana dashboard JSON, uploaded via the Grafana provisioning API by the 
 
 ### `grafana/alerts/*.json`
 
-Ten alert rules covering availability, latency, DB health, Redis health, queue depth, and deploy failures. Each rule is JSON, uploaded by the bootstrap script, and routes to a documented Slack channel with a documented severity and owner.
+Ten alert rules covering availability, latency, DB health, Redis health, queue depth, and deploy failures. Each rule is JSON, uploaded by the bootstrap script, and exposes a documented severity and owner in Grafana Cloud. No outbound notification integration is required.
 
 ### `grafana/datasources.yaml`
 
@@ -76,10 +76,9 @@ Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key a
 After this PR lands, the operator (Quinn) does:
 
 1. Create the Grafana Cloud org in the closest region to Fly.io `syd`. Save the OTLP endpoint + API key.
-2. Create three Slack Incoming Webhooks (`#sindustries-p1`, `#sindustries-p2`, `#sindustries-deploy`, `#sindustries-billing`).
-3. Populate `infra/cloud/observability/.env.local` with the live values (this file is gitignored).
-4. Run `bash infra/cloud/observability/bootstrap-observability.sh` once the runtime artefacts land in a follow-on PR.
-5. Verify the smoke check passes and the four hosted dashboards show data within 5 minutes.
+2. Populate `infra/cloud/observability/.env.local` with the live values (this file is gitignored).
+3. Run `bash infra/cloud/observability/bootstrap-observability.sh` once the runtime artefacts land in a follow-on PR.
+4. Verify the smoke check passes and the four hosted dashboards show data within 5 minutes.
 
 ---
 
@@ -104,7 +103,7 @@ Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.ex
 - **Free tier today (staging).** 10k metrics series, 50GB traces, 14-day retention. Sufficient for the current staging footprint.
 - **Expected staging growth.** ~500–1000 active series; well under the free tier for the next 12 months.
 - **Production rollout.** Expected 5–10× growth. Free tier will be exceeded. Upgrade path is to the Grafana Cloud Pro tier (~$8/1k active series + $5/50GB traces).
-- **Cost alarm.** `sindustries_cost_alert` routes a Slack notification to `#sindustries-billing` when monthly active series crosses 80% of the paid-tier allowance. Configured in the bootstrap script.
+- **Cost alarm.** `sindustries_cost_alert` appears in Grafana Cloud when monthly active series crosses 80% of the paid-tier allowance. Configured in the bootstrap script.
 
 ---
 
