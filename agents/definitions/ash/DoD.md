@@ -8,6 +8,9 @@ A QA action is done only when:
 - every executable or reachable check was attempted before deferral; a
   deferred AC has an explicit capability request naming its verification
   domain, attempted check, missing capability, and requested next action;
+- incomplete implementation or missing delivery evidence is reported as
+  `blocked` and routed to Rowan; `deferred` is reserved for a genuine
+  verifier/platform capability gap;
 - the structured `qa_agent` approval reflects the per-AC reasoning: posts only
   when every AC is claimed addressed and verified; does not post when any AC
   is blocked or deferred;

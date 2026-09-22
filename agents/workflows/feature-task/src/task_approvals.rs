@@ -103,6 +103,20 @@ fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
             Some("blocked")
         } else if starts_with_tag("[qa-agent-verified]") {
             Some("verified")
+        } else if starts_with_tag("[qa-agent-verification]") || starts_with_tag("[qa-verification]")
+        {
+            // Ash has historically used both verification tags. Treat a
+            // later positive verification as closing the approval-note
+            // fallback, but preserve an explicit deferred/blocked verdict
+            // embedded in the same report.
+            let lower = text.to_ascii_lowercase();
+            if lower.contains("deferred") {
+                Some("deferred")
+            } else if lower.contains("blocked") {
+                Some("blocked")
+            } else {
+                Some("verified")
+            }
         } else {
             None
         }
@@ -154,6 +168,47 @@ pub(crate) fn qa_agent_deferred_capability_extension_complete(task: &Task) -> bo
 /// True when Ash has reported an evidence blocker after an older approval.
 pub(crate) fn qa_agent_blocked(task: &Task) -> bool {
     matches!(latest_qa_verdict(task), Some("blocked"))
+}
+
+/// True when the latest blocked QA report is newer than the latest delivery
+/// handoff. Once Rowan posts a replacement delivery, the old block is stale
+/// for routing and Ash must get the next verification pass.
+pub(crate) fn qa_agent_blocked_after_latest_delivery(task: &Task) -> bool {
+    let latest_blocked_comment =
+        task.comments
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, comment)| {
+                let text = comment
+                    .text
+                    .as_deref()
+                    .or(comment.body.as_deref())
+                    .unwrap_or_default();
+                text.lines()
+                    .any(|line| line.trim_start().starts_with("[qa-agent-blocked]"))
+                    .then_some(index)
+            });
+    let latest_delivery_comment =
+        task.comments
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, comment)| {
+                let text = comment
+                    .text
+                    .as_deref()
+                    .or(comment.body.as_deref())
+                    .unwrap_or_default();
+                text.lines()
+                    .any(|line| {
+                        let line = line.trim_start();
+                        line.starts_with("[implementer-prs]") || line.starts_with("[rowan-prs]")
+                    })
+                    .then_some(index)
+            });
+
+    matches!(latest_blocked_comment, Some(blocked) if latest_delivery_comment.is_none_or(|delivery| blocked > delivery))
 }
 
 #[cfg(test)]
@@ -327,6 +382,20 @@ mod tests {
         task.comments.push(crate::TaskComment {
             author: Some("Ash".to_string()),
             text: Some("[qa-agent-verified] All ACs verified.".to_string()),
+            ..Default::default()
+        });
+
+        assert!(!qa_agent_deferred(&task));
+        assert!(qa_agent_verified(&task));
+    }
+
+    #[test]
+    fn later_qa_agent_verification_clears_deferred_approval_note_fallback() {
+        let mut task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        task.approvals[0].note = Some("AC1 deferred to the W38 follow-up task.".to_string());
+        task.comments.push(crate::TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-verification] All ACs verified.".to_string()),
             ..Default::default()
         });
 

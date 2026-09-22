@@ -39,7 +39,10 @@
       repository command or script that is available, use green CI where it
       is authoritative, and run a bounded live probe when the local service
       can be started or the endpoint is reachable. A manual or inconvenient
-      check is not a capability gap; do not defer it without attempting it.
+      check is not a capability gap; do not defer it without attempting it. If
+      the implementation or an AC is simply incomplete, use `blocked` and
+      route back to Rowan; reserve `deferred` for a missing verifier/platform
+      capability.
    5. On `verified` for all ACs: post the structured `qa_agent`
       approval via the Tasks API (Ash's `ASH_TASKS_API_APPROVAL_TOKEN`
       is in her agent env). A `[qa-agent-verified]` comment records the
