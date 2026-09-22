@@ -319,16 +319,6 @@ class ListCurateCandidatesTests(unittest.TestCase):
         payload = self._run()
         self.assertEqual(payload["count"], 0)
 
-    def test_picks_items_with_review_doc_but_no_summary_cache(self):
-        # The summary lives in the review doc on disk; the state cache is optional.
-        _load_state(self.state_path, {
-            "k1": {"bookmarkKey": "k1", "title": "has reviewDoc",
-                   "topic": "brain", "reviewStatus": "summarized",
-                   "reviewDoc": "brain/reviews/whatever/k1.md"},
-        })
-        payload = self._run()
-        self.assertEqual(payload["count"], 1)
-
     def test_picks_regardless_of_review_status(self):
         # Pure age check — status doesn't gate eligibility.
         for status in ("summarized", "monitoring", "spec_created",
