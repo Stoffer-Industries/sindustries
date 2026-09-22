@@ -92,6 +92,26 @@ def _print_envelope(envelope: dict) -> None:
     sys.stdout.flush()
 
 
+def _print_failure_envelope(*, started_at: str, code: str) -> int:
+    """Keep the machine-readable CLI contract intact on unexpected failures."""
+
+    _print_envelope(
+        _envelope(
+            outcome="failed",
+            issue_url=None,
+            eligible_links=0,
+            candidates=0,
+            selected=0,
+            created_count=0,
+            skipped_duplicate_count=0,
+            notification=None,
+            errors=[f"cli: {code}: workflow terminated before a final state was available"],
+            started_at=started_at,
+        )
+    )
+    return 2
+
+
 def _build_real_model(settings: Settings) -> StructuredAngleModel:
     """Build the production angle model."""
 
@@ -354,12 +374,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command == "validate":
-        return cmd_validate(args)
-    if args.command == "run":
-        return cmd_run(args)
-    if args.command == "replay":
-        return cmd_replay(args)
+    try:
+        if args.command == "validate":
+            return cmd_validate(args)
+        if args.command == "run":
+            return cmd_run(args)
+        if args.command == "replay":
+            return cmd_replay(args)
+    except Exception:
+        log.exception("workflow command failed before producing a final envelope")
+        if args.command in {"run", "replay"}:
+            return _print_failure_envelope(
+                started_at=datetime.now(tz=timezone.utc).isoformat(),
+                code="UNHANDLED_EXCEPTION",
+            )
+        raise
     parser.error(f"unknown command: {args.command}")
     return 2
 
