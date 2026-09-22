@@ -1,48 +1,45 @@
 ---
 name: pr-open
-description: "Open a pull request in the Sindustries repository. Covers branch setup, PR summary format, assignee/reviewer flags, and the gh pr create command."
+description: "Open a pull request in the Sindustries repository. Covers branch setup, PR summary format, assignee/reviewer flags, the gh pr create command, the requested_reviewers postcondition check, and the AC evidence annotations the feature-task lobster parses."
 ---
 
-# Opening a PR
+# Pilot structured SKILL.md blueprint on `pr-open`
 
-Use this skill whenever you need to open a pull request in the Sindustries repository.
+> Restructured into the 5+1 canonical blueprint (RULES / PROCESS / OUTPUT FORMAT / KNOWLEDGE FILES / ONBOARDING + minimal IDENTITY pointer) under task `43a9ac7b`. Operational content preserved verbatim from the prior version; presentation changed, not substance. See `docs/specs/pilot-structured-skill-blueprint-pr-open-tech-design.md` for the full mapping.
 
-## Before You Open
+## RULES
 
-- Branch must be pushed to `origin`
-- All tests must pass locally
-- Commits must follow the project convention: `<type>(<scope>): <what>`
+- **Never open a PR without a designated reviewer in `--reviewer`.** If the reviewer is not stated by the invoking skill, task, or workflow, stop and ask/escalate — do **not** guess a default reviewer.
+- **Never retry `gh pr create` with another agent's token to work around a scope error.** That makes the PR unreviewable by that agent and breaks the opener-reviewer-merge split. Fix the opener's GitHub token/config or escalate.
+- **Never treat PR-open as complete until the `requested_reviewers` REST check returns non-zero.** Applies at both `gh pr create` time AND at the draft→ready-for-review conversion (`gh pr ready`). The latter is a second "opening" event.
+- **Never use `gh pr view --json reviewRequests` for the postcondition check.** Resolving reviewer/team identity fields requires scopes the agent token intentionally does not have (`read:org` / `read:discussion`). Use the REST endpoint instead. Do not rely on `gh pr list`'s `reviewDecision`/`mergeStateStatus` (`REVIEW_REQUIRED`) as evidence a reviewer was actually requested — that field reflects branch-protection policy, not assignment; a PR can sit `REVIEW_REQUIRED` with `requested_reviewers` empty indefinitely.
+- **Never nest parentheses inside AC evidence annotations.** The feature-task lobster matches the first top-level `(` after the AC text. Nested `)` truncates the annotation and misaligns subsequent ACs. Use `-` or `:` separators in test names instead:
+  - **Breaks:** `AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-render (desktop))` — the trailing `)` closes the annotation, leaving `desktop))` outside the group; subsequent ACs are misaligned.
+  - **Flat form (correct):** `AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-render - desktop)` or `AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-render)` if "desktop" is not part of the test ID.
+- **Never omit AC checkboxes from a feature-task PR body.** Use `- [x]` (the lobster's only parseable form), not bullet, not `- [ ]`, not `✅` emoji, not plain prose. Every task AC must appear in the PR body, with the original task AC sentence copied verbatim before the evidence annotation.
+- **Never paraphrase or shorten the AC sentence text.** The lobster ignores Markdown code-span markers and line-wrapping whitespace, but it rejects omitted clauses, paraphrases, or shortened sentences. Copy the task AC sentence exactly.
+- **Never use `file:` as an AC evidence annotation.** It has been removed; use `testID` or record a substantive reason in `not tested`.
+- **Never set `--assignee` to anyone other than the implementation owner/opener.** The reviewer must not open the implementer's PR on their own account.
+- **Always include `## System Spec` (or a one-line no-change reason)** in the PR body. It is a documentation convention, not a lobster gate — doc content is too varied to check reliably in code — so verify by hand before opening.
+- **Always check the app-spec requirement separately.** A `docs/systems/*.md` no-change declaration does **not** exempt you from `apps/<app>/SPEC.md`. If the app has a `SPEC.md` and this PR changes user-visible behaviour, update it in the same PR and reference it in your AC evidence.
+- **Always include a `Co-Authored-By` trailer** in commit messages identifying the opener (`Co-Authored-By: <Your Name> <your-email>`).
+- **Always apply at least one label to every PR.** Labels are required; see the label table in `pr-process/SKILL.md`. Task-driven PRs use the matching task-type label (`feature-task`, `content-task`, `code-task`); Quinn proactive fixes use `workflow-garden`; Tom asks in chat use `direct-ask`; retro-daily-fix output uses `retro-fix`. Labels are not mutually exclusive — apply all that apply.
 
-### Validation — Rust workflow PRs
+## PROCESS
 
-If the PR touches `agents/workflows/feature-task/**`, follow the quality gates
-in `agents/workflows/feature-task/WORKFLOW.md` before opening or marking
-ready-for-review (CI enforces the same gates). Note in the PR test plan that
-tests/clippy are green — do not paste the full `cargo` command lines into
-every PR body. Content/doc/non-Rust PRs skip this entirely.
+### 1. Pre-flight (before `gh pr create`)
 
-## The gh pr create Command
+- Branch is pushed to `origin` (verify with `git ls-remote origin <branch>` or a `git push` step earlier in the work).
+- All tests pass locally on the implementation branch.
+- Commits follow the project convention: `<type>(<scope>): <what>`.
+- Open on the agent's own GitHub identity — verify with `gh api user --jq '.login'` before the call. If the login does not match the intended opener, fix the GH config or escalate.
+- (Rust workflow PRs only) If the PR touches `agents/workflows/feature-task/**`, run the quality gates in `agents/workflows/feature-task/WORKFLOW.md` and confirm clippy + tests are green. Note that fact in the PR test plan; do **not** paste the full `cargo` command lines into every PR body. Content / doc / non-Rust PRs skip this step.
 
-Always set `--assignee` to the implementation owner/opener and `--reviewer` to the designated reviewer(s). Check the invoking skill, task, or workflow for reviewer routing. If the reviewer is not stated, stop and ask/escalate — do **not** guess a default reviewer.
+### 2. Compose the PR body
 
-**Labels are required on every PR.** See `agents/skills/dev/pr-process/SKILL.md` for the full label table. Quick reference:
-- Task-driven PRs: `feature-task`, `content-task`, or `code-task` (match `taskType`)
-- Quinn proactive fix with no task: `workflow-garden`
-- Tom asked in chat: `direct-ask`
-- Same-day fix from the `retro-daily-fix` skill: `retro-fix`
-- Labels are not mutually exclusive — apply all that apply.
+Use the OUTPUT FORMAT section below. For feature-task PRs the body MUST include the `## Acceptance Criteria` section with every task AC as a `- [x]` line and a valid evidence annotation. For multi-task combined deliveries, group ACs under `### Task <task-id> — <short description>` so the lobster scopes AC vs task comparison per heading.
 
-For feature-task PRs, the opener is the task implementer/assignee. Reviewers are the blocking reviewer plus any visibility-only reviewers defined by the workflow. The reviewer must not open the implementer's PR on their own account.
-
-Use the opener's GitHub identity/token for `gh pr create`. Before creating the PR, verify the active GitHub login matches the intended opener:
-
-```bash
-gh api user --jq '.login'
-```
-
-If `gh pr create` fails with an auth/scope error (`Resource not accessible...`, `createPullRequest`, `Bad credentials`, etc.), fix the opener's GitHub token/config or escalate. Do **not** retry with another agent's token/account; that makes the PR unreviewable by that agent and breaks the opener-reviewer-merge split.
-
-**A PR with no requested reviewer is invisible to every heartbeat's review queue** — nobody's `reviewRequests` will ever surface it, no matter how long it sits open. Treat "reviewer(s) actually requested" as a checked postcondition of opening a PR, not just an intention: `--reviewer` can silently fail to register (typo'd login, self-request, revoked collaborator access) even when `gh pr create` itself exits 0.
+### 3. `gh pr create`
 
 ```bash
 gh pr create \
@@ -71,49 +68,87 @@ EOF
 )"
 ```
 
-**Mandatory: verify the reviewer request actually registered, immediately after creating the PR.** Do not treat PR-open as complete until this check passes.
+(Add `--draft` if you want informal self-review before requesting the formal pass; convert to ready-for-review only after ACs are complete and the system spec / app spec / `Co-Authored-By` trailer are all in place.)
 
-Use the REST endpoint for this check so repo-only agent tokens do not need
-GraphQL's `read:org` / `read:discussion` scopes:
+### 4. Postcondition verify — `requested_reviewers` is non-zero
 
 ```bash
 gh api repos/Stoffer-Industries/sindustries/pulls/<number>/requested_reviewers \
   --jq '(.users | length) + (.teams | length)'
 ```
 
-Do not use `gh pr view --json reviewRequests`; resolving reviewer/team identity
-fields requires scopes that agent tokens intentionally do not have.
-
-If this prints `0`, the PR is currently unreviewable by anyone's heartbeat queue. Fix it before moving on — re-add the intended reviewer(s) from the routing table in `agents/skills/dev/pr-process/SKILL.md`:
+If this prints `0`, the PR is currently unreviewable by anyone's heartbeat queue. Fix it before moving on:
 
 ```bash
 gh pr edit <number> --repo Stoffer-Industries/sindustries --add-reviewer <reviewer-github-username>
 ```
 
-Then re-run the REST `requested_reviewers` check above to confirm it's non-zero before considering the PR opened.
+Re-run the REST `requested_reviewers` check and confirm it is non-zero before considering the PR opened.
 
-**Draft PRs: the postcondition check applies at ready-for-review conversion, not just at `gh pr create`.** If you open a PR as `--draft` with no reviewer yet (e.g. for informal self-review before requesting a formal pass), the zero-reviewer state at creation time is expected and fine. But the moment you run `gh pr ready <number>`, treat that conversion as a second "opening" event: add the reviewer(s) immediately (`gh pr edit <number> --add-reviewer <login>`) and re-run the `requested_reviewers` REST check before moving on. Do not rely on `gh pr list`'s `reviewDecision`/`mergeStateStatus` (e.g. `REVIEW_REQUIRED`) as evidence a reviewer was actually requested — that field reflects branch-protection policy ("this PR needs *a* review before merge"), not whether anyone has been assigned to give one. A PR can sit `REVIEW_REQUIRED` with `requested_reviewers` empty indefinitely; only the REST endpoint confirms someone will actually see it in their queue. (Real incident: PR #516 converted draft→ready on 2026-08-23, sat with zero requested reviewers for 2.5+ days while the opener's own status checks kept reading `REVIEW_REQUIRED` as "reviewer already assigned, just waiting" — Tom caught it by noticing no assignee in the PR list on 2026-08-26.)
+> **Draft → ready conversion is also a "second opening" event.** When you run `gh pr ready <number>`, add the reviewer(s) immediately (`gh pr edit <number> --add-reviewer <login>`) and re-run the REST check. The zero-reviewer state at `gh pr create --draft` time is expected and fine — but the conversion to ready-for-review must end with a non-zero `requested_reviewers` count.
 
-**`## System Spec` is a documentation convention, not a lobster gate.** Note the path to the spec file you wrote or updated (`docs/systems/<file>.md`), or a short reason why none was touched. Nothing parses or blocks on this section — it's judgment-based, not automated, because doc content is too varied to check reliably in code.
+### 5. Update task workstreams
 
-**This section only covers `docs/systems/*.md`. It does not satisfy the app-spec requirement.** Per `docs/CONVENTIONS.md` (DoD item 3) and `agents/definitions/rowan/DoD.md`, if your change alters user-visible behaviour in an app that has an `apps/<app>/SPEC.md`, that file must be updated in this PR too — a system-doc no-change declaration does not exempt you from it. There is no automated gate for this either, so check it by hand before opening the PR: does `apps/<app>/SPEC.md` exist, and does it describe the flow/screen you just changed? If yes, update it in the same PR and reference it in your AC evidence (`(📄 not code: updated apps/<app>/SPEC.md)`).
+For feature-task PRs, post `[implementer-prs] <url>` as a task comment when the PR is ready for review. Existing `[rowan-prs]` comments are treated as a legacy alias only; new work should use `[implementer-prs]`.
 
-Include a `Co-Authored-By` trailer in your commit messages identifying yourself:
+Then PATCH the task description to fill in the workstream `Branch:` and `PR:` lines. The task ID prefix is the first 8 chars of the branch name (`task-{8chars}-...`):
+
+```bash
+TASK_ID_PREFIX="<first-8-chars>"
+TASK=$(TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py list | \
+  python3 -c "import json,sys; tasks=json.load(sys.stdin)['data']; \
+    t=next((t for t in tasks if t['id'].startswith('$TASK_ID_PREFIX')), None); \
+    print(t['id'], t['description']) if t else print('NOT FOUND')")
+
+TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
+  python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
+    --id <full-task-id> \
+    --description '<updated description with Branch and PR filled in>'
 ```
-Co-Authored-By: <Your Name> <your-email>
+
+If this PR covers only a subset of ACs, add a new workstream entry for the remaining ACs (still `Branch: (pending)`, `PR: (pending)`) so the task description reflects what is still outstanding.
+
+## OUTPUT FORMAT
+
+### PR body template
+
+```markdown
+## Summary
+- <bullet: what changed and why>
+- <bullet: any notable decisions or trade-offs>
+
+## System Spec
+<path to docs/systems/<file>.md that was written or updated>
+— OR —
+No system spec change — <substantive reason, e.g. "CI-only fix, no user-facing behaviour">
+
+## Test plan
+- [ ] <specific thing to verify>
+- [ ] <another check>
+
+## Acceptance Criteria  (feature-task PRs only)
+- [x] AC<n>: <verbatim task AC sentence> (<annotation: evidence>)
+- [x] ...
+
+🤖 Generated with Claude Code
 ```
 
-## PR Summary Guidelines
+### Title format
 
-**Title:** `<type>(<scope>): <short description>` — same format as commit messages. Under 72 characters.
+`<type>(<scope>): <short description>` — same format as commit messages, under 72 characters.
 
-**Summary bullets:** focus on *what* changed and *why*, not implementation steps. One bullet per logical change. If the PR is trivial (e.g. code-garden), one bullet is enough.
+### Summary bullets
 
-**Test plan:** concrete, checkable steps. Not "tests pass" — what specifically should a reviewer verify? For non-functional changes, it's fine to write "No logic changes — diff is purely structural."
+Focus on *what* changed and *why*, not implementation steps. One bullet per logical change. For trivial PRs (e.g. code-garden), one bullet is enough.
 
-**Acceptance Criteria (feature-task PRs only):** the lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. **Every task AC must appear in the PR body as a `- [x]` checkbox** — not a bullet, not `- [ ]`, not plain prose, not a `✅` emoji. The `- [x]` form is the only signal the lobster can machine-parse to confirm the AC is covered by this PR (or by a merged predecessor PR referenced on the line). Unchecked ACs and bullet-style ACs are both treated as missing and block the transition. The actual QA verdict is a separate gate (the structured `qa` TaskApproval from Tom); the `- [x]` checkbox is "work is in this PR", not "work is verified".
+### Test plan
 
-Every `- [x]` AC line must end with one of the following annotations, in priority order:
+Concrete, checkable steps — not "tests pass." For non-functional changes, "No logic changes — diff is purely structural" is acceptable.
+
+### AC evidence annotations (priority-ordered)
+
+The lobster enforces a per-AC evidence rule at the `doing → acceptance` gate. **Every task AC must appear in the PR body as a `- [x]` checkbox.** Each `- [x]` AC line must end with one of the following annotations, in priority order:
 
 | Priority | Annotation | When to use |
 |---|---|---|
@@ -124,30 +159,11 @@ Every `- [x]` AC line must end with one of the following annotations, in priorit
 
 `file:` has been removed. If you wrote a unit test, reference it via `testID` or explain in `not tested` why it wasn't feasible to add a Playwright test. Emojis are optional but encouraged for visual clarity.
 
-Copy the task AC sentence exactly before appending the evidence annotation. The
-lobster ignores Markdown code-span markers and line-wrapping whitespace, but it
-still rejects omitted clauses, paraphrases, or shortened sentences. A CI job
-or GitHub Actions check may be cited as `testID: <job name> CI job — <what it
-verifies>`; Ash's structured QA approval is the verification for that external
-check. For shell fixture suites, cite the script (for example
-`testID: fly-deploy-trigger-paths > static assertions`) rather than a prose
-summary of its assertions.
+A CI job or GitHub Actions check may be cited as `testID: <job name> CI job — <what it verifies>`; Ash's structured QA approval is the verification for that external check. For shell fixture suites, cite the script (for example `testID: fly-deploy-trigger-paths > static assertions`) rather than a prose summary of its assertions.
 
-**Every task AC must appear in the PR body** — checked with evidence. Fix PRs must re-list all task ACs, not just the ones being addressed.
+### Multi-task combined deliveries
 
-Example:
-
-```markdown
-## Acceptance Criteria
-- [x] AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-10-day-render)
-- [x] AC2: Drag to reschedule updates scheduledFor. (🧪 testID: cal-drag-reschedule)
-- [x] AC3: Published items show read-only badge. (⚠️ not tested: visual badge; covered by CSS class assertion in unit test — no Playwright testID yet)
-- [x] AC4: System spec updated. (📄 not code: updated docs/systems/content-scheduler.md)
-```
-
-PRs without the required annotations are blocked from acceptance with a clear comment listing the ACs that need evidence.
-
-**Multi-task combined deliveries:** when one PR covers two or more feature tasks (e.g. a combined delivery), use one `## Acceptance Criteria` section containing a `### Task <task-id> — <short description>` subsection per task. The lobster scopes the AC vs task comparison by `### Task <id>` heading, so AC labels (`AC1`, `AC2`, ...) in different subsections do not collide. Each task's ACs still need their own evidence annotation.
+When one PR covers two or more feature tasks, use one `## Acceptance Criteria` section containing a `### Task <task-id> — <short description>` subsection per task. The lobster scopes the AC vs task comparison by `### Task <id>` heading, so AC labels (`AC1`, `AC2`, ...) in different subsections do not collide. Each task's ACs still need their own evidence annotation.
 
 ```markdown
 ## Acceptance Criteria
@@ -159,35 +175,34 @@ PRs without the required annotations are blocked from acceptance with a clear co
 - [x] AC2: Dashboard is reachable from the Flow metrics tab. (🧪 testID: flow-metrics-tab-reachable)
 ```
 
-The lobster walks the AC section line-by-line and tracks the current `### Task <id>` heading. ACs in a sibling task's subsection are not considered for the current task's text/evidence comparison. PR bodies without any `### Task <id>` heading fall back to the pre-#183 behavior (the whole AC section is implicitly one subsection).
+### QA-bounce footer
 
-**QA bounce:** after merge, the lobster compares the latest merged PR body against the task description ACs. If any AC is missing, unchecked, or has altered text, the task bounces back to `doing` and a `[feature-task-progress-checklist]` comment is posted explaining what the next PR must address.
+After merge, the lobster compares the latest merged PR body against the task description ACs. If any AC is missing, unchecked, or has altered text, the task bounces back to `doing` and a `[feature-task-progress-checklist]` comment is posted explaining what the next PR must address. The AC list in the PR body is "work is in this PR", not "work is verified"; the actual QA verdict is Ash's structured `qa_agent` TaskApproval + Tom's structured `accepted` TaskApproval.
 
----
+## KNOWLEDGE FILES
 
-## After Opening — Update Task Workstreams
+Read in this order before invoking this skill:
 
-For feature-task PRs, post `[implementer-prs] <url>` as a task comment when the PR is ready for review. Existing `[rowan-prs]` comments are treated as a legacy alias only; new work should use `[implementer-prs]`.
+1. `agents/skills/dev/pr-process/SKILL.md` — reviewer routing, label table, merging rules, role-based entry points (opener / reviewer / addressee).
+2. `agents/skills/dev/pr-address-feedback/SKILL.md` — referenced from `pr-process` for the addressing-comments loop (used after reviewer feedback lands, not at PR-open time).
+3. The task description on the Tasks API — for the AC list to mirror in the PR body. Fetch with `python3 agents/skills/ops/tasks-api/tasks_api_client.py get --id <task-uuid>`.
+4. `docs/CONVENTIONS.md` — for the system-spec vs app-spec DoD item (item 3) and the PR body's `## System Spec` requirement.
+5. (Feature-task PRs) The task's prior `[implementer-prs]` comment, if any — to confirm which PR is the current gating PR for the task (the most recent one naming parseable PR URLs wins, not PR number magnitude).
+6. (Rust workflow PRs only) `agents/workflows/feature-task/WORKFLOW.md` — quality gates before `gh pr create` or `gh pr ready`.
 
-Patch the task description to record the branch and PR URL in the workstreams section. The task ID is the first 8 chars of the branch name (`task-{8chars}-...`).
+## ONBOARDING
 
-Find the task by ID prefix, then PATCH the description to fill in the workstream entry:
+To invoke this skill, the caller must provide:
 
-```bash
-# Get the task (first 8 chars of branch = task ID prefix)
-TASK_ID_PREFIX="<first-8-chars>"
-TASK=$(TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-  python3 agents/skills/ops/tasks-api/tasks_api_client.py list | \
-  python3 -c "import json,sys; tasks=json.load(sys.stdin)['data']; \
-    t=next((t for t in tasks if t['id'].startswith('$TASK_ID_PREFIX')), None); \
-    print(t['id'], t['description']) if t else print('NOT FOUND')")
+- (a) the implementation branch name (off `origin/main`),
+- (b) the implementation owner's GitHub login (the `--assignee` value),
+- (c) the blocking reviewer's GitHub login, or `null` if the workflow does not specify one,
+- (d) the label set (origin label + task-type label; see `pr-process/SKILL.md` for the table),
+- (e) the task ID and full AC list (verbatim, for mirroring in the PR body), and
+- (f) the system-spec path the implementation touched, or a substantive no-change reason.
 
-# Then PATCH the description: replace the pending Branch/PR placeholders
-# with the actual branch name and PR URL
-TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
-  python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
-    --id <full-task-id> \
-    --description '<updated description with Branch and PR filled in>'
-```
+The skill returns the `gh pr create` invocation composed from the inputs, runs the `requested_reviewers` REST postcondition check, and (for feature-task PRs) the workstream update + `[implementer-prs]` task comment.
 
-If this PR covers only a subset of ACs, add a new workstream entry for the remaining ACs (still `Branch: (pending)`, `PR: (pending)`) so the task description reflects what's still outstanding.
+## IDENTITY
+
+> See the agent's `AGENTS.md` for role framing; this skill is doc-only and inherits the agent's authority boundaries from that file. No agent-specific role prose is inlined here.
