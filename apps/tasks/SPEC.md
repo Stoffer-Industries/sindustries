@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-08-10 (WS3 stacked avatar group)
+**Last updated:** 2026-09-23 (avatar stack rightmost-on-top fix, task 08362d54)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 
@@ -160,7 +160,7 @@ new planes is scoped separately.
      `state: "outstanding"` are included. Approved gates are excluded
      so the stack never re-shows a gate that has already been
      satisfied. Gate order matches the mapper's policy-defined order.
-   * **Layer 3 — attention owners.** Explicit `position` order matches the mapper output; the first attention slot is the top/current actor. Attention layers paint above gate/delivery context, and position 0 paints above later escalation slots.
+   * **Layer 3 — attention owners.** Explicit `position` order matches the mapper output; the first attention slot is the top/current actor. Attention layers paint above gate/delivery context, and within each role tier the rightmost avatar (the most recently added slot) paints above earlier ones in the overlap.
 3. Every role slot remains visible, including repeated people. Stable keys combine role, position, and a case-insensitive trimmed owner string; duplicates are never collapsed because order communicates escalation. The
    `findAssigneeUser` lookup uses the original (un-normalised)
    `owner` string so display name and avatar asset still resolve

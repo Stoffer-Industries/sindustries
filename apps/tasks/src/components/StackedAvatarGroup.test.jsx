@@ -126,7 +126,7 @@ describe('StackedAvatarGroup', () => {
     ]);
   });
 
-  it('places the top attention owner visually above context and escalation slots', () => {
+  it('places the rightmost attention owner visually above context and escalation slots', () => {
     const { container } = render(<StackedAvatarGroup task={{
       assignee: 'Rowan',
       status: 'doing',
@@ -134,7 +134,62 @@ describe('StackedAvatarGroup', () => {
       attentionOwners: ['Quinn', 'Tom']
     }} />);
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
-    expect(items.map((item) => Number(item.style.zIndex))).toEqual([100, 199, 298, 297]);
+    // roleDepth baselines: delivery=100, workflow-gate=200, attention=300.
+    // Within a role tier, the rightmost avatar (highest DOM index) gets the
+    // higher z so it stays visible in the overlap. The role-tier separation
+    // is preserved by the 100/200/300 spacing.
+    expect(items.map((item) => Number(item.style.zIndex))).toEqual([100, 201, 302, 303]);
+  });
+
+  it('rightmost avatar in a same-role attention stack renders above the avatars to its left', () => {
+    // AC1: only attention owners; no delivery, no workflow-gate, so the
+    // tier-baseline question is moot and the within-tier direction is the
+    // whole test.
+    const { container } = render(<StackedAvatarGroup task={{
+      status: 'open',
+      assignee: '',
+      workflowGates: [],
+      attentionOwners: ['Quinn', 'Tom']
+    }} />);
+    const items = [...container.querySelectorAll('.task-owner-stack-item')];
+    expect(items).toHaveLength(2);
+    const zIndexes = items.map((item) => Number(item.style.zIndex));
+    expect(zIndexes[1]).toBeGreaterThan(zIndexes[0]);
+  });
+
+  it('single-avatar rendering is unchanged', () => {
+    // AC3: a single avatar keeps its existing role-tier baseline z value
+    // and is the only one rendered. The exact baseline depends on role;
+    // for an attention-only stack it is 300 + 0 = 300.
+    const { container } = render(<StackedAvatarGroup task={{
+      status: 'open',
+      assignee: '',
+      workflowGates: [],
+      attentionOwners: ['Quinn']
+    }} />);
+    const items = [...container.querySelectorAll('.task-owner-stack-item')];
+    expect(items).toHaveLength(1);
+    expect(Number(items[0].style.zIndex)).toBe(300);
+  });
+
+  it('stacks of three and four attention avatars follow rightmost-on-top', () => {
+    // AC3: for stacks of 3 and 4 attention owners (no delivery / gate),
+    // the rendered z-index values are strictly increasing left-to-right
+    // so the rightmost avatar wins within the attention tier.
+    for (const owners of [['A', 'B', 'C'], ['A', 'B', 'C', 'D']]) {
+      const { container } = render(<StackedAvatarGroup task={{
+        status: 'open',
+        assignee: '',
+        workflowGates: [],
+        attentionOwners: owners
+      }} />);
+      const items = [...container.querySelectorAll('.task-owner-stack-item')];
+      expect(items).toHaveLength(owners.length);
+      const zIndexes = items.map((item) => Number(item.style.zIndex));
+      for (let i = 1; i < zIndexes.length; i += 1) {
+        expect(zIndexes[i]).toBeGreaterThan(zIndexes[i - 1]);
+      }
+    }
   });
 
   it('renders nothing when the task has no ownership data', () => {
