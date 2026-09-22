@@ -1,0 +1,57 @@
+# Grafana datasources for the hosted observability stack.
+#
+# Mirrors infra/grafana/provisioning/datasources/datasources.yaml (the local
+# stack) so the hosted Grafana has the same datasource shape as the local
+# one. Uploaded by bootstrap-observability.sh via the Grafana provisioning
+# API.
+#
+# Cross-references:
+#   docs/specs/hosted-observability-migration-alerts-tech-design.md §"Dashboards"
+#   infra/grafana/provisioning/datasources/datasources.yaml          — local mirror
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    url: ${GRAFANA_CLOUD_PROMETHEUS_URL}
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s
+      maxParallelism: 10
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    uid: tempo
+    url: ${GRAFANA_CLOUD_TEMPO_URL}
+    editable: false
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: prometheus
+        spanStartTimeShift: -1h
+        spanEndTimeShift: 1h
+      serviceMap:
+        datasourceUid: prometheus
+
+  - name: Postgres
+    type: postgres
+    access: proxy
+    uid: postgres
+    url: ${NEON_DB_HOST}:5432
+    user: ${NEON_DB_USER}
+    secureJsonData:
+      password: ${NEON_DB_PASSWORD}
+    jsonData:
+      database: ${NEON_DB_NAME}
+      sslmode: require
+      maxIdleConns: 2
+      maxOpenConns: 4
+      connMaxLifetime: 600
+      postgresVersion: 1500
+      timescaledb: false
