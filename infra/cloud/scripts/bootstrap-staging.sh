@@ -18,7 +18,8 @@
 #   1. Pre-flight: `fly` CLI installed + authenticated, .env.local readable.
 #   2. Create missing Fly apps (tasks-api, budget-api, auto-post-worker).
 #   3. `fly secrets set` per service from .env.local values.
-#   4. Prisma migrations deploy (tasks-api + content-scheduler-api; budget-api is migrationless).
+#   4. Prisma migrations deploy (tasks-api + budget-api + content-scheduler-api).
+#      budget-api DOES have migrations at services/budget-api/prisma (init + 5 follow-ups).
 #      Skipped by default; pass --migrate to enable.
 #   5. Smoke deploy (canary). Skipped by default; pass --deploy to enable.
 #
@@ -270,9 +271,16 @@ if [[ "$RUN_MIGRATIONS" -eq 0 ]]; then
 fi
 
 if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
-  confirm "Apply Prisma migrations on $FLY_APP_TASKS_API + $FLY_APP_AUTO_POST_WORKER?"
+  confirm "Apply Prisma migrations on $FLY_APP_TASKS_API + $FLY_APP_BUDGET_API + $FLY_APP_AUTO_POST_WORKER?"
   if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "tasks-api" ]]; then
     run_migrations_for_app "$FLY_APP_TASKS_API" "/app/services/tasks-api"
+  fi
+  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
+    # budget-api has its own Prisma schema at services/budget-api/prisma with
+    # 6 migrations (init_budget_api + add_akahu_* + add_account_balances +
+    # add_balance_alert_config + akahu_access_token_bytes). The runtime
+    # workdir mirrors the Dockerfile layout (/app/services/budget-api).
+    run_migrations_for_app "$FLY_APP_BUDGET_API" "/app/services/budget-api"
   fi
   if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
     # Auto-post-worker ships content-scheduler-api's source. Migrations live in
