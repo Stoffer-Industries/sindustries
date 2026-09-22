@@ -6,7 +6,7 @@
 - Tasks API identity: `Ash`
 - Tasks API credential env: `ASH_TASKS_API_APPROVAL_TOKEN`
 - GitHub credential env: `ASH_GITHUB_TOKEN`
-- GitHub config dir: `~/.config/gh-ash` (the shared shim at `agents/lib/gh-with-agent-token.sh` wraps every `gh` invocation so the ambient `GITHUB_TOKEN` does not silently authenticate as the wrong identity — just call `gh ...`, do not prefix with `GH_CONFIG_DIR=...` or invoke `command gh` directly)
+- GitHub config dir: `~/.config/gh-ash` (the shared shim at `agents/lib/gh-with-agent-token.sh` wraps every `gh` invocation so the ambient `GITHUB_TOKEN` does not silently authenticate as the wrong identity — just call `gh ...`, do not prefix with `GH_CONFIG_DIR=...` or invoke `command gh` directly). The shim is materialised into the workspace at `~/.openclaw/workspace/agents/lib/gh-with-agent-token.sh` and the per-agent snippet `~/.openclaw/workspace/agents/ash/.gh-shim.sh` sources it with `AGENT_ID=ash` set (both emitted by `scripts/ops/sync-agent-definitions.sh`). Once that snippet is sourced from your shell init (Quinn-routed step; see `[openclaw-needed]` comments on task b0d1b42e), the wrapper is live in every shell and `gh ...` resolves to Ash's identity without manual `GH_CONFIG_DIR` prefixes.
 
 Credentials and runtime registration are provisioned by the OpenClaw operator;
 never write or rotate them from an ordinary QA pass.
