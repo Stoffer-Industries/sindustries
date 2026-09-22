@@ -29,7 +29,14 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
    `cd <workflow> && uv run --frozen python run.py --help` works,
    `cd .. && uv run --frozen python <workflow>/run.py --help` fails.
 
-2. Parse the JSON envelope on stdout. It looks like:
+   The production run can take several minutes while it enriches links and
+   scores articles. Give the command the full cron timeout. If `exec` returns
+   a running process, poll it with `process` until it exits; do not treat an
+   interim poll result as the workflow result and do not stop waiting after a
+   short fixed interval.
+
+2. Parse the JSON envelope on stdout only after the process has exited. It
+   looks like:
 
    ```json
    {
@@ -60,6 +67,12 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
      and follow it. The workflow's `errors` and `diagnostics` fields are
      the inputs.
 
+   A non-zero exit, command timeout, killed process, missing stdout envelope,
+   malformed JSON, or JSON without one of the documented `outcome` values is
+   also a **failed** run. Do not report `ok`, `noop`, or “still running” as a
+   successful result. Read and follow `notify-soft-fail` and include the
+   concrete failure class in the escalation.
+
 # Behaviour
 
 - **One notification per run.** A successful run produces exactly one
@@ -77,4 +90,5 @@ Run the CTO Craft recurring tweet-draft workflow and report the result.
 
 # notify-soft-fails
 
-Read `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md` and follow it. If the workflow exit code is non-zero, the JSON envelope is malformed, or `errors` is non-empty, escalate to Lox's main session with a short summary. Include the `outcome`, `errors`, and `diagnostics` from the envelope. Do not spam Tom with the failure text — Tom's path is the successful notification only.
+Read `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/notify-soft-fail/SKILL.md` and follow it.
+If the output of this cron has soft failures or unacceptable errors, escalate that to Lox's main session.
