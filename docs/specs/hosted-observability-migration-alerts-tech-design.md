@@ -28,23 +28,23 @@ shipped_date: null
 The existing local observability stack (Prometheus, Tempo, OTel Collector, Grafana) ships in `infra/docker-compose.observability.yml` and is wired through `packages/otel-node` for the Node services. That stack is a useful dev experience, but it does not satisfy the migration acceptance criteria because:
 
 - All four components run on the local machine; cloud services that emit signals from the staging/production region never reach them.
-- No alert routing exists beyond the Grafana dashboard; there is no Alertmanager, no PagerDuty / Slack / email integration.
+- No alert evaluation or documented ownership exists beyond the Grafana dashboard; there is no Alertmanager or external notification integration.
 - No documented ownership: who responds to a 5xx alert, who triages a database health alert, who owns the dashboard definitions.
 
-Once this task lands, the cloud-deployed services ship traces, metrics, and database health to a hosted backend (Grafana Cloud is the recommended choice — see Open Questions). The hosted backend exposes the same shape of signals (PromQL queries, Tempo trace IDs, Postgres health views) that operators can use to diagnose failures without touching the local machine. Alerts route to owner-defined Slack channels with documented severity and response expectations.
+Once this task lands, the cloud-deployed services ship traces, metrics, and database health to a hosted backend (Grafana Cloud is the recommended choice — see Open Questions). The hosted backend exposes the same shape of signals (PromQL queries, Tempo trace IDs, Postgres health views) that operators can use to diagnose failures without touching the local machine. Grafana Cloud evaluates alerts with documented severity and ownership; outbound notification integrations are explicitly out of scope.
 
 ## Service boundary and data ownership
 
 - **Hosted backend — Grafana Cloud**, free tier (10k metrics series, 50GB traces, 14-day retention). Rationale: same vendor as the existing local Grafana, single auth plane, single UI, no new agents to ship. Self-hosting on Fly.io is the alternative (Open Question 1).
 - **Telemetry pipeline** — services already use `@sindustries/otel-node` to emit traces and metrics via OTLP. The change here is environment: the collector/processor destination flips from the local Tempo/Prometheus to Grafana Cloud OTLP endpoints. The OTel SDK does not change.
 - **Database signal source** — Postgres on Cloud (Neon) exposes connection health via PgBouncer or a cron'd `SELECT 1`. A small side process (also on Fly) runs the health probe and emits the result as a Prometheus metric. The metric is the durable source of truth; the cron'd query is a fallback.
-- **Alert routing** — Alertmanager is not used in this task. Instead, Grafana Cloud's alerting routes directly to Slack via a webhook. The Slack workspace and channel topology is owner-supplied (Quinn owns the Slack workspace).
+- **Alert evaluation** — Alertmanager is not used in this task. Grafana Cloud evaluates the rules and exposes their state through its UI/API. No outbound notification integration is required.
 - **Dashboard ownership** — `docs/systems/observability.md` becomes the canonical owner index. The repo carries the dashboards as JSON in `infra/grafana/provisioning/dashboards/json/` (existing pattern); the hosted backend provisions those same JSONs via the Grafana provisioning API.
 - **Service ownership** — domain ownership of the application services stays in `services/tasks-api`, `services/budget-api`, `services/gymtrack-mcp`. This task does not extend application code; it extends the runtime telemetry destination.
 
 ## `.openclaw` boundary notes
 
-- **Owner-supplied secrets** — Grafana Cloud API key, Slack webhook URL, Slack channel names, Neon connection string for the health probe. These are Quinn-owned and **must not** be committed. The PR ships `infra/cloud/observability/.env.example` (redacted) and the wiring code; live values land in Fly.io secrets per the foundation task.
+- **Owner-supplied secrets** — Grafana Cloud API key and Neon connection string for the health probe. These are Quinn-owned and **must not be committed**. The PR ships `infra/cloud/observability/.env.example` (redacted) and the wiring code; live values land in Fly.io secrets per the foundation task.
 - **No `.openclaw` cron changes** — periodic health probes and metric scrape intervals are owned by the cloud runtime (Grafana Cloud's scrape config, the health-probe Fly app) and not by Quinn's local cron.
 - **No DNS changes** — the hosted Grafana URL is owned by Grafana Cloud; SIndustries does not provision a `*.sindustries.dev` Grafana subdomain in this task. That's a future UX improvement, not a foundation requirement.
 
@@ -117,29 +117,28 @@ The hosted Grafana is provisioned with the dashboard JSON via the provisioning A
 
 - **Cloud overview** — per-app p95 latency, error rate, request count, with annotations for deploys.
 - **DB health** — the `sindustries_db_up` and `sindustries_db_query_duration_seconds` metrics, broken down by app.
-- **Migration alerts** — alert routing overview: which alerts are firing, which Slack channels they hit, how long each has been open.
+- **Migration alerts** — alert state and ownership overview: which alerts are firing, their severity/owner, and how long each has been open.
 - **Copy of existing local dashboards** — `tasks-api-red.json` and `openclaw-diagnostics.json` (existing) — proven to be useful in dev, ported to the hosted backend for parity.
 
 Dashboards are JSON in `infra/cloud/observability/grafana/dashboards/`. The provisioning script uploads them via the Grafana provisioning API.
 
 ### 6. Alerts
 
-Grafana Cloud's alerting (not Alertmanager) is the routing layer. Alert rules:
+Grafana Cloud's alerting (not Alertmanager) is the evaluation layer. Alert rules:
 
-| Alert | Source | Condition | Severity | Channel | Owner |
-| --- | --- | --- | --- | --- | --- |
-| `tasks-api-down` | fly app health | `sindustries_fly_app_health{app="tasks-api"} == 0` for 2m | page | `#sindustries-p1` | Quinn |
-| `budget-api-down` | fly app health | `sindustries_fly_app_health{app="budget-api"} == 0` for 2m | page | `#sindustries-p1` | Quinn |
-| `tasks-api-5xx-spike` | request metrics | `rate(http_requests_total{status=~"5.."}[5m]) > 0.05` for 5m | warn | `#sindustries-p2` | Quinn |
-| `budget-api-4xx-spike` | request metrics | `rate(http_requests_total{status=~"4.."}[5m]) > 0.20` for 10m | warn | `#sindustries-p2` | Quinn |
-| `tasks-api-db-down` | db health | `sindustries_db_up{app="tasks-api"} == 0` for 1m | page | `#sindustries-p1` | Quinn |
-| `budget-api-db-down` | db health | `sindustries_db_up{app="budget-api"} == 0` for 1m | page | `#sindustries-p1` | Quinn |
-| `db-query-slow` | db health | `histogram_quantile(0.95, sindustries_db_query_duration_seconds) > 0.5` for 5m | warn | `#sindustries-p2` | Quinn |
-| `redis-down` | redis health | `sindustries_redis_up{app="content-scheduler"} == 0` for 1m | page | `#sindustries-p1` | Quinn |
-| `worker-queue-stuck` | queue metrics | `sindustries_queue_ready > 100` for 5m | warn | `#sindustries-p2` | Quinn |
-| `deploy-failed` | CI workflow | GitHub Actions workflow failure | warn | `#sindustries-deploy` | Quinn |
-
-Severity is either `page` (immediate, PagerDuty-equivalent urgent) or `warn` (next-business-day). Channels are separate Slack channels so the on-call rotation is unambiguous. Quinn is the canonical owner for every alert in this list; the runbook records how to reassign.
+| Alert | Source | Condition | Severity | Owner |
+| --- | --- | --- | --- | --- |
+| `tasks-api-down` | fly app health | `sindustries_fly_app_health{app="tasks-api"} == 0` for 2m | page | Quinn |
+| `budget-api-down` | fly app health | `sindustries_fly_app_health{app="budget-api"} == 0` for 2m | page | Quinn |
+| `tasks-api-5xx-spike` | request metrics | `rate(http_requests_total{status=~"5.."}[5m]) > 0.05` for 5m | warn | Quinn |
+| `budget-api-4xx-spike` | request metrics | `rate(http_requests_total{status=~"4.."}[5m]) > 0.20` for 10m | warn | Quinn |
+| `tasks-api-db-down` | db health | `sindustries_db_up{app="tasks-api"} == 0` for 1m | page | Quinn |
+| `budget-api-db-down` | db health | `sindustries_db_up{app="budget-api"} == 0` for 1m | page | Quinn |
+| `db-query-slow` | db health | `histogram_quantile(0.95, sindustries_db_query_duration_seconds) > 0.5` for 5m | warn | Quinn |
+| `redis-down` | redis health | `sindustries_redis_up{app="content-scheduler"} == 0` for 1m | page | Quinn |
+| `worker-queue-stuck` | queue metrics | `sindustries_queue_ready > 100` for 5m | warn | Quinn |
+| `deploy-failed` | CI workflow | GitHub Actions workflow failure | warn | Quinn |
+Severity is either `page` (immediate, urgent) or `warn` (next-business-day). Quinn is the canonical owner for every alert in this list; the runbook records how to reassign.
 
 ### 7. Bootstrap script
 
@@ -213,22 +212,22 @@ These run as part of the SMOKE job in the GitHub Actions workflow, not as unit t
 | AC | Verification approach | Planned evidence |
 | --- | --- | --- |
 | AC1 | Health probe emits the four `sindustries_db_*` and `sindustries_fly_app_health` metrics; traces and metrics from cloud-deployed services flow to Grafana Cloud via the `OTEL_EXPORTER_OTLP_ENDPOINT` env var. | Provisioning contract test + smoke check on the hosted Grafana. |
-| AC2 | Ten alert rules defined in `infra/cloud/observability/grafana/alerts/`. Each rule has a documented condition, severity, slack channel, and owner. | Provisioning contract test asserts the alerts are present and the severity/channel/owner fields are populated. |
+| AC2 | Ten alert rules defined in `infra/cloud/observability/grafana/alerts/`. Each rule has a documented condition, severity, and owner. | Provisioning contract test asserts the alerts are present and the severity/owner fields are populated. |
 | AC3 | A representative workflow is run against the staging environment (the next workstream, `Cloud staging environment` task `2850c5ac`). The hosted dashboards show the request flow, error rate, and DB health. The trace query is a single Tempo URL. | Workstream `2850c5ac` accepts AC3 on the strength of the dashboards shipped here; this task's contribution is the dashboards existing and being queryable. |
 | AC4 | `docs/systems/observability.md` covers the backend, region, account ownership, cost expectations, and handover. `infra/cloud/observability/README.md` indexes the artefacts. `docs/runbooks/cloud-alerts-response.md` documents each alert's response expectation. | The three doc files plus a checklist in the PR description that confirms each AC4 bullet is satisfied. |
 
 ### Manual verification
 
 - Quinn runs `bootstrap-observability.sh` once with their live tokens and confirms the smoke check passes.
-- Quinn triggers a synthetic failure (e.g., stops the budget-api Fly app) and confirms the alert routes to the right Slack channel within 2 minutes.
-- Quinn runs a representative workflow (next workstream) and diagnoses a failure from the hosted dashboards. The trace ID is in the alert message; the dashboard deep-links to the trace.
+- Quinn triggers a synthetic failure (e.g., stops the budget-api Fly app) and confirms the alert enters the expected firing state in Grafana Cloud within 2 minutes, then returns to resolved after recovery.
+- Quinn runs a representative workflow (next workstream) and diagnoses a failure from the hosted dashboards. The hosted Grafana alert state and dashboard expose the relevant trace ID/query link.
 - Owner-supplied steps are documented in `infra/cloud/observability/README.md` so a future operator can repeat them without re-deriving the procedure.
 
 ## Open questions and risks
 
 1. **Backend choice — Grafana Cloud vs self-hosted.** Chosen Grafana Cloud for time and cost (free tier). Self-hosting on Fly.io would preserve vendor independence but adds a Fly app to operate. Flag for review before approval.
 2. **Alertmanager vs Grafana Cloud alerting.** Chosen Grafana Cloud alerting for simplicity. Alertmanager is the de-facto standard for Prometheus, but adding it would add another service to operate. Flag for review.
-3. **Slack channel ownership.** The list above assumes Quinn owns every channel. If Tom wants to be on-call for content-scheduler alerts, the routing table needs to change. The runbook documents it as a single find-and-replace.
+3. **External notification integration.** Deliberately not included. Grafana Cloud UI/API state is sufficient for this staging milestone; adding Slack, PagerDuty, email, or another notifier requires a separate decision and task.
 4. **False-positive rate.** The 5xx threshold (5% over 5m) is conservative. If the alerts are noisy in practice, the threshold is adjustable in the JSON alerts file. The provisioning contract test enforces the severity field but not the threshold value.
 5. **Health-probe single point of failure.** If the health-probe Fly app is down, the operators see all `sindustries_db_up=0` and every page fires. That is a known and acceptable failure mode for staging; the runbook documents the mitigation (restart the probe) and the longer-term fix (high-availability probe placement).
 6. **Grafana Cloud cost growth.** The free tier is enough for the staging environment today. Production traffic will exceed the free tier. The handover document records the upgrade path.
@@ -241,6 +240,6 @@ These run as part of the SMOKE job in the GitHub Actions workflow, not as unit t
 | AC | Spec text | Implementation reference |
 | --- | --- | --- |
 | AC1 | Service availability, request failures, latency, and database health are visible for the cloud environment. | `packages/otel-node` OTLP exporter to Grafana Cloud + health-probe service + cloud-overview dashboard. |
-| AC2 | Alerts cover conditions that could make migrated services unavailable, unsafe, or materially degraded. | Ten alert rules in `infra/cloud/observability/grafana/alerts/`, each with severity, channel, owner. |
-| AC3 | A failed representative workflow can be diagnosed from hosted signals alone. | cloud-overview + db-health + migration-alerts dashboards; trace IDs linked from alert messages. |
+| AC2 | Alerts cover conditions that could make migrated services unavailable, unsafe, or materially degraded. | Ten alert rules in `infra/cloud/observability/grafana/alerts/`, each with severity and owner. |
+| AC3 | A failed representative workflow can be diagnosed from hosted signals alone. | cloud-overview + db-health + migration-alerts dashboards; trace IDs/query links available from hosted Grafana state. |
 | AC4 | Dashboard and alert ownership, severity, and response expectations are documented. | `docs/systems/observability.md` + `infra/cloud/observability/README.md` + `docs/runbooks/cloud-alerts-response.md`. |
