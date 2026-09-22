@@ -87,6 +87,17 @@ When Quinn is top owner:
 6. Do not escalate when the only possible action is duplicate state help, such
    as repeating PR assistance or restating evidence already recorded elsewhere.
    Leave the existing stack unchanged and avoid a second page.
+7. **Tom is never added to `attentionOwners` for a `doing`-status task unless
+   the very next action truly requires him** (owner-only approval, credential
+   only he can provision, an unresolved product decision). "Quinn's own gate is
+   complete" is not by itself a reason to add or reorder Tom onto a `doing`
+   task — the task is still not ready for his acceptance, and adding him
+   pages him for nothing. This bit us for real on 2026-09-22/23: a heartbeat
+   pass added Tom to two `doing`/dependency-blocked tasks hours after Tom
+   asked to be removed, for no actionable reason. Before adding or reordering
+   Tom onto any task, ask: "is there a concrete action only Tom can take on
+   this specific task, right now?" If no, do not add him, regardless of
+   whether Quinn's own portion of the work is finished.
 
 Delivery assignee and structured gate owner remain independent context. Ash may
 remain the QA gate owner while Quinn or Rowan is the top attention owner.
