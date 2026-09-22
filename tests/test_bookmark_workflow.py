@@ -1218,6 +1218,9 @@ class BookmarkWorkflowTests(unittest.TestCase):
             self.assertEqual(updated["items"][status]["reviewStatus"], status)
 
     def test_list_review_candidates_uses_high_curation_without_legacy_analysis(self):
+        # Updated for task b38f70bb (reviewDoc removed from new-pipeline routing).
+        # Previously this used reviewDoc-only as the trigger; now summaryDoc is the
+        # primary signal and the curation-score branch must still skip review.
         bookmark_path = self.root / "brain/bookmarks/x/high-curation.md"
         bookmark_path.parent.mkdir(parents=True, exist_ok=True)
         bookmark_path.write_text(
@@ -1227,15 +1230,17 @@ class BookmarkWorkflowTests(unittest.TestCase):
         with patch.object(common, "WORKSPACE", self.root), patch.object(common, "BOOKMARKS_ROOT", self.root / "brain/bookmarks"):
             record = common.bookmark_record(bookmark_path)
         key = record["bookmarkKey"]
-        review_doc = "brain/reviews/high-curation.md"
-        review_path = self.root / review_doc
-        review_path.parent.mkdir(parents=True, exist_ok=True)
-        review_path.write_text("# Legacy review without classification\n", encoding="utf-8")
+        summary_doc = f"brain/bookmarks/summaries/sample-{key}.md"
+        summary_path = self.root / summary_doc
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        # Deliberately no "Classified as 'implement'" — high curation alone must
+        # drive the skipReview decision without the legacy classification marker.
+        summary_path.write_text("# Plain summary without legacy classification\n", encoding="utf-8")
 
         state = common.state_template()
         state["items"][key] = {
             "bookmarkKey": key,
-            "reviewDoc": review_doc,
+            "summaryDoc": summary_doc,
             "reviewStatus": "summarized",
             "curation": {"score": 9, "threshold": 7},
         }
@@ -1412,6 +1417,10 @@ class BookmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(item["reviewStatus"], "spec_requested")
 
     def test_list_review_candidates_includes_spec_created_items_pending_approval(self):
+        # Updated for task b38f70bb (reviewDoc removed from new-pipeline routing).
+        # The implement-classification marker now lives in the summaryDoc body,
+        # and summaryDoc is the primary signal that admits the item to the
+        # priority-recovery bucket.
         bookmark_path = self.root / "brain/bookmarks/x/spec-created.md"
         bookmark_path.parent.mkdir(parents=True, exist_ok=True)
         bookmark_path.write_text(
@@ -1427,23 +1436,24 @@ class BookmarkWorkflowTests(unittest.TestCase):
             record = common.bookmark_record(bookmark_path)
         key = record["bookmarkKey"]
 
+        summary_doc = f"brain/bookmarks/summaries/sample-{key}.md"
+        summary_path = self.root / summary_doc
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text("Classified as 'implement'", encoding="utf-8")
+
         state = common.state_template()
         state["items"][key] = {
             "bookmarkKey": key,
             "path": "brain/bookmarks/x/spec-created.md",
             "topic": "infra",
             "title": "Spec created bookmark",
-            "reviewDoc": "brain/reviews/infra/spec-created.md",
+            "summaryDoc": summary_doc,
             "reviewStatus": "spec_created",
             "specDocs": [f"brain/bookmarks/specs/infra/spec-created-{key}.md"],
             "specProposals": [{"title": "Do it", "proposedTasks": [{"title": "task"}]}],
             "taskIds": [],
         }
         common.save_state(state, self.state_path)
-
-        review_path = self.root / "brain/reviews/infra/spec-created.md"
-        review_path.parent.mkdir(parents=True, exist_ok=True)
-        review_path.write_text("Classified as 'implement'", encoding="utf-8")
 
         spec_path = self.root / f"brain/bookmarks/specs/infra/spec-created-{key}.md"
         spec_path.parent.mkdir(parents=True, exist_ok=True)
