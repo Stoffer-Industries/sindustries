@@ -13,6 +13,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./test/setup.js'],
-    include: ['src/**/*.test.{js,jsx,ts,tsx}']
+    include: ['src/**/*.test.{js,jsx,ts,tsx}', 'vite.config.test.{js,mjs}']
   }
 });

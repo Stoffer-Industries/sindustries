@@ -220,14 +220,18 @@ specimen mount.
   See [`docs/systems/content-scheduler.md`](../systems/content-scheduler.md)
   for the full system contract.
 - **Bookmark state** is read by the Bookmarks tab from
-  `brain/state/bookmark-review-state.json` and
-  `brain/state/bookmark-transitions.jsonl` via the dev-only Vite plugin
-  in `vite.config.js`. The plugin serves `/api/state` and
-  `/api/transitions` from the workspace `brain/` directory (resolved via
-  the `WORKSPACE_ROOT` env var or three levels up from the Vite config).
-  In production (`vite build`) the plugin is a no-op and the tab renders
-  an empty state. Optional override via `VITE_BOOKMARK_STATE_BASE_URL`
-  for staging/prod.
+  `brain/state/bookmark-review-state.json` (via the dev-only Vite
+  plugin's `/api/state` endpoint) and from
+  `analytics.bookmark_transitions` in Postgres (via the dev-only Vite
+  plugin's `/api/transitions` endpoint). The plugin resolves the
+  workspace `brain/` directory via the `WORKSPACE_ROOT` env var,
+  falling back to three levels up from the Vite config. When
+  `DATABASE_URL` is unset, the connection fails, or the query rejects,
+  `/api/transitions` falls back to
+  `brain/state/bookmark-transitions.jsonl` so local development never
+  depends on database availability. The plugin is a no-op in
+  production (`vite build`) and the tab renders an empty state.
+  Optional override via `VITE_BOOKMARK_STATE_BASE_URL` for staging/prod.
 - **Compounding signal** is read by the Bookmarks tab from
   `brain/state/compounding-signal.json` via the dev-only Vite plugin
   route `GET /api/compounding-signal` (404 when the file is missing,
@@ -254,7 +258,3 @@ specimen mount.
 - Filter persistence across reloads (deferred per Q4 — matches the
   standalone dashboard's behaviour before `tools/bookmark-dashboard/`
   was retired on 2026-07-16).
-- Migrate the Bookmarks tab off `bookmark-transitions.jsonl` to
-  `analytics.bookmark_transitions` once Postgres has enough rows to
-  render Sankey + states-over-time directly from the analytics schema
-  (separate feature task).

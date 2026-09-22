@@ -218,10 +218,10 @@ and does not emit a duplicate transition entry.
 | File | Role |
 |---|---|
 | `brain/state/bookmark-review-state.json` | Single source of truth for all bookmark states |
-| `brain/state/bookmark-transitions.jsonl` | Append-only transition log (used by Mission Control's `/bookmarks` dashboard; authoritative source of truth) |
+| `brain/state/bookmark-transitions.jsonl` | Append-only transition log (authoritative write source; serves as Mission Control's `/api/transitions` fallback when `DATABASE_URL` is unset or the Postgres query fails) |
 | `brain/wiki/index.md` | Grounded recall catalog; summary/spec hooks update it incrementally |
 | `brain/wiki/log.md` | Append-only wiki ingest/query/lint history |
-| `analytics.bookmark_transitions` (Postgres) | Queryable mirror of every transition; best-effort, write happens after JSONL append. See "Analytics Mirror" below. |
+| `analytics.bookmark_transitions` (Postgres) | Queryable mirror of every transition; preferred read source for Mission Control's `/api/transitions` when `DATABASE_URL` is set and reachable. Best-effort mirror — see "Analytics Mirror" below. |
 | `brain/state/focus-config.json` | Curation config: topics, relevanceThreshold, recurationDays, batchSize |
 | `brain/state/bookmark-approval-topics.json` | Telegram delivery config: chatId + threadId per topic |
 | `brain/bookmarks/x/<slug>.md` | Raw bookmark files |
@@ -317,8 +317,14 @@ never raised, so the JSONL path is unaffected.
   v1).
 - **No-op when `DATABASE_URL` is unset:** the helper returns `False`
   silently — the JSONL still gets the row.
-- **Read path:** Pulse queries the table directly via SQL; there is no REST
-  endpoint in v1. Indexes are on `occurred_at`, `bookmark_key`, and
+- **Read path:** Pulse's dev-only Vite plugin (`apps/mission-control/vite.config.js`)
+  serves `/api/transitions` directly from this table when `DATABASE_URL` is set
+  and reachable (task 5c87ea16). The plugin uses the `pg` npm package, queries
+  `analytics.bookmark_transitions` ordered by `occurred_at ASC, id ASC`, and
+  normalises each row into the existing transition event shape. When `DATABASE_URL`
+  is unset, the connection fails, or the query rejects, the plugin falls back
+  to `brain/state/bookmark-transitions.jsonl` so local development never depends
+  on database availability. Indexes are on `occurred_at`, `bookmark_key`, and
   `to_status`.
 - **Reserved table:** `analytics.task_transitions` is created by the same
   migration but stays empty until the feature-task workflow wires its
