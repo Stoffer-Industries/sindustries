@@ -1,0 +1,283 @@
+# GitHub Actions: cloud staging validation (task 2850c5ac).
+#
+# Quinn-approved design: deploys an immutable commit to the staging
+# topology, runs the AC2 black-box workflow harness and (optionally)
+# the AC3 failure-drill, uploads the redacted JSON results as
+# artifacts, and posts a JSON summary to the workflow run. workflow_dispatch
+# only — no scheduled trigger, no push trigger. Staging changes must
+# not deploy or inject faults unattended.
+#
+# Required environment secrets (Quinn-owned):
+#   FLY_API_TOKEN                       — flyctl auth + machine control
+#   TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN — tasks-api mutations
+#   CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN — scheduler mutations
+#
+# Required environment variables (set by the operator on dispatch):
+#   INTENT_COMMIT  — commit SHA the run intends to validate (default: HEAD)
+
+name: Cloud staging validation (task 2850c5ac)
+
+on:
+  workflow_dispatch:
+    inputs:
+      intent_commit:
+        description: 'Commit SHA this run intends to validate (default: HEAD)'
+        required: false
+        default: ''
+      run_failure_drill:
+        description: 'Run the incomplete AC3 stop/restart drill (always reports a blocker until observability verification lands)'
+        required: false
+        default: 'false'
+      max_duration_seconds:
+        description: 'Hard cap on the drill (seconds)'
+        required: false
+        default: '600'
+
+concurrency:
+  group: cloud-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Cloud staging AC2 + (optional) AC3
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 45
+    env:
+      NODE_VERSION: '22'
+      TASKS_API_URL: ${{ vars.STAGING_TASKS_API_URL }}
+      BUDGET_API_URL: ${{ vars.STAGING_BUDGET_API_URL }}
+      SCHEDULER_API_URL: ${{ vars.STAGING_SCHEDULER_API_URL }}
+      FLY_ORG: ${{ vars.STAGING_FLY_ORG }}
+      FLY_APP_WORKER: ${{ vars.STAGING_FLY_APP_WORKER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve intent commit
+        id: intent
+        env:
+          # Surface the raw dispatch input via env so we never put ${{ }}
+          # expressions inside bash [[ ]] (Codex P1: bash parser confusion
+          # when the input literal expands adjacent to bash conditionals).
+          INPUT_COMMIT: ${{ github.event.inputs.intent_commit }}
+        run: |
+          set -euo pipefail
+          input_commit="${INPUT_COMMIT}"
+          if [[ -z "${input_commit}" ]]; then
+            input_commit="${{ github.sha }}"
+          fi
+          if [[ ! "${input_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::intent_commit must be a 40-character hex SHA; received '${input_commit}'. Re-dispatch with an empty value to default to the workflow-triggering SHA." >&2
+            exit 1
+          fi
+          echo "intent_commit=${input_commit}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install workspace dependencies
+        run: |
+          # GitHub-hosted runners start from a clean checkout; tsx and the
+          # Prisma generated client are not tracked (Codex P1: `npx --no-install
+          # tsx` fails on a fresh runner). Install the monorepo so the
+          # budget-api smoke-session CLI and the AC2/AC3 harness scripts
+          # resolve their workspace + generated imports.
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm --workspace services/budget-api run prisma:generate
+
+      - name: Validate required inputs
+        env:
+          # Map the staging secret into this step's env so the check below
+          # sees it (Codex P1: GitHub environment secrets are not auto-exported
+          # into `run:`; later steps that map the secret explicitly do not
+          # help this preflight).
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -z "${TASKS_API_URL:-}"    ]] && missing+=("STAGING_TASKS_API_URL")
+          [[ -z "${BUDGET_API_URL:-}"   ]] && missing+=("STAGING_BUDGET_API_URL")
+          [[ -z "${SCHEDULER_API_URL:-}" ]] && missing+=("STAGING_SCHEDULER_API_URL")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing required environment variables / vars: ${missing[*]}" >&2
+            echo "Configure them via Settings > Environments > staging > Environment variables." >&2
+            exit 1
+          fi
+          if [[ -z "${FLY_API_TOKEN}" ]]; then
+            echo "::error::FLY_API_TOKEN is not configured for the staging GitHub environment. Add it through Settings > Environments > staging > Environment secrets." >&2
+            exit 1
+          fi
+
+      - name: Install Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: 0.4.102
+
+      - name: Mint budget-api synthetic session
+        id: budget-mint
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          BUDGET_TOKEN_FILE: /tmp/budget-smoke-bearer
+          # Run the mint CLI inside the budget-api service workspace so it
+          # can resolve services/budget-api/generated/prisma + the source
+          # auth helpers.
+          DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+          BUDGET_STAGING_ENVIRONMENT: staging
+        run: |
+          set -euo pipefail
+          cd services/budget-api
+          # Capture the mint result as JSON so downstream cleanup can revoke
+          # the exact fixture pair (Codex P2 + Stoff81 Critical #4: prior code
+          # only deleted the token file and left a live session row behind).
+          mint_json=$(npx tsx scripts/staging-smoke-session.ts mint \
+            --staging \
+            --token-out "$BUDGET_TOKEN_FILE" \
+            --json)
+          chmod 0600 "$BUDGET_TOKEN_FILE"
+          mint_user_id=$(printf '%s' "${mint_json}" | jq -r '.userId')
+          mint_session_id=$(printf '%s' "${mint_json}" | jq -r '.sessionId')
+          mint_email=$(printf '%s' "${mint_json}" | jq -r '.email')
+          echo "mint_token_bytes=$(wc -c <"${BUDGET_TOKEN_FILE}" | tr -d ' ')"
+          echo "mint_user_id=${mint_user_id}" >> "$GITHUB_OUTPUT"
+          echo "mint_session_id=${mint_session_id}" >> "$GITHUB_OUTPUT"
+          echo "mint_email=${mint_email}" >> "$GITHUB_OUTPUT"
+
+      - name: Run AC2 black-box harness
+        id: workflows
+        env:
+          STAGING_TASKS_API_URL:    ${{ env.TASKS_API_URL }}
+          STAGING_BUDGET_API_URL:   ${{ env.BUDGET_API_URL }}
+          STAGING_SCHEDULER_API_URL: ${{ env.SCHEDULER_API_URL }}
+          STAGING_TASKS_API_TOKEN:  ${{ secrets.TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          STAGING_SCHEDULER_TOKEN:  ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          STAGING_BUDGET_TOKEN_FILE: /tmp/budget-smoke-bearer
+          STAGING_INTENT_COMMIT:    ${{ steps.intent.outputs.intent_commit }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          set +e
+          node tests/cloud/staging-workflows.mjs --output artifacts/staging-workflows.json
+          workflows_exit=$?
+          set -e
+          echo "workflows_exit=$workflows_exit" >> "$GITHUB_OUTPUT"
+          # Always upload the artifact, even on harness exit 1 — the verdict
+          # lives in the JSON, not the exit code.
+          exit $workflows_exit
+
+      # Best-effort revoke of the synthetic budget session. Runs on success,
+      # failure, and cancellation (Codex P2 + Stoff81 Critical #4: prior code
+      # only deleted the token file, leaving live credentials/rows behind and
+      # creating an unsafe deletion path). If the mint step never produced
+      # IDs (the mint step failed), reconcile-mode sweeps every known smoke
+      # fixture as a safety net.
+      - name: Cleanup synthetic budget session
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+          BUDGET_STAGING_ENVIRONMENT: staging
+          MINT_USER_ID: ${{ steps.budget-mint.outputs.mint_user_id }}
+          MINT_SESSION_ID: ${{ steps.budget-mint.outputs.mint_session_id }}
+          MINT_EMAIL: ${{ steps.budget-mint.outputs.mint_email }}
+        run: |
+          set -euo pipefail
+          cd services/budget-api
+          if [[ -n "${MINT_USER_ID:-}" && -n "${MINT_SESSION_ID:-}" ]]; then
+            npx tsx scripts/staging-smoke-session.ts revoke \
+              --staging \
+              --user-id "${MINT_USER_ID}" \
+              --session-id "${MINT_SESSION_ID}" \
+              --json
+          elif [[ -n "${MINT_EMAIL:-}" ]]; then
+            npx tsx scripts/staging-smoke-session.ts revoke \
+              --staging \
+              --email "${MINT_EMAIL}" \
+              --json
+          else
+            npx tsx scripts/staging-smoke-session.ts reconcile \
+              --staging \
+              --json
+          fi
+          rm -f /tmp/budget-smoke-bearer
+
+      - name: Run AC3 failure drill
+        id: drill
+        if: github.event.inputs.run_failure_drill == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          STAGING_FLY_ORG: ${{ env.FLY_ORG }}
+          STAGING_FLY_APP_WORKER: ${{ env.FLY_APP_WORKER }}
+          STAGING_SCHEDULER_API_URL: ${{ env.SCHEDULER_API_URL }}
+          STAGING_SCHEDULER_TOKEN: ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          STAGING_INTENT_COMMIT: ${{ steps.intent.outputs.intent_commit }}
+          MAX_DURATION_SECONDS: ${{ github.event.inputs.max_duration_seconds || '600' }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          set +e
+          # Validate the dispatch input as a 60-3600 integer (Codex P1 #6 +
+          # Stoff81 Important #6: prior code interpolated the input directly
+          # into the shell, allowing trivial shell injection).
+          if [[ ! "${MAX_DURATION_SECONDS}" =~ ^[0-9]+$ ]] || (( MAX_DURATION_SECONDS < 60 || MAX_DURATION_SECONDS > 3600 )); then
+            echo "::error::max_duration_seconds must be an integer in [60, 3600]; received '${MAX_DURATION_SECONDS}'." >&2
+            exit 2
+          fi
+          tests/cloud/staging-failure-drill.sh \
+            --confirm-staging \
+            --output artifacts/staging-failure-drill.json \
+            --max-duration-seconds "${MAX_DURATION_SECONDS}"
+          drill_exit=$?
+          set -e
+          echo "drill_exit=$drill_exit" >> "$GITHUB_OUTPUT"
+          exit $drill_exit
+
+      - name: Upload redacted results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-staging-validation-${{ steps.intent.outputs.intent_commit }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+          # No secrets allowed in the artifact; the harness + drill redact
+          # bearer values before they reach the JSON. The budget-api smoke-
+          # session CLI is unlinked before the upload. Any future token
+          # leakage will surface in this artifact's diff; treat a
+          # `Bearer ` token-shaped string as a CI blocker.
+
+      - name: Summary
+        if: always()
+        env:
+          WORKFLOWS_RESULT: ${{ steps.workflows.outputs.workflows_exit }}
+          DRILL_RESULT: ${{ steps.drill.outputs.drill_exit }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Cloud staging validation summary"
+            echo ""
+            echo "- intent_commit: \`${{ steps.intent.outputs.intent_commit }}\`"
+            echo "- workflows harness exit: \`${WORKFLOWS_RESULT:-N/A}\`"
+            echo "- failure drill exit: \`${DRILL_RESULT:-N/A}\`"
+            echo ""
+            if [[ -f artifacts/staging-workflows.json ]]; then
+              echo "### AC2 verdict"
+              jq -r '"  - verdict: " + .verdict, "  - runId: " + .runId, "  - services match intent: tasksApi=" + (.services.tasksApi.matchesIntent|tostring) + ", budgetApi=" + (.services.budgetApi.matchesIntent|tostring) + ", contentScheduler=" + (.services.contentScheduler.matchesIntent|tostring)' artifacts/staging-workflows.json
+              jq -r '"  - cleanup ok: " + (.cleanup.ok|tostring)' artifacts/staging-workflows.json
+              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + .error.code + ")" else "" end)' artifacts/staging-workflows.json
+              jq -r '.acceptedLimitations[] | "  - accepted limitation: " + .code + " (owner " + .owner + ")"' artifacts/staging-workflows.json
+            fi
+            if [[ -f artifacts/staging-failure-drill.json ]]; then
+              echo "### AC3 verdict"
+              jq -r '"  - verdict: " + .verdict' artifacts/staging-failure-drill.json
+              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + .error.code + ")" else "" end)' artifacts/staging-failure-drill.json
+              jq -r '.cleanup.operations[] | "  - cleanup " + .name + ": " + (.ok|tostring)' artifacts/staging-failure-drill.json
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
