@@ -290,13 +290,13 @@ jobs:
               echo "### AC2 verdict"
               jq -r '"  - verdict: " + .verdict, "  - runId: " + .runId, "  - services match intent: tasksApi=" + (.services.tasksApi.matchesIntent|tostring) + ", budgetApi=" + (.services.budgetApi.matchesIntent|tostring) + ", contentScheduler=" + (.services.contentScheduler.matchesIntent|tostring)' artifacts/staging-workflows.json
               jq -r '"  - cleanup ok: " + (.cleanup.ok|tostring)' artifacts/staging-workflows.json
-              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + .error.code + ")" else "" end)' artifacts/staging-workflows.json
+              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + (.error.code|tostring) + ")" else "" end)' artifacts/staging-workflows.json
               jq -r '.acceptedLimitations[] | "  - accepted limitation: " + .code + " (owner " + .owner + ")"' artifacts/staging-workflows.json
             fi
             if [[ -f artifacts/staging-failure-drill.json ]]; then
               echo "### AC3 verdict"
               jq -r '"  - verdict: " + .verdict' artifacts/staging-failure-drill.json
-              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + .error.code + ")" else "" end)' artifacts/staging-failure-drill.json
+              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + (.error.code|tostring) + ")" else "" end)' artifacts/staging-failure-drill.json
               jq -r '.cleanup.operations[] | "  - cleanup " + .name + ": " + (.ok|tostring)' artifacts/staging-failure-drill.json
             fi
           } >> "$GITHUB_STEP_SUMMARY"
