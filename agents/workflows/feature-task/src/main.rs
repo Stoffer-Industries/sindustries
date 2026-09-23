@@ -190,6 +190,8 @@ pub(crate) struct TaskComment {
     text: Option<String>,
     #[serde(default)]
     body: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
 }
 
 /// Structured approval row embedded in the Tasks API task payload after

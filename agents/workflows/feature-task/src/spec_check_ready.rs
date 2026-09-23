@@ -848,6 +848,7 @@ mod tests {
                     .to_string(),
             ),
             body: None,
+            created_at: None,
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
@@ -1018,11 +1019,13 @@ mod tests {
                     .to_string(),
             ),
             body: None,
+            created_at: None,
         });
         task.comments.push(TaskComment {
             author: Some("Ash".to_string()),
             text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
             body: None,
+            created_at: None,
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
@@ -1036,11 +1039,13 @@ mod tests {
             author: Some("Ash".to_string()),
             text: Some("[qa-agent-blocked] Route back to Rowan.".to_string()),
             body: None,
+            created_at: None,
         });
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
             text: Some("Collected the requested runtime evidence.".to_string()),
             body: None,
+            created_at: None,
         });
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1049,6 +1054,7 @@ mod tests {
                     .to_string(),
             ),
             body: None,
+            created_at: None,
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),

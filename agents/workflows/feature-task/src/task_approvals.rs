@@ -89,7 +89,31 @@ pub(crate) fn qa_agent_verified(task: &Task) -> bool {
 }
 
 fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
+    // A structured approval is the start of the current QA pass. Ignore
+    // verdict comments from an earlier pass; otherwise an old blocked report
+    // can invalidate a later approval when the approval comment itself has no
+    // verdict tag.
+    let latest_approval_at = task
+        .approvals
+        .iter()
+        .filter(|approval| approval.approval_type == "qa_agent" && approval.state == "approved")
+        .filter_map(|approval| approval.approved_at.as_deref())
+        .max();
+
     task.comments.iter().rev().find_map(|comment| {
+        if let Some(approval_at) = latest_approval_at {
+            // Tasks API timestamps are RFC-3339 UTC strings, so their
+            // normalized representation sorts chronologically. Comments
+            // without a timestamp cannot safely override a timestamped
+            // approval and are ignored for this pass.
+            if comment
+                .created_at
+                .as_deref()
+                .is_none_or(|created_at| created_at <= approval_at)
+            {
+                return None;
+            }
+        }
         let text = comment
             .text
             .as_deref()
@@ -369,6 +393,27 @@ mod tests {
         assert!(qa_agent_deferred(&task));
         assert!(!qa_agent_verified(&task));
         assert!(crate::verify_delivery::qa_agent_verified_failures(&task)[0].contains("deferred"));
+    }
+
+    #[test]
+    fn old_blocked_report_does_not_override_later_qa_approval() {
+        let mut task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        task.approvals[0].approved_at = Some("2026-09-23T01:16:00.000Z".to_string());
+        task.comments.push(crate::TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-blocked] AC1: old evidence was missing.".to_string()),
+            created_at: Some("2026-09-22T20:52:00.000Z".to_string()),
+            ..Default::default()
+        });
+        task.comments.push(crate::TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("Approval qa_agent approved by Ash.".to_string()),
+            created_at: Some("2026-09-23T01:16:01.000Z".to_string()),
+            ..Default::default()
+        });
+
+        assert!(qa_agent_verified(&task));
+        assert!(crate::verify_delivery::qa_agent_verified_failures(&task).is_empty());
     }
 
     #[test]
