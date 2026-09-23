@@ -55,7 +55,7 @@ The task description (durable product spec since the original `brain/tasks/specs
 
 Natural source-of-truth decisions:
 
-- **UI-local state** — the Clerk React SDK manages session state, org claims, and user metadata locally. The app's `AuthProvider` (`apps/gymtrack/src/lib/auth.jsx`) becomes a thin wrapper around `useUser()` / `useSession()` from `@clerk/clerk-react`. No bespoke session cache.
+- **UI-local state** — the Clerk React SDK manages session state, org claims, and user metadata locally. The app's `AuthProvider` (`apps/gymtrack/src/lib/auth.jsx`) becomes a thin wrapper around `useUser()` / `useSession()` from `@clerk/react`. No bespoke session cache.
 - **API-owned resource** — the new `public.profiles` table is the GymTrack-owned profile resource, keyed by the Clerk subject (`text` storing Clerk's `user.id`, primary-keyed so RLS can do `auth.uid() = profiles.clerk_user_id` lookups). Profiles carry product-local fields (display name, signup source) that don't belong in Clerk.
 - **Database-backed domain data** — workouts, workout sets, planned workouts, agent API keys, MCP OAuth rows all stay where they are; only their FK column changes target.
 - **Shared package / cross-app contract** — none. Each product will eventually verify Clerk on its own (the architecture direction in `docs/ARCHITECTURE.md`). GymTrack is the first product; do not extract a shared `@sindustries/auth` package in this task — premature without a second consumer.
@@ -116,7 +116,7 @@ Each migration ships with a smoke test assertion (the existing `20260731190000_s
 
 Application-side. UI swap behind a feature flag (`VITE_AUTH_PROVIDER=clerk|supabase`) for one deploy cycle so the rollback path is one env-var flip rather than a re-deploy.
 
-- `apps/gymtrack/package.json` — add `@clerk/clerk-react`. Pin a version; no `^` to keep the Vite-resolution path stable.
+- `apps/gymtrack/package.json` — add `@clerk/react` (the supported Core 3 successor to the now-deprecated `@clerk/clerk-react`). Pin a version; no `^` to keep the Vite-resolution path stable.
 - `apps/gymtrack/src/lib/auth.jsx` — keep the existing `AuthProvider` interface so consumers do not change. Internally, when `VITE_AUTH_PROVIDER === 'clerk'`, wrap with Clerk's `ClerkProvider` and proxy `session/user/loading/signIn/signUp/signOut` to Clerk's hooks. When `=== 'supabase'`, fall through to the current behaviour. The proxy layer keeps the consumer surface stable across the cutover.
 - `apps/gymtrack/src/lib/authFlow.js` — `signInWithOAuthRedirect` becomes a Clerk OAuth redirect (`window.location.assign(clerk.buildUrlWithAuth('sso-callback-id'))` style), but the function signature stays `{ data, error, providerDisabled }`. `DISABLED_OAUTH_PROVIDERS` is sourced from Clerk's runtime config (`clerk.userSettings` or equivalent) so the Apple-hidden-on-first-paint behaviour carries over without a separate list.
 - `apps/gymtrack/src/components/SignUpPage.jsx` — no DOM change. The `<button data-testid="signup-google">` stays; the `handleOAuth` calls now invoke the Clerk-backed `signInWithOAuthRedirect`. Same e2e test surface.

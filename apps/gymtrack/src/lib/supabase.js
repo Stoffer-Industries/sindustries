@@ -77,6 +77,13 @@ export function setSupabaseAccessTokenGetter(getter) {
  *
  * @type {import('@supabase/supabase-js').SupabaseClient}
  */
+// NOTE: `storage: window.localStorage` (below) and `getActiveProvider()` (which
+// reads VITE_AUTH_PROVIDER at module load) both touch the browser environment.
+// The `typeof window === 'undefined'` guard above (line ~21) MUST stay above
+// this `createClient` call — re-ordering will break SSR/build-time evaluation.
+// The guard is the source of truth for "supabase.js must not be imported in a
+// server context"; do not move `createClient` ahead of it without re-validating
+// SSR safety.
 export const supabase = createClient(url, anonKey, {
   auth: {
     persistSession: getActiveProvider() === 'supabase',

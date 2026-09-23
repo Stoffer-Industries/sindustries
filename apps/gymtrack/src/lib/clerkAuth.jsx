@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useSession, useUser, useSignIn, useSignUp, useClerk } from '@clerk/clerk-react';
+import { useSession, useUser, useSignIn, useSignUp, useClerk } from '@clerk/react';
 import { AuthContext } from './authContext.jsx';
 import { getClerkPublishableKey } from './clerkConfig.js';
 import { setSupabaseAccessTokenGetter } from './supabase.js';
