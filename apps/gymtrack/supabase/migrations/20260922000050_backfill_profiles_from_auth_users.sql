@@ -28,7 +28,7 @@
 -- cleanup section.
 --
 -- Pre-requisites verified:
--   - Phase 1 (`20260922000000_clerk_profiles_schema_readiness.sql`) is
+--   - Phase 1 (`20260922000000_clerk_profiles_schema_readiness.sql`) is
 --     merged on origin/main: `public.profiles` exists with the expected
 --     columns and RLS.
 --   - `auth.users` is Supabase-managed and continues to hold the legacy
