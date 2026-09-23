@@ -92,6 +92,19 @@ test('harness emits verdict=fail JSON against an unreachable host set', async ()
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /fake-token-not-real/);
   assert.doesNotMatch(serialized, /Bearer\s+[A-Za-z0-9._-]{12,}/);
+  // Schema conformance: tests/cloud/staging-validation.schema.json declares
+  // error.code as type=string. Node's undici fetch emits numeric codes
+  // (e.g. 20 on AbortController aborts), which previously slipped through
+  // this test and broke the cloud-staging-validate workflow's GITHUB_STEP_SUMMARY
+  // jq render. Regress the contract here so future harness changes can't
+  // reintroduce the violation.
+  const { stdout: schemaOut, stderr: schemaErr } = await exec('node', [SCHEMA_CHECK, out]);
+  assert.match(schemaOut, /schema check passed for /, `expected schema check to pass; got stdout="${schemaOut}" stderr="${schemaErr}"`);
+  for (const c of result.checks) {
+    if (c.error !== undefined && c.error !== null) {
+      assert.equal(typeof c.error.code, 'string', `expected ${c.name}.error.code to be string, got ${typeof c.error.code} (${c.error.code})`);
+    }
+  }
 });
 
 test('schema validator passes a green-path result', async () => {

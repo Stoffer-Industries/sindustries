@@ -199,7 +199,12 @@ class CheckRunner {
       return true;
     } catch (err) {
       const endedAt = new Date().toISOString();
-      const code = err.code ?? 'CHECK_FAILED';
+      // Schema contract: tests/cloud/staging-validation.schema.json declares
+      // error.code as type=string, minLength=1. Node's undici fetch sets
+      // numeric codes (e.g. 20 for UND_ERR_HEADERS_TIMEOUT on AbortController
+      // aborts), which would fail downstream schema validation. Coerce to
+      // string defensively so any future error surface keeps emitting strings.
+      const code = String(err.code ?? 'CHECK_FAILED');
       this.checks.push({
         name,
         status: 'fail',
