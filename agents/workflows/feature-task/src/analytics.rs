@@ -673,11 +673,13 @@ mod tests {
                 author: None,
                 text: Some("[implementer-prs] https://github.com/foo/bar/pull/1".to_string()),
                 body: None,
+                created_at: None,
             },
             TaskComment {
                 author: None,
                 text: Some("[implementer-prs] https://github.com/foo/bar/pull/2 https://github.com/foo/bar/pull/1".to_string()),
                 body: None,
+                created_at: None,
             },
         ];
         let urls = extract_implementer_pr_urls(&task);
