@@ -80,7 +80,8 @@ When Quinn is top owner:
    approval, unavailable credential, or an unresolved product decision), do not
    silently remove Quinn or let Rowan route around her. Preserve the existing
    ordered handoff chain (normally `["Quinn", "Tom"]`), post the concrete
-   blocker evidence, and page Tom directly and immediately. Do not collapse the
+   blocker evidence with a `[quinn-escalation]` marker, and page Tom directly
+   and immediately. Do not collapse the
    stack to `["Tom"]` merely to notify him; the unchanged stack makes the
    Rowan → Quinn → Tom routing visible. This is a real escalation, not a
    duplicate PR/state-assistance request.
