@@ -24,16 +24,30 @@ test.describe('GymTrack — OAuth (Google) sign-up', () => {
     const googleButton = page.getByTestId('signup-google');
     await expect(googleButton).toBeVisible();
 
-    // Click Google. The page will navigate off-site to accounts.google.com;
-    // we don't try to complete the redirect end-to-end here (that would
-    // require a live OAuth client + interactive consent in CI). The test
-    // verifies the wiring: the button calls signInWithOAuth and the URL
-    // it receives is one we recognise.
-    const navigationPromise = page.waitForURL(/accounts\.google\.com|supabase\.co\/auth\/v1\/authorize/i, {
-      timeout: 10_000
-    }).catch(() => null);
+    // Click Google. The page will navigate off-site to accounts.google.com
+    // (Supabase path) or to the Clerk hosted account portal (Clerk path —
+    // task bb09eaed Phase 3 cutover); we don't try to complete the
+    // redirect end-to-end here (that would require a live OAuth client +
+    // interactive consent in CI). The test verifies the wiring: the button
+    // calls startOAuthRedirect and the URL it receives is one we recognise.
+    //
+    // URL pattern matchers:
+    //   - accounts.google.com      → Supabase path's eventual consent screen
+    //   - supabase.co/auth/v1/authorize → Supabase path's intermediate redirect
+    //   - clerk.<instance>.com     → Clerk path's hosted account portal
+    //                                 (instance host is per-deployment —
+    //                                 the wildcard covers test + prod)
+    const navigationPromise = page.waitForURL(
+      /accounts\.google\.com|supabase\.co\/auth\/v1\/authorize|clerk\.[a-z0-9-]+\.com/i,
+      {
+        timeout: 10_000
+      }
+    ).catch(() => null);
     await googleButton.click();
     const matched = await navigationPromise;
-    expect(matched, 'Expected navigation to Google OAuth or Supabase authorize URL after clicking Continue with Google').not.toBeNull();
+    expect(
+      matched,
+      'Expected navigation to Google OAuth, Supabase authorize URL, or Clerk hosted account portal after clicking Continue with Google'
+    ).not.toBeNull();
   });
 });

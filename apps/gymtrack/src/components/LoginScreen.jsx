@@ -3,8 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import {
   DISABLED_OAUTH_PROVIDERS,
-  SUPPORTED_OAUTH_PROVIDERS,
-  signInWithOAuthRedirect
+  SUPPORTED_OAUTH_PROVIDERS
 } from '../lib/authFlow.js';
 
 /**
@@ -16,7 +15,7 @@ const INITIAL_AVAILABLE_PROVIDERS = SUPPORTED_OAUTH_PROVIDERS.filter(
 );
 
 export default function LoginScreen() {
-  const { session, signIn } = useAuth();
+  const { session, signIn, startOAuthRedirect } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = location.state?.from;
@@ -37,7 +36,7 @@ export default function LoginScreen() {
   async function handleOAuth(provider) {
     setError(null);
     const { data, error: oauthError, providerDisabled } =
-      await signInWithOAuthRedirect(provider, from);
+      await startOAuthRedirect(provider, from);
     if (providerDisabled) {
       setAvailableProviders((prev) => prev.filter((value) => value !== provider));
       setError(`Sign-in with ${provider} is not available right now. Try another option.`);
