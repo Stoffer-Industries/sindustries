@@ -122,6 +122,25 @@ jobs:
         with:
           version: 0.4.102
 
+      # Run budget-api Prisma migrations against the staging DB before the
+      # mint step needs them (Quinn review 2026-09-23T05:50:25Z: dispatch
+      # run 35799599485 failed at the budget-api mint step with
+      # `The table 'budget_api.User' does not exist in the current database.`
+      # because the bootstrap-staging.sh migration row alone is not enough —
+      # the deployed budget-api image only references the bootstrap step,
+      # it doesn't apply migrations on deploy. `prisma migrate deploy` is
+      # idempotent so re-runs are safe; this step makes the validate
+      # workflow self-sufficient and removes the manual Quinn-owned
+      # bootstrap-staging.sh run as a precondition for AC2 evidence.
+      - name: Run budget-api Prisma migrations
+        id: budget-migrate
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          npm --workspace services/budget-api run prisma:migrate
+          echo "budget_migrate_ok=true" >> "$GITHUB_OUTPUT"
+
       - name: Mint budget-api synthetic session
         id: budget-mint
         env:
