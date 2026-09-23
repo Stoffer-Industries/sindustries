@@ -33,7 +33,8 @@
 //!   `Ash` for unverified `qa_agent`, `Tom` for unapproved `accepted`);
 //!   returns `None` when the gate is satisfied.
 //!   Tom is only a workflow owner at `acceptance`; a `doing` task may retain
-//!   Tom only after Quinn has explicitly escalated to him.
+//!   Tom only after Quinn has explicitly escalated to him and recorded the
+//!   escalation marker in the task audit trail.
 //! - `ash_was_last_commenter` — gate so Ash's own comments do not let a
 //!   stale `Ash` head persist into the next lobster sweep.
 //! - `managed_owner_reason_satisfied` — predicate for whether the head of
@@ -551,12 +552,18 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
 }
 
 /// Tom is only a workflow owner at `acceptance` for the structured `accepted`
-/// gate. During implementation, remove stale Tom slots unless Quinn is already
-/// before Tom, which represents an explicit Quinn -> Tom escalation. If Quinn
-/// appears after Tom, normalize the escalation order so Quinn gets the first
-/// chance to resolve the blocker.
+/// gate. During implementation, remove Tom slots unless Quinn has explicitly
+/// recorded a `[quinn-escalation]` marker in the task audit trail. This keeps
+/// stale workflow-generated stacks from paging Tom while still allowing Quinn
+/// to preserve a deliberate Quinn -> Tom escalation. If Quinn appears after
+/// Tom, normalize the escalation order so Quinn gets the first chance to
+/// resolve the blocker.
 fn enforce_tom_acceptance_only(task: &Task, owners: &mut Vec<String>) {
     if task.status != "doing" {
+        return;
+    }
+    if !has_explicit_quinn_tom_escalation(task) {
+        owners.retain(|owner| !owner.eq_ignore_ascii_case("Tom"));
         return;
     }
     let Some(quinn_index) = owners
@@ -576,6 +583,20 @@ fn enforce_tom_acceptance_only(task: &Task, owners: &mut Vec<String>) {
         let quinn = owners.remove(quinn_index);
         owners.insert(tom_index, quinn);
     }
+}
+
+fn has_explicit_quinn_tom_escalation(task: &Task) -> bool {
+    task.comments.iter().any(|comment| {
+        comment
+            .author
+            .as_deref()
+            .is_some_and(|author| author.trim().eq_ignore_ascii_case("Quinn"))
+            && comment
+                .text
+                .as_deref()
+                .or(comment.body.as_deref())
+                .is_some_and(|text| text.contains("[quinn-escalation]"))
+    })
 }
 
 pub(crate) fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<()> {
@@ -902,7 +923,7 @@ mod tests {
 
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Rowan", "Quinn", "Tom"]
+            vec!["Rowan", "Quinn"]
         );
     }
 
@@ -944,6 +965,11 @@ mod tests {
         task.comments.push(TaskComment {
             author: Some("Ash".to_string()),
             text: Some("[qa-agent-deferred] AC1: pending admin action.".to_string()),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Quinn".to_string()),
+            text: Some("[quinn-escalation] Tom must provision the external credential.".to_string()),
             ..Default::default()
         });
 
@@ -1097,6 +1123,15 @@ mod tests {
     fn routing_keeps_quinn_before_tom_without_draining_remaining_owners() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
         task.comments.push(TaskComment {
+            author: Some("Quinn".to_string()),
+            text: Some(
+                "[quinn-escalation] Tom must provision the external credential."
+                    .to_string(),
+            ),
+            body: None,
+            ..TaskComment::default()
+        });
+        task.comments.push(TaskComment {
             text: Some(
                 "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
                     .to_string(),
@@ -1123,6 +1158,11 @@ mod tests {
     #[test]
     fn routing_moves_quinn_before_tom_head_before_acceptance() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
+        task.comments.push(TaskComment {
+            author: Some("Quinn".to_string()),
+            text: Some("[quinn-escalation] Tom must provision the external credential.".to_string()),
+            ..Default::default()
+        });
         task.approvals.push(TaskApproval {
             approval_type: "tech_design".to_string(),
             state: "approved".to_string(),
