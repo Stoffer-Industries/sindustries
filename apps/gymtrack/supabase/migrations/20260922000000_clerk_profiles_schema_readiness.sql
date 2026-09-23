@@ -53,13 +53,11 @@
 
 create table if not exists public.profiles (
   id                   uuid        primary key default gen_random_uuid(),
-  clerk_user_id        text        unique
+  clerk_user_id        text        unique,
                                      -- nullable during Phase 4 linking:
                                      -- a backfilled row may have only the
                                      -- legacy id until first post-migration
                                      -- sign-in populates clerk_user_id.
-                                     -- check (clerk_user_id is not null
-                                     --         or legacy_auth_user_id is not null),
   email                text,
   email_verified       boolean     not null default false,
   display_name         text,
@@ -74,7 +72,10 @@ create table if not exists public.profiles (
                                      -- Nullable for fresh Clerk sign-ups.
                                      ,
   created_at           timestamptz not null default now(),
-  updated_at           timestamptz not null default now()
+  updated_at           timestamptz not null default now(),
+  constraint profiles_identity_source_check check (
+    clerk_user_id is not null or legacy_auth_user_id is not null
+  )
 );
 
 comment on table public.profiles is
