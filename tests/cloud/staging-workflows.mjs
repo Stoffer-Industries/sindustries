@@ -31,13 +31,56 @@
 // returns, including on assertion failure or SIGINT/SIGTERM.
 
 import { randomBytes, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { argv, exit, stderr, stdout } from 'node:process';
 
 const SCHEMA_VERSION = 1;
 const REDACTED = '[REDACTED]';
 const DEFAULT_TIMEOUT_MS = 15_000;
+// Quinn beat 283 (2026-09-24 04:50 NZST): when the harness crashes before
+// writeFileSync(staging-workflows.json) (run 35858190813 had zero captured
+// stdout/stderr between step start and exit), the only signal we have is
+// the Node process exit code with no diagnostic. Capture the failure as
+// a structured JSON file alongside the workflow's regular artifact upload
+// so next dispatch surfaces the actual stack instead of producing the
+// same silent exit-1. The path is env-overridable so unit tests can
+// rewrite it under a temp dir without polluting the working tree.
+const CRASH_OUT_DIR = process.env.HARNESS_CRASH_OUT_DIR ?? 'artifacts';
+const CRASH_OUT_FILE = process.env.HARNESS_CRASH_OUT_FILE ?? 'harness-crash.json';
+const CRASH_OUT_PATH = join(CRASH_OUT_DIR, CRASH_OUT_FILE);
+
+function writeCrashJson(err, where) {
+  // Best-effort: never let the diagnostic writer itself crash the harness.
+  // The catch handler at the bottom covers the writing logic; if writeFileSync
+  // itself throws (read-only fs, ENOSPC), the original error is unchanged
+  // and we surface both messages on stderr.
+  try {
+    mkdirSync(CRASH_OUT_DIR, { recursive: true });
+    const payload = {
+      crashedAt: new Date().toISOString(),
+      where,
+      error: {
+        name: err?.name ?? 'Error',
+        code: String(err?.code ?? 'HARNESS_CRASHED'),
+        message: redactMessage(err?.message ?? String(err)),
+        stack: err?.stack
+          ? redactMessage(err.stack).split('\n').slice(0, 50).join('\n')
+          : null
+      },
+      argv: process.argv.slice(0, 50),
+      runId: process.env.STAGING_RUN_ID ?? null
+    };
+    writeFileSync(CRASH_OUT_PATH, JSON.stringify(payload, null, 2));
+    return CRASH_OUT_PATH;
+  } catch (writeErr) {
+    stderr.write(
+      `fatal: could not write crash json to ${CRASH_OUT_PATH}: ` +
+        `${writeErr?.message ?? String(writeErr)}\n`
+    );
+    return null;
+  }
+}
 
 // Synthetic tag prefix used to find this run's fixtures during cleanup and
 // during the failure-drill evidence correlation. The same prefix is reused
@@ -573,6 +616,23 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  try {
+    return await runHarness();
+  } catch (err) {
+    // Quinn beat 283 (2026-09-24 04:50 NZST): run 35858190813 exited 1
+    // with zero captured stdout/stderr between step start and exit, so
+    // the bottom-level `.catch` could only write to stderr — and stderr
+    // was lost. Capture the error to disk here before re-throwing so the
+    // workflow's `Upload redacted results` step (path: artifacts/) picks
+    // the crash JSON up regardless of whether the GitHub Actions log
+    // captured the console output. The bottom `.catch` still writes to
+    // stderr for the in-log diagnostic.
+    writeCrashJson(err, 'main.catch');
+    throw err;
+  }
+}
+
+async function runHarness() {
   const args = parseArgs();
   const ctx = {
     tasksApiUrl: args.tasksApiUrl.replace(/\/$/, ''),
@@ -686,7 +746,6 @@ async function main() {
 
   const serialized = JSON.stringify(result, null, 2);
   if (args.output !== null) {
-    const { writeFileSync } = await import('node:fs');
     writeFileSync(args.output, serialized);
   } else {
     stdout.write(serialized + '\n');
@@ -697,8 +756,40 @@ async function main() {
 process.on('SIGINT', () => { stderr.write('harness: SIGINT received\n'); exit(130); });
 process.on('SIGTERM', () => { stderr.write('harness: SIGTERM received\n'); exit(143); });
 
+// Quinn beat 283: also capture synchronous-throw crashes and async
+// rejections that bypass the bottom `.catch` (e.g. an `await` outside
+// any `main()` caller that escapes via Node's unhandledRejection
+// handler). These handlers are last-chance: each one writes the crash
+// JSON, then defers to Node's default behaviour (which still surfaces
+// the message on stderr and exits non-zero).
+process.on('uncaughtException', (err) => {
+  writeCrashJson(err, 'uncaughtException');
+  stderr.write(`fatal: uncaughtException: ${redactMessage(err?.message ?? String(err))}\n`);
+  if (err?.stack) stderr.write(redactMessage(err.stack) + '\n');
+  exit(2);
+});
+process.on('unhandledRejection', (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  writeCrashJson(err, 'unhandledRejection');
+  stderr.write(
+    `fatal: unhandledRejection: ${redactMessage(err?.message ?? String(err))}\n`
+  );
+  if (err?.stack) stderr.write(redactMessage(err.stack) + '\n');
+  exit(2);
+});
+
 main().catch((err) => {
-  stderr.write(`error: harness crashed: ${redactMessage(err?.message ?? String(err))}\n`);
+  // Main's try/catch has already written the crash JSON; this block
+  // exists for the live in-log diagnostic only. If the crash JSON
+  // write itself failed (e.g. read-only fs), the call above will have
+  // surfaced that message on stderr, and we still want stderr to
+  // carry the original failure.
+  const onDisk = process.env.HARNESS_SKIP_CRASH_WRITE === '1' ? null : 'see artifacts/harness-crash.json';
+  stderr.write(
+    `error: harness crashed: ${redactMessage(err?.message ?? String(err))}` +
+      (onDisk ? ` (${onDisk})` : '') +
+      '\n'
+  );
   if (err?.stack) stderr.write(redactMessage(err.stack) + '\n');
   exit(2);
 });
