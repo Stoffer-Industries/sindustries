@@ -16,7 +16,7 @@ import { publishContentSchedulerItem } from '../src/routes/contentSchedulerPubli
 
 // --- Prisma mock (hoisted so the autoPostWorker import does not blow up) -
 
-const { prismaMock } = vi.hoisted(() => {
+const { prismaMock, threadPublishMock } = vi.hoisted(() => {
   const prismaMock: any = {
     contentSchedulerItem: {
       findMany: vi.fn(),
@@ -27,11 +27,15 @@ const { prismaMock } = vi.hoisted(() => {
     },
     $transaction: vi.fn()
   };
-  return { prismaMock };
+  return { prismaMock, threadPublishMock: vi.fn() };
 });
 
 vi.mock('../src/lib/prisma.ts', () => ({
   prisma: prismaMock
+}));
+
+vi.mock('../src/routes/contentSchedulerThreadPublish.ts', () => ({
+  publishThreadContentSchedulerItem: threadPublishMock
 }));
 
 function itemFixture(overrides: Record<string, unknown> = {}) {
@@ -454,6 +458,30 @@ describe('publishContentSchedulerItem (auto actor)', () => {
 // --- processAutoPostJob --------------------------------------------------
 
 describe('processAutoPostJob', () => {
+  it('routes thread items through the thread publisher', async () => {
+    const item = itemFixture({ kind: 'thread' });
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(item);
+    threadPublishMock.mockResolvedValue({
+      ok: true,
+      code: 'OK',
+      itemId: item.id,
+      attemptId: 'attempt-1',
+      publishedUrl: 'https://x.com/sindustries/status/thread-root',
+      publishedAt: new Date('2026-07-17T09:00:00Z')
+    });
+
+    const outcome = await processAutoPostJob({
+      itemId: item.id,
+      scheduledFor: item.scheduledFor,
+      scheduleVersion: 1
+    });
+
+    expect(outcome).toBe('published');
+    expect(threadPublishMock).toHaveBeenCalledOnce();
+    expect(threadPublishMock).toHaveBeenCalledWith(item.id);
+    expect(prismaMock.contentSchedulerItem.findUnique).toHaveBeenCalledOnce();
+  });
+
   it('exits rejected-stale-version when the item has a newer scheduleVersion', async () => {
     const item = itemFixture({
       autoPostScheduleVersion: 5,
