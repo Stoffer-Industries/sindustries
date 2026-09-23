@@ -19,6 +19,7 @@ import {
   getJobSchedulerAdapter
 } from '../routes/contentSchedulerJobs.ts';
 import { publishContentSchedulerItem } from '../routes/contentSchedulerPublishService.ts';
+import { publishThreadContentSchedulerItem } from '../routes/contentSchedulerThreadPublish.ts';
 
 export type AutoPostJobOutcome =
   | 'published'
@@ -102,8 +103,11 @@ export async function processAutoPostJob(
     return 'rescheduled-early-fire';
   }
 
-  // Call the shared publish service.
-  const result = await publishContentSchedulerItem(item.id, 'auto');
+  // Dispatch by kind. Thread items must use the chain orchestrator so the
+  // root and every reply are posted and journalled as one publish attempt.
+  const result = item.kind === 'thread'
+    ? await publishThreadContentSchedulerItem(item.id)
+    : await publishContentSchedulerItem(item.id, 'auto');
 
   if (result.ok) {
     // On success, clear the job id (so a future schedule change does not
