@@ -3,8 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import {
   DISABLED_OAUTH_PROVIDERS,
-  SUPPORTED_OAUTH_PROVIDERS,
-  signInWithOAuthRedirect
+  SUPPORTED_OAUTH_PROVIDERS
 } from '../lib/authFlow.js';
 
 /**
@@ -35,7 +34,7 @@ const INITIAL_AVAILABLE_PROVIDERS = SUPPORTED_OAUTH_PROVIDERS.filter(
  * already exists; an empty-history state is rendered for fresh users.
  */
 export default function SignUpPage() {
-  const { session, signUp } = useAuth();
+  const { session, signUp, startOAuthRedirect } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = location.state?.from;
@@ -59,7 +58,7 @@ export default function SignUpPage() {
   async function handleOAuth(provider) {
     setError(null);
     const { data, error: oauthError, providerDisabled } =
-      await signInWithOAuthRedirect(provider, from);
+      await startOAuthRedirect(provider, from);
     if (providerDisabled) {
       // Mark this provider as disabled in the UI by removing it from the
       // available list so the button disappears on re-render.

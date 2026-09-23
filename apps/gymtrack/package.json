@@ -13,6 +13,7 @@
     "check:clerk-profiles-readiness": "node scripts/check-clerk-profiles-readiness.js"
   },
   "dependencies": {
+    "@clerk/clerk-react": "5.61.3",
     "@supabase/supabase-js": "^2.45.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

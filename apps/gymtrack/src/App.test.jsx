@@ -15,7 +15,8 @@ vi.mock('./lib/auth.jsx', () => ({
     loading: false,
     signIn: mockSignIn,
     signUp: vi.fn(),
-    signOut: vi.fn()
+    signOut: vi.fn(),
+    startOAuthRedirect: (...args) => mockSignInWithOAuthRedirect(...args)
   }),
   AuthProvider: ({ children }) => children
 }));

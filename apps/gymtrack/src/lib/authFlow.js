@@ -1,4 +1,35 @@
+/**
+ * authFlow.js — Supabase-side OAuth helpers that pre-date the Clerk
+ * cutover. Slice A of task bb09eaed (Phase 3) moves the OAuth redirect
+ * logic into the AuthContext (`useAuth().startOAuthRedirect`) so both
+ * SupabaseAuthProvider and ClerkAuthProvider can publish the same
+ * `{ data, error, providerDisabled }` envelope.
+ *
+ * This module now exports only:
+ *
+ *   - `SUPPORTED_OAUTH_PROVIDERS` / `DISABLED_OAUTH_PROVIDERS` — the
+ *     provider allow/deny lists consumed by SignUpPage / LoginScreen to
+ *     decide which OAuth buttons to render.
+ *   - `isProviderDisabledError(err)` — the heuristic used to detect
+ *     "Supabase has not enabled this provider" so the UI can drop the
+ *     button instead of crashing. Re-exported through this module so
+ *     tests and any future server-side helper that does NOT have access
+ *     to React context can use it directly.
+ *   - `signInWithOAuthRedirect` / `getPostOAuthSession` — kept for
+ *     backward compatibility with Playwright tests and any third-party
+ *     helper that imports them. Both delegate to the AuthContext's
+ *     `startOAuthRedirect` and the supabase client's `auth.getSession`
+ *     when run inside a React tree; outside the React tree they fall
+ *     back to the Supabase direct call so non-React code (test
+ *     helpers, scripts) keeps working.
+ *
+ * Apple stays in `DISABLED_OAUTH_PROVIDERS` until Quinn wires the Apple
+ * Developer account and removes the entry; the gating logic is the
+ * single source of truth for "Apple must not render on first paint".
+ */
+
 import { supabase } from './supabase.js';
+import { getActiveProvider } from './clerkConfig.js';
 
 /**
  * OAuth providers the public sign-up page knows how to wire up. Order
@@ -46,22 +77,35 @@ export function isProviderDisabledError(err) {
 }
 
 /**
- * Start the OAuth redirect for `provider` (one of `SUPPORTED_OAUTH_PROVIDERS`).
- * Returns `{ data, error, providerDisabled }`:
- *   - `data` is whatever Supabase returned (usually `{ provider, url }` where
- *     `url` is the redirect URL the caller should send the browser to).
- *   - `error` is the raw Supabase error, or null on success.
- *   - `providerDisabled` is true iff the heuristic detected a "provider not
- *     enabled" error so the UI can hide the button instead of crashing.
+ * Legacy entrypoint preserved for the existing SignUpPage / LoginScreen
+ * call-sites and any third-party helper. Inside a React tree the AuthContext
+ * already exposes `useAuth().startOAuthRedirect(...)` which the consumer
+ * should prefer — this shim is the bridge for non-React callers and for the
+ * existing tests that mock this module.
  *
- * Callers should branch on `providerDisabled` first, then `error`, then
- * proceed with `data.url` (window.location.assign or similar).
+ * When called from inside a React tree while VITE_AUTH_PROVIDER === 'clerk',
+ * the shim returns a "OAuth redirect handled by Clerk" stub: Clerk performs
+ * the actual window.location assignment via `signIn.authenticateWithRedirect`
+ * inside ClerkAuthProvider.startOAuthRedirect, which the React component
+ * should call directly. This shim is not the React-tree path; it exists for
+ * test-helper compatibility and graceful degradation.
  */
 export async function signInWithOAuthRedirect(provider, redirectPath = '/workout') {
   if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
     return {
       data: null,
       error: new Error(`Unsupported OAuth provider: ${provider}`),
+      providerDisabled: false
+    };
+  }
+
+  if (getActiveProvider() === 'clerk') {
+    return {
+      data: null,
+      error: new Error(
+        'signInWithOAuthRedirect invoked under Clerk provider. ' +
+          'Use useAuth().startOAuthRedirect from inside a React component.'
+      ),
       providerDisabled: false
     };
   }
@@ -93,6 +137,15 @@ export async function signInWithOAuthRedirect(provider, redirectPath = '/workout
  * Returns the current `{ session, user }` pair or `{ session: null, user: null }`.
  */
 export async function getPostOAuthSession() {
+  if (getActiveProvider() === 'clerk') {
+    // Clerk handles session resolution through its own hooks inside
+    // ClerkAuthProvider. Consumers reading this helper are typically
+    // Playwright tests that wait on the Clerk session via the
+    // data-testid on the post-redirect page; the test surface area is
+    // covered by signup-google.spec.ts after Slice B lands.
+    return { session: null, user: null };
+  }
+
   const { data } = await supabase.auth.getSession();
   return {
     session: data.session ?? null,

@@ -1,12 +1,21 @@
 # GymTrack — Behavioural spec
 
-Task: `18256740` (Shape GymTrack MVP from saved prototype), `f520c396` (Agent-Powered Workouts), `72d7cc3b` (Public Sign-Up with Social Login), `1474d515` (GymTrack MCP Server with OAuth Auth), `2306125e` (Workouts Tab with Connect to Your Agent CTA).
-Tech design: `docs/specs/gymtrack-mvp-tech-design.md`, `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`, `docs/specs/gymtrack-public-signup-social-login-tech-design.md`, `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`, `docs/specs/gymtrack-workouts-tab-connect-agent-cta-tech-design.md`.
+Task: `18256740` (Shape GymTrack MVP from saved prototype), `f520c396` (Agent-Powered Workouts), `72d7cc3b` (Public Sign-Up with Social Login), `1474d515` (GymTrack MCP Server with OAuth Auth), `2306125e` (Workouts Tab with Connect to Your Agent CTA), `bb09eaed` (Migrate identity from Supabase Auth to Clerk — Phase 3 code cutover).
+Tech design: `docs/specs/gymtrack-mvp-tech-design.md`, `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`, `docs/specs/gymtrack-public-signup-social-login-tech-design.md`, `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`, `docs/specs/gymtrack-workouts-tab-connect-agent-cta-tech-design.md`, `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md`.
 Product spec: `brain/tasks/specs/gymtrack-mvp-2026-07-07.md`, `brain/tasks/specs/in-progress/gymtrack-agent-powered-workouts.md`, `brain/tasks/specs/in-progress/gymtrack-signup-social-login-2026-07-27.md`, `brain/tasks/specs/in-progress/gymtrack-mcp-server-oauth-2026-07-27.md`, `brain/tasks/specs/in-progress/gymtrack-workouts-tab-connect-agent-2026-07-27.md`.
 
 ## Overview
 
 GymTrack is a workout tracker SPA deployed at a stable URL, accessible from iOS Safari without an app install. Workouts are persisted in Supabase, scoped per-user via RLS. Any visitor can create their own account via a public sign-up page — GymTrack is a real multi-tenant product, not a single-user app.
+
+### Identity provider switch (task `bb09eaed` Phase 3 cutover)
+
+GymTrack's identity layer is gated on `VITE_AUTH_PROVIDER`:
+
+- `supabase` (default) — Supabase Auth signs the user in directly; supabase-js sends a Supabase JWT to Supabase Postgres.
+- `clerk` — Clerk signs the user in; supabase-js sends the Clerk session JWT (validated by Supabase Third-Party Auth against the Clerk JWKS) so `auth.uid()` resolves to the Clerk subject at the RLS boundary. Workouts, MCP OAuth rows, agent API keys, and planned-workout rows already reference `public.profiles.id` (Phase 2 repoint landed via PR #716), so RLS keeps working without policy rewrites once Phase 4's first-login linking populates `public.profiles`.
+
+The flag is read at build time by Vite (no runtime inspection); rollback is one env-var flip and a re-deploy. Apple stays in `DISABLED_OAUTH_PROVIDERS` regardless of the active provider until Quinn wires the Apple Developer account.
 
 GymTrack now exposes **two agent surfaces**:
 
