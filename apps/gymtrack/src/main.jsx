@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { ClerkProvider } from '@clerk/clerk-react';
+import { ClerkProvider } from '@clerk/react';
 import App from './App.jsx';
 import { AuthProvider } from './lib/auth.jsx';
 import { getActiveProvider, getClerkPublishableKey } from './lib/clerkConfig.js';
