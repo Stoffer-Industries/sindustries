@@ -122,6 +122,25 @@ jobs:
         with:
           version: 0.4.102
 
+      # Run budget-api Prisma migrations against the staging DB before the
+      # mint step needs them (Quinn review 2026-09-23T05:50:25Z: dispatch
+      # run 35799599485 failed at the budget-api mint step with
+      # `The table 'budget_api.User' does not exist in the current database.`
+      # because the bootstrap-staging.sh migration row alone is not enough —
+      # the deployed budget-api image only references the bootstrap step,
+      # it doesn't apply migrations on deploy. `prisma migrate deploy` is
+      # idempotent so re-runs are safe; this step makes the validate
+      # workflow self-sufficient and removes the manual Quinn-owned
+      # bootstrap-staging.sh run as a precondition for AC2 evidence.
+      - name: Run budget-api Prisma migrations
+        id: budget-migrate
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          npm --workspace services/budget-api run prisma:migrate
+          echo "budget_migrate_ok=true" >> "$GITHUB_OUTPUT"
+
       - name: Mint budget-api synthetic session
         id: budget-mint
         env:
@@ -161,14 +180,37 @@ jobs:
           STAGING_SCHEDULER_TOKEN:  ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           STAGING_BUDGET_TOKEN_FILE: /tmp/budget-smoke-bearer
           STAGING_INTENT_COMMIT:    ${{ steps.intent.outputs.intent_commit }}
+          # Quinn beat 283 (2026-09-24 04:50 NZST): run 35858190813 exited 1
+          # with zero captured stdout/stderr between step start and exit.
+          # The harness now writes a structured crash JSON (artifacts/harness-
+          # crash.json) on any uncaught exception / unhandled rejection, and
+          # this step mirrors stderr to a file so the upload-artifacts step
+          # surfaces in-log output alongside the structured crash record.
+          HARNESS_CRASH_OUT_DIR: artifacts
+          HARNESS_CRASH_OUT_FILE: harness-crash.json
         run: |
           set -euo pipefail
           mkdir -p artifacts
           set +e
-          node tests/cloud/staging-workflows.mjs --output artifacts/staging-workflows.json
+          # 2> redirect must come AFTER `set +e` so the redirect itself
+          # cannot crash the step on a sandboxed fs (Codex P1: a missing
+          # artifacts/ directory would set +e lose its protection if the
+          # mkdir failed silently). The harness's mkdirSync(recursive)
+          # backs the crash JSON path independently.
+          node tests/cloud/staging-workflows.mjs --output artifacts/staging-workflows.json \
+            1> artifacts/harness-stdout.log \
+            2> artifacts/harness-stderr.log
           workflows_exit=$?
           set -e
           echo "workflows_exit=$workflows_exit" >> "$GITHUB_OUTPUT"
+          # Tail the stderr log into the step output so the run summary
+          # carries the failure signal even when the workflow summary
+          # jq render runs before stdout buffering flushes.
+          if [[ -s artifacts/harness-stderr.log ]]; then
+            echo "::group::harness stderr"
+            tail -n 200 artifacts/harness-stderr.log
+            echo "::endgroup::"
+          fi
           # Always upload the artifact, even on harness exit 1 — the verdict
           # lives in the JSON, not the exit code.
           exit $workflows_exit
@@ -245,7 +287,13 @@ jobs:
         with:
           name: cloud-staging-validation-${{ steps.intent.outputs.intent_commit }}
           path: artifacts/
-          if-no-files-found: error
+          # Quinn beat 283 (2026-09-24 04:50 NZST): when the harness
+          # crashes before writeFileSync(staging-workflows.json), the
+          # artifacts/ directory holds only the crash-diagnostic files
+          # (harness-stderr.log, harness-stdout.log, harness-crash.json).
+          # Downgrading from error to warn so the upload does not fail
+          # the run when only the diagnostic files are present.
+          if-no-files-found: warn
           retention-days: 30
           # No secrets allowed in the artifact; the harness + drill redact
           # bearer values before they reach the JSON. The budget-api smoke-
@@ -271,13 +319,13 @@ jobs:
               echo "### AC2 verdict"
               jq -r '"  - verdict: " + .verdict, "  - runId: " + .runId, "  - services match intent: tasksApi=" + (.services.tasksApi.matchesIntent|tostring) + ", budgetApi=" + (.services.budgetApi.matchesIntent|tostring) + ", contentScheduler=" + (.services.contentScheduler.matchesIntent|tostring)' artifacts/staging-workflows.json
               jq -r '"  - cleanup ok: " + (.cleanup.ok|tostring)' artifacts/staging-workflows.json
-              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + .error.code + ")" else "" end)' artifacts/staging-workflows.json
+              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + (.error.code|tostring) + ")" else "" end)' artifacts/staging-workflows.json
               jq -r '.acceptedLimitations[] | "  - accepted limitation: " + .code + " (owner " + .owner + ")"' artifacts/staging-workflows.json
             fi
             if [[ -f artifacts/staging-failure-drill.json ]]; then
               echo "### AC3 verdict"
               jq -r '"  - verdict: " + .verdict' artifacts/staging-failure-drill.json
-              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + .error.code + ")" else "" end)' artifacts/staging-failure-drill.json
+              jq -r '.checks[] | "  - check " + .name + ": " + .status + (if .error then " (" + (.error.code|tostring) + ")" else "" end)' artifacts/staging-failure-drill.json
               jq -r '.cleanup.operations[] | "  - cleanup " + .name + ": " + (.ok|tostring)' artifacts/staging-failure-drill.json
             fi
           } >> "$GITHUB_STEP_SUMMARY"

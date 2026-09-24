@@ -103,7 +103,15 @@ export function createApp() {
   app.use('/api/v1/content-scheduler/items/:id/publish', writeEndpointRateLimit);
 
   app.get('/health', (_req, res) => {
-    res.status(200).json({ status: 'ok', service: 'content-scheduler-api' });
+    // `version` exposes the deployed commit SHA so the cloud-staging
+    // validation harness (tests/cloud/staging-workflows.mjs) can confirm
+    // `matchesIntent === true`. Set by infra/cloud/bin/deploy at deploy
+    // time via `--env GIT_COMMIT_SHA=<sha>`; null in local dev.
+    res.status(200).json({
+      status: 'ok',
+      service: 'content-scheduler-api',
+      version: process.env.GIT_COMMIT_SHA ?? null
+    });
   });
 
   // Service-to-service routes (x-actor-secret + x-content-ingest-secret

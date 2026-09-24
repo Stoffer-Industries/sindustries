@@ -25,10 +25,10 @@ kill_timeout = '5s'
 [build]
   # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
   # so `../../..` is the repo root. The previous `../../` resolved to
-  # `infra/` — silently wrong. Pin to repo root so the `dockerfile` path
-  # below resolves under all invocation forms.
+  # `infra/` — silently wrong. Pin to repo root for Docker COPY paths.
   context = '../../..'
-  dockerfile = 'infra/cloud/docker/tasks-api.Dockerfile'
+  # NOTE: dockerfile path is relative to this fly.toml's directory in flyctl 0.4.107+.
+  dockerfile = '../docker/tasks-api.Dockerfile'
 
 [env]
   NODE_ENV = 'production'
@@ -63,4 +63,8 @@ kill_timeout = '5s'
 
 [deploy]
   strategy = 'canary'
-  release_command = 'npx prisma migrate deploy'
+  # Prisma CLI resolves the schema relative to its CWD. Dockerfile WORKDIR is
+  # /app and the schema lives at services/tasks-api/prisma/schema.prisma,
+  # so `cd` into the service directory before invoking migrate deploy.
+  # Mirrors budget-api fly.toml (same monorepo layout).
+  release_command = 'cd services/tasks-api && npx prisma migrate deploy'

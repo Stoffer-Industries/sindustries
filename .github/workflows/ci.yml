@@ -795,6 +795,24 @@ jobs:
       - name: Run gh-with-agent-token shim tests
         run: bash agents/lib/tests/test_gh_with_agent_token.sh
 
+      # Task 2850c5ac (cloud-staging-environment) bin/ wrappers
+      - name: Run bin/deploy contract test
+        # Stubs flyctl, curl, and python3 via the test script's own $TMP/bin.
+        # AC1 + AC2 regression guard for infra/cloud/bin/{deploy,status,rollback}.
+        run: bash infra/cloud/bin/tests/deploy.test.sh
+
+      - name: Run bin/status contract test
+        run: bash infra/cloud/bin/tests/status.test.sh
+
+      - name: Run bin/rollback contract test
+        run: bash infra/cloud/bin/tests/rollback.test.sh
+
+      - name: Run cloud staging workflow harness tests
+        run: node --test tests/cloud/tests/staging-workflows.test.mjs
+
+      - name: Run cloud staging failure-drill contract tests
+        run: bash tests/cloud/tests/staging-failure-drill.test.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest

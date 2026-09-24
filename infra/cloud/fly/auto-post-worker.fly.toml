@@ -33,10 +33,10 @@ kill_timeout = '5s'
 
 [build]
   # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
-  # so `../../..` is the repo root. Pin to repo root so the `dockerfile`
-  # path below resolves under all invocation forms.
+  # so `../../..` is the repo root. Pin to repo root for Docker COPY paths.
   context = '../../..'
-  dockerfile = 'infra/cloud/docker/auto-post-worker.Dockerfile'
+  # NOTE: dockerfile path is relative to this fly.toml's directory in flyctl 0.4.107+.
+  dockerfile = '../docker/auto-post-worker.Dockerfile'
 
 [env]
   NODE_ENV = 'production'

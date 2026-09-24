@@ -25,7 +25,7 @@ describe('health endpoint', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       status: 'ok',
-      service: 'tasks-api',
+      service: 'content-scheduler-api',
       version: null
     });
   });
@@ -39,7 +39,7 @@ describe('health endpoint', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       status: 'ok',
-      service: 'tasks-api',
+      service: 'content-scheduler-api',
       version: '26e0492218aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     });
   });
