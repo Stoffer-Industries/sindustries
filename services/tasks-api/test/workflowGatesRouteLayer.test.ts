@@ -168,17 +168,22 @@ describe('config — approval owners', () => {
 describe('normalizeAttentionOwners', () => {
   it('returns an empty array when given an empty array', () => {
     const result = normalizeAttentionOwners([]);
-    expect(result).toEqual({ owners: [] });
+    expect(result).toEqual({ owners: [], collapsed: [] });
   });
 
-  it('trims but preserves repeated role slots', () => {
+  it('collapses case-insensitive duplicates on the first occurrence', () => {
     const result = normalizeAttentionOwners(['Tom', 'tom', '  Tom  ']);
-    expect(result).toEqual({ owners: ['Tom', 'tom', 'Tom'] });
+    expect(result).toEqual({ owners: ['Tom'], collapsed: ['tom', 'Tom'] });
   });
 
-  it('preserves ordered escalation slots', () => {
-    const result = normalizeAttentionOwners(['Rowan', 'Ash', 'Rowan', 'Tom']);
-    expect(result).toEqual({ owners: ['Rowan', 'Ash', 'Rowan', 'Tom'] });
+  it('preserves ordered escalation slots when there are no case-insensitive duplicates', () => {
+    const result = normalizeAttentionOwners(['Rowan', 'Ash', 'Tom']);
+    expect(result).toEqual({ owners: ['Rowan', 'Ash', 'Tom'], collapsed: [] });
+  });
+
+  it('preserves the first occurrence position across multiple duplicates', () => {
+    const result = normalizeAttentionOwners(['Tom', 'Quinn', 'TOM', 'Rowan', 'tom']);
+    expect(result).toEqual({ owners: ['Tom', 'Quinn', 'Rowan'], collapsed: ['TOM', 'tom'] });
   });
 
   it('rejects non-string entries', () => {
@@ -196,12 +201,12 @@ describe('normalizeAttentionOwners', () => {
     expect(normalizeAttentionOwners([tooLong])).toBeNull();
   });
 
-  it('rejects more than MAX_ATTENTION_OWNERS entries', () => {
+  it('rejects more than MAX_ATTENTION_OWNERS unique entries', () => {
     const many = Array.from({ length: MAX_ATTENTION_OWNERS + 1 }, (_, i) => `p${i}`);
     expect(normalizeAttentionOwners(many)).toBeNull();
   });
 
-  it('accepts exactly MAX_ATTENTION_OWNERS entries', () => {
+  it('accepts exactly MAX_ATTENTION_OWNERS unique entries', () => {
     const many = Array.from({ length: MAX_ATTENTION_OWNERS }, (_, i) => `p${i}`);
     const result = normalizeAttentionOwners(many);
     expect(result).not.toBeNull();
@@ -251,17 +256,46 @@ describe('PATCH /api/v1/tasks/:id — attentionOwners', () => {
 
     const response = await authedRequest(createApp())
       .patch(`/api/v1/tasks/${TASK_ID}`)
-      .send({ attentionOwners: ['Rowan', 'Ash', 'Rowan', 'Tom'] });
+      .send({ attentionOwners: ['Rowan', 'Ash', 'Tom'] });
 
     expect(response.status).toBe(200);
     expect(prismaMock.taskAttentionOwner.createMany).toHaveBeenCalledWith({
       data: [
         { taskId: TASK_ID, owner: 'Rowan', position: 0 },
         { taskId: TASK_ID, owner: 'Ash', position: 1 },
-        { taskId: TASK_ID, owner: 'Rowan', position: 2 },
-        { taskId: TASK_ID, owner: 'Tom', position: 3 }
+        { taskId: TASK_ID, owner: 'Tom', position: 2 }
       ]
     });
+  });
+
+  it('collapses case-insensitive duplicates and emits one audit comment per dropped name', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce({ id: TASK_ID, taskType: 'feature', archivedAt: null })
+      .mockResolvedValueOnce(baseTaskFixture({
+        attentionOwners: [
+          { id: 'ao-1', taskId: TASK_ID, owner: 'Quinn', addedBy: null, note: null, position: 0, createdAt: new Date() },
+          { id: 'ao-2', taskId: TASK_ID, owner: 'Rowan', addedBy: null, note: null, position: 1, createdAt: new Date() }
+        ]
+      }));
+
+    const response = await authedRequest(createApp())
+      .patch(`/api/v1/tasks/${TASK_ID}`)
+      .send({ attentionOwners: ['Quinn', 'quinn', 'Rowan', 'QUINN'] });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskAttentionOwner.createMany).toHaveBeenCalledWith({
+      data: [
+        { taskId: TASK_ID, owner: 'Quinn', position: 0 },
+        { taskId: TASK_ID, owner: 'Rowan', position: 1 }
+      ]
+    });
+    const auditCalls = prismaMock.taskComment.create.mock.calls.filter((call) =>
+      String(call[0]?.data?.body ?? '').startsWith('Attention owners normalized')
+    );
+    expect(auditCalls).toHaveLength(2);
+    expect(auditCalls[0][0].data.body).toContain('[quinn]');
+    expect(auditCalls[1][0].data.body).toContain('[QUINN]');
+    expect(response.body.data.attentionOwners).toEqual(['Quinn', 'Rowan']);
   });
 
   it('clears all attention owners when given an empty array', async () => {

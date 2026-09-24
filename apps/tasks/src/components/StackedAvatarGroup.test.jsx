@@ -13,15 +13,52 @@ describe('buildStackedOwnerLayers', () => {
       status: 'doing',
       assignee: 'Rowan',
       workflowGates: [{ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }],
-      attentionOwners: ['Rowan', 'Tom']
+      attentionOwners: ['Quinn', 'Tom']
     };
+    // No cross-role dedupe needed: Rowan is delivery only, Ash is workflow-gate
+    // only, Quinn/Tom are attention-only. All four slots render in order.
     const { entries } = buildStackedOwnerLayers(task);
     expect(entries).toEqual([
-      { role: 'attention', owner: 'Rowan', slot: 0, key: 'attention:0:rowan' },
-      { role: 'attention', owner: 'Tom', slot: 1, key: 'attention:1:tom' },
+      { role: 'attention', owner: 'Quinn', slot: 0, note: null, addedBy: null, rowId: null, key: 'attention:0:quinn' },
+      { role: 'attention', owner: 'Tom', slot: 1, note: null, addedBy: null, rowId: null, key: 'attention:1:tom' },
       { role: 'workflow-gate', owner: 'Ash', gateType: 'qa_agent', key: 'workflow-gate:0:ash' },
       { role: 'delivery', owner: 'Rowan', key: 'delivery:rowan' }
     ]);
+  });
+
+  it('collapses a cross-role duplicate into the highest-tier role (AC4)', () => {
+    // Rowan is delivery + attention at slot 0 — the attention tier outranks
+    // delivery, so the duplicate collapses into one attention row.
+    const { entries } = buildStackedOwnerLayers({
+      status: 'doing',
+      assignee: 'Rowan',
+      attentionOwners: ['Rowan', 'Tom']
+    });
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
+      'attention:Rowan',
+      'attention:Tom'
+    ]);
+    expect(entries).toHaveLength(2);
+  });
+
+  it('preserves separate attention slots when a person repeats within the attention tier only', () => {
+    // Two attention slots for Rowan — that is the escalation shape; we
+    // intentionally do NOT collapse intra-tier repeats. Quinn is delivery
+    // only, so the lower-tier delivery renders LAST after attention.
+    const { entries } = buildStackedOwnerLayers({
+      status: 'doing',
+      assignee: 'Quinn',
+      attentionOwners: ['Rowan', 'Rowan', 'Tom']
+    });
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
+      'attention:Rowan',
+      'attention:Rowan',
+      'attention:Tom',
+      'delivery:Quinn'
+    ]);
+    expect(entries[0].slot).toBe(0);
+    expect(entries[1].slot).toBe(1);
+    expect(entries[2].slot).toBe(2);
   });
 
   it.each([
@@ -65,6 +102,12 @@ describe('buildStackedOwnerLayers', () => {
   });
 
   it('normalises whitespace and case only inside stable per-slot keys', () => {
+    // AC4: same-name cross-tier duplicates collapse into the highest
+    // tier (attention). Workflow-gate Quinn and delivery Quinn both
+    // reduce to the existing attention-row representative. Both
+    // attention slots stay — the intra-tier repeat is part of the
+    // escalation shape. Whitespace and case differences are normalised
+    // inside the per-slot key.
     const { entries } = buildStackedOwnerLayers({
       status: 'doing',
       assignee: '  Quinn  ',
@@ -73,9 +116,7 @@ describe('buildStackedOwnerLayers', () => {
     });
     expect(entries.map((entry) => entry.key)).toEqual([
       'attention:0:quinn',
-      'attention:1:quinn',
-      'workflow-gate:0:quinn',
-      'delivery:quinn'
+      'attention:1:quinn'
     ]);
   });
 
@@ -109,15 +150,18 @@ describe('buildAvatarAriaLabel', () => {
 });
 
 describe('StackedAvatarGroup', () => {
-  it('renders repeated people as separate avatars in the full Rowan/Ash/Rowan stack', () => {
+  it('collapses a cross-role duplicate into a single attention avatar (AC4)', () => {
+    // Rowan is both delivery and attention at slot 0 — the avatar stack
+    // collapses that into ONE attention avatar (highest tier wins).
     const { container } = render(<StackedAvatarGroup task={{
       status: 'doing',
       assignee: 'Rowan',
-      workflowGates: [{ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }],
+      workflowGates: [],
       attentionOwners: ['Rowan', 'Tom']
     }} />);
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.getAttribute('data-role'))).toEqual(['attention', 'attention']);
     expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
       'attention owner Rowan',
       'attention owner Tom',
