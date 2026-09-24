@@ -505,3 +505,83 @@ describe('ContentSchedulerTab thread surface (task 1016cbff PR B)', () => {
     });
   });
 });
+
+// --- Tweet preview formatting (task d06edf9a) --------------------------
+
+const MULTIPY_ID = '66666666-6666-6666-6666-666666666666';
+const MULTIPY_APPROVED_ID = '77777777-7777-7777-7777-777777777777';
+
+function singleItemWithBody(body, { status = 'queued', id: itemId = MULTIPY_ID } = {}) {
+  return [
+    {
+      ...fixture()[0],
+      id: itemId,
+      body,
+      status
+    }
+  ];
+}
+
+describe('ContentSchedulerTab tweet preview formatting (task d06edf9a)', () => {
+  // AC1 — preview preserves paragraph breaks; AC3 — characters unaltered.
+  it('single-item preview preserves paragraph breaks from a multi-paragraph body', async () => {
+    const body = 'Intro paragraph\n\nSecond paragraph\n\nThird paragraph';
+    listItems.mockResolvedValue(singleItemWithBody(body));
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-body-${MULTIPY_ID}`)).toBeTruthy());
+    const rendered = screen.getByTestId(`content-scheduler-body-${MULTIPY_ID}`);
+    expect(rendered.textContent).toBe(body);
+    expect(rendered.tagName).toBe('P');
+    expect(rendered.className).toContain('content-scheduler-row__body-text');
+  });
+
+  // AC2 — list readability (bullet items visibly preserved).
+  it('single-item preview preserves bullet items from a list body', async () => {
+    const body = 'Three launches this week:\n\n- Mission Control v2\n- GymTrack MCP\n- Sindustries site';
+    listItems.mockResolvedValue(singleItemWithBody(body));
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-body-${MULTIPY_ID}`)).toBeTruthy());
+    const rendered = screen.getByTestId(`content-scheduler-body-${MULTIPY_ID}`);
+    expect(rendered.textContent).toBe(body);
+    expect(rendered.className).toContain('content-scheduler-row__body-text');
+  });
+
+  // AC4 — verified for queued and approved, including a mixed paragraph + bullet body.
+  it('single-item preview preserves a mixed paragraph + bullet body on both queued and approved items', async () => {
+    const body = 'Spec went green today.\n\nAction items:\n\n- Approve tech design\n- Land Quinn merge\n- Update retro notes';
+    listItems.mockResolvedValue([
+      ...singleItemWithBody(body, { status: 'queued', id: MULTIPY_ID }),
+      ...singleItemWithBody(body, { status: 'approved', id: MULTIPY_APPROVED_ID })
+    ]);
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-body-${MULTIPY_ID}`)).toBeTruthy());
+    const queuedRendered = screen.getByTestId(`content-scheduler-body-${MULTIPY_ID}`);
+    const approvedRendered = screen.getByTestId(`content-scheduler-body-${MULTIPY_APPROVED_ID}`);
+    expect(queuedRendered.textContent).toBe(body);
+    expect(queuedRendered.className).toContain('content-scheduler-row__body-text');
+    expect(approvedRendered.textContent).toBe(body);
+    expect(approvedRendered.className).toContain('content-scheduler-row__body-text');
+  });
+
+  // AC2 + AC3 — thread reply-part preview preserves paragraph breaks within one part.
+  it('thread reply-part preview preserves paragraph breaks within one part', async () => {
+    const multiPartBody = 'reply intro\n\nreply body';
+    const fixture2 = threadFixture();
+    fixture2[0].parts[0] = { position: 1, body: multiPartBody };
+    listItems.mockResolvedValue(fixture2);
+    render(<ContentSchedulerTab />);
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-row-${THREAD_ID}`)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(`content-scheduler-thread-toggle-${THREAD_ID}`));
+    await waitFor(() => expect(screen.getByTestId(`content-scheduler-thread-part-${THREAD_ID}-1`)).toBeTruthy());
+    const partEl = screen.getByTestId(`content-scheduler-thread-part-${THREAD_ID}-1`);
+    // The wrapping <li> testid contains both the label and the body span; assert
+    // that the body text equals the stored body verbatim.
+    expect(partEl.textContent).toContain(multiPartBody);
+    // The inner <span> carries both classes so the white-space rule applies.
+    const bodySpan = partEl.querySelector('.content-scheduler-row__thread-part-body');
+    expect(bodySpan).toBeTruthy();
+    expect(bodySpan.className).toContain('content-scheduler-row__body-text');
+    expect(bodySpan.className).toContain('content-scheduler-row__thread-part-body');
+    expect(bodySpan.textContent).toBe(multiPartBody);
+  });
+});
