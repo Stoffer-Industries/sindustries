@@ -66,4 +66,8 @@ kill_timeout = '5s'
 
 [deploy]
   strategy = 'canary'
-  release_command = 'npx prisma migrate deploy'
+  # Prisma CLI resolves the schema relative to its CWD. Dockerfile WORKDIR is
+  # /app and the schema lives at services/budget-api/prisma/schema.prisma,
+  # so `cd` into the service directory before invoking migrate deploy.
+  # Mirrors tasks-api fly.toml (same monorepo layout).
+  release_command = 'cd services/budget-api && npx prisma migrate deploy'
