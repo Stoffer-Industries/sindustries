@@ -20,6 +20,7 @@ description: "Open a pull request in the Sindustries repository. Covers branch s
 - **Never paraphrase or shorten the AC sentence text.** The lobster ignores Markdown code-span markers and line-wrapping whitespace, but it rejects omitted clauses, paraphrases, or shortened sentences. Copy the task AC sentence exactly.
 - **Never use `file:` as an AC evidence annotation.** It has been removed; use `testID` or record a substantive reason in `not tested`.
 - **Never set `--assignee` to anyone other than the implementation owner/opener.** The reviewer must not open the implementer's PR on their own account.
+- **Never create an implementation PR from a different agent's GitHub identity.** The task implementer/assignee is the intended opener; commit authorship and branch ownership are not substitutes for authenticated identity.
 - **Always include `## System Spec` (or a one-line no-change reason)** in the PR body. It is a documentation convention, not a lobster gate — doc content is too varied to check reliably in code — so verify by hand before opening.
 - **Always check the app-spec requirement separately.** A `docs/systems/*.md` no-change declaration does **not** exempt you from `apps/<app>/SPEC.md`. If the app has a `SPEC.md` and this PR changes user-visible behaviour, update it in the same PR and reference it in your AC evidence.
 - **Always include a `Co-Authored-By` trailer** in commit messages identifying the opener (`Co-Authored-By: <Your Name> <your-email>`).
@@ -32,7 +33,7 @@ description: "Open a pull request in the Sindustries repository. Covers branch s
 - Branch is pushed to `origin` (verify with `git ls-remote origin <branch>` or a `git push` step earlier in the work).
 - All tests pass locally on the implementation branch.
 - Commits follow the project convention: `<type>(<scope>): <what>`.
-- Open on the agent's own GitHub identity — verify with `gh api user --jq '.login'` before the call. If the login does not match the intended opener, fix the GH config or escalate.
+- Open on the agent's own GitHub identity — immediately before `gh pr create`, run `agents/skills/dev/pr-open/scripts/assert-opener-identity.sh <intended-opener-login>`. For a task implementation PR, `<intended-opener-login>` is the task implementer's GitHub login; for a Quinn-owned workflow-garden/direct-ask PR, it is `quinnstoffer`. If the check fails, stop and fix the agent environment or escalate. Never retry with another agent's token.
 - (Rust workflow PRs only) If the PR touches `agents/workflows/feature-task/**`, run the quality gates in `agents/workflows/feature-task/WORKFLOW.md` and confirm clippy + tests are green. Note that fact in the PR test plan; do **not** paste the full `cargo` command lines into every PR body. Content / doc / non-Rust PRs skip this step.
 
 ### 2. Compose the PR body
@@ -85,7 +86,7 @@ gh pr edit <number> --repo Stoffer-Industries/sindustries --add-reviewer <review
 
 Re-run the REST `requested_reviewers` check and confirm it is non-zero before considering the PR opened.
 
-> **Draft → ready conversion is also a "second opening" event.** When you run `gh pr ready <number>`, add the reviewer(s) immediately (`gh pr edit <number> --add-reviewer <login>`) and re-run the REST check. The zero-reviewer state at `gh pr create --draft` time is expected and fine — but the conversion to ready-for-review must end with a non-zero `requested_reviewers` count.
+> **Draft → ready conversion is also a "second opening" event.** Before `gh pr ready <number>`, rerun `assert-opener-identity.sh <intended-opener-login>` so an ambient token cannot change the PR's operating identity mid-lifecycle. Then add the reviewer(s) immediately (`gh pr edit <number> --add-reviewer <login>`) and re-run the REST check. The zero-reviewer state at `gh pr create --draft` time is expected and fine — but the conversion to ready-for-review must end with a non-zero `requested_reviewers` count.
 
 ### 5. Update task workstreams
 
