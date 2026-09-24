@@ -120,7 +120,7 @@ info "validating $FLY_CONFIG"
 flyctl config validate --config "$FLY_CONFIG" || fail "fly.toml validation failed" 3
 
 info "checking that $FLY_APP exists"
-if ! flyctl apps list --json 2>/dev/null | grep -q "\"Name\":\"$FLY_APP\""; then
+if ! flyctl apps list --json 2>/dev/null | grep -Eq "\"Name\":[[:space:]]*\"$FLY_APP\""; then
   fail "Fly app '$FLY_APP' is not provisioned; run infra/cloud/scripts/bootstrap-staging.sh first" 2
 fi
 
