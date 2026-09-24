@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gh-with-agent-token.sh — per-agent GitHub CLI shim (task b0d1b42e).
 #
-# Problem: a bare `GITHUB_TOKEN` exported from `~/.openclaw/.env` silently
+# Problem: a bare `GITHUB_TOKEN` exported by a parent process silently
 # overrides an agent's per-agent `GH_CONFIG_DIR` identity because `gh`'s
 # credential-resolution order treats env vars as authoritative. The five most
 # recent occurrences (2026-09-08 / 09-10 / 09-10 / 09-12 / 09-12 / 09-13) all
@@ -11,20 +11,19 @@
 # This shim wraps `gh` so each agent's `gh` invocation authenticates as that
 # agent's own identity by (a) unsetting the bare `GITHUB_TOKEN` / `GH_TOKEN`
 # in the child environment, (b) scoping `GH_CONFIG_DIR` to the agent, and
-# (c) re-exporting the per-agent token as `GH_TOKEN` (which is preferred over
-# `GITHUB_TOKEN` by `gh` and is exactly what the agent's TOOLS.md documents).
+# (c) re-exporting the per-agent token as `GH_TOKEN` when one is provided.
 #
-# Quinn and Lox are NOT in the agent allow-list — the shim is a no-op for them
-# because their documented write-op convention (`GITHUB_TOKEN=$QUINN_GITHUB_TOKEN
-# gh ...`) depends on the ambient `GITHUB_TOKEN` being authoritative.
+# Quinn is included because her dedicated `gh-quinn` profile is the source of
+# truth. Lox has no GitHub profile and must not inherit a parent credential.
 #
 # Sourcing: each agent's session-init sources this file. The implementation is
 # deliberately compatible with both bash and zsh because macOS loads it from
 # ~/.zshenv. It must not mutate the caller's shell options. Tests live at
 # `agents/lib/tests/test_gh_with_agent_token.sh` with a stubbed `gh` on PATH.
 
-# Allow-list of agents whose `gh` calls this shim re-scopes. Quinn and Lox
-# are intentionally absent — see the file header comment.
+# Allow-list of agents whose `gh` calls this shim re-scopes. Unknown agents and
+# agents without a dedicated profile fail closed when an ambient credential is
+# present instead of silently impersonating the host's default account.
 # Detect the calling agent. Resolution order:
 #   1. `GH_SHIM_AGENT` env var (explicit override; tests use this).
 #   2. `OPENCLAW_AGENT_ID` when the runtime exposes it directly.
@@ -68,26 +67,28 @@ __gh_shim_agent_allowed() {
     return 1
   fi
   case "${agent}" in
-    rowan|ash|ivy) return 0 ;;
+    quinn|rowan|ash|ivy) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-# Warn once per process when an override is in effect but the agent identity
-# could not be resolved — surfaces unexpected ambient `GITHUB_TOKEN` overrides
-# so the structural regression is observable (backing AC3 of task b0d1b42e).
-__gh_shim_warn_unresolved() {
-  if [[ -z "${__GH_SHIM_WARNED:-}" ]] && [[ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]]; then
-    printf 'gh-with-agent-token: ambient GITHUB_TOKEN/GH_TOKEN present but agent identity unresolved; passing through to command gh\n' >&2
-    __GH_SHIM_WARNED=1
+# Refuse to pass an ambient credential through an unresolved or unsupported
+# agent identity. Passing through here is how a Rowan heartbeat can open a PR
+# as Quinn. The caller must select a dedicated profile or approved lobster
+# credential explicitly.
+__gh_shim_refuse_ambient() {
+  if [[ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]]; then
+    printf 'gh-with-agent-token: refusing ambient GITHUB_TOKEN/GH_TOKEN because agent identity is not scoped\n' >&2
+    return 1
   fi
+  return 0
 }
 
 # The wrapper itself. Invoked as `gh <args...>` after the function below is
 # exported by sourcing.
 gh() {
   if ! __gh_shim_agent_allowed; then
-    __gh_shim_warn_unresolved
+    __gh_shim_refuse_ambient || return 1
     command gh "$@"
     return $?
   fi
@@ -131,7 +132,7 @@ gh-with-agent-token() {
 # stdout instead of exporting them, polluting every shell startup.
 if [[ -n "${BASH_VERSION:-}" ]]; then
   export -f gh gh-with-agent-token 2>/dev/null || true
-  export -f __gh_shim_resolve_agent __gh_shim_agent_allowed __gh_shim_warn_unresolved 2>/dev/null || true
+  export -f __gh_shim_resolve_agent __gh_shim_agent_allowed __gh_shim_refuse_ambient 2>/dev/null || true
 fi
 
 # Self-test hook — when `gh-with-agent-token.sh` is invoked as a command (not
