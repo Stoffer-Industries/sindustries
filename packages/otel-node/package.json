@@ -10,7 +10,10 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./register": "./src/register.cjs"
+    "./register": {
+      "types": "./src/register.d.ts",
+      "require": "./src/register.cjs"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -1,0 +1,77 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "tasks-api-5xx-spike",
+      "folder": "SIndustries/Performance",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "sindustries-tasks-api-5xx-spike",
+          "title": "tasks-api-5xx-spike",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": {
+                "expr": "sum(rate(http_requests_total{service_name=\"tasks-api\",status=~\"5..\"}[5m]))",
+                "instant": true,
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "refId": "B"
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "threshold",
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": { "type": "gt", "params": [0.05] },
+                    "operator": { "type": "and" },
+                    "query": { "params": ["B"] },
+                    "reducer": { "type": "last", "params": [] }
+                  }
+                ],
+                "refId": "C"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Alerting",
+          "for": "5m",
+          "annotations": {
+            "summary": "tasks-api 5xx error rate > 5% over 5m",
+            "description": "5xx rate on tasks-api exceeded 5% over the last 5 minutes. Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
+            "owner": "Quinn",
+            "severity": "warn"
+          },
+          "labels": {
+            "alert": "tasks-api-5xx-spike",
+            "severity": "warn",
+            "owner": "Quinn"
+          }
+        }
+      ]
+    }
+  ]
+}

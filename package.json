@@ -14,7 +14,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "services/*"
+    "services/*",
+    "infra/cloud/observability/health-probe"
   ],
   "devDependencies": {
     "@shadcn/lint": "0.1.0",

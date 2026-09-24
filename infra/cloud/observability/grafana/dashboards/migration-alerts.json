@@ -1,0 +1,91 @@
+{
+  "annotations": { "list": [] },
+  "description": "SIndustries alert state and ownership overview. Shows currently firing + recently resolved alerts with severity and owner. Backed by Grafana Cloud's alert state API.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "title": "SIndustries / Migration alerts",
+  "uid": "sindustries-migration-alerts",
+  "tags": ["sindustries", "hosted", "alerts"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Alerts firing",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(ALERTS{alertstate=\"firing\", alertgroup=~\"sindustries-.*\"})",
+          "legendFormat": "firing"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Alerts pending",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(ALERTS{alertstate=\"pending\", alertgroup=~\"sindustries-.*\"})",
+          "legendFormat": "pending"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Alerts resolved (last 1h)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(ALERTS{alertstate=\"resolved\", alertgroup=~\"sindustries-.*\"})",
+          "legendFormat": "resolved"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Alerts no-data",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(ALERTS{alertstate=\"nodata\", alertgroup=~\"sindustries-.*\"})",
+          "legendFormat": "nodata"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] }
+    }
+  ]
+}
