@@ -24,6 +24,16 @@ GymTrack now exposes **two agent surfaces**:
 
 The user-facing app surfaces planned workouts (created via either agent surface), lets the user log actuals against planned sets, and now includes an **Agents** settings screen where the user can see and revoke connected MCP clients.
 
+### Identity verification — Slice B (Phase 3)
+
+Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Clerk SDK + supabase-js JWT bridge. Slice B closes the live data-plane verification gap against the wired Clerk instance:
+
+- `apps/gymtrack/test/e2e/signin-clerk.spec.ts` exercises the email + password sign-in path through Clerk (gated on `CLERK_TEST_URL`, with `SUPABASE_TEST_URL` fallback during the cutover window per the Phase 5 cleanup plan).
+- `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql` is a pure-assertion migration that runs against the staging Supabase project after Phase 0: it asserts the Supabase Third-Party Auth presence check, the `public.profiles` table + RLS + policies, and the absence of any remaining `auth.users(id)` foreign keys, plus a live cross-user RLS rejection block gated on `app.slice_b_rls_test='on'`.
+- `infra/cloud/scripts/run-clerk-rls-test.sh` is the staging runbook that drives the cross-user RLS rejection assertion (seeds two Clerk test users + one workout each, simulates user A and user B's authenticated request via `set_config request.jwt.claim.sub`, asserts each user sees exactly their own workout row, best-effort cleanup on EXIT). Exit 0 = pass; exit 1 = RLS broken; exit 2 = pre-reqs missing.
+
+Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23 per Quinn beat 293); the Slice B runbook is the assertion that produces the AC1 evidence, and AC3 (verified-email linking on first post-migration sign-in) is Phase 4 follow-up.
+
 ## Users
 
 - **Anyone** — can self-sign-up at `/signup` with email + password or Google. Apple is gated on the Supabase project having Apple configured — currently disabled, so the Apple button is not rendered.
