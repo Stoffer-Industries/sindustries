@@ -53,12 +53,12 @@ Quinn has different names in different systems — use the right one per system,
 
 - **Account:** quinnstoffer
 - **GH_CONFIG_DIR:** `~/.config/gh-quinn`
-- **Token:** stored in `~/.openclaw/.env` as `QUINN_GITHUB_TOKEN` (classic PAT, `repo` scope)
+- **Credential storage:** the dedicated `gh-quinn` profile owns the credential in the host keychain; do not use an ambient `GITHUB_TOKEN` or `GH_TOKEN`.
 - Repo access: Stoffer-Industries/sindustries (Pull requests R/W, Contents R/W)
 - Repo access: Stoffer-Industries/workspace (Pull requests R/W, Contents R/W)
-- **Usage:** Prefix read commands with `GH_CONFIG_DIR=~/.config/gh-quinn gh ...`
-- **For write operations** (PR review, merge): use `GITHUB_TOKEN="$QUINN_GITHUB_TOKEN" gh ...` — the classic PAT lacks `read:org` so can't be stored in gh-quinn config, but works fine via env var
-- **No-op for `agents/lib/gh-with-agent-token.sh`:** Quinn is intentionally NOT in the shim's allow-list (`rowan`, `ash`, `ivy`). The shim passes through to `command gh` unchanged for Quinn sessions — your documented write-op convention (`GITHUB_TOKEN=$QUINN_GITHUB_TOKEN gh ...`) keeps the ambient `GITHUB_TOKEN` authoritative, which is exactly what your workflow expects. Do not source the shim from Quinn's session-init; the allow-list is the contract.
+- **Usage:** Prefix every GitHub command, including writes, with `GH_CONFIG_DIR=~/.config/gh-quinn gh ...`; verify `gh api user --jq '.login'` returns `quinnstoffer` before writes.
+- **No ambient fallback:** never set or rely on `GITHUB_TOKEN`/`GH_TOKEN` for Quinn operations. A missing or mismatched profile must fail closed rather than inherit another agent's credential.
+- **Shim:** `agents/lib/gh-with-agent-token.sh` scopes Quinn to `~/.config/gh-quinn` and removes ambient token variables. Do not bypass that identity boundary.
 
 ## Why Separate?
 

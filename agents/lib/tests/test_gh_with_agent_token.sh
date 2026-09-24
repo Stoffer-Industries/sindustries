@@ -3,7 +3,8 @@
 # AC1 + AC2). Stage a stub `gh` binary on PATH that records argv and the
 # environment the shim passed, then assert that:
 #
-#   1. The shim is a no-op for Quinn and Lox (no allow-list entry).
+#   1. The shim scopes Quinn to her dedicated profile and refuses Lox's
+#      unsupported ambient credential.
 #   2. The shim unsets `GITHUB_TOKEN` / `GH_TOKEN` for an allowed agent.
 #   3. The shim exports `GH_CONFIG_DIR=~/.config/gh-<agent>` and
 #      `GH_TOKEN=$<AGENT>_GITHUB_TOKEN` for an allowed agent.
@@ -90,7 +91,7 @@ run_shim() {
     # Source the shim with a clean function table so prior cases do not leak.
     source "${SHIM}"
     # Invoke the wrapper.
-    gh api user --jq .login
+    gh api user --jq .login || true
   ) >"${LOG_FILE}" 2>&1
 }
 
@@ -116,22 +117,24 @@ assert_log_not_contains() {
   fi
 }
 
-# Case 1: Quinn (not in allow-list) — bare GITHUB_TOKEN passes through.
+# Case 1: Quinn uses her dedicated profile; ambient credentials are removed.
 run_shim \
   "GH_SHIM_AGENT=quinn" \
   "GITHUB_TOKEN=ghp_quinn_ambient" \
-  "QUINN_GITHUB_TOKEN=ghp_quinn_ambient"
-assert_log_contains 'GITHUB_TOKEN=ghp_quinn_ambient'
-assert_log_contains 'GH_CONFIG_DIR=<unset>'
-pass "quinn: ambient GITHUB_TOKEN preserved (no-op for non-allow-listed agent)"
+  "QUINN_GITHUB_TOKEN=ghp_quinn_scoped"
+assert_log_not_contains 'GITHUB_TOKEN=ghp_quinn_ambient'
+assert_log_contains 'GITHUB_TOKEN=<unset>'
+assert_log_contains 'GH_TOKEN=ghp_quinn_scoped'
+assert_log_contains "GH_CONFIG_DIR=${TMPDIR_TEST}/agent-home/.config/gh-quinn"
+pass "quinn: dedicated profile scoped and ambient token removed"
 
-# Case 2: Lox (not in allow-list) — same passthrough behaviour.
+# Case 2: Lox has no GitHub profile; ambient credentials are refused.
 run_shim \
   "GH_SHIM_AGENT=lox" \
   "GITHUB_TOKEN=ghp_lox_ambient"
-assert_log_contains 'GITHUB_TOKEN=ghp_lox_ambient'
-assert_log_contains 'GH_CONFIG_DIR=<unset>'
-pass "lox: ambient GITHUB_TOKEN preserved (no-op for non-allow-listed agent)"
+assert_log_contains 'refusing ambient GITHUB_TOKEN/GH_TOKEN because agent identity is not scoped'
+assert_log_not_contains 'argv: api user'
+pass "lox: unsupported ambient credential refused"
 
 # Case 3: Rowan with per-agent token — shim unsets ambient and sets
 # GH_CONFIG_DIR + GH_TOKEN to the rowan-scoped values (AC1 + AC2).
@@ -193,7 +196,7 @@ assert_log_not_contains 'GH_TOKEN=ghp_rowan'
 pass "GH_SHIM_AGENT override beats AGENT_ID"
 
 # Case 8: Agent identity unresolved but ambient GITHUB_TOKEN is set — shim
-# passes through to `command gh` AND warns to stderr (AC3 observability).
+# refuses to pass it through (AC3 observability).
 unset -f gh gh-with-agent-token 2>/dev/null || true
 STDOUT_FILE="${TMPDIR_TEST}/stdout"
 STDERR_FILE="${TMPDIR_TEST}/stderr"
@@ -207,18 +210,18 @@ STDERR_FILE="${TMPDIR_TEST}/stderr"
   source "${SHIM}"
   gh api user --jq .login
 ) >"${STDOUT_FILE}" 2>"${STDERR_FILE}" || true
-# The ambient var passes through (no agent to enforce scoping for).
-if ! grep -qF 'GITHUB_TOKEN=ghp_quinn_ambient' "${STDOUT_FILE}"; then
+# The stub must not run and the refusal must be explicit.
+if grep -qF 'GITHUB_TOKEN=ghp_quinn_ambient' "${STDOUT_FILE}"; then
   cat "${STDOUT_FILE}" >&2 || true
-  fail "unresolved identity: ambient GITHUB_TOKEN should pass through unchanged"
+  fail "unresolved identity: ambient GITHUB_TOKEN was passed through"
 fi
-# And the warn-once line must appear on stderr exactly once per process.
-if ! grep -qF 'gh-with-agent-token: ambient GITHUB_TOKEN/GH_TOKEN present but agent identity unresolved' "${STDERR_FILE}"; then
+# The refusal line must appear on stderr.
+if ! grep -qF 'gh-with-agent-token: refusing ambient GITHUB_TOKEN/GH_TOKEN because agent identity is not scoped' "${STDERR_FILE}"; then
   echo "=== stderr ===" >&2
   cat "${STDERR_FILE}" >&2 || true
-  fail "unresolved identity: expected one-line stderr warning"
+  fail "unresolved identity: expected one-line stderr refusal"
 fi
-pass "unresolved identity: passthrough + stderr warning (AC3 observability)"
+pass "unresolved identity: ambient credential refused (AC3 observability)"
 
 # Case 9: argv passes through verbatim after the shim wraps. The stub records
 # argv as `argv: api|user|--jq|.login` (first arg separated by space, the
