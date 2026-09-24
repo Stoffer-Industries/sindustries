@@ -8,29 +8,16 @@ Product spec: `brain/tasks/specs/gymtrack-mvp-2026-07-07.md`, `brain/tasks/specs
 
 GymTrack is a workout tracker SPA deployed at a stable URL, accessible from iOS Safari without an app install. Workouts are persisted in Supabase, scoped per-user via RLS. Any visitor can create their own account via a public sign-up page — GymTrack is a real multi-tenant product, not a single-user app.
 
-### Identity provider switch (task `bb09eaed` Phase 3 cutover)
+### Identity provider switch
+### Identity verification — Slice B (Phase 3)
 
-GymTrack's identity layer is gated on `VITE_AUTH_PROVIDER`:
+After Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Clerk SDK + supabase-js JWT bridge, Slice B verifies the live data-plane boundary against the wired Clerk instance:
 
-- `supabase` (default) — Supabase Auth signs the user in directly; supabase-js sends a Supabase JWT to Supabase Postgres.
-- `clerk` — Clerk signs the user in; supabase-js sends the Clerk session JWT (validated by Supabase Third-Party Auth against the Clerk JWKS) so `auth.uid()` resolves to the Clerk subject at the RLS boundary. Workouts, MCP OAuth rows, agent API keys, and planned-workout rows already reference `public.profiles.id` (Phase 2 repoint landed via PR #716), so RLS keeps working without policy rewrites once Phase 4's first-login linking populates `public.profiles`.
+- `apps/gymtrack/test/e2e/signin-clerk.spec.ts` exercises the email + password sign-in path through Clerk (gated on `CLERK_TEST_URL`, with `SUPABASE_TEST_URL` fallback during the cutover window).
+- `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql` asserts the Supabase Third-Party Auth presence check, the `public.profiles` table + RLS, and the absence of any remaining `auth.users(id)` foreign keys.
+- `infra/cloud/scripts/run-clerk-rls-test.sh` is the staging runbook that drives the cross-user RLS rejection assertion (seeds two test users, simulates user A and user B's authenticated request, asserts each user sees exactly their own workout row).
 
-The flag is read at build time by Vite (no runtime inspection); rollback is one env-var flip and a re-deploy. Apple stays in `DISABLED_OAUTH_PROVIDERS` regardless of the active provider until Quinn wires the Apple Developer account.
-
-GymTrack now exposes **two agent surfaces**:
-
-1. **Legacy REST agent endpoints** under `/api/agent/*` for already-issued static bearer keys from task `f520c396`.
-2. **A discoverable MCP server** (`services/gymtrack-mcp`) that uses OAuth 2.1 Authorization Code + PKCE, issues hashed access/refresh tokens, and lets a user approve or revoke an external client without any manual database work.
-
-The user-facing app surfaces planned workouts (created via either agent surface), lets the user log actuals against planned sets, and now includes an **Agents** settings screen where the user can see and revoke connected MCP clients.
-
-## Users
-
-- **Anyone** — can self-sign-up at `/signup` with email + password or Google. Apple is gated on the Supabase project having Apple configured — currently disabled, so the Apple button is not rendered.
-- **Existing GymTrack users** — can sign in at `/login` with email + password, or with Google when the flow originates from a protected route such as `/agent-consent`.
-- **MCP clients** — authenticate through the GymTrack MCP OAuth flow. The issued bearer token is scoped to one GymTrack user and one consent record; it can discover tools, plan workouts, read history, and read exercise progression, but only for that user. The same OAuth token is accepted by both the MCP server (`/mcp`) and the REST endpoints under `/api/agent/*`.
-
-## Flows
+Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23).
 
 ### Sign up
 
