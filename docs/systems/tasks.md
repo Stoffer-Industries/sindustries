@@ -133,31 +133,38 @@ See [Structured approval and authentication contract](#structured-approval-and-a
 
 ### TaskAttentionOwner
 
-Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional and are not deduplicated.
+Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional within the attention tier (intra-tier repeats stay as separate ordered slots — that is the escalation shape) and are deduplicated across case-insensitive matches on every write. Task `91864257` ("Make attention-owner escalations deduplicated, explainable, and resolvable") closed the case-insensitive duplicate path; cross-tier repeats are visually collapsed by the avatar stack but remain distinct rows on disk.
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | PK |
 | `taskId` | UUID | FK → Task, cascade delete |
-| `owner` | String | Required, max 64 chars; repeats allowed |
+| `owner` | String | Required, max 64 chars; case-insensitive duplicates dropped on write |
 | `position` | Int | Zero-based action/escalation order; unique per task |
-| `addedBy` | String | Nullable, free-form |
-| `note` | String | Nullable, free-form |
+| `addedBy` | String | Nullable, free-form; set server-side from the authenticated actor on the per-row POST endpoint |
+| `note` | String | Required for newly added rows (max 500 chars); persisted on the per-row POST endpoint and surfaced as `data-reason` in the avatar stack |
 | `createdAt` | Timestamp | Insertion order, surfaced for stable UI ordering |
 
 Task responses include:
 
-- `attentionOwners` — ordered role slots; index 0 is actionable, repeats preserved
+- `attentionOwners` — ordered role slots; index 0 is actionable, intra-tier repeats preserved, cross-tier case-insensitive duplicates collapsed
 - `topAttentionOwner` — `attentionOwners[0]` or `null`
 - `attentionOwnerDetails` — full audit rows (`{ id, owner, position, addedBy, note, createdAt }`)
 
-**Persistence rules:**
+**Write contract (task `91864257`):**
 
-- `PATCH /tasks/:id` accepts `attentionOwners` as a full-replacement array. Omission = no change. `[]` clears all rows. The server trims without deduplicating and validates (max 16 entries, max 64 chars per name) before persisting.
+- `PATCH /tasks/:id` accepts `attentionOwners` as a full-replacement array. Omission = no change. `[]` clears all rows. The server normalizes case-insensitive duplicates (first occurrence wins; later case-equivalent entries drop out, position preserved) and emits one `Tasks API` audit comment per dropped name. Validates max 16 unique entries, max 64 chars per name.
+- `POST /tasks/:id/attention-owners` adds a single row with a **required** reason. `note` is non-empty after trim, max 500 chars. `position` defaults to 0 (head insert); a non-zero position shifts the tail down by one within the same transaction. Case-insensitive duplicates return 409 (`DUPLICATE_ATTENTION_OWNER`).
+- `PATCH /tasks/:id/attention-owners/:rowId` renames / moves / edits the note on a single row. At least one field required. Reordering preserves the relative order of every other row. Authorization: top-of-stack actor OR Tom/Quinn.
+- `DELETE /tasks/:id/attention-owners/:rowId` removes exactly the targeted row; renumbers positions contiguously. Authorization: top-of-stack actor OR Tom/Quinn.
+- `POST /tasks/:id/attention-owners/self-resolve` removes ONLY the current top slot when the authenticated actor matches `attentionOwners[0]` (or Tom/Quinn override). Preserves `task.blocked`, `dependencyBlocked`, `assignee`, `approvals`, and `workflowHandoff*`. Returns the new top via `nextTopOwner`. 403 `NOT_TOP_OWNER` if the actor doesn't match and isn't Tom/Quinn; 403 `NO_ACTIVE_BLOCKER` if the stack is empty.
 - Clearing attention owners never touches `task.blocked`, `dependencies`, `assignee`, or `approvals`.
-- Surviving rows keep their `note` and `addedBy` only when their `(taskId, owner)` pair reappears in the new array; the detail-level add/update endpoint (future work, not in WS1) is the right place to preserve per-row metadata across owner churn.
+- Surviving rows keep their `note` and `addedBy` only when their `(taskId, owner)` pair reappears in the new array; the per-row add/update endpoint is the right place to preserve per-row metadata across owner churn.
+- Approval writes (`POST/DELETE /tasks/:id/approvals/:type`) never touch `attentionOwners`. Gate ownership lives exclusively in `workflowHandoffRoleId/Gate/Reason`. The lobster's `api_patch` and the per-row endpoints are the only writers of the ordered stack.
 
-**CLI:** `tasks_api_client.py` exposes `--attention-owners <name>` (repeatable, full-replacement) and `--clear-attention-owners` (mutually exclusive) for automation.
+**Repair path (AC7):** `services/tasks-api/scripts/dedupe-attention-owners.ts` collapses pre-deployment duplicates on a per-task basis with `--dry-run` / `--write` / `--rollback <snapshot>` modes. Idempotent: re-running on a clean task is a no-op. Snapshots are written to `.openclaw/tasks-api/snapshots/<ts>.json`.
+
+**CLI / Python helpers:** `tasks_api_client.py --attention-owners <name>` is the full-replacement PATCH flag (case-insensitive dedupe applies). `add_self_to_attention_owners(task_id, name, note)` now requires `note` and calls the per-row POST endpoint; `resolve_own_attention_owner(task_id, name, note=None)` calls the new `/self-resolve` endpoint.
 
 **What this is NOT:**
 
@@ -167,7 +174,7 @@ Task responses include:
 
 **How to use it.** `attentionOwners[0]` is the sole actionability source. Assignee says who delivers, while approvals and `workflowGates` are eligibility/informational context only; neither independently enqueues work. Lobster writes and reconciles the `tech_design`, `qa_agent`, and `accepted` workflow slots. The status-derived fallback is retained only for the lobster-independent `spec` gate. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
-Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. Both Rowan occurrences are meaningful across role slots; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
+Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack collapses the delivery/attention duplicate into one attention-tier avatar (highest tier wins), but the underlying rows remain distinct; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
 

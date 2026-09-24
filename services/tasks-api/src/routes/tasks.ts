@@ -541,6 +541,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
     const hasAttentionUpdate = req.body?.attentionOwners !== undefined
       && req.body?.attentionOwners !== null;
     let attentionOwnersUpdate: string[] | null = null;
+    let attentionOwnersCollapsed: string[] = [];
     if (hasAttentionUpdate) {
       const normalized = normalizeAttentionOwners(req.body.attentionOwners);
       if (!normalized) {
@@ -551,6 +552,7 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
         );
       }
       attentionOwnersUpdate = normalized.owners;
+      attentionOwnersCollapsed = normalized.collapsed;
     }
 
     // Acceptance is a terminal human handoff. When Tom moves a task back to
@@ -626,16 +628,32 @@ tasksRouter.patch('/tasks/:id', async (req, res, next) => {
       if (shouldPersistAttentionOwners) {
         // Full-replacement semantics: delete-then-create within the same
         // transaction. Each array entry is a distinct ordered role slot;
-        // repeated owner names are intentionally retained. The
-        // detail-level add/update endpoint (future work, not in WS1) will
-        // be the right place to preserve per-row metadata. We delete by
-        // `taskId`; clearing by `taskId` is correct regardless of how many
-        // rows survive.
+        // case-insensitive duplicate names are dropped by the normalization
+        // step above, so the persisted set never carries two rows for the
+        // same person. The detail-level add/update endpoint
+        // (routes/taskAttentionOwners.ts) is the right place for callers
+        // who need to preserve per-row metadata; this PATCH is a stack
+        // replacement with case-insensitive dedupe.
         await tx.taskAttentionOwner.deleteMany({ where: { taskId: id } });
         if (attentionOwnersUpdate.length > 0) {
           await tx.taskAttentionOwner.createMany({
             data: attentionOwnersUpdate.map((owner, position) => ({ taskId: id, owner, position }))
           });
+        }
+        // AC1 audit trail — one comment per dropped duplicate. Idempotent:
+        // re-PATCHing the same input collapses the same names again and
+        // emits the same comment trail; a self-resolving client wants the
+        // PATCH to be safe on retry.
+        if (attentionOwnersCollapsed.length > 0) {
+          for (const dropped of attentionOwnersCollapsed) {
+            await tx.taskComment.create({
+              data: {
+                taskId: id,
+                author: 'Tasks API',
+                body: `Attention owners normalized: dropped duplicate "[${dropped}]" (case-insensitive)`
+              }
+            });
+          }
         }
       }
 

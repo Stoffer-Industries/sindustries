@@ -29,8 +29,6 @@ function immutableTask(res) {
 
 function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'revoked') {
   const handoff = workflowHandoffForApproval(type);
-  const currentAttentionOwners = (task.attentionOwners ?? []).map((row) => row.owner);
-  const desiredAttentionOwners = attentionOwnersForApproval(currentAttentionOwners, type, action);
 
   const update: Record<string, unknown> = {};
 
@@ -51,19 +49,12 @@ function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'r
     }
   }
 
-  if (desiredAttentionOwners) {
-    // Full-replacement via Prisma nested write — same atomicity as the
-    // PATCH endpoint's deleteMany + createMany, but in a single statement.
-    // The PATCH endpoint (routes/tasks.ts lines 615-622) uses the explicit
-    // two-call form; the nested-write form here is equivalent inside one
-    // $transaction.
-    update.attentionOwners = {
-      deleteMany: {},
-      createMany: {
-        data: desiredAttentionOwners.map((owner, position) => ({ owner, position }))
-      }
-    };
-  }
+  // AC3: approval writes no longer touch the `attentionOwners` stack. Gate
+  // ownership lives in `workflowHandoffRoleId/Gate/Reason` only; the
+  // ordered action/escalation stack is owned by the lobster's `api_patch`
+  // path (which goes through the case-insensitive dedupe normalization in
+  // routes/tasks/_validation.ts) and the new per-row endpoints in
+  // routes/taskAttentionOwners.ts. The two planes never co-write.
 
   return Object.keys(update).length > 0 ? update : null;
 }

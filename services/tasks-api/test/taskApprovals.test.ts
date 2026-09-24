@@ -223,7 +223,7 @@ describe('task approval boundary', () => {
   });
 });
 
-describe('attentionOwners reconciliation on structured approval (task 45a759ac)', () => {
+describe('attentionOwners stays untouched on structured approval (task 91864257 AC3)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.approvalSession.findUnique.mockResolvedValue(null);
@@ -247,7 +247,7 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     return prismaMock.task.update.mock.calls[0][0];
   }
 
-  it('approved gate whose owner matches the head removes only the head and preserves the tail (AC1 positive)', async () => {
+  it('approval clears the gate handoff and never writes the attentionOwners stack (AC3)', async () => {
     prismaMock.task.findUnique.mockResolvedValue({
       ...activeTask,
       workflowHandoffRoleId: 'tech_design_approver',
@@ -267,23 +267,13 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     expect(args.data.workflowHandoffGate).toBeNull();
     expect(args.data.workflowHandoffReason).toBeNull();
     expect(args.data).not.toHaveProperty('status');
-    expect(args.data.attentionOwners).toEqual({
-      deleteMany: {},
-      createMany: {
-        data: [
-          { owner: 'Rowan', position: 0 },
-          { owner: 'Tom', position: 1 }
-        ]
-      }
-    });
+    // AC3 — the approval write never touches the attention stack.
+    expect(args.data).not.toHaveProperty('attentionOwners');
   });
 
-  it('approved gate whose owner does NOT match the head leaves attentionOwners alone (AC1 negative / AC3 other-types)', async () => {
+  it('approval whose owner does NOT match the head leaves attentionOwners alone (AC3 negative)', async () => {
     prismaMock.task.findUnique.mockResolvedValue({
       ...activeTask,
-      // No active handoff gate (so workflowHandoffFields are null), and the
-      // head is Rowan (the assignee) — not Quinn — so the attentionOwners
-      // head-slot pop must NOT fire. The next lobster sweep will reconcile.
       attentionOwners: attentionOwnersFromList(['Rowan', 'Quinn'])
     });
     prismaMock.taskApproval.findUnique.mockResolvedValue(null);
@@ -295,11 +285,11 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     expect(prismaMock.task.update).not.toHaveBeenCalled();
   });
 
-  it('accepted approval by Tom in acceptance removes Tom from the head and does not change task.status (AC2)', async () => {
+  it('accepted approval by Tom in acceptance does not change task.status and never writes attentionOwners (AC2)', async () => {
     prismaMock.task.findUnique.mockResolvedValue({
       ...activeTask,
       status: 'acceptance',
-      workflowHandoffRoleId: 'product_spec_approver', // accepted gate uses the same roleId as spec per APPROVAL_WORKFLOW_HANDOFFS — but here we're testing the attentionOwners path
+      workflowHandoffRoleId: 'product_spec_approver',
       workflowHandoffGate: 'accepted',
       workflowHandoffReason: 'Final acceptance is required',
       attentionOwners: attentionOwnersFromList(['Tom', 'Lox'])
@@ -311,20 +301,13 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'accepted' });
     expect(res.status).toBe(200);
 
-    const args = updateArgs();
-    // The no-premature-done guarantee: the API write MUST NOT include a
-    // `status` field. The lobster's acceptance-to-done gate still owns the
-    // status transition on its next sweep.
-    expect(args.data).not.toHaveProperty('status');
-    expect(args.data.attentionOwners).toEqual({
-      deleteMany: {},
-      createMany: {
-        data: [{ owner: 'Lox', position: 0 }]
-      }
-    });
+    // `accepted` has no entry in APPROVAL_WORKFLOW_HANDOFFS, so the
+    // approval never writes to `task.workflowHandoff*` and (since AC3)
+    // never writes to `attentionOwners`. No task.update happens.
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
   });
 
-  it('POST of the identical approved state is idempotent and still writes the attentionOwners delta on the first call (AC3 idempotency)', async () => {
+  it('POST of the identical approved state is idempotent and never writes the attentionOwners stack (AC3 idempotency)', async () => {
     const withAttention = {
       ...activeTask,
       workflowHandoffRoleId: 'tech_design_approver',
@@ -336,28 +319,18 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     prismaMock.task.findUnique.mockResolvedValue(withAttention);
     prismaMock.taskApproval.findUnique.mockResolvedValue(existingApproval);
 
-    // First (idempotent) call: no upsert, no audit comment, but the
-    // handoff + attentionOwners delta still applies because the existing
-    // approval satisfies the gate and the head still matches.
     const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(QUINN_TOKEN)).send({ type: 'tech_design' });
     expect(res.status).toBe(200);
     expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
     expect(prismaMock.taskComment.create).not.toHaveBeenCalled();
 
     const args = updateArgs();
-    expect(args.data.attentionOwners).toEqual({
-      deleteMany: {},
-      createMany: { data: [{ owner: 'Rowan', position: 0 }] }
-    });
+    expect(args.data).not.toHaveProperty('attentionOwners');
   });
 
-  it('revoking a gate re-prepends the owner when the head does NOT match and the owner is absent (AC1 symmetric / AC3 atomicity)', async () => {
+  it('revoking a gate restores the handoff fields but never prepends onto attentionOwners (AC3 revoke)', async () => {
     prismaMock.task.findUnique.mockResolvedValue({
       ...activeTask,
-      // Head is Rowan (the assignee) — not Quinn — so revoking tech_design
-      // must prepend Quinn back onto the routing stack while the gate is
-      // open again. The handoff field is also restored because tech_design
-      // is required for feature tasks.
       attentionOwners: attentionOwnersFromList(['Rowan'])
     });
     prismaMock.taskApproval.findUnique.mockResolvedValue(approval({ type: 'tech_design', owner: 'Quinn' }));
@@ -371,21 +344,15 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
     expect(args.data.workflowHandoffRoleId).toBe('tech_design_approver');
     expect(args.data.workflowHandoffGate).toBe('tech_design');
     expect(args.data.workflowHandoffReason).toBe('Tech design approval is required');
-    expect(args.data.attentionOwners).toEqual({
-      deleteMany: {},
-      createMany: { data: [{ owner: 'Quinn', position: 0 }, { owner: 'Rowan', position: 1 }] }
-    });
+    expect(args.data).not.toHaveProperty('attentionOwners');
   });
 
-  it('revoking a gate whose owner is already at the head is a no-op for attentionOwners (AC3 idempotency)', async () => {
+  it('revoking a gate whose owner is already at the head still never touches attentionOwners (AC3)', async () => {
     prismaMock.task.findUnique.mockResolvedValue({
       ...activeTask,
       workflowHandoffRoleId: 'tech_design_approver',
       workflowHandoffGate: 'tech_design',
       workflowHandoffReason: 'Tech design approval is required',
-      // Quinn is already at the head — revoking must NOT prepend a
-      // duplicate Quinn. The handoff field still re-sets because revoking
-      // always restores the required gate.
       attentionOwners: attentionOwnersFromList(['Quinn', 'Rowan'])
     });
     prismaMock.taskApproval.findUnique.mockResolvedValue(approval({ type: 'tech_design', owner: 'Quinn' }));
@@ -397,7 +364,7 @@ describe('attentionOwners reconciliation on structured approval (task 45a759ac)'
 
     const args = updateArgs();
     expect(args.data.workflowHandoffRoleId).toBe('tech_design_approver');
-    expect(args.data.attentionOwners).toBeUndefined();
+    expect(args.data).not.toHaveProperty('attentionOwners');
   });
 });
 
