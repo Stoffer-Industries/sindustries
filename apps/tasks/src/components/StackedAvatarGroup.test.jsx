@@ -164,9 +164,7 @@ describe('StackedAvatarGroup', () => {
     expect(items.map((item) => item.getAttribute('data-role'))).toEqual(['attention', 'attention']);
     expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
       'attention owner Rowan',
-      'attention owner Tom',
-      'workflow-gate owner Ash',
-      'delivery assignee Rowan'
+      'attention owner Tom'
     ]);
   });
 
