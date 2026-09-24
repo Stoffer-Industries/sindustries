@@ -56,13 +56,26 @@ const ROLE_TIER = {
 };
 
 /**
- * Find the first attention-detail row matching this owner name (case
- * insensitive). Returns the row or `null` when the detail surface did not
- * carry per-row metadata (e.g. older mapper responses).
+ * Find the attention-detail row matching this owner at the given
+ * slot, falling back to the first case-insensitive match when the
+ * slot lookup misses (older mapper responses without per-row positions).
+ *
+ * Quinn's PR #751 review (AC4 follow-up): the original implementation
+ * matched by `owner` only, which silently collapsed the per-row note
+ * for any intra-tier repeat (AC4 explicitly preserves two attention
+ * slots for the same owner at different positions). The slot-aware
+ * lookup surfaces each row's own note; the fallback to first-match
+ * keeps older mapper payloads from rendering an empty reason.
  */
-function findAttentionDetail(details, owner) {
+function findAttentionDetail(details, owner, slot) {
   if (!Array.isArray(details)) return null;
   const target = owner.trim().toLowerCase();
+  if (typeof slot === 'number' && Number.isInteger(slot) && slot >= 0) {
+    const slotRow = details[slot];
+    if (slotRow && typeof slotRow?.owner === 'string' && slotRow.owner.trim().toLowerCase() === target) {
+      return slotRow;
+    }
+  }
   for (const row of details) {
     if (typeof row?.owner !== 'string') continue;
     if (row.owner.trim().toLowerCase() === target) return row;
@@ -82,7 +95,7 @@ export function buildStackedOwnerLayers(task) {
   const attention = Array.isArray(task?.attentionOwners) ? task.attentionOwners : [];
   for (const [slot, owner] of attention.entries()) {
     if (!owner || typeof owner !== 'string') continue;
-    const detail = findAttentionDetail(attentionDetails, owner);
+    const detail = findAttentionDetail(attentionDetails, owner, slot);
     layers.push({
       role: 'attention',
       owner,

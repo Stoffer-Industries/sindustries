@@ -9,7 +9,7 @@
     "prestart": "prisma generate",
     "start": "tsx --require @sindustries/otel-node/register src/server.ts",
     "pretest": "prisma generate",
-    "test": "vitest run --exclude test/db-integration.test.ts",
+    "test": "vitest run",
     "test:watch": "vitest",
     "pretest:integration": "prisma generate",
     "test:integration": "vitest run --config vitest.integration.config.ts",

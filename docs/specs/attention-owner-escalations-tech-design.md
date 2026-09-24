@@ -27,6 +27,11 @@ shipped_date: null
   - `services/tasks-api/src/routes/taskApprovals.ts` — strip `attentionOwners` side-effect from `approvalHandoffUpdate`; gate ownership stays in `workflowHandoffRoleId/Gate/Reason` only
   - `services/tasks-api/src/routes/taskAttentionOwners.ts` *(new)* — per-row POST/PATCH/DELETE endpoints + `/self-resolve` endpoint
   - `services/tasks-api/test/taskAttentionOwners.test.ts`, `services/tasks-api/test/taskAttentionOwnersApi.test.ts` *(new)*
+  - `services/tasks-api/test/taskAttentionOwnersRoute.test.ts` — route-level mocks covering POST/PATCH/DELETE/self-resolve, including the temp-position move dance with sequential-write assertions
+  - `services/tasks-api/test/taskAttentionOwnersPositionMove.test.ts` *(new, integration)* — real-DB coverage of the temp-position move dance against Postgres (Quinn review PR #751)
+  - `services/tasks-api/test/dedupeAttentionOwnersHelpers.test.ts` *(new)* — unit tests for the pure helpers extracted from the repair script
+  - `services/tasks-api/test/dedupeAttentionOwnersScript.test.ts` *(new, integration)* — real-DB snapshot roundtrip (Quinn review AC7)
+  - `services/tasks-api/scripts/dedupe-attention-owners-helpers.ts` *(new)* — pure helpers (`selectTasksWithDuplicates`, `collapsePlan`, `renumberPlan`, `buildTaskSnapshot`, `duplicateAuditBody`) extracted from the script so the repair logic is unit-testable
   - `services/tasks-api/scripts/dedupe-attention-owners.ts` *(new)* — idempotent repair path (mirrors `migrate-legacy-approvals.ts` flags: `--dry-run` / `--write` / `--rollback`)
   - `apps/tasks/src/components/StackedAvatarGroup.jsx` — cross-role visual dedupe; per-row `note` carried into the accessibility label and detail tooltip
   - `apps/tasks/src/components/AttentionOwnersPanel.jsx` *(new)* — in-task edit surface for the ordered stack (add with required reason, reorder, edit reason, remove, resolve my blocker)
