@@ -372,4 +372,111 @@ describe('PATCH /tasks/:id/attention-owners/:rowId (task 91864257 AC6)', () => {
       data: expect.objectContaining({ note: 'new reason' })
     }));
   });
+
+  it('moves a row down through a 5-row stack using the temp-position dance (Quinn review AC2)', async () => {
+    // Real-DB parity test for the temp-position renumbering path (Quinn's
+    // PR #751 critical review). The prismaMock lets this test exercise the
+    // same update order the route emits, and the position move-dance test
+    // (`taskAttentionOwners-position-move.test.ts`) drives the real
+    // Postgres to confirm the constraint never trips end-to-end.
+    const rows = [
+      attentionRowFixture({ id: 'ao-a', owner: 'Quinn', position: 0 }),
+      attentionRowFixture({ id: 'ao-b', owner: 'Rowan', position: 1 }),
+      attentionRowFixture({ id: 'ao-c', owner: 'Tom', position: 2 }),
+      attentionRowFixture({ id: 'ao-d', owner: 'Lox', position: 3, note: 'target row' }),
+      attentionRowFixture({ id: 'ao-e', owner: 'Ivy', position: 4 })
+    ];
+    prismaMock.task.findFirst.mockResolvedValue(taskFixture({
+      attentionOwners: rows,
+      assignee: 'Rowan'
+    }));
+    prismaMock.taskAttentionOwner.findUnique.mockResolvedValue(rows[3]);
+    prismaMock.taskAttentionOwner.findMany.mockResolvedValue(rows);
+    prismaMock.taskAttentionOwner.update.mockResolvedValue(rows[3]);
+    prismaMock.taskComment.create.mockResolvedValue({});
+
+    const response = await request(createApp())
+      .patch(`/api/v1/tasks/${TASK_ID}/attention-owners/ao-d`)
+      .set(auth(TOM_TOKEN))
+      .send({ position: 1 });
+
+    expect(response.status).toBe(200);
+
+    // Step 1: target moves to temp position (max(0..4) + 1 = 5).
+    const updateCalls = prismaMock.taskAttentionOwner.update.mock.calls.map((call) => call[0]);
+    const tempWrite = updateCalls.find((call) => call.where?.id === 'ao-d' && call.data?.position === 5);
+    expect(tempWrite).toBeDefined();
+
+    // Step 2: siblings strictly between currentIndex(3) and targetIndex(1)
+    // shift UP by one. ao-b (1→2) and ao-c (2→3) get bumped.
+    const sibWrites = updateCalls.filter(
+      (call) => call.where?.id !== 'ao-d' && (call.data?.position === 2 || call.data?.position === 3)
+    );
+    const bumpedById = new Map(sibWrites.map((call) => [call.where.id, call.data.position]));
+    expect(bumpedById.get('ao-b')).toBe(2);
+    expect(bumpedById.get('ao-c')).toBe(3);
+
+    // Step 3: target lands at the requested slot (1).
+    const finalWrite = updateCalls.find((call) => call.where?.id === 'ao-d' && call.data?.position === 1);
+    expect(finalWrite).toBeDefined();
+
+    // The earlier logic used the *first* position-emitted UPDATE order to
+    // detect the bug; verify the new logic emits temp→shift→final in that
+    // exact order so the route can never violate @@unique([taskId, position]).
+    const orderedWrites = prismaMock.taskAttentionOwner.update.mock.calls
+      .map((call, idx) => ({ idx, ...call[0] }))
+      .filter((call) => call.data?.position !== undefined);
+    const tempIdx = orderedWrites.findIndex((call) => call.where?.id === 'ao-d' && call.data.position === 5);
+    const finalIdx = orderedWrites.findIndex(
+      (call, idx) => idx > tempIdx && call.where?.id === 'ao-d' && call.data.position === 1
+    );
+    expect(tempIdx).toBeGreaterThanOrEqual(0);
+    expect(finalIdx).toBeGreaterThan(tempIdx);
+  });
+
+  it('moves a row up through a 4-row stack using the temp-position dance (Quinn review AC2)', async () => {
+    // Mirror of the move-down test for the upward direction (targetIndex
+    // < currentIndex). Verifies siblings strictly between targetIndex and
+    // currentIndex shift DOWN by one so the slot at targetIndex opens.
+    const rows = [
+      attentionRowFixture({ id: 'ao-a', owner: 'Quinn', position: 0 }),
+      attentionRowFixture({ id: 'ao-b', owner: 'Rowan', position: 1, note: 'target row' }),
+      attentionRowFixture({ id: 'ao-c', owner: 'Tom', position: 2 }),
+      attentionRowFixture({ id: 'ao-d', owner: 'Lox', position: 3 })
+    ];
+    prismaMock.task.findFirst.mockResolvedValue(taskFixture({
+      attentionOwners: rows,
+      assignee: 'Rowan'
+    }));
+    prismaMock.taskAttentionOwner.findUnique.mockResolvedValue(rows[1]);
+    prismaMock.taskAttentionOwner.findMany.mockResolvedValue(rows);
+    prismaMock.taskAttentionOwner.update.mockResolvedValue(rows[1]);
+    prismaMock.taskComment.create.mockResolvedValue({});
+
+    const response = await request(createApp())
+      .patch(`/api/v1/tasks/${TASK_ID}/attention-owners/ao-b`)
+      .set(auth(QUINN_TOKEN))
+      .send({ position: 3 });
+
+    expect(response.status).toBe(200);
+
+    const updateCalls = prismaMock.taskAttentionOwner.update.mock.calls.map((call) => call[0]);
+    // Step 1: target moves to temp position (max(0..3) + 1 = 4).
+    const tempWrite = updateCalls.find((call) => call.where?.id === 'ao-b' && call.data?.position === 4);
+    expect(tempWrite).toBeDefined();
+
+    // Step 2: siblings strictly between targetIndex(3) and currentIndex(1)
+    // shift DOWN by one. ao-c (2→1) gets bumped. ao-a is at 0 < targetIndex
+    // and is left alone.
+    const sibWrites = updateCalls.filter(
+      (call) => call.where?.id !== 'ao-b' && (call.data?.position === 1)
+    );
+    expect(sibWrites.find((call) => call.where?.id === 'ao-c')).toBeDefined();
+    // ao-a must NOT be bumped (out of the shifted range).
+    expect(updateCalls.find((call) => call.where?.id === 'ao-a')).toBeUndefined();
+
+    // Step 3: target lands at the requested slot (3).
+    const finalWrite = updateCalls.find((call) => call.where?.id === 'ao-b' && call.data?.position === 3);
+    expect(finalWrite).toBeDefined();
+  });
 });

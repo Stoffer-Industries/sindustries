@@ -272,28 +272,85 @@ taskAttentionOwnersRouter.patch('/tasks/:id/attention-owners/:rowId', async (req
 
       // Move: re-number the slot at the new position out of the way,
       // then re-number the freed slot down. Single transaction so the
-      // @@unique constraint never trips.
+      // @@unique([taskId, position]) constraint never trips.
+      //
+      // Implementation note: we cannot bump sibling rows in place while
+      // the target still occupies a position inside the shifted range.
+      // Postgres rejects the first UPDATE that targets a position another
+      // row still occupies. The safe shape is a three-step temp-position
+      // dance inside the same `$transaction`:
+      //   1. Move the target row to a guaranteed-unused position (one
+      //      greater than every existing row's max). Because target is
+      //      now outside the [0..N] range, the sibling bumps below cannot
+      //      collide with it.
+      //   2. Shift the affected siblings into the slot the target is
+      //      vacating (move-up: +1 within [targetIndex, currentIndex);
+      //      move-down: -1 within (currentIndex, targetIndex]). Each
+      //      shift lands on a slot the target no longer occupies.
+      //   3. Move the target to the requested final position. Because
+      //      step 2 already cleared that slot, the UPDATE never trips
+      //      the unique constraint.
       const movingToDifferentPosition = newPosition !== null && newPosition !== target.position;
       if (movingToDifferentPosition) {
         const targetIndex = newPosition;
         const currentIndex = allRows.findIndex((row) => row.id === target.id);
         if (targetIndex !== currentIndex) {
-          // Two-step swap: bump everything at/after the target slot up by
-          // one (to free the slot), then move the target into place.
-          for (const row of allRows) {
-            if (row.id === target.id) continue;
-            if (row.position >= targetIndex && row.position < currentIndex) {
-              await tx.taskAttentionOwner.update({
-                where: { id: row.id },
-                data: { position: row.position + 1 }
-              });
-            } else if (row.position <= targetIndex && row.position > currentIndex) {
+          const maxPosition = allRows.reduce((acc, row) => Math.max(acc, row.position), -1);
+          const tempPosition = maxPosition + 1;
+
+          // Step 1: move target out of the way.
+          await tx.taskAttentionOwner.update({
+            where: { id: target.id },
+            data: { position: tempPosition }
+          });
+
+          // Step 2: shift the siblings into the vacated slot. Iterate in
+          // the right direction so each shift lands on a slot the prior
+          // shift already cleared — the constraint is satisfied because
+          // target is now at tempPosition (outside the range the siblings
+          // move within) AND we never bump a sibling into a slot another
+          // sibling in this batch still occupies.
+          if (currentIndex < targetIndex) {
+            // Move down: targetIndex > currentIndex. Siblings strictly
+            // between currentIndex and targetIndex shift DOWN by one
+            // (toward currentIndex). Ascending order so each shift lands
+            // on the slot the previous bump cleared.
+            const sorted = [...allRows]
+              .filter((row) => row.id !== target.id)
+              .filter((row) => row.position > currentIndex && row.position <= targetIndex)
+              .sort((a, b) => a.position - b.position);
+            for (const row of sorted) {
               await tx.taskAttentionOwner.update({
                 where: { id: row.id },
                 data: { position: row.position - 1 }
               });
             }
+          } else {
+            // Move up: targetIndex < currentIndex. Siblings strictly
+            // between targetIndex and currentIndex shift UP by one
+            // (away from targetIndex). Descending order so each shift
+            // lands on the slot the previous bump cleared.
+            const sorted = [...allRows]
+              .filter((row) => row.id !== target.id)
+              .filter((row) => row.position >= targetIndex && row.position < currentIndex)
+              .sort((a, b) => b.position - a.position);
+            for (const row of sorted) {
+              await tx.taskAttentionOwner.update({
+                where: { id: row.id },
+                data: { position: row.position + 1 }
+              });
+            }
           }
+
+          // Step 3: place target at the requested final slot. The slot
+          // is empty because step 2 already shifted every sibling that
+          // occupied it. The target's own previous position (now
+          // tempPosition) is also out of the way, so no row is left
+          // with a duplicate (taskId, position) pair.
+          await tx.taskAttentionOwner.update({
+            where: { id: target.id },
+            data: { position: targetIndex }
+          });
         }
       }
 
@@ -305,15 +362,11 @@ taskAttentionOwnersRouter.patch('/tasks/:id/attention-owners/:rowId', async (req
         data
       });
 
-      // If position was meant to change, the row's own position needs the
-      // final value (targetIndex, possibly after the swap dance).
+      // The move dance above (step 3) already persisted the final
+      // position; reflect that on the returned row so callers see the
+      // updated stack ordering without a second round-trip.
       if (movingToDifferentPosition) {
-        const finalIndex = newPosition;
-        await tx.taskAttentionOwner.update({
-          where: { id: rowId },
-          data: { position: finalIndex }
-        });
-        patch.position = finalIndex;
+        patch.position = newPosition;
       }
 
       const changes: string[] = [];

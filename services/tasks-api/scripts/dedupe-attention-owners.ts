@@ -50,6 +50,15 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { argv, exit } from 'node:process';
 import { prisma } from '../src/lib/prisma.ts';
+import {
+  buildTaskSnapshot,
+  collapsePlan,
+  duplicateAuditBody,
+  renumberPlan,
+  selectTasksWithDuplicates,
+  type RowSnapshot,
+  type TaskSnapshot
+} from './dedupe-attention-owners-helpers.ts';
 
 const SNAPSHOT_DIR = resolve(
   fileURLToPath(new URL('.', import.meta.url)),
@@ -132,37 +141,7 @@ async function listTasksWithDuplicates() {
   const rows = await prisma.taskAttentionOwner.findMany({
     orderBy: [{ taskId: 'asc' }, { position: 'asc' }]
   });
-  const byTask = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const list = byTask.get(row.taskId) ?? [];
-    list.push(row);
-    byTask.set(row.taskId, list);
-  }
-  const out: Array<{ taskId: string; rows: typeof rows }> = [];
-  for (const [taskId, list] of byTask.entries()) {
-    const seen = new Set<string>();
-    let hasDup = false;
-    for (const r of list) {
-      const key = r.owner.trim().toLowerCase();
-      if (seen.has(key)) { hasDup = true; break; }
-      seen.add(key);
-    }
-    if (hasDup) out.push({ taskId, rows: list });
-  }
-  return out;
-}
-
-function collapsePlan(rows: RowSnapshot[]) {
-  const kept: RowSnapshot[] = [];
-  const dropped: RowSnapshot[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const key = row.owner.trim().toLowerCase();
-    if (seen.has(key)) { dropped.push(row); continue; }
-    seen.add(key);
-    kept.push(row);
-  }
-  return { kept, dropped };
+  return selectTasksWithDuplicates(rows);
 }
 
 async function dryRun() {
@@ -210,23 +189,32 @@ async function runWrite() {
   };
 
   for (const { taskId, rows } of candidates) {
-    const snap: TaskSnapshot = {
-      taskId,
-      rows: rows.map((r) => ({
-        id: r.id,
-        taskId: r.taskId,
-        owner: r.owner,
-        addedBy: r.addedBy,
-        note: r.note,
-        position: r.position,
-        createdAt: r.createdAt.toISOString()
-      })),
-      collapsed: []
-    };
+    const snapRows: RowSnapshot[] = rows.map((r) => ({
+      id: r.id,
+      taskId: r.taskId,
+      owner: r.owner,
+      addedBy: r.addedBy,
+      note: r.note,
+      position: r.position,
+      createdAt: r.createdAt.toISOString()
+    }));
 
-    const { kept, dropped } = collapsePlan(snap.rows);
-    if (dropped.length === 0) continue;
-    snap.collapsed = dropped.map((r) => r.owner);
+    const { kept, dropped } = collapsePlan(snapRows);
+    if (dropped.length === 0) {
+      // Quinn review (PR #751): an empty collapse set still merits an
+      // audit row so the operator has a record that the script ran and
+      // found nothing to repair.
+      await prisma.taskComment.create({
+        data: {
+          taskId,
+          author: 'Tasks API',
+          body: 'Attention-owner repair scan ran with no duplicates found.'
+        }
+      });
+      summary.auditCommentsCreated += 1;
+      continue;
+    }
+    const snap = buildTaskSnapshot(taskId, snapRows, dropped.map((r) => r.owner));
 
     await prisma.$transaction(async (tx) => {
       // 1. Delete the dropped rows
@@ -234,22 +222,22 @@ async function runWrite() {
         await tx.taskAttentionOwner.delete({ where: { id: row.id } });
       }
       // 2. Renumber kept rows so positions are contiguous starting at 0
-      for (let i = 0; i < kept.length; i++) {
-        const row = kept[i];
-        if (row.position !== i) {
-          await tx.taskAttentionOwner.update({ where: { id: row.id }, data: { position: i } });
+      const renumber = renumberPlan(kept);
+      for (const { id, position } of renumber) {
+        const current = kept.find((r) => r.id === id);
+        if (current && current.position !== position) {
+          await tx.taskAttentionOwner.update({ where: { id }, data: { position } });
         }
       }
       // 3. Audit comment per dropped owner, preserving the note from the
       //    kept row when one was supplied (and surviving in the stack).
       for (const droppedRow of dropped) {
         const keptRow = kept.find((r) => r.owner.trim().toLowerCase() === droppedRow.owner.trim().toLowerCase());
-        const preservedNote = keptRow?.note ? ` preserved note: "${keptRow.note}"` : '';
         await tx.taskComment.create({
           data: {
             taskId,
             author: 'Tasks API',
-            body: `Duplicate attention owner "${droppedRow.owner}" (case-insensitive) collapsed by repair script;${preservedNote}`
+            body: duplicateAuditBody(droppedRow.owner, keptRow?.note ?? null)
           }
         });
       }

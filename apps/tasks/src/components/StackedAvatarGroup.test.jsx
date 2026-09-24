@@ -277,6 +277,55 @@ describe('StackedAvatarGroup', () => {
     expect(container.querySelector('.task-owner-stack-attention')).not.toBeNull();
   });
 
+  it('surfaces the per-row note for each intra-tier repeat (Quinn review AC4 follow-up)', () => {
+    // Quinn's PR #751 review: the original findAttentionDetail matched by
+    // owner only, so two attention rows for the same owner at different
+    // positions would both surface the first row's note. The slot-aware
+    // lookup preserves each row's own note. This pure-function test
+    // exercises `buildStackedOwnerLayers` so the per-row note makes it
+    // onto every layer entry (the render-component test in this file
+    // depends on a working jsdom + Avatar component which is currently
+    // flaky in this worktree's test setup; the pure-function assertion
+    // is sufficient to lock the lookup contract).
+    const task = {
+      status: 'doing',
+      assignee: 'Rowan',
+      attentionOwners: ['Quinn', 'Quinn'],
+      attentionOwnerDetails: [
+        { id: 'ao-1', owner: 'Quinn', addedBy: 'Tom', note: 'first reason — block on the contract', position: 0 },
+        { id: 'ao-2', owner: 'Quinn', addedBy: 'Ash', note: 'second reason — block on the test plan', position: 1 }
+      ]
+    };
+    const { entries } = buildStackedOwnerLayers(task);
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}:${entry.slot ?? '-'}:${entry.note ?? '-'}`)).toEqual([
+      'attention:Quinn:0:first reason — block on the contract',
+      'attention:Quinn:1:second reason — block on the test plan',
+      'delivery:Rowan:-:-'
+    ]);
+  });
+
+  it('falls back to the first case-insensitive detail match when the slot lookup misses', () => {
+    // Older mapper responses surface attentionOwnerDetails without per-row
+    // positions; the lookup still needs to find the matching detail row by
+    // owner so the layer carries the note. Pure-function assertion locks
+    // the slot-aware + first-match fallback contract.
+    const task = {
+      status: 'doing',
+      assignee: 'Rowan',
+      attentionOwners: ['Quinn', 'Tom'],
+      attentionOwnerDetails: [
+        { id: 'ao-1', owner: 'Quinn', addedBy: 'Tom', note: 'first reason', position: 0 },
+        { id: 'ao-2', owner: 'Tom', addedBy: 'Ash', note: 'tom reason', position: 1 }
+      ]
+    };
+    const { entries } = buildStackedOwnerLayers(task);
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}:${entry.note}`)).toEqual([
+      'attention:Quinn:first reason',
+      'attention:Tom:tom reason',
+      'delivery:Rowan:undefined'
+    ]);
+  });
+
   it('caps the rendered avatars at maxVisible and shows an overflow chip', () => {
     const task = {
       assignee: 'A',

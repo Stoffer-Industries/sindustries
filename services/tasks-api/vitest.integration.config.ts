@@ -5,7 +5,11 @@ const defaultDevDatabaseUrl = 'postgresql://postgres:postgres@localhost:6432/sin
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['test/db-integration.test.ts'],
+    include: [
+      'test/db-integration.test.ts',
+      'test/taskAttentionOwnersPositionMove.test.ts',
+      'test/dedupeAttentionOwnersScript.test.ts'
+    ],
     env: {
       DATABASE_URL: process.env.DATABASE_URL || defaultDevDatabaseUrl
     },
