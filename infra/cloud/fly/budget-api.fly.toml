@@ -29,8 +29,7 @@ kill_timeout = '5s'
   # read `infra/cloud/docker/budget-api.Dockerfile` from inside `infra/`,
   # i.e. `infra/infra/cloud/docker/budget-api.Dockerfile` (silently wrong
   # when the parent CI runner's working dir rescued it). Pin to the repo
-  # root so `dockerfile = 'infra/cloud/docker/budget-api.Dockerfile'`
-  # resolves the published path under all invocation forms.
+  # root so Docker COPY paths resolve under all invocation forms.
   context = '../../..'
   dockerfile = '../docker/budget-api.Dockerfile'
 
