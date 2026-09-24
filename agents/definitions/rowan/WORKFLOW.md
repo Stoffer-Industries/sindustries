@@ -218,6 +218,14 @@ put Quinn at position 0; `[openclaw-needed]` comments may remain as audit histor
 but never route work. Remove or advance only the resolved top slot while
 preserving every later slot, including repeated people.
 
+Every position-0 owner is an active blocker owner, not a passive watch state:
+that agent must investigate and take a concrete unblock action on its next
+heartbeat, then remove or advance itself when resolved, or record concrete
+blocker evidence and escalate. For Quinn specifically, never place Quinn in a
+later dormant slot as a reviewer or future convenience; route Quinn to position
+0 only when Quinn owns the current OpenClaw/runtime blocker. Use the PR review
+request mechanism for review work.
+
 ```bash
 python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
   --id <task-uuid> --attention-owners "Quinn" "Rowan" "Tom"

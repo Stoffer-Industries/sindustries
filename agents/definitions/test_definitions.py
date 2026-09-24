@@ -42,5 +42,22 @@ class AshDefinitionContractTest(unittest.TestCase):
         self.assertIn("position 0 acts and Ash's gate fallback is dormant", workflow)
 
 
+class AttentionOwnerActionContractTest(unittest.TestCase):
+    def test_quinn_attention_owner_is_active_unblock_not_passive_review(self):
+        quinn_heartbeat = (DEFINITIONS / "quinn" / "HEARTBEAT.md").read_text()
+        rowan_workflow = (DEFINITIONS / "rowan" / "WORKFLOW.md").read_text()
+        docs = " ".join(f"{quinn_heartbeat}\n{rowan_workflow}".split())
+        for phrase in (
+            "an active unblock handoff, not a watchlist",
+            "must only be added at position 0",
+            "Never add Quinn as a later dormant slot",
+            "On this heartbeat, investigate the blocker",
+            "remove Quinn from the ordered stack immediately",
+            "Every position-0 owner is an active blocker owner",
+            "Use the PR review request mechanism for review work",
+        ):
+            self.assertIn(phrase, docs)
+
+
 if __name__ == "__main__":
     unittest.main()
