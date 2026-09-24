@@ -8,7 +8,7 @@ import {
 } from './StackedAvatarGroup.jsx';
 
 describe('buildStackedOwnerLayers', () => {
-  it('preserves delivery, exact actionable gate, and repeated attention slots in order', () => {
+  it('preserves the current attention owner first, then gate and delivery context', () => {
     const task = {
       status: 'doing',
       assignee: 'Rowan',
@@ -17,10 +17,10 @@ describe('buildStackedOwnerLayers', () => {
     };
     const { entries } = buildStackedOwnerLayers(task);
     expect(entries).toEqual([
-      { role: 'delivery', owner: 'Rowan', key: 'delivery:rowan' },
-      { role: 'workflow-gate', owner: 'Ash', gateType: 'qa_agent', key: 'workflow-gate:0:ash' },
       { role: 'attention', owner: 'Rowan', slot: 0, key: 'attention:0:rowan' },
-      { role: 'attention', owner: 'Tom', slot: 1, key: 'attention:1:tom' }
+      { role: 'attention', owner: 'Tom', slot: 1, key: 'attention:1:tom' },
+      { role: 'workflow-gate', owner: 'Ash', gateType: 'qa_agent', key: 'workflow-gate:0:ash' },
+      { role: 'delivery', owner: 'Rowan', key: 'delivery:rowan' }
     ]);
   });
 
@@ -61,7 +61,7 @@ describe('buildStackedOwnerLayers', () => {
       workflowGates: [{ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }],
       attentionOwners: ['Lox']
     });
-    expect(entries.map((entry) => entry.role)).toEqual(['workflow-gate', 'attention']);
+    expect(entries.map((entry) => entry.role)).toEqual(['attention', 'workflow-gate']);
   });
 
   it('normalises whitespace and case only inside stable per-slot keys', () => {
@@ -72,10 +72,10 @@ describe('buildStackedOwnerLayers', () => {
       attentionOwners: ['QUINN', 'quinn']
     });
     expect(entries.map((entry) => entry.key)).toEqual([
-      'delivery:quinn',
-      'workflow-gate:0:quinn',
       'attention:0:quinn',
-      'attention:1:quinn'
+      'attention:1:quinn',
+      'workflow-gate:0:quinn',
+      'delivery:quinn'
     ]);
   });
 
@@ -119,14 +119,14 @@ describe('StackedAvatarGroup', () => {
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
     expect(items).toHaveLength(4);
     expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
-      'delivery assignee Rowan',
-      'workflow-gate owner Ash',
       'attention owner Rowan',
-      'attention owner Tom'
+      'attention owner Tom',
+      'workflow-gate owner Ash',
+      'delivery assignee Rowan'
     ]);
   });
 
-  it('places the rightmost attention owner visually above context and escalation slots', () => {
+  it('places the current attention owner visually above later escalation slots and context', () => {
     const { container } = render(<StackedAvatarGroup task={{
       assignee: 'Rowan',
       status: 'doing',
@@ -135,13 +135,11 @@ describe('StackedAvatarGroup', () => {
     }} />);
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
     // roleDepth baselines: delivery=100, workflow-gate=200, attention=300.
-    // Within a role tier, the rightmost avatar (highest DOM index) gets the
-    // higher z so it stays visible in the overlap. The role-tier separation
-    // is preserved by the 100/200/300 spacing.
-    expect(items.map((item) => Number(item.style.zIndex))).toEqual([100, 201, 302, 303]);
+    // Position 0 is the current actor, so it gets the higher attention z.
+    expect(items.map((item) => Number(item.style.zIndex))).toEqual([301, 300, 200, 100]);
   });
 
-  it('rightmost avatar in a same-role attention stack renders above the avatars to its left', () => {
+  it('position zero in a same-role attention stack renders above later slots', () => {
     // AC1: only attention owners; no delivery, no workflow-gate, so the
     // tier-baseline question is moot and the within-tier direction is the
     // whole test.
@@ -154,7 +152,7 @@ describe('StackedAvatarGroup', () => {
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
     expect(items).toHaveLength(2);
     const zIndexes = items.map((item) => Number(item.style.zIndex));
-    expect(zIndexes[1]).toBeGreaterThan(zIndexes[0]);
+    expect(zIndexes[0]).toBeGreaterThan(zIndexes[1]);
   });
 
   it('single-avatar rendering is unchanged', () => {
@@ -172,10 +170,10 @@ describe('StackedAvatarGroup', () => {
     expect(Number(items[0].style.zIndex)).toBe(300);
   });
 
-  it('stacks of three and four attention avatars follow rightmost-on-top', () => {
+  it('stacks of three and four attention avatars keep position zero on top', () => {
     // AC3: for stacks of 3 and 4 attention owners (no delivery / gate),
-    // the rendered z-index values are strictly increasing left-to-right
-    // so the rightmost avatar wins within the attention tier.
+    // the rendered z-index values are strictly decreasing left-to-right so
+    // position 0 remains the visible current actor.
     for (const owners of [['A', 'B', 'C'], ['A', 'B', 'C', 'D']]) {
       const { container } = render(<StackedAvatarGroup task={{
         status: 'open',
@@ -187,7 +185,7 @@ describe('StackedAvatarGroup', () => {
       expect(items).toHaveLength(owners.length);
       const zIndexes = items.map((item) => Number(item.style.zIndex));
       for (let i = 1; i < zIndexes.length; i += 1) {
-        expect(zIndexes[i]).toBeGreaterThan(zIndexes[i - 1]);
+        expect(zIndexes[i]).toBeLessThan(zIndexes[i - 1]);
       }
     }
   });
@@ -197,12 +195,12 @@ describe('StackedAvatarGroup', () => {
     expect(container.querySelector('.task-owner-stack')).toBeNull();
   });
 
-  it('renders the delivery assignee as the first avatar', () => {
+  it('renders the delivery assignee as context when no attention owner exists', () => {
     render(<StackedAvatarGroup task={{ assignee: 'Quinn', workflowGates: [], attentionOwners: [] }} />);
     expect(screen.getByLabelText('delivery assignee Quinn')).toBeInTheDocument();
   });
 
-  it('renders workflow-gate and attention-owner avatars in order', () => {
+  it('renders attention, workflow-gate, and delivery avatars in responsibility order', () => {
     const task = {
       assignee: 'Rowan',
       status: 'doing',
@@ -213,9 +211,15 @@ describe('StackedAvatarGroup', () => {
     // The Avatar component renders an <img> when the user has an avatarSrc,
     // so the initial text is not in the DOM. Check by aria-label instead,
     // which is the source of truth for the role semantics (AC5, AC6).
-    expect(screen.getByLabelText('delivery assignee Rowan')).toBeInTheDocument();
-    expect(screen.getByLabelText('workflow-gate owner Ash')).toBeInTheDocument();
     expect(screen.getByLabelText('attention owner Lox')).toBeInTheDocument();
+    expect(screen.getByLabelText('workflow-gate owner Ash')).toBeInTheDocument();
+    expect(screen.getByLabelText('delivery assignee Rowan')).toBeInTheDocument();
+    const items = [...document.querySelectorAll('.task-owner-stack-item')];
+    expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
+      'attention owner Lox',
+      'workflow-gate owner Ash',
+      'delivery assignee Rowan'
+    ]);
   });
 
   it('marks the visible avatar with the correct data-role attribute', () => {

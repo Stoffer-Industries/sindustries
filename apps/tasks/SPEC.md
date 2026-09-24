@@ -152,15 +152,17 @@ new planes is scoped separately.
    never owns focus or click behaviour; clicks continue to route to
    the task title.
 2. Layer order on the card is fixed and stable:
-   * **Layer 1 — delivery assignee** (the `task.assignee` field).
-     Always first when present. Empty `assignee` is allowed; the
-     remaining layers still render so a task waiting on a gate owner
-     surfaces that ownership immediately.
+   * **Layer 1 — attention owners.** Explicit `position` order matches the
+     mapper output; position 0 is the current actor exposed to the task and
+     is the strongest visual layer. Empty attention owners are allowed; the
+     remaining layers still render.
    * **Layer 2 — outstanding workflow-gate owners.** Only gates with
      `state: "outstanding"` are included. Approved gates are excluded
      so the stack never re-shows a gate that has already been
      satisfied. Gate order matches the mapper's policy-defined order.
-   * **Layer 3 — attention owners.** Explicit `position` order matches the mapper output; the first attention slot is the top/current actor. Attention layers paint above gate/delivery context, and within each role tier the rightmost avatar (the most recently added slot) paints above earlier ones in the overlap.
+   * **Layer 3 — delivery assignee** (the `task.assignee` field). The
+     delivery avatar remains visible as context but never obscures the current
+     attention owner. Empty `assignee` is allowed.
 3. Every role slot remains visible, including repeated people. Stable keys combine role, position, and a case-insensitive trimmed owner string; duplicates are never collapsed because order communicates escalation. The
    `findAssigneeUser` lookup uses the original (un-normalised)
    `owner` string so display name and avatar asset still resolve
@@ -169,7 +171,7 @@ new planes is scoped separately.
    * `delivery assignee <DisplayName>`
    * `workflow-gate owner <DisplayName>`
    * `attention owner <DisplayName>`
-   When a person wears multiple hats, each role slot has its own label so assistive technology receives the same ordered responsibility stack. The container wraps the stack in
+   When a person wears multiple hats, each role slot has its own label so assistive technology receives the same ordered responsibility stack, with the current attention owner announced first when present. The container wraps the stack in
    `role="group"` with an `aria-label` that lists every visible
    owner using the same wording, comma-separated.
 5. Stable data attributes on each visible avatar span:
