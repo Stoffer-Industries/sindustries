@@ -6,6 +6,7 @@ import { healthRouter } from './routes/health';
 import { config } from './config/index.ts';
 import { tasksRouter } from './routes/tasks';
 import { taskApprovalsRouter } from './routes/taskApprovals';
+import { taskAttentionOwnersRouter } from './routes/taskAttentionOwners.ts';
 import { approvalSessionsRouter } from './routes/approvalSessions.ts';
 import { requiredApprovalsRouter } from './routes/requiredApprovals';
 import { tagsRouter } from './routes/tags';
@@ -104,6 +105,7 @@ export function createApp() {
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', tasksRouter);
   app.use('/api/v1', taskApprovalsRouter);
+  app.use('/api/v1', taskAttentionOwnersRouter);
   app.use('/api/v1', approvalSessionsRouter);
   app.use('/api/v1', requiredApprovalsRouter);
   app.use('/api/v1', tagsRouter);

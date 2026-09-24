@@ -16,6 +16,13 @@ function normalizeOwnerKeyPart(owner) {
  * accessibility label and the task-details surface can render the distinct
  * responsibilities without re-deriving them.
  *
+ * Cross-role visual dedupe (AC4): a person who appears as both delivery
+ * assignee AND attention owner renders ONE avatar, owned by the higher-tier
+ * role (attention > workflow-gate > delivery). This closes the "Rowan is
+ * shown three times for one task" defect without losing the escalation
+ * semantics — within the attention tier, repeated names stay as separate
+ * ordered slots because that IS the escalation shape.
+ *
  * `delivery` is the single-row assignee field on the task. It is allowed to
  * be empty (no assignee yet) — the layout still renders the workflow-gate
  * and attention-owner layers so a task sitting in the queue waiting for a
@@ -27,7 +34,7 @@ function normalizeOwnerKeyPart(owner) {
  *
  * `attentionOwners` is the array of owner strings from the
  * `TaskAttentionOwner` table. The full details (note, addedBy) are surfaced
- * in task details, not here, so the avatar stack stays compact.
+ * in the accessibility label and the task-details surface.
  *
  * Every role slot is rendered, including repeated people. A repeated avatar
  * communicates that the same person owns more than one ordered responsibility;
@@ -41,19 +48,48 @@ const ACTIONABLE_GATE_BY_STATUS = {
   acceptance: 'accepted'
 };
 
+// Tier rank — higher wins on cross-role dedupe.
+const ROLE_TIER = {
+  delivery: 1,
+  'workflow-gate': 2,
+  attention: 3
+};
+
+/**
+ * Find the first attention-detail row matching this owner name (case
+ * insensitive). Returns the row or `null` when the detail surface did not
+ * carry per-row metadata (e.g. older mapper responses).
+ */
+function findAttentionDetail(details, owner) {
+  if (!Array.isArray(details)) return null;
+  const target = owner.trim().toLowerCase();
+  for (const row of details) {
+    if (typeof row?.owner !== 'string') continue;
+    if (row.owner.trim().toLowerCase() === target) return row;
+  }
+  return null;
+}
+
 export function buildStackedOwnerLayers(task) {
   const layers = [];
+  const attentionDetails = Array.isArray(task?.attentionOwnerDetails) ? task.attentionOwnerDetails : [];
 
   // Layer 1: attention owners in explicit escalation-slot order. Position 0
   // is the person currently exposed to the task and must be first in the
-  // rendered ownership group.
+  // rendered ownership group. Each entry carries the per-row note so the
+  // accessibility label and the task-details surface can surface the
+  // reason without a second API round-trip.
   const attention = Array.isArray(task?.attentionOwners) ? task.attentionOwners : [];
   for (const [slot, owner] of attention.entries()) {
     if (!owner || typeof owner !== 'string') continue;
+    const detail = findAttentionDetail(attentionDetails, owner);
     layers.push({
       role: 'attention',
       owner,
       slot,
+      note: detail?.note ?? null,
+      addedBy: detail?.addedBy ?? null,
+      rowId: detail?.id ?? null,
       key: `attention:${slot}:${normalizeOwnerKeyPart(owner)}`
     });
   }
@@ -88,7 +124,43 @@ export function buildStackedOwnerLayers(task) {
     });
   }
 
-  return { entries: layers };
+  // AC4 cross-role collapse: a name that appears in more than one role tier
+  // renders one avatar, owned by the highest-tier role. Within a single
+  // tier the repeat stays as separate slots because that IS the escalation
+  // shape (e.g. [Rowan, Rowan, Tom] is a real escalation contract); only
+  // cross-tier duplicates collapse.
+  const collapsed = [];
+  const seenAcrossTiers = new Map();
+  for (const layer of layers) {
+    const key = normalizeOwnerKeyPart(layer.owner);
+    const existing = seenAcrossTiers.get(key);
+    if (!existing) {
+      seenAcrossTiers.set(key, { tier: ROLE_TIER[layer.role], layer });
+      collapsed.push(layer);
+      continue;
+    }
+    if (ROLE_TIER[layer.role] > existing.tier) {
+      // The new layer outranks the prior; replace the prior with the new
+      // entry but keep the original index so the avatar stack's relative
+      // ordering stays stable for callers that read position-by-index.
+      const idx = collapsed.indexOf(existing.layer);
+      collapsed[idx] = layer;
+      seenAcrossTiers.set(key, { tier: ROLE_TIER[layer.role], layer });
+      continue;
+    }
+    if (ROLE_TIER[layer.role] === existing.tier) {
+      // Same-tier repeat (intra-tier): keep as separate slot. The
+      // escalation shape — e.g. Rowan listed twice intentionally at
+      // different positions — is preserved by NOT replacing the prior and
+      // NOT registering the new entry as the canonical representative.
+      collapsed.push(layer);
+      continue;
+    }
+    // Lower-tier: the higher-tier entry already represents this person;
+    // skip the duplicate.
+  }
+
+  return { entries: collapsed };
 }
 
 /**
@@ -111,11 +183,19 @@ export function roleLabel(role) {
 
 /**
  * Build the combined accessibility label for a single avatar in the stack.
- * Repeated people retain one label per ordered role slot (AC5, AC6).
+ * Cross-role repeats render once with the higher-tier role label (AC4);
+ * within-tier attention repeats stay as separate slots (AC5).
+ *
+ * AC4: when the row carries a `note`, append a 80-char truncated excerpt
+ * so screen readers communicate why the attention request was raised
+ * without a second interaction.
  */
 export function buildAvatarAriaLabel(entry) {
   const displayName = assigneeDisplayName(entry.owner) || entry.owner;
-  return `${roleLabel(entry.role)} ${displayName}`;
+  const baseLabel = `${roleLabel(entry.role)} ${displayName}`;
+  if (entry.role !== 'attention' || !entry.note) return baseLabel;
+  const trimmed = entry.note.length > 80 ? `${entry.note.slice(0, 80)}…` : entry.note;
+  return `${baseLabel} — ${trimmed}`;
 }
 
 /**
@@ -138,7 +218,7 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
     <div
       className="task-owner-stack"
       role="group"
-      aria-label={`Task ownership: ${entries.map((e) => `${roleLabel(e.role)} ${assigneeDisplayName(e.owner) || e.owner}`).join(', ')}`}
+      aria-label={`Task ownership: ${entries.map((e) => buildAvatarAriaLabel(e)).join(', ')}`}
     >
       {visible.map((entry) => {
         const user = findAssigneeUser(entry.owner);
@@ -154,12 +234,16 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
         const roleZIndex = roleDepth + sameRoleEntries.length - roleIndex - 1;
         // The `data-role` attribute lets the task-details surface and the
         // accessibility script read the role without re-parsing the label.
+        // The `data-reason` attribute (AC4) carries the attention note into
+        // the task-details surface so the per-row reason is rendered without
+        // a second API round-trip.
         return (
           <span
             key={entry.key}
             className={`task-owner-stack-item task-owner-stack-${entry.role}`}
             data-role={entry.role}
             data-owner-key={entry.key}
+            data-reason={entry.role === 'attention' && entry.note ? entry.note : undefined}
             aria-label={ariaLabel}
             style={{ zIndex: roleZIndex }}
           >

@@ -77,12 +77,12 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
         ), patch.object(
             tasks_api_client, "api_request", return_value={"data": {"attentionOwners": ["Quinn", "Lox"]}}
         ) as api_request:
-            result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+            result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn", "needs eyes on the spec revision")
         api_request.assert_called_once_with(
-            "PATCH",
+            "POST",
             self.BASE_URL,
-            "/tasks/task-1",
-            {"attentionOwners": ["Quinn", "Lox"]},
+            "/tasks/task-1/attention-owners",
+            {"owner": "Quinn", "note": "needs eyes on the spec revision"},
             token=None,
         )
         self.assertEqual(result, {"attentionOwners": ["Quinn", "Lox"]})
@@ -91,9 +91,15 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
         with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
             tasks_api_client, "get_task", return_value=self._task(["Quinn", "Lox"])
         ), patch.object(tasks_api_client, "api_request") as api_request:
-            result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+            with self.assertRaises(ValueError):
+                tasks_api_client.add_self_to_attention_owners("task-1", "Quinn", "   ")
         api_request.assert_not_called()
-        self.assertEqual(result, {"id": "task-1", "attentionOwners": ["Quinn", "Lox"]})
+
+    def test_add_self_requires_non_empty_note(self):
+        with patch.object(tasks_api_client, "api_request") as api_request:
+            with self.assertRaises(ValueError):
+                tasks_api_client.add_self_to_attention_owners("task-1", "Quinn", "")
+        api_request.assert_not_called()
 
     def test_remove_self_preserves_repeated_later_slot(self):
         with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
@@ -106,8 +112,14 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
         with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
             tasks_api_client, "get_task", return_value=self._task(["Ash", "Quinn", "Tom"])
         ), patch.object(tasks_api_client, "api_request", return_value={"data": {}}) as api_request:
-            tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
-        self.assertEqual(api_request.call_args.args[3]["attentionOwners"], ["Quinn", "Ash", "Quinn", "Tom"])
+            tasks_api_client.add_self_to_attention_owners("task-1", "Quinn", "duplicate Quinn slot")
+        api_request.assert_called_once_with(
+            "POST",
+            self.BASE_URL,
+            "/tasks/task-1/attention-owners",
+            {"owner": "Quinn", "note": "duplicate Quinn slot"},
+            token=None,
+        )
 
     def test_add_self_to_empty_attention_owners(self):
         with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
@@ -115,14 +127,28 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
         ), patch.object(
             tasks_api_client, "api_request", return_value={"data": {"attentionOwners": ["Quinn"]}}
         ) as api_request:
-            tasks_api_client.add_self_to_attention_owners("task-1", "Quinn")
+            result = tasks_api_client.add_self_to_attention_owners("task-1", "Quinn", "first slot")
         api_request.assert_called_once_with(
-            "PATCH",
+            "POST",
             self.BASE_URL,
-            "/tasks/task-1",
-            {"attentionOwners": ["Quinn"]},
+            "/tasks/task-1/attention-owners",
+            {"owner": "Quinn", "note": "first slot"},
             token=None,
         )
+
+    def test_resolve_own_attention_owner_calls_self_resolve_endpoint(self):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client, "api_request", return_value={"data": {"topAttentionOwner": "Rowan"}}
+        ) as api_request:
+            result = tasks_api_client.resolve_own_attention_owner("task-1", "Quinn", note="unblocked")
+        api_request.assert_called_once_with(
+            "POST",
+            self.BASE_URL,
+            "/tasks/task-1/attention-owners/self-resolve",
+            {"note": "unblocked"},
+            token=None,
+        )
+        self.assertEqual(result, {"topAttentionOwner": "Rowan"})
 
 
 class TasksApiClientPatchTest(unittest.TestCase):

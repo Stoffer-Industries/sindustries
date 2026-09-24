@@ -81,8 +81,7 @@ WS1 introduces the data shape only; the stacked avatar rendering and
 detail-view composer land in WS3.
 
 1. Task responses include `workflowGates` (derived view of outstanding /
-   approved structured gates), `attentionOwners` (ordered action/escalation role slots; repeats preserved), and `attentionOwnerDetails` (full audit
-   rows). The existing `Blocked` indicator, `dependencyBlocked`, and
+   approved structured gates), `attentionOwners` (ordered action/escalation role slots; intra-tier repeats preserved, cross-tier case-insensitive duplicates collapsed), and `attentionOwnerDetails` (full audit rows). The existing `Blocked` indicator, `dependencyBlocked`, and
    `blockedBy` dependency references remain unchanged.
 2. The detail view surfaces each plane in its own labelled section:
    delivery assignee, outstanding workflow gates with their configured
@@ -104,6 +103,28 @@ detail-view composer land in WS3.
    opens a structured approval (spec / tech_design / qa_agent / accepted), the
    approval-row UX is the only path; the attention-editor UX never
    surfaces for the same action.
+
+### Flows
+
+- **Manage attention owners** (added with task `91864257`): a task editor
+  panel renders one row per `attentionOwnerDetails` entry with inline
+  edit, move up / move down, and remove controls. An "Add attention
+  owner" composer requires both owner and reason before submit enables.
+  The panel mounts from `TaskEditor` under the "Attention owners" heading
+  and from `TaskDetailDrawer` as a read-only summary.
+- **Resolve my blocker** (added with task `91864257`): the same panel
+  renders a "Resolve my blocker" button only for the authenticated
+  top-of-stack actor (or Tom/Quinn override). The button posts to
+  `/tasks/:id/attention-owners/self-resolve`, removes only the current
+  top row, and toasts "Top is now <next owner>".
+
+### Screens
+
+- `AttentionOwnersPanel` (added with task `91864257`) is a new section in
+  the task editor that lists ordered attention owners, supports
+  add-with-reason, inline edit, move, and remove. The stacked avatar
+  group surfaces `data-reason` per attention row so the detail view can
+  render the per-row reason inline.
 
 ### 10. Discovery queue: ownership filters and default landing view (WS2)
 WS2 wires the WS1 data surface into the backlog view so normal handoffs

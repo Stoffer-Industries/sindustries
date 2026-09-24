@@ -280,3 +280,90 @@ export async function deleteTaskApproval(
     credentials: 'include'
   });
 }
+
+/** Per-row write payload for the attention-owner stack (AC2). */
+export interface CreateAttentionOwnerPayload {
+  owner: string;
+  note: string;
+  position?: number;
+}
+
+/** Per-row update payload — at least one field must be supplied. */
+export interface UpdateAttentionOwnerPayload {
+  owner?: string;
+  note?: string;
+  position?: number;
+}
+
+export interface AttentionOwnerRowResponse {
+  id: string;
+  owner: string;
+  addedBy?: string | null;
+  note?: string | null;
+  position: number;
+  createdAt: string;
+}
+
+export interface AttentionOwnerMutationResponse {
+  data: Task;
+  row?: AttentionOwnerRowResponse;
+  resolved?: string;
+  nextTopOwner?: string | null;
+  removed?: { id: string; owner: string };
+}
+
+/**
+ * POST /tasks/:id/attention-owners — add a row with a required reason
+ * (AC2). Returns the refreshed task mapper payload plus the new row.
+ */
+export async function createAttentionOwner(
+  id: string | number,
+  payload: CreateAttentionOwnerPayload
+): Promise<AttentionOwnerMutationResponse> {
+  return api<AttentionOwnerMutationResponse>(`/tasks/${id}/attention-owners`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+/**
+ * PATCH /tasks/:id/attention-owners/:rowId — rename / move / edit reason.
+ */
+export async function updateAttentionOwner(
+  id: string | number,
+  rowId: string,
+  payload: UpdateAttentionOwnerPayload
+): Promise<AttentionOwnerMutationResponse> {
+  return api<AttentionOwnerMutationResponse>(`/tasks/${id}/attention-owners/${rowId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+}
+
+/**
+ * DELETE /tasks/:id/attention-owners/:rowId — remove a single row.
+ */
+export async function deleteAttentionOwner(
+  id: string | number,
+  rowId: string,
+  reason?: string
+): Promise<AttentionOwnerMutationResponse> {
+  return api<AttentionOwnerMutationResponse>(`/tasks/${id}/attention-owners/${rowId}`, {
+    method: 'DELETE',
+    body: JSON.stringify(reason ? { reason } : {})
+  });
+}
+
+/**
+ * POST /tasks/:id/attention-owners/self-resolve — remove the current
+ * top slot only (AC5). Returns the post-resolve task mapper payload.
+ */
+export async function resolveOwnAttentionOwner(
+  id: string | number,
+  note?: string
+): Promise<AttentionOwnerMutationResponse> {
+  return api<AttentionOwnerMutationResponse>(`/tasks/${id}/attention-owners/self-resolve`, {
+    method: 'POST',
+    body: JSON.stringify(note ? { note } : {})
+  });
+}

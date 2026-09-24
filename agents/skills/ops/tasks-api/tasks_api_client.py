@@ -162,25 +162,65 @@ def remove_self_from_attention_owners(
 
 
 def add_self_to_attention_owners(
-    task_id: str, name: str, *, base_url: str | None = None, token: str | None = None
+    task_id: str,
+    name: str,
+    note: str,
+    *,
+    base_url: str | None = None,
+    token: str | None = None,
 ) -> dict:
-    """Put ``name`` on top while preserving every existing escalation slot.
+    """Add ``name`` as a new attention-owner row with the required reason.
 
-    This is idempotent only when ``name`` is already position 0. If the same
-    person appears later, prepending creates an intentional repeated role slot.
+    The new write contract (task ``91864257`` AC2) requires a non-empty
+    ``note``; without it the request 400s. Use ``resolve_own_attention_owner``
+    to drop only the current top slot.
+
+    The helper uses the per-row ``POST /tasks/:id/attention-owners``
+    endpoint so the note is recorded against the new row rather than as a
+    full-stack PATCH side-effect.
     """
+    if not isinstance(note, str) or not note.strip():
+        raise ValueError("note is required (non-empty after trim)")
     base = base_url or get_base_url()
-    task = get_task(task_id, base_url=base)
-    current = list(task.get("attentionOwners") or [])
-    if current and str(current[0]).strip().casefold() == name.strip().casefold():
-        return task
-    next_owners = [name] + current
     resp = api_request(
-        "PATCH", base, f"/tasks/{task_id}", {"attentionOwners": next_owners}, token=token
+        "POST",
+        base,
+        f"/tasks/{task_id}/attention-owners",
+        {"owner": name, "note": note.strip()},
+        token=token,
     )
     if isinstance(resp, dict) and "data" in resp:
         return resp["data"]
-    return resp if isinstance(resp, dict) else task
+    return resp if isinstance(resp, dict) else {}
+
+
+def resolve_own_attention_owner(
+    task_id: str,
+    name: str,
+    *,
+    note: str | None = None,
+    base_url: str | None = None,
+    token: str | None = None,
+) -> dict:
+    """Drop only the current top-of-stack row when ``name`` matches.
+
+    Mirrors the AC5 contract: removes exactly the current top row,
+    preserves every later row, and the call is server-validated against
+    the authenticated actor (Tom/Quinn can override). Returns the
+    post-resolve mapper payload so callers can read ``nextTopOwner``.
+    """
+    base = base_url or get_base_url()
+    payload = {"note": note} if note else {}
+    resp = api_request(
+        "POST",
+        base,
+        f"/tasks/{task_id}/attention-owners/self-resolve",
+        payload,
+        token=token,
+    )
+    if isinstance(resp, dict) and "data" in resp:
+        return resp["data"]
+    return resp if isinstance(resp, dict) else {}
 
 
 def _blocking_comment(task: dict) -> str | None:
