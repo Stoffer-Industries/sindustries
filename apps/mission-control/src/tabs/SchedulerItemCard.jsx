@@ -125,9 +125,12 @@ export function SchedulerItemCard({
             />
           </Field>
         ) : (
-          <div data-testid={`content-scheduler-body-${item.id}`}>
+          <div>
             {isThread && normalizedParts ? (
-              <div className="content-scheduler-row__thread">
+              <div
+                className="content-scheduler-row__thread"
+                data-testid={`content-scheduler-body-${item.id}`}
+              >
                 <div className="content-scheduler-row__thread-head">
                   <Badge variant="info" data-testid={`content-scheduler-thread-badge-${item.id}`}>
                     Thread · {normalizedParts.length} parts
@@ -142,7 +145,9 @@ export function SchedulerItemCard({
                     {expanded ? 'Collapse' : 'Expand'}
                   </Button>
                 </div>
-                <p className="content-scheduler-row__thread-root">{normalizedParts[0].body}</p>
+                <p className="content-scheduler-row__thread-root content-scheduler-row__body-text">
+                  {normalizedParts[0].body}
+                </p>
                 {expanded && (
                   <ol
                     className="content-scheduler-row__thread-parts"
@@ -155,14 +160,21 @@ export function SchedulerItemCard({
                         data-testid={`content-scheduler-thread-part-${item.id}-${idx + 1}`}
                       >
                         <span className="content-scheduler-row__thread-part-label">{idx + 1}.</span>
-                        <span className="content-scheduler-row__thread-part-body">{part.body}</span>
+                        <span className="content-scheduler-row__thread-part-body content-scheduler-row__body-text">
+                          {part.body}
+                        </span>
                       </li>
                     ))}
                   </ol>
                 )}
               </div>
             ) : (
-              <p>{item.body}</p>
+              <p
+                className="content-scheduler-row__body-text"
+                data-testid={`content-scheduler-body-${item.id}`}
+              >
+                {item.body}
+              </p>
             )}
           </div>
         )}

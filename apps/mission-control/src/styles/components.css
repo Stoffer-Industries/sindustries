@@ -936,3 +936,17 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+.content-scheduler-row__body-text {
+  /* The edit view (native <textarea>) preserves every character
+  verbatim — \n shows as a visible line break, bullet markers are
+  visible, indentation survives. The preview view uses the same
+  `pre-wrap` semantics so a queued / approved item shows the same
+  paragraph and list structure Tom typed. `overflow-wrap: anywhere`
+  lets long unbroken strings (URLs, hashtags) wrap at the column
+  edge instead of pushing the card wider than its column. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  margin: 0;
+}
