@@ -67,28 +67,35 @@ escalation path. OpenClaw/runtime blockers must put Quinn first. Legacy
 `[openclaw-needed]` and `[openclaw-done]` comments remain useful audit evidence
 but never route work.
 
+**Quinn's attention-owner contract:** an attention-owner entry is an active
+unblock handoff, not a watchlist or passive review reservation. Quinn must only
+be added at position 0 when Quinn owns the current OpenClaw/runtime blocker.
+Never add Quinn as a later dormant slot; a GitHub PR review request is the
+separate mechanism for review. If the queue surfaces a task only because
+Quinn appears after position 0, that is not Quinn's work and Quinn must not
+retain or reinstate that slot.
+
 When Quinn is top owner:
 
 1. Read the task and its audit/context comments.
-2. Apply or decide the requested action. For `~/.openclaw/`, retain the normal
+2. On this heartbeat, investigate the blocker and take the next concrete
+   unblock action. Do not leave the task waiting for a later pass without
+   either progress or newly evidenced blocker state.
+3. Apply or decide the requested action. For `~/.openclaw/`, retain the normal
    safety and product-behaviour approval checks.
-3. Post evidence as a task comment.
-4. If the work is resolved, advance the ordered stack by removing the resolved
-   first slot while preserving every later slot exactly, including repeated
-   people. Never deduplicate the list or clear all owners.
-5. If Quinn hits a genuine external blocker (missing access, owner-only
-   approval, unavailable credential, or an unresolved product decision), do not
-   silently remove Quinn or let Rowan route around her. Preserve the existing
-   ordered handoff chain (normally `["Quinn", "Tom"]`), post the concrete
-   blocker evidence with a `[quinn-escalation]` marker, and page Tom directly
-   and immediately. Do not collapse the
-   stack to `["Tom"]` merely to notify him; the unchanged stack makes the
-   Rowan → Quinn → Tom routing visible. This is a real escalation, not a
-   duplicate PR/state-assistance request.
-6. Do not escalate when the only possible action is duplicate state help, such
+4. Post evidence as a task comment.
+5. If the work is resolved, remove Quinn from the ordered stack immediately,
+   preserving any genuine later escalation slots exactly. Do not leave Quinn
+   behind as a dormant reviewer.
+6. If Quinn cannot resolve the blocker because of a genuine external blocker
+   (missing access, owner-only approval, unavailable credential, or unresolved
+   product decision), keep Quinn at position 0, post concrete evidence with a
+   `[quinn-escalation]` marker, and page Tom directly and immediately. Do not
+   silently remove Quinn or wait for another heartbeat.
+7. Do not escalate when the only possible action is duplicate state help, such
    as repeating PR assistance or restating evidence already recorded elsewhere.
    Leave the existing stack unchanged and avoid a second page.
-7. **Tom is never added to `attentionOwners` for a `doing`-status task unless
+8. **Tom is never added to `attentionOwners` for a `doing`-status task unless
    the very next action truly requires him** (owner-only approval, credential
    only he can provision, an unresolved product decision). "Quinn's own gate is
    complete" is not by itself a reason to add or reorder Tom onto a `doing`
