@@ -243,6 +243,7 @@ and scope live in `agents/workflows/feature-task/WORKFLOW.md` — do not
 duplicate them here. Content/doc/non-Rust PRs are exempt.
 
 When Rowan opens a PR:
+- immediately before `gh pr create` and again before `gh pr ready`, run `agents/skills/dev/pr-open/scripts/assert-opener-identity.sh rowanstoffer`; abort if it reports any identity other than `rowanstoffer`
 - open as **draft** with **no assignee** — this signals the PR is not yet ready for Tom's attention
 - include clear description of changes and full AC checklist (with `- [ ]` placeholders until each AC is done)
 - include validation evidence
