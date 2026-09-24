@@ -10,9 +10,9 @@ function normalizeOwnerKeyPart(owner) {
 
 /**
  * Build the ordered owner layers used by the stacked avatar group. The
- * returned shape is stable: delivery assignee first, then workflow-gate
- * owners (outstanding only, in policy-defined order), then attention
- * owners (in explicit escalation-slot order). Each entry carries the role so the
+ * returned shape is stable: attention owners first (in explicit escalation-slot
+ * order), then workflow-gate owners (outstanding only, in policy-defined
+ * order), then the delivery assignee. Each entry carries the role so the
  * accessibility label and the task-details surface can render the distinct
  * responsibilities without re-deriving them.
  *
@@ -31,7 +31,8 @@ function normalizeOwnerKeyPart(owner) {
  *
  * Every role slot is rendered, including repeated people. A repeated avatar
  * communicates that the same person owns more than one ordered responsibility;
- * collapsing it would destroy the escalation path.
+ * collapsing it would destroy the escalation path. Position 0 is the current
+ * attention owner and is therefore the strongest visual layer.
  */
 const ACTIONABLE_GATE_BY_STATUS = {
   open: 'spec',
@@ -43,14 +44,17 @@ const ACTIONABLE_GATE_BY_STATUS = {
 export function buildStackedOwnerLayers(task) {
   const layers = [];
 
-  // Layer 1: delivery assignee. The single source of truth for "who is
-  // shipping this". Never duplicated elsewhere in the stack.
-  const delivery = task?.assignee;
-  if (delivery && typeof delivery === 'string' && delivery.trim()) {
+  // Layer 1: attention owners in explicit escalation-slot order. Position 0
+  // is the person currently exposed to the task and must be first in the
+  // rendered ownership group.
+  const attention = Array.isArray(task?.attentionOwners) ? task.attentionOwners : [];
+  for (const [slot, owner] of attention.entries()) {
+    if (!owner || typeof owner !== 'string') continue;
     layers.push({
-      role: 'delivery',
-      owner: delivery,
-      key: `delivery:${normalizeOwnerKeyPart(delivery)}`
+      role: 'attention',
+      owner,
+      slot,
+      key: `attention:${slot}:${normalizeOwnerKeyPart(owner)}`
     });
   }
 
@@ -71,16 +75,16 @@ export function buildStackedOwnerLayers(task) {
     });
   }
 
-  // Layer 3: attention owners in explicit escalation-slot order. Repeated
-  // people stay as separate entries; position 0 is the current actor.
-  const attention = Array.isArray(task?.attentionOwners) ? task.attentionOwners : [];
-  for (const [slot, owner] of attention.entries()) {
-    if (!owner || typeof owner !== 'string') continue;
+  // Layer 3: delivery assignee. The single source of truth for "who is
+  // shipping this". Never duplicated elsewhere in the stack. It is rendered
+  // after attention and gate context so the current attention owner remains
+  // visually primary.
+  const delivery = task?.assignee;
+  if (delivery && typeof delivery === 'string' && delivery.trim()) {
     layers.push({
-      role: 'attention',
-      owner,
-      slot,
-      key: `attention:${slot}:${normalizeOwnerKeyPart(owner)}`
+      role: 'delivery',
+      owner: delivery,
+      key: `delivery:${normalizeOwnerKeyPart(delivery)}`
     });
   }
 
@@ -115,8 +119,8 @@ export function buildAvatarAriaLabel(entry) {
 }
 
 /**
- * Stacked avatar group for task cards. Renders the delivery assignee first,
- * then outstanding workflow-gate owners, then the ordered attention stack.
+ * Stacked avatar group for task cards. Renders the ordered attention stack
+ * first, then outstanding workflow-gate owners, then the delivery assignee.
  * Repeated people remain visible as separate role slots (AC5, AC6).
  *
  * The component is read-only and consumes the mapper-derived task payload
@@ -136,22 +140,18 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
       role="group"
       aria-label={`Task ownership: ${entries.map((e) => `${roleLabel(e.role)} ${assigneeDisplayName(e.owner) || e.owner}`).join(', ')}`}
     >
-      {visible.map((entry, index) => {
+      {visible.map((entry) => {
         const user = findAssigneeUser(entry.owner);
         const displayName = assigneeDisplayName(entry.owner) || entry.owner;
         const initial = assigneeInitial(entry.owner);
         const ariaLabel = buildAvatarAriaLabel(entry);
         const roleDepth = entry.role === 'attention' ? 300 : entry.role === 'workflow-gate' ? 200 : 100;
-        // Within a role tier, the rightmost avatar (highest DOM index in the
-        // visible slice) is the most recently added slot and should render
-        // above the avatars to its left so it stays visible in the overlap.
-        // The role-tier baseline (delivery < workflow-gate < attention) is
-        // preserved by keeping `roleDepth` as the dominant term; the
-        // `+ index` only adjusts ordering within a tier. The separation
-        // between tiers stays strict because the roleDepth gaps (100/200/300)
-        // are wider than any realistic index within a tier under the
-        // "exactly one status-actionable gate" invariant. If that invariant
-        // is ever relaxed, re-check that the tier gaps still dominate.
+        const sameRoleEntries = visible.filter((candidate) => candidate.role === entry.role);
+        const roleIndex = sameRoleEntries.indexOf(entry);
+        // Position 0 is the current attention owner, so it must paint above
+        // later escalation slots. The same rule keeps each role tier stable
+        // if more than one gate or delivery context is ever introduced.
+        const roleZIndex = roleDepth + sameRoleEntries.length - roleIndex - 1;
         // The `data-role` attribute lets the task-details surface and the
         // accessibility script read the role without re-parsing the label.
         return (
@@ -161,7 +161,7 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
             data-role={entry.role}
             data-owner-key={entry.key}
             aria-label={ariaLabel}
-            style={{ zIndex: roleDepth + index }}
+            style={{ zIndex: roleZIndex }}
           >
             <Avatar
               src={user?.avatarSrc ?? undefined}
