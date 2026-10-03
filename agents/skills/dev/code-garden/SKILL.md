@@ -56,7 +56,7 @@ SLUG="<audit-week>-<short-slug>"   # e.g. 2026-W26-stale-triage-comment
 BRANCH="chore/code-garden-${SLUG}"
 /Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh \
   "code-garden-${SLUG}" origin/main "$BRANCH"
-cd "/Users/quinnstoffer/.openclaw/workspace/worktrees/code-garden-${SLUG}"
+cd "/Volumes/WD1/worktrees/quinn/code-garden-${SLUG}"
 ```
 
 e.g. branch `chore/code-garden-2026-W26-stale-triage-comment`

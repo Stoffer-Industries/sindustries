@@ -90,7 +90,7 @@ When in doubt, escalate to Tom (medium/high), not Quinn (low).
 
 ### 4. Open the PR(s)
 
-**Always work in my dedicated worktree: `~/workspaces/ivy/sindustries`**
+**Always work in my dedicated worktree: `/Volumes/WD1/worktrees/ivy/sindustries`**
 
 Never touch the canonical Edge-managed checkout
 (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries`). It must stay
@@ -107,8 +107,8 @@ If that dedicated worktree is missing, create a fresh one with the paved path
 
 Before starting any new task, ensure my worktree is on a clean `main`:
 ```bash
-git -C ~/workspaces/ivy/sindustries checkout main
-git -C ~/workspaces/ivy/sindustries pull origin main
+git -C /Volumes/WD1/worktrees/ivy/sindustries checkout main
+git -C /Volumes/WD1/worktrees/ivy/sindustries pull origin main
 ```
 
 Branch names:
@@ -125,7 +125,7 @@ GH_CONFIG_DIR=~/.config/gh-ivy gh pr view ...
 
 Push branches using my identity:
 ```bash
-GH_CONFIG_DIR=~/.config/gh-ivy git -C ~/workspaces/ivy/sindustries push -u origin <branch>
+GH_CONFIG_DIR=~/.config/gh-ivy git -C /Volumes/WD1/worktrees/ivy/sindustries push -u origin <branch>
 ```
 
 Always tag with the `content-task` label: `GH_CONFIG_DIR=~/.config/gh-ivy gh pr create --label "content-task" ...`
@@ -201,11 +201,11 @@ GH_CONFIG_DIR=~/.config/gh-ivy gh pr view <url> --json reviewDecision,statusChec
 ```
 
 **If `mergeStateStatus` is `DIRTY` (merge conflict):**
-1. Rebase the branch onto `origin/main` in my worktree (`~/workspaces/ivy/sindustries`)
+1. Rebase the branch onto `origin/main` in my worktree (`/Volumes/WD1/worktrees/ivy/sindustries`)
 2. For JSON content files: keep all new entries from both branches (do not drop entries from either side)
 3. Force-push with `--force-with-lease` using my identity:
    ```bash
-   GH_CONFIG_DIR=~/.config/gh-ivy git -C ~/workspaces/ivy/sindustries push origin <branch> --force-with-lease
+   GH_CONFIG_DIR=~/.config/gh-ivy git -C /Volumes/WD1/worktrees/ivy/sindustries push origin <branch> --force-with-lease
    ```
 4. Force-pushing dismisses any existing approval — re-request review from the original reviewer:
    ```bash

@@ -16,11 +16,11 @@ For every Sindustries code change, create (or reuse) your own worktree:
 
 ```bash
 /Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh <name>
-cd /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>
+cd /Volumes/WD1/worktrees/lox/<name>
 ```
 
 - Never `git worktree add … main` (bare `main` may only live in the canonical checkout)
-- After merge: `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries worktree remove /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>`
+- After merge: `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries worktree remove /Volumes/WD1/worktrees/lox/<name>`
 
 Reading skills/scripts under the canonical path is fine; mutating that checkout is not.
 

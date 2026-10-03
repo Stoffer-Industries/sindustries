@@ -11,7 +11,7 @@ repo.
 on a clean `main`. Read-only absolute paths into that checkout are fine for
 discovery. For **any write / branch / commit / push**, create a worktree first
 (see the skill runbook step 0) and operate only under
-`/Users/quinnstoffer/.openclaw/workspace/worktrees/repo-audit-<YYYY-Www>/`.
+`/Volumes/WD1/worktrees/quinn/repo-audit-<YYYY-Www>/`.
 
 Do NOT `cd` into `codebases/sindustries` for git ops. Do NOT rely on relative
 paths like `services/...`, `docs/...`, `apps/...` without the worktree prefix —

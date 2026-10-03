@@ -66,7 +66,7 @@ PAT so you never touch the stored remote:
 
 ```bash
 source ~/.openclaw/.env
-# From your worktree (e.g. workspace/worktrees/<name>):
+# From your worktree (e.g. /Volumes/WD1/worktrees/rowan/<name>):
 # Commit as Rowan (override local config inline)
 git -c user.name="rowanstoffer" -c user.email="rowanstoffer@gmail.com" commit -m "..."
 # Push as Rowan (explicit URL, does not change stored origin)

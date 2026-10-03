@@ -18,13 +18,13 @@ For every Sindustries code change, create (or reuse) your own worktree:
 
 ```bash
 /Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh <name>
-cd /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>
+cd /Volumes/WD1/worktrees/rowan/<name>
 ```
 
 - Create feature branches from `origin/main` **inside that worktree**
 - Open PRs from your branch
 - Never `git worktree add … main` (bare `main` may only live in the canonical checkout)
-- After merge: `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries worktree remove /Users/quinnstoffer/.openclaw/workspace/worktrees/<name>`
+- After merge: `git -C /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries worktree remove /Volumes/WD1/worktrees/rowan/<name>`
 
 ---
 
