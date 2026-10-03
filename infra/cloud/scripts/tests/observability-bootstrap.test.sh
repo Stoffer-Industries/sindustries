@@ -173,8 +173,7 @@ expected_vars=(
   GRAFANA_CLOUD_OTLP_ENDPOINT
   GRAFANA_CLOUD_OTLP_HEADERS
   GRAFANA_CLOUD_PROVISIONING_AUTH
-  GRAFANA_CLOUD_PROMETHEUS_URL
-  GRAFANA_CLOUD_TEMPO_URL
+  GRAFANA_CLOUD_INSTANCE_URL
   HEALTH_PROBE_DATABASES
   HEALTH_PROBE_FLY_APPS
   HEALTH_PROBE_REDIS
@@ -193,6 +192,107 @@ if grep -q 'step_evidence' "${BOOT}"; then
 else
   fail "bootstrap-observability.sh missing step_evidence wiring"
 fi
+
+# 10. Grafana HTTP payloads match the API contract. The checked-in alert
+# files intentionally remain in portable file-provisioning format; bootstrap
+# must translate them into per-rule HTTP payloads at runtime.
+mkdir -p "${TMP_DIR}/bin"
+FAKE_CURL_LOG="${TMP_DIR}/curl.log"
+export FAKE_CURL_LOG
+cat > "${TMP_DIR}/bin/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+set -euo pipefail
+method=GET
+data=''
+output=''
+write_out=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -X) method="$2"; shift 2 ;;
+    -H|--header) shift 2 ;;
+    --data-binary)
+      data="$2"
+      if [ "${data}" = '@-' ]; then data="$(cat)"; fi
+      shift 2
+      ;;
+    -o|--output) output="$2"; shift 2 ;;
+    -w|--write-out) write_out="$2"; shift 2 ;;
+    --fail|--silent|--show-error) shift ;;
+    http*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+printf '%s\t%s\t%s\n' "${method}" "${url}" "${data}" >> "${FAKE_CURL_LOG}"
+status=200
+body='{}'
+case "${url}" in
+  */api/datasources)
+    body='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true}]'
+    ;;
+  */api/folders/*)
+    status=404
+    ;;
+  */api/v1/provisioning/alert-rules/*)
+    if [ "${FAKE_ALERT_EXISTS:-false}" = true ]; then status=200; else status=404; fi
+    ;;
+  */api/v1/provisioning/alert-rules)
+    status=201
+    ;;
+esac
+if [ -n "${output}" ]; then
+  printf '%s' "${body}" > "${output}"
+else
+  printf '%s' "${body}"
+fi
+if [ -n "${write_out}" ]; then printf '%s' "${status}"; fi
+FAKECURL
+chmod +x "${TMP_DIR}/bin/curl"
+
+cat > "${OBS}/.env.local" <<'TESTENV'
+FLY_API_TOKEN=test
+FLY_ORG=personal
+GRAFANA_CLOUD_OTLP_ENDPOINT=https://otlp.example/v1/
+GRAFANA_CLOUD_OTLP_HEADERS="Authorization=Basic test"
+GRAFANA_CLOUD_PROVISIONING_AUTH="Bearer test"
+GRAFANA_CLOUD_INSTANCE_URL=https://grafana.example
+HEALTH_PROBE_DATABASES=test=postgres://test
+HEALTH_PROBE_FLY_APPS=test=https://example.test/health
+HEALTH_PROBE_REDIS=test=rediss://example.test
+TESTENV
+
+: > "${FAKE_CURL_LOG}"
+PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null
+dashboard_payload="$(awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/ {print $3; exit}' "${FAKE_CURL_LOG}")"
+if jq -e '.overwrite == true and (.dashboard.uid | length > 0)' <<<"${dashboard_payload}" >/dev/null \
+    && grep -q 'grafanacloud-prom' <<<"${dashboard_payload}"; then
+  ok "dashboard upload wraps the model and resolves the Prometheus datasource UID"
+else
+  fail "dashboard upload payload does not match Grafana API contract"
+fi
+
+: > "${FAKE_CURL_LOG}"
+PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" alerts >/dev/null
+alert_payload="$(awk -F '\t' '$1 == "POST" && $2 ~ /\/api\/v1\/provisioning\/alert-rules$/ {print $3; exit}' "${FAKE_CURL_LOG}")"
+if jq -e '
+  .uid and .folderUID and .ruleGroup and .orgID
+  and ([.data[].datasourceUid] | index("grafanacloud-prom") != null)
+  and (has("groups") | not)
+' <<<"${alert_payload}" >/dev/null; then
+  ok "alert upload translates file provisioning JSON into a per-rule API payload"
+else
+  fail "alert upload payload does not match Grafana per-rule API contract"
+fi
+
+: > "${FAKE_CURL_LOG}"
+FAKE_ALERT_EXISTS=true PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" alerts >/dev/null
+if awk -F '\t' '$1 == "PUT" && $2 ~ /\/api\/v1\/provisioning\/alert-rules\/sindustries-/ {found=1} END {exit !found}' "${FAKE_CURL_LOG}"; then
+  ok "alert upload updates existing rules by UID"
+else
+  fail "alert upload did not PUT existing rules by UID"
+fi
+
+rm -f "${OBS}/.env.local"
 
 restore_env_local
 

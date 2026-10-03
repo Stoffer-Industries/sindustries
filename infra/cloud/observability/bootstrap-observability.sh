@@ -155,12 +155,106 @@ REQUIRED_VARS=(
   GRAFANA_CLOUD_OTLP_ENDPOINT
   GRAFANA_CLOUD_OTLP_HEADERS
   GRAFANA_CLOUD_PROVISIONING_AUTH
-  GRAFANA_CLOUD_PROMETHEUS_URL
-  GRAFANA_CLOUD_TEMPO_URL
+  GRAFANA_CLOUD_INSTANCE_URL
   HEALTH_PROBE_DATABASES
   HEALTH_PROBE_FLY_APPS
   HEALTH_PROBE_REDIS
 )
+
+grafana_api_url() {
+  printf '%s%s' "${GRAFANA_CLOUD_INSTANCE_URL%/}" "$1"
+}
+
+grafana_auth_header() {
+  printf 'Authorization: %s' "${GRAFANA_CLOUD_PROVISIONING_AUTH}"
+}
+
+resolve_prometheus_datasource_uid() {
+  local response uid
+  response="$(curl --fail --silent --show-error \
+    -H "$(grafana_auth_header)" \
+    "$(grafana_api_url '/api/datasources')")"
+  uid="$(jq -r '
+    map(select(.type == "prometheus"))
+    | (map(select(.isDefault == true))[0] // .[0] // {})
+    | .uid // empty
+  ' <<<"${response}")"
+  if [ -z "${uid}" ]; then
+    echo "::error::hosted Grafana has no Prometheus datasource" >&2
+    return 1
+  fi
+  printf '%s' "${uid}"
+}
+
+grafana_folder_uid() {
+  local title="$1" slug
+  slug="$(printf '%s' "${title}" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+  printf 'sindustries-%s' "${slug#sindustries-}"
+}
+
+ensure_grafana_folder() {
+  local title="$1" uid="$2" response_file status
+  response_file="$(mktemp)"
+  status="$(curl --silent --show-error \
+    --output "${response_file}" \
+    --write-out '%{http_code}' \
+    -H "$(grafana_auth_header)" \
+    "$(grafana_api_url "/api/folders/${uid}")")"
+  case "${status}" in
+    200)
+      ;;
+    404)
+      jq -n --arg uid "${uid}" --arg title "${title}" \
+        '{uid: $uid, title: $title}' \
+        | curl --fail --silent --show-error \
+            -H "$(grafana_auth_header)" \
+            -H "Content-Type: application/json" \
+            --data-binary @- \
+            "$(grafana_api_url '/api/folders')" >/dev/null
+      ;;
+    *)
+      echo "::error::Grafana folder lookup failed (${status}): $(cat "${response_file}")" >&2
+      rm -f "${response_file}"
+      return 1
+      ;;
+  esac
+  rm -f "${response_file}"
+}
+
+upsert_grafana_alert_rule() {
+  local uid="$1" payload="$2" response_file status method url
+  response_file="$(mktemp)"
+  status="$(curl --silent --show-error \
+    --output "${response_file}" \
+    --write-out '%{http_code}' \
+    -H "$(grafana_auth_header)" \
+    "$(grafana_api_url "/api/v1/provisioning/alert-rules/${uid}")")"
+  case "${status}" in
+    200)
+      method="PUT"
+      url="$(grafana_api_url "/api/v1/provisioning/alert-rules/${uid}")"
+      ;;
+    404)
+      method="POST"
+      url="$(grafana_api_url '/api/v1/provisioning/alert-rules')"
+      ;;
+    *)
+      echo "::error::Grafana alert lookup failed for ${uid} (${status}): $(cat "${response_file}")" >&2
+      rm -f "${response_file}"
+      return 1
+      ;;
+  esac
+  rm -f "${response_file}"
+  curl --fail --silent --show-error \
+    -X "${method}" \
+    -H "$(grafana_auth_header)" \
+    -H "Content-Type: application/json" \
+    -H "X-Disable-Provenance: true" \
+    --data-binary "${payload}" \
+    "${url}" >/dev/null
+}
 
 source_env_local() {
   if [ ! -f "${ENV_LOCAL}" ]; then
@@ -243,21 +337,37 @@ step_dashboards() {
   if [ "${DRY_RUN}" = true ]; then
     for dashboard_file in "${DASHBOARD_DIR}"/*.json; do
       filename="$(basename "${dashboard_file}" .json)"
-      echo "    [dry-run] POST \${GRAFANA_CLOUD_PROMETHEUS_URL}/api/dashboards/db  body=${dashboard_file}  (uid=${filename})"
+      echo "    [dry-run] POST \${GRAFANA_CLOUD_INSTANCE_URL}/api/dashboards/db  body=${dashboard_file}  (uid=${filename})"
     done
     return 0
   fi
   source_env_local
   require_env_var GRAFANA_CLOUD_PROVISIONING_AUTH
-  require_env_var GRAFANA_CLOUD_PROMETHEUS_URL
+  require_env_var GRAFANA_CLOUD_INSTANCE_URL
+  local prometheus_uid wrapped_payload
+  prometheus_uid="$(resolve_prometheus_datasource_uid)"
   for dashboard_file in "${DASHBOARD_DIR}"/*.json; do
     filename="$(basename "${dashboard_file}" .json)"
     echo "    - ${filename}"
+    wrapped_payload="$(jq -c --arg prometheus_uid "${prometheus_uid}" '
+      walk(
+        if type == "object" and has("datasource") then
+          .datasource |= (
+            if type == "object" and (.uid == "prometheus" or .uid == "${DS_PROMETHEUS}") then
+              .uid = $prometheus_uid
+            elif . == "prometheus" or . == "${DS_PROMETHEUS}" then
+              $prometheus_uid
+            else . end
+          )
+        else . end
+      )
+      | {dashboard: ., overwrite: true}
+    ' "${dashboard_file}")"
     curl --fail --silent --show-error \
-      -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
+      -H "$(grafana_auth_header)" \
       -H "Content-Type: application/json" \
-      --data-binary "@${dashboard_file}" \
-      "${GRAFANA_CLOUD_PROMETHEUS_URL%/}/api/dashboards/db"
+      --data-binary "${wrapped_payload}" \
+      "$(grafana_api_url '/api/dashboards/db')" >/dev/null
   done
 }
 
@@ -266,22 +376,40 @@ step_alerts() {
   if [ "${DRY_RUN}" = true ]; then
     for alert_file in "${ALERT_DIR}"/*.json; do
       filename="$(basename "${alert_file}" .json)"
-      echo "    [dry-run] PUT  \${GRAFANA_CLOUD_PROMETHEUS_URL}/api/v1/provisioning/alert-rules  body=${alert_file}  (uid=${filename})"
+      echo "    [dry-run] POST-or-PUT \${GRAFANA_CLOUD_INSTANCE_URL}/api/v1/provisioning/alert-rules[/<uid>]  source=${alert_file}"
     done
     return 0
   fi
   source_env_local
   require_env_var GRAFANA_CLOUD_PROVISIONING_AUTH
-  require_env_var GRAFANA_CLOUD_PROMETHEUS_URL
+  require_env_var GRAFANA_CLOUD_INSTANCE_URL
+  local prometheus_uid folder_title folder_uid rule_payload rule_uid
+  prometheus_uid="$(resolve_prometheus_datasource_uid)"
   for alert_file in "${ALERT_DIR}"/*.json; do
     filename="$(basename "${alert_file}" .json)"
     echo "    - ${filename}"
-    curl --fail --silent --show-error \
-      -X PUT \
-      -H "Authorization: ${GRAFANA_CLOUD_PROVISIONING_AUTH}" \
-      -H "Content-Type: application/json" \
-      --data-binary "@${alert_file}" \
-      "${GRAFANA_CLOUD_PROMETHEUS_URL%/}/api/v1/provisioning/alert-rules"
+    folder_title="$(jq -r '.groups[0].folder' "${alert_file}")"
+    folder_uid="$(grafana_folder_uid "${folder_title}")"
+    ensure_grafana_folder "${folder_title}" "${folder_uid}"
+    while IFS= read -r rule_payload; do
+      rule_uid="$(jq -r '.uid' <<<"${rule_payload}")"
+      upsert_grafana_alert_rule "${rule_uid}" "${rule_payload}"
+    done < <(jq -c \
+      --arg folder_uid "${folder_uid}" \
+      --arg prometheus_uid "${prometheus_uid}" '
+        .groups[] as $group
+        | $group.rules[]
+        | . + {
+            folderUID: $folder_uid,
+            ruleGroup: $group.name,
+            orgID: ($group.orgId // 1)
+          }
+        | .data |= map(
+            if .datasourceUid == "prometheus" then
+              .datasourceUid = $prometheus_uid
+            else . end
+          )
+      ' "${alert_file}")
   done
 }
 
@@ -375,7 +503,7 @@ case "${SUBCOMMAND}" in
 ==> Bootstrap complete
 
 Fly app:    ${FLY_APP}
-Grafana:    ${GRAFANA_CLOUD_PROMETHEUS_URL%/}
+Grafana:    ${GRAFANA_CLOUD_INSTANCE_URL%/}
 
 Dashboards provisioned:
 $(for f in "${DASHBOARD_DIR}"/*.json; do printf '  - /d/%s\n' "$(basename "${f}" .json)"; done)
@@ -384,7 +512,7 @@ Alert rules provisioned:
 $(for f in "${ALERT_DIR}"/*.json; do printf '  - %s\n' "$(basename "${f}" .json)"; done)
 
 Next steps:
-  1. Open the four dashboards and confirm data appears within 5 minutes.
+  1. Open the five dashboards and confirm data appears within 5 minutes.
   2. Trigger a synthetic failure (\`./infra/cloud/observability/failure-inject.sh <scenario>\`)
      and confirm the corresponding alert enters the firing state within 2 minutes.
   3. Capture screenshots / exported signals for the closing PR's AC4 evidence

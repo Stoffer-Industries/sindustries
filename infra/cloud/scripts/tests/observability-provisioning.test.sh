@@ -3,13 +3,13 @@
 # (task 31233a0a — AC1/AC2 evidence).
 #
 # Validates that the JSON artefacts under infra/cloud/observability/grafana/
-# and the datasources YAML are present and well-formed, without invoking
-# Grafana Cloud or EAS. This is the offline half of AC1/AC2 evidence; the
+# are present and well-formed, without invoking Grafana Cloud or EAS. This is
+# the offline half of AC1/AC2 evidence; the
 # live half is captured in the closing PR's screenshot/export.
 #
 # AC coverage:
 #   AC1 — hosted observability stack has the expected runtime artefacts
-#         (dashboards, datasources, health probe) so a live hosted Grafana
+#         (dashboards, datasource discovery, health probe) so a live hosted Grafana
 #         can be provisioned against them.
 #   AC2 — ten alert rules with severity + owner populated. This test
 #         asserts the alert JSONs have a `labels.severity` and
@@ -23,8 +23,6 @@ python3 - "$REPO_ROOT" <<'PY'
 import json
 import pathlib
 import sys
-
-import yaml
 
 root = pathlib.Path(sys.argv[1])
 obs = root / 'infra' / 'cloud' / 'observability'
@@ -102,18 +100,6 @@ def assert_alerts() -> None:
                     )
 
 
-def assert_datasources() -> None:
-    path = obs / 'grafana' / 'datasources.yaml'
-    if not path.exists():
-        add_failure(f"missing datasources: {path}")
-        return
-    data = yaml.safe_load(path.read_text())
-    names = {d.get('name') for d in data.get('datasources', [])}
-    for expected in ('Prometheus', 'Tempo', 'Postgres'):
-        if expected not in names:
-            add_failure(f"datasources.yaml missing expected datasource: {expected}")
-
-
 def assert_bootstrap_references() -> None:
     bootstrap = obs / 'bootstrap-observability.sh'
     if not bootstrap.exists():
@@ -124,7 +110,10 @@ def assert_bootstrap_references() -> None:
         'flyctl apps create',
         'flyctl secrets set',
         '/api/dashboards/db',
+        '/api/datasources',
         '/api/v1/provisioning/alert-rules',
+        'folderUID',
+        'ruleGroup',
         'HEALTH_PROBE_DATABASES',
     ):
         if expected not in body:
@@ -144,7 +133,6 @@ def assert_health_probe() -> None:
 
 assert_dashboards()
 assert_alerts()
-assert_datasources()
 assert_bootstrap_references()
 assert_health_probe()
 
@@ -155,6 +143,6 @@ if failures:
 print(
     f"OK: {len(EXPECTED_DASHBOARDS)} dashboards, "
     f"{len(EXPECTED_ALERTS)} alert rules, "
-    f"3 datasources, bootstrap + health-probe present"
+    f"hosted datasource discovery, bootstrap + health-probe present"
 )
 PY

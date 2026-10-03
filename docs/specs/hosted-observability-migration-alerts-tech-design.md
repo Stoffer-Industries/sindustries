@@ -74,7 +74,6 @@ infra/cloud/observability/
     Dockerfile
   fly.toml                      # health probe app definition
   grafana/
-    datasources.yaml            # mirrors existing infra/grafana/provisioning/datasources/datasources.yaml
     dashboards/
       tasks-api-red.json        # copied from local provisioning
       openclaw-diagnostics.json # copied from local provisioning
@@ -149,7 +148,8 @@ Severity is either `page` (immediate, urgent) or `warn` (next-business-day). Qui
 - Creates the health-probe Fly app if missing.
 - Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed).
 - Uploads the dashboard JSONs via the Grafana provisioning API.
-- Creates the alert rules via the Grafana provisioning API.
+- Discovers the hosted stack's pre-provisioned Prometheus datasource through the Grafana API and rewrites dashboard/alert datasource UIDs at upload time.
+- Converts the portable file-provisioning alert JSON into the HTTP API's per-rule schema, ensures deterministic folders, and creates or updates each rule by UID.
 - Performs a smoke deploy (`fly deploy --strategy canary`).
 - Surfaces a final report with the Grafana URL, the dashboard URLs, and the smoke-check result.
 

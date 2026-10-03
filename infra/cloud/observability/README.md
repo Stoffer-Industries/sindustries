@@ -17,7 +17,6 @@ infra/cloud/observability/
   env/
     .env.example                     # redacted env-var contract
   grafana/
-    datasources.yaml                 # mirrors local provisioning (Prometheus + Tempo + Postgres)
     dashboards/
       cloud-overview.json            # NEW — per-app latency, error rate, request count, deploy annotations
       db-health.json                 # NEW — sindustries_db_up, query duration by app
@@ -54,10 +53,6 @@ Hosted Grafana dashboard JSON, uploaded via the Grafana provisioning API by the 
 
 Ten alert rules covering availability, latency, DB health, Redis health, queue depth, and deploy failures. Each rule is JSON, uploaded by the bootstrap script, and exposes a documented severity and owner in Grafana Cloud. No outbound notification integration is required.
 
-### `grafana/datasources.yaml`
-
-Mirrors `infra/grafana/provisioning/datasources/datasources.yaml` so the hosted Grafana has the same datasource shape as the local one (Postgres for DB health, Prometheus for app metrics, Tempo for traces).
-
 ### `health-probe/`
 
 A small, single-purpose Node service that periodically emits:
@@ -71,7 +66,7 @@ The probe is its own Fly app (`infra/cloud/observability/health-probe/`) that ru
 
 ### `bootstrap-observability.sh`
 
-Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Uploads dashboard JSONs and alert rules via the Grafana provisioning API. Performs a smoke deploy. Surfaces a final report with the Grafana URL, the dashboard URLs, and the smoke-check result.
+Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Discovers the Grafana Cloud stack's pre-provisioned Prometheus datasource via `/api/datasources`, uploads wrapped dashboard models, translates the portable alert files into per-rule HTTP payloads, and creates or updates each alert by UID. Performs a smoke deploy and surfaces a final report.
 
 ---
 
@@ -117,7 +112,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64(instance_id:api_k
 pnpm --filter <service> dev
 ```
 
-Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.example` is the only file in the repo that references these variable names.
+Do NOT commit any live exporter or provisioning credential. The redacted `.env.example` is the canonical operator template.
 
 ---
 
@@ -151,7 +146,7 @@ Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.ex
 
 The CI pipeline runs two offline contract tests against this directory so drift is caught before merge:
 
-- `bash infra/cloud/scripts/tests/observability-provisioning.test.sh` — asserts 5 dashboards, 10 alert rules, 3 datasources, the bootstrap script, and the health-probe package are present and well-formed.
-- `bash infra/cloud/scripts/tests/observability-bootstrap.test.sh` — asserts `bootstrap-observability.sh`, `evidence-capture.sh`, and `failure-inject.sh` pass `bash -n`, that every subcommand and failure-injection scenario is documented and produces output under `--dry-run`, and that `validate` exits with the missing-var count.
+- `bash infra/cloud/scripts/tests/observability-provisioning.test.sh` — asserts 5 dashboards, 10 alert rules, hosted-datasource discovery, the bootstrap script, and the health-probe package are present and well-formed.
+- `bash infra/cloud/scripts/tests/observability-bootstrap.test.sh` — asserts script syntax and dry-run behaviour, validates the required env contract, and exercises dashboard wrapping plus alert create/update payloads against a fake Grafana HTTP surface.
 
 Both are wired into the `health-probe-tests` CI job. Run them locally before any PR that touches this directory.

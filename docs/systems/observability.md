@@ -35,6 +35,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Env var contract                 | `OTEL_EXPORTER_OTLP_ENDPOINT` + `OTEL_EXPORTER_OTLP_HEADERS` (and friends) | Quinn | `infra/cloud/observability/env/.env.example` (redacted)       |
 | Database signal source           | Health probe service on Fly (single-purpose Node app, `sindustries_db_up` + `sindustries_db_query_duration_seconds` + `sindustries_fly_app_health` + `sindustries_redis_up`)    | Rowan  | `infra/cloud/observability/health-probe/`         |
 | Alert evaluation                 | Grafana Cloud alerting (not Alertmanager), UI/API state   | Quinn  | `infra/cloud/observability/grafana/alerts/` (10 rules, 5 page + 5 warn) |
+| Hosted datasource identity       | Discovered from Grafana Cloud `/api/datasources` at bootstrap time | Quinn | Hosted Grafana API; the repo does not duplicate SaaS datasource URLs or UIDs |
 | Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/`  | Rowan  | Provisioned via Grafana provisioning API on bootstrap        |
 | Dashboard definitions (local)    | `infra/grafana/provisioning/dashboards/json/` (existing) | Rowan  | Parity copy for hosted: `tasks-api-red.json`, `openclaw-diagnostics.json` |
 | Dashboard definitions (cloud, new) | `cloud-overview.json`, `db-health.json`, `migration-alerts.json` | Rowan | `infra/cloud/observability/grafana/dashboards/`   |
@@ -127,6 +128,8 @@ For the full per-alert response expectation see the "Alert ownership" table belo
 
 All dashboard definitions live as JSON in the repo (either `infra/grafana/provisioning/dashboards/json/` for local or `infra/cloud/observability/grafana/dashboards/` for hosted). Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
 
+The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default Prometheus datasource and rewrites repository-local `prometheus` / `${DS_PROMETHEUS}` references while constructing each API payload. The repository deliberately does not carry a Grafana Cloud `datasources.yaml`: file provisioning is not the control plane for the managed instance.
+
 ### Alerts
 
 | Alert                          | Severity | Owner  |
@@ -142,6 +145,15 @@ All dashboard definitions live as JSON in the repo (either `infra/grafana/provis
 | `worker-queue-stuck`           | warn     | Quinn  |
 | `deploy-failed`                | warn     | Quinn  |
 Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P2 informational). Quinn is the canonical owner for every alert in the v1 list; the runbook documents how to reassign individual alerts to Tom or another on-call.
+
+### Provisioning contract and common failures
+
+- `GRAFANA_CLOUD_INSTANCE_URL` is the Grafana stack base URL used for dashboard, folder, datasource, and alert-rule APIs. It is not a Prometheus query endpoint.
+- `GRAFANA_CLOUD_PROVISIONING_AUTH` is a quoted `Bearer <service-account-token>` value. The service account needs datasource read plus dashboard, folder, and alert-rule write permissions.
+- `GRAFANA_CLOUD_OTLP_HEADERS` is a quoted `Authorization=Basic <base64(instance_id:access_policy_token)>` exporter header. It is a separate credential from provisioning auth.
+- Dashboard upload wraps the checked-in model as `{dashboard: <model>, overwrite: true}`.
+- Alert files stay in portable Grafana file-export format. Bootstrap translates each rule to the HTTP API schema (`folderUID`, `ruleGroup`, `orgID`), creates its deterministic folder if absent, then POSTs a new UID or PUTs an existing UID.
+- Fly resolves both `build.context` and `build.dockerfile` relative to the Fly config file. `infra/cloud/scripts/tests/fly-toml-context.test.sh` resolves every cloud config and rejects paths that do not reach the repository root or an existing Dockerfile.
 
 ---
 
