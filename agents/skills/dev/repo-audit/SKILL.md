@@ -25,7 +25,7 @@ Ground every claim in actual files: cite file paths and line numbers. If you can
 > ```bash
 > /Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh \
 >   repo-audit-<YYYY-Www> origin/main code-garden/sindustries/<YYYY-Www>
-> WT=/Users/quinnstoffer/.openclaw/workspace/worktrees/repo-audit-<YYYY-Www>
+> WT=/Volumes/WD1/worktrees/quinn/repo-audit-<YYYY-Www>
 > ```
 >
 > Then use `$WT/...` paths or `cd "$WT" && ...`. Relative paths like
@@ -153,7 +153,7 @@ Canonical checkout (read-only): `/Users/quinnstoffer/.openclaw/workspace/codebas
 WEEK=$(python3 -c "import datetime; y,w,_=datetime.date.today().isocalendar(); print(f'{y}-W{w:02d}')")
 /Users/quinnstoffer/.openclaw/workspace/infra/guards/sindustries-worktree.sh \
   "repo-audit-${WEEK}" origin/main "code-garden/sindustries/${WEEK}"
-WT="/Users/quinnstoffer/.openclaw/workspace/worktrees/repo-audit-${WEEK}"
+WT="/Volumes/WD1/worktrees/quinn/repo-audit-${WEEK}"
 ```
 
 Never `cd` into the canonical checkout for branch/commit/push — that breaks Edge.
