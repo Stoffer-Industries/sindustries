@@ -18,7 +18,11 @@ A QA action is done only when:
   reason and (when known) a spec link; a capability-extension task leaves the
   original task depending on the extension, with no dependency back; recurring
   gaps across two distinct tasks become a follow-up task, not a silent
-  deferral;
+  deferral. When the capability is later available, the resolver posts
+  `[qa-agent-capability-resolved]` on the original task (the legacy
+  `[quinn-resolved]` marker is accepted for existing tasks); this clears the
+  deferred handoff and sends the task back to Ash for fresh verification, but
+  does not grant QA approval;
 - blockers are routed through `attentionOwners[0]` to the correct next actor;
 - delivery assignee and gate context remain intact;
 - repeated and dormant escalation slots are preserved;

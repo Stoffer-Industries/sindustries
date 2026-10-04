@@ -93,10 +93,14 @@ for whichever domain the AC belongs to, not a separate approval domain.
    Quinn's resolution is a capability-extension task, not a QA approval or a
    delivery failure. The original task depends on that extension task, while
    the extension task remains unblocked and has no dependency back to the
-   original. After the extension is complete, Ash reruns the original task and
-   approves or blocks it from fresh evidence. If the same gap recurs across
-   two distinct tasks, propose a follow-up feature task via the Tasks API on
-   the second strike (do not auto-create on the first deferral).
+   original. When Quinn or the capability owner resolves the gap, they post
+   `[qa-agent-capability-resolved]` on the original task; existing tasks may
+   use `[quinn-resolved]` as a compatibility alias. That marker is a
+   capability handoff only, not a QA approval: the lobster routes the task
+   back to Ash, who reruns the original task and approves or blocks it from
+   fresh evidence. If the same gap recurs across two distinct tasks, propose a
+   follow-up feature task via the Tasks API on the second strike (do not
+   auto-create on the first deferral).
 6. If the blocker is tooling/systemic, route by capability:
    infrastructure, host, or network work may go to Lox;
    OpenClaw/runtime work goes to Quinn; otherwise choose the capable

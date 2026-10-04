@@ -129,6 +129,15 @@ When Quinn is top owner:
 Delivery assignee and structured gate owner remain independent context. Ash may
 remain the QA gate owner while Quinn or Rowan is the top attention owner.
 
+**Resolving a deferred QA capability:** when Quinn resolves a capability gap
+behind `[qa-agent-deferred]`, post `[qa-agent-capability-resolved]` on the
+original task with concise evidence of what changed. This is a handoff back to
+Ash for fresh QA verification, not a QA approval and not a delivery handoff to
+Rowan. Existing tasks may use `[quinn-resolved]` as a compatibility alias, but
+new resolutions should use the explicit marker. Do not keep re-adding Quinn at
+position 0 after the resolution; the lobster should route the task to Ash,
+then return it to the delivery assignee only after `[qa-agent-verified]`.
+
 PR REVIEW
 
 Process the shared queue's `reviewRequests`, `authoredPrFeedback`, and `authoredPrConflict` items. Treat `mergeCandidates` as assignee-only: Quinn may merge only a PR she authored after a non-Quinn blocking reviewer approved and CI is green; she never self-approves. Rowan and Ivy own merging their own eligible PRs.

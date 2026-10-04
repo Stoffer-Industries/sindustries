@@ -174,6 +174,27 @@ Task responses include:
 
 **How to use it.** `attentionOwners[0]` is the sole actionability source. Assignee says who delivers, while approvals and `workflowGates` are eligibility/informational context only; neither independently enqueues work. Lobster writes and reconciles the `tech_design`, `qa_agent`, and `accepted` workflow slots. The status-derived fallback is retained only for the lobster-independent `spec` gate. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
+**QA capability-deferral lifecycle.** The feature-task workflow treats these
+markers as a distinct routing protocol:
+
+- `[qa-agent-blocked]` means delivery or evidence failed and routes directly
+  back to the task's delivery assignee (normally Rowan).
+- `[qa-agent-deferred]` means Ash could not verify because a genuine external
+  capability was unavailable and routes the active handoff to Quinn (or the
+  capability owner).
+- `[qa-agent-capability-resolved]` records that the capability gap is closed
+  and routes the task to Ash for fresh re-verification. It does not grant the
+  `qa_agent` approval. Existing tasks may use `[quinn-resolved]` as a legacy
+  alias for the same transition.
+- `[qa-agent-verified]` plus the structured `qa_agent` approval closes QA and
+  returns delivery to the task assignee; acceptance later routes to Tom when
+  human acceptance is the next real action.
+
+These QA markers are parsed by the feature-task router as workflow state; they
+are not generic audit comments. A capability-resolution marker must therefore
+be followed by a new Ash verdict, never treated as evidence that QA already
+passed.
+
 Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack collapses the delivery/attention duplicate into one attention-tier avatar (highest tier wins), but the underlying rows remain distinct; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
