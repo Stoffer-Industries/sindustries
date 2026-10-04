@@ -62,41 +62,6 @@ export function brainStateApi({
     };
   }
 
-  async function loadTransitionsFromPostgres(transitionsPath, databaseUrl) {
-    let PoolCtor;
-    let pool = null;
-    try {
-      if (pgClient) {
-        // pgClient is a { Pool: Ctor } object supplied by tests; this keeps the
-        // production code free of `require('pg')` at module load time and gives
-        // the test suite a deterministic seam to assert on.
-        PoolCtor = pgClient.Pool;
-        pool = new PoolCtor({ connectionString: databaseUrl, max: 1 });
-      } else {
-        const pg = await import('pg');
-        PoolCtor = pg.Pool;
-        pool = new PoolCtor({ connectionString: databaseUrl, max: 1 });
-      }
-      const result = await pool.query(
-        'SELECT id, occurred_at, bookmark_key, from_status, to_status, actor, payload '
-          + 'FROM analytics.bookmark_transitions '
-          + 'ORDER BY occurred_at ASC, id ASC'
-      );
-      const events = (result.rows ?? [])
-        .map(rowToEvent)
-        .filter((event) => event !== null);
-      return { events, pool };
-    } catch (err) {
-      if (pool && typeof pool.end === 'function') {
-        try { await pool.end(); } catch { /* swallow */ }
-      }
-      logger.warn?.(
-        `[brain-state-api] Postgres transitions unavailable, falling back to JSONL: ${err?.message ?? 'unknown error'}`
-      );
-      return { events: readJsonlFallback(transitionsPath), pool: null };
-    }
-  }
-
   return {
     name: 'brain-state-api',
     configureServer(server) {
@@ -105,12 +70,67 @@ export function brainStateApi({
       const transitionsPath = path.join(brainRoot, 'state', 'bookmark-transitions.jsonl');
       const signalPath = path.join(brainRoot, 'state', 'compounding-signal.json');
 
+      // W41 audit F2: every successful request previously created a new Pool
+      // and overwrote `activePool`, orphaning all earlier pools when shutdown
+      // closed only the latest reference. The pool is now created lazily on
+      // first use, shared across every /api/transitions request, and ended
+      // exactly once when the dev server closes. `activePoolPromise` guards
+      // against overlapping requests racing to create two pools.
       let activePool = null;
+      let activePoolPromise = null;
+      const getOrCreatePool = (databaseUrl) => {
+        if (activePool) return Promise.resolve(activePool);
+        if (activePoolPromise) return activePoolPromise;
+        activePoolPromise = (async () => {
+          try {
+            let PoolCtor;
+            if (pgClient) {
+              // pgClient is a { Pool: Ctor } object supplied by tests; this
+              // keeps the production code free of `import('pg')` at module
+              // load time and gives the test suite a deterministic seam.
+              PoolCtor = pgClient.Pool;
+            } else {
+              const pg = await import('pg');
+              PoolCtor = pg.Pool;
+            }
+            const pool = new PoolCtor({ connectionString: databaseUrl, max: 1 });
+            activePool = pool;
+            return pool;
+          } finally {
+            activePoolPromise = null;
+          }
+        })();
+        return activePoolPromise;
+      };
       const closeActivePool = async () => {
-        if (activePool && typeof activePool.end === 'function') {
-          try { await activePool.end(); } catch { /* swallow */ }
-        }
+        const pool = activePool;
         activePool = null;
+        activePoolPromise = null;
+        if (pool && typeof pool.end === 'function') {
+          try { await pool.end(); } catch { /* swallow */ }
+        }
+      };
+
+      const loadTransitionsFromPostgres = async (transitionsPath, databaseUrl) => {
+        try {
+          const pool = await getOrCreatePool(databaseUrl);
+          const result = await pool.query(
+            'SELECT id, occurred_at, bookmark_key, from_status, to_status, actor, payload '
+              + 'FROM analytics.bookmark_transitions '
+              + 'ORDER BY occurred_at ASC, id ASC'
+          );
+          return (result.rows ?? [])
+            .map(rowToEvent)
+            .filter((event) => event !== null);
+        } catch (err) {
+          // Transient query failures do NOT end the shared pool — a later
+          // request can reuse it without paying pool-setup cost. The pool is
+          // only ended on dev-server shutdown via closeActivePool.
+          logger.warn?.(
+            `[brain-state-api] Postgres transitions unavailable, falling back to JSONL: ${err?.message ?? 'unknown error'}`
+          );
+          return readJsonlFallback(transitionsPath);
+        }
       };
 
       server.middlewares.use('/api/state', (_req, res) => {
@@ -142,8 +162,7 @@ export function brainStateApi({
           return;
         }
         try {
-          const { events, pool } = await loadTransitionsFromPostgres(transitionsPath, databaseUrl);
-          if (pool) activePool = pool;
+          const events = await loadTransitionsFromPostgres(transitionsPath, databaseUrl);
           res.setHeader('content-type', 'application/json; charset=utf-8');
           res.statusCode = 200;
           res.end(JSON.stringify(events));
