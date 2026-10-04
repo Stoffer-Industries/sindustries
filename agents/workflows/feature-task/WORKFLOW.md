@@ -35,6 +35,25 @@ Both commands must exit zero locally before pushing. If clippy fails, fix the
 warning before requesting review — temporary exceptions must be called out in
 the PR description with a documented rationale.
 
+## QA capability handoff contract
+
+The router distinguishes a capability deferral from a delivery failure:
+
+- `[qa-agent-blocked]` sends an implementation or evidence failure back to
+  the task assignee.
+- `[qa-agent-deferred]` sends a genuine verifier/platform capability gap to
+  Quinn or the capability owner.
+- `[qa-agent-capability-resolved]` closes that capability handoff and sends
+  the task to Ash for a fresh QA run. It is not a QA approval. The legacy
+  `[quinn-resolved]` marker is accepted for existing tasks, but new workflow
+  comments should use the explicit marker.
+- Only a fresh `[qa-agent-verified]` verdict with structured `qa_agent`
+  approval returns delivery to the task assignee.
+
+Keep this lifecycle separate from acceptance routing: the assignee remains
+the implementer throughout QA re-verification, and Tom becomes actionable
+only when acceptance genuinely requires his decision.
+
 ## Brain checkbox → structured spec approval reconciliation
 
 Before dispatching per-task workflows, `run.py` scans only
