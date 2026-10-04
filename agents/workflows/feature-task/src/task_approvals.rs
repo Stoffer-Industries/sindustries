@@ -29,6 +29,9 @@
 //! Structured approvals are the primary gate source. The latest Ash QA
 //! verdict is also consulted as a safety invariant: a stale approved row must
 //! not survive a later `[qa-agent-deferred]` or `[qa-agent-blocked]` report.
+//! A capability deferral can be explicitly resolved with
+//! `[qa-agent-capability-resolved]`; the legacy `[quinn-resolved]` marker is
+//! accepted as an alias so existing tasks can recover without manual routing.
 //! Missing, revoked, and unknown states fail closed.
 //!
 //! Spec drift is intentionally NOT blocked here. Tom owns the ACs
@@ -125,6 +128,10 @@ fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
             Some("deferred")
         } else if starts_with_tag("[qa-agent-blocked]") {
             Some("blocked")
+        } else if starts_with_tag("[qa-agent-capability-resolved]")
+            || starts_with_tag("[quinn-resolved]")
+        {
+            Some("capability_resolved")
         } else if starts_with_tag("[qa-agent-verified]") {
             Some("verified")
         } else if starts_with_tag("[qa-agent-verification]") || starts_with_tag("[qa-verification]")
@@ -154,7 +161,7 @@ fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
 pub(crate) fn qa_agent_deferred(task: &Task) -> bool {
     match latest_qa_verdict(task) {
         Some("deferred") => true,
-        Some("verified") | Some("blocked") => false,
+        Some("verified") | Some("blocked") | Some("capability_resolved") => false,
         _ => task
             .approvals
             .iter()
