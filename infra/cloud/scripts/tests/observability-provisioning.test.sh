@@ -126,6 +126,28 @@ def assert_health_probe() -> None:
         add_failure(f"missing health-probe package.json: {probe_pkg}")
         return
     pkg = json.loads(probe_pkg.read_text())
+    start_script = pkg.get('scripts', {}).get('start', '')
+    if '--require @sindustries/otel-node/register' not in start_script:
+        add_failure('health-probe start script must preload the OTel register hook')
+    otel_spec = pkg.get('dependencies', {}).get('@sindustries/otel-node', '')
+    if not otel_spec.startswith('file:'):
+        add_failure('health-probe must reference @sindustries/otel-node via a file: dependency')
+    else:
+        resolved_otel = (probe_pkg.parent / otel_spec.removeprefix('file:')).resolve()
+        expected_otel = (root / 'packages' / 'otel-node').resolve()
+        if resolved_otel != expected_otel:
+            add_failure(
+                'health-probe @sindustries/otel-node path resolves to '
+                f'{resolved_otel}, expected {expected_otel}',
+            )
+    server = (probe_pkg.parent / 'src' / 'server.ts').read_text()
+    if "from '@sindustries/otel-node/register'" in server:
+        add_failure(
+            'health-probe server must not ESM-import the require-only OTel register export',
+        )
+    fly_config = (probe_pkg.parent / 'fly.toml').read_text()
+    if "OTEL_SERVICE_NAME = 'health-probe'" not in fly_config:
+        add_failure('health-probe Fly config must name the preloaded OTel service')
     for dep in ('@sindustries/otel-node', 'express', 'ioredis', 'pg', 'prom-client'):
         if dep not in pkg.get('dependencies', {}):
             add_failure(f"health-probe package.json missing dependency: {dep}")
@@ -146,3 +168,49 @@ print(
     f"hosted datasource discovery, bootstrap + health-probe present"
 )
 PY
+
+# Exercise the production startup command, not just the source-level tests.
+# This catches package-export and workspace-link failures that only appear when
+# tsx applies the OTel preload hook before loading the ESM server entrypoint.
+probe_port="$(python3 - <<'PY'
+import socket
+
+with socket.socket() as sock:
+    sock.bind(('127.0.0.1', 0))
+    print(sock.getsockname()[1])
+PY
+)"
+probe_log="$(mktemp)"
+probe_pid=''
+cleanup_probe() {
+  if [[ -n "${probe_pid}" ]]; then
+    kill "${probe_pid}" >/dev/null 2>&1 || true
+    wait "${probe_pid}" >/dev/null 2>&1 || true
+  fi
+  rm -f "${probe_log}"
+}
+trap cleanup_probe EXIT
+OTEL_SDK_DISABLED=true PORT="${probe_port}" \
+  npm run start --workspace infra/cloud/observability/health-probe \
+  >"${probe_log}" 2>&1 &
+probe_pid=$!
+
+probe_ready=false
+for _ in $(seq 1 50); do
+  if curl --fail --silent "http://127.0.0.1:${probe_port}/healthz" \
+      | grep -q '"service":"health-probe"'; then
+    probe_ready=true
+    break
+  fi
+  if ! kill -0 "${probe_pid}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+
+if [[ "${probe_ready}" != true ]]; then
+  cat "${probe_log}" >&2
+  echo 'FAIL: health-probe production start command did not serve /healthz' >&2
+  exit 1
+fi
+echo 'OK: health-probe production start command serves /healthz'

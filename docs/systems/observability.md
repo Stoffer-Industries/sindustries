@@ -153,6 +153,7 @@ Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P
 - `GRAFANA_CLOUD_OTLP_HEADERS` is a quoted `Authorization=Basic <base64(instance_id:access_policy_token)>` exporter header. It is a separate credential from provisioning auth.
 - Dashboard upload wraps the checked-in model as `{dashboard: <model>, overwrite: true}`.
 - Alert files stay in portable Grafana file-export format. Bootstrap translates each rule to the HTTP API schema (`folderUID`, `ruleGroup`, `orgID`), creates its deterministic folder if absent, then POSTs a new UID or PUTs an existing UID.
+- The health-probe starts OTel through Node's `--require @sindustries/otel-node/register` preload. `./register` is a require-only package export and must not be imported from ESM application code; `OTEL_SERVICE_NAME=health-probe` in Fly config names the preloaded SDK.
 - Fly resolves both `build.context` and `build.dockerfile` relative to the Fly config file. `infra/cloud/scripts/tests/fly-toml-context.test.sh` resolves every cloud config and rejects paths that do not reach the repository root or an existing Dockerfile.
 
 ---

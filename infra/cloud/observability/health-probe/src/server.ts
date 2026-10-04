@@ -10,7 +10,6 @@
  * cloud-overview dashboard.
  */
 
-import { startOtel } from '@sindustries/otel-node/register';
 import express, { type Request, type Response } from 'express';
 import { collectDefaultMetrics, Registry, Gauge, Histogram } from 'prom-client';
 
@@ -19,8 +18,6 @@ import {
   runProbe,
   type ProbeResult,
 } from './probe.js';
-
-startOtel({ serviceName: 'health-probe' });
 
 const PORT = Number.parseInt(process.env.PORT ?? '9090', 10);
 const INTERVAL_SECONDS = Number.parseInt(

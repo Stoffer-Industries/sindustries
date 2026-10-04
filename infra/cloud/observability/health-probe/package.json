@@ -12,7 +12,7 @@
     "lint:dockerfile": "hadolint Dockerfile"
   },
   "dependencies": {
-    "@sindustries/otel-node": "file:../../../packages/otel-node",
+    "@sindustries/otel-node": "file:../../../../packages/otel-node",
     "express": "^4.21.0",
     "ioredis": "^5.4.1",
     "pg": "^8.13.1",

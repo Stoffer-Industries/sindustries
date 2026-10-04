@@ -28,6 +28,7 @@ kill_timeout = '5s'
 
 [env]
   NODE_ENV = 'production'
+  OTEL_SERVICE_NAME = 'health-probe'
   PORT = '9090'
   PROBE_INTERVAL_SECONDS = '30'
 

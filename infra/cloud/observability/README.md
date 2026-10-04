@@ -146,7 +146,7 @@ Do NOT commit any live exporter or provisioning credential. The redacted `.env.e
 
 The CI pipeline runs two offline contract tests against this directory so drift is caught before merge:
 
-- `bash infra/cloud/scripts/tests/observability-provisioning.test.sh` — asserts 5 dashboards, 10 alert rules, hosted-datasource discovery, the bootstrap script, and the health-probe package are present and well-formed.
+- `bash infra/cloud/scripts/tests/observability-provisioning.test.sh` — asserts 5 dashboards, 10 alert rules, hosted-datasource discovery, and the health-probe package contract, then runs the production health-probe startup command and checks `/healthz`.
 - `bash infra/cloud/scripts/tests/observability-bootstrap.test.sh` — asserts script syntax and dry-run behaviour, validates the required env contract, and exercises dashboard wrapping plus alert create/update payloads against a fake Grafana HTTP surface.
 
 Both are wired into the `health-probe-tests` CI job. Run them locally before any PR that touches this directory.
