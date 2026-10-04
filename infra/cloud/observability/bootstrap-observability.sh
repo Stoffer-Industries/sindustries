@@ -422,10 +422,16 @@ step_deploy() {
   source_env_local
   require_env_var FLY_API_TOKEN
   export FLY_API_TOKEN
-  flyctl deploy \
-    --config "${FLY_CONFIG}" \
-    --strategy canary \
-    --wait-timeout 600
+  # fly.toml documents a repo-root build context. Keep the deploy cwd
+  # aligned with that contract: Fly's remote builder resolves a relative
+  # [build].context from the CLI cwd in some versions, not the config dir.
+  (
+    cd "${REPO_ROOT}"
+    flyctl deploy \
+      --config "${FLY_CONFIG}" \
+      --strategy canary \
+      --wait-timeout 600
+  )
 }
 
 step_smoke() {
@@ -466,11 +472,11 @@ step_evidence() {
     echo "::error::evidence helper not found or not executable: ${EVIDENCE_CAPTURE}" >&2
     exit 1
   fi
-  local extra_args=()
   if [ "${DRY_RUN}" = true ]; then
-    extra_args+=("--dry-run")
+    "${EVIDENCE_CAPTURE}" --dry-run --format md
+  else
+    "${EVIDENCE_CAPTURE}" --format md
   fi
-  "${EVIDENCE_CAPTURE}" "${extra_args[@]}" --format md
 }
 
 # ---------------------------------------------------------------------------

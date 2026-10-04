@@ -12,10 +12,18 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 # Fallback for non-git checkouts where the relative walk could go weird.
-if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
+if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
   REPO_ROOT="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
 fi
 FAIL=0
+if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
+  # Ignore operator-local/generated Fly configs that are deliberately not
+  # tracked. The regression guard is for deployable repository configs.
+  CONFIG_FILES="$(git -C "$REPO_ROOT" ls-files | awk '$0 ~ /^infra\/cloud\// && ($0 ~ /(^|\/)fly\.toml$/ || $0 ~ /\.fly\.toml$/) {print}')"
+else
+  CONFIG_FILES="$(find "$REPO_ROOT/infra/cloud" -type f \( -name 'fly.toml' -o -name '*.fly.toml' \) | sort)"
+fi
+
 while IFS= read -r toml; do
   config_dir="$(dirname "$toml")"
   ctx=$(awk -F"'" '/^[[:space:]]*context[[:space:]]*=/ {print $2; exit}' "$toml")
@@ -42,7 +50,13 @@ while IFS= read -r toml; do
       "${toml#"$REPO_ROOT"/}" >&2
     FAIL=1
   fi
-done < <(find "$REPO_ROOT/infra/cloud" -type f \( -name 'fly.toml' -o -name '*.fly.toml' \) | sort)
+done < <(printf '%s\n' "${CONFIG_FILES}" | sed '/^$/d' | while IFS= read -r rel; do
+  if [[ "${rel}" = /* ]]; then
+    printf '%s\n' "${rel}"
+  else
+    printf '%s/%s\n' "${REPO_ROOT}" "${rel}"
+  fi
+done | sort)
 
 [[ "$FAIL" -eq 0 ]] || exit 1
 echo "fly-toml-context: ok"

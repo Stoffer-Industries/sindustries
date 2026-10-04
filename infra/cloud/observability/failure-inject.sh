@@ -17,9 +17,9 @@
 #   failure-inject.sh <scenario> [--dry-run] [--app <name>] [-h|--help]
 #
 # Scenarios (all have a matching <scenario>-up or <scenario>-recover counterpart):
-#   redis-down           Suspend the content-scheduler Redis Fly app (or
-#                        your Fly Redis addon) so PING fails. Expected
-#                        alert: sindustries-redis-down (for=1m).
+#   redis-down           Repoint the health-probe at an unreachable Redis
+#                        endpoint. Use --app only for a Fly Redis app.
+#                        Expected alert: sindustries-redis-down (for=1m).
 #   tasks-api-down       Scale the tasks-api Fly app to 0 machines.
 #                        Expected alert: sindustries-tasks-api-down (for=2m).
 #   tasks-api-up         Restore tasks-api to 1 machine.
@@ -69,9 +69,9 @@ Usage:
   failure-inject.sh <scenario> [--dry-run] [--app <name>] [-h|--help]
 
 Scenarios (all have a matching <scenario>-up or <scenario>-recover counterpart):
-  redis-down           Suspend the content-scheduler Redis Fly app (or
-                       your Fly Redis addon) so PING fails. Expected
-                       alert: sindustries-redis-down (for=1m).
+  redis-down           Repoint the health-probe at an unreachable Redis
+                       endpoint. Use --app only for a Fly Redis app.
+                       Expected alert: sindustries-redis-down (for=1m).
   redis-up             Resume the content-scheduler Redis.
   tasks-api-down       Scale the tasks-api Fly app to 0 machines.
                        Expected alert: sindustries-tasks-api-down (for=2m).
@@ -154,29 +154,93 @@ run_flyctl() {
   flyctl "$@"
 }
 
+stop_app_machines() {
+  local app="$1"
+  if [ "${DRY_RUN}" = true ]; then
+    echo "    [dry-run] flyctl machine list --app ${app} --json | jq -r '.[].id' | xargs -n1 flyctl machine stop --app ${app}"
+    return 0
+  fi
+  local ids
+  ids="$(flyctl machine list --app "${app}" --json | jq -r '.[].id')"
+  if [ -z "${ids}" ]; then
+    echo "::error::no machines found for ${app}; cannot inject outage" >&2
+    return 1
+  fi
+  while IFS= read -r id; do
+    [ -z "${id}" ] && continue
+    flyctl machine stop "${id}" --app "${app}"
+  done <<< "${ids}"
+}
+
+start_app_machines() {
+  local app="$1"
+  if [ "${DRY_RUN}" = true ]; then
+    echo "    [dry-run] flyctl machine list --app ${app} --json | jq -r '.[].id' | xargs -n1 flyctl machine start --app ${app}"
+    return 0
+  fi
+  local ids
+  ids="$(flyctl machine list --app "${app}" --json | jq -r '.[].id')"
+  if [ -z "${ids}" ]; then
+    echo "::error::no machines found for ${app}; cannot recover" >&2
+    return 1
+  fi
+  while IFS= read -r id; do
+    [ -z "${id}" ] && continue
+    flyctl machine start "${id}" --app "${app}"
+  done <<< "${ids}"
+}
+
 scenario_redis_down() {
   print_scenario_header "redis-down" "sindustries-redis-down" "1m"
   require_dry_run_or_token
-  local redis_app="${APP_OVERRIDE:-content-scheduler-redis}"
-  run_flyctl redis suspend --app "${redis_app}" 2>/dev/null \
-    || run_flyctl machines suspend --app "${redis_app}" --all 2>/dev/null \
-    || echo "    (could not auto-pause ${redis_app}; manually pause in the Fly dashboard or scale its machines to 0)"
-  cat <<NOTE
+  if [ -n "${APP_OVERRIDE}" ]; then
+    local redis_app="${APP_OVERRIDE}"
+    run_flyctl redis suspend --app "${redis_app}" 2>/dev/null \
+      || run_flyctl machines suspend --app "${redis_app}" --all 2>/dev/null \
+      || echo "    (could not auto-pause ${redis_app}; manually pause in the Fly dashboard or scale its machines to 0)"
+  elif [ "${DRY_RUN}" = true ]; then
+    echo "    [dry-run] flyctl secrets set --app sindustries-health-probe-staging HEALTH_PROBE_REDIS='content-scheduler=redis://127.0.0.1:1'"
+  else
+    flyctl secrets set \
+      --app sindustries-health-probe-staging \
+      HEALTH_PROBE_REDIS="content-scheduler=redis://127.0.0.1:1"
+  fi
+  if [ -n "${APP_OVERRIDE}" ]; then
+    cat <<NOTE
 
     Wait ~90s, then:
       bash infra/cloud/observability/evidence-capture.sh --format sh | bash
     Capture alert-state JSON for sindustries-redis-down.
     Run \`${0} redis-up [--app ${redis_app}]\` to recover.
 NOTE
+  else
+    cat <<NOTE
+
+    Wait ~90s, then capture alert-state JSON for sindustries-redis-down.
+    Run \`${0} redis-up\` to restore HEALTH_PROBE_REDIS from .env.local.
+NOTE
+  fi
 }
 
 scenario_redis_up() {
   print_scenario_header "redis-up (recover)" "sindustries-redis-down" "(should resolve)"
   require_dry_run_or_token
-  local redis_app="${APP_OVERRIDE:-content-scheduler-redis}"
-  run_flyctl redis resume --app "${redis_app}" 2>/dev/null \
-    || run_flyctl machines start --app "${redis_app}" --all 2>/dev/null \
-    || echo "    (could not auto-resume ${redis_app}; manually resume in the Fly dashboard or scale back to 1)"
+  if [ -n "${APP_OVERRIDE}" ]; then
+    local redis_app="${APP_OVERRIDE}"
+    run_flyctl redis resume --app "${redis_app}" 2>/dev/null \
+      || run_flyctl machines start --app "${redis_app}" --all 2>/dev/null \
+      || echo "    (could not auto-resume ${redis_app}; manually resume in the Fly dashboard or scale back to 1)"
+  elif [ "${DRY_RUN}" = true ]; then
+    echo "    [dry-run] flyctl secrets set --app sindustries-health-probe-staging HEALTH_PROBE_REDIS=<restored-from-env>"
+  else
+    if [ -z "${HEALTH_PROBE_REDIS:-}" ]; then
+      echo "::error::HEALTH_PROBE_REDIS not set in .env.local — cannot restore." >&2
+      exit 1
+    fi
+    flyctl secrets set \
+      --app sindustries-health-probe-staging \
+      HEALTH_PROBE_REDIS="${HEALTH_PROBE_REDIS}"
+  fi
   cat <<NOTE
 
     Wait ~90s for the alert to transition to Normal.
@@ -188,7 +252,7 @@ scenario_tasks_api_down() {
   print_scenario_header "tasks-api-down" "sindustries-tasks-api-down" "2m"
   require_dry_run_or_token
   local app="${APP_OVERRIDE:-sindustries-tasks-api-staging}"
-  run_flyctl scale count 0 --app "${app}"
+  run_flyctl scale count 0 --app "${app}" || stop_app_machines "${app}"
   cat <<NOTE
 
     Wait ~3m (alert \`for=2m\` + 60s scrape interval + buffer), then:
@@ -202,7 +266,7 @@ scenario_tasks_api_up() {
   print_scenario_header "tasks-api-up (recover)" "sindustries-tasks-api-down" "(should resolve)"
   require_dry_run_or_token
   local app="${APP_OVERRIDE:-sindustries-tasks-api-staging}"
-  run_flyctl scale count 1 --app "${app}"
+  run_flyctl scale count 1 --app "${app}" || start_app_machines "${app}"
   cat <<NOTE
 
     Wait ~3m for the alert to transition to Normal.
@@ -214,7 +278,7 @@ scenario_budget_api_down() {
   print_scenario_header "budget-api-down" "sindustries-budget-api-down" "2m"
   require_dry_run_or_token
   local app="${APP_OVERRIDE:-sindustries-budget-api-staging}"
-  run_flyctl scale count 0 --app "${app}"
+  run_flyctl scale count 0 --app "${app}" || stop_app_machines "${app}"
   cat <<NOTE
 
     Wait ~3m, then capture alert-state JSON for sindustries-budget-api-down.
@@ -226,7 +290,7 @@ scenario_budget_api_up() {
   print_scenario_header "budget-api-up (recover)" "sindustries-budget-api-down" "(should resolve)"
   require_dry_run_or_token
   local app="${APP_OVERRIDE:-sindustries-budget-api-staging}"
-  run_flyctl scale count 1 --app "${app}"
+  run_flyctl scale count 1 --app "${app}" || start_app_machines "${app}"
   cat <<NOTE
 
     Wait ~3m for the alert to transition to Normal.
