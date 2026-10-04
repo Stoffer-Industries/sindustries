@@ -900,6 +900,67 @@ mod tests {
     }
 
     #[test]
+    fn routing_sends_resolved_capability_deferral_to_ash_then_rowan() {
+        let mut task = routing_task("doing", &["Quinn", "Tom"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-deferred] AC1: external setup is outstanding.".to_string()),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Quinn".to_string()),
+            text: Some(
+                "[qa-agent-capability-resolved] External setup is now complete.".to_string(),
+            ),
+            ..Default::default()
+        });
+
+        assert_eq!(reconciled_attention_owners(&task), vec!["Ash"]);
+
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-verified] AC1: mechanical checks pass.".to_string()),
+            ..Default::default()
+        });
+        task.approvals.push(approval_row("qa_agent", "approved"));
+
+        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
+    }
+
+    #[test]
+    fn routing_accepts_legacy_quinn_resolved_capability_marker() {
+        let mut task = routing_task("doing", &["Quinn"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Ash".to_string()),
+            text: Some("[qa-agent-deferred] AC1: external setup is outstanding.".to_string()),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("Quinn".to_string()),
+            text: Some("[quinn-resolved] External setup is now complete.".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(reconciled_attention_owners(&task), vec!["Ash"]);
+    }
+
+    #[test]
     fn routing_sends_ordinary_qa_block_back_to_rowan_after_lobster_comment() {
         let mut task = routing_task("doing", &["Ash", "Quinn", "Tom"]);
         task.comments.push(TaskComment {
