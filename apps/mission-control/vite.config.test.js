@@ -201,7 +201,7 @@ describe('brainStateApi (/api/transitions Postgres wiring)', () => {
     ]);
   });
 
-  it('falls back to the JSONL log when the pool query rejects and still calls end() on the pool', async () => {
+  it('keeps the shared pool warm across transient query failures and ends it only on dev-server shutdown (W41 audit F2)', async () => {
     process.env.DATABASE_URL = 'postgres://example/test';
     makeJsonlFixture(workspaceRoot, []);
     const end = vi.fn().mockResolvedValue(undefined);
@@ -211,9 +211,56 @@ describe('brainStateApi (/api/transitions Postgres wiring)', () => {
 
     const handler = getHandler(server, '/api/transitions');
     await runHandler(handler);
+    await runHandler(handler);
 
-    expect(Pool).toHaveBeenCalled();
+    // The pool is constructed exactly once across repeated requests, and a
+    // transient query rejection does NOT end it — the next request can reuse
+    // the warm pool instead of paying pool-setup cost again.
+    expect(Pool).toHaveBeenCalledTimes(1);
+    expect(end).not.toHaveBeenCalled();
+
+    server.httpServer._fireClose();
+    await new Promise((resolve) => setImmediate(resolve));
     expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not orphan pools when /api/transitions is invoked repeatedly (W41 audit F2)', async () => {
+    process.env.DATABASE_URL = 'postgres://example/test';
+    makeJsonlFixture(workspaceRoot, []);
+    const end = vi.fn().mockResolvedValue(undefined);
+    const Pool = makePoolMock({ rows: [], end });
+    const server = createFakeServer();
+    brainStateApi({ pgClient: { Pool } }).configureServer(server);
+
+    const handler = getHandler(server, '/api/transitions');
+    await runHandler(handler);
+    await runHandler(handler);
+    await runHandler(handler);
+
+    // W41 audit F2 reproduction: two successful requests used to create two
+    // pools because every request constructed a fresh Pool. The fix shares
+    // one lazily-initialized pool across requests.
+    expect(Pool).toHaveBeenCalledTimes(1);
+    expect(end).not.toHaveBeenCalled();
+
+    server.httpServer._fireClose();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares a single pool across concurrent overlapping /api/transitions requests (W41 audit F2)', async () => {
+    process.env.DATABASE_URL = 'postgres://example/test';
+    const Pool = makePoolMock({ rows: [] });
+    const server = createFakeServer();
+    brainStateApi({ pgClient: { Pool } }).configureServer(server);
+
+    const handler = getHandler(server, '/api/transitions');
+    await Promise.all([runHandler(handler), runHandler(handler), runHandler(handler)]);
+
+    // Overlapping requests must not race to create two pools. The lazy
+    // getOrCreatePool guard serialises the first construction and reuses
+    // the cached pool for every concurrent caller.
+    expect(Pool).toHaveBeenCalledTimes(1);
   });
 
   it('keeps /api/state file-backed and never instantiates a pg pool', async () => {
