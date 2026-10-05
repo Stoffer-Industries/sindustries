@@ -143,6 +143,25 @@ for uid in "${expected_alerts[@]}"; do
   fi
 done
 
+# 5d. sh-format runbook references the full Grafana provisioning auth var
+#     name. Quinn's review of PR #756 (2026-10-05T09:51:03Z) flagged that
+#     the bootstrap contract test covered JSON enumeration but not the sh
+#     runbook var refs, which would let a truncated ${GRAF…AUTH}
+#     (Unicode ellipsis) slip through into the emitted runbook and 401 on
+#     live creds. Lock the contract so future commits cannot reintroduce
+#     the truncated form.
+sh_out="$(bash "${EVID}" --dry-run --format sh 2>&1)"
+if printf '%s\n' "${sh_out}" | grep -qF '${GRAFANA_CLOUD_PROVISIONING_AUTH}'; then
+  ok "evidence --dry-run --format sh references full \${GRAFANA_CLOUD_PROVISIONING_AUTH}"
+else
+  fail "evidence --dry-run --format sh missing full \${GRAFANA_CLOUD_PROVISIONING_AUTH}"
+fi
+if printf '%s\n' "${sh_out}" | grep -qF $'GRAF\xe2\x80\xa6AUTH'; then
+  fail "evidence --dry-run --format sh contains truncated \${GRAF…AUTH} form"
+else
+  ok "evidence --dry-run --format sh free of truncated \${GRAF…AUTH} form"
+fi
+
 # 6. failure-inject.sh --help
 inj_help="$(bash "${INJ}" --help 2>&1)"
 for needle in redis-down redis-up tasks-api-down tasks-api-up budget-api-down budget-api-up db-down db-up deploy-failed deploy-restored --dry-run; do
