@@ -11,28 +11,31 @@ For the durable ownership handover see [`docs/systems/observability.md`](../../d
 ```
 infra/cloud/observability/
   README.md                          # this file — operator index
-  bootstrap-observability.sh         # idempotent local script (future PR)
+  bootstrap-observability.sh         # idempotent local script with subcommand dispatch (validate | app | secrets | dashboards | alerts | deploy | smoke | evidence | all)
+  evidence-capture.sh                # prints the closing-PR evidence pack template (md | sh | json)
+  failure-inject.sh                  # 10 failure-injection scenarios with --dry-run (redis-down/up, tasks-api-down/up, budget-api-down/up, db-down/up, deploy-failed/restored)
   env/
     .env.example                     # redacted env-var contract
   grafana/
-    datasources.yaml                 # mirrors local provisioning (future PR)
     dashboards/
-      cloud-overview.json            # NEW (future PR)
-      db-health.json                 # NEW (future PR)
-      migration-alerts.json          # NEW (future PR)
-      tasks-api-red.json             # parity copy from local (future PR)
-      openclaw-diagnostics.json      # parity copy from local (future PR)
+      cloud-overview.json            # NEW — per-app latency, error rate, request count, deploy annotations
+      db-health.json                 # NEW — sindustries_db_up, query duration by app
+      migration-alerts.json          # NEW — alert routing overview
+      tasks-api-red.json             # parity copy from local
+      openclaw-diagnostics.json      # parity copy from local
     alerts/
-      tasks-api-down.json            # ten alert rules (future PR)
+      tasks-api-down.json            # ten alert rules (5 page-severity, 5 warn-severity)
       ...
   health-probe/
-    package.json                     # single-purpose Node service (future PR)
+    package.json                     # single-purpose Node service (workspace @sindustries/health-probe)
     src/probe.ts                     # emits DB / app / Redis metrics
+    src/server.ts                    # /healthz HTTP server for Fly
     Dockerfile
     fly.toml
+    tests/                           # 17 unit tests
 ```
 
-The current PR ships only the docs (this README + `env/.env.example`) and the handover docs. The runtime artefacts (dashboards JSON, alert rules JSON, health-probe service, bootstrap script) ship in subsequent PRs.
+All runtime artefacts ship in this branch. Quinn's first-time setup below is the only thing standing between these artefacts and live data on staging.
 
 ---
 
@@ -48,11 +51,7 @@ Hosted Grafana dashboard JSON, uploaded via the Grafana provisioning API by the 
 
 ### `grafana/alerts/*.json`
 
-Ten alert rules covering availability, latency, DB health, Redis health, queue depth, and deploy failures. Each rule is JSON, uploaded by the bootstrap script, and routes to a documented Slack channel with a documented severity and owner.
-
-### `grafana/datasources.yaml`
-
-Mirrors `infra/grafana/provisioning/datasources/datasources.yaml` so the hosted Grafana has the same datasource shape as the local one (Postgres for DB health, Prometheus for app metrics, Tempo for traces).
+Ten alert rules covering availability, latency, DB health, Redis health, queue depth, and deploy failures. Each rule is JSON, uploaded by the bootstrap script, and exposes a documented severity and owner in Grafana Cloud. No outbound notification integration is required.
 
 ### `health-probe/`
 
@@ -67,19 +66,37 @@ The probe is its own Fly app (`infra/cloud/observability/health-probe/`) that ru
 
 ### `bootstrap-observability.sh`
 
-Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Uploads dashboard JSONs and alert rules via the Grafana provisioning API. Performs a smoke deploy. Surfaces a final report with the Grafana URL, the dashboard URLs, and the smoke-check result.
+Idempotent local script. Verifies `fly`, `curl`, and the Grafana Cloud API key are available. Creates the health-probe Fly app if missing. Sets Fly secrets from Quinn's local `infra/cloud/observability/.env.local` (never committed). Discovers the Grafana Cloud stack's pre-provisioned Prometheus datasource via `/api/datasources`, uploads wrapped dashboard models, translates the portable alert files into per-rule HTTP payloads, and creates or updates each alert by UID. Performs a smoke deploy and surfaces a final report.
 
 ---
 
 ## First-time setup
 
-After this PR lands, the operator (Quinn) does:
+After Tom hands over the Grafana Cloud + Fly + Neon credentials, the operator (Quinn) does:
 
-1. Create the Grafana Cloud org in the closest region to Fly.io `syd`. Save the OTLP endpoint + API key.
-2. Create three Slack Incoming Webhooks (`#sindustries-p1`, `#sindustries-p2`, `#sindustries-deploy`, `#sindustries-billing`).
-3. Populate `infra/cloud/observability/.env.local` with the live values (this file is gitignored).
-4. Run `bash infra/cloud/observability/bootstrap-observability.sh` once the runtime artefacts land in a follow-on PR.
-5. Verify the smoke check passes and the four hosted dashboards show data within 5 minutes.
+1. Populate `infra/cloud/observability/.env.local` with the live values (this file is gitignored; the template lives at `infra/cloud/observability/env/.env.example`).
+2. Sanity-check the env var set without performing any I/O:
+   ```bash
+   bash infra/cloud/observability/bootstrap-observability.sh validate
+   ```
+   The script exits with the missing-var count (capped at 125) so Quinn can re-run as each secret is handed over without Fly or Grafana auth.
+3. Run the full idempotent provisioning flow:
+   ```bash
+   bash infra/cloud/observability/bootstrap-observability.sh all
+   ```
+   This creates the health-probe Fly app (if missing), sets Fly secrets, uploads dashboard JSONs and alert rules via the Grafana provisioning API, performs a canary deploy, and surfaces a final report with the Grafana URL, dashboard URLs, and smoke-check result. The whole script is idempotent — re-runs are safe.
+4. Verify the smoke check passes and the five hosted dashboards show data within 5 minutes.
+5. Capture the AC1-AC3 evidence pack for task 31233a0a AC4:
+   ```bash
+   bash infra/cloud/observability/evidence-capture.sh --format md > evidence.md
+   # paste evidence.md into PR #724 body
+   ```
+6. Exercise the failure-injection surface to verify alerts fire and resolve:
+   ```bash
+   bash infra/cloud/observability/failure-inject.sh tasks-api-down     # induce
+   bash infra/cloud/observability/failure-inject.sh tasks-api-up       # recover
+   ```
+   Both commands print the expected alert uid + for-window so Quinn can correlate with the matching Grafana state. `--dry-run` prints the plan without contacting Fly.
 
 ---
 
@@ -95,7 +112,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64(instance_id:api_k
 pnpm --filter <service> dev
 ```
 
-Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.example` is the only file in the repo that references these variable names.
+Do NOT commit any live exporter or provisioning credential. The redacted `.env.example` is the canonical operator template.
 
 ---
 
@@ -104,7 +121,7 @@ Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.ex
 - **Free tier today (staging).** 10k metrics series, 50GB traces, 14-day retention. Sufficient for the current staging footprint.
 - **Expected staging growth.** ~500–1000 active series; well under the free tier for the next 12 months.
 - **Production rollout.** Expected 5–10× growth. Free tier will be exceeded. Upgrade path is to the Grafana Cloud Pro tier (~$8/1k active series + $5/50GB traces).
-- **Cost alarm.** `sindustries_cost_alert` routes a Slack notification to `#sindustries-billing` when monthly active series crosses 80% of the paid-tier allowance. Configured in the bootstrap script.
+- **Cost alarm.** `sindustries_cost_alert` appears in Grafana Cloud when monthly active series crosses 80% of the paid-tier allowance. Configured in the bootstrap script.
 
 ---
 
@@ -124,3 +141,12 @@ Do NOT commit the live `OTEL_EXPORTER_OTLP_HEADERS` value. The redacted `.env.ex
 - [`docs/specs/hosted-observability-migration-alerts-tech-design.md`](../../docs/specs/hosted-observability-migration-alerts-tech-design.md) — tech design.
 - [`infra/cloud/README.md`](../README.md) — parent index of `infra/cloud/` artefacts.
 - [`docs/systems/cloud-platform.md`](../../docs/systems/cloud-platform.md) — platform context.
+
+## Contract tests
+
+The CI pipeline runs two offline contract tests against this directory so drift is caught before merge:
+
+- `bash infra/cloud/scripts/tests/observability-provisioning.test.sh` — asserts 5 dashboards, 10 alert rules, hosted-datasource discovery, and the health-probe package contract, then runs the production health-probe startup command and checks `/healthz`.
+- `bash infra/cloud/scripts/tests/observability-bootstrap.test.sh` — asserts script syntax and dry-run behaviour, validates the required env contract, and exercises dashboard wrapping plus alert create/update payloads against a fake Grafana HTTP surface.
+
+Both are wired into the `health-probe-tests` CI job. Run them locally before any PR that touches this directory.

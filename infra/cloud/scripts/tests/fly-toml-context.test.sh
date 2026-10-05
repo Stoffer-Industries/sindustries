@@ -1,35 +1,62 @@
 #!/usr/bin/env bash
-# fly-toml-context.test.sh — AC2 regression guard.
+# fly-toml-context.test.sh — Fly build-path regression guard.
 #
-# `context` in fly.toml is resolved relative to the file's location, so
-# for files at `infra/cloud/fly/<svc>.fly.toml` the repo root is exactly
-# three levels up: `../../..`. The previous value `../../` resolved to
-# `infra/`, which only "worked" because the broken tasks-api Dockerfile
-# happened to be invoked from a CI working dir that papered over it.
+# `context` and `dockerfile` in Fly config are resolved relative to the
+# config file's location. Every cloud image needs the repo root as context
+# because its Dockerfile copies workspace packages and root manifests.
 #
-# This test fails CI if any `infra/cloud/fly/*.fly.toml` regresses to
-# the old `../../` (or any non-repo-root value).
+# This test resolves every Fly config under infra/cloud instead of comparing
+# literal relative strings, so configs can live at different directory depths.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 # Fallback for non-git checkouts where the relative walk could go weird.
-if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
+if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
   REPO_ROOT="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
 fi
-FLY_DIR="$REPO_ROOT/infra/cloud/fly"
-
 FAIL=0
-shopt -s nullglob
-for toml in "$FLY_DIR"/*.fly.toml; do
+if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
+  # Ignore operator-local/generated Fly configs that are deliberately not
+  # tracked. The regression guard is for deployable repository configs.
+  CONFIG_FILES="$(git -C "$REPO_ROOT" ls-files | awk '$0 ~ /^infra\/cloud\// && ($0 ~ /(^|\/)fly\.toml$/ || $0 ~ /\.fly\.toml$/) {print}')"
+else
+  CONFIG_FILES="$(find "$REPO_ROOT/infra/cloud" -type f \( -name 'fly.toml' -o -name '*.fly.toml' \) | sort)"
+fi
+
+while IFS= read -r toml; do
+  config_dir="$(dirname "$toml")"
   ctx=$(awk -F"'" '/^[[:space:]]*context[[:space:]]*=/ {print $2; exit}' "$toml")
-  if [[ "$ctx" != "../../.." ]]; then
-    printf 'FAIL: %s context=%q (expected "../../..")\n' \
+  dockerfile=$(awk -F"'" '/^[[:space:]]*dockerfile[[:space:]]*=/ {print $2; exit}' "$toml")
+  if [[ -z "$ctx" || ! -d "$config_dir/$ctx" ]]; then
+    printf 'FAIL: %s has invalid build context=%q\n' \
       "${toml#"$REPO_ROOT"/}" "$ctx" >&2
     FAIL=1
+    continue
   fi
-done
-shopt -u nullglob
+  resolved_ctx="$(cd "$config_dir/$ctx" && pwd -P)"
+  if [[ "$resolved_ctx" != "$REPO_ROOT" ]]; then
+    printf 'FAIL: %s context=%q resolves to %s (expected repo root)\n' \
+      "${toml#"$REPO_ROOT"/}" "$ctx" "$resolved_ctx" >&2
+    FAIL=1
+  fi
+  if [[ -z "$dockerfile" || ! -f "$config_dir/$dockerfile" ]]; then
+    printf 'FAIL: %s dockerfile=%q does not resolve relative to the config file\n' \
+      "${toml#"$REPO_ROOT"/}" "$dockerfile" >&2
+    FAIL=1
+  fi
+  if grep -q '^\[\[services\.http_checks\]\]' "$toml"; then
+    printf 'FAIL: %s mixes [http_service] with [[services.http_checks]]; use [[http_service.checks]]\n' \
+      "${toml#"$REPO_ROOT"/}" >&2
+    FAIL=1
+  fi
+done < <(printf '%s\n' "${CONFIG_FILES}" | sed '/^$/d' | while IFS= read -r rel; do
+  if [[ "${rel}" = /* ]]; then
+    printf '%s\n' "${rel}"
+  else
+    printf '%s/%s\n' "${REPO_ROOT}" "${rel}"
+  fi
+done | sort)
 
 [[ "$FAIL" -eq 0 ]] || exit 1
 echo "fly-toml-context: ok"

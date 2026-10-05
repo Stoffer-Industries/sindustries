@@ -36,7 +36,7 @@ kill_timeout = '5s'
   # so `../../..` is the repo root. Pin to repo root so the `dockerfile`
   # path below resolves under all invocation forms.
   context = '../../..'
-  dockerfile = 'infra/cloud/docker/auto-post-worker.Dockerfile'
+  dockerfile = '../docker/auto-post-worker.Dockerfile'
 
 [env]
   NODE_ENV = 'production'

@@ -41,6 +41,7 @@ expected_required = {
     'python-workflow-tests',
     'cto-craft-tweet-drafts-tests',
     'otel-node-tests',
+    'health-probe-tests',
     'mission-control-tests',
     'tasks-api-tests',
     'content-scheduler-api-tests',
@@ -104,6 +105,7 @@ deploy_jobs = {
     'deploy-auto-post-worker-staging',
     'deploy-gymtrack-production',
     'deploy-gymtrack-mcp-production',
+    'deploy-health-probe-staging',
     'eas-update-production',
 }
 for job_name in sorted(deploy_jobs):
@@ -136,6 +138,7 @@ called_workflows = {
     'deploy-staging-auto-post-worker.yml',
     'gymtrack-deploy.yml',
     'gymtrack-mcp-deploy.yml',
+    'deploy-staging-health-probe.yml',
 }
 docs = {name: load(name) for name in called_workflows}
 for name, doc in docs.items():
@@ -152,6 +155,7 @@ fly_names = {
     'deploy-staging-budget-api.yml',
     'deploy-staging-auto-post-worker.yml',
     'gymtrack-mcp-deploy.yml',
+    'deploy-staging-health-probe.yml',
 }
 sha_ref = re.compile(r'^superfly/flyctl-actions/setup-flyctl@[0-9a-f]{40}$')
 for name in sorted(fly_names):
@@ -193,7 +197,7 @@ else:
     if not version or version == 'latest':
         fail('gymtrack-deploy.yml: Supabase CLI must be pinned to an explicit version')
 
-for name in ('deploy-staging-tasks-api.yml', 'deploy-staging-budget-api.yml', 'deploy-staging-auto-post-worker.yml'):
+for name in ('deploy-staging-tasks-api.yml', 'deploy-staging-budget-api.yml', 'deploy-staging-auto-post-worker.yml', 'deploy-staging-health-probe.yml'):
     if docs[name].get('concurrency', {}).get('cancel-in-progress') is not True:
         fail(f'{name}: staging must cancel superseded deployments')
 

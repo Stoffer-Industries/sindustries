@@ -22,6 +22,7 @@ jobs:
       gymtrack_mcp: ${{ steps.filter.outputs.gymtrack_mcp }}
       budget_mobile: ${{ steps.filter.outputs.budget_mobile }}
       feature_task: ${{ steps.filter.outputs.feature_task }}
+      health_probe: ${{ steps.filter.outputs.health_probe }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,6 +82,12 @@ jobs:
               - 'package-lock.json'
             feature_task:
               - 'agents/workflows/feature-task/**'
+            health_probe:
+              - 'infra/cloud/observability/**'
+              - 'packages/otel-node/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/deploy-staging-health-probe.yml'
 
   python-workflow-tests:
     name: python workflow tests
@@ -196,6 +203,38 @@ jobs:
 
       - name: Run otel-node tests
         run: npm test --workspace @sindustries/otel-node
+
+  health-probe-tests:
+    name: health-probe unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run health-probe tests
+        run: npm test --workspace infra/cloud/observability/health-probe
+
+      - name: Run observability provisioning contract test
+        run: bash infra/cloud/scripts/tests/observability-provisioning.test.sh
+
+      - name: Run observability bootstrap / evidence / failure-inject contract test (task 31233a0a)
+        # AC2/AC3 evidence-pack helper regression guard — exercises the
+        # subcommand dispatch + --dry-run surfaces of bootstrap-observability.sh,
+        # evidence-capture.sh, and failure-inject.sh without requiring Fly or
+        # Grafana access. Closes the gap where the operator scripts Quinn
+        # runs could silently regress while the dashboard/alert JSONs stayed
+        # in sync.
+        run: bash infra/cloud/scripts/tests/observability-bootstrap.test.sh
 
   mission-control-tests:
     name: mission-control tests
@@ -899,6 +938,7 @@ jobs:
       - python-workflow-tests
       - cto-craft-tweet-drafts-tests
       - otel-node-tests
+      - health-probe-tests
       - mission-control-tests
       - tasks-api-tests
       - content-scheduler-api-tests
@@ -999,6 +1039,18 @@ jobs:
       needs.merge-gate.result == 'success' &&
       needs.changes.outputs.gymtrack == 'true'
     uses: ./.github/workflows/gymtrack-deploy.yml
+    secrets: inherit
+
+  deploy-health-probe-staging:
+    name: health-probe staging
+    needs: [changes, merge-gate]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.merge-gate.result == 'success' &&
+      needs.changes.outputs.health_probe == 'true'
+    uses: ./.github/workflows/deploy-staging-health-probe.yml
     secrets: inherit
 
   deploy-gymtrack-mcp-production:

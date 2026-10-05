@@ -1,0 +1,77 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "tasks-api-down",
+      "folder": "SIndustries/Availability",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "sindustries-tasks-api-down",
+          "title": "tasks-api-down",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": {
+                "expr": "sindustries_fly_app_health{app=\"tasks-api\"}",
+                "instant": true,
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "refId": "B"
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "threshold",
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": { "type": "lt", "params": [1] },
+                    "operator": { "type": "and" },
+                    "query": { "params": ["B"] },
+                    "reducer": { "type": "last", "params": [] }
+                  }
+                ],
+                "refId": "C"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Alerting",
+          "for": "2m",
+          "annotations": {
+            "summary": "tasks-api is unreachable on Fly",
+            "description": "sindustries_fly_app_health{app=\"tasks-api\"} has been 0 for at least 2 minutes. Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
+            "owner": "Quinn",
+            "severity": "page"
+          },
+          "labels": {
+            "alert": "tasks-api-down",
+            "severity": "page",
+            "owner": "Quinn"
+          }
+        }
+      ]
+    }
+  ]
+}
