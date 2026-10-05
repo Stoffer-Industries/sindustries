@@ -21,6 +21,21 @@ migrate-db:
 
 test: test-api test-app test-e2e
 
+# NOTE: `make test-all` is a local convenience target — it is NOT a full
+# local parity with CI. Coverage:
+#   - services/tasks-api       (via test-api)
+#   - services/budget-api      (via test-api)
+#   - apps/website             (via test-website)
+#   - apps/tasks               (via test-app + test-e2e)
+# Out of scope (run from the workspace root or rely on CI):
+#   - apps/mission-control
+#   - services/content-scheduler-api
+#   - services/gymtrack-mcp
+#   - apps/gymtrack
+#   - agents/**/*
+# For the full CI surface and what each CI job covers, see CONTRIBUTING.md
+# ("CI currently covers" section). Renaming or expanding this target is
+# out of scope for the W41 audit F4 docs cleanup.
 test-all: test-api test-website test-app test-e2e
 
 test-api:

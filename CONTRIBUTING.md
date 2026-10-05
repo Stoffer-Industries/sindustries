@@ -94,6 +94,12 @@ make test-app
 make test-e2e
 ```
 
+`make test-all` is a local convenience target that runs the four
+commands above (Tasks/Budget APIs, website, Tasks app + e2e); it is
+not a full local parity with CI. Mission Control, the content
+scheduler, GymTrack, MCP, and agent verification run from their own
+workspaces or under CI (listed below).
+
 CI currently covers:
 - `services/tasks-api` unit + DB integration tests
 - `services/budget-api` unit tests (`budget-api-unit` job also runs `packages/budget-domain` test + typecheck and `apps/budget-mobile` typecheck) plus DB integration tests (`budget-api-db-integration` job runs the ownership-contract suite against real Postgres; previously ran with mocked Prisma — see W38 audit F4 for the historical gap)
