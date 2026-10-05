@@ -1,0 +1,77 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "budget-api-4xx-spike",
+      "folder": "SIndustries/Performance",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "sindustries-budget-api-4xx-spike",
+          "title": "budget-api-4xx-spike",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": {
+                "expr": "sum(rate(http_requests_total{service_name=\"budget-api\",status=~\"4..\"}[5m]))",
+                "instant": true,
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "refId": "B"
+              }
+            },
+            {
+              "refId": "C",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "threshold",
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": { "type": "gt", "params": [0.20] },
+                    "operator": { "type": "and" },
+                    "query": { "params": ["B"] },
+                    "reducer": { "type": "last", "params": [] }
+                  }
+                ],
+                "refId": "C"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Alerting",
+          "for": "10m",
+          "annotations": {
+            "summary": "budget-api 4xx error rate > 20% over 10m",
+            "description": "4xx rate on budget-api exceeded 20% over the last 10 minutes. Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
+            "owner": "Quinn",
+            "severity": "warn"
+          },
+          "labels": {
+            "alert": "budget-api-4xx-spike",
+            "severity": "warn",
+            "owner": "Quinn"
+          }
+        }
+      ]
+    }
+  ]
+}
