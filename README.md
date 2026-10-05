@@ -179,6 +179,14 @@ make test-app
 make test-e2e
 ```
 
+`make test-all` is also available, but note it is a local convenience
+target, not a full local parity with CI: it covers the Tasks/Budget
+APIs, the website, and the Tasks app + e2e, and intentionally omits
+Mission Control, the content scheduler, GymTrack, MCP, and agent
+verification (those run from their own workspaces or under CI). For
+the full CI surface and per-job coverage, see `CONTRIBUTING.md`
+("CI currently covers" section).
+
 ## Working method
 
 For non-trivial work, use spec-first delivery:
