@@ -12,6 +12,7 @@
 
 import express, { type Request, type Response } from 'express';
 import { collectDefaultMetrics, Registry, Gauge, Histogram } from 'prom-client';
+import { metrics } from '@opentelemetry/api';
 
 import {
   configFromEnv,
@@ -73,18 +74,59 @@ const probeErrors = new Gauge({
   registers: [registry],
 });
 
+// prom-client serves the compatibility /metrics endpoint, but it is not
+// connected to the OTLP pipeline. Mirror the values into OTel instruments so
+// Grafana Cloud receives the health metrics through the SDK preload.
+const meter = metrics.getMeter('health-probe');
+const dbUpOtel = meter.createObservableGauge('sindustries_db_up', {
+  description: '1 if the database responds to SELECT 1 within the probe timeout, 0 otherwise',
+});
+const flyAppHealthOtel = meter.createObservableGauge('sindustries_fly_app_health', {
+  description: '1 if the Fly app health endpoint returns 2xx, 0 otherwise',
+});
+const redisUpOtel = meter.createObservableGauge('sindustries_redis_up', {
+  description: '1 if Redis PING returns PONG, 0 otherwise',
+});
+const probeRunsOtel = meter.createObservableGauge('sindustries_health_probe_runs_total', {
+  description: 'Cumulative count of probe passes run by this service',
+});
+const probeErrorsOtel = meter.createObservableGauge('sindustries_health_probe_errors_total', {
+  description: 'Cumulative count of probe pass errors',
+});
+
+const dbValues = new Map<string, number>();
+const flyValues = new Map<string, number>();
+const redisValues = new Map<string, number>();
+let probeRunsValue = 0;
+let probeErrorsValue = 0;
+
+dbUpOtel.addCallback((result) => {
+  for (const [app, value] of dbValues) result.observe(value, { app });
+});
+flyAppHealthOtel.addCallback((result) => {
+  for (const [app, value] of flyValues) result.observe(value, { app });
+});
+redisUpOtel.addCallback((result) => {
+  for (const [app, value] of redisValues) result.observe(value, { app });
+});
+probeRunsOtel.addCallback((result) => result.observe(probeRunsValue));
+probeErrorsOtel.addCallback((result) => result.observe(probeErrorsValue));
+
 function applyResult(result: ProbeResult): void {
   for (const entry of result.db) {
     dbUp.set({ app: entry.app }, entry.up);
+    dbValues.set(entry.app, entry.up);
     if (entry.up === 1) {
       dbQueryDuration.observe({ app: entry.app }, entry.durationSeconds);
     }
   }
   for (const entry of result.fly) {
     flyAppHealth.set({ app: entry.app }, entry.up);
+    flyValues.set(entry.app, entry.up);
   }
   for (const entry of result.redis) {
     redisUp.set({ app: entry.app }, entry.up);
+    redisValues.set(entry.app, entry.up);
   }
 }
 
@@ -94,8 +136,10 @@ async function runOnce(): Promise<void> {
     const result = await runProbe(config);
     applyResult(result);
     probeRuns.inc();
+    probeRunsValue += 1;
   } catch (err) {
     probeErrors.inc();
+    probeErrorsValue += 1;
     // eslint-disable-next-line no-console
     console.error('probe pass failed', err);
   }
