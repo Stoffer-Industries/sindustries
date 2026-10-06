@@ -200,6 +200,7 @@ The script is **idempotent** — re-running it does not destroy existing apps or
 ## Related documents
 
 - [`docs/specs/cloud-deployment-foundation-tech-design.md`](../specs/cloud-deployment-foundation-tech-design.md) — design rationale, WS1–WS4 split, AC coverage matrix.
+- [`docs/specs/cloud-staging-environment-tech-design.md`](../specs/cloud-staging-environment-tech-design.md) — task `2850c5ac` design: staging validation workflow, AC2 authenticated harness, AC3 failure-drill, AC4 evidence contract.
 - [`infra/cloud/README.md`](../../infra/cloud/README.md) — operator index, Quinn-vs-Rowan ownership table, PR-stack history.
 - [`infra/cloud/env/.env.example`](../../infra/cloud/env/.env.example) — cross-service env contract template.
 - [`infra/cloud/scripts/bootstrap-staging.sh`](../../infra/cloud/scripts/bootstrap-staging.sh) — Quinn-runnable first-time setup.
@@ -225,3 +226,30 @@ Read-back procedure for future drift:
 3. `gh api repos/Stoffer-Industries/sindustries/environments/staging/secrets/public-key` (or the equivalent secrets list endpoint) — confirm `FLY_API_TOKEN` exists in the staging environment. The production secret is Quinn-owned out-of-band per the Credential boundary section; the workflow preflight guarantees a clean fail-fast until it lands.
 
 Update this table whenever any of the three artifacts changes; the `Last read-back` field is the source of truth for what the lobster should cite when the AC entry needs a `(📄 not code: …)` evidence pointer.
+
+---
+
+## Cloud staging validation (task `2850c5ac`)
+
+The first end-to-end check that the staging target is production-shaped runs through `.github/workflows/cloud-staging-validate.yml`, a `workflow_dispatch`-only job on the `cloud-staging` concurrency group with a 45-minute cap. The workflow:
+
+- Applies `prisma migrate deploy` for budget-api before any harness step (idempotent; resolves the bootstrap-staging prerequisite).
+- Mints a synthetic budget-api session via `npx tsx services/budget-api/scripts/staging-smoke-session.ts mint --staging` (mode-0600 bearer file in `/tmp/budget-smoke-bearer`, SIGINT/SIGTERM cleanup trap). The CLI refuses to run unless `BUDGET_STAGING_ENVIRONMENT=staging`, `--staging` is passed, and `DATABASE_URL` does not look production-shaped.
+- Runs `tests/cloud/staging-workflows.mjs` (pure Node 22 ESM, no install step on the runner) against the live staging endpoints. Verifies Tasks API create/read/comment/patch/archive/list-excludes, Budget API `/me`, and Content Scheduler create/approve/health-bullmq/unapprove. Cleanup runs unconditionally via try/finally; the bearer file is unlinked before exit.
+- Optionally runs `tests/cloud/staging-failure-drill.sh` when `run_failure_drill=true` (default false; AC3 prerequisite `31233a0a` is the hosted-observability contract that has not yet closed).
+- Always uploads `artifacts/staging-workflows.json` + `artifacts/staging-failure-drill.json` + (on harness crash) `artifacts/harness-crash.json`. The structured summary surfaces verdict, per-check status, cleanup.ok, and accepted limitations inline.
+
+### Why `workflow_dispatch` only (not on push)
+
+The validate workflow depends on branch-local files (`staging-smoke-session.ts`, `staging-workflows.mjs`, the failure-drill script, the harness-side crash-capture). Until those land on main via PR #695, the workflow file on main is incomplete and any run against `main` will fail at the mint step with `ERR_MODULE_NOT_FOUND` (observed on Quinn-dispatched run 37417928545 at 2026-10-06T05:19:07Z). Until PR #695 merges, Quinn dispatches against the branch head from the Actions tab (no `gh workflow run` path, per the dispatch-path note at task comment `5681276981`).
+
+### Evidence contract (AC4)
+
+Each run produces a dated evidence record at `docs/infra/cloud-staging-validation-YYYY-MM-DD.md` (template at `docs/infra/cloud-staging-validation-template.md`). Verdict is `PASS` only when `productionBlockers == []`; `FAIL` is acceptable for known accepted limitations if `acceptedLimitations` is non-empty. Production blockers and accepted limitations live in separate tables in the evidence doc so reviewers cannot mistake one for the other.
+
+### Operator notes
+
+- The workflow refuses to run with an empty `FLY_ORG` (silent fail-fast is worse than a loud refusal at workflow start).
+- AC3 requires Quinn-owned Grafana Cloud + Neon + Fly secrets to land under task `31233a0a`; until then the failure-drill step emits `AC3_OBSERVABILITY_VERIFICATION_UNIMPLEMENTED` as an accepted limitation.
+- The `bin/{deploy,status,rollback}` wrappers in `infra/cloud/bin/` are operator hotfix paths; they are NOT a replacement for the CI workflows and they MUST NOT be used to bypass the merge gate.
+- Per-deploy intent commit SHA is exposed on every service `/health` as `version: process.env.GIT_COMMIT_SHA`; the AC2 harness asserts `matchesIntent === true` for all three services using this signal.
