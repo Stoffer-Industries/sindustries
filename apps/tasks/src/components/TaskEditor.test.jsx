@@ -38,6 +38,32 @@ describe('TaskEditor', () => {
     expect(screen.getByLabelText('Detail title')).toHaveValue('Test Task');
   });
 
+  it('renders attention-owner reasons and management controls in the detail view', async () => {
+    const props = {
+      ...defaultProps,
+      task: {
+        ...defaultProps.task,
+        attentionOwnerDetails: [
+          {
+            id: 'attention-1',
+            owner: 'Quinn',
+            position: 0,
+            addedBy: 'Tom',
+            note: 'Needs UI verification before acceptance.',
+            createdAt: '2026-10-07T00:00:00.000Z'
+          }
+        ]
+      }
+    };
+
+    render(<TaskEditor {...props} />);
+
+    expect(await screen.findByRole('region', { name: 'Attention owners' })).toBeInTheDocument();
+    expect(screen.getByText('Needs UI verification before acceptance.')).toBeInTheDocument();
+    expect(screen.getByText('Reason (required)')).toBeInTheDocument();
+    expect(screen.getByTestId('composer-submit')).toBeDisabled();
+  });
+
   it('renders description in view mode by default', () => {
     render(<TaskEditor {...defaultProps} />);
     // View mode shows rendered markdown, not a textarea

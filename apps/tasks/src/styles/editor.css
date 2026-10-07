@@ -108,6 +108,101 @@
   width: 100%;
 }
 
+/* Attention-owner escalation controls */
+.attention-owners-panel {
+  background: var(--si-color-bg-field);
+  border: 2px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  width: 100%;
+}
+
+.attention-owners-panel h3,
+.attention-owners-panel h4 {
+  color: var(--si-color-text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.attention-owners-panel-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.attention-owners-panel-row {
+  background: var(--si-color-bg-surface, var(--si-color-bg));
+  border: 1px solid var(--si-color-border-subtle);
+  border-radius: var(--si-radius-sm);
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.attention-owners-panel-row-top {
+  border-color: var(--si-color-cta-primary);
+}
+
+.attention-owners-panel-row-meta,
+.attention-owners-panel-row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attention-owners-panel-owner {
+  font-weight: 700;
+}
+
+.attention-owners-panel-position,
+.attention-owners-panel-added-by {
+  color: var(--si-color-text-muted);
+  font-size: 0.8rem;
+}
+
+.attention-owners-panel-note {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.attention-owners-panel-note-empty,
+.attention-owners-panel-empty {
+  color: var(--si-color-text-muted);
+}
+
+.attention-owners-panel-composer {
+  border-top: 1px dashed var(--si-color-border-subtle);
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.attention-owners-panel-field {
+  display: grid;
+  gap: 4px;
+}
+
+.attention-owners-panel-field span {
+  color: var(--si-color-text-muted);
+  font-size: 0.8rem;
+}
+
+.attention-owners-panel-error {
+  color: var(--si-color-danger, #b42318);
+  margin: 0;
+}
+
+.attention-owners-panel-success {
+  color: var(--si-color-success, #147a45);
+  margin: 0;
+}
+
 .dependencies-section {
   background: var(--si-color-bg-field);
   border: 2px solid var(--si-color-border-subtle);
