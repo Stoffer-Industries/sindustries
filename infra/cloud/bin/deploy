@@ -18,7 +18,8 @@
 # Usage:
 #   infra/cloud/bin/deploy <service> [--image <registry/repo:tag>] [--dry-run]
 #
-# Where <service> is one of: tasks-api, budget-api, auto-post-worker.
+# Where <service> is one of: tasks-api, budget-api, content-scheduler-api,
+# auto-post-worker.
 #
 # Required environment:
 #   FLY_API_TOKEN   — Fly.io API token with deploy rights on the staging
@@ -45,16 +46,19 @@ fi
 declare -A FLY_APP_FOR=(
   [tasks-api]="sindustries-tasks-api-staging"
   [budget-api]="sindustries-budget-api-staging"
+  [content-scheduler-api]="sindustries-content-scheduler-api-staging"
   [auto-post-worker]="sindustries-auto-post-worker-staging"
 )
 declare -A FLY_CONFIG_FOR=(
   [tasks-api]="infra/cloud/fly/tasks-api.fly.toml"
   [budget-api]="infra/cloud/fly/budget-api.fly.toml"
+  [content-scheduler-api]="infra/cloud/fly/content-scheduler-api.fly.toml"
   [auto-post-worker]="infra/cloud/fly/auto-post-worker.fly.toml"
 )
 declare -A FLY_HEALTH_URL_FOR=(
   [tasks-api]="https://sindustries-tasks-api-staging.fly.dev/health"
   [budget-api]="https://sindustries-budget-api-staging.fly.dev/health"
+  [content-scheduler-api]="https://sindustries-content-scheduler-api-staging.fly.dev/health"
   [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
 )
 
@@ -137,6 +141,9 @@ if [[ -n "$IMAGE" ]]; then
   GIT_COMMIT_SHA="${IMAGE##*:}"
 else
   if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+      fail "working tree is dirty; commit or stash changes before deploying local source so GIT_COMMIT_SHA identifies the exact image contents" 2
+    fi
     GIT_COMMIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
   fi
 fi
@@ -201,9 +208,17 @@ EOF
 
 if [[ -n "$HEALTH_URL" ]]; then
   info "smoke check: GET $HEALTH_URL"
-  if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null; then
-    info "smoke OK"
-  else
+  SAW_HEALTH=0
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null; then
+      SAW_HEALTH=1
+      info "smoke OK on attempt $attempt"
+      break
+    fi
+    warn "smoke attempt $attempt failed; retrying in ${SMOKE_RETRY_DELAY_SECONDS:-5}s"
+    sleep "${SMOKE_RETRY_DELAY_SECONDS:-5}"
+  done
+  if [[ "$SAW_HEALTH" -ne 1 ]]; then
     fail "smoke check failed for $HEALTH_URL — check fly logs --app $FLY_APP" 4
   fi
 else

@@ -75,7 +75,7 @@ jobs:
 
       - name: Deploy (canary)
         working-directory: .
-        run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600
+        run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=${{ github.sha }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
@@ -84,22 +84,33 @@ jobs:
         run: |
           set -euo pipefail
           APP="${{ env.FLY_APP }}"
-          echo "Checking $APP startup log line via fly logs"
-          # fly logs tails historical + new entries. We grep for the
-          # worker's structured startup line, which only appears after a
-          # successful boot (Prisma connect + BullMQ worker registration).
-          # Retry up to 10 times with a 5s sleep — Fly logs can take a
-          # few seconds to surface after a canary promote.
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if flyctl logs --app "$APP" --no-tail 2>/dev/null \
-                | grep -q '\[content-scheduler-worker\] starting (adapter=bullmq)'; then
-              echo "Smoke OK on attempt $i — worker boot line present in fly logs"
-              exit 0
+          echo "Checking $APP worker boot log line via fly logs"
+          # After a canary promote Fly may briefly list a killed canary
+          # machine as a started-but-rotated entry, so we re-list started
+          # machines on each retry and only tail logs from currently
+          # started machines. This avoids the race where fly logs --no-tail
+          # returns entries from a canary machine that was aborted before
+          # the worker emitted its startup line.
+          STARTUP_RE='\[content-scheduler-worker\] starting \(adapter=bullmq\)'
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            MACHINES=$(flyctl machines list --app "$APP" --json 2>/dev/null \
+              | jq -r '.[] | select(.state == "started") | .id')
+            if [ -z "$MACHINES" ]; then
+              echo "Smoke attempt $i: no started machines yet (try again)"
+              sleep 5
+              continue
             fi
-            echo "Smoke attempt $i: startup line not yet visible; retrying in 5s"
+            for machine in $MACHINES; do
+              if flyctl logs --app "$APP" --machine "$machine" --no-tail 2>/dev/null \
+                  | grep -q "$STARTUP_RE"; then
+                echo "Smoke OK on machine $machine attempt $i — worker boot line present in fly logs"
+                exit 0
+              fi
+            done
+            echo "Smoke attempt $i: startup line not yet visible on any started machine (machines: $MACHINES); retrying in 5s"
             sleep 5
           done
-          echo "Smoke check failed after 10 attempts — worker did not boot cleanly" >&2
+          echo "Smoke check failed after 12 attempts — worker did not boot cleanly" >&2
           echo "Hint: fly logs --app $APP" >&2
           exit 1
         env:

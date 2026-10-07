@@ -22,6 +22,8 @@
 
 FROM node:22-alpine AS base
 
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Workspace manifests — install-time only; pruned in the runtime stage.

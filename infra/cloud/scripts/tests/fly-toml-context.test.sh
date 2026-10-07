@@ -58,5 +58,37 @@ done < <(printf '%s\n' "${CONFIG_FILES}" | sed '/^$/d' | while IFS= read -r rel;
   fi
 done | sort)
 
+# Fly passes release_command directly to the image entrypoint. Keep Prisma
+# migrations on npm workspace scripts so no shell builtin (`cd`) is required
+# and each service selects its own schema from the repository root.
+for spec in \
+  "infra/cloud/fly/tasks-api.fly.toml|services/tasks-api" \
+  "infra/cloud/fly/budget-api.fly.toml|services/budget-api" \
+  "infra/cloud/fly/content-scheduler-api.fly.toml|services/content-scheduler-api"; do
+  config_path="${spec%%|*}"
+  workspace="${spec#*|}"
+  release_command="$(awk -F"'" '/^[[:space:]]*release_command[[:space:]]*=/ {print $2; exit}' "$REPO_ROOT/$config_path")"
+  expected="npm run prisma:migrate --workspace $workspace"
+  if [[ "$release_command" != "$expected" ]]; then
+    printf 'FAIL: %s release_command=%q (expected %q)\n' \
+      "$config_path" "$release_command" "$expected" >&2
+    FAIL=1
+  fi
+done
+
+# Prisma's Alpine engine selection requires OpenSSL to exist before npm
+# installs or `prisma generate` runs. Without it, release migrations select
+# the OpenSSL 1.1 engine and fail before deployment promotion.
+for dockerfile in \
+  "infra/cloud/docker/tasks-api.Dockerfile" \
+  "infra/cloud/docker/budget-api.Dockerfile" \
+  "infra/cloud/docker/content-scheduler-api.Dockerfile" \
+  "infra/cloud/docker/auto-post-worker.Dockerfile"; do
+  if ! grep -Eq '^RUN apk add --no-cache openssl$' "$REPO_ROOT/$dockerfile"; then
+    printf 'FAIL: %s must install OpenSSL for Prisma Alpine engines\n' "$dockerfile" >&2
+    FAIL=1
+  fi
+done
+
 [[ "$FAIL" -eq 0 ]] || exit 1
 echo "fly-toml-context: ok"
