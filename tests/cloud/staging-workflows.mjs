@@ -517,6 +517,9 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
   const runTag = ctx.runTag;
 
   // AUTO-POST HEALTH: confirm adapter=bullmq before any further writes.
+  // Route returns { data: { adapter, queue, overdue, redis, recommended, now } };
+  // unwrap before checking the adapter. (Envelope fix surfaced by dispatch
+  // 37692173371 on 2026-10-07T21:50Z, task 2850c5ac.)
   const healthOk = await runner.run('scheduler.auto_post_health', async () => {
     const { json } = await http(
       'GET',
@@ -526,18 +529,19 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
         expectStatus: 200
       }
     );
-    if (json?.adapter !== 'bullmq') {
+    const payload = json?.data ?? null;
+    if (payload?.adapter !== 'bullmq') {
       throw Object.assign(
-        new Error(`scheduler auto-post adapter=${json?.adapter}; expected bullmq`),
+        new Error(`scheduler auto-post adapter=${payload?.adapter}; expected bullmq`),
         { code: 'SCHEDULER_HEALTH_ADAPTER_MISMATCH' }
       );
     }
-    if (json?.redis && json.redis.ok === false) {
+    if (payload?.redis && payload.redis.ok === false) {
       throw Object.assign(new Error('scheduler auto-post Redis unhealthy'), {
         code: 'SCHEDULER_HEALTH_REDIS_UNHEALTHY'
       });
     }
-    return { adapter: REDACTED, redis: json.redis ?? null };
+    return { adapter: REDACTED, redis: payload?.redis ?? null };
   });
   if (!healthOk) return null;
 

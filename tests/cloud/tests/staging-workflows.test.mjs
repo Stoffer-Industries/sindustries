@@ -250,6 +250,21 @@ test('harness writes a structured crash JSON when main() throws', async () => {
   }
 });
 
+test('harness source unwraps the scheduler.auto_post/health data envelope', () => {
+  // Dispatch run 37692173371 (2026-10-07T21:50Z) failed AC2 with
+  // SCHEDULER_HEALTH_ADAPTER_MISMATCH ("adapter=undefined; expected bullmq")
+  // because the harness read json.adapter at the top level, but the
+  // route at GET /api/v1/content-scheduler/auto-post/health returns
+  // { data: { adapter, queue, overdue, redis, recommended, now } }.
+  // The fix unwraps json.data before checking the adapter; assert that
+  // contract here so a future refactor of the route or the harness
+  // cannot reintroduce the mismatch silently.
+  const harness = readFileSync(HARNESS, 'utf8');
+  assert.match(harness, /payload\?\.adapter !== 'bullmq'/);
+  assert.match(harness, /payload\?\.redis/);
+  assert.match(harness, /const payload = json\?\.data \?\? null/);
+});
+
 test('harness source honors STAGING_INTENT_SCOPE for matchesIntent', () => {
   // Dispatch run 37649924730 (2026-10-07T16:10Z) failed at verdict=fail
   // even though every check passed, because the intent commit
