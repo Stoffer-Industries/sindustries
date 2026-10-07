@@ -15,6 +15,8 @@
 #      and budget-api, and grep-tails logs for auto-post-worker.
 #   7. --dry-run prints the deploy command and exits 0 without invoking
 #      `flyctl deploy`.
+#   8. Source deploys refuse a dirty worktree so GIT_COMMIT_SHA cannot
+#      misrepresent the image contents.
 
 set -euo pipefail
 
@@ -35,7 +37,12 @@ if ! bash -c 'declare -A FLY_APP_FOR=([x]=y) && echo "${!FLY_APP_FOR[*]}"' >/dev
 fi
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+DIRTY_SENTINEL="$REPO_ROOT/.deploy-dirty-guard-test"
+cleanup() {
+  rm -rf "$TMP"
+  rm -f "$DIRTY_SENTINEL"
+}
+trap cleanup EXIT
 
 # ---------- stub flyctl -----------------------------------------------------
 
@@ -79,6 +86,15 @@ chmod +x "$TMP/bin/flyctl"
 cat >"$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 printf 'INVOKED: curl %s\n' "$*" >>"$FLY_LOG"
+if [[ -n "${FLY_CURL_COUNT_FILE:-}" ]]; then
+  count=0
+  [[ -f "$FLY_CURL_COUNT_FILE" ]] && count="$(cat "$FLY_CURL_COUNT_FILE")"
+  count=$((count + 1))
+  printf '%s' "$count" >"$FLY_CURL_COUNT_FILE"
+  if (( count <= ${FLY_CURL_FAIL_COUNT:-0} )); then
+    exit 1
+  fi
+fi
 exit "${FLY_CURL_EXIT:-0}"
 STUB
 chmod +x "$TMP/bin/curl"
@@ -173,6 +189,15 @@ if grep -E "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml .*--ima
 fi
 assert_log_contains "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA="
 
+echo "test: API smoke check retries while the promoted machine finishes starting"
+reset_log
+: >"$TMP/curl.count"
+FLY_API_TOKEN=stub FLY_CURL_COUNT_FILE="$TMP/curl.count" FLY_CURL_FAIL_COUNT=1 \
+  SMOKE_RETRY_DELAY_SECONDS=0 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
+  "$SCRIPT" tasks-api 2>&1
+assert_eq "deploy tasks-api retry exit code" "0" "$?"
+assert_eq "curl retry count" "2" "$(cat "$TMP/curl.count")"
+
 echo "test: missing FLY_API_TOKEN fails preflight"
 reset_log
 set +e
@@ -196,6 +221,17 @@ FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-
 assert_eq "deploy tasks-api (no image) exit code" "0" "$?"
 HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 assert_log_contains "INVOKED: deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=$HEAD_SHA"
+
+echo "test: local-source deploy refuses a dirty worktree"
+reset_log
+touch "$DIRTY_SENTINEL"
+set +e
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run 2>&1
+rc=$?
+set -e
+rm -f "$DIRTY_SENTINEL"
+assert_eq "dirty source deploy exit code" "2" "$rc"
+assert_log_absent "INVOKED: deploy"
 
 echo "test: --dry-run prints deploy command and exits 0"
 reset_log
