@@ -111,7 +111,9 @@ detail-view composer land in WS3.
   edit, move up / move down, and remove controls. An "Add attention
   owner" composer requires both owner and reason before submit enables.
   The panel mounts from `TaskEditor` under the "Attention owners" heading
-  and from `TaskDetailDrawer` as a read-only summary.
+  and from `TaskDetailDrawer` as a read-only summary. It remains visible
+  for tasks with no attention rows so an authorized user can add the first
+  escalation request with its required reason.
 - **Resolve my blocker** (added with task `91864257`): the same panel
   renders a "Resolve my blocker" button only for the authenticated
   top-of-stack actor (or Tom/Quinn override). The button posts to
