@@ -697,14 +697,6 @@ pub(crate) fn mechanical_evidence_failures(
         };
         match evidence {
             Evidence::TestId(test_id) => {
-                if user_visible_ac_requires_e2e(_task_text)
-                    && !is_browser_e2e_test_path(test_id)
-                {
-                    failures.push(format!(
-                        "{label} is a user-visible/app AC and requires a Playwright e2e test citation under test/e2e/; component, unit, and service tests cannot substitute."
-                    ));
-                    continue;
-                }
                 if is_external_ci_evidence(raw, test_id) {
                     // This is intentionally an Ash-owned external check, not
                     // a local test filter. The structured QA approval is the
@@ -734,20 +726,11 @@ pub(crate) fn mechanical_evidence_failures(
                 // explanatory prose, not a second file citation; checking
                 // for slashes here made ordinary explanations look like
                 // paths and created false blockers.
-                if user_visible_ac_requires_e2e(_task_text) {
-                    failures.push(format!(
-                        "{label} is a user-visible/app AC and cannot use `not tested` evidence; add a Playwright e2e test under test/e2e/ or explicitly remove the user-flow requirement."
-                    ));
-                } else {
-                    let _ = reason;
-                }
+                let _ = (label, reason);
             }
             Evidence::NotCode { reason: _ } => {
-                if user_visible_ac_requires_e2e(_task_text) {
-                    failures.push(format!(
-                        "{label} is a user-visible/app AC and cannot use `not code` evidence; add a Playwright e2e test under test/e2e/."
-                    ));
-                }
+                // Non-code ACs are verified semantically by Ash; the lobster
+                // does not infer whether an AC describes a UI flow.
             }
             Evidence::Pr { reference } => {
                 // PR reference: `#<n>` or URL is a sibling cross-reference
@@ -772,45 +755,11 @@ pub(crate) fn mechanical_evidence_failures(
                 }
             }
             Evidence::Signoff { approver: _ } => {
-                if user_visible_ac_requires_e2e(_task_text) {
-                    failures.push(format!(
-                        "{label} is a user-visible/app AC and requires a Playwright e2e test under test/e2e/; human sign-off cannot substitute for the user-flow check."
-                    ));
-                }
+                // Human judgement is verified semantically by Ash.
             }
         }
     }
     failures
-}
-
-/// True when an AC describes a user-visible application flow. These ACs need
-/// browser-level evidence: an isolated component test can prove that a
-/// component behaves when mounted by a test, but cannot prove that the
-/// product mounts or exposes it from the real task route.
-///
-/// This intentionally stays conservative and only covers language that
-/// clearly names a UI/user-flow surface. Service/API ACs continue to use
-/// unit and integration evidence without requiring Playwright.
-fn user_visible_ac_requires_e2e(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    [
-        "user interface",
-        "task ui",
-        "ui/api",
-        "detail view",
-        "task editor",
-        "browser",
-        "screen",
-        "page",
-        "button",
-        "click",
-        "accessible label",
-        "visually",
-        "renders",
-        "visible",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
 }
 
 /// Mechanical check: any PR that changes an app's behavioural spec
@@ -1858,66 +1807,19 @@ Lead-in.
     }
 
     #[test]
-    fn mechanical_evidence_blocks_component_test_as_ui_ac_evidence() {
+    fn mechanical_evidence_leaves_ui_semantics_to_ash() {
         let body = "## Acceptance Criteria\n\
-            - [x] AC4: The Tasks UI renders the attention-owner reason in the detail view (🧪 testID: apps/tasks/src/components/StackedAvatarGroup.test.jsx)\n";
+            - [x] AC1: The detail screen renders the owner reason (\u{1f9ea} testID: apps/tasks/src/components/AttentionOwnersPanel.test.jsx)\n";
         let failures = mechanical_evidence_failures(
             "5e35dc25-aed5-4064-8f11-a99413d18612",
-            &single_ac(
-                "AC4",
-                "The Tasks UI renders the attention-owner reason in the detail view",
-            ),
+            &single_ac("AC1", "The detail screen renders the owner reason"),
             body,
-            &["apps/tasks/src/components/StackedAvatarGroup.test.jsx".to_string()],
+            &["apps/tasks/src/components/AttentionOwnersPanel.test.jsx".to_string()],
         );
-        assert_eq!(failures.len(), 1, "expected UI e2e blocker, got: {failures:?}");
-        assert!(failures[0].contains("Playwright e2e"), "got: {failures:?}");
-    }
-
-    #[test]
-    fn mechanical_evidence_blocks_service_test_as_ui_ac_evidence() {
-        let body = "## Acceptance Criteria\n\
-            - [x] AC6: An authorized user can add an attention owner from the task UI (🧪 testID: services/tasks-api/test/taskAttentionOwnersRoute.test.ts)\n";
-        let failures = mechanical_evidence_failures(
-            "5e35dc25-aed5-4064-8f11-a99413d18612",
-            &single_ac(
-                "AC6",
-                "An authorized user can add an attention owner from the task UI",
-            ),
-            body,
-            &["services/tasks-api/test/taskAttentionOwnersRoute.test.ts".to_string()],
+        assert!(
+            failures.is_empty(),
+            "mechanical gate must not classify UI language: {failures:?}"
         );
-        assert_eq!(failures.len(), 1, "expected UI e2e blocker, got: {failures:?}");
-        assert!(failures[0].contains("cannot substitute"), "got: {failures:?}");
-    }
-
-    #[test]
-    fn mechanical_evidence_accepts_browser_e2e_test_for_ui_ac() {
-        let body = "## Acceptance Criteria\n\
-            - [x] AC6: An authorized user can add an attention owner from the task UI (🧪 testID: apps/tasks/test/e2e/attention-owners.spec.js)\n";
-        let failures = mechanical_evidence_failures(
-            "5e35dc25-aed5-4064-8f11-a99413d18612",
-            &single_ac(
-                "AC6",
-                "An authorized user can add an attention owner from the task UI",
-            ),
-            body,
-            &["apps/tasks/test/e2e/attention-owners.spec.js".to_string()],
-        );
-        assert!(failures.is_empty(), "expected e2e evidence to pass, got: {failures:?}");
-    }
-
-    #[test]
-    fn mechanical_evidence_keeps_service_ac_unit_tests_valid() {
-        let body = "## Acceptance Criteria\n\
-            - [x] AC1: The API rejects duplicate owners (🧪 testID: services/tasks-api/test/attention.test.ts)\n";
-        let failures = mechanical_evidence_failures(
-            "5e35dc25-aed5-4064-8f11-a99413d18612",
-            &single_ac("AC1", "The API rejects duplicate owners"),
-            body,
-            &["services/tasks-api/test/attention.test.ts".to_string()],
-        );
-        assert!(failures.is_empty(), "service AC should remain unit-testable: {failures:?}");
     }
 
     #[test]
@@ -2022,23 +1924,10 @@ Lead-in.
     }
 
     #[test]
-    fn mechanical_evidence_not_tested_free_text_reason_passes_for_non_ui_ac() {
+    fn mechanical_evidence_not_tested_free_text_reason_passes() {
         // Free-text reason (no slash, no test extension) — mechanical
-        // surface treats it as a description, not a file path. A user-flow
-        // AC would correctly be blocked by the browser-evidence policy.
-        let body = "## Acceptance Criteria\n\
-            - [x] AC1: Migration requires manual operator review (\u{26a0}\u{fe0f} not tested: migration requires manual operator review)\n";
-        let failures = mechanical_evidence_failures(
-            "5e35dc25-aed5-4064-8f11-a99413d18612",
-            &single_ac("AC1", "Migration requires manual operator review"),
-            body,
-            &[],
-        );
-        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
-    }
-
-    #[test]
-    fn mechanical_evidence_not_tested_ui_ac_is_blocked() {
+        // surface treats it as a description, not a file path. Whether the
+        // exception is acceptable for a UI flow belongs to Ash's reasoning.
         let body = "## Acceptance Criteria\n\
             - [x] AC1: Drag requires manual browser QA (\u{26a0}\u{fe0f} not tested: drag requires manual browser QA)\n";
         let failures = mechanical_evidence_failures(
@@ -2047,12 +1936,7 @@ Lead-in.
             body,
             &[],
         );
-        assert_eq!(failures.len(), 1, "got: {failures:?}");
-        assert!(
-            failures[0].contains("cannot use `not tested`")
-                && failures[0].contains("Playwright e2e test"),
-            "failure should require browser evidence: {failures:?}"
-        );
+        assert!(failures.is_empty(), "expected pass, got: {failures:?}");
     }
 
     #[test]
