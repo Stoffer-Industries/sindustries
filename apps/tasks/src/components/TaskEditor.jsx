@@ -6,6 +6,7 @@ import { MarkdownContent } from './MarkdownContent.jsx';
 import { toggleMarkdownTaskCheckbox } from '../utils/markdown.js';
 import { TaskCardSummary } from './TaskCardSummary.jsx';
 import { ApprovalsSection } from './ApprovalsSection.jsx';
+import { AttentionOwnersPanel } from './AttentionOwnersPanel.jsx';
 
 /**
  * TaskEditor - Inline editor for task details
@@ -530,6 +531,8 @@ export function TaskEditor({
         <Divider variant="dashed" />
 
         <ApprovalsSection task={task} onTaskRefresh={onTaskRefresh} />
+
+        <AttentionOwnersPanel task={task} onTaskRefresh={onTaskRefresh} />
 
         <div className="comments-section">
           <div className="comments-header">
