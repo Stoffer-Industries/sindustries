@@ -8,7 +8,7 @@
 #   - process types (services defined in fly.toml vs running)
 #   - machine IDs, regions, and states
 #
-# By default reports all three staging services. Pass a service name to
+# By default reports all four staging services. Pass a service name to
 # scope the report. The --json flag emits a single JSON document (one
 # element per service) suitable for the staging-workflows harness or the
 # failure drill evidence record.
@@ -39,6 +39,7 @@ fi
 declare -A FLY_APP_FOR=(
   [tasks-api]="sindustries-tasks-api-staging"
   [budget-api]="sindustries-budget-api-staging"
+  [content-scheduler-api]="sindustries-content-scheduler-api-staging"
   [auto-post-worker]="sindustries-auto-post-worker-staging"
 )
 
@@ -49,6 +50,7 @@ declare -A FLY_APP_FOR=(
 declare -A EXPECTED_PROCESS_TYPES=(
   [tasks-api]="tasks-api"
   [budget-api]="budget-api"
+  [content-scheduler-api]="content-scheduler-api"
   [auto-post-worker]="auto-post-worker"
 )
 
@@ -69,7 +71,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  for s in tasks-api budget-api auto-post-worker; do TARGETS+=("$s"); done
+  for s in tasks-api budget-api content-scheduler-api auto-post-worker; do TARGETS+=("$s"); done
 fi
 
 for s in "${TARGETS[@]}"; do

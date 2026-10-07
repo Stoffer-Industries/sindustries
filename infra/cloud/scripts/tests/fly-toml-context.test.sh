@@ -63,7 +63,8 @@ done | sort)
 # and each service selects its own schema from the repository root.
 for spec in \
   "infra/cloud/fly/tasks-api.fly.toml|services/tasks-api" \
-  "infra/cloud/fly/budget-api.fly.toml|services/budget-api"; do
+  "infra/cloud/fly/budget-api.fly.toml|services/budget-api" \
+  "infra/cloud/fly/content-scheduler-api.fly.toml|services/content-scheduler-api"; do
   config_path="${spec%%|*}"
   workspace="${spec#*|}"
   release_command="$(awk -F"'" '/^[[:space:]]*release_command[[:space:]]*=/ {print $2; exit}' "$REPO_ROOT/$config_path")"
@@ -81,6 +82,7 @@ done
 for dockerfile in \
   "infra/cloud/docker/tasks-api.Dockerfile" \
   "infra/cloud/docker/budget-api.Dockerfile" \
+  "infra/cloud/docker/content-scheduler-api.Dockerfile" \
   "infra/cloud/docker/auto-post-worker.Dockerfile"; do
   if ! grep -Eq '^RUN apk add --no-cache openssl$' "$REPO_ROOT/$dockerfile"; then
     printf 'FAIL: %s must install OpenSSL for Prisma Alpine engines\n' "$dockerfile" >&2

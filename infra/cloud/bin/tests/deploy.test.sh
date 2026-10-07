@@ -140,7 +140,7 @@ assert_log_absent() {
 }
 
 reset_log() { : >"$TMP/fly.log"; }
-export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-auto-post-worker-staging"}]'
+export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"}]'
 
 # ---------- tests ----------------------------------------------------------
 
@@ -197,6 +197,13 @@ FLY_API_TOKEN=stub FLY_CURL_COUNT_FILE="$TMP/curl.count" FLY_CURL_FAIL_COUNT=1 \
   "$SCRIPT" tasks-api 2>&1
 assert_eq "deploy tasks-api retry exit code" "0" "$?"
 assert_eq "curl retry count" "2" "$(cat "$TMP/curl.count")"
+
+echo "test: content-scheduler-api maps to its standalone Fly app"
+reset_log
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
+  "$SCRIPT" content-scheduler-api --image registry/repo:cafe1234 2>&1
+assert_eq "deploy content-scheduler-api exit code" "0" "$?"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/content-scheduler-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=cafe1234 --image registry/repo:cafe1234"
 
 echo "test: missing FLY_API_TOKEN fails preflight"
 reset_log

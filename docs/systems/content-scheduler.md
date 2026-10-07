@@ -1,15 +1,16 @@
 # Content Scheduler
 
 **Status:** Live (calendar view + event-driven auto-post shipped)
-**Last updated:** 2026-07-25
+**Last updated:** 2026-10-07
 **Owner:** Rowan (engineering) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **Related PRs:**
 - [PR #213](https://github.com/Stoffer-Industries/sindustries/pull/213) — original Content Scheduler tab + backend (task 115e8d89)
 - [PR #257](https://github.com/Stoffer-Industries/sindustries/pull/257) — 10-day calendar view (task 95e65d06)
 - [PR #245](https://github.com/Stoffer-Industries/sindustries/pull/245) — event-driven auto-post (task ac74e9bb)
+- [PR #509](https://github.com/Stoffer-Industries/sindustries/pull/509) — extraction into the dedicated Content Scheduler API (task 94d5e4fc)
 
-**Related tasks:** `115e8d89` (initial tab), `95e65d06` (calendar view), `ac74e9bb` (auto-post), `94d5e4fc` (future service extraction)
+**Related tasks:** `115e8d89` (initial tab), `95e65d06` (calendar view), `ac74e9bb` (auto-post), `94d5e4fc` (service extraction), `2850c5ac` (cloud staging validation)
 **Related tech designs:**
 - [Tab + backend](../specs/content-scheduler-tab-tech-design.md)
 - [Calendar view](../specs/content-scheduler-calendar-view-2026-07-16-tech-design.md)
@@ -34,24 +35,22 @@ Manual publish is still available. Auto-publish of approved items whose `schedul
 - `apps/mission-control/src/tabs/contentSchedulerCalendar.js` — pure helpers: `buildCalendarDays`, `getAucklandDayKey`, `getAucklandTimeOfDay`, `zonedDateTimeToIso` (handles NZST/NZDT offset + DST start), `rescheduleIsoForDay`, `groupItemsForCalendar`, `dayDropBlocked`.
 - `apps/mission-control/src/contentSchedulerApi.js` — Mission Control API client (list/create/update/approve/unapprove/publish/remove/reorder + today-status).
 - `apps/mission-control/src/styles/components.css` — calendar grid CSS (10-column flex grid, `Unscheduled` panel, drop-target outline).
-- `services/tasks-api/src/routes/contentScheduler.ts` — Express routes. Mounted under `/api/v1`. Enqueues a delayed auto-post job on approve and on `PATCH` of `scheduledFor`; cancels on unapprove, remove, and successful manual publish.
-- `services/tasks-api/src/routes/contentSchedulerPublish.ts` — `guardPublish`, `XClient` interface, `RealXClient` (OAuth 1.0a), `FakeXClient` (CI), `getXClient()`, `getAucklandTodayParts()`.
-- `services/tasks-api/src/routes/contentSchedulerPublishService.ts` — `publishContentSchedulerItem` shared between manual and auto-post paths so guard semantics cannot drift.
-- `services/tasks-api/src/routes/contentSchedulerJobs.ts` — `JobSchedulerAdapter` interface + `decideAutoPostAction` pure helper. The single point of contact between route/publish code and any queue provider.
-- `services/tasks-api/src/routes/contentSchedulerJobs.inProcess.ts` — default adapter. One `setTimeout` per job, deterministic `in-process:<itemId>:<version>` ids. Survives for the lifetime of the API process. No Redis required. **See limitations below.**
-- `services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts` — BullMQ-backed `JobSchedulerAdapter` (production). Uses deterministic `content-scheduler-auto-post:<itemId>:<scheduleVersion>` job ids, `attempts: 1`, and `removeOnComplete` / `removeOnFail` policies so domain failures are not retried. Exposes `ping()` and `queueStats()` for the diagnostic endpoint and `hasJob()` for the reconciliation sweep.
-- `services/tasks-api/src/routes/autoPostReconciliation.ts` — startup reconciliation. On every worker boot the database is the source of truth: approved items with a future `scheduledFor` whose queue job is missing are re-enqueued; overdue approved items are published deterministically through the shared service. The sweep is idempotent and bounded by `limit` / `batchSize` so a huge backlog does not stall boot.
-- `services/tasks-api/src/routes/contentSchedulerAutoPost.ts` — diagnostic endpoints. `GET /content-scheduler/auto-post/health` reports adapter kind, queue stats, overdue approved items, Redis liveness, and a recommended next action. `POST /content-scheduler/auto-post/reconcile` runs the reconciliation sweep on demand for ops. `GET /content-scheduler/auto-post/items` lists per-item status for the auto-post panel.
-- `services/tasks-api/src/routes/autoPostWorker.ts` — `processAutoPostJob` worker function. Reconciles against current item state, handles clock skew via reschedule, returns structured outcomes.
-- `services/tasks-api/src/autoPostWorkerMain.ts` — worker entrypoint. `npm run content-scheduler:worker` from `services/tasks-api`.
-- `services/tasks-api/prisma/schema.prisma` — `ContentSchedulerItem` model + `ContentSchedulerItemStatus` / `ContentSchedulerSource` enums + `autoPost*` fields.
+- `services/content-scheduler-api/src/routes/contentScheduler.ts` — Express routes mounted under `/api/v1`.
+- `services/content-scheduler-api/src/routes/contentSchedulerPublish.ts` — publish guard and X client implementations.
+- `services/content-scheduler-api/src/routes/contentSchedulerPublishService.ts` — shared manual/automatic publish service.
+- `services/content-scheduler-api/src/routes/contentSchedulerJobs*.ts` — in-process development and BullMQ production scheduling adapters.
+- `services/content-scheduler-api/src/routes/autoPostReconciliation.ts` — bounded, idempotent queue/database reconciliation.
+- `services/content-scheduler-api/src/routes/contentSchedulerAutoPost.ts` — diagnostics and manual reconciliation endpoints.
+- `services/content-scheduler-api/src/workers/autoPostWorker.ts` — queue job processor.
+- `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` — dedicated Fly worker entrypoint.
+- `services/content-scheduler-api/prisma/schema.prisma` — Content Scheduler-owned schema.
 - `apps/mission-control/SPEC.md` — Mission Control behavioural contract (Flow 7).
 
 ### Service boundary
 
-The Content Scheduler backend currently lives inside `services/tasks-api` for historical reasons (PR #213 landed before the service-extraction work). This is treated as **temporary coupling**. A dedicated `services/content-scheduler-api` is planned under task `94d5e4fc`; the design at [`docs/specs/content-scheduler-service-extraction-tech-design.md`](../specs/content-scheduler-service-extraction-tech-design.md) defines the extraction. Mission Control will call Content Scheduler API directly once the extraction lands — it should not get an aggregate backend.
+The backend was extracted from Tasks API by task `94d5e4fc` and now runs from `services/content-scheduler-api`. It owns its Prisma schema, HTTP routes, authentication boundary, queue adapter, and publishing integration. No Tasks API compatibility proxy exists. Mission Control calls the dedicated service directly; the browser never holds X credentials.
 
-Mission Control owns the calendar UI. The Tasks API owns the data plane until extraction. The X (Twitter) API is reached only through the server-side `XClient` abstraction; the browser never holds X credentials.
+In cloud staging, the HTTP API runs as `sindustries-content-scheduler-api-staging` while `sindustries-auto-post-worker-staging` consumes the shared BullMQ queue. Both use the same Content Scheduler database schema and Redis queue, but deploy and scale independently.
 
 ---
 
@@ -126,7 +125,7 @@ Mission Control surfaces the new drafts through the existing Content Scheduler l
 
 ## API surface
 
-All routes are mounted under `/api/v1` from `services/tasks-api/src/app.ts`. CORS allows `x-actor` so the Mission Control client can send the operator identity. All mutation routes require a valid Tasks API session or `Authorization: Bearer <agent credential>` header; automated callers must use their own workspace-scoped `TASKS_API_APPROVAL_TOKEN`. The authenticated credential is authoritative for actor attribution, while `x-actor` remains an audit signal and must match it.
+All routes are mounted under `/api/v1` from `services/content-scheduler-api/src/app.ts`. Mutation routes require a valid shared Tasks session cookie or `Authorization: Bearer <service credential>`. Automated callers use a token represented in `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS`; the authenticated identity is authoritative for actor attribution.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -249,8 +248,8 @@ The auto-post flow is a delayed-job trigger that fires **once** at each item's `
 
 The auto-post layer has two adapter implementations that share the same `JobSchedulerAdapter` interface. The choice is made at process boot via `CONTENT_SCHEDULER_JOB_ADAPTER`:
 
-- `in-process` (default) — the in-process implementation in `services/tasks-api/src/routes/contentSchedulerJobs.inProcess.ts`. One `setTimeout` per job, deterministic `in-process:<itemId>:<version>` ids. Survives for the lifetime of the API process. **No Redis required.**
-- `bullmq` — the BullMQ-backed implementation in `services/tasks-api/src/routes/contentSchedulerJobs.bullmq.ts`. Uses `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`). Deterministic `content-scheduler-auto-post:<itemId>:<scheduleVersion>` job ids, `attempts: 1`, `removeOnComplete` / `removeOnFail` policies.
+- `in-process` (default) — the in-process implementation in `services/content-scheduler-api/src/routes/contentSchedulerJobs.inProcess.ts`. One `setTimeout` per job, deterministic `in-process:<itemId>:<version>` ids. Survives for the lifetime of the API process. **No Redis required.**
+- `bullmq` — the BullMQ-backed implementation in `services/content-scheduler-api/src/routes/contentSchedulerJobs.bullmq.ts`. Uses `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`). Deterministic `content-scheduler-auto-post:<itemId>:<scheduleVersion>` job ids, `attempts: 1`, `removeOnComplete` / `removeOnFail` policies.
 
 ### When to use the in-process adapter
 
@@ -269,7 +268,7 @@ When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker
 - Set `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq` and `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`) in the API and worker environments.
 - The API and the worker entrypoint pick the adapter at register-time and log the active kind on startup. No code change is required.
 - Run the API and the worker against the same Redis. Multiple worker replicas are safe — BullMQ's deterministic `jobId` collapses duplicate enqueues.
-- `npm run content-scheduler:worker` (services/tasks-api) boots the worker. The worker dynamically imports BullMQ so the in-process dev path does not pay the load cost.
+- `npm run content-scheduler:worker --workspace services/content-scheduler-api` boots the worker. The worker dynamically imports BullMQ so the in-process dev path does not pay the load cost.
 - For local dev without Redis, leave `CONTENT_SCHEDULER_JOB_ADAPTER` unset and the in-process adapter is used. The diagnostic endpoint will report `adapter: "in-process"` and recommend switching to BullMQ for any non-local use.
 
 ---
@@ -321,7 +320,7 @@ When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker
 
 ### Production swap to BullMQ
 
-- The BullMQ adapter is wired by default; `bullmq` and `ioredis` are listed in `services/tasks-api/package.json` dependencies.
+- The BullMQ adapter is wired by default in staging; `bullmq` and `ioredis` are listed in `services/content-scheduler-api/package.json` dependencies.
 - Set `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq` and `CONTENT_SCHEDULER_REDIS_URL` (or `REDIS_URL`) in the API and worker environments.
 - Run the API process and the worker process against the same Redis. Multiple worker replicas are safe — BullMQ's deterministic `jobId` collapses duplicate enqueues.
 - The route, publish service, and worker code do not change. The interface boundary (AC5) makes the swap a single env-var change.
@@ -329,7 +328,7 @@ When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker
 
 ### Service extraction (future, task `94d5e4fc`)
 
-- The Content Scheduler tables/routes will move from `services/tasks-api` to `services/content-scheduler-api`.
+- Content Scheduler tables/routes are owned by `services/content-scheduler-api`; Tasks API must not regain scheduler-domain routes.
 - Mission Control will switch from `tasksApi.js` to a new `contentSchedulerApi.js`-equivalent client pointing at the new host.
 - The X client lives on the new service, not on Mission Control.
 - The design at [`docs/specs/content-scheduler-service-extraction-tech-design.md`](../specs/content-scheduler-service-extraction-tech-design.md) covers the migration plan and the rollback path.
@@ -342,8 +341,8 @@ When `CONTENT_SCHEDULER_JOB_ADAPTER=bullmq`, both the API process and the worker
 |---|---|
 | Pure helpers (`contentSchedulerCalendar.js`) | `contentSchedulerCalendar.test.js` covers timezone, NZST/NZDT offset, DST start edge, scheduling defaults, day-key grouping, drop-guard logic |
 | UI (`ContentSchedulerTab.jsx`) | `ContentSchedulerTab.test.jsx` covers mount/loading/error/retry, calendar grid layout, drag-and-drop reschedule, Unscheduled overflow, published read-only badge, max-one-per-day inline error, today-status banner |
-| API (`services/tasks-api`) | `contentScheduler.test.ts` covers CRUD, approve/unapprove, publish guard outcomes (incl. `not_approved`, `already_published_today`, `missing_credentials`), reorder, today-status |
-| Auto-post (`services/tasks-api`) | `contentSchedulerAutoPost.test.ts` covers the job queue adapter, BullMQ placeholder, in-process timer, end-to-end publish-via-auto-post. `contentSchedulerAutoPostDurable.test.ts` covers the BullMQ adapter (deterministic jobId, delay/attempts, cancel/hasJob/ping/queueStats/close), `reconcileAutoPostItems` (re-enqueue / scheduled-active / overdue / limit), `describeItemForReconcile`, and the `resolveRedisUrl` env precedence. |
+| API (`services/content-scheduler-api`) | `contentScheduler.test.ts` covers CRUD, approve/unapprove, publish guard outcomes (incl. `not_approved`, `already_published_today`, `missing_credentials`), reorder, today-status |
+| Auto-post (`services/content-scheduler-api`) | `contentSchedulerAutoPost.test.ts` covers the job queue adapter, BullMQ placeholder, in-process timer, end-to-end publish-via-auto-post. `contentSchedulerAutoPostDurable.test.ts` covers the BullMQ adapter (deterministic jobId, delay/attempts, cancel/hasJob/ping/queueStats/close), `reconcileAutoPostItems` (re-enqueue / scheduled-active / overdue / limit), `describeItemForReconcile`, and the `resolveRedisUrl` env precedence. |
 
 Mission Control suite: 161/161 green as of PR #257 merge.
 
@@ -357,20 +356,20 @@ Mission Control suite: 161/161 green as of PR #257 merge.
 | Calendar helpers | `apps/mission-control/src/tabs/contentSchedulerCalendar.js` |
 | API client | `apps/mission-control/src/contentSchedulerApi.js` |
 | Calendar grid CSS | `apps/mission-control/src/styles/components.css` |
-| Express routes | `services/tasks-api/src/routes/contentScheduler.ts` |
-| Publish guard + X client | `services/tasks-api/src/routes/contentSchedulerPublish.ts` |
-| Shared publish service | `services/tasks-api/src/routes/contentSchedulerPublishService.ts` |
-| Auto-post jobs adapter | `services/tasks-api/src/routes/contentSchedulerJobs*.ts` |
-| Auto-post worker | `services/tasks-api/src/routes/autoPostWorker.ts` |
-| Auto-post worker entrypoint | `services/tasks-api/src/autoPostWorkerMain.ts` |
-| Prisma model | `services/tasks-api/prisma/schema.prisma` |
+| Express routes | `services/content-scheduler-api/src/routes/contentScheduler.ts` |
+| Publish guard + X client | `services/content-scheduler-api/src/routes/contentSchedulerPublish.ts` |
+| Shared publish service | `services/content-scheduler-api/src/routes/contentSchedulerPublishService.ts` |
+| Auto-post jobs adapter | `services/content-scheduler-api/src/routes/contentSchedulerJobs*.ts` |
+| Auto-post worker | `services/content-scheduler-api/src/workers/autoPostWorker.ts` |
+| Auto-post worker entrypoint | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` |
+| Prisma model | `services/content-scheduler-api/prisma/schema.prisma` |
 | App behavioural contract | `apps/mission-control/SPEC.md` (Flow 7) |
 
 ---
 
 ## Known gaps / future work
 
-- **Service extraction** (task `94d5e4fc`): move out of `services/tasks-api` into a dedicated `services/content-scheduler-api` per [`docs/specs/content-scheduler-service-extraction-tech-design.md`](../specs/content-scheduler-service-extraction-tech-design.md).
+- **Service extraction** (task `94d5e4fc`): shipped in PR #509; the dedicated `services/content-scheduler-api` boundary is now the source of truth.
 - **`draft` affordance**: the data model supports `draft` but the UI never produces one. If a "save without queueing" button is added, it should land in a follow-up PR.
 - **Multi-channel publishing**: ACs are X-only. TikTok, LinkedIn, etc. are future channels.
 - **Media attachments** (images / video): not supported in the model or the X client. Future work.

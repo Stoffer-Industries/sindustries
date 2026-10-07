@@ -102,6 +102,7 @@ deploy_jobs = {
     'deploy-website-production',
     'deploy-tasks-api-staging',
     'deploy-budget-api-staging',
+    'deploy-content-scheduler-api-staging',
     'deploy-auto-post-worker-staging',
     'deploy-gymtrack-production',
     'deploy-gymtrack-mcp-production',
@@ -135,6 +136,7 @@ called_workflows = {
     'website-deploy.yml',
     'deploy-staging-tasks-api.yml',
     'deploy-staging-budget-api.yml',
+    'deploy-staging-content-scheduler-api.yml',
     'deploy-staging-auto-post-worker.yml',
     'gymtrack-deploy.yml',
     'gymtrack-mcp-deploy.yml',
@@ -153,6 +155,7 @@ for name, doc in docs.items():
 fly_names = {
     'deploy-staging-tasks-api.yml',
     'deploy-staging-budget-api.yml',
+    'deploy-staging-content-scheduler-api.yml',
     'deploy-staging-auto-post-worker.yml',
     'gymtrack-mcp-deploy.yml',
     'deploy-staging-health-probe.yml',
@@ -186,6 +189,21 @@ for name in sorted(fly_names):
     if not version or version == 'latest':
         fail(f'{name}: flyctl must be pinned to an explicit version')
 
+for name in (
+    'deploy-staging-tasks-api.yml',
+    'deploy-staging-budget-api.yml',
+    'deploy-staging-content-scheduler-api.yml',
+    'deploy-staging-auto-post-worker.yml',
+):
+    deploy_steps = docs[name].get('jobs', {}).get('deploy', {}).get('steps', [])
+    deploy_command = '\n'.join(
+        str(step.get('run', ''))
+        for step in deploy_steps
+        if step.get('name') == 'Deploy (canary)'
+    )
+    if '--env GIT_COMMIT_SHA=${{ github.sha }}' not in deploy_command:
+        fail(f'{name}: deploy must expose the immutable GitHub SHA to runtime health/version checks')
+
 supabase_steps = docs['gymtrack-deploy.yml']['jobs']['deploy']['steps']
 supabase = next((s for s in supabase_steps if str(s.get('uses', '')).startswith('supabase/setup-cli@')), None)
 if not supabase:
@@ -197,7 +215,7 @@ else:
     if not version or version == 'latest':
         fail('gymtrack-deploy.yml: Supabase CLI must be pinned to an explicit version')
 
-for name in ('deploy-staging-tasks-api.yml', 'deploy-staging-budget-api.yml', 'deploy-staging-auto-post-worker.yml', 'deploy-staging-health-probe.yml'):
+for name in ('deploy-staging-tasks-api.yml', 'deploy-staging-budget-api.yml', 'deploy-staging-content-scheduler-api.yml', 'deploy-staging-auto-post-worker.yml', 'deploy-staging-health-probe.yml'):
     if docs[name].get('concurrency', {}).get('cancel-in-progress') is not True:
         fail(f'{name}: staging must cancel superseded deployments')
 

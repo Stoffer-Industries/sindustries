@@ -70,7 +70,7 @@ jobs:
 
       - name: Deploy (canary)
         working-directory: .
-        run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600
+        run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=${{ github.sha }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 

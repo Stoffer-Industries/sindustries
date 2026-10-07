@@ -5,7 +5,7 @@
 # verifies bin/status:
 #
 #   1. Unknown service fails fast (exit 1).
-#   2. With no target, all three services are reported.
+#   2. With no target, all four services are reported.
 #   3. With one service name, only that service is reported.
 #   4. Missing FLY_API_TOKEN fails preflight (exit 2).
 #   5. JSON output is valid JSON; degraded flag flips to true when the
@@ -67,6 +67,8 @@ JSON
 emit_status_json tasks-api-healthy '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":42},"ProcessTypes":[{"Type":"tasks-api"}],"Machines":[{"ID":"m1","Region":"syd","State":"started","Name":"tasks-api"}],"Services":[{"Protocol":"TCP","Port":4001,"Ports":[{"Type":"tasks-api"}]}]}'
 
 emit_status_json budget-api-healthy '{"Name":"sindustries-budget-api-staging","Status":"running","Deployed":true,"Release":{"Version":7},"ProcessTypes":[{"Type":"budget-api"}],"Machines":[{"ID":"m2","Region":"syd","State":"started","Name":"budget-api"}],"Services":[{"Protocol":"TCP","Port":4002,"Ports":[{"Type":"budget-api"}]}]}'
+
+emit_status_json scheduler-api-healthy '{"Name":"sindustries-content-scheduler-api-staging","Status":"running","Deployed":true,"Release":{"Version":3},"ProcessTypes":[{"Type":"content-scheduler-api"}],"Machines":[{"ID":"m4","Region":"syd","State":"started","Name":"content-scheduler-api"}],"Services":[{"Protocol":"TCP","Port":4003,"Ports":[{"Type":"content-scheduler-api"}]}]}'
 
 emit_status_json worker-healthy '{"Name":"sindustries-auto-post-worker-staging","Status":"running","Deployed":true,"Release":{"Version":11},"ProcessTypes":[{"Type":"auto-post-worker"}],"Machines":[{"ID":"m3","Region":"syd","State":"started","Name":"auto-post-worker"}],"Services":[{"Protocol":"TCP","Port":0,"Ports":[{"Type":"auto-post-worker"}]}]}'
 
@@ -173,10 +175,10 @@ FLY_STATUS_JSON="$(cat "$TMP/tasks-api-legacy-shape.json")" FLY_API_TOKEN=stub F
 assert_eq "legacy-shape exit code" "0" "$?"
 python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["degraded"]==False; assert "tasks-api" in data[0]["processTypesRunning"]'
 
-echo "test: default (no args) reports all three services"
+echo "test: all-service report includes the standalone content scheduler API"
 reset_log
-# Drive --json three times with different healthy payloads; combine the
-# three single-element arrays into one valid JSON document.
+# Drive --json four times with healthy payloads; combine the single-service
+# arrays into one valid JSON document.
 {
     printf '['
     FLY_STATUS_JSON="$(cat "$TMP/tasks-api-healthy.json")" \
@@ -187,12 +189,16 @@ reset_log
       FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
       "$SCRIPT" --json budget-api | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
     printf ','
+    FLY_STATUS_JSON="$(cat "$TMP/scheduler-api-healthy.json")" \
+      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
+      "$SCRIPT" --json content-scheduler-api | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
+    printf ','
     FLY_STATUS_JSON="$(cat "$TMP/worker-healthy.json")" \
       FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
       "$SCRIPT" --json auto-post-worker | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
     printf ']'
   } >"$TMP/out.json"
-assert_eq "three-service exits" "0" "$?"
+assert_eq "four-service exits" "0" "$?"
 python3 -c '
 import json, pathlib
 data = json.loads(pathlib.Path("'$TMP'/out.json").read_text())
@@ -200,10 +206,11 @@ apps = sorted(d["app"] for d in data)
 expected = sorted([
     "sindustries-tasks-api-staging",
     "sindustries-budget-api-staging",
+    "sindustries-content-scheduler-api-staging",
     "sindustries-auto-post-worker-staging",
 ])
 assert apps == expected, f"got {apps}"
-assert all(not d["degraded"] for d in data), "all three should be healthy"
+assert all(not d["degraded"] for d in data), "all four should be healthy"
 '
 
 echo

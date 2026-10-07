@@ -33,6 +33,7 @@ fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+: >"$TMP/devnull"
 
 mkdir -p "$TMP/bin"
 cat >"$TMP/bin/flyctl" <<'STUB'
@@ -72,7 +73,7 @@ exit "${FLY_CURL_EXIT:-0}"
 STUB
 chmod +x "$TMP/bin/curl"
 
-export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-auto-post-worker-staging"}]'
+export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"}]'
 
 reset_log() { : >"$TMP/fly.log"; }
 assert_eq() {
@@ -158,6 +159,13 @@ reset_log
 FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" budget-api --yes --to-version 41
 assert_eq "budget-api rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: releases rollback --app sindustries-budget-api-staging --to-version 41"
+
+echo "test: content-scheduler-api uses the HTTP smoke check"
+reset_log
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" content-scheduler-api --yes
+assert_eq "content-scheduler-api rollback exit code" "0" "$?"
+assert_log_contains "INVOKED: releases rollback --app sindustries-content-scheduler-api-staging"
+assert_log_contains "INVOKED: curl"
 
 echo "test: auto-post-worker uses the log-tail smoke check, not curl"
 reset_log

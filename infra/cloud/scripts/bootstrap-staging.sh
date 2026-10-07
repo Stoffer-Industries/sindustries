@@ -9,14 +9,16 @@
 #   infra/cloud/.env.local  — Quinn-owned file with Fly app names + secret values.
 #                             Never committed; .gitignore'd. Format is the union
 #                             of env/tasks-api.env.example, env/budget-api.env.example,
-#                             and env/auto-post-worker.env.example prefixed by the
+#                             env/content-scheduler-api.env.example, and
+#                             env/auto-post-worker.env.example prefixed by the
 #                             service name (TASKS_API_*, BUDGET_API_*, AUTO_POST_WORKER_*).
 #                             Plus top-level FLY_APP_* aliases if Quinn wants to
 #                             override the default staging app names.
 #
 # Steps (each guarded by a confirm prompt unless --yes is passed):
 #   1. Pre-flight: `fly` CLI installed + authenticated, .env.local readable.
-#   2. Create missing Fly apps (tasks-api, budget-api, auto-post-worker).
+#   2. Create missing Fly apps (tasks-api, budget-api, content-scheduler-api,
+#      auto-post-worker).
 #   3. `fly secrets set` per service from .env.local values.
 #   4. Prisma migrations deploy (tasks-api + budget-api + content-scheduler-api).
 #      budget-api DOES have migrations at services/budget-api/prisma (init + 5 follow-ups).
@@ -56,10 +58,12 @@ ENV_LOCAL="${REPO_ROOT}/infra/cloud/.env.local"
 # Default staging app names match the fly.toml files in infra/cloud/fly/.
 FLY_APP_TASKS_API_DEFAULT="sindustries-tasks-api-staging"
 FLY_APP_BUDGET_API_DEFAULT="sindustries-budget-api-staging"
+FLY_APP_CONTENT_SCHEDULER_API_DEFAULT="sindustries-content-scheduler-api-staging"
 FLY_APP_AUTO_POST_WORKER_DEFAULT="sindustries-auto-post-worker-staging"
 
 FLY_APP_TASKS_API="${FLY_APP_TASKS_API_DEFAULT}"
 FLY_APP_BUDGET_API="${FLY_APP_BUDGET_API_DEFAULT}"
+FLY_APP_CONTENT_SCHEDULER_API="${FLY_APP_CONTENT_SCHEDULER_API_DEFAULT}"
 FLY_APP_AUTO_POST_WORKER="${FLY_APP_AUTO_POST_WORKER_DEFAULT}"
 
 ASSUME_YES=0
@@ -138,7 +142,8 @@ ok "fly CLI authenticated"
 if [[ ! -f "$ENV_LOCAL" ]]; then
   fail "Quinn-owned env file not found: $ENV_LOCAL
   Expected format: union of infra/cloud/env/*.env.example values, prefixed by service name
-  (TASKS_API_*, BUDGET_API_*, AUTO_POST_WORKER_*). Copy infra/cloud/env/.env.example as a
+  (TASKS_API_*, BUDGET_API_*, CONTENT_SCHEDULER_API_*, AUTO_POST_WORKER_*).
+  Copy infra/cloud/env/.env.example as a
   starting point, fill in Quinn-owned values, re-run." 1
 fi
 # shellcheck disable=SC1090
@@ -148,11 +153,13 @@ ok ".env.local loaded"
 # Override Fly app names if Quinn set them in .env.local.
 [[ -n "${FLY_APP_TASKS_API:-}" ]]      && FLY_APP_TASKS_API="$FLY_APP_TASKS_API"
 [[ -n "${FLY_APP_BUDGET_API:-}" ]]     && FLY_APP_BUDGET_API="$FLY_APP_BUDGET_API"
+[[ -n "${FLY_APP_CONTENT_SCHEDULER_API:-}" ]] && FLY_APP_CONTENT_SCHEDULER_API="$FLY_APP_CONTENT_SCHEDULER_API"
 [[ -n "${FLY_APP_AUTO_POST_WORKER:-}" ]] && FLY_APP_AUTO_POST_WORKER="$FLY_APP_AUTO_POST_WORKER"
 
 info "Target Fly apps:"
 info "  tasks-api:           $FLY_APP_TASKS_API"
 info "  budget-api:          $FLY_APP_BUDGET_API"
+info "  content-scheduler:   $FLY_APP_CONTENT_SCHEDULER_API"
 info "  auto-post-worker:    $FLY_APP_AUTO_POST_WORKER"
 
 # ---------- Fly app creation ------------------------------------------------
@@ -190,18 +197,21 @@ fi
 if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
   create_app_if_missing "$FLY_APP_BUDGET_API"
 fi
+if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
+  create_app_if_missing "$FLY_APP_CONTENT_SCHEDULER_API"
+fi
 if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
   create_app_if_missing "$FLY_APP_AUTO_POST_WORKER"
 fi
 
 # ---------- Fly secrets -----------------------------------------------------
 
-# Apply one service's TASKS_API_* / BUDGET_API_* / AUTO_POST_WORKER_* env values as
+# Apply one service's prefixed env values as
 # Fly secrets. Strips the prefix so the secret NAME matches what the service
 # reads (e.g. TASKS_API_DATABASE_URL -> DATABASE_URL).
 apply_secrets_for_service() {
   local app="$1"
-  local prefix="$2"  # TASKS_API / BUDGET_API / AUTO_POST_WORKER
+  local prefix="$2"  # TASKS_API / BUDGET_API / CONTENT_SCHEDULER_API / AUTO_POST_WORKER
 
   # Discover keys via env (printenv), filter to prefix, strip prefix.
   local keys=()
@@ -247,6 +257,9 @@ fi
 if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
   apply_secrets_for_service "$FLY_APP_BUDGET_API" "BUDGET_API"
 fi
+if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
+  apply_secrets_for_service "$FLY_APP_CONTENT_SCHEDULER_API" "CONTENT_SCHEDULER_API"
+fi
 if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
   apply_secrets_for_service "$FLY_APP_AUTO_POST_WORKER" "AUTO_POST_WORKER"
 fi
@@ -271,7 +284,7 @@ if [[ "$RUN_MIGRATIONS" -eq 0 ]]; then
 fi
 
 if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
-  confirm "Apply Prisma migrations on $FLY_APP_TASKS_API + $FLY_APP_BUDGET_API + $FLY_APP_AUTO_POST_WORKER?"
+  confirm "Apply Prisma migrations on $FLY_APP_TASKS_API + $FLY_APP_BUDGET_API + $FLY_APP_CONTENT_SCHEDULER_API?"
   if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "tasks-api" ]]; then
     run_migrations_for_app "$FLY_APP_TASKS_API" "/app/services/tasks-api"
   fi
@@ -282,11 +295,11 @@ if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
     # workdir mirrors the Dockerfile layout (/app/services/budget-api).
     run_migrations_for_app "$FLY_APP_BUDGET_API" "/app/services/budget-api"
   fi
+  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
+    run_migrations_for_app "$FLY_APP_CONTENT_SCHEDULER_API" "/app/services/content-scheduler-api"
+  fi
   if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
-    # Auto-post-worker ships content-scheduler-api's source. Migrations live in
-    # services/content-scheduler-api/prisma. We run via the worker machine
-    # because it's the only always-on process for that service tree.
-    run_migrations_for_app "$FLY_APP_AUTO_POST_WORKER" "/app/services/content-scheduler-api"
+    info "content-scheduler migrations are owned by the HTTP API deploy; worker has no separate migration"
   fi
 fi
 
@@ -313,6 +326,12 @@ if [[ "$RUN_DEPLOY" -eq 1 ]]; then
       || fail "canary deploy failed: budget-api" 4
     ok "deployed: $FLY_APP_BUDGET_API"
   fi
+  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
+    info "deploying $FLY_APP_CONTENT_SCHEDULER_API"
+    "$FLY" deploy --config infra/cloud/fly/content-scheduler-api.fly.toml --strategy canary --wait-timeout 600 \
+      || fail "canary deploy failed: content-scheduler-api" 4
+    ok "deployed: $FLY_APP_CONTENT_SCHEDULER_API"
+  fi
   if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
     info "deploying $FLY_APP_AUTO_POST_WORKER"
     "$FLY" deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary --wait-timeout 600 \
@@ -330,6 +349,7 @@ SIndustries staging environment bootstrap report.
 Apps:
   tasks-api:           https://${FLY_APP_TASKS_API}.fly.dev
   budget-api:          https://${FLY_APP_BUDGET_API}.fly.dev
+  content-scheduler:   https://${FLY_APP_CONTENT_SCHEDULER_API}.fly.dev
   auto-post-worker:    https://${FLY_APP_AUTO_POST_WORKER}.fly.dev (no public HTTP)
 
 Next steps:
