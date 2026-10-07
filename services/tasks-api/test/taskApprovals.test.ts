@@ -21,11 +21,6 @@ const prismaMock = {
 };
 vi.mock('../src/lib/prisma.ts', () => ({ prisma: prismaMock }));
 const { createApp } = await import('../src/app.ts');
-// `attentionOwnersForApproval` is a pure helper exported from taskApprovals.ts
-// for direct AC3 unit coverage. Dynamic-imported alongside `createApp` above
-// so the top-level `prismaMock` binding has been initialised by the time
-// taskApprovals.ts transitively pulls the mocked prisma module.
-const { attentionOwnersForApproval } = await import('../src/routes/taskApprovals.ts');
 
 const TASK_ID = '11111111-1111-1111-1111-111111111111';
 const TOM_TOKEN = 'tom-service-token-long-enough';
@@ -307,6 +302,41 @@ describe('attentionOwners stays untouched on structured approval (task 91864257 
     expect(prismaMock.task.update).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { status: 'doing', owners: ['Rowan'] },
+    { status: 'acceptance', owners: ['Tom', 'Rowan'] }
+  ])('approving then revoking accepted at $status leaves attentionOwners unchanged', async ({ status, owners }) => {
+    const task = {
+      ...activeTask,
+      status,
+      attentionOwners: attentionOwnersFromList(owners)
+    };
+    const approved = approval({ type: 'accepted', owner: 'Tom' });
+    const revoked = approval({ type: 'accepted', owner: 'Tom', state: 'revoked', revokedAt: new Date() });
+    prismaMock.task.findUnique.mockResolvedValue(task);
+    prismaMock.taskApproval.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(approved);
+    prismaMock.taskApproval.upsert.mockResolvedValue(approved);
+    prismaMock.taskApproval.update.mockResolvedValue(revoked);
+    prismaMock.taskComment.create.mockResolvedValue({});
+
+    const app = createApp();
+    const approveRes = await request(app)
+      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
+      .set(auth())
+      .send({ type: 'accepted' });
+    const revokeRes = await request(app)
+      .delete(`/api/v1/tasks/${TASK_ID}/approvals/accepted`)
+      .set(auth());
+
+    expect(approveRes.status).toBe(200);
+    expect(revokeRes.status).toBe(200);
+    expect(prismaMock.taskApproval.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.taskApproval.update).toHaveBeenCalledTimes(1);
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+  });
+
   it('POST of the identical approved state is idempotent and never writes the attentionOwners stack (AC3 idempotency)', async () => {
     const withAttention = {
       ...activeTask,
@@ -365,63 +395,6 @@ describe('attentionOwners stays untouched on structured approval (task 91864257 
     const args = updateArgs();
     expect(args.data.workflowHandoffRoleId).toBe('tech_design_approver');
     expect(args.data).not.toHaveProperty('attentionOwners');
-  });
-});
-
-describe('attentionOwnersForApproval pure helper (task 45a759ac AC3 other-types)', () => {
-  // The `qa_agent` row is materialised by `POST /tasks` and the lobster, not
-  // by the approval route, so there's no end-to-end route flow to assert the
-  // "head != owner → no-op" behaviour through. The pure-helper cases below
-  // pin down the matrix the route handler relies on; they make the contract
-  // explicit and protect the qa_agent mapping from accidental fan-out.
-  it('returns null when current attentionOwners is empty (avoid colliding with the lobster initial-population sweep)', () => {
-    expect(attentionOwnersForApproval([], 'qa_agent', 'approved')).toBeNull();
-    expect(attentionOwnersForApproval([], 'qa_agent', 'revoked')).toBeNull();
-    expect(attentionOwnersForApproval([], 'tech_design', 'revoked')).toBeNull();
-    expect(attentionOwnersForApproval([], 'accepted', 'revoked')).toBeNull();
-  });
-
-  it('pops the head case-insensitively on approval when it matches the type owner and preserves tail entries', () => {
-    expect(attentionOwnersForApproval(['quinn', 'Rowan', 'Tom'], 'tech_design', 'approved')).toEqual(['Rowan', 'Tom']);
-    expect(attentionOwnersForApproval(['ASH', 'Quinn'], 'qa_agent', 'approved')).toEqual(['Quinn']);
-    expect(attentionOwnersForApproval(['Tom', 'Lox'], 'accepted', 'approved')).toEqual(['Lox']);
-  });
-
-  it('returns null on approval when the head does NOT match the type owner', () => {
-    // Covers qa_agent (Ash), tech_design (Quinn), spec (Tom), and accepted
-    // (Tom) against heads that don't line up — all must remain a no-op so
-    // the lobster's next sweep is the only writer that touches them.
-    expect(attentionOwnersForApproval(['Rowan', 'Quinn'], 'qa_agent', 'approved')).toBeNull();
-    expect(attentionOwnersForApproval(['Rowan', 'Quinn'], 'tech_design', 'approved')).toBeNull();
-    expect(attentionOwnersForApproval(['Quinn', 'Ash'], 'spec', 'approved')).toBeNull();
-    expect(attentionOwnersForApproval(['Rowan', 'Quinn'], 'accepted', 'approved')).toBeNull();
-  });
-
-  it('re-prepends the owner on revoke when the owner is absent from the stack and the head does not match', () => {
-    expect(attentionOwnersForApproval(['Rowan'], 'tech_design', 'revoked')).toEqual(['Quinn', 'Rowan']);
-    expect(attentionOwnersForApproval(['Rowan', 'Tom'], 'spec', 'revoked')).toEqual(['Tom', 'Rowan', 'Tom']);
-  });
-
-  it('returns null on revoke when the owner is already at the head', () => {
-    // Position 0 is the sole routing signal; the head-match guard above
-    // already covers the idempotent-revoke case. Any earlier presence lower
-    // in the stack must NOT suppress the prepend — see the next test.
-    expect(attentionOwnersForApproval(['Quinn', 'Rowan'], 'tech_design', 'revoked')).toBeNull();
-    expect(attentionOwnersForApproval(['Ash', 'Rowan', 'Tom'], 'qa_agent', 'revoked')).toBeNull();
-  });
-
-  it('re-prepends the owner on revoke even when the owner is present elsewhere in the stack', () => {
-    // Mirrors the lobster's head-only routing invariant: only position 0
-    // routes actionably, so the gate-owner must sit at the head while their
-    // gate is open even if a stale tail entry already names them. Duplicate
-    // tail entries are tolerated by the lobster's reconciled sweep.
-    expect(attentionOwnersForApproval(['Rowan', 'Ash', 'Tom'], 'qa_agent', 'revoked')).toEqual([
-      'Ash',
-      'Rowan',
-      'Ash',
-      'Tom'
-    ]);
-    expect(attentionOwnersForApproval(['Rowan', 'Tom'], 'spec', 'revoked')).toEqual(['Tom', 'Rowan', 'Tom']);
   });
 });
 

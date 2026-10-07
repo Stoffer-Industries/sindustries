@@ -6,7 +6,7 @@ import { parseTaskId } from './tasks/_validation.ts';
 import { mapTaskApproval } from './tasks/_mapper.ts';
 import { validApprovalTypes } from './tasks/_constants.ts';
 import { loadRequiredApprovalsConfig, requiredApprovalsFor } from '../config/requiredApprovals.ts';
-import { attentionOwnerForApproval, workflowHandoffForApproval } from '../config/workflowHandoffs.ts';
+import { workflowHandoffForApproval } from '../config/workflowHandoffs.ts';
 
 export const taskApprovalsRouter = Router();
 
@@ -57,63 +57,6 @@ function approvalHandoffUpdate(task, type: ApprovalType, action: 'approved' | 'r
   // routes/taskAttentionOwners.ts. The two planes never co-write.
 
   return Object.keys(update).length > 0 ? update : null;
-}
-
-/**
- * Compute the desired `attentionOwners[]` array after a structured approval
- * write, mirroring the lobster's `reconciled_attention_owners` else-branch
- * for the head-slot-pop / head-slot-prepend path.
- *
- * Returns:
- *   - `null` when the approval type has no attention-owner mapping, when the
- *     current head is unrelated (e.g. the assignee is at position 0 and the
- *     just-recorded approval satisfies a different gate), or when no change
- *     is needed (idempotent). The caller treats `null` as "leave the array
- *     alone; let the lobster's next sweep handle the broader reconciliation."
- *   - The new array otherwise.
- *
- * Behaviour:
- *   - approved + head matches type's owner → remove the head (single pop).
- *     Tail slots (including duplicates) are preserved byte-for-byte.
- *   - revoked + head does NOT match type's owner → prepend the owner, even
- *     when the owner is already present lower in the stack. Only position 0
- *     routes actionably, and the gate-owner must be there while their gate
- *     is open (the lobster tolerates duplicates; matching it preserves the
- *     invariant it relies on).
- *   - revoked + head already matches → no-op (idempotent).
- *   - anything else (head doesn't match on approve, no owner for this type) → null.
- *
- * Case-insensitive comparison mirrors the lobster's `eq_ignore_ascii_case`
- * so a task created with `"tom"` at the head behaves identically to `"Tom"`.
- */
-export function attentionOwnersForApproval(
-  current: string[],
-  type: ApprovalType,
-  action: 'approved' | 'revoked'
-): string[] | null {
-  const owner = attentionOwnerForApproval(type);
-  if (!owner) return null;
-  // Reconciliation only applies when there is existing state to reconcile.
-  // An empty `current` array means the lobster has not yet populated the
-  // stack (e.g. a task that has only ever held a single approval write);
-  // injecting an entry here would collide with the lobster's broader
-  // initial-population sweep on the next stage call, and it also breaks
-  // pre-existing tests whose fixtures intentionally model the unset case.
-  if (current.length === 0) return null;
-  const matchesOwner = (o: string) => o.trim().toLowerCase() === owner.toLowerCase();
-  const head = current[0];
-  if (action === 'approved') {
-    return head !== undefined && matchesOwner(head) ? current.slice(1) : null;
-  }
-  // action === 'revoked'
-  // Only the head slot routes actionably; the lobster (Rust) treats head as
-  // the sole routing signal and tolerates duplicates lower in the stack.
-  // If the owner is already at the head (above) this is an idempotent revoke
-  // — no-op. Any other presence (e.g. owner in the tail from an earlier
-  // reconciliation pass) must NOT suppress the prepend, because the gate-
-  // owner must be at position 0 while their gate is open.
-  if (head !== undefined && matchesOwner(head)) return null;
-  return [owner, ...current];
 }
 
 export function approvalAuditBody(type: ApprovalType, action: 'approved' | 'revoked', actor: string) {
