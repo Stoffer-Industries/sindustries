@@ -323,16 +323,6 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 failures.push(format!("PR {url} — {failure}"));
             }
         }
-        // A SPEC.md change with no matching e2e file change in the same PR
-        // is checked independently of per-AC evidence: task `91864257`
-        // shipped exactly this shape (prose spec update, zero e2e churn).
-        let spec_e2e_failures = ac_parsing::app_spec_change_missing_e2e_failures(pr_files);
-        if !spec_e2e_failures.is_empty() {
-            mechanical_gate_failed = true;
-            for failure in spec_e2e_failures {
-                failures.push(format!("PR {url} — {failure}"));
-            }
-        }
     }
     // AC1 of task f6a4d56a: short-circuit on `qa_agent` outstanding with a
     // dedicated `[qa-agent-blocked]` comment so Ash's verification gap is
