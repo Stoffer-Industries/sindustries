@@ -71,6 +71,28 @@ an implementation/evidence failure, not a capability deferral. Do not post
 the structured `qa_agent` approval until the e2e path is delivered and its CI
 result or direct execution is verified.
 
+### App-spec changes require captured e2e coverage
+
+When a delivery PR changes `apps/<app>/SPEC.md`, Ash must inspect the spec
+diff itself, not just confirm that the document was touched. Any new or
+changed user-visible flow, screen, interaction, or behavioural contract
+described there must have a matching e2e spec added or updated in that same
+delivery, and the app spec's e2e-coverage table/list must link the flow to
+that test file. A prose-only coverage-table row, a component test, or an API
+test does not satisfy this — those prove the code runs in isolation, not that
+the described flow is reachable and exercised end-to-end.
+
+If the spec diff adds or changes user-visible behaviour without a
+corresponding e2e test change in the same delivery, classify the affected
+AC(s) as **blocked** and name the exact spec flow and the missing test path
+in the report. Only accept a non-e2e fallback when the approved tech design
+explicitly records why browser automation is impossible or disproportionate
+for that flow and names the replacement verification layer; absence of a
+recorded rationale is not an exception. This check applies to the delivery as
+a whole — if an earlier contributing PR touched the spec, the merged set of
+PRs must still contain the matching test and coverage-map entry before Ash
+approves.
+
 1. Fetch the full task and current delivery PR.
 2. For a `doing` task with the current `qa_agent` gate, reason over the
    AC descriptions + the PR diff + cited tests + cited files via the
