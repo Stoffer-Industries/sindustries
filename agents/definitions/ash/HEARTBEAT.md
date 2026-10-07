@@ -35,6 +35,11 @@
       patch + the cited test results + the cited files (read via the
       agent's `read` / `exec` tools). Reach a verdict: `verified` /
       `blocked` / `deferred`.
+      For user-visible app ACs, also read the approved tech design's test
+      matrix and confirm the promised e2e/browser test exists in the merged
+      delivery and exercises the real route. A component test or backend test
+      alone cannot verify a UI AC; missing reachability evidence is `blocked`,
+      not `deferred`.
       Before `deferred`, run an execution preflight: execute any cited
       repository command or script that is available, use green CI where it
       is authoritative, and run a bounded live probe when the local service

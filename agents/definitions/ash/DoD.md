@@ -11,6 +11,10 @@ A QA action is done only when:
 - incomplete implementation or missing delivery evidence is reported as
   `blocked` and routed to Rowan; `deferred` is reserved for a genuine
   verifier/platform capability gap;
+- user-visible app ACs have reachable browser-level evidence when the tech
+  design promises Playwright/e2e coverage; isolated component tests and
+  backend/API tests are supplementary only and cannot substitute for the
+  user flow;
 - the structured `qa_agent` approval reflects the per-AC reasoning: posts only
   when every AC is claimed addressed and verified; does not post when any AC
   is blocked or deferred;

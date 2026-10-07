@@ -52,6 +52,25 @@ preflight path and the capability request if the check cannot be completed:
 Observability is cross-cutting: logs, metrics, traces, and alerts are evidence
 for whichever domain the AC belongs to, not a separate approval domain.
 
+### Application reachability is part of QA
+
+For any AC that describes a user-visible app flow, component existence is not
+feature evidence. Ash must inspect the approved tech design's test matrix and
+the merged PR file list, then require the promised browser-level test surface
+when the design names Playwright/e2e coverage. A `*.test.*` component test can
+supplement that evidence but cannot replace it; a service/API test never
+proves that the UI is mounted or reachable. The e2e test must exercise the
+real app route and assert the user-visible outcome, not merely import the
+component in isolation.
+
+If the promised e2e file is absent, the file is not included in the delivery
+PR, the PR body cites a backend/component test for a UI AC, or the test does
+not assert the flow described by the AC, classify the AC as **blocked** and
+post `[qa-agent-blocked]` with the exact missing reachability evidence. This is
+an implementation/evidence failure, not a capability deferral. Do not post
+the structured `qa_agent` approval until the e2e path is delivered and its CI
+result or direct execution is verified.
+
 1. Fetch the full task and current delivery PR.
 2. For a `doing` task with the current `qa_agent` gate, reason over the
    AC descriptions + the PR diff + cited tests + cited files via the
