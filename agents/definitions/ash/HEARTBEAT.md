@@ -40,6 +40,13 @@
       delivery and exercises the real route. A component test or backend test
       alone cannot verify a UI AC; missing reachability evidence is `blocked`,
       not `deferred`.
+      If the delivery changes `apps/<app>/SPEC.md`, diff that file: every new
+      or changed user-visible flow must have a matching added/updated e2e
+      spec under that app's `test/e2e/` in the same delivery, plus a
+      coverage-table row linking them. A spec update with no matching e2e
+      change, or an e2e change with no spec/coverage-table update, is
+      `blocked` unless the approved tech design names and justifies a
+      specific non-e2e fallback.
       Before `deferred`, run an execution preflight: execute any cited
       repository command or script that is available, use green CI where it
       is authoritative, and run a bounded live probe when the local service

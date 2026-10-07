@@ -15,6 +15,11 @@ A QA action is done only when:
   design promises Playwright/e2e coverage; isolated component tests and
   backend/API tests are supplementary only and cannot substitute for the
   user flow;
+- a delivery that changes `apps/<app>/SPEC.md` also adds/updates a matching
+  e2e spec and coverage-table row for every new or changed user-visible flow
+  in that spec diff; a prose-only spec update is blocked, not deferred,
+  unless the approved tech design explicitly records a non-e2e fallback and
+  its rationale;
 - the structured `qa_agent` approval reflects the per-AC reasoning: posts only
   when every AC is claimed addressed and verified; does not post when any AC
   is blocked or deferred;
