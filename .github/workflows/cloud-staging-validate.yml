@@ -57,7 +57,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # fetch-depth: 2 so the intent-scope step below can
+          # `git diff-tree -r ${INTENT_COMMIT}^ ${INTENT_COMMIT}` and
+          # classify the diff as tests-only or full. A shallow
+          # single-commit clone (the prior default) returns no parent
+          # and silently disables the scope relaxation.
+          fetch-depth: 2
 
       - name: Resolve intent commit
         id: intent
@@ -77,6 +82,48 @@ jobs:
             exit 1
           fi
           echo "intent_commit=${input_commit}" >> "$GITHUB_OUTPUT"
+
+      # Diff-stash the intent commit against its parent and classify the
+      # diff as "tests-only" when every changed file falls under an
+      # allow-list of harness-only paths (tests/, docs/, and this
+      # workflow file itself). Tests-only diffs do not rebuild the
+      # deploy-staging-* service images, so the harness can accept the
+      # deployed service version without requiring a fresh deploy cycle.
+      # The harness reads STAGING_INTENT_SCOPE and relaxes matchesIntent
+      # accordingly. Without this step the harness returns verdict=fail
+      # on every dispatch against a tests-only fix commit, which
+      # prevents iteration (dispatch run 37649924730, 2026-10-07T16:10Z,
+      # intent ff5a7e0c2d; the diff was tests/cloud/staging-workflows.mjs
+      # only but the verdict still failed because deployed services
+      # were at f986d30ed).
+      - name: Determine intent commit scope
+        id: scope
+        env:
+          INTENT_COMMIT: ${{ steps.intent.outputs.intent_commit }}
+        run: |
+          set -euo pipefail
+          # git diff-tree needs both endpoints in the local repo; the
+          # checkout step above fetches depth 2 to make that possible.
+          # If the parent is missing (e.g. an initial-commit dispatch),
+          # the diff is empty and the scope defaults to "full".
+          parent_sha=$(git rev-parse "${INTENT_COMMIT}^" 2>/dev/null || true)
+          if [[ -z "${parent_sha}" ]]; then
+            echo "intent_scope=full" >> "$GITHUB_OUTPUT"
+            echo "intent_scope_reason=initial-commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff-tree --no-commit-id --name-only -r "${parent_sha}" "${INTENT_COMMIT}" || true)
+          # Allow-list: tests/, docs/, and this single workflow file.
+          # Any change outside the allow-list forces a full redeploy
+          # cycle so the deployed SHA can match the intent commit.
+          non_tests_only=$(printf '%s\n' "${changed}" | grep -vE '^(tests/|docs/|\.github/workflows/cloud-staging-validate\.yml$)' || true)
+          if [[ -z "${non_tests_only}" && -n "${changed}" ]]; then
+            echo "intent_scope=tests-only" >> "$GITHUB_OUTPUT"
+            echo "intent_scope_reason=diff is entirely tests/docs/validate-workflow" >> "$GITHUB_OUTPUT"
+          else
+            echo "intent_scope=full" >> "$GITHUB_OUTPUT"
+            echo "intent_scope_reason=diff includes non-tests-only paths" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -141,6 +188,45 @@ jobs:
           npm --workspace services/budget-api run prisma:migrate
           echo "budget_migrate_ok=true" >> "$GITHUB_OUTPUT"
 
+      # Wake the content-scheduler machines before the AC2 harness so
+      # scheduler.health does not have to wait through a 15-second
+      # AbortController timeout while the Fly Machine cold-starts.
+      # Dispatch runs 37649053268, 37649068433, 37649135686, and
+      # 37649924730 (all 2026-10-07T16:03-16:10Z) failed scheduler.health
+      # with code 20 ("This operation was aborted") because the
+      # autostopped machines never woke up within the harness's 15s
+      # timeout — the verdict JSON reported contentScheduler.version=null
+      # for that reason, which cascaded into matchesIntent=false.
+      - name: Wake content-scheduler machines
+        if: env.SCHEDULER_API_URL != ''
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          app="sindustries-content-scheduler-api-staging"
+          # Find currently-stopped machines and start each one. Using
+          # `fly machines list --json` (not `fly machines start --app`)
+          # because Fly's bulk-start sometimes errors when a machine is
+          # already started or in a transitional state; starting by ID
+          # is idempotent on already-started machines (Fly returns
+          # "already started" and exits 0).
+          stopped_ids=$(fly machines list --app "${app}" --json 2>/dev/null \
+            | jq -r '.[] | select(.state == "stopped") | .id' || true)
+          if [[ -z "${stopped_ids}" ]]; then
+            echo "no stopped machines — skipping wake"
+            exit 0
+          fi
+          while IFS= read -r mid; do
+            [[ -z "${mid}" ]] && continue
+            echo "waking machine ${mid}"
+            fly machines start "${mid}" --app "${app}" || \
+              echo "warn: failed to start ${mid} (continuing)"
+          done <<<"${stopped_ids}"
+          # Allow up to 60s for cold-start + readiness probe. The
+          # harness's 15s per-request timeout will then easily hit a
+          # warm machine.
+          sleep 30
+
       - name: Mint budget-api synthetic session
         id: budget-mint
         env:
@@ -180,6 +266,7 @@ jobs:
           STAGING_SCHEDULER_TOKEN:  ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           STAGING_BUDGET_TOKEN_FILE: /tmp/budget-smoke-bearer
           STAGING_INTENT_COMMIT:    ${{ steps.intent.outputs.intent_commit }}
+          STAGING_INTENT_SCOPE:     ${{ steps.scope.outputs.intent_scope }}
           # Quinn beat 283 (2026-09-24 04:50 NZST): run 35858190813 exited 1
           # with zero captured stdout/stderr between step start and exit.
           # The harness now writes a structured crash JSON (artifacts/harness-

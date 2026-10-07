@@ -250,6 +250,20 @@ test('harness writes a structured crash JSON when main() throws', async () => {
   }
 });
 
+test('harness source honors STAGING_INTENT_SCOPE for matchesIntent', () => {
+  // Dispatch run 37649924730 (2026-10-07T16:10Z) failed at verdict=fail
+  // even though every check passed, because the intent commit
+  // (ff5a7e0c2d, tests/cloud/staging-workflows.mjs only) had no service
+  // image to redeploy and the harness required deployed SHA === intent
+  // SHA. The fix reads STAGING_INTENT_SCOPE; tests-only relaxes the
+  // requirement to "any non-null deployed version", letting the harness
+  // iterate on harness-only fixes without forcing a fresh deploy cycle.
+  const harness = readFileSync(HARNESS, 'utf8');
+  assert.match(harness, /STAGING_INTENT_SCOPE/);
+  assert.match(harness, /intentScope === 'tests-only'/);
+  assert.match(harness, /deployedVersion !== null/);
+});
+
 test('harness exposes writeCrashJson via env-overridable crash file path', () => {
   // Source contract: the harness must (a) declare the HARNESS_CRASH_OUT_DIR
   // and HARNESS_CRASH_OUT_FILE env hooks, and (b) wire process-level
