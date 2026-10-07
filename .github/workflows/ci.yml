@@ -55,6 +55,13 @@ jobs:
               - 'package-lock.json'
               - 'infra/cloud/**'
               - '.github/workflows/deploy-staging-budget-api.yml'
+            content_scheduler_api:
+              - 'services/content-scheduler-api/**'
+              - 'packages/otel-node/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'infra/cloud/**'
+              - '.github/workflows/deploy-staging-content-scheduler-api.yml'
             auto_post_worker:
               - 'services/content-scheduler-api/**'
               - 'packages/otel-node/**'
@@ -1033,6 +1040,18 @@ jobs:
       needs.merge-gate.result == 'success' &&
       needs.changes.outputs.budget_api == 'true'
     uses: ./.github/workflows/deploy-staging-budget-api.yml
+    secrets: inherit
+
+  deploy-content-scheduler-api-staging:
+    name: content-scheduler-api staging
+    needs: [changes, merge-gate]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.merge-gate.result == 'success' &&
+      needs.changes.outputs.content_scheduler_api == 'true'
+    uses: ./.github/workflows/deploy-staging-content-scheduler-api.yml
     secrets: inherit
 
   deploy-auto-post-worker-staging:

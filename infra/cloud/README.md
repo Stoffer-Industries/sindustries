@@ -31,7 +31,7 @@ infra/cloud/
     └── bootstrap-staging.sh
 ```
 
-CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this subtree): `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-auto-post-worker.yml`.
+CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this subtree): `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml`, `deploy-staging-auto-post-worker.yml`.
 
 Mission Control and the Tasks app are static Vite SPAs and deploy as separate
 Vercel projects using their co-located `apps/<app>/vercel.json` files. They
@@ -44,6 +44,7 @@ runtime for APIs and workers.
 | ----------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `sindustries-tasks-api-staging`        | `services/tasks-api/`        | Tasks/approvals/tags/analytics/feature-task API. Health at `/health`. Port 4001.       |
 | `sindustries-budget-api-staging`       | `services/budget-api/`       | Budget + Akahu integration. Health at `/health`. Port 4002.                            |
+| `sindustries-content-scheduler-api-staging` | `services/content-scheduler-api/` | Content Scheduler HTTP owner. Health at `/health`. Port 4003.                         |
 | `sindustries-auto-post-worker-staging` | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` | Long-running BullMQ consumer. **Not** HTTP-exposed. Same Fly machine isolation rationale as the `gymtrack-mcp` precedent. |
 
 The auto-post-worker source lives in `services/content-scheduler-api/` after the 94d5e4fc extraction — the design predates that move but Quinn's APPROVED review on PR #508 stated "implementation PRs can stack on top", so the worker Fly app builds from content-scheduler-api's source tree.
@@ -83,12 +84,19 @@ fly secrets set --app sindustries-auto-post-worker-staging \
   X_ACCESS_TOKEN=... \
   X_ACCESS_TOKEN_SECRET=...
 
+fly secrets set --app sindustries-content-scheduler-api-staging \
+  DATABASE_URL=... \
+  REDIS_URL=... \
+  CONTENT_SCHEDULER_REDIS_URL=... \
+  CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS=...
+
 # 2. Deploy (CI does this on push to main; manual override via workflow_dispatch)
 fly deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary
+fly deploy --config infra/cloud/fly/content-scheduler-api.fly.toml --strategy canary
 fly deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary
 ```
 
-The CI workflow runs `--strategy canary` for every deploy. For HTTP services (tasks-api, budget-api) the post-deploy smoke check curls `/health`. For the auto-post-worker (no HTTP) the smoke check greps `fly logs` for the worker's structured startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section — the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
+The CI workflow runs `--strategy canary` for every deploy. For HTTP services (tasks-api, budget-api, content-scheduler-api) the post-deploy smoke check curls `/health`. For the auto-post-worker (no HTTP) the smoke check greps `fly logs` for the worker's structured startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section — the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
 
 ## Operator wrappers (task 2850c5ac)
 
@@ -101,7 +109,7 @@ the same Fly apps via the local `flyctl` CLI, not via GitHub Actions.
 # Without --image the deploy builds from local source (no registry push).
 infra/cloud/bin/deploy tasks-api --image registry/repo:abc123
 
-# Inspect the running state of all three staging services.
+# Inspect the running state of all four staging services.
 infra/cloud/bin/status
 infra/cloud/bin/status tasks-api --json
 
@@ -110,6 +118,7 @@ infra/cloud/bin/status tasks-api --json
 # exits without invoking flyctl.
 infra/cloud/bin/rollback tasks-api --dry-run
 infra/cloud/bin/rollback budget-api --yes
+infra/cloud/bin/rollback content-scheduler-api --yes
 infra/cloud/bin/rollback auto-post-worker --yes --to-version 41
 ```
 

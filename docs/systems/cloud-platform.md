@@ -2,10 +2,10 @@
 
 **Type:** System reference (handover)
 **Status:** Implemented for staging
-**Last updated:** 2026-09-18
+**Last updated:** 2026-10-07
 **Owner:** Rowan (engineering); Quinn owns the live cloud account + secrets
 **Repos:** `Stoffer-Industries/sindustries`
-**App:** Staging target on Fly.io (Sydney region) for `tasks-api`, `budget-api`, `auto-post-worker`
+**App:** Staging target on Fly.io (Sydney region) for `tasks-api`, `budget-api`, `content-scheduler-api`, `auto-post-worker`
 
 > **Naming history:** this workstream was originally scoped as a separate "SIndustries Cloud Platform" spec (task `b2f62c36`). The artefacts land under `infra/cloud/` plus `docs/systems/cloud-platform.md` as the handover doc. The prior `docs/runbooks/cloud-deployment-rollback.md` and `docs/runbooks/rotate-akahu-access-tokens.md` were removed in PR #583 (operational runbooks no longer live in this repo — see `agents/definitions/README.md` "Where operational runbooks live"); their content lives in `~/.openclaw/workspace/docs/infra/runbooks/` or, for the rollback steps, in `docs/specs/cloud-deployment-foundation-tech-design.md`. Live deployment to production is a follow-on tracked under the broader cloud migration plan (tasks `206927ed`, `2850c5ac`, `020f423e`, `f2c23e26`, `d37681e1`, `4b3d6e9c`); this document covers the **staging** target only.
 
@@ -27,7 +27,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | -------------------------------- | -------------------------------------------------------- | ------ | ------------------------------------------------------------- |
 | Compute                          | Fly.io (managed VMs, regional)                           | Quinn  | `infra/cloud/fly/*.fly.toml`                                  |
 | Application packaging            | Dockerfiles, per service                                 | Rowan  | `infra/cloud/docker/*.Dockerfile`                             |
-| HTTP services (tasks-api, budget-api) | Fly `http_service` block + `http_checks` to `/health`  | Rowan  | `infra/cloud/fly/{tasks-api,budget-api}.fly.toml`             |
+| HTTP services (tasks-api, budget-api, content-scheduler-api) | Fly `http_service` block + `http_checks` to `/health` | Rowan | `infra/cloud/fly/{tasks-api,budget-api,content-scheduler-api}.fly.toml` |
 | Long-running worker              | Separate Fly app process (no HTTP)                       | Rowan  | `infra/cloud/fly/auto-post-worker.fly.toml`                   |
 | Primary database                 | Neon managed Postgres (syd region, branch-per-env)       | Quinn  | Neon dashboard (URLs in `infra/cloud/env/*.env.example`)      |
 | Queue + cache                    | Upstash managed Redis (TLS, pay-per-request)             | Quinn  | Upstash dashboard (URLs in `infra/cloud/env/*.env.example`)   |
@@ -76,7 +76,7 @@ Fly.io is the right shape for the foundation milestone: low operational overhead
 
 ## Region
 
-All three services run in **`syd` (Sydney, Australia)**. Reasoning:
+All four staging services run in **`syd` (Sydney, Australia)**. Reasoning:
 
 1. Matches Tom/Quinn geography — operator on-call windows align with business hours.
 2. Akahu (NZ open-banking) integration in `services/budget-api` benefits from low latency to NZ endpoints.
@@ -89,16 +89,16 @@ Production may move to `syd` or `nrt` (Tokyo) once traffic patterns emerge. The 
 
 ## Cost model
 
-Current staging cost (3 services, near-idle):
+Current staging cost (4 services, near-idle):
 
 | Resource                                        | Monthly estimate         | Notes                                                |
 | ----------------------------------------------- | ------------------------ | ---------------------------------------------------- |
-| Fly — 3 × `shared-cpu-1x` 1 GB machines         | ~$15/mo                  | `auto_stop_machines=stop` keeps idle cost low        |
+| Fly — 4 × `shared-cpu-1x` 1 GB machines         | ~$20/mo                  | HTTP services stop when idle; the worker stays available for queued jobs |
 | Neon — staging branch (free tier)               | $0                       | Free tier covers staging; production will move to Pro |
 | Upstash — staging Redis (free tier)             | $0                       | Pay-per-request model; staging won't exceed free     |
 | Domain — `sindustries.dev` (annual)             | ~$15/yr (~$1.25/mo)      | Quinn-registered                                     |
 | GH Actions (deploys on push to main)            | $0                       | Within repo free tier                                |
-| **Total staging**                               | **~$16/mo**              |                                                      |
+| **Total staging**                               | **~$21/mo**              |                                                      |
 
 Production cost projection (when traffic is real): dominated by Neon compute-hours + Upstash request volume. Re-estimate when the production cutover task (`020f423e`) starts.
 
@@ -129,6 +129,7 @@ Until DNS lands, deploys use the default `*.fly.dev` URLs:
 
 - `https://sindustries-tasks-api-staging.fly.dev/health`
 - `https://sindustries-budget-api-staging.fly.dev/health`
+- `https://sindustries-content-scheduler-api-staging.fly.dev/health`
 - `https://sindustries-auto-post-worker-staging.fly.dev` (no HTTP — Fly supervises by PID)
 
 Once DNS lands, point `<service>.staging.sindustries.dev` CNAMEs at the matching `*.fly.dev` host and update the smoke check URLs in the deploy workflows.
@@ -163,7 +164,7 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 
 Fly reusable workflows run a credential preflight, install a commit-pinned setup action and version-pinned `flyctl`, run `flyctl deploy --strategy canary`, then smoke-check:
 
-- **HTTP services** — curl `https://<app>.fly.dev/health` (10 retries, 5s apart). The `/health` route is mounted in `services/tasks-api/src/app.ts` (and the equivalent in budget-api); Fly's `[[services.http_checks]]` block in the `fly.toml` hits the same route on the 15s interval.
+- **HTTP services** — curl `https://<app>.fly.dev/health` (10 retries, 5s apart). Tasks, Budget, and Content Scheduler each expose `/health`; Fly's `[[http_service.checks]]` block hits the same route every 15 seconds.
 - **Worker** — `flyctl logs --app <app> --no-tail | grep '\[content-scheduler-worker\] starting (adapter=bullmq)'`. A clean boot line means Prisma connected + the BullMQ worker registered. Fly's process supervisor handles PID liveness; there's no `http_service` block to monitor.
 
 If the smoke check fails, the deploy job exits non-zero. Quinn/Lox investigates via `flyctl logs --app <app>` and either forward-fixes or rolls back per the rollback procedure in `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section (the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
@@ -252,4 +253,4 @@ Each run produces a dated evidence record at `docs/infra/cloud-staging-validatio
 - The workflow refuses to run with an empty `FLY_ORG` (silent fail-fast is worse than a loud refusal at workflow start).
 - AC3 requires Quinn-owned Grafana Cloud + Neon + Fly secrets to land under task `31233a0a`; until then the failure-drill step emits `AC3_OBSERVABILITY_VERIFICATION_UNIMPLEMENTED` as an accepted limitation.
 - The `bin/{deploy,status,rollback}` wrappers in `infra/cloud/bin/` are operator hotfix paths; they are NOT a replacement for the CI workflows and they MUST NOT be used to bypass the merge gate.
-- Per-deploy intent commit SHA is exposed on every service `/health` as `version: process.env.GIT_COMMIT_SHA`; the AC2 harness asserts `matchesIntent === true` for all three services using this signal.
+- Per-deploy intent commit SHA is exposed on every HTTP service `/health` as `version: process.env.GIT_COMMIT_SHA`; the AC2 harness asserts `matchesIntent === true` for Tasks, Budget, and Content Scheduler using this signal.

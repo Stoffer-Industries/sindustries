@@ -21,6 +21,7 @@ const ARCHIVE_REF = 'https://www.techmanagerweekly.com/issue/2026-08-04';
 const STRONG_REF = 'https://staysaasy.com/p/slow-iteration';
 const BOUNDARY_REF = 'https://lethain.com/boundaries/';
 const HIRING_REF = 'https://lethain.com/hiring-receiving-role/';
+const originalIngestSecret = process.env.CONTENT_SCHEDULER_INGEST_SECRET;
 
 function itemBody(body: string, sourceRef: string, scheduledFor?: string) {
   return {
@@ -38,6 +39,7 @@ function asPersisted(ref: string, id?: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.CONTENT_SCHEDULER_INGEST_SECRET;
   // Default: every requested sourceRef already exists → 0 created.
   prismaMock.contentSchedulerItem.createMany.mockImplementation(async ({ data }: any) => {
     const rows = Array.isArray(data) ? data : [];
@@ -47,7 +49,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.CONTENT_SCHEDULER_INGEST_SECRET;
+  if (originalIngestSecret === undefined) {
+    delete process.env.CONTENT_SCHEDULER_INGEST_SECRET;
+  } else {
+    process.env.CONTENT_SCHEDULER_INGEST_SECRET = originalIngestSecret;
+  }
 });
 
 describe('POST /content-scheduler/imports/cto-craft', () => {

@@ -6,6 +6,6 @@ healthRouter.get('/health', (_req, res) => {
   res.status(200).json({
     status: 'ok',
     service: 'content-scheduler-api',
-    timestamp: new Date().toISOString(),
+    version: process.env.GIT_COMMIT_SHA ?? null,
   });
 });

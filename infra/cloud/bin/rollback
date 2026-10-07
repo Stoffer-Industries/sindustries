@@ -38,16 +38,19 @@ fi
 declare -A FLY_APP_FOR=(
   [tasks-api]="sindustries-tasks-api-staging"
   [budget-api]="sindustries-budget-api-staging"
+  [content-scheduler-api]="sindustries-content-scheduler-api-staging"
   [auto-post-worker]="sindustries-auto-post-worker-staging"
 )
 declare -A FLY_CONFIG_FOR=(
   [tasks-api]="infra/cloud/fly/tasks-api.fly.toml"
   [budget-api]="infra/cloud/fly/budget-api.fly.toml"
+  [content-scheduler-api]="infra/cloud/fly/content-scheduler-api.fly.toml"
   [auto-post-worker]="infra/cloud/fly/auto-post-worker.fly.toml"
 )
 declare -A FLY_HEALTH_URL_FOR=(
   [tasks-api]="https://sindustries-tasks-api-staging.fly.dev/health"
   [budget-api]="https://sindustries-budget-api-staging.fly.dev/health"
+  [content-scheduler-api]="https://sindustries-content-scheduler-api-staging.fly.dev/health"
   [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
 )
 
