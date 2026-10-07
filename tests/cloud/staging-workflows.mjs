@@ -670,6 +670,17 @@ async function runHarness() {
   // Cleanup always runs, even on partial failure.
   const cleanupResults = await cleanup.runAll();
 
+  // intent_scope is computed by the workflow from `git diff-tree -r
+  // ${INTENT_COMMIT}^ ${INTENT_COMMIT}` against an allow-list of
+  // tests-only paths (tests/, docs/, .github/workflows/cloud-staging-validate.yml).
+  // When the intent commit only touches those paths, the deploy-staging-*
+  // workflows will not have rebuilt new service images, so the deployed
+  // service version cannot equal the intent SHA. Accept "tests-only" by
+  // requiring only that a deployed version is reported (i.e. /health
+  // returned a SHA), so the harness can iterate on harness-only fixes
+  // without forcing a redundant redeploy.
+  const intentScope = process.env.STAGING_INTENT_SCOPE ?? 'full';
+
   const servicesByName = {
     tasksApi: { url: ctx.tasksApiUrl, version: null, matchesIntent: false },
     budgetApi: { url: ctx.budgetApiUrl, version: null, matchesIntent: false },
@@ -682,8 +693,12 @@ async function runHarness() {
   ]) {
     const c = runner.checks.find((x) => x.name === check);
     if (c?.status === 'pass') {
-      servicesByName[key].version = c.details?.version ?? null;
-      servicesByName[key].matchesIntent = c.details?.version === ctx.intentCommit;
+      const deployedVersion = c.details?.version ?? null;
+      servicesByName[key].version = deployedVersion;
+      servicesByName[key].matchesIntent =
+        intentScope === 'tests-only'
+          ? deployedVersion !== null
+          : deployedVersion === ctx.intentCommit;
     } else {
       servicesByName[key].matchesIntent = false;
     }
@@ -693,10 +708,12 @@ async function runHarness() {
   const checksOk = runner.checks.every((c) => c.status !== 'fail');
   // Codex P1 #5: every run declares an intentCommit, and every
   // service's reported version must match it for the verdict to be
-  // pass. Prior code only factored checksOk && cleanupOk, which let a
-  // green check set return verdict=pass even when the deployed
-  // version was stale or unrelated. Missing or invalid intentCommit
-  // values are rejected during argument validation.
+  // pass — except when the intent commit is tests-only, in which case
+  // any non-null deployed version is acceptable (see intentScope
+  // block above). Prior code only factored checksOk && cleanupOk,
+  // which let a green check set return verdict=pass even when the
+  // deployed version was stale or unrelated. Missing or invalid
+  // intentCommit values are rejected during argument validation.
   const allServicesMatchIntent = Object.values(servicesByName).every(
     (s) => s.matchesIntent === true
   );
