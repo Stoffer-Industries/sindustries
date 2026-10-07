@@ -239,7 +239,7 @@ class CheckRunner {
         endedAt,
         details: details ?? {}
       });
-      return true;
+      return details ?? true;
     } catch (err) {
       const endedAt = new Date().toISOString();
       // Schema contract: tests/cloud/staging-validation.schema.json declares
@@ -353,7 +353,7 @@ async function tasksApiFlow(runner, ctx, cleanup) {
     return { taskId: json.data.id, title: REDACTED };
   });
   if (!created) return null;
-  const taskId = created.details.taskId;
+  const taskId = created.taskId;
 
   // READ
   await runner.run('tasks.read', async () => {
@@ -563,7 +563,7 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
     return { itemId: json.data.id, scheduledFor: REDACTED };
   });
   if (!created) return null;
-  const itemId = created.details.itemId;
+  const itemId = created.itemId;
 
   // APPROVE
   await runner.run('scheduler.approve', async () => {
