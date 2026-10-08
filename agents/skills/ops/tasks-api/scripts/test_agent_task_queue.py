@@ -86,6 +86,34 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(item["classification"], "DEPENDENCY_BLOCKED")
         self.assertEqual(item["topAttentionOwner"], "Rowan")
 
+    def test_matching_attention_owner_remains_actionable_when_not_dependency_blocked(self):
+        # Confirms the fix is scoped to the blocked case only: a normal
+        # attentionOwners[0] handoff (no incomplete dependency) must still be
+        # ACTIONABLE for the matching agent, exactly as before this change.
+        task = implementation_task(
+            dependencyBlocked=False,
+            attentionOwners=["Rowan"],
+        )
+        queue = agent_task_queue.build_queue([task], agent="Rowan")
+        item = queue["items"][0]
+        self.assertEqual(item["classification"], "ACTIONABLE")
+        self.assertEqual(item["reason"], "top attention owner is Rowan")
+        self.assertEqual(queue["actionableCount"], 1)
+
+    def test_dependency_blocked_task_is_still_visible_in_queue_not_dropped(self):
+        # DEPENDENCY_BLOCKED items must remain in the queue for visibility
+        # (e.g. Tom/Quinn auditing state) — only actionableCount excludes
+        # them, the item itself is never removed from `items`.
+        task = implementation_task(
+            id="blocked-visible",
+            dependencyBlocked=True,
+            attentionOwners=["Rowan"],
+        )
+        queue = agent_task_queue.build_queue([task], agent="Rowan")
+        self.assertEqual(len(queue["items"]), 1)
+        self.assertEqual(queue["items"][0]["id"], "blocked-visible")
+        self.assertEqual(queue["actionableCount"], 0)
+
     def test_missing_implementer_prs_is_actionable_for_feature_and_code(self):
         for task_type in ("feature", "code"):
             with self.subTest(task_type=task_type):
