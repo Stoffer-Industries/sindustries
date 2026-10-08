@@ -164,6 +164,10 @@ pub(crate) struct Task {
     /// later entries are escalation targets and repeated people are valid.
     #[serde(default)]
     attention_owners: Vec<String>,
+    /// Detail rows are used by workflow reconciliation to detect legacy
+    /// owner rows that were created without an actor/reason.
+    #[serde(default)]
+    attention_owner_details: Vec<TaskAttentionOwner>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -192,6 +196,17 @@ pub(crate) struct TaskComment {
     body: Option<String>,
     #[serde(default)]
     created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TaskAttentionOwner {
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    added_by: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
 }
 
 /// Structured approval row embedded in the Tasks API task payload after
