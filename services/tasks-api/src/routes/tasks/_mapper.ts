@@ -69,10 +69,11 @@ export function mapTaskAttentionOwner(attentionOwners) {
  * status.
  *
  * The `task.workflowHandoffRoleId` / `workflowHandoffGate` /
- * `workflowHandoffReason` columns remain populated (they still drive the
- * lobster's per-iteration current-attention handoff via
- * `tasksRouter.patch('/tasks/:id')` and `taskApprovals.ts`), but they no
- * longer drive the `mapTask.workflowGates` response surface.
+ * `workflowHandoffReason` columns remain populated for the lobster's
+ * per-iteration handoff protocol, but the read-only gate view below is derived
+ * from the current status and approval policy. The two planes intentionally
+ * remain separate: an attention row is an explicit escalation, while a gate
+ * owner is the normal next actor when that escalation stack is empty.
  */
 export interface MapTaskOptions {
   requiredApprovalTypes?: readonly string[];
@@ -98,8 +99,11 @@ export function buildMapTaskOptions(
   return { requiredApprovalTypes: required, gateOwnersByType };
 }
 
-const INFORMATIONAL_STATUS_BY_APPROVAL_TYPE: Readonly<Record<string, string>> = {
-  spec: 'open'
+const ACTIONABLE_STATUS_BY_APPROVAL_TYPE: Readonly<Record<string, string>> = {
+  spec: 'open',
+  tech_design: 'ready',
+  qa_agent: 'doing',
+  accepted: 'acceptance'
 };
 
 export function mapTask(task, options) {
@@ -122,10 +126,11 @@ export function mapTask(task, options) {
   const attentionOwners = attentionOwnerRows.map((row) => row.owner);
 
   const workflowHandoffOwner = workflowHandoffOwnerFor(task.workflowHandoffRoleId);
-  // `workflowGates` is retained only for the lobster-independent `spec` gate.
-  // Lobster owns routing for tech_design, qa_agent, and accepted by writing
-  // `attentionOwners`; exposing those here would recreate a second,
-  // status-derived actionability source.
+  // Derive only the gate for the task's current workflow transition. This is
+  // informational/read-only metadata; it must not be persisted into the
+  // attention-owner stack. Queue consumers use it as the normal next actor
+  // only when `attentionOwners` is empty, while the card uses the same gate
+  // row to render the next responsibility.
   const requiredApprovalTypes = options?.requiredApprovalTypes ?? [];
   const gateOwnersByType = options?.gateOwnersByType ?? {};
   const approvedTypes = new Set(
@@ -134,7 +139,7 @@ export function mapTask(task, options) {
       .map((a) => a.type)
   );
   const derivedGates = requiredApprovalTypes
-    .filter((approvalType) => INFORMATIONAL_STATUS_BY_APPROVAL_TYPE[approvalType] === task.status)
+    .filter((approvalType) => ACTIONABLE_STATUS_BY_APPROVAL_TYPE[approvalType] === task.status)
     .filter((approvalType) => !approvedTypes.has(approvalType))
     .map((approvalType) => ({
       roleId: `${approvalType}_gate`,

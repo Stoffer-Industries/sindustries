@@ -161,7 +161,7 @@ Task responses include:
 - `POST /tasks/:id/attention-owners/self-resolve` removes ONLY the current top slot when the authenticated actor matches `attentionOwners[0]` (or Tom/Quinn override). Preserves `task.blocked`, `dependencyBlocked`, `assignee`, `approvals`, and `workflowHandoff*`. Returns the new top via `nextTopOwner`. 403 `NOT_TOP_OWNER` if the actor doesn't match and isn't Tom/Quinn; 403 `NO_ACTIVE_BLOCKER` if the stack is empty.
 - Clearing attention owners never touches `task.blocked`, `dependencies`, `assignee`, or `approvals`.
 - Surviving rows keep their `note` and `addedBy` only when their `(taskId, owner)` pair reappears in the new array; the per-row add/update endpoint is the right place to preserve per-row metadata across owner churn.
-- Approval writes (`POST/DELETE /tasks/:id/approvals/:type`) never touch `attentionOwners`. Gate ownership lives exclusively in `workflowHandoffRoleId/Gate/Reason`. The lobster's metadata-aware reconciliation endpoint and the per-row endpoints are the writers of explainable ordered-stack changes; the legacy full-replacement PATCH remains for explicit task-stack replacement.
+- Approval writes (`POST/DELETE /tasks/:id/approvals/:type`) never touch `attentionOwners`. Gate approvals and the current gate owner remain a separate workflow plane; the lobster's metadata-aware reconciliation endpoint and the per-row endpoints are the writers of explainable ordered-stack changes, while the legacy full-replacement PATCH remains for explicit task-stack replacement.
 
 **Repair path (AC7):** `services/tasks-api/scripts/dedupe-attention-owners.ts` collapses pre-deployment duplicates on a per-task basis with `--dry-run` / `--write` / `--rollback <snapshot>` modes. Idempotent: re-running on a clean task is a no-op. Snapshots are written to `.openclaw/tasks-api/snapshots/<ts>.json`.
 
@@ -173,7 +173,7 @@ Task responses include:
 - Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
 - Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
 
-**How to use it.** `attentionOwners[0]` is the sole actionability source. Assignee says who delivers, while approvals and `workflowGates` are eligibility/informational context only; neither independently enqueues work. Lobster writes and reconciles the `tech_design`, `qa_agent`, and `accepted` workflow slots. The status-derived fallback is retained only for the lobster-independent `spec` gate. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
+**How to use it.** `attentionOwners[0]` is the explicit attention/escalation action slot. When that stack is empty, the owner of the exact current outstanding workflow gate is the normal next actor (`open → spec`, `ready → tech_design`, `doing → qa_agent`, `acceptance → accepted`). Assignee says who delivers and remains the final fallback when no gate is outstanding. Gate ownership is derived for queue/card presentation; it is never copied into or persisted as an attention-owner row. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
 **QA capability-deferral lifecycle.** The feature-task workflow treats these
 markers as a distinct routing protocol:
@@ -281,12 +281,12 @@ Task ownership is split into five **independent** planes. No plane silently deri
 The API surfaces each plane independently:
 
 - `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
-- `approvals` (raw rows) and `workflowGates` (read-only informational metadata for the lobster-independent `spec` gate only). Lobster-managed `tech_design`, `qa_agent`, and `accepted` gates are intentionally omitted; their action routing lives exclusively in `attentionOwners`.
+- `approvals` (raw rows) and `workflowGates` (read-only metadata for the one exact current-stage gate, with its configured owner and outstanding state). This is a derived view for normal gate discovery and card rendering; it is not an attention-owner stack and does not replace explicit attention rows.
 - `attentionOwners` / `topAttentionOwner` / `attentionOwnerDetails` (ordered action/escalation).
 
 Discovery filters on `GET /tasks`:
 
-- `?workflowGateOwner=<name>` — compatibility discovery for the outstanding `spec` gate only. Lobster-managed gates must be discovered through `?attentionOwner=<name>`.
+- `?workflowGateOwner=<name>` — tasks whose exact current-stage outstanding gate is owned by `<name>`; this covers `spec`, `tech_design`, `qa_agent`, and `accepted` according to status and task-type policy.
 - `?attentionOwner=<name>` — tasks whose position-0 `TaskAttentionOwner` matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
@@ -294,7 +294,7 @@ The two filters combine via AND: a UI can show "Quinn's outstanding gates AND th
 **Non-replacement guarantees** (enforced by the API and asserted by tests):
 
 - `attentionOwners` is fully independent of `task.blocked` and `dependencyBlocked`. Clearing attention owners does not declare the task unblocked.
-- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue uses `attentionOwners[0]` for Lobster-managed gates; only `spec` retains the legacy `workflowGateOwner` fallback.
+- `attentionOwners` is independent of `TaskApproval` rows. The discovery queue uses `attentionOwners[0]` when an explicit attention request exists, then the exact current outstanding workflow-gate owner, then the delivery assignee. Clearing the attention stack therefore reveals the normal gate owner without writing a new attention row.
 - Resolving one attention owner (PATCH replacement) does not affect other attention owners, workflow-gate ownership, dependencies, or `task.blocked`.
 - Changing `taskType` does not retroactively create or remove attention-owner rows; attention is decoupled from task-type policy.
 

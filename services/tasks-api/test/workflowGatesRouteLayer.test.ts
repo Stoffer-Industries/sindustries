@@ -500,7 +500,7 @@ describe('GET /api/v1/tasks — discovery filters', () => {
   });
 
   it.each(['Ash', 'Quinn', 'Tom'])(
-    '?workflowGateOwner=%s is restricted to the lobster-independent spec fallback',
+    '?workflowGateOwner=%s scopes the current-stage outstanding gate',
     async (owner) => {
       prismaMock.task.findMany.mockResolvedValue([]);
 
@@ -629,14 +629,15 @@ describe('mapTask — status-scoped workflow gates', () => {
     }
   };
 
-  it('shows only the lobster-independent spec gate', () => {
-    expect(mapTask(baseTaskFixture({ status: 'open' }), options).workflowGates).toEqual([{
-      roleId: 'spec_gate', owner: 'Tom', gate: 'spec', reason: null, state: 'outstanding'
+  it.each([
+    ['open', 'spec', 'Tom'],
+    ['ready', 'tech_design', 'Quinn'],
+    ['doing', 'qa_agent', 'Ash'],
+    ['acceptance', 'accepted', 'Tom']
+  ])('shows the current %s-stage gate owned by the configured gate owner', (status, gate, owner) => {
+    expect(mapTask(baseTaskFixture({ status }), options).workflowGates).toEqual([{
+      roleId: `${gate}_gate`, owner, gate, reason: null, state: 'outstanding'
     }]);
-  });
-
-  it.each(['ready', 'doing', 'acceptance'])('omits lobster-managed gates at status %s', (status) => {
-    expect(mapTask(baseTaskFixture({ status }), options).workflowGates).toEqual([]);
   });
 
   it('shows no workflow gate once the task is done', () => {
@@ -690,14 +691,29 @@ describe('explicit workflow handoffs', () => {
     expect(normalizeWorkflowHandoff({ roleId: 'qa_verifier', reason: '' })).toBeNull();
   });
 
-  it('filters owner queues only for the spec fallback', () => {
-    expect(buildWorkflowGateOwnerWhere('ash')).toEqual([]);
-    expect(buildWorkflowGateOwnerWhere('quinn')).toEqual([]);
-    expect(buildWorkflowGateOwnerWhere('Tom')).toEqual([{ OR: [{
-      status: 'open',
-      taskType: { in: ['feature'] },
-      approvals: { none: { type: 'spec', state: 'approved', revokedAt: null } }
+  it('filters owner queues for every current-stage gate', () => {
+    expect(buildWorkflowGateOwnerWhere('ash')).toEqual([{ OR: [{
+      status: 'doing',
+      taskType: { in: ['feature', 'code'] },
+      approvals: { none: { type: 'qa_agent', state: 'approved', revokedAt: null } }
     }] }]);
+    expect(buildWorkflowGateOwnerWhere('quinn')).toEqual([{ OR: [{
+      status: 'ready',
+      taskType: { in: ['feature', 'code'] },
+      approvals: { none: { type: 'tech_design', state: 'approved', revokedAt: null } }
+    }] }]);
+    expect(buildWorkflowGateOwnerWhere('Tom')).toEqual([{ OR: [
+      {
+        status: 'open',
+        taskType: { in: ['feature'] },
+        approvals: { none: { type: 'spec', state: 'approved', revokedAt: null } }
+      },
+      {
+        status: 'acceptance',
+        taskType: { in: ['feature', 'code'] },
+        approvals: { none: { type: 'accepted', state: 'approved', revokedAt: null } }
+      }
+    ] }]);
     expect(buildWorkflowGateOwnerWhere('Nobody')).toEqual([]);
   });
 
@@ -726,8 +742,12 @@ describe('explicit workflow handoffs', () => {
         workflowHandoffGate: 'qa'
       })
     }));
-    // Lobster-managed handoffs are no longer projected through workflowGates.
-    expect(response.body.data.workflowGates).toEqual([]);
+    // The persisted handoff remains distinct from the derived current-stage
+    // gate surface. This test fixture is a doing task, so its normal gate is
+    // QA; the explicit legacy handoff does not replace that read model.
+    expect(response.body.data.workflowGates).toEqual([{
+      roleId: 'qa_agent_gate', owner: 'Ash', gate: 'qa_agent', reason: null, state: 'outstanding'
+    }]);
   });
 
   it('rejects unknown role ids before writing', async () => {
