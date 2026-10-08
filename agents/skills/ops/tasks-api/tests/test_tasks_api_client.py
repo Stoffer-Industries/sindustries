@@ -13,6 +13,51 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(tasks_api_client)
 
 
+class TasksApiClientCredentialResolutionTest(unittest.TestCase):
+    def test_prefers_current_agents_scoped_token(self):
+        with patch.dict(
+            tasks_api_client.os.environ,
+            {
+                "OPENCLAW_AGENT_ID": "rowan",
+                "ROWAN_TASKS_API_APPROVAL_TOKEN": "rowan-token",
+                "TASKS_API_APPROVAL_TOKEN": "stale-shared-token",
+            },
+            clear=True,
+        ):
+            self.assertEqual(tasks_api_client.resolve_agent_id(), "rowan")
+            self.assertEqual(tasks_api_client.resolve_default_token(), "rowan-token")
+
+    def test_uses_legacy_agent_id_fallback(self):
+        with patch.dict(
+            tasks_api_client.os.environ,
+            {"AGENT_ID": "Ash", "ASH_TASKS_API_APPROVAL_TOKEN": "ash-token"},
+            clear=True,
+        ):
+            self.assertEqual(tasks_api_client.resolve_agent_id(), "ash")
+            self.assertEqual(tasks_api_client.resolve_default_token(), "ash-token")
+
+    def test_uses_codex_home_agent_when_runtime_id_is_missing(self):
+        with patch.dict(
+            tasks_api_client.os.environ,
+            {
+                "CODEX_HOME": "/Users/test/.openclaw/agents/rowan/agent/codex-home",
+                "ROWAN_TASKS_API_APPROVAL_TOKEN": "rowan-token",
+            },
+            clear=True,
+        ):
+            self.assertEqual(tasks_api_client.resolve_agent_id(), "rowan")
+            self.assertEqual(tasks_api_client.resolve_default_token(), "rowan-token")
+
+    def test_falls_back_to_generic_token_without_agent_identity(self):
+        with patch.dict(
+            tasks_api_client.os.environ,
+            {"TASKS_API_APPROVAL_TOKEN": "shared-token"},
+            clear=True,
+        ):
+            self.assertIsNone(tasks_api_client.resolve_agent_id())
+            self.assertEqual(tasks_api_client.resolve_default_token(), "shared-token")
+
+
 class TasksApiClientAttentionOwnersTest(unittest.TestCase):
     """Task d8fbe750: attentionOwners round-trip helpers.
 
@@ -427,5 +472,4 @@ class TasksApiClientPatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 
