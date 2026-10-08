@@ -859,6 +859,28 @@ jobs:
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
 
+      # Task 5cb4a8fe AC5 static check: dry-run the stable-hostname
+      # verification harness so every CI run proves the harness emits
+      # schema-valid JSON for the committed matrix, even when DNS is
+      # not live. The dry-run mode never opens a socket, so this is
+      # safe to run on every PR without staging credentials.
+      - name: Run stable-hostname verification harness tests
+        run: node --test tests/cloud/tests/stable-hostname-verification.test.mjs
+
+      # Task 5cb4a8fe AC5 static check: invoke the harness in dry-run
+      # mode and validate the emitted JSON against the committed
+      # schema. This is the merge-gate guarantee that the harness +
+      # schema + matrix are in lockstep on every commit.
+      - name: Static-check stable-hostname verification harness (dry-run)
+        run: |
+          set -euo pipefail
+          out="$(mktemp -t stable-hostname-verification.XXXXXX.json)"
+          node tests/cloud/scripts/stable-hostname-verification.mjs \
+            --mode dry-run --run-id "ci-${GITHUB_SHA::12}" --output "${out}"
+          node tests/cloud/scripts/check-schema.mjs "${out}" \
+            tests/cloud/stable-hostname-verification.schema.json
+          echo "stable-hostname-verification dry-run: schema-valid JSON, ${GITHUB_SHA::12}"
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest
