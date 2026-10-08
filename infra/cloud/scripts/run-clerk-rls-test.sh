@@ -1,159 +1,171 @@
 #!/usr/bin/env bash
+# Live GymTrack Clerk -> Supabase Third-Party Auth -> PostgREST RLS test.
 #
-# run-clerk-rls-test.sh — Slice B RLS integration test driver for the GymTrack
-# Clerk identity migration (task bb09eaed, Phase 3 Slice B).
-#
-# Phase 3 Slice A (PR #734, MERGED 2026-09-23) shipped the AuthProvider
-# dispatcher + Clerk SDK + supabase-js JWT bridge. Slice B verifies that
-# when a Clerk session JWT is presented as the bearer token to Supabase:
-#
-#   1. Supabase Third-Party Auth validates the Clerk signature against
-#      the Clerk JWKS.
-#   2. `auth.uid()` resolves to the Clerk subject (text).
-#   3. The existing `auth.uid() = user_id` RLS policies on `public.workouts`,
-#      `public.workouts.workout_sets`, etc., still allow the user's own
-#      rows and still reject cross-user reads.
-#
-# This script is the staging runbook that drives the cross-user rejection
-# assertion. It runs against the deployed staging Supabase project,
-# seeds two Clerk test users with one workout row each, simulates user
-# A and user B's session via `set_config('request.jwt.claim.sub', ...)`,
-# and asserts the row counts differ (proving RLS is keyed per-user).
-#
-# Pre-requisites:
-#   - Phase 0 done: Clerk app + Google OAuth + Supabase Third-Party Auth
-#     configured (Quinn / Tom).
-#   - Phase 1 + 2 merged (PRs #714, #716) on staging.
-#   - The migration
-#     `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql`
-#     has been applied to staging.
-#   - Two Clerk test users exist in the Clerk application; their Clerk
-#     subjects are exported as `CLERK_TEST_USER_A_SUB` and
-#     `CLERK_TEST_USER_B_SUB`.
-#
-# Usage:
-#   bash infra/cloud/scripts/run-clerk-rls-test.sh
-#
-# Environment overrides:
-#   - CLERK_TEST_USER_A_SUB, CLERK_TEST_USER_B_SUB
-#   - SUPABASE_DB_URL_STAGING (default: derived from staging secrets)
-#   - PG_BINARY (default: psql)
-#
-# Exit codes:
-#   - 0  → assertion passed
-#   - 1  → assertion failed (cross-user RLS rejection is broken)
-#   - 2  → pre-requisites missing (Clerk test users / staging DB)
-#
-# This script is run-only; it does not write durable state. Cleanup of
-# the seeded workout rows happens inside the script (best-effort
-# `delete from public.workouts where ...` on EXIT).
+# Unlike the original Slice B harness, this script never synthesizes database
+# claims with set_config. It mints real Clerk session JWTs for two existing
+# test users, sends them through Supabase's public Data API, and proves each
+# principal sees its own fixture but not the other principal's fixture.
 
 set -euo pipefail
 
-CLERK_TEST_USER_A_SUB="${CLERK_TEST_USER_A_SUB:-}"
-CLERK_TEST_USER_B_SUB="${CLERK_TEST_USER_B_SUB:-}"
-PG_BINARY="${PG_BINARY:-psql}"
+SUPABASE_URL="${SUPABASE_URL:-${GYMTRACK_SUPABASE_URL:-}}"
+SUPABASE_PUBLISHABLE_KEY="${SUPABASE_PUBLISHABLE_KEY:-${GYMTRACK_SUPABASE_PUBLISHABLE_KEY:-}}"
+CLERK_TEST_USER_A_ID="${CLERK_TEST_USER_A_ID:-${CLERK_TEST_USER_A_SUB:-}}"
+CLERK_TEST_USER_B_ID="${CLERK_TEST_USER_B_ID:-${CLERK_TEST_USER_B_SUB:-}}"
 
-if [ -z "$CLERK_TEST_USER_A_SUB" ] || [ -z "$CLERK_TEST_USER_B_SUB" ]; then
-  echo "ERROR: CLERK_TEST_USER_A_SUB and CLERK_TEST_USER_B_SUB must be set" >&2
-  echo "       (Clerk subjects for the two test users created on the Clerk dashboard)" >&2
+for command_name in curl jq node; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "ERROR: required command is missing: $command_name" >&2
+    exit 2
+  fi
+done
+
+for variable_name in SUPABASE_URL SUPABASE_PUBLISHABLE_KEY SUPABASE_PAT CLERK_SECRET_KEY CLERK_TEST_USER_A_ID CLERK_TEST_USER_B_ID; do
+  if [ -z "${!variable_name:-}" ]; then
+    echo "ERROR: $variable_name must be set" >&2
+    exit 2
+  fi
+done
+
+if ! [[ "$CLERK_TEST_USER_A_ID" =~ ^user_[A-Za-z0-9]+$ ]] ||
+   ! [[ "$CLERK_TEST_USER_B_ID" =~ ^user_[A-Za-z0-9]+$ ]]; then
+  echo "ERROR: Clerk test user ids must use the expected user_<alphanumeric> shape" >&2
   exit 2
 fi
 
-if [ -z "${SUPABASE_DB_URL_STAGING:-}" ]; then
-  # Derive from Fly secrets if not exported. The staging budget-api uses
-  # STAGING_BUDGET_API_DATABASE_URL; if the dedicated GymTrack staging DB
-  # URL is exported, prefer that.
-  if [ -n "${STAGING_GYMTRACK_DB_URL:-}" ]; then
-    SUPABASE_DB_URL_STAGING="$STAGING_GYMTRACK_DB_URL"
-  else
-    echo "ERROR: SUPABASE_DB_URL_STAGING (or STAGING_GYMTRACK_DB_URL) must be set" >&2
-    exit 2
-  fi
+if [ "$CLERK_TEST_USER_A_ID" = "$CLERK_TEST_USER_B_ID" ]; then
+  echo "ERROR: the two Clerk test user ids must be different" >&2
+  exit 2
 fi
 
+PROJECT_REF="$(node -e "console.log(new URL(process.argv[1]).hostname.split('.')[0])" "$SUPABASE_URL")"
+RUN_MARKER="slice-b-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+SESSION_A_ID=""
+SESSION_B_ID=""
+
+management_query() {
+  local sql="$1"
+  jq -n --arg query "$sql" '{query: $query}' |
+    curl --fail --silent --show-error -X POST -H "Authorization: Bearer $SUPABASE_PAT" -H "Content-Type: application/json" --data-binary @- "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query"
+}
+
+revoke_session() {
+  local session_id="$1"
+  if [ -n "$session_id" ]; then
+    curl --fail --silent --show-error -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/sessions/$session_id/revoke" >/dev/null || true
+  fi
+}
+
 cleanup() {
-  # Best-effort cleanup of any workout rows we seeded for the assertion.
-  "$PG_BINARY" "$SUPABASE_DB_URL_STAGING" <<SQL
-    delete from public.workouts
-    where user_id in (
-      select id from public.profiles
-      where clerk_user_id in ('$CLERK_TEST_USER_A_SUB', '$CLERK_TEST_USER_B_SUB')
-        and email like '%slice-b-test%'
-    );
-SQL
+  management_query "
+    delete from public.workouts where notes in ('$RUN_MARKER-a', '$RUN_MARKER-b');
+    delete from public.profiles
+      where clerk_user_id in ('$CLERK_TEST_USER_A_ID', '$CLERK_TEST_USER_B_ID')
+        and email like 'slice-b-%@gymtrack-test.local';
+  " >/dev/null || true
+  revoke_session "$SESSION_A_ID"
+  revoke_session "$SESSION_B_ID"
 }
 trap cleanup EXIT
 
-echo "→ Driving cross-user RLS rejection assertion..."
-echo "   user A Clerk subject: $CLERK_TEST_USER_A_SUB"
-echo "   user B Clerk subject: $CLERK_TEST_USER_B_SUB"
+echo "→ Verifying Supabase Third-Party Auth control-plane configuration"
+TPA_JSON="$(
+  curl --fail --silent --show-error -H "Authorization: Bearer $SUPABASE_PAT" "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth/third-party-auth"
+)"
 
-RESULT=$("$PG_BINARY" "$SUPABASE_DB_URL_STAGING" <<SQL
--- Enable the Slice B assertion block in the migration.
-set local app.slice_b_rls_test to 'on';
+CLERK_ISSUER="$(
+  jq -er '
+    map(select(.type == "clerk" or .type == "custom"))
+    | map(select(.oidc_issuer_url != null and ((.resolved_jwks.keys // []) | length) > 0))
+    | first
+    | .oidc_issuer_url
+  ' <<<"$TPA_JSON"
+)"
 
--- Seed two profiles + one workout each for the test users (idempotent).
-insert into public.profiles (clerk_user_id, email, email_verified, signup_source)
-values ('$CLERK_TEST_USER_A_SUB', 'slice-b-test-a@gymtrack-test.local', true, 'clerk_import')
-on conflict (clerk_user_id) do nothing;
+create_clerk_session() {
+  local user_id="$1"
+  jq -n --arg user_id "$user_id" '{user_id: $user_id}' |
+    curl --fail --silent --show-error -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" -H "Content-Type: application/json" --data-binary @- "https://api.clerk.com/v1/sessions"
+}
 
-insert into public.profiles (clerk_user_id, email, email_verified, signup_source)
-values ('$CLERK_TEST_USER_B_SUB', 'slice-b-test-b@gymtrack-test.local', true, 'clerk_import')
-on conflict (clerk_user_id) do nothing;
+create_clerk_token() {
+  local session_id="$1"
+  curl --fail --silent --show-error -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/sessions/$session_id/tokens" |
+    jq -er '.jwt'
+}
 
--- Seed one workout per user.
-with profile_a as (
-  select id from public.profiles where clerk_user_id = '$CLERK_TEST_USER_A_SUB'
-), profile_b as (
-  select id from public.profiles where clerk_user_id = '$CLERK_TEST_USER_B_SUB'
-)
-insert into public.workouts (user_id, name, performed_at)
-select id, 'Slice B test workout A', now() from profile_a
-where not exists (
-  select 1 from public.workouts
-  where user_id = (select id from profile_a)
-    and name = 'Slice B test workout A'
-);
+SESSION_A_JSON="$(create_clerk_session "$CLERK_TEST_USER_A_ID")"
+SESSION_B_JSON="$(create_clerk_session "$CLERK_TEST_USER_B_ID")"
+SESSION_A_ID="$(jq -er '.id' <<<"$SESSION_A_JSON")"
+SESSION_B_ID="$(jq -er '.id' <<<"$SESSION_B_JSON")"
+TOKEN_A="$(create_clerk_token "$SESSION_A_ID")"
+TOKEN_B="$(create_clerk_token "$SESSION_B_ID")"
 
-with profile_b as (
-  select id from public.profiles where clerk_user_id = '$CLERK_TEST_USER_B_SUB'
-)
-insert into public.workouts (user_id, name, performed_at)
-select id, 'Slice B test workout B', now() from profile_b
-where not exists (
-  select 1 from public.workouts
-  where user_id = (select id from profile_b)
-    and name = 'Slice B test workout B'
-);
+assert_token_claims() {
+  local token="$1"
+  local expected_sub="$2"
+  local expected_issuer="$3"
+  TOKEN_TO_CHECK="$token" EXPECTED_SUB="$expected_sub" EXPECTED_ISSUER="$expected_issuer" node <<'NODE'
+const [, payload] = process.env.TOKEN_TO_CHECK.split('.');
+const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+const normalize = (value) => value.replace(/\/$/, '');
+if (claims.sub !== process.env.EXPECTED_SUB) {
+  throw new Error('Clerk token subject does not match the requested test user');
+}
+if (claims.role !== 'authenticated') {
+  throw new Error('Clerk token is missing role=authenticated required by Supabase');
+}
+if (normalize(claims.iss) !== normalize(process.env.EXPECTED_ISSUER)) {
+  throw new Error('Clerk token issuer does not match the Supabase TPA integration');
+}
+NODE
+}
 
--- Simulate user A's authenticated request.
-set local role authenticated;
-set local request.jwt.claim.sub to '$CLERK_TEST_USER_A_SUB';
-select 'user_a_count' as who, count(*)::text as visible_workouts
-from public.workouts;
+assert_token_claims "$TOKEN_A" "$CLERK_TEST_USER_A_ID" "$CLERK_ISSUER"
+assert_token_claims "$TOKEN_B" "$CLERK_TEST_USER_B_ID" "$CLERK_ISSUER"
 
--- Simulate user B's authenticated request.
-set local request.jwt.claim.sub to '$CLERK_TEST_USER_B_SUB';
-select 'user_b_count' as who, count(*)::text as visible_workouts
-from public.workouts;
+echo "→ Seeding isolated profiles and workout fixtures through the admin plane"
+SEED_RESULT="$(
+  management_query "
+    insert into public.profiles (clerk_user_id, email, email_verified, signup_source)
+    values
+      ('$CLERK_TEST_USER_A_ID', '$RUN_MARKER-a@gymtrack-test.local', true, 'clerk_import'),
+      ('$CLERK_TEST_USER_B_ID', '$RUN_MARKER-b@gymtrack-test.local', true, 'clerk_import')
+    on conflict (clerk_user_id) where clerk_user_id is not null
+    do update set email = excluded.email, email_verified = true;
 
--- Reset role for cleanup.
-reset role;
-SQL
-)
+    insert into public.workouts (user_id, notes)
+    select id, '$RUN_MARKER-a' from public.profiles
+      where clerk_user_id = '$CLERK_TEST_USER_A_ID';
+    insert into public.workouts (user_id, notes)
+    select id, '$RUN_MARKER-b' from public.profiles
+      where clerk_user_id = '$CLERK_TEST_USER_B_ID';
 
-echo "$RESULT"
+    select clerk_user_id, id
+    from public.profiles
+    where clerk_user_id in ('$CLERK_TEST_USER_A_ID', '$CLERK_TEST_USER_B_ID')
+    order by clerk_user_id;
+  "
+)"
 
-USER_A_COUNT=$(echo "$RESULT" | awk -F'|' '/user_a_count/ {gsub(/ /,"",$3); print $3}')
-USER_B_COUNT=$(echo "$RESULT" | awk -F'|' '/user_b_count/ {gsub(/ /,"",$3); print $3}')
+PROFILE_A_ID="$(jq -er --arg subject "$CLERK_TEST_USER_A_ID" '.[] | select(.clerk_user_id == $subject) | .id' <<<"$SEED_RESULT")"
+PROFILE_B_ID="$(jq -er --arg subject "$CLERK_TEST_USER_B_ID" '.[] | select(.clerk_user_id == $subject) | .id' <<<"$SEED_RESULT")"
 
-# Both users should see exactly 1 workout (their own). If either sees
-# more than 1, RLS is broken (cross-user leak). If either sees 0, the
-# set_config simulation is broken (RLS is too aggressive).
-if [ "${USER_A_COUNT:-0}" != "1" ] || [ "${USER_B_COUNT:-0}" != "1" ]; then
-  echo "FAIL: cross-user RLS rejection is broken (user A saw $USER_A_COUNT workouts, user B saw $USER_B_COUNT)" >&2
-  exit 1
-fi
+query_workouts() {
+  local token="$1"
+  curl --fail --silent --show-error --get -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Authorization: Bearer $token" --data-urlencode "select=id,user_id,notes" --data-urlencode "notes=like.$RUN_MARKER-*" "$SUPABASE_URL/rest/v1/workouts"
+}
 
-echo "PASS: cross-user RLS rejection works as expected (each user sees exactly their own workout)"
+echo "→ Querying Supabase Data API with two real Clerk bearer tokens"
+USER_A_ROWS="$(query_workouts "$TOKEN_A")"
+USER_B_ROWS="$(query_workouts "$TOKEN_B")"
+
+jq -e --arg owner "$PROFILE_A_ID" --arg notes "$RUN_MARKER-a" '
+  length == 1 and .[0].user_id == $owner and .[0].notes == $notes
+' <<<"$USER_A_ROWS" >/dev/null
+
+jq -e --arg owner "$PROFILE_B_ID" --arg notes "$RUN_MARKER-b" '
+  length == 1 and .[0].user_id == $owner and .[0].notes == $notes
+' <<<"$USER_B_ROWS" >/dev/null
+
+echo "PASS: Supabase accepted both Clerk JWTs; each user saw exactly its own fixture"
