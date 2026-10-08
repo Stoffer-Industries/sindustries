@@ -395,7 +395,16 @@ def build_queue(
     items = []
     for task in tasks:
         top_owner = top_attention_owner(task)
-        if top_owner and agent:
+        if task.get("dependencyBlocked"):
+            # A real dependency gate is never satisfied by an attention-owner
+            # note. An implementer must not be told this task is ACTIONABLE
+            # merely because they hold position 0 — see
+            # agents/skills/ops/attention-owner-routing/SKILL.md.
+            classification, reason = (
+                "DEPENDENCY_BLOCKED",
+                "one or more task dependencies are incomplete",
+            )
+        elif top_owner and agent:
             if top_owner.casefold() == agent.strip().casefold():
                 classification, reason = "ACTIONABLE", f"top attention owner is {top_owner}"
             else:

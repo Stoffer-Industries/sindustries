@@ -71,6 +71,21 @@ class AgentTaskQueueTest(unittest.TestCase):
         queue = agent_task_queue.build_queue([implementation_task(blocked=True)])
         self.assertEqual(queue["items"][0]["classification"], "BLOCKED")
 
+    def test_dependency_blocked_overrides_matching_attention_owner(self):
+        # Task d37681e1 (2026-10-08): an attentionOwners[0] note directed the
+        # implementer to proceed with delivery work while the task was still
+        # dependencyBlocked. Per agents/skills/ops/attention-owner-routing/
+        # SKILL.md, a position-0 slot overrides routing classification only,
+        # never the dependency gate itself.
+        task = implementation_task(
+            dependencyBlocked=True,
+            attentionOwners=["Rowan"],
+        )
+        queue = agent_task_queue.build_queue([task], agent="Rowan")
+        item = queue["items"][0]
+        self.assertEqual(item["classification"], "DEPENDENCY_BLOCKED")
+        self.assertEqual(item["topAttentionOwner"], "Rowan")
+
     def test_missing_implementer_prs_is_actionable_for_feature_and_code(self):
         for task_type in ("feature", "code"):
             with self.subTest(task_type=task_type):
