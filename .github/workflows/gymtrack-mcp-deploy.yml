@@ -141,6 +141,8 @@ jobs:
       - name: Smoke check (OAuth discovery)
         run: |
           set -euo pipefail
+          # stable-fallback: GymTrack MCP is not in scope for task 5cb4a8fe; the *.fly.dev URLs below remain the live production target until a follow-up task adopts a stable sindustries.co.nz hostname.
           curl --fail --silent --show-error --max-time 15 \
             "https://${FLY_APP}.fly.dev/.well-known/oauth-authorization-server" \
+            # stable-fallback: same rationale as the line above — both *.fly.dev URLs are the live production target until a follow-up task adopts a stable sindustries.co.nz hostname.
             | grep -F '"registration_endpoint":"https://gymtrack-mcp.fly.dev/oauth/register"'

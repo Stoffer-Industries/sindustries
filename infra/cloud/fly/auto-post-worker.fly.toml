@@ -1,5 +1,13 @@
 # fly.toml — auto-post-worker staging.
 #
+# Stable hostname (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
+#   staging:    (none) — queue-bound, not HTTP-bound
+#   production: (none) — queue-bound, not HTTP-bound
+# This surface has NO public URL by design. Health is observed via
+# GET /api/v1/content-scheduler/auto-post/health on the content-scheduler-api
+# stable hostname, not via a separate worker hostname. The matrix's worker row
+# records this rule so future operators cannot add a worker hostname by mistake.
+#
 # Long-running BullMQ queue consumer. NOT an HTTP service — Quinn's
 # APPROVED review on PR #508 (docs/specs/cloud-deployment-foundation-tech-design.md)
 # confirmed the worker gets a SEPARATE Fly app process (no sidecar in

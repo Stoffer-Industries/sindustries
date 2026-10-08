@@ -204,8 +204,9 @@ URL pair is stable.
   `VITE_TASKS_API_BASE_URL` and `VITE_SHELL_ORIGIN`. These are public URLs,
   never secrets.
 - **Current staging aliases (deployed 2026-09-08):**
-  `https://sindustries-mission-control-staging.vercel.app` and
-  `https://sindustries-tasks-app-staging.vercel.app`. Root documents, SPA
+  `https://sindustries-mission-control-staging.vercel.app` <!-- stable-fallback: documented-migration; superseded by https://mission-control.staging.sindustries.co.nz once the stable Vercel domain lands (task 5cb4a8fe) -->
+  and
+  `https://sindustries-tasks-app-staging.vercel.app` <!-- stable-fallback: documented-migration; superseded by https://tasks.staging.sindustries.co.nz once the stable Vercel domain lands (task 5cb4a8fe) -->. Root documents, SPA
   routes, and hashed assets have been smoke-tested at HTTP 200. A second
   Mission Control release was deployed and rolled back successfully to prove
   the provider rollback path.

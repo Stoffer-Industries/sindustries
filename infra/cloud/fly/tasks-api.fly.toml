@@ -1,5 +1,11 @@
 # fly.toml — tasks-api staging.
 #
+# Stable hostnames (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
+#   staging:    tasks-api.staging.sindustries.co.nz
+#   production: tasks-api.sindustries.co.nz
+# Add via `fly certs add tasks-api.staging.sindustries.co.nz --app sindustries-tasks-api-staging`
+# (Quinn-owned operator step; the cert is auto-issued by Let's Encrypt once the CNAME lands).
+#
 # Mirror of services/gymtrack-mcp/fly.toml with the staging-specific app name,
 # primary_region kept at 'syd' (matches the existing gymtrack-mcp precedent and
 # Tom/Quinn geography), and the internal_port pinned to 4001 to match the
