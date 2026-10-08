@@ -25,7 +25,7 @@
 //! (unchecking "Approved by Tom" and requiring explicit re-approval)
 //! handles drift tracking.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::brain_spec_lifecycle::{
     archive_done_task_spec, block_with_manual_block, manual_block_failures,
@@ -64,6 +64,48 @@ pub(crate) fn post_merge_pr_failure(
         }
         other => Some(format!("PR {url} is not merged: {other:?}.")),
     }
+}
+
+/// Read every linked PR before making any task-level decision.
+///
+/// An external read failure means the evidence is unknown, not absent. Keep
+/// this collection fail-closed so a rate limit or transient GitHub failure
+/// cannot be converted into a false `doing` transition.
+fn collect_pr_bodies<F>(urls: &[String], mut fetch: F) -> Result<Vec<String>>
+where
+    F: FnMut(&str) -> Result<String>,
+{
+    urls.iter()
+        .map(|url| {
+            fetch(url).with_context(|| {
+                format!(
+                    "[feature-task-run-abort] external GitHub evidence read failed: inspect GitHub PR body for {url}"
+                )
+            })
+        })
+        .collect()
+}
+
+/// Read every linked PR's review state before making any task-level decision.
+/// See [`collect_pr_bodies`] for the run-level failure contract.
+fn collect_pr_states<F>(
+    urls: &[String],
+    mut inspect: F,
+) -> Result<Vec<(String, pr_gates::ReviewState)>>
+where
+    F: FnMut(&str) -> Result<pr_gates::ReviewState>,
+{
+    urls.iter()
+        .map(|url| {
+            inspect(url)
+                .with_context(|| {
+                    format!(
+                        "[feature-task-run-abort] external GitHub evidence read failed: inspect GitHub PR review state for {url}"
+                    )
+                })
+                .map(|state| (url.clone(), state))
+        })
+        .collect()
 }
 
 /// Best-effort removal of any feature-task worktree that was created for this
@@ -127,7 +169,6 @@ pub(crate) fn run_post_merge_worktree_cleanup(
 ///   `done` handoff, and on success archive the spec + run worktree cleanup.
 pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    crate::spec_check_ready::reconcile_workflow_attention(&args, &mut env)?;
     // Spec drift is not blocked at post_merge: Tom owns the ACs during QA and may
     // legitimately refine them. The resync flow (unchecking "Approved by Tom" and
     // requiring explicit re-approval) handles drift tracking; see the spec-resync
@@ -150,11 +191,33 @@ pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
     // off yet) — those are fine; leave them until qa-ac-verified.
     let description = env.task.description.clone().unwrap_or_default();
     let unchecked_acs = ac_parsing::unchecked_task_ac_labels(&description);
+    let pr_urls = implementer_pr_urls(&env.task);
+    let pr_bodies = if unchecked_acs.is_empty() {
+        Vec::new()
+    } else {
+        // External evidence is a prerequisite for every status decision below.
+        // A rate limit or transient GitHub failure is not missing evidence, so
+        // propagate it before reconciling attention or changing task status.
+        collect_pr_bodies(&pr_urls, cli_utils::pr_body)?
+    };
+
+    // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
+    // Require Tom's explicit sign-off before closing.
+    let qa_failures = task_approvals::accepted_structured_failures(&env.task);
+    let past_acceptance = is_past(&env.task, "acceptance");
+    let latest_urls = latest_implementer_pr_urls(&env.task);
+    let inspected_prs = if past_acceptance {
+        Vec::new()
+    } else {
+        collect_pr_states(&pr_urls, inspect_pr)?
+    };
+
+    // All required GitHub reads succeeded. From this point onward, ordinary
+    // task-level evidence failures may mutate task state; run-level external
+    // failures have already aborted without touching routing or status.
+    crate::spec_check_ready::reconcile_workflow_attention(&args, &mut env)?;
+
     if !unchecked_acs.is_empty() {
-        let pr_bodies: Vec<String> = implementer_pr_urls(&env.task)
-            .iter()
-            .filter_map(|url| cli_utils::pr_body(url).ok())
-            .collect();
         let needs_pr = ac_parsing::ac_labels_needing_new_pr(&unchecked_acs, &pr_bodies);
         if !needs_pr.is_empty() {
             let labels = needs_pr.join(", ");
@@ -187,10 +250,7 @@ pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
         }
     }
 
-    // AC text check runs pre-merge at the doing → acceptance gate (verify_delivery).
-    // Require Tom's explicit sign-off before closing.
-    let qa_failures = task_approvals::accepted_structured_failures(&env.task);
-    if is_past(&env.task, "acceptance") {
+    if past_acceptance {
         if !qa_failures.is_empty() {
             if !args.dry_run {
                 api_patch::<Task>(
@@ -238,16 +298,9 @@ pub(crate) fn post_merge(args: StageArgs) -> Result<Envelope> {
         return Ok(env);
     }
     let mut failures = qa_failures;
-    let pr_urls = implementer_pr_urls(&env.task);
-    let latest_urls = latest_implementer_pr_urls(&env.task);
-    for url in &pr_urls {
-        match inspect_pr(url) {
-            Ok(state) => {
-                if let Some(failure) = post_merge_pr_failure(url, state, &latest_urls) {
-                    failures.push(failure);
-                }
-            }
-            Err(err) => failures.push(format!("Could not inspect PR {url}: {err}.")),
+    for (url, state) in inspected_prs {
+        if let Some(failure) = post_merge_pr_failure(&url, state, &latest_urls) {
+            failures.push(failure);
         }
     }
     let env = transition_or_block(
@@ -338,6 +391,48 @@ mod tests {
         assert!(
             post_merge_pr_failure(later_merged, pr_gates::ReviewState::Merged, &urls).is_none()
         );
+    }
+
+    #[test]
+    fn github_pr_body_failure_aborts_evidence_collection() {
+        let urls = vec![
+            "https://github.com/owner/repo/pull/100".to_string(),
+            "https://github.com/owner/repo/pull/101".to_string(),
+        ];
+        let mut calls = 0;
+        let result = collect_pr_bodies(&urls, |url| {
+            calls += 1;
+            if url.ends_with("/100") {
+                Ok("body".to_string())
+            } else {
+                Err(anyhow::anyhow!("GraphQL: API rate limit already exceeded"))
+            }
+        });
+
+        assert!(result.is_err());
+        assert_eq!(calls, 2);
+        assert!(format!("{:#}", result.unwrap_err()).contains("rate limit already exceeded"));
+    }
+
+    #[test]
+    fn github_pr_review_failure_aborts_state_collection() {
+        let urls = vec![
+            "https://github.com/owner/repo/pull/100".to_string(),
+            "https://github.com/owner/repo/pull/101".to_string(),
+        ];
+        let mut calls = 0;
+        let result = collect_pr_states(&urls, |url| {
+            calls += 1;
+            if url.ends_with("/100") {
+                Ok(pr_gates::ReviewState::Merged)
+            } else {
+                Err(anyhow::anyhow!("GraphQL: API rate limit already exceeded"))
+            }
+        });
+
+        assert!(result.is_err());
+        assert_eq!(calls, 2);
+        assert!(format!("{:#}", result.unwrap_err()).contains("rate limit already exceeded"));
     }
 
     // Worktree-cleanup helpers live in main.rs for this slice; once the
