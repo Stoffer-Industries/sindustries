@@ -38,6 +38,12 @@ python3 tasks_api_client.py create -h
 
 Programmatic use: import `get_task`, `list_tasks`, and `get_base_url` from `tasks_api_client` for scripts that need to query tasks without the CLI.
 
+The client automatically prefers the current agent's scoped credential
+(`<AGENT>_TASKS_API_APPROVAL_TOKEN`) when the runtime exposes
+`OPENCLAW_AGENT_ID`, `AGENT_ID`, or an agent-scoped `CODEX_HOME`. It falls back
+to `TASKS_API_APPROVAL_TOKEN` for callers without an identifiable agent. For
+explicit programmatic writes, pass `token=service_token_env("<AGENT>_TASKS_API_APPROVAL_TOKEN")`.
+
 ## Common patterns
 
 Agent heartbeat queue (recommended):
