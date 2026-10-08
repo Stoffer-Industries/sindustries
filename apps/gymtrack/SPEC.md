@@ -13,7 +13,7 @@ GymTrack is a workout tracker SPA deployed at a stable URL, accessible from iOS 
 GymTrack's identity layer is gated on `VITE_AUTH_PROVIDER`:
 
 - `supabase` (default) — Supabase Auth signs the user in directly; supabase-js sends a Supabase JWT to Supabase Postgres.
-- `clerk` — Clerk signs the user in; supabase-js sends the Clerk session JWT (validated by Supabase Third-Party Auth against the Clerk JWKS) so `auth.uid()` resolves to the Clerk subject at the RLS boundary. Workouts, MCP OAuth rows, agent API keys, and planned-workout rows already reference `public.profiles.id` (Phase 2 repoint landed via PR #716), so RLS keeps working without policy rewrites once Phase 4's first-login linking populates `public.profiles`.
+- `clerk` — Clerk signs the user in; supabase-js sends the Clerk session JWT, which Supabase Third-Party Auth validates against Clerk's JWKS. RLS reads the verified text subject from `auth.jwt()->>'sub'`; `auth.uid()` remains UUID-typed and must not be used for Clerk's `user_...` subjects. Workouts, MCP OAuth rows, and planned-workout rows reference `public.profiles.id`, while their policies resolve that UUID through `profiles.clerk_user_id`.
 
 The flag is read at build time by Vite (no runtime inspection); rollback is one env-var flip and a re-deploy. Apple stays in `DISABLED_OAUTH_PROVIDERS` regardless of the active provider until Quinn wires the Apple Developer account.
 
@@ -29,8 +29,8 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Clerk SDK + supabase-js JWT bridge. Slice B closes the live data-plane verification gap against the wired Clerk instance:
 
 - `apps/gymtrack/test/e2e/signin-clerk.spec.ts` exercises the email + password sign-in path through Clerk (gated on `CLERK_TEST_URL`, with `SUPABASE_TEST_URL` fallback during the cutover window per the Phase 5 cleanup plan).
-- `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql` is a pure-assertion migration that runs against the staging Supabase project after Phase 0: it asserts the Supabase Third-Party Auth presence check, the `public.profiles` table + RLS + policies, and the absence of any remaining `auth.users(id)` foreign keys, plus a live cross-user RLS rejection block gated on `app.slice_b_rls_test='on'`.
-- `infra/cloud/scripts/run-clerk-rls-test.sh` is the staging runbook that drives the cross-user RLS rejection assertion (seeds two Clerk test users + one workout each, simulates user A and user B's authenticated request via `set_config request.jwt.claim.sub`, asserts each user sees exactly their own workout row, best-effort cleanup on EXIT). Exit 0 = pass; exit 1 = RLS broken; exit 2 = pre-reqs missing.
+- `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql` is the forward repair migration: it rewrites every user-owned policy from UUID-only `auth.uid()` to the verified text `auth.jwt()->>'sub'` claim, then asserts all eight policies and the Phase 2 FK shape.
+- `infra/cloud/scripts/run-clerk-rls-test.sh` verifies the control-plane integration, mints real session JWTs for two existing Clerk test users, seeds one workout each, and queries Supabase's public Data API with those bearer tokens. It passes only when each user sees exactly its own fixture.
 
 Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23 per Quinn beat 293); the Slice B runbook is the assertion that produces the AC1 evidence, and AC3 (verified-email linking on first post-migration sign-in) is Phase 4 follow-up.
 
@@ -144,8 +144,8 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 
 ## Persistence
 
-- `public.workouts` — one row per workout session. RLS: `auth.uid() = user_id`.
-- `public.workout_sets` — one row per set. RLS via parent `workouts.user_id = auth.uid()`.
+- `public.workouts` — one row per workout session. RLS compares `auth.jwt()->>'sub'` with the owning `profiles.clerk_user_id`.
+- `public.workout_sets` — one row per set. RLS resolves the parent workout's profile and compares its Clerk subject with `auth.jwt()->>'sub'`.
 - `public.planned_workouts` / `public.planned_workout_sets` — planned workout state created by MCP clients via OAuth. `planned_workouts.consent_id` (FK → `gymtrack_oauth_consents.id`) records which connected agent authored the plan.
 - `public.gymtrack_oauth_clients` — static allowlist of supported MCP clients and their registered redirect URIs.
 - `public.gymtrack_oauth_consents` — one active consent per `user_id + client_id`; drives the Agents settings page and is the only credential path for agent access to workout data.
