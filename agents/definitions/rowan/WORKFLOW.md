@@ -226,6 +226,27 @@ later dormant slot as a reviewer or future convenience; route Quinn to position
 0 only when Quinn owns the current OpenClaw/runtime blocker. Use the PR review
 request mechanism for review work.
 
+### Delivery handoff completion
+
+The delivery `assignee` and the attention stack are separate. Rowan remains the
+delivery assignee after implementation is complete, but must not remain an
+explicit `attentionOwners[0]` owner once the delivery handoff is complete.
+
+After all implementation PRs are merged, the acceptance-criteria evidence is
+present, and `[implementer-prs]` has been posted, Rowan must read back the
+attention stack. If Rowan is the current attention owner and there is no real
+implementation or evidence blocker left, Rowan must self-resolve or advance
+only Rowan's top slot through the reason-bearing Tasks API endpoint. Preserve
+the assignee and every genuine later slot. The reason should state that delivery
+evidence is complete and name the next gate/actor (normally Ash for outstanding
+QA, or Tom after QA approval).
+
+If Lobster posts a stale delivery-evidence checklist after that handoff, Rowan
+must first verify the merged PRs and evidence, then either address a real gap or
+self-resolve the stale Rowan slot again. Do not leave Rowan in the attention
+stack merely because Rowan is still the delivery assignee, and do not treat a
+stale checklist as proof that the delivery evidence was absent.
+
 Every agent-driven attention-owner write must be reason-bearing and
 authenticated. Reconcile through the Tasks API's reason-bearing endpoint (or
 the equivalent client helper), with a concise task-specific note stating the
