@@ -28,7 +28,7 @@ The user-facing app surfaces planned workouts (created via either agent surface)
 
 Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Clerk SDK + supabase-js JWT bridge. Slice B closes the live data-plane verification gap against the wired Clerk instance:
 
-- `apps/gymtrack/test/e2e/signin-clerk.spec.ts` exercises the email + password sign-in path through Clerk (gated on `CLERK_TEST_URL`, with `SUPABASE_TEST_URL` fallback during the cutover window per the Phase 5 cleanup plan).
+- `apps/gymtrack/test/e2e/signin-clerk.spec.ts` exercises the email + password sign-in path through Clerk. It runs only when `CLERK_TEST_URL` is set and then requires dedicated `CLERK_TEST_EMAIL` + `CLERK_TEST_PASSWORD` credentials; Supabase-only E2E configuration never activates it.
 - `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql` is the forward repair migration: it rewrites every user-owned policy from UUID-only `auth.uid()` to the verified text `auth.jwt()->>'sub'` claim, then asserts all eight policies and the Phase 2 FK shape.
 - `infra/cloud/scripts/run-clerk-rls-test.sh` verifies the control-plane integration, mints real session JWTs for two existing Clerk test users, seeds one workout each, and queries Supabase's public Data API with those bearer tokens. It passes only when each user sees exactly its own fixture.
 

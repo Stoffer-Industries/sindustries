@@ -18,18 +18,22 @@ import { test, expect } from '@playwright/test';
  *     state.
  *
  * Gating:
- *   - Slice B is opt-in. The test gates on `process.env.CLERK_TEST_URL` so
- *     it is skipped (not failed) on developer machines without a Clerk
- *     test instance wired up. During the cutover window
- *     (`SUPABASE_TEST_URL` is set, `CLERK_TEST_URL` is not) we fall back
- *     to running the existing Supabase-path tests in
- *     `signup.spec.ts` / `signin.spec.ts`.
- *   - The fallback strategy is documented in the Slice B tech design
- *     § Phase 5 (cleanup): remove `SUPABASE_TEST_URL` fallback once the
- *     flag flips default.
+ *   - Slice B is opt-in. The test gates only on `CLERK_TEST_URL` so a
+ *     Supabase-only E2E run cannot accidentally execute the Clerk suite.
+ *   - Once enabled, `CLERK_TEST_EMAIL` and `CLERK_TEST_PASSWORD` are
+ *     required. Missing live credentials are a configuration failure, not a
+ *     placeholder login attempt or a silently skipped happy path.
  */
 
-const CLERK_GATE = process.env.CLERK_TEST_URL ?? process.env.SUPABASE_TEST_URL;
+const CLERK_GATE = Boolean(process.env.CLERK_TEST_URL);
+const CLERK_TEST_EMAIL = process.env.CLERK_TEST_EMAIL;
+const CLERK_TEST_PASSWORD = process.env.CLERK_TEST_PASSWORD;
+
+if (CLERK_GATE && (!CLERK_TEST_EMAIL || !CLERK_TEST_PASSWORD)) {
+  throw new Error(
+    'CLERK_TEST_EMAIL and CLERK_TEST_PASSWORD are required when CLERK_TEST_URL is set'
+  );
+}
 
 test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
   test.skip(!CLERK_GATE, 'CLERK_TEST_URL not set — Clerk sign-in path skipped');
@@ -39,11 +43,8 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
 
     // The Slice A dispatcher mounts ClerkAuthProvider when VITE_AUTH_PROVIDER=clerk.
     // The LoginScreen renders the same data-testid surface as the Supabase path.
-    const email = process.env.GT_TEST_EMAIL ?? 'tom@example.com';
-    const password = process.env.GT_TEST_PASSWORD ?? 'password';
-
-    await page.getByTestId('login-email').fill(email);
-    await page.getByTestId('login-password').fill(password);
+    await page.getByTestId('login-email').fill(CLERK_TEST_EMAIL!);
+    await page.getByTestId('login-password').fill(CLERK_TEST_PASSWORD!);
     await page.getByTestId('login-submit').click();
 
     // Successful sign-in navigates to /workout (or to the originally intended
