@@ -217,6 +217,9 @@ LOG="$TMP/cleanup-fail.log"
 rc="$(
   set +e
   source "$SCRIPT" 2>"$LOG"
+  # Re-disable set -e: common.sh re-enables it on sourcing, and we need
+  # to capture the function's return code without the subshell exiting.
+  set +e
   cloud_db_register_cleanup 'printf "surviving\n" >> "'"$TMP"'/survive.txt"'
   cloud_db_register_cleanup 'false'
   cloud_db_register_cleanup 'printf "early\n" >> "'"$TMP"'/early.txt"'
@@ -233,11 +236,17 @@ fi
 # 9. Bash version assertion
 echo "test: bash version assertion refuses bash 3"
 LOG="$TMP/bash.log"
-if bash-3 bash -c 'source "'"$SCRIPT"'"; echo "this should not print"' >/dev/null 2>"$LOG"; then
-  : # bash-3 may not be installed; the test is allowed to be skipped
+if ! command -v bash-3 >/dev/null 2>&1; then
+  : # bash-3 is not installed on this runner; the production gate is the
+  # version check in common.sh itself, not the test harness. Skip.
+  :
 else
-  if ! grep -q "bash >=" "$LOG"; then
-    echo "FAIL: old-bash refusal should mention the required version" >&2; cat "$LOG" >&2; exit 1
+  if ! bash-3 bash -c 'source "'"$SCRIPT"'"; echo "this should not print"' >/dev/null 2>"$LOG"; then
+    if ! grep -q "bash >=" "$LOG"; then
+      echo "FAIL: old-bash refusal should mention the required version" >&2; cat "$LOG" >&2; exit 1
+    fi
+  else
+    echo "FAIL: bash-3 sourced common.sh without dying; the bash version assertion is broken" >&2; cat "$LOG" >&2; exit 1
   fi
 fi
 

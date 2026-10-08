@@ -10,7 +10,7 @@
     "lint:no-legacy-approval-marker": "node scripts/check-no-legacy-approval-marker.mjs",
     "lint:design-system": "node scripts/check-design-system-lint.mjs",
     "test:lint": "node --test scripts/test/check-no-absolute-paths.test.mjs scripts/test/check-no-legacy-approval-marker.test.mjs scripts/test/check-design-system-lint.test.mjs",
-    "test:cloud-db": "bash scripts/cloud/database/tests/common.test.sh",
+    "test:cloud-db": "bash scripts/cloud/database/tests/common.test.sh && bash scripts/cloud/database/tests/manifest-constraints.test.sh",
     "lint:cloud-db": "shellcheck scripts/cloud/database/*.sh scripts/cloud/database/tests/*.sh"
   },
   "workspaces": [

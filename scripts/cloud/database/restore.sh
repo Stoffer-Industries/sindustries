@@ -31,6 +31,7 @@ Usage: restore.sh \
   --destination-dsn-file <path> \
   --archive <path> \
   --archive-sha256 <digest>
+  [--intentional-failure-after <seconds>]
 
 Required:
   --source-dsn-file <path>       Mode-0600 source DSN file (used only for
@@ -39,6 +40,16 @@ Required:
                                  in a fresh, empty database.
   --archive <path>               Path to the .dump archive.
   --archive-sha256 <digest>      Expected sha256 digest (64 hex chars).
+
+Optional:
+  --intentional-failure-after <seconds>
+                                 Drill-only flag. When set, restore.sh
+                                 starts pg_restore, waits the given
+                                 number of seconds, then SIGTERMs
+                                 pg_restore and exits non-zero with
+                                 a clear 'intentional failure' message.
+                                 Demonstrates the AC4 failure-and-retry
+                                 surface; never used in production runs.
 USAGE
 }
 
@@ -46,21 +57,29 @@ SOURCE_DSN_FILE=""
 DEST_DSN_FILE=""
 ARCHIVE_PATH=""
 EXPECTED_SHA=""
+INTENTIONAL_FAILURE_AFTER=""
 
 while (( $# > 0 )); do
   case "$1" in
-    --source-dsn-file)      SOURCE_DSN_FILE="$2"; shift 2;;
-    --destination-dsn-file) DEST_DSN_FILE="$2"; shift 2;;
-    --archive)              ARCHIVE_PATH="$2"; shift 2;;
-    --archive-sha256)       EXPECTED_SHA="$2"; shift 2;;
-    --help|-h)              usage; exit 0;;
-    *)                      cloud_db_die "unknown argument: $1";;
+    --source-dsn-file)            SOURCE_DSN_FILE="$2"; shift 2;;
+    --destination-dsn-file)       DEST_DSN_FILE="$2"; shift 2;;
+    --archive)                    ARCHIVE_PATH="$2"; shift 2;;
+    --archive-sha256)             EXPECTED_SHA="$2"; shift 2;;
+    --intentional-failure-after)  INTENTIONAL_FAILURE_AFTER="$2"; shift 2;;
+    --help|-h)                    usage; exit 0;;
+    *)                            cloud_db_die "unknown argument: $1";;
   esac
 done
 
 if [[ -z "$SOURCE_DSN_FILE" || -z "$DEST_DSN_FILE" || \
       -z "$ARCHIVE_PATH" || -z "$EXPECTED_SHA" ]]; then
   cloud_db_die "all four --source-dsn-file, --destination-dsn-file, --archive, --archive-sha256 are required"
+fi
+
+if [[ -n "$INTENTIONAL_FAILURE_AFTER" ]]; then
+  if ! [[ "$INTENTIONAL_FAILURE_AFTER" =~ ^[0-9]+$ ]] || (( INTENTIONAL_FAILURE_AFTER < 1 )); then
+    cloud_db_die "--intentional-failure-after must be a positive integer"
+  fi
 fi
 
 cloud_db_assert_environment "staging"
@@ -72,9 +91,9 @@ cloud_db_assign_run_id
 
 cloud_db_load_secret SOURCE_DSN "$SOURCE_DSN_FILE"
 cloud_db_load_secret DEST_DSN "$DEST_DSN_FILE"
-cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN_FILE"
-cloud_db_assert_no_production_dsn "destination" "$DEST_DSN_FILE"
-cloud_db_assert_inequality "source" "$SOURCE_DSN_FILE" "destination" "$DEST_DSN_FILE"
+cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN"
+cloud_db_assert_no_production_dsn "destination" "$DEST_DSN"
+cloud_db_assert_inequality "source" "$SOURCE_DSN" "destination" "$DEST_DSN"
 
 if [[ ! -f "$ARCHIVE_PATH" ]]; then
   cloud_db_die "archive '$ARCHIVE_PATH' not found"
@@ -112,6 +131,28 @@ restore_start_epoch="$(date +%s)"
 
 # Use --exit-on-error so a SQL error fails the whole restore; --no-owner
 # and --no-acl so the destination is the source of privilege truth.
+if [[ -n "$INTENTIONAL_FAILURE_AFTER" ]]; then
+  # Drill-only failure injection. Start pg_restore, wait the given
+  # number of seconds, then SIGTERM it. The destination is left in
+  # a partial state; the operator-driven quarantine + re-restore
+  # procedure is documented in the runbook.
+  PGPASSWORD="" pg_restore \
+    --exit-on-error \
+    --no-owner \
+    --no-acl \
+    --no-password \
+    --dbname="$DEST_DSN" \
+    "$ARCHIVE_PATH" \
+    >"${RESULT_PATH%.json}.log" 2>&1 &
+  PGPID=$!
+  trap "kill -TERM '$PGPID' 2>/dev/null || true" INT TERM
+  sleep "$INTENTIONAL_FAILURE_AFTER"
+  cloud_db_info "intentional failure drill: sending SIGTERM to pg_restore (pid=$PGPID) after ${INTENTIONAL_FAILURE_AFTER}s"
+  kill -TERM "$PGPID" 2>/dev/null || true
+  wait "$PGPID" || true
+  cloud_db_die "intentional failure drill: pg_restore killed at ${INTENTIONAL_FAILURE_AFTER}s; see ${RESULT_PATH%.json}.log"
+fi
+
 PGPASSWORD="" pg_restore \
   --exit-on-error \
   --no-owner \

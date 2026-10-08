@@ -57,8 +57,8 @@ cloud_db_assert_environment "staging"
 
 cloud_db_load_secret TASKS_DSN "$TASKS_DSN_FILE"
 cloud_db_load_secret BUDGET_DSN "$BUDGET_DSN_FILE"
-cloud_db_assert_no_production_dsn "tasks" "$TASKS_DSN_FILE"
-cloud_db_assert_no_production_dsn "budget" "$BUDGET_DSN_FILE"
+cloud_db_assert_no_production_dsn "tasks" "$TASKS_DSN"
+cloud_db_assert_no_production_dsn "budget" "$BUDGET_DSN"
 
 # Required schema qualification so Prisma writes into the right schema.
 case "$TASKS_DSN" in
@@ -127,10 +127,17 @@ run_service_migration() {
 
   state="$(prisma_migration_state "$service_name" "$dsn")"
 
-  # Refuse if a previous failed migration is still present.
-  if [[ "$state" == *'"failed":'* && "$state" != *'"failed": 0'* ]]; then
-    cloud_db_die "service=${service_name} has failed migrations in _prisma_migrations; refusing"
-  fi
+  # Parse the JSON with inline python so we key off the actual
+  # `failed` field rather than a fragile substring match. A naive
+  # match like `*"failed": 0*` misclassifies if the JSON ever has
+  # sibling fields like `"failed_rollbacks": 0` or is reformatted.
+  python3 - "$service_name" "$state" <<'PY' || cloud_db_die "service=$1 has failed migrations in _prisma_migrations; refusing"
+import json, sys
+service = sys.argv[1]
+state = json.loads(sys.argv[2])
+if int(state.get("failed", 0)) > 0:
+    raise SystemExit(f"service={service} has failed migrations in _prisma_migrations; refusing")
+PY
 
   ( cd "$prisma_dir" && \
       DATABASE_URL="$dsn" \

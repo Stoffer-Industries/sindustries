@@ -134,7 +134,7 @@ RESTORE_OUT="$(
     --destination-dsn-file "$DEST_TASKS_FILE" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
-    $( [[ "$INTERRUPTION" == "restore" ]] && printf -- '--exit-on-error' )
+    $( [[ "$INTERRUPTION" == "restore" ]] && printf -- '--intentional-failure-after 2' )
 )"
 
 if [[ "$INTERRUPTION" == "restore" ]]; then
@@ -177,6 +177,19 @@ cloud_db_info "step 5 reconcile complete"
 
 RECOVERY_OUT=""
 if (( RECOVERY )); then
+  # The recovery DSN files are expected to be named `<dest-stem>-recovery.dsn`,
+  # where `<dest-stem>` is the destination file path with the `.dsn` suffix
+  # stripped. This is the convention documented in the runbook; refuse any
+  # future caller that violates it instead of silently reading the wrong
+  # file.
+  case "$DEST_TASKS_FILE" in
+    *.dsn) ;;
+    *) cloud_db_die "destination DSN file '$DEST_TASKS_FILE' must end in .dsn (runbook convention)" ;;
+  esac
+  case "$DEST_BUDGET_FILE" in
+    *.dsn) ;;
+    *) cloud_db_die "destination DSN file '$DEST_BUDGET_FILE' must end in .dsn (runbook convention)" ;;
+  esac
   RECOVERY_TASKS_FILE="${DEST_TASKS_FILE%.dsn}-recovery.dsn"
   RECOVERY_BUDGET_FILE="${DEST_BUDGET_FILE%.dsn}-recovery.dsn"
   if [[ ! -f "$RECOVERY_TASKS_FILE" || ! -f "$RECOVERY_BUDGET_FILE" ]]; then
