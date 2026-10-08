@@ -551,6 +551,40 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     owners
 }
 
+/// Explain why the workflow is changing the actionable attention slot. This
+/// note is persisted on any automated row created or repaired by Lobster so
+/// an escalation is never a silent `addedBy = null, note = null` mutation.
+pub(crate) fn workflow_attention_reason(task: &Task, owner: &str) -> String {
+    match owner.to_ascii_lowercase().as_str() {
+        "quinn" if task.status == "ready" => {
+            "Tech design approval is required before delivery can proceed.".to_string()
+        }
+        "quinn" => {
+            "QA verification was deferred and requires workflow capability resolution.".to_string()
+        }
+        "ash" => "QA verification is required for the delivered implementation.".to_string(),
+        "tom" => "Final acceptance approval is required.".to_string(),
+        "rowan" => "The delivery owner must address the outstanding workflow evidence.".to_string(),
+        _ => format!("Workflow reconciliation requires attention from {owner}."),
+    }
+}
+
+fn attention_owner_metadata_complete(task: &Task, desired: &[String]) -> bool {
+    desired.iter().all(|owner| {
+        task.attention_owner_details.iter().any(|detail| {
+            detail.owner.eq_ignore_ascii_case(owner)
+                && detail
+                    .added_by
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+                && detail
+                    .note
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
+    })
+}
+
 /// Tom is only a workflow owner at `acceptance` for the structured `accepted`
 /// gate. During implementation, remove Tom slots unless Quinn has explicitly
 /// recorded a `[quinn-escalation]` marker in the task audit trail. This keeps
@@ -601,17 +635,22 @@ fn has_explicit_quinn_tom_escalation(task: &Task) -> bool {
 
 pub(crate) fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<()> {
     let desired = reconciled_attention_owners(&env.task);
-    if desired == env.task.attention_owners {
+    let metadata_needs_repair = !attention_owner_metadata_complete(&env.task, &desired);
+    if desired == env.task.attention_owners && !metadata_needs_repair {
         return Ok(());
     }
     if args.dry_run {
         env.task.attention_owners = desired;
         return Ok(());
     }
-    api_client::api_patch::<Task>(
+    let owner_for_reason = workflow_attention_owner(&env.task)
+        .or_else(|| desired.first().cloned())
+        .unwrap_or_else(|| "workflow".to_string());
+    api_client::api_reconcile_attention::<Task>(
         &args.base_url,
         &env.task.id,
-        json!({"attentionOwners": desired}),
+        desired,
+        &workflow_attention_reason(&env.task, &owner_for_reason),
     )?;
     env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
     Ok(())
@@ -813,6 +852,37 @@ mod tests {
     fn managed_owner_reason_satisfied_unknown_owner_is_never_satisfied() {
         let task = task_with_status("ready");
         assert!(!managed_owner_reason_satisfied(&task, "Nobody"));
+    }
+
+    #[test]
+    fn workflow_attention_reason_is_specific_to_the_managed_owner() {
+        let ready = task_with_status("ready");
+        assert_eq!(
+            workflow_attention_reason(&ready, "Quinn"),
+            "Tech design approval is required before delivery can proceed."
+        );
+        let doing = task_with_status("doing");
+        assert_eq!(
+            workflow_attention_reason(&doing, "Quinn"),
+            "QA verification was deferred and requires workflow capability resolution."
+        );
+        assert_eq!(
+            workflow_attention_reason(&doing, "Ash"),
+            "QA verification is required for the delivered implementation."
+        );
+    }
+
+    #[test]
+    fn workflow_metadata_repair_is_needed_for_legacy_rows() {
+        let mut task = task_with_status("doing");
+        task.attention_owners = vec!["Quinn".to_string()];
+        assert!(!attention_owner_metadata_complete(&task, &task.attention_owners));
+        task.attention_owner_details = vec![crate::TaskAttentionOwner {
+            owner: "Quinn".to_string(),
+            added_by: Some("Rowan".to_string()),
+            note: Some("QA is deferred".to_string()),
+        }];
+        assert!(attention_owner_metadata_complete(&task, &task.attention_owners));
     }
 
     #[test]

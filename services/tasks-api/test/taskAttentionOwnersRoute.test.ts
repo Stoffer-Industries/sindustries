@@ -115,6 +115,84 @@ function taskFixture(overrides = {}) {
   };
 }
 
+describe('POST /tasks/:id/attention-owners/reconcile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (fn) => fn(prismaMock));
+  });
+
+  it('records actor and reason for a workflow-created owner', async () => {
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce({ id: TASK_ID, attentionOwners: [] })
+      .mockResolvedValueOnce(taskFixture({
+        attentionOwners: [attentionRowFixture({ owner: 'Quinn', addedBy: 'Rowan', note: 'QA is deferred' })]
+      }));
+    prismaMock.taskAttentionOwner.findMany.mockResolvedValueOnce([]);
+    prismaMock.taskAttentionOwner.create.mockResolvedValueOnce(attentionRowFixture({
+      owner: 'Quinn',
+      addedBy: 'Rowan',
+      note: 'QA is deferred'
+    }));
+
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(ROWAN_TOKEN))
+      .send({ attentionOwners: ['Quinn'], note: 'QA is deferred' });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskAttentionOwner.create).toHaveBeenCalledWith({
+      data: {
+        taskId: TASK_ID,
+        owner: 'Quinn',
+        addedBy: 'Rowan',
+        note: 'QA is deferred',
+        position: 0
+      }
+    });
+    expect(prismaMock.taskComment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        author: 'Rowan',
+        body: expect.stringContaining('QA is deferred')
+      })
+    });
+  });
+
+  it('repairs a legacy owner row that has no actor or reason', async () => {
+    const legacy = attentionRowFixture({ owner: 'Quinn', addedBy: null, note: null });
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce({ id: TASK_ID, attentionOwners: [legacy] })
+      .mockResolvedValueOnce(taskFixture({ attentionOwners: [legacy] }));
+    prismaMock.taskAttentionOwner.findMany.mockResolvedValueOnce([legacy]);
+
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(ROWAN_TOKEN))
+      .send({ attentionOwners: ['Quinn'], note: 'QA verification is deferred' });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.taskAttentionOwner.update).toHaveBeenCalledWith({
+      where: { id: legacy.id },
+      data: {
+        owner: 'Quinn',
+        position: 0,
+        note: 'QA verification is deferred',
+        addedBy: 'Rowan'
+      }
+    });
+    expect(prismaMock.taskAttentionOwner.create).not.toHaveBeenCalled();
+  });
+
+  it('requires a reason even when the workflow is clearing the stack', async () => {
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(ROWAN_TOKEN))
+      .send({ attentionOwners: [] });
+
+    expect(response.status).toBe(400);
+    expect(response.body?.error?.code).toBe('INVALID_ATTENTION_OWNER_NOTE');
+  });
+});
+
 describe('POST /tasks/:id/attention-owners (task 91864257 AC2)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

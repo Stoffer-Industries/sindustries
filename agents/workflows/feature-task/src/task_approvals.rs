@@ -355,6 +355,7 @@ mod tests {
                 })
                 .collect(),
             attention_owners: Vec::new(),
+            attention_owner_details: Vec::new(),
         }
     }
 

@@ -4,6 +4,7 @@ import { badRequest, notFound, sendError } from '../lib/http.ts';
 import {
   MAX_ATTENTION_OWNERS,
   MAX_ATTENTION_OWNER_LENGTH,
+  normalizeAttentionOwners,
   parseTaskId
 } from './tasks/_validation.ts';
 import { mapTask } from './tasks/_mapper.ts';
@@ -20,9 +21,9 @@ import { mapTaskOptionsFor } from './tasks/_deps.ts';
  *   - delete a single row without disturbing the rest of the stack,
  *   - remove the caller's own current top slot ("resolve my blocker").
  *
- * Every write here goes through `requireAuth`; the lobster is unaffected
- * because it still writes the full stack via the PATCH `/tasks/:id`
- * endpoint and benefits from the case-insensitive dedupe there.
+ * Every write here goes through `requireAuth`. The workflow lobster uses the
+ * reconciliation endpoint below so automated additions carry the same
+ * actor/reason metadata as human attention-owner writes.
  */
 
 export const taskAttentionOwnersRouter = Router();
@@ -90,6 +91,122 @@ async function loadTaskWithAttentionOwners(id) {
     include: { attentionOwners: { orderBy: { position: 'asc' } } }
   });
 }
+
+/**
+ * POST /tasks/:id/attention-owners/reconcile
+ * Body: `{ attentionOwners: string[], note: string }`
+ * Auth: the authenticated workflow actor.
+ *
+ * Reconcile the ordered stack while preserving metadata for rows that remain
+ * in the stack. New rows (and legacy rows missing metadata) receive the
+ * authenticated actor and the supplied reason. This is deliberately a
+ * separate endpoint from PATCH /tasks/:id: the latter is a legacy
+ * full-replacement contract and cannot safely represent why an automated
+ * owner was added.
+ */
+taskAttentionOwnersRouter.post('/tasks/:id/attention-owners/reconcile', async (req, res, next) => {
+  try {
+    const id = parseTaskId(req.params.id);
+    if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
+
+    const authenticatedActor = req.user?.actor;
+    if (!authenticatedActor) {
+      return sendError(res, 401, 'AUTH_REQUIRED', 'A valid session or service credential is required');
+    }
+
+    const normalized = normalizeAttentionOwners(req.body?.attentionOwners);
+    if (!normalized) {
+      return badRequest(
+        res,
+        'INVALID_ATTENTION_OWNERS',
+        'attentionOwners must be an array of non-empty strings (max 16 entries, 64 chars each)'
+      );
+    }
+    const note = normalizeNoteString(req.body?.note);
+    if (!note) {
+      return badRequest(res, 'INVALID_ATTENTION_OWNER_NOTE', 'note is required (max 500 chars, non-empty after trim)');
+    }
+
+    const existing = await loadTaskWithAttentionOwners(id);
+    if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
+
+    const reconciliation = await prisma.$transaction(async (tx) => {
+      const currentRows = await tx.taskAttentionOwner.findMany({
+        where: { taskId: id },
+        orderBy: { position: 'asc' }
+      });
+      const rowsByOwner = new Map();
+      for (const row of currentRows) {
+        const key = row.owner.trim().toLowerCase();
+        if (!rowsByOwner.has(key)) rowsByOwner.set(key, []);
+        rowsByOwner.get(key).push(row);
+      }
+
+      const desiredRows = normalized.owners.map((owner, position) => {
+        const candidates = rowsByOwner.get(owner.toLowerCase()) ?? [];
+        const row = candidates.shift() ?? null;
+        return { owner, position, row };
+      });
+      const retainedIds = new Set(desiredRows.filter(({ row }) => row).map(({ row }) => row.id));
+      const removedRows = currentRows.filter((row) => !retainedIds.has(row.id));
+
+      // Move every current row outside the live range before reordering;
+      // this keeps @@unique([taskId, position]) valid for every intermediate
+      // update in the transaction.
+      const temporaryBase = currentRows.length + normalized.owners.length + 1;
+      for (const [index, row] of currentRows.entries()) {
+        await tx.taskAttentionOwner.update({
+          where: { id: row.id },
+          data: { position: temporaryBase + index }
+        });
+      }
+      for (const row of removedRows) {
+        await tx.taskAttentionOwner.delete({ where: { id: row.id } });
+      }
+
+      const created = [];
+      const repaired = [];
+      for (const { owner, position, row } of desiredRows) {
+        if (row) {
+          const data: Record<string, string | number> = { owner, position };
+          if (!row.note || !row.addedBy) {
+            data.note = row.note || note;
+            data.addedBy = row.addedBy || authenticatedActor;
+            repaired.push({ owner, position });
+          }
+          await tx.taskAttentionOwner.update({ where: { id: row.id }, data });
+          continue;
+        }
+
+        await tx.taskAttentionOwner.create({
+          data: { taskId: id, owner, addedBy: authenticatedActor, note, position }
+        });
+        created.push({ owner, position });
+      }
+
+      for (const { owner, position } of [...created, ...repaired]) {
+        const kind = created.some((item) => item.owner === owner) ? 'added' : 'metadata repaired';
+        await tx.taskComment.create({
+          data: {
+            taskId: id,
+            author: authenticatedActor,
+            body: `Attention owner "${owner}" ${kind} at position ${position} by ${authenticatedActor}: ${note}`
+          }
+        });
+      }
+
+      return { created, repaired, removed: removedRows.map((row) => row.owner) };
+    });
+
+    const refreshed = await loadTask(id);
+    return res.status(200).json({
+      data: mapTask(refreshed, mapTaskOptionsFor(refreshed)),
+      reconciliation
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 
 /**
  * POST /tasks/:id/attention-owners
