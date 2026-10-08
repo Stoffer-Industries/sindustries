@@ -1,0 +1,149 @@
+# .github/workflows/cloud-staging-db-drill.yml
+#
+# Cloud staging database transfer + restore drill (task d37681e1).
+# workflow_dispatch only — never runs on push or schedule.
+#
+# Required secrets (configured on the staging GitHub Environment):
+#   * TASKS_API_SOURCE_DSN            — read-only DSN for source tasks_api
+#   * BUDGET_API_SOURCE_DSN           — read-only DSN for source budget_api
+#   * TASKS_API_DEST_DSN              — owner DSN for destination tasks_api
+#   * BUDGET_API_DEST_DSN             — owner DSN for destination budget_api
+#   * RECOVERY_TASKS_API_DSN          — owner DSN for recovery tasks_api
+#                                       (only required when --recovery)
+#   * RECOVERY_BUDGET_API_DSN         — owner DSN for recovery budget_api
+#                                       (only required when --recovery)
+#
+# Required environment variables (configured on the staging GitHub Environment):
+#   * ENVIRONMENT — must equal "staging"
+#   * PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING — "1" (skip offline cache check)
+
+name: cloud-staging-db-drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery:
+        description: 'Also restore into a recovery DB and re-reconcile.'
+        required: false
+        type: boolean
+        default: false
+      interruption:
+        description: 'Run a single interruption drill: dump, restore, or none.'
+        required: false
+        type: string
+        default: 'none'
+
+concurrency:
+  group: cloud-staging-database
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: Drill
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 45
+    env:
+      ENVIRONMENT: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install repository deps
+        run: npm ci
+
+      - name: Write DSNs to mode-0600 files
+        env:
+          TASKS_SOURCE: ${{ secrets.TASKS_API_SOURCE_DSN }}
+          BUDGET_SOURCE: ${{ secrets.BUDGET_API_SOURCE_DSN }}
+          TASKS_DEST: ${{ secrets.TASKS_API_DEST_DSN }}
+          BUDGET_DEST: ${{ secrets.BUDGET_API_DEST_DSN }}
+          TASKS_RECOVERY: ${{ secrets.RECOVERY_TASKS_API_DSN }}
+          BUDGET_RECOVERY: ${{ secrets.RECOVERY_BUDGET_API_DSN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cloud-staging-secrets"
+          chmod 0700 "$RUNNER_TEMP/cloud-staging-secrets"
+          for pair in \
+              "tasks-source:tasks.dsn:$TASKS_SOURCE" \
+              "budget-source:budget.dsn:$BUDGET_SOURCE" \
+              "tasks-dest:tasks-dest.dsn:$TASKS_DEST" \
+              "budget-dest:budget-dest.dsn:$BUDGET_DEST"; do
+            name="${pair%%:*}"
+            rest="${pair#*:}"
+            file="${rest%%:*}"
+            value="${rest#*:}"
+            if [[ -n "$value" ]]; then
+              printf '%s' "$value" > "$RUNNER_TEMP/cloud-staging-secrets/$name-$file"
+              chmod 0600 "$RUNNER_TEMP/cloud-staging-secrets/$name-$file"
+            fi
+          done
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            printf '%s' "$TASKS_RECOVERY"  > "$RUNNER_TEMP/cloud-staging-secrets/tasks-recovery.dsn"
+            chmod 0600 "$RUNNER_TEMP/cloud-staging-secrets/tasks-recovery.dsn"
+            printf '%s' "$BUDGET_RECOVERY" > "$RUNNER_TEMP/cloud-staging-secrets/budget-recovery.dsn"
+            chmod 0600 "$RUNNER_TEMP/cloud-staging-secrets/budget-recovery.dsn"
+          fi
+
+      - name: Pre-flight safety checks
+        env:
+          ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          [[ "$ENVIRONMENT" == "staging" ]] || { echo "ENVIRONMENT must be staging"; exit 10; }
+          command -v pg_dump >/dev/null
+          command -v pg_restore >/dev/null
+          psql --version | grep -q '16\.'
+
+      - name: Run the drill
+        env:
+          ENVIRONMENT: staging
+          CLOUD_DB_DRILL_INTERRUPTION: ${{ inputs.interruption }}
+        run: |
+          set -euo pipefail
+          SEC="$RUNNER_TEMP/cloud-staging-secrets"
+          RECOVERY_FLAG=""
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            RECOVERY_FLAG="--recovery"
+          fi
+          RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 3)"
+          ./scripts/cloud/database/drill.sh \
+            --source-tasks-dsn-file  "$SEC/tasks-source-tasks.dsn" \
+            --source-budget-dsn-file "$SEC/budget-source-budget.dsn" \
+            --dest-tasks-dsn-file    "$SEC/tasks-dest-tasks-dest.dsn" \
+            --dest-budget-dsn-file   "$SEC/budget-dest-budget-dest.dsn" \
+            --confirm "$RUN_ID" \
+            --interruption "${{ inputs.interruption }}" \
+            $RECOVERY_FLAG \
+            --archive-dir "$RUNNER_TEMP/cloud-staging-artifacts" \
+            --output      "$RUNNER_TEMP/cloud-staging-artifacts/drill-final.json"
+
+      - name: Upload redacted result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-staging-db-drill-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cloud-staging-artifacts/*.json
+            ${{ runner.temp }}/cloud-staging-artifacts/*.sha256
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Fail if reconcile FAILED
+        run: |
+          set -euo pipefail
+          f="$RUNNER_TEMP/cloud-staging-artifacts/reconcile-*.json"
+          if compgen -G "$f" >/dev/null; then
+            latest=$(ls -1t $f | head -n1)
+            verdict=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).verdict || 'unknown')" "$latest")
+            if [[ "$verdict" != "PASS" ]]; then
+              echo "reconcile verdict=$verdict; failing the workflow"
+              exit 20
+            fi
+          fi
