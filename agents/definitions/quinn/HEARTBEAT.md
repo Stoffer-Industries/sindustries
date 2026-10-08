@@ -101,7 +101,10 @@ defined owner (for example Ash for `qa_agent`). Any Quinn or Tom escalation
 must use a reason-bearing Tasks API write with an authenticated actor and a
 specific current blocker, next action, and reason the named owner is needed.
 `[quinn-escalation]` is audit text only and does not satisfy that row metadata
-contract.
+contract. Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for every
+add, replacement, escalation, repair, and self-resolve. Never fall back to the
+legacy full-stack PATCH or direct curl if the reason-bearing endpoint is
+unavailable; stop and report the blocker.
 
 When Quinn is top owner:
 

@@ -251,9 +251,11 @@ Every agent-driven attention-owner write must be reason-bearing and
 authenticated. Reconcile through the Tasks API's reason-bearing endpoint (or
 the equivalent client helper), with a concise task-specific note stating the
 current actor, why the handoff is needed, and the next action. Do not use the
-legacy full-stack PATCH for automated handoffs: it can silently recreate rows
-with no actor or reason. A task comment is supporting audit evidence, not a
-substitute for row metadata.
+legacy full-stack PATCH or direct curl for automated handoffs: it can silently
+recreate rows with no actor or reason. Invoke
+`agents/skills/ops/attention-owner-routing/SKILL.md` for the complete
+procedure. A task comment is supporting audit evidence, not a substitute for
+row metadata.
 
 Quinn is an exceptional OpenClaw/runtime unblocker, not a normal workflow
 stage. Do not route Quinn for ordinary delivery, QA, acceptance, or PR-review

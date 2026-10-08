@@ -94,7 +94,9 @@ When you see yourself listed as an attention owner:
 
 1. Read the task, decide or answer.
 2. Post the response / action as a task comment.
-3. Clear your own name without dropping co-owners (preserves siblings like `["Quinn"]`):
+3. Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for the
+   reason-bearing self-resolve or any replacement/escalation. Clear your own
+   name without dropping co-owners (preserves siblings like `["Quinn"]`):
 
 ```python
 from agents.skills.ops.tasks_api.tasks_api_client import remove_self_from_attention_owners
@@ -102,6 +104,7 @@ remove_self_from_attention_owners("<task-uuid>", "Lox")
 ```
 
 Do NOT use `--clear-attention-owners` — that wipes every owner, not just yours.
+Do not use the legacy full-stack PATCH or direct curl for a handoff.
 
 ## Failure Response Framework
 
