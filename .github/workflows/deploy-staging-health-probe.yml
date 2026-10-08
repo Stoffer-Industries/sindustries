@@ -7,6 +7,13 @@
 #   - Canary deploy with a /healthz smoke check (the probe exposes its
 #     own health route; that is the http_check target in fly.toml).
 #
+# Stable hostname (task 5cb4a8fe; source of truth:
+# infra/cloud/hostname-matrix.json). The smoke check hits the stable
+# staging hostname (health-probe.staging.sindustries.co.nz). The
+# provider-shaped URL is retained below the active command as a
+# documented `<!-- stable-fallback -->` annotation per AC4 — it is the
+# audit-only fallback, not the smoke path.
+#
 # Quinn-owned: FLY_API_TOKEN must be registered once as a repo secret
 # in the staging GitHub environment.
 
@@ -71,7 +78,10 @@ jobs:
         id: smoke
         run: |
           set -euo pipefail
-          URL="https://${{ env.FLY_APP }}.fly.dev/healthz"
+          # AC4 documented fallback path (provider URL retained for audit only;
+          # the active smoke check targets the matrix stable staging hostname).
+          # <!-- stable-fallback --> https://sindustries-health-probe-staging.fly.dev/healthz
+          URL="https://health-probe.staging.sindustries.co.nz/healthz"
           STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "${URL}")"
           if [ "${STATUS}" != "200" ]; then
             echo "::error::smoke check failed: GET ${URL} returned ${STATUS}"

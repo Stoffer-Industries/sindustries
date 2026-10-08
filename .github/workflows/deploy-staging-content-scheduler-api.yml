@@ -1,4 +1,15 @@
 # GitHub Actions: deploy content-scheduler-api to Fly.io staging.
+#
+# Stable hostname (task 5cb4a8fe; source of truth:
+# infra/cloud/hostname-matrix.json). The smoke check hits the stable
+# staging hostname (content-scheduler-api.staging.sindustries.co.nz).
+# The provider-shaped URL is retained below the active command as a
+# documented `<!-- stable-fallback -->` annotation per AC4 — it is the
+# audit-only fallback, not the smoke path. 20-attempt retry loop (5s
+# sleep, 100s total) per docs/specs/add-stable-app-name-hostnames-tech-design.md
+# §risks-3: Let's Encrypt cert issuance can take a few minutes after a
+# new CNAME lands, so the deploy-window tolerance must outlast the
+# longest expected cert-issuance latency.
 
 name: Deploy content-scheduler-api (Fly.io staging)
 
@@ -58,8 +69,11 @@ jobs:
       - name: Smoke check (/health)
         run: |
           set -euo pipefail
-          URL="https://${{ env.FLY_APP }}.fly.dev/health"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          # AC4 documented fallback path (provider URL retained for audit only;
+          # the active smoke check targets the matrix stable staging hostname).
+          # <!-- stable-fallback --> https://sindustries-content-scheduler-api-staging.fly.dev/health
+          URL="https://content-scheduler-api.staging.sindustries.co.nz/health"
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
             if curl --fail --silent --show-error --max-time 10 "$URL"; then
               echo "Smoke OK on attempt $i"
               exit 0
@@ -67,5 +81,5 @@ jobs:
             echo "Smoke attempt $i failed; retrying in 5s"
             sleep 5
           done
-          echo "Smoke check failed after 10 attempts" >&2
+          echo "Smoke check failed after 20 attempts" >&2
           exit 1

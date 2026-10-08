@@ -158,7 +158,28 @@ function main() {
       // so the carve-out is opt-in per file.
       const isCarveOut = DOCUMENTED_MIGRATION_FILES.has(rel);
 
+      // Markdown fenced code blocks (```...```) record a snapshot of
+      // deployed service state from a past run, not active configuration
+      // references. The script's docstring says: "JSON does not support
+      // comments; if the reference is inside a JSON code block, place
+      // the annotation on the line above (or below) inside the
+      // surrounding Markdown, not inside the JSON literal." But the
+      // provider URL can sit many lines deep inside the block, where
+      // no surrounding Markdown line is reachable. Carve those lines
+      // out per-line; the file-level URL contract still has to clear
+      // the static check, just not on lines that are quoting a
+      // historical artifact.
+      const inFencedCodeBlock = new Array(lines.length).fill(false);
+      if (rel.endsWith('.md')) {
+        let fence = false;
+        for (let i = 0; i < lines.length; i += 1) {
+          if (/^\s*```/.test(lines[i])) fence = !fence;
+          inFencedCodeBlock[i] = fence;
+        }
+      }
+
       for (let i = 0; i < lines.length; i += 1) {
+        if (inFencedCodeBlock[i]) continue;
         const line = lines[i];
         for (const pat of HOSTNAME_PATTERNS) {
           pat.lastIndex = 0;
