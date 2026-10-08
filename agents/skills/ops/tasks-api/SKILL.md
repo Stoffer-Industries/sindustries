@@ -100,6 +100,23 @@ structured approvals) remain independent. A normal stack can therefore be:
 `assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
 Do not hide Ash and do not deduplicate Rowan across those roles.
 
+### Completed delivery handoff
+
+When an implementation delivery is complete, the delivery assignee must not
+remain at `attentionOwners[0]` merely because the `assignee` field is still
+theirs. After the implementation PRs are merged, the acceptance-criteria
+evidence and required delivery marker are present, and no real delivery blocker
+remains, the current agent must read back the stack and self-resolve or advance
+only its own top attention slot through the reason-bearing endpoint. Preserve
+the delivery assignee and every genuine later slot. The reason must name the
+completed evidence and the next gate/actor. If QA is already approved, the next
+actor is the acceptance gate rather than the delivery assignee.
+
+If a later Lobster checklist claims that delivery evidence is missing, verify
+the merged PR bodies and task evidence before acting. Address a real gap; if the
+checklist is stale, clear the stale top attention slot again. Do not leave the
+assignee in the attention stack as a passive watch state.
+
 ```http
 POST /tasks/<task-uuid>/attention-owners/reconcile
 {"attentionOwners":["Ash"],"note":"QA verification is required for the delivered implementation."}
