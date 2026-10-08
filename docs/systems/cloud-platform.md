@@ -33,7 +33,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Queue + cache                    | Upstash managed Redis (TLS, pay-per-request)             | Quinn  | Upstash dashboard (URLs in `infra/cloud/env/*.env.example`)   |
 | Object storage                   | (not used yet)                                           | —      | —                                                             |
 | Observability                    | OpenTelemetry via `@sindustries/otel-node` → collector   | Shared | `infra/cloud/env/*.env.example` (OTEL_EXPORTER_OTLP_ENDPOINT) |
-| Domain                           | `sindustries.dev` (Quinn-registered)                     | Quinn  | DNS provider                                                  |
+| Domain                           | `sindustries.co.nz` (apex for production; `*.staging.sindustries.co.nz` for staging) — supersedes the foundation's `sindustries.dev` reservation per task `5cb4a8fe` | Quinn  | DNS provider + `infra/cloud/hostname-matrix.json` (machine-readable source of truth) |
 | CI deploy                        | GitHub Actions, path-filtered per service, canary deploy | Rowan  | `.github/workflows/deploy-staging-*.yml`                      |
 | Secrets                          | Fly app secrets + GH repo secrets                        | Quinn  | `fly secrets set …` (operator CLI); `secrets.FLY_API_TOKEN`   |
 | First-time setup                 | Idempotent local bootstrap script                        | Quinn  | `infra/cloud/scripts/bootstrap-staging.sh`                    |
@@ -96,7 +96,7 @@ Current staging cost (4 services, near-idle):
 | Fly — 4 × `shared-cpu-1x` 1 GB machines         | ~$20/mo                  | HTTP services stop when idle; the worker stays available for queued jobs |
 | Neon — staging branch (free tier)               | $0                       | Free tier covers staging; production will move to Pro |
 | Upstash — staging Redis (free tier)             | $0                       | Pay-per-request model; staging won't exceed free     |
-| Domain — `sindustries.dev` (annual)             | ~$15/yr (~$1.25/mo)      | Quinn-registered                                     |
+| Domain — `sindustries.co.nz` (annual)           | ~$15/yr (~$1.25/mo)      | Quinn-registered; replaces the foundation's `sindustries.dev` reservation per task `5cb4a8fe` |
 | GH Actions (deploys on push to main)            | $0                       | Within repo free tier                                |
 | **Total staging**                               | **~$21/mo**              |                                                      |
 
@@ -123,14 +123,26 @@ This is a staging foundation — Quinn is the single point of contact for creden
 
 | Domain             | Use                                       | Status                         |
 | ------------------ | ----------------------------------------- | ------------------------------ |
-| `sindustries.dev`  | Wildcard CNAMEs to Fly app subdomains     | Quinn-registered, DNS pending  |
+| `sindustries.co.nz` (apex) | Production frontends + APIs (mission-control, tasks, tasks-api, budget-api, content-scheduler-api, health-probe) | Quinn-registered; matrix at `infra/cloud/hostname-matrix.json`; CNAMEs pending per task `5cb4a8fe` |
+| `staging.sindustries.co.nz` (subdomain) | Staging frontends + APIs (same six surfaces)        | Delegation pending per task `5cb4a8fe`; matrix at `infra/cloud/hostname-matrix.json` |
+| `sindustries.dev` (legacy)    | Wildcard CNAMEs to Fly app subdomains (audited historical reservation) | Superseded by `sindustries.co.nz` for staging and production per task `5cb4a8fe`; remains documented for audit only |
 
-Until DNS lands, deploys use the default `*.fly.dev` URLs:
+## Stable hostname matrix (task `5cb4a8fe`)
 
-- `https://sindustries-tasks-api-staging.fly.dev/health`
-- `https://sindustries-budget-api-staging.fly.dev/health`
-- `https://sindustries-content-scheduler-api-staging.fly.dev/health`
-- `https://sindustries-auto-post-worker-staging.fly.dev` (no HTTP — Fly supervises by PID)
+The full staging + production hostname matrix lives at [`infra/cloud/hostname-matrix.json`](../../infra/cloud/hostname-matrix.json) (the machine-readable source of truth). The matrix records:
+
+- Six public surfaces: mission-control, tasks-app, tasks-api, budget-api, content-scheduler-api, health-probe.
+- The auto-post worker row with `staging: null`, `production: null`, and `publicUrl: false` — the explicit non-public nature is auditable from the matrix and from the per-hostname comment block at the top of `infra/cloud/fly/auto-post-worker.fly.toml`.
+- A `providerFallback` per public surface (the `*.fly.dev` / `*.vercel.app` URL the design records as the migration path until the stable CNAMEs + certs land).
+
+The static checks `tests/cloud/scripts/check-stable-hostname-matrix.mjs` and `tests/cloud/scripts/check-stable-url-fallbacks.mjs` enforce the matrix on every CI run; both pass on the committed tree at the time of writing.
+
+Until the stable CNAMEs land, deploys use the default `*.fly.dev` URLs:
+
+- `https://sindustries-tasks-api-staging.fly.dev/health` <!-- stable-fallback: documented-migration; superseded by https://tasks-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- `https://sindustries-budget-api-staging.fly.dev/health` <!-- stable-fallback: documented-migration; superseded by https://budget-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- `https://sindustries-content-scheduler-api-staging.fly.dev/health` <!-- stable-fallback: documented-migration; superseded by https://content-scheduler-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- `https://sindustries-auto-post-worker-staging.fly.dev` (no HTTP — Fly supervises by PID) <!-- stable-fallback: documented-migration; auto-post worker keeps no public URL on the stable hostname matrix either (task 5cb4a8fe) -->
 
 Once DNS lands, point `<service>.staging.sindustries.dev` CNAMEs at the matching `*.fly.dev` host and update the smoke check URLs in the deploy workflows.
 
@@ -204,6 +216,7 @@ The script is **idempotent** — re-running it does not destroy existing apps or
 - [`docs/specs/cloud-staging-environment-tech-design.md`](../specs/cloud-staging-environment-tech-design.md) — task `2850c5ac` design: staging validation workflow, AC2 authenticated harness, AC3 failure-drill, AC4 evidence contract.
 - [`infra/cloud/README.md`](../../infra/cloud/README.md) — operator index, Quinn-vs-Rowan ownership table, PR-stack history.
 - [`infra/cloud/env/.env.example`](../../infra/cloud/env/.env.example) — cross-service env contract template.
+- [`infra/cloud/hostname-matrix.json`](../../infra/cloud/hostname-matrix.json) — stable hostname matrix (task `5cb4a8fe`); source of truth for the static checks under `tests/cloud/scripts/`.
 - [`infra/cloud/scripts/bootstrap-staging.sh`](../../infra/cloud/scripts/bootstrap-staging.sh) — Quinn-runnable first-time setup.
 - `~/.openclaw/workspace/docs/infra/runbooks/cloud-deployment-rollback.md` — rollback procedure (was at `docs/runbooks/cloud-deployment-rollback.md`; retired in PR #583 — re-create in workspace if Quinn needs to roll back a deploy without re-deriving from `docs/specs/cloud-deployment-foundation-tech-design.md`).
 - `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` — secret rotation precedent (was at `docs/runbooks/rotate-akahu-access-tokens.md`; retired in PR #583 — re-create in workspace before rotating an Akahu token with downstream ciphertext rows).

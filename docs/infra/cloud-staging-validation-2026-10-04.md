@@ -36,6 +36,8 @@ AC1–AC4 wording.
 Collapsed from the emitted `staging-workflows.json` (full JSON is the artifact
 attached to the workflow):
 
+<!-- stable-fallback: dated 2026-10-04 evidence; the provider URLs in the JSON below were the live target at run time, superseded by https://<service>.staging.sindustries.co.nz once the stable CNAMEs + certs land (task 5cb4a8fe) -->
+
 ```json
 {
   "runId": "staging-validate-20261004070043-795a",
@@ -60,9 +62,9 @@ attached to the workflow):
   },
   "cleanup": { "ok": true, "operations": [] },
   "services": {
-    "tasksApi":        { "url": "https://sindustries-tasks-api-staging.fly.dev",        "version": null, "matchesIntent": false },
-    "budgetApi":       { "url": "https://sindustries-budget-api-staging.fly.dev",       "version": null, "matchesIntent": false },
-    "contentScheduler":{ "url": "https://sindustries-content-scheduler-api-staging.fly.dev", "version": null, "matchesIntent": false }
+    "tasksApi":        { "url": "https://sindustries-tasks-api-staging.fly.dev",        "version": null, "matchesIntent": false }, // stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://tasks-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe)
+    "budgetApi":       { "url": "https://sindustries-budget-api-staging.fly.dev",       "version": null, "matchesIntent": false }, // stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://budget-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe)
+    "contentScheduler":{ "url": "https://sindustries-content-scheduler-api-staging.fly.dev", "version": null, "matchesIntent": false } // stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://content-scheduler-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe)
   }
 }
 ```
@@ -71,7 +73,7 @@ attached to the workflow):
 
 | AC | Status | Evidence (URL / file / command) |
 | --- | --- | --- |
-| AC1 — staging deployment starts + service health checks pass | **NOT MET** | workflow run `37184451599` step 10 "Run AC2 black-box harness" failed at the first probe (`tasks.health` returned `error.code=20` AbortController timeout against `https://sindustries-tasks-api-staging.fly.dev` after 15.003s; `budget.health` and `scheduler.health` returned `fetch failed`). Preflight (steps 6–9) all passed: required env vars present (`STAGING_TASKS_API_URL` / `STAGING_BUDGET_API_URL` / `STAGING_SCHEDULER_API_URL` / `STAGING_FLY_APP_WORKER`), `FLY_API_TOKEN` provisioned, `budget-api Prisma migrations` ran (step 8 ✓), `Mint budget-api synthetic session` succeeded (step 9 ✓). Service versions returned `null` and `matchesIntent=false` for all three services — the deployed machines either never came up on the intent-commit image or are not responding on the public URLs. Operational: Quinn owns the deployed-machine health. |
+| AC1 — staging deployment starts + service health checks pass | **NOT MET** | workflow run `37184451599` step 10 "Run AC2 black-box harness" failed at the first probe (`tasks.health` returned `error.code=20` AbortController timeout against `https://sindustries-tasks-api-staging.fly.dev` after 15.003s; `budget.health` and `scheduler.health` returned `fetch failed`). <!-- stable-fallback: dated 2026-10-04 evidence; provider URL was the live target at run time, superseded by https://tasks-api.staging.sindustries.co.nz once the stable CNAME + cert land (task 5cb4a8fe) --> Preflight (steps 6–9) all passed: required env vars present (`STAGING_TASKS_API_URL` / `STAGING_BUDGET_API_URL` / `STAGING_SCHEDULER_API_URL` / `STAGING_FLY_APP_WORKER`), `FLY_API_TOKEN` provisioned, `budget-api Prisma migrations` ran (step 8 ✓), `Mint budget-api synthetic session` succeeded (step 9 ✓). Service versions returned `null` and `matchesIntent=false` for all three services — the deployed machines either never came up on the intent-commit image or are not responding on the public URLs. Operational: Quinn owns the deployed-machine health. |
 | AC2 — authenticated workflows for Tasks API, Budget API, Content Scheduler complete successfully | **NOT MET** | AC2 harness aborted at the first `/health` probe (above), so no authenticated workflow ran. `cleanup.operations=[]` confirms the harness never persisted anything to clean up. |
 | AC3 — failure behaviour / logging / observability / recovery verified for an intentional service failure | **NOT MET — observability-gated** | AC3 step was `SKIPPED` because AC2 returned non-success (`failureDrill.skipped=true`). Independently, the hosted-observability contract (task `31233a0a` / PR #724) has not landed against a live Grafana Cloud org yet, so even an AC3 run today could not honestly verify alert firing/resolution. Quinn's 2026-09-24T08:52Z review explicitly anticipates this: "AC3 evidence remains gated on the hosted-observability contract from task 31233a0a; the failure drill cannot be honestly verified without it." |
 | AC4 — staging validation evidence recorded and clearly distinguishable from accepted limitations | **MET** | This document. Workflow produced the `staging-workflows.json` + `harness-stdout.log` + `harness-stderr.log` artifacts under `cloud-staging-validation-7d7485825bc2a7ee4f669dd9b5ea69abac11b60d`. Production blockers and accepted limitations are tracked in separate tables below. |

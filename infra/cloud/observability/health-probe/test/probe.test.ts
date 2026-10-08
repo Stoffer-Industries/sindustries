@@ -52,11 +52,13 @@ describe('parseDbTargets', () => {
 
 describe('parseHttpTargets', () => {
   it('parses a single Fly app health URL', () => {
+    // stable-fallback: provider URL is a test fixture for the URL parser; the real production target is the stable sindustries.co.nz hostname (task 5cb4a8fe).
     expect(
       parseHttpTargets('tasks-api=https://sindustries-tasks-api.fly.dev/health'),
     ).toEqual([
       {
         app: 'tasks-api',
+        // stable-fallback: provider URL is a test fixture; the real production target is the stable sindustries.co.nz hostname (task 5cb4a8fe).
         url: 'https://sindustries-tasks-api.fly.dev/health',
       },
     ]);

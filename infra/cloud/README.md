@@ -72,7 +72,7 @@ fly secrets set --app sindustries-tasks-api-staging \
   DATABASE_URL=... \
   REDIS_URL=... \
   CONTENT_SCHEDULER_REDIS_URL=... \
-  CONTENT_SCHEDULER_API_BASE_URL=https://sindustries-content-scheduler-api-staging.fly.dev/api/v1 \
+  CONTENT_SCHEDULER_API_BASE_URL=https://sindustries-content-scheduler-api-staging.fly.dev/api/v1 \ # stable-fallback: provider URL pending migration to https://content-scheduler-api.staging.sindustries.co.nz/api/v1 (task 5cb4a8fe)
   ROWAN_TASKS_API_APPROVAL_TOKEN=... \
   CORS_ALLOWED_ORIGINS=https://mission-control.sindustries.dev
 

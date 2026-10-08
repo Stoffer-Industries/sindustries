@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Stable hostname matrix for the six public surfaces and the auto-post worker (task 5cb4a8fe). Authoritative source of truth: tests/cloud/scripts/check-stable-hostname-matrix.mjs validates the shape; tests/cloud/scripts/check-stable-url-fallbacks.mjs reads the providerFallback entries to assert every *.fly.dev / *.vercel.app reference in scope is annotated. Do not edit the surface rows without updating docs/systems/cloud-platform.md and the comment blocks at the top of each infra/cloud/fly/<service>.fly.toml; the static checks will fail otherwise.",
+  "taskId": "5cb4a8fe-6069-4b3c-b2ef-0b8dc61cdb3c",
+  "designDoc": "docs/specs/add-stable-app-name-hostnames-tech-design.md",
+  "apexDomain": "sindustries.co.nz",
+  "stagingSubdomainSuffix": "staging.sindustries.co.nz",
+  "productionApex": "sindustries.co.nz",
+  "supersedes": {
+    "previousApex": "sindustries.dev",
+    "previousApexReference": "docs/specs/cloud-deployment-foundation-tech-design.md (the foundation's *.sindustries.dev reservation is superseded for staging and production by this task; the reservation remains documented for audit only)."
+  },
+  "surfaces": [
+    {
+      "id": "mission-control",
+      "kind": "frontend",
+      "vercelProject": "sindustries-mission-control",
+      "staging": "mission-control.staging.sindustries.co.nz",
+      "production": "mission-control.sindustries.co.nz",
+      "providerFallback": "sindustries-mission-control.vercel.app"
+    },
+    {
+      "id": "tasks-app",
+      "kind": "frontend",
+      "vercelProject": "sindustries-tasks",
+      "staging": "tasks.staging.sindustries.co.nz",
+      "production": "tasks.sindustries.co.nz",
+      "providerFallback": "sindustries-tasks.vercel.app"
+    },
+    {
+      "id": "tasks-api",
+      "kind": "api",
+      "flyApp": "sindustries-tasks-api",
+      "staging": "tasks-api.staging.sindustries.co.nz",
+      "production": "tasks-api.sindustries.co.nz",
+      "providerFallback": "sindustries-tasks-api.fly.dev"
+    },
+    {
+      "id": "budget-api",
+      "kind": "api",
+      "flyApp": "sindustries-budget-api",
+      "staging": "budget-api.staging.sindustries.co.nz",
+      "production": "budget-api.sindustries.co.nz",
+      "providerFallback": "sindustries-budget-api.fly.dev"
+    },
+    {
+      "id": "content-scheduler-api",
+      "kind": "api",
+      "flyApp": "sindustries-content-scheduler-api",
+      "staging": "content-scheduler-api.staging.sindustries.co.nz",
+      "production": "content-scheduler-api.sindustries.co.nz",
+      "providerFallback": "sindustries-content-scheduler-api.fly.dev"
+    },
+    {
+      "id": "health-probe",
+      "kind": "api",
+      "flyApp": "sindustries-health-probe",
+      "staging": "health-probe.staging.sindustries.co.nz",
+      "production": "health-probe.sindustries.co.nz",
+      "providerFallback": "sindustries-health-probe.fly.dev"
+    },
+    {
+      "id": "auto-post-worker",
+      "kind": "worker",
+      "flyApp": "sindustries-auto-post-worker",
+      "staging": null,
+      "production": null,
+      "providerFallback": null,
+      "publicUrl": false,
+      "rationale": "BullMQ consumer; no HTTP surface. Health is observed via GET /api/v1/content-scheduler/auto-post/health on the content-scheduler-api hostname, not via a separate worker hostname. The row exists in the matrix to make the explicit non-public nature auditable."
+    }
+  ]
+}

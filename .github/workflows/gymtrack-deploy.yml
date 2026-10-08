@@ -76,5 +76,6 @@ jobs:
             echo "- Target: production"
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- URL: $DEPLOY_URL"
+            # stable-fallback: GymTrack production is not in scope for task 5cb4a8fe; the *.vercel.app URL remains the live production target until a follow-up task adopts gymtrack.sindustries.co.nz.
             echo "- Production URL: https://gymtrack-sigma-pied.vercel.app"
           } >> "$GITHUB_STEP_SUMMARY"

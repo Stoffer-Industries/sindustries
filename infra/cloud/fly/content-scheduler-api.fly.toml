@@ -1,5 +1,11 @@
 # fly.toml — content-scheduler-api staging.
 #
+# Stable hostnames (task 5cb4a8fe; source of truth: infra/cloud/hostname-matrix.json):
+#   staging:    content-scheduler-api.staging.sindustries.co.nz
+#   production: content-scheduler-api.sindustries.co.nz
+# Add via `fly certs add content-scheduler-api.staging.sindustries.co.nz --app sindustries-content-scheduler-api-staging`
+# (Quinn-owned operator step; the cert is auto-issued by Let's Encrypt once the CNAME lands).
+#
 # The HTTP API and auto-post worker are separate Fly apps but share the
 # content_scheduler database schema and BullMQ queue. This app owns the HTTP
 # routes; infra/cloud/fly/auto-post-worker.fly.toml owns queue consumption.
