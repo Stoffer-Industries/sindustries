@@ -66,7 +66,7 @@ cloud_db_assign_run_id
 # ---------------------------------------------------------------------------
 
 cloud_db_load_secret SOURCE_DSN "$SOURCE_DSN_FILE"
-cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN_FILE"
+cloud_db_assert_no_production_dsn "source" "$SOURCE_DSN"
 
 ARCHIVE_DIR="${ARCHIVE_DIR:-./artifacts/cloud-staging}"
 mkdir -p "$ARCHIVE_DIR"

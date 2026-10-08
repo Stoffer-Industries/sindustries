@@ -107,11 +107,16 @@ function makeRunId() {
 
 // ----- client wiring -------------------------------------------------------
 
+// Pass the DSN through to node-postgres verbatim so its sslmode is
+// honoured. Hard-coding `ssl: { rejectUnauthorized: false }` here
+// would silently override sslmode=verify-full and disable certificate
+// verification for staging data that mirrors production shape.
+//
+// Staging DSNs are expected to include sslmode=require at minimum.
+// When sslmode is `disable` we still don't override it — the DSN is
+// the source of truth.
 function buildClient(dsn) {
-  const client = new Client({ connectionString: dsn, ssl: { rejectUnauthorized: false } });
-  // Re-enable strong verification when DSN includes sslmode=verify-full;
-  // pg will already enforce that.
-  return client;
+  return new Client({ connectionString: dsn });
 }
 
 async function withClient(dsn, fn) {
@@ -132,8 +137,28 @@ async function withClient(dsn, fn) {
 //
 // The manifest is split on `;` boundaries at lines that are not inside a
 // string literal; we additionally skip blank lines and `--` comments.
+//
+// Manifest format constraints (enforced by the CI check in
+// scripts/cloud/database/tests/manifest-constraints.test.sh):
+//   - No `$$ ... $$` dollar-quoted bodies.
+//   - No `E'...'` escape-string literals.
+//   - String literals are single-quoted and contain neither single
+//     quotes nor backslashes (i.e. the naive `;\n` split is exact).
+//   - Every statement ends with `;\n` (the splitter requires this).
+
+const MANIFEST_FORBIDDEN_PATTERNS = [
+  { name: 'dollar-quoted body', pattern: /\$\$/u },
+  { name: 'escape-string literal', pattern: /\bE'\S/u },
+  { name: 'backslash in string literal', pattern: /'[^']*\\[^']*'/u },
+  { name: 'embedded single quote in string literal', pattern: /'[^']*'[^']*'/u },
+];
 
 function splitSqlStatements(sql) {
+  for (const { name, pattern } of MANIFEST_FORBIDDEN_PATTERNS) {
+    if (pattern.test(sql)) {
+      throw new Error(`reconciliation manifest contains forbidden pattern: ${name}`);
+    }
+  }
   const cleaned = sql
     .split('\n')
     .filter((line) => !line.trim().startsWith('--'))
