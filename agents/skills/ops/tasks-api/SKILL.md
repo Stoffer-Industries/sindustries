@@ -68,6 +68,11 @@ original reviewer because the push dismisses the approval.
 
 ### Attention owners: ordered action and escalation stack
 
+Use `agents/skills/ops/attention-owner-routing/SKILL.md` for the complete
+decision and mutation procedure. This section records the shared data model;
+the routing skill is the single procedure for adds, replacements, escalations,
+repairs, and self-resolves.
+
 `attentionOwners` is the primary blocker/handoff control plane. It is an ordered
 list of role slots, not a set: position 0 is the next actionable owner and later
 positions are escalation targets. Repeated names are meaningful and must be

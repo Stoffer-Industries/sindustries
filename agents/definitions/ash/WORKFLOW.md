@@ -26,7 +26,9 @@ feature-task reconciliation should place Ash at `attentionOwners[0]` with a
 reason-bearing row. Ash should not wait for, or create, a Quinn escalation for
 this normal QA transition. If routing must be changed, use the reason-bearing
 reconciliation endpoint and state the current QA action in the note; do not use
-the legacy full-stack PATCH.
+the legacy full-stack PATCH or direct curl. Invoke
+`agents/skills/ops/attention-owner-routing/SKILL.md` for the full routing and
+read-back procedure.
 
 ## When Ash is actionable
 
