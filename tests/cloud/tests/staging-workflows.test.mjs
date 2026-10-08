@@ -294,3 +294,33 @@ test('harness exposes writeCrashJson via env-overridable crash file path', () =>
   assert.match(harness, /writeCrashJson\(err, 'unhandledRejection'\)/);
   assert.match(harness, /writeCrashJson\(err, 'main\.catch'\)/);
 });
+
+test('harness source accepts queued status on scheduler.unapprove', () => {
+  // Dispatch run 37710980703 (2026-10-08T01:03Z) failed AC2 with
+  // SCHEDULER_UNAPPROVE_STATUS_MISMATCH because the deployed handler
+  // at services/content-scheduler-api/src/routes/contentScheduler.ts:610
+  // intentionally sets status='queued' on unapprove (clearing the
+  // approval and cancelling the auto-post schedule). The harness now
+  // accepts 'queued' alongside 'draft' and 'pending'. Assert this
+  // contract so a future refactor cannot reintroduce the over-strict
+  // assertion and re-fail AC2.
+  const harness = readFileSync(HARNESS, 'utf8');
+  assert.match(harness, /unapproveStatus !== 'queued'/);
+  assert.match(harness, /scheduler\.unapprove/);
+});
+
+test('harness source retries http() once on AbortError code 20 cold-start', () => {
+  // Dispatch runs 37710723179 (2026-10-08T01:00Z), 37682736378
+  // (2026-10-07T20:32Z), and 37649924730 (2026-10-07T16:10Z) all hit
+  // cold-start races where the first /health probe to a Fly machine
+  // in mid auto-restart aborted with undici code 20
+  // (UND_ERR_HEADERS_TIMEOUT) before the cold machine could warm. The
+  // harness's http() now retries exactly once on the first such
+  // internal AbortController abort before bubbling the error up.
+  // Assert this contract so a future cleanup cannot silently remove
+  // the cold-start retry.
+  const harness = readFileSync(HARNESS, 'utf8');
+  assert.match(harness, /code === 20/);
+  assert.match(harness, /isColdStartAbort/);
+  assert.match(harness, /attempt < 2/);
+});
