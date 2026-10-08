@@ -72,7 +72,7 @@ export function AttentionOwnersPanel({ task, onTaskRefresh, readOnly = false }) 
   async function refreshTask() {
     if (typeof onTaskRefresh === 'function') {
       try {
-        await onTaskRefresh();
+        await onTaskRefresh(task.id);
       } catch (err) {
         setGlobalError(err?.message ?? 'Refresh failed');
       }
