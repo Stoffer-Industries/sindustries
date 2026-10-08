@@ -101,6 +101,19 @@ describe('buildStackedOwnerLayers', () => {
     expect(entries.map((entry) => entry.role)).toEqual(['attention', 'workflow-gate']);
   });
 
+  it('promotes the current gate owner to the first rendered responsibility when attention is empty', () => {
+    const { entries } = buildStackedOwnerLayers({
+      status: 'doing',
+      assignee: 'Rowan',
+      workflowGates: [{ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }],
+      attentionOwners: []
+    });
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
+      'workflow-gate:Ash',
+      'delivery:Rowan'
+    ]);
+  });
+
   it('normalises whitespace and case only inside stable per-slot keys', () => {
     // AC4: same-name cross-tier duplicates collapse into the highest
     // tier (attention). Workflow-gate Quinn and delivery Quinn both

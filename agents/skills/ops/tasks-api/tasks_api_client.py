@@ -5,14 +5,16 @@ Usage examples:
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --limit 50
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py create --title "Test" --priority high
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --status doing
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --attention-owners Tom --attention-owners Quinn
-  TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py patch --id <task-id> --clear-attention-owners
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --workflow-gate-owner Quinn
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py list --attention-owner Tom
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py approve --id <task-id> --type tech_design
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py revoke-approval --id <task-id> --type tech_design
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 scripts/tasks_api_client.py archive --id <task-id>
 """
+
+# Agent-driven attention-owner writes must use the reason-bearing reconcile or
+# single-owner endpoint; the legacy PATCH flags are retained only for explicit
+# compatibility/manual use and can create rows without actor/reason metadata.
 
 from __future__ import annotations
 
@@ -25,18 +27,57 @@ import urllib.parse
 import urllib.request
 
 
+_SUPPORTED_AGENT_IDS = frozenset({"quinn", "rowan", "ash", "ivy", "lox", "vara"})
+
+
+def resolve_agent_id() -> str | None:
+    """Resolve the current OpenClaw agent without guessing from credentials.
+
+    Heartbeat processes expose ``OPENCLAW_AGENT_ID``.  ``AGENT_ID`` is kept as
+    a legacy fallback, and Codex sessions can identify the agent from their
+    per-agent ``CODEX_HOME`` path.  The allow-list prevents an arbitrary
+    environment value from selecting an unrelated credential variable.
+    """
+    for value in (os.getenv("OPENCLAW_AGENT_ID"), os.getenv("AGENT_ID")):
+        agent = (value or "").strip().lower()
+        if agent in _SUPPORTED_AGENT_IDS:
+            return agent
+
+    codex_home = os.getenv("CODEX_HOME", "")
+    marker = "/.openclaw/agents/"
+    if marker in codex_home and codex_home.endswith("/agent/codex-home"):
+        agent = codex_home.split(marker, 1)[1].split("/", 1)[0].strip().lower()
+        if agent in _SUPPORTED_AGENT_IDS:
+            return agent
+    return None
+
+
+def resolve_default_token() -> str:
+    """Return the current agent's Tasks API token, without impersonation.
+
+    Per-agent credentials take precedence when the runtime identifies an
+    agent.  The generic token remains a compatibility fallback for callers
+    such as isolated service workers that intentionally provide only
+    ``TASKS_API_APPROVAL_TOKEN``.
+    """
+    agent = resolve_agent_id()
+    if agent:
+        scoped = (os.getenv(f"{agent.upper()}_TASKS_API_APPROVAL_TOKEN") or "").strip()
+        if scoped:
+            return scoped
+    return (os.getenv("TASKS_API_APPROVAL_TOKEN") or "").strip()
+
+
 def api_request(method: str, base_url: str, path: str, payload=None, *, token: str | None = None):
     url = f"{base_url.rstrip('/')}{path}"
     data = None
     headers = {"content-type": "application/json"}
-    # Per-call `token` overrides the default TASKS_API_APPROVAL_TOKEN. This
-    # lets trusted agent processes (bookmark_lobster, content-tasks Lobster,
-    # feature_task_lobster) authenticate with their own per-agent service
-    # credential so the API derives the comment author / audit-trail actor
-    # correctly (task 0719a8e3). Falls back to TASKS_API_APPROVAL_TOKEN when
-    # `token` is None so existing call sites that don't know about the
-    # per-agent env vars keep working.
-    resolved_token = (token if token is not None else os.getenv("TASKS_API_APPROVAL_TOKEN") or "").strip()
+    # Per-call `token` overrides automatic agent-scoped resolution. This lets
+    # trusted service processes authenticate with a specific credential while
+    # heartbeat/CLI callers use their own `<AGENT>_TASKS_API_APPROVAL_TOKEN`.
+    # The generic TASKS_API_APPROVAL_TOKEN remains the fallback for callers
+    # without an identifiable agent.
+    resolved_token = (token if token is not None else resolve_default_token()).strip()
     if resolved_token:
         headers["authorization"] = f"Bearer {resolved_token}"
     if payload is not None:

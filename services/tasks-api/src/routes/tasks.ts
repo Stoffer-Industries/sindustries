@@ -106,11 +106,11 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     }
 
     // Discovery filters for workflow-gate ownership and attention ownership.
-    // These are independent (AC4): `workflowGateOwner` scopes to explicit
-    // gate handoffs whose configured owner matches; `attentionOwner` scopes
-    // to generic attention rows. Combining them via AND lets a user view
-    // e.g. "Quinn's outstanding gates AND the attention requests Quinn
-    // raised" without conflating the two planes.
+    // These are independent (AC4): `workflowGateOwner` scopes to the exact
+    // current-stage structured gate whose configured owner matches;
+    // `attentionOwner` scopes to explicit attention rows. Combining them via
+    // AND lets a user view both normal gate work and exceptional attention
+    // requests without conflating the two planes.
     const workflowGateOwnerRequested =
       typeof workflowGateOwner === 'string' && workflowGateOwner.trim().length > 0;
     const workflowGateOwnerFilter = workflowGateOwnerRequested

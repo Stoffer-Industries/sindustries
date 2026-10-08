@@ -21,6 +21,8 @@
 //! - `api_get_task` — GET `/tasks/:id`.
 //! - `api_patch` — PATCH `/tasks/:id` with `TASKS_API_APPROVAL_TOKEN`
 //!   bearer (revoking or upserting structured approvals).
+//! - `api_reconcile_attention` — POST the workflow-owned attention stack
+//!   reconciliation with an actor/reason-bearing note.
 //! - `api_delete` — DELETE helper used to revoke a structured
 //!   TaskApproval row (e.g. `DELETE /tasks/:id/approvals/spec` on spec
 //!   drift).
@@ -130,6 +132,17 @@ fn authenticated_api_patch_request(url: &str) -> ureq::Request {
     request
 }
 
+fn authenticated_api_post_request(url: &str) -> ureq::Request {
+    let mut request = ureq::post(url);
+    if let Ok(token) = std::env::var("TASKS_API_APPROVAL_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+    }
+    request
+}
+
 pub(crate) fn api_patch<T: for<'de> Deserialize<'de>>(
     base_url: &str,
     task_id: &str,
@@ -139,6 +152,29 @@ pub(crate) fn api_patch<T: for<'de> Deserialize<'de>>(
     let value: Value = handle_api_result(authenticated_api_patch_request(&url).send_json(payload))?;
     serde_json::from_value(value.get("data").cloned().unwrap_or(value))
         .context("decode API patch response")
+}
+
+/// Reconcile the workflow-owned attention stack through the metadata-aware
+/// endpoint. Unlike the legacy full-replacement PATCH, this preserves rows
+/// that remain in the stack and records the authenticated actor/reason for
+/// every newly created or repaired row.
+pub(crate) fn api_reconcile_attention<T: for<'de> Deserialize<'de>>(
+    base_url: &str,
+    task_id: &str,
+    attention_owners: Vec<String>,
+    note: &str,
+) -> Result<T> {
+    let url = format!(
+        "{}/tasks/{task_id}/attention-owners/reconcile",
+        base_url.trim_end_matches('/')
+    );
+    let payload = json!({
+        "attentionOwners": attention_owners,
+        "note": note,
+    });
+    let value: Value = handle_api_result(authenticated_api_post_request(&url).send_json(payload))?;
+    serde_json::from_value(value.get("data").cloned().unwrap_or(value))
+        .context("decode attention reconciliation response")
 }
 
 /// DELETE wrapper used to revoke a structured TaskApproval row

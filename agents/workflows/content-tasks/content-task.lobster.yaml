@@ -30,29 +30,29 @@ steps:
 
   - id: capacity_transition
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       python3 ${sindustriesRepo}/agents/workflows/content-tasks/scripts/capacity_transition.py
       --base-url ${tasksApiBaseUrl}
       --ivy-capacity-limit ${ivyCapacityLimit}
       --dry-run ${dryRun}
       --json
     stdin: $format_transition.stdout
-    condition: $format_transition.json.criteria_met
 
   - id: pr_transition
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       python3 ${sindustriesRepo}/agents/workflows/content-tasks/scripts/pr_transition.py
       --base-url ${tasksApiBaseUrl}
       --dry-run ${dryRun}
       --json
     stdin: $capacity_transition.stdout
-    condition: $capacity_transition.json.criteria_met
 
   - id: merge_transition
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       python3 ${sindustriesRepo}/agents/workflows/content-tasks/scripts/merge_transition.py
       --base-url ${tasksApiBaseUrl}
       --repo ${sindustriesRepo}
       --dry-run ${dryRun}
       --json
     stdin: $pr_transition.stdout
-    condition: $pr_transition.json.criteria_met

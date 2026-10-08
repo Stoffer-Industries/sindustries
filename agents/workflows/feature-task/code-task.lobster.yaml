@@ -52,28 +52,28 @@ steps:
 
   - id: code_task_ready_checks
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       code-task-ready-checks --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $code_task_tech_design_check.stdout
-    condition: $code_task_tech_design_check.json.criteriaMet
 
   - id: code_task_verify_delivery
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       verify-delivery --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $code_task_ready_checks.stdout
-    condition: $code_task_ready_checks.json.criteriaMet
 
   - id: feedback_aggregate
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       feedback-aggregate --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $code_task_verify_delivery.stdout
-    condition: $code_task_verify_delivery.json.criteriaMet
 
   - id: post_merge
     command: >-
+      python3 ${sindustriesRepo}/agents/workflows/run_if_criteria_met.py --
       cargo run --manifest-path ${sindustriesRepo}/agents/workflows/feature-task/Cargo.toml --
       post-merge --base-url ${tasksApiBaseUrl} --dry-run ${dryRun} --repo ${sindustriesRepo} --workspace-root ${workspaceRoot}
     stdin: $feedback_aggregate.stdout
-    condition: $feedback_aggregate.json.criteriaMet

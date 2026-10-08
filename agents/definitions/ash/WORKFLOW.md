@@ -21,6 +21,13 @@ stage-aware: `open → spec`, `ready → tech_design`, `doing → qa_agent`,
 attention owner exists, position 0 acts and Ash's gate fallback is dormant.
 Repeated people across or within planes are meaningful and must remain visible.
 
+When implementation ACs are complete and `qa_agent` is outstanding, the
+feature-task reconciliation should place Ash at `attentionOwners[0]` with a
+reason-bearing row. Ash should not wait for, or create, a Quinn escalation for
+this normal QA transition. If routing must be changed, use the reason-bearing
+reconciliation endpoint and state the current QA action in the note; do not use
+the legacy full-stack PATCH.
+
 ## When Ash is actionable
 
 ### Verification domains

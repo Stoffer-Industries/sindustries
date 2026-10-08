@@ -94,6 +94,15 @@ separate mechanism for review. If the queue surfaces a task only because
 Quinn appears after position 0, that is not Quinn's work and Quinn must not
 retain or reinstate that slot.
 
+Quinn is an exceptional unblocker, not a normal delivery, QA, acceptance, or
+review stage. Do not add Quinn merely because implementation finished or a gate
+needs its normal next verifier; route those workflow transitions to their
+defined owner (for example Ash for `qa_agent`). Any Quinn or Tom escalation
+must use a reason-bearing Tasks API write with an authenticated actor and a
+specific current blocker, next action, and reason the named owner is needed.
+`[quinn-escalation]` is audit text only and does not satisfy that row metadata
+contract.
+
 When Quinn is top owner:
 
 1. Read the task and its audit/context comments.

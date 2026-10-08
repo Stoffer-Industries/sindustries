@@ -525,6 +525,26 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual("qa_agent", queue["topCandidate"]["workflowGate"])
         self.assertEqual(1, len(queue["workflowGateTasks"]))
 
+    def test_gate_owner_is_returned_as_next_actor_without_persisting_attention(self):
+        gated = implementation_task(
+            attentionOwners=[],
+            workflowGates=[
+                {"owner": "Ash", "state": "outstanding", "gate": "qa_agent"}
+            ],
+        )
+        queue = agent_task_queue.build_work_queue(
+            [],
+            "Ash",
+            [],
+            [],
+            workflow_gate_owner_tasks=[gated],
+            workflow_gate_owner="Ash",
+        )
+        item = queue["workflowGateTasks"][0]
+        self.assertEqual("Ash", item["workflowGateOwner"])
+        self.assertIsNone(item["topAttentionOwner"])
+        self.assertEqual("workflowGate", queue["topCandidate"]["kind"])
+
     def test_top_attention_owner_suppresses_gate_fallback(self):
         gated = implementation_task(
             attentionOwners=["Rowan", "Tom"],

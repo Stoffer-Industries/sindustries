@@ -183,7 +183,18 @@ Exit 0 pass, 1 fail, 2 harness/config error.
 // ---------------------------------------------------------------------------
 
 async function http(method, url, { token, body, expectStatus, signal } = {}) {
-  const controller = new AbortController();
+  // Cold-start race: the first /health probe to a Fly machine that is
+  // auto-restarting can abort with undici code 20
+  // (UND_ERR_HEADERS_TIMEOUT) on the internal AbortController timer.
+  // Observed across dispatches 37710723179 (2026-10-08T01:00Z),
+  // 37682736378 (2026-10-07T20:32Z), and 37649924730
+  // (2026-10-07T16:10Z). Retry exactly once on the first such abort;
+  // caller-supplied signal aborts do NOT trigger a retry (we check the
+  // internal controller's aborted state, not just err.name).
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const onSignal = () => controller.abort();
   if (signal) signal.addEventListener('abort', onSignal);
@@ -212,9 +223,23 @@ async function http(method, url, { token, body, expectStatus, signal } = {}) {
       throw err;
     }
     return { status: res.status, json, text, headers: res.headers };
-  } finally {
-    clearTimeout(timer);
-    if (signal) signal.removeEventListener('abort', onSignal);
+    } catch (err) {
+      const isColdStartAbort =
+        err?.name === 'AbortError' &&
+        (err?.code === 20 || String(err?.code) === '20') &&
+        controller.signal.aborted &&
+        attempt < 2;
+      if (isColdStartAbort) {
+        // brief backoff so the cold machine warms; 2s is short enough
+        // to stay within the workflow's per-step budget.
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onSignal);
+    }
   }
 }
 
@@ -517,6 +542,9 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
   const runTag = ctx.runTag;
 
   // AUTO-POST HEALTH: confirm adapter=bullmq before any further writes.
+  // Route returns { data: { adapter, queue, overdue, redis, recommended, now } };
+  // unwrap before checking the adapter. (Envelope fix surfaced by dispatch
+  // 37692173371 on 2026-10-07T21:50Z, task 2850c5ac.)
   const healthOk = await runner.run('scheduler.auto_post_health', async () => {
     const { json } = await http(
       'GET',
@@ -526,18 +554,19 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
         expectStatus: 200
       }
     );
-    if (json?.adapter !== 'bullmq') {
+    const payload = json?.data ?? null;
+    if (payload?.adapter !== 'bullmq') {
       throw Object.assign(
-        new Error(`scheduler auto-post adapter=${json?.adapter}; expected bullmq`),
+        new Error(`scheduler auto-post adapter=${payload?.adapter}; expected bullmq`),
         { code: 'SCHEDULER_HEALTH_ADAPTER_MISMATCH' }
       );
     }
-    if (json?.redis && json.redis.ok === false) {
+    if (payload?.redis && payload.redis.ok === false) {
       throw Object.assign(new Error('scheduler auto-post Redis unhealthy'), {
         code: 'SCHEDULER_HEALTH_REDIS_UNHEALTHY'
       });
     }
-    return { adapter: REDACTED, redis: json.redis ?? null };
+    return { adapter: REDACTED, redis: payload?.redis ?? null };
   });
   if (!healthOk) return null;
 
@@ -580,15 +609,26 @@ async function schedulerApiFlow(runner, ctx, cleanup) {
     return { itemId: REDACTED, status: REDACTED };
   });
 
-  // UNAPPROVE (revert to draft so REMOVE is unambiguous)
+  // UNAPPROVE — clears approvedAt/approvedBy and cancels the auto-post
+  // schedule. The deployed handler at services/content-scheduler-api/
+  // src/routes/contentScheduler.ts:610 intentionally leaves the item
+  // in 'queued' status so the queue reconciler can re-evaluate it;
+  // the worker stale-version check covers any missed cancel jobs.
+  // Accept 'queued' here (in addition to 'draft' / 'pending') so the
+  // harness verdict reflects the actual deployed contract.
   await runner.run('scheduler.unapprove', async () => {
     const { json } = await http(
       'POST',
       `${url}/api/v1/content-scheduler/items/${itemId}/unapprove`,
       { token, body: {}, expectStatus: 200 }
     );
-    if (json?.data?.status !== 'draft' && json?.data?.status !== 'pending') {
-      throw Object.assign(new Error(`scheduler.unapprove: status=${json?.data?.status}`), {
+    const unapproveStatus = json?.data?.status;
+    if (
+      unapproveStatus !== 'draft' &&
+      unapproveStatus !== 'pending' &&
+      unapproveStatus !== 'queued'
+    ) {
+      throw Object.assign(new Error(`scheduler.unapprove: status=${unapproveStatus}`), {
         code: 'SCHEDULER_UNAPPROVE_STATUS_MISMATCH'
       });
     }

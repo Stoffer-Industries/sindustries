@@ -23,6 +23,14 @@ Use `agents/skills/ops/tasks-api/tasks_api_client.py` for task reads/writes.
 - repeated names are intentional role slots and must not be deduplicated;
 - comments are audit/evidence only and never route work.
 
+Agent-driven routing writes must use the reason-bearing Tasks API endpoint or
+client helper. Supply a non-empty, task-specific reason on every add,
+replacement, repair, or escalation; comments do not substitute for the row's
+`addedBy` and `note`. Never use the legacy full-stack PATCH for automated
+handoffs because it can recreate silent rows. Ash is the normal `qa_agent`
+owner after implementation ACs are complete; Quinn is reserved for genuine
+OpenClaw/runtime unblockers, not normal QA routing.
+
 Before replacing the stack, fetch the full current task and preserve every slot
 that should remain. A normal evidence failure routes back to the delivery
 assignee at position 0. Tooling blockers route by capability: infrastructure,
