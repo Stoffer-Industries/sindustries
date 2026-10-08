@@ -653,6 +653,44 @@ describe('mapTask — status-scoped workflow gates', () => {
       }]
     }), options).workflowGates).toEqual([]);
   });
+
+  it('keeps Ash dormant while the latest Lobster state reports delivery evidence failures', () => {
+    const task = baseTaskFixture({
+      status: 'doing',
+      comments: [
+        { body: '[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/745' },
+        { body: '[feature-task-progress-checklist]\nDelivery evidence is incomplete.' },
+        { body: '[lobster-state]\n```json\n{"failureFingerprint":"delivery evidence missing"}\n```' }
+      ]
+    });
+    expect(mapTask(task, options).workflowGates).toEqual([]);
+  });
+
+  it('surfaces Ash after Lobster clears the delivery evidence gate', () => {
+    const task = baseTaskFixture({
+      status: 'doing',
+      comments: [
+        { body: '[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/745' },
+        { body: '[lobster-state]\n```json\n{"failureFingerprint":null}\n```' }
+      ]
+    });
+    expect(mapTask(task, options).workflowGates).toEqual([{
+      roleId: 'qa_agent_gate', owner: 'Ash', gate: 'qa_agent', reason: null, state: 'outstanding'
+    }]);
+  });
+
+  it('does not hide Ash for a normal QA approval handoff', () => {
+    const task = baseTaskFixture({
+      status: 'doing',
+      comments: [
+        { body: '[qa-agent-blocked]\nStructured qa_agent approval is outstanding.' },
+        { body: '[lobster-state]\n```json\n{"failureFingerprint":"qa approval missing"}\n```' }
+      ]
+    });
+    expect(mapTask(task, options).workflowGates).toEqual([{
+      roleId: 'qa_agent_gate', owner: 'Ash', gate: 'qa_agent', reason: null, state: 'outstanding'
+    }]);
+  });
 });
 
 describe('explicit workflow handoffs', () => {

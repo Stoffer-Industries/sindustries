@@ -30,6 +30,34 @@ description: Add, replace, escalate, or clear Tasks API attention owners with or
 
 ## PROCESS
 
+### Escalation lifecycle
+
+Treat every position-0 slot as a short-lived action handoff, not a watchlist:
+
+1. **Action:** read the full task, confirm the concrete next action, and
+   investigate or execute it during the current pass.
+2. **Evidence:** record the result in the task's audit trail and verify the
+   source of truth. A stale checklist or comment is not a new blocker by
+   itself.
+3. **Resolve or advance:** when the action is complete, self-resolve or
+   advance only the current agent's top slot through the reason-bearing
+   endpoint. Preserve the delivery assignee and genuine later slots.
+4. **Remain or escalate:** when a genuine blocker remains, keep the current
+   owner at position 0 and escalate only to the next capable actor with a
+   reason naming the blocker and immediate next action. Do not remove a live
+   blocker just to make the queue quiet.
+5. **Verify:** read the task back after the write. If the source of truth shows
+   that a later checklist was stale, clear the stale slot again rather than
+   creating a duplicate escalation.
+
+Capability deferrals are a distinct branch: Ash routes a real verifier-capability
+gap to Quinn, Quinn resolves the capability task, and the original task returns
+to Ash for a fresh QA pass. A capability-resolved marker is not itself QA
+approval. Normal delivery or evidence failures return to the delivery assignee;
+they must not surface Ash until Lobster's delivery-evidence gate has passed.
+
+### Execute the routing operation
+
 1. Fetch the full task from the Tasks API, including `assignee`, approvals,
    workflow gates, `attentionOwners`, and attention-owner detail rows. Confirm
    the proposed owner has a concrete action now.
@@ -103,4 +131,3 @@ operation is unavailable, return the blocker without changing task ownership.
 
 > Read the invoking agent's `AGENTS.md` for role, authority, and voice. This
 > skill supplies only the shared attention-owner routing contract.
-

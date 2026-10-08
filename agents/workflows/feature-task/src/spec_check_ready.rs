@@ -449,6 +449,15 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+                && latest_lobster_delivery_failure(task) =>
+        {
+            // Lobster owns the delivery-evidence gate. Until its latest
+            // evidence sweep clears, Ash must remain dormant even though the
+            // task is already in `doing` and has an implementer marker.
+            task.assignee.clone()
+        }
+        "doing"
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && task_approvals::qa_agent_deferred_capability_extension_complete(task) =>
         {
             Some("Ash".to_string())
@@ -489,6 +498,87 @@ pub(crate) fn ash_was_last_commenter(task: &Task) -> bool {
         .last()
         .and_then(|comment| comment.author.as_deref())
         .is_some_and(|author| author.trim().eq_ignore_ascii_case("Ash"))
+}
+
+/// True when the latest Lobster state still reports an unresolved delivery
+/// checklist. This prevents a pre-verification sweep from routing the normal
+/// `qa_agent` gate to Ash merely because an `[implementer-prs]` marker exists.
+/// A later successful Lobster state clears the condition; a later delivery
+/// marker after a failed state keeps Ash dormant until that delivery is checked.
+fn latest_lobster_delivery_failure(task: &Task) -> bool {
+    let Some((state_index, state_text)) =
+        task.comments
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, comment)| {
+                let text = comment
+                    .text
+                    .as_deref()
+                    .or(comment.body.as_deref())
+                    .unwrap_or_default();
+                text.starts_with("[lobster-state]").then_some((index, text))
+            })
+    else {
+        return false;
+    };
+
+    let Some(json_text) = state_text
+        .split_once("```json")
+        .and_then(|(_, rest)| rest.split_once("```").map(|(json, _)| json.trim()))
+    else {
+        return false;
+    };
+    let Ok(state) = serde_json::from_str::<Value>(json_text) else {
+        return false;
+    };
+    let state_has_failure = state
+        .get("failureFingerprint")
+        .and_then(Value::as_str)
+        .is_some_and(|failure| !failure.trim().is_empty());
+    if !state_has_failure {
+        return false;
+    }
+
+    // A delivery marker posted after a failed state represents a fresh
+    // handoff that still needs this Lobster run's evidence check.
+    if task.comments.iter().skip(state_index + 1).any(|comment| {
+        let text = comment
+            .text
+            .as_deref()
+            .or(comment.body.as_deref())
+            .unwrap_or_default();
+        text.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("[implementer-prs]") || line.starts_with("[rowan-prs]")
+        })
+    }) {
+        return true;
+    }
+
+    task.comments[..=state_index]
+        .iter()
+        .rev()
+        .find_map(|comment| {
+            let text = comment
+                .text
+                .as_deref()
+                .or(comment.body.as_deref())
+                .unwrap_or_default();
+            let has = |tag: &str| text.lines().any(|line| line.trim_start().starts_with(tag));
+            if has("[qa-agent-blocked]") || has("[qa-agent-deferred]") {
+                Some(false)
+            } else if has("[feature-task-progress-checklist]")
+                || has("[code-task-progress-checklist]")
+                || has("[feature-task-blocked]")
+                || has("[code-task-blocked]")
+            {
+                Some(true)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
@@ -564,7 +654,10 @@ pub(crate) fn workflow_attention_reason(task: &Task, owner: &str) -> String {
         }
         "ash" => "QA verification is required for the delivered implementation.".to_string(),
         "tom" => "Final acceptance approval is required.".to_string(),
-        "rowan" => "The delivery owner must address the outstanding workflow evidence.".to_string(),
+        "rowan" => {
+            "The delivery owner must address the outstanding workflow evidence before QA can act."
+                .to_string()
+        }
         _ => format!("Workflow reconciliation requires attention from {owner}."),
     }
 }
@@ -941,6 +1034,37 @@ mod tests {
             crate::spec_check_ready::reconciled_attention_owners(&task),
             vec!["Ash"]
         );
+    }
+
+    #[test]
+    fn routing_keeps_delivery_owner_while_lobster_delivery_evidence_is_open() {
+        let mut task = routing_task("doing", &[]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("feature_task_lobster".to_string()),
+            text: Some(
+                "[feature-task-progress-checklist]\nDelivery evidence is incomplete.".to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("feature_task_lobster".to_string()),
+            text: Some(
+                "[lobster-state]\n```json\n{\"failureFingerprint\":\"delivery evidence missing\"}\n```"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+
+        assert_eq!(workflow_attention_owner(&task), Some("Rowan".to_string()));
+        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
     }
 
     #[test]
