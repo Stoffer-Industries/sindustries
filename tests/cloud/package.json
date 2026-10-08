@@ -12,7 +12,13 @@
     "validate:schema": "node scripts/check-schema.mjs",
     "check:stable-hostname-matrix": "node scripts/check-stable-hostname-matrix.mjs",
     "check:stable-url-fallbacks": "node scripts/check-stable-url-fallbacks.mjs",
+    "check:cors-origin-matrix": "node scripts/check-cors-origin-matrix.mjs",
+    "check:deploy-workflow-stable-hostname": "node scripts/check-deploy-workflow-stable-hostname.mjs",
+    "check:vercel-env-matrix": "node scripts/check-vercel-env-matrix.mjs",
     "test:stable-hostname-matrix": "node --test tests/check-stable-hostname-matrix.test.mjs",
-    "test:stable-url-fallbacks": "node --test tests/check-stable-url-fallbacks.test.mjs"
+    "test:stable-url-fallbacks": "node --test tests/check-stable-url-fallbacks.test.mjs",
+    "test:cors-origin-matrix": "node --test tests/check-cors-origin-matrix.test.mjs",
+    "test:deploy-workflow-stable-hostname": "node --test tests/check-deploy-workflow-stable-hostname.test.mjs",
+    "test:vercel-env-matrix": "node --test tests/check-vercel-env-matrix.test.mjs"
   }
 }

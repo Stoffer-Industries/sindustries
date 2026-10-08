@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Vercel env var contract for the two in-scope Vercel frontends (task 5cb4a8fe slice 5, AC3 Vercel half). Each VITE_* value is derived from infra/cloud/hostname-matrix.json; tests/cloud/scripts/check-vercel-env-matrix.mjs asserts that on every CI run. Quinn provisions the actual values in the Vercel dashboard per the contract; this file records the contract, not the values. Do not edit a value here without updating the corresponding Vercel environment, and vice versa — the static check exits 1 on drift between the contract and the matrix.",
+  "taskId": "5cb4a8fe-6069-4b3c-b2ef-0b8dc61cdb3c",
+  "designDoc": "docs/specs/add-stable-app-name-hostnames-tech-design.md",
+  "vercelProjects": [
+    {
+      "vercelProjectId": "sindustries-mission-control",
+      "appPath": "apps/mission-control",
+      "environments": {
+        "production": {
+          "branch": "main",
+          "customDomain": "mission-control.sindustries.co.nz",
+          "env": {
+            "VITE_TASKS_API_BASE_URL": "https://tasks-api.sindustries.co.nz/api/v1",
+            "VITE_CONTENT_SCHEDULER_API_BASE_URL": "https://content-scheduler-api.sindustries.co.nz/api/v1"
+          }
+        },
+        "preview": {
+          "branch": "staging",
+          "customDomain": "mission-control.staging.sindustries.co.nz",
+          "env": {
+            "VITE_TASKS_API_BASE_URL": "https://tasks-api.staging.sindustries.co.nz/api/v1",
+            "VITE_CONTENT_SCHEDULER_API_BASE_URL": "https://content-scheduler-api.staging.sindustries.co.nz/api/v1"
+          }
+        }
+      }
+    },
+    {
+      "vercelProjectId": "sindustries-tasks",
+      "appPath": "apps/tasks",
+      "environments": {
+        "production": {
+          "branch": "main",
+          "customDomain": "tasks.sindustries.co.nz",
+          "env": {
+            "VITE_TASKS_API_BASE_URL": "https://tasks-api.sindustries.co.nz/api/v1"
+          }
+        },
+        "preview": {
+          "branch": "staging",
+          "customDomain": "tasks.staging.sindustries.co.nz",
+          "env": {
+            "VITE_TASKS_API_BASE_URL": "https://tasks-api.staging.sindustries.co.nz/api/v1"
+          }
+        }
+      }
+    }
+  ],
+  "outOfScope": [
+    {
+      "vercelProjectId": "sindustries-gymtrack",
+      "reason": "GymTrack production hostname scope deferred per tech design OQ5; the Clerk cutover (task bb09eaed) owns any GymTrack matrix changes. The GymTrack Vercel env vars (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_GYMTRACK_MCP_BASE_URL, VITE_AUTH_PROVIDER) are out of scope for this slice."
+    },
+    {
+      "vercelProjectId": "sindustries-website",
+      "reason": "Root /website Vercel project is static marketing content with no API surface; no VITE_* env vars are in scope. Tracking under sindustries.co.nz apex (production) and a future website.staging.sindustries.co.nz (preview) is a separate task; the matrix row exists in name only via the apex domain convention."
+    }
+  ]
+}
