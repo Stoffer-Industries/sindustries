@@ -77,15 +77,32 @@ Tom to position 0. `attentionOwners=["Tom"]` is the terminal human action state:
 no fallback slot is required and no escalation exists beyond Tom. Tom merely
 appearing later in a tail is dormant, not actionable.
 
+### Reason-bearing write contract
+
+Every agent- or Lobster-driven add, replacement, repair, or escalation must
+record a non-empty task-specific reason and the authenticated actor. A bracketed
+comment is useful audit evidence, but it does not replace the reason on the
+attention-owner row. Do not use the legacy `PATCH /tasks/:id` attention-owner
+fields for automated handoffs: that full-stack compatibility path can recreate
+rows with `addedBy=null` and `note=null`.
+
+Use `POST /tasks/:id/attention-owners/reconcile` with the complete ordered
+`attentionOwners` array and a concise `note` explaining who acts, why now, and
+what the next action is. Use the single-owner POST endpoint when adding one
+owner, and the self-resolve endpoint when the current actor is done. Preserve
+genuine tail slots; remove stale or unjustified escalation slots rather than
+carrying them forward. Quinn is an exceptional OpenClaw/runtime unblocker, not
+a normal QA, acceptance, review, or delivery-workflow owner. Tom is added only
+when a concrete action requires Tom now.
+
 Delivery (`assignee`) and gate eligibility/context (`workflowGates` and
 structured approvals) remain independent. A normal stack can therefore be:
 `assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
 Do not hide Ash and do not deduplicate Rowan across those roles.
 
-```bash
-# Full ordered replacement: Quinn acts now, then Rowan, then Tom.
-python3 tasks_api_client.py patch --id <task-uuid> \
-  --attention-owners "Quinn" "Rowan" "Tom"
+```http
+POST /tasks/<task-uuid>/attention-owners/reconcile
+{"attentionOwners":["Ash"],"note":"QA verification is required for the delivered implementation."}
 ```
 
 OpenClaw/runtime blockers route to Quinn by putting Quinn first. Legacy

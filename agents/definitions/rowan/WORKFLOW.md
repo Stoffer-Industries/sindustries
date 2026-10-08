@@ -226,9 +226,24 @@ later dormant slot as a reviewer or future convenience; route Quinn to position
 0 only when Quinn owns the current OpenClaw/runtime blocker. Use the PR review
 request mechanism for review work.
 
-```bash
-python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
-  --id <task-uuid> --attention-owners "Quinn" "Rowan" "Tom"
+Every agent-driven attention-owner write must be reason-bearing and
+authenticated. Reconcile through the Tasks API's reason-bearing endpoint (or
+the equivalent client helper), with a concise task-specific note stating the
+current actor, why the handoff is needed, and the next action. Do not use the
+legacy full-stack PATCH for automated handoffs: it can silently recreate rows
+with no actor or reason. A task comment is supporting audit evidence, not a
+substitute for row metadata.
+
+Quinn is an exceptional OpenClaw/runtime unblocker, not a normal workflow
+stage. Do not route Quinn for ordinary delivery, QA, acceptance, or PR-review
+work. When implementation ACs are complete and `qa_agent` is outstanding,
+Lobster should make Ash the active owner; after Ash's QA approval, the task
+should advance to Tom's acceptance gate. Add Tom to a `doing` task only when a
+concrete action is required from him immediately.
+
+```http
+POST /tasks/<task-uuid>/attention-owners/reconcile
+{"attentionOwners":["Ash"],"note":"QA verification is required for the delivered implementation."}
 ```
 
 ## PR Standards
