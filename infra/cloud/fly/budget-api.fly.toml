@@ -42,6 +42,13 @@ kill_timeout = '5s'
 [env]
   NODE_ENV = 'production'
   PORT = '4002'
+  # Stable CORS origins for browser-originated requests (task 5cb4a8fe slice 2).
+  # Source of truth: infra/cloud/hostname-matrix.json. The browser-side consumer
+  # of budget-api is mission-control; budget-mobile is a native client with its
+  # own auth path and is not in the CORS scope. Production wiring follows once
+  # the production hostnames are provisioned (slice 5; AC6). See
+  # services/budget-api/src/app.ts for the CsvList consumer.
+  CORS_ALLOWED_ORIGINS = 'https://mission-control.staging.sindustries.co.nz'
 
 [http_service]
   internal_port = 4002

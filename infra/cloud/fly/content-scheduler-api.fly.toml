@@ -23,6 +23,14 @@ kill_timeout = '5s'
   NODE_ENV = 'production'
   PORT = '4003'
   CONTENT_SCHEDULER_JOB_ADAPTER = 'bullmq'
+  # Stable CORS origins for browser-originated requests (task 5cb4a8fe slice 2).
+  # Source of truth: infra/cloud/hostname-matrix.json. The browser-side consumer
+  # of content-scheduler-api is mission-control (ContentSchedulerTab in
+  # apps/mission-control/src/tabs/); tasks-api has no in-app content-scheduler
+  # surface. Production wiring follows once the production hostnames are
+  # provisioned (slice 5; AC6). See services/content-scheduler-api/src/app.ts
+  # and services/content-scheduler-api/src/config/env.ts for the CsvList consumer.
+  CORS_ALLOWED_ORIGINS = 'https://mission-control.staging.sindustries.co.nz'
 
 [processes]
   content-scheduler-api = 'npm run start --workspace services/content-scheduler-api'

@@ -39,6 +39,13 @@ kill_timeout = '5s'
   NODE_ENV = 'production'
   PORT = '4001'
   ALLOW_PORT_DB_MISMATCH = '1'
+  # Stable CORS origins for browser-originated requests (task 5cb4a8fe slice 2).
+  # Source of truth: infra/cloud/hostname-matrix.json. Frontend consumers of
+  # tasks-api are tasks-app and mission-control; values are the matrix staging
+  # hostnames. Production wiring follows once the production hostnames are
+  # provisioned (slice 5; AC6). See services/tasks-api/src/app.ts and
+  # services/tasks-api/src/config/env.ts for the CsvList consumer.
+  CORS_ALLOWED_ORIGINS = 'https://tasks.staging.sindustries.co.nz,https://mission-control.staging.sindustries.co.nz'
 
 [http_service]
   internal_port = 4001
