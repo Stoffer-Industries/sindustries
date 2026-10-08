@@ -58,6 +58,12 @@ jobs:
       - name: Install repository deps
         run: npm ci
 
+      - name: Install shellcheck (system binary, not an npm package)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Lint cloud database scripts
+        run: npm run lint:cloud-db
+
       - name: Write DSNs to mode-0600 files
         env:
           TASKS_SOURCE: ${{ secrets.TASKS_API_SOURCE_DSN }}
