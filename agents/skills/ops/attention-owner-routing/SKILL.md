@@ -20,6 +20,16 @@ description: Add, replace, escalate, or clear Tasks API attention owners with or
   curl, or a compatibility CLI fallback for an automated handoff.** Use the
   reason-bearing reconcile operation; if it is unavailable, stop and report
   the blocker.
+- **Never perform implementation or delivery work on a `dependencyBlocked`
+  task, even when you are the explicit `attentionOwners[0]` owner.** A
+  position-0 slot overrides the *routing classification* (which actor is
+  next), not the *dependency gate itself*. If the attention note asks you to
+  "open the delivery PR" while a real dependency is incomplete, the only
+  correct action is to resolve or escalate the blocking dependency task (or
+  report that you cannot), and post that back as the evidence. Do not start
+  or continue building the downstream deliverable while its dependency is
+  unresolved; that produces unreviewable, potentially-wasted work and masks
+  the real blocker.
 - **Only add Tom when a concrete action requires Tom immediately.** Do not page
   him merely because an agent's work or gate is complete.
 - **Do not route Quinn for normal delivery, QA, acceptance, or review work.**
