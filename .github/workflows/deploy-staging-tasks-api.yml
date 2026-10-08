@@ -13,6 +13,17 @@
 # tasks-api mounts the health router at `/health` in src/app.ts; we hit
 # the real route rather than introducing a `/healthz` alias.
 #
+# Stable hostname (task 5cb4a8fe; source of truth:
+# infra/cloud/hostname-matrix.json). The smoke check hits the stable
+# staging hostname (tasks-api.staging.sindustries.co.nz). The
+# provider-shaped URL is retained below the active command as a
+# documented `<!-- stable-fallback -->` annotation per AC4 — it is the
+# audit-only fallback, not the smoke path. 20-attempt retry loop (5s
+# sleep, 100s total) per docs/specs/add-stable-app-name-hostnames-tech-design.md
+# §risks-3: Let's Encrypt cert issuance can take a few minutes after a
+# new CNAME lands, so the deploy-window tolerance must outlast the
+# longest expected cert-issuance latency.
+#
 # Quinn-owned: FLY_API_TOKEN must be registered once as a repo secret.
 # Rowan references it by name only — no value is hardcoded in this file.
 
@@ -77,10 +88,12 @@ jobs:
         id: smoke
         run: |
           set -euo pipefail
-          URL="https://${{ env.FLY_APP }}.fly.dev/health"
+          # AC4 documented fallback path (provider URL retained for audit only;
+          # the active smoke check targets the matrix stable staging hostname).
+          # <!-- stable-fallback --> https://sindustries-tasks-api-staging.fly.dev/health
+          URL="https://tasks-api.staging.sindustries.co.nz/health"
           echo "Checking $URL"
-          # Fly assigns *.fly.dev by default; replace once sindustries.dev DNS lands.
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
             if curl --fail --silent --show-error --max-time 10 "$URL"; then
               echo "Smoke OK on attempt $i"
               exit 0
@@ -88,7 +101,7 @@ jobs:
             echo "Smoke attempt $i failed; retrying in 5s"
             sleep 5
           done
-          echo "Smoke check failed after 10 attempts" >&2
+          echo "Smoke check failed after 20 attempts" >&2
           exit 1
 
       # No PR-comment step: this reusable workflow is called only for gated

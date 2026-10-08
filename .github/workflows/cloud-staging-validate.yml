@@ -7,6 +7,14 @@
 # only — no scheduled trigger, no push trigger. Staging changes must
 # not deploy or inject faults unattended.
 #
+# Stable hostname contract (task 5cb4a8fe; source of truth:
+# infra/cloud/hostname-matrix.json). The env vars STAGING_TASKS_API_URL,
+# STAGING_BUDGET_API_URL, and STAGING_SCHEDULER_API_URL below are
+# bound to the matrix's stable staging hostnames (Quinn registers
+# them in the staging GitHub environment once the CNAMEs + certs
+# land). The harness under tests/cloud/staging-workflows.mjs is what
+# the AC2 black-box phase exercises against those URLs.
+#
 # Required environment secrets (Quinn-owned):
 #   FLY_API_TOKEN                       — flyctl auth + machine control
 #   TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN — tasks-api mutations
