@@ -132,7 +132,7 @@ SEED_RESULT="$(
       ('$CLERK_TEST_USER_A_ID', '$RUN_MARKER-a@gymtrack-test.local', true, 'clerk_import'),
       ('$CLERK_TEST_USER_B_ID', '$RUN_MARKER-b@gymtrack-test.local', true, 'clerk_import')
     on conflict (clerk_user_id) where clerk_user_id is not null
-    do update set email = excluded.email, email_verified = true;
+    do nothing;
 
     insert into public.workouts (user_id, notes)
     select id, '$RUN_MARKER-a' from public.profiles

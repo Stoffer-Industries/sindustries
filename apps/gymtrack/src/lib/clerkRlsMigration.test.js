@@ -51,4 +51,11 @@ describe('Clerk RLS forward migration', () => {
     expect(runbook).toContain('/rest/v1/workouts');
     expect(runbook).not.toContain("set local request.jwt.claim.sub");
   });
+
+  it('never mutates an existing production test profile during fixture seeding', () => {
+    expect(runbook).toMatch(
+      /on conflict \(clerk_user_id\) where clerk_user_id is not null\s+do nothing/
+    );
+    expect(runbook).not.toMatch(/do update set email/i);
+  });
 });
