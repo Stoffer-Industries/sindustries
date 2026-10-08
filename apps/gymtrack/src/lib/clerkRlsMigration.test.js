@@ -7,6 +7,7 @@ const migrationPath = resolve(
   'supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql'
 );
 const runbookPath = resolve(process.cwd(), '../../infra/cloud/scripts/run-clerk-rls-test.sh');
+const clerkE2ePath = resolve(process.cwd(), 'test/e2e/signin-clerk.spec.ts');
 
 const migration = readFileSync(migrationPath, 'utf8');
 const executableSql = migration
@@ -14,6 +15,7 @@ const executableSql = migration
   .map((line) => line.replace(/--.*$/, ''))
   .join('\n');
 const runbook = readFileSync(runbookPath, 'utf8');
+const clerkE2e = readFileSync(clerkE2ePath, 'utf8');
 
 describe('Clerk RLS forward migration', () => {
   it('rewrites every user-owned policy to the verified text sub claim', () => {
@@ -57,5 +59,18 @@ describe('Clerk RLS forward migration', () => {
       /on conflict \(clerk_user_id\) where clerk_user_id is not null\s+do nothing/
     );
     expect(runbook).not.toMatch(/do update set email/i);
+  });
+
+  it('keeps the Clerk E2E gate and credentials independent from Supabase E2E', () => {
+    const executable = clerkE2e
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    expect(executable).not.toContain('SUPABASE_TEST_URL');
+    expect(executable).not.toContain('tom@example.com');
+    expect(executable).not.toMatch(/['"]password['"]/);
+    expect(executable).toContain('process.env.CLERK_TEST_EMAIL');
+    expect(executable).toContain('process.env.CLERK_TEST_PASSWORD');
   });
 });
