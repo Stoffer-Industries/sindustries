@@ -1,7 +1,7 @@
 # Tasks
 
 **Type:** System reference (data plane + workflows)
-**Last updated:** 2026-08-04
+**Last updated:** 2026-10-09
 **Owner:** Rowan (engineering) · Quinn (workflow orchestration) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **App spec:** `apps/tasks/SPEC.md`
@@ -11,6 +11,14 @@
 ## Purpose
 
 This doc is the single source of truth for everything task-shaped at Sindustries: the Tasks API (data plane and Tasks app), the shared task lifecycle, and the three workflows that orchestrate each `taskType` end-to-end (`feature`, `code`, `content`). Read it first when touching tasks API endpoints, task lifecycle rules, or any of the three workflow pipelines.
+
+Feature-task Lobster stages treat external evidence reads as a run-level
+precondition. If GitHub PR body, review, or similar inspection fails because of
+rate limiting, authentication, network, or another infrastructure error, the
+stage exits non-zero before mutating task status, attention owners, or blocker
+comments. The feature-task batch runner stops the sweep on that marked failure
+and retries after the dependency recovers; an unreadable PR is not evidence
+that ACs are missing.
 
 Cross-cutting references:
 
