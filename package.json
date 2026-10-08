@@ -25,7 +25,6 @@
     "jsdom": "^29.0.1",
     "oxlint": "1.83.0",
     "pg": "^8.13.1",
-    "shellcheck": "^0.10.0",
     "tailwindcss": "4.3.3"
   }
 }
