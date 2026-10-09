@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
+# shellcheck source=scripts/cloud/database/common.sh
 # common.test.sh — unit tests for scripts/cloud/database/common.sh.
 #
 # Exercises the public helpers that have no dependency on PostgreSQL:
@@ -207,7 +209,7 @@ if ! run_capture "$LOG" bash -c "
 "; then
   echo "FAIL: cleanup hook orchestration should succeed" >&2; cat "$LOG" >&2; exit 1
 fi
-order="$(cat "$TMP/order.txt" | tr '\n' ',' )"
+order="$(tr '\n' ',' < "$TMP/order.txt")"
 if [[ "$order" != "three,two,one," ]]; then
   echo "FAIL: cleanup hooks should run in reverse order; got [$order]" >&2; cat "$LOG" >&2; exit 1
 fi
