@@ -10,7 +10,12 @@ Do not run broad maintenance or updates from heartbeat. Exact scheduled checks b
 
 ## Incident feed
 
-Incidents are created in Telegram DMs with Tom channel by cron and heartbeat agents when a failure is detected. Lox reads new messages from that channel, investigates, applies fixes if safe, and escalates to Tom with `openclaw message send --channel telegram --account lox --target 6435140143 --message "<message>"`.
+Incidents are created by system-health checks when an operational failure is detected. Lox reads the daily review, investigates, applies fixes if safe, and escalates to Tom with `openclaw message send --channel telegram --account lox --target 6435140143 --message "<message>"`.
+
+Task gates, QA/acceptance state, delivery evidence, attention-owner routing, and
+ordinary handoffs are not incidents. They belong to the Tasks API and must not
+be written to `lox-incident-state.json`; task escalation is the authoritative
+surface for those cases.
 
 Heartbeat keeps incident state in `brain/state/lox-incident-state.json` to avoid repeating the same recovery attempt on every run.
 
@@ -53,9 +58,10 @@ On every heartbeat:
 3. Read the latest daily review for today if it exists.
    - Prefer the exact path in `brain/state/lox-latest-daily-review.txt`.
    - If that pointer is missing, fall back to the canonical path `brain/infra/daily-reviews/lox-daily-YYYY-MM-DD.md`.
-4. Derive stable incident keys for each.
+4. Derive stable incident keys for each system-health failure.
    - Use the checked item text when possible, e.g. `tasks-api-prodlike-down`.
    - Include the daily review date in the state entry, not in the incident key.
+   - Skip any task workflow, delivery-gate, QA/acceptance, or attention-owner item.
 5. For each unresolved item:
    - If state is `resolved`, skip it.
    - If state is `repair_attempted` or `blocked` and `nextRetryAt` is still in the future, skip it.
@@ -84,7 +90,7 @@ On every heartbeat:
     - a repair was attempted, or
     - a repair is blocked/failed, or
     - a non-safe issue needs human action.
-12. If no open incidents, do not sweep and do not send a message.
+12. If no fresh open system incidents, do not sweep and do not send a message.
 
 ## Attention-owner pages (task d8fbe750)
 
@@ -109,7 +115,7 @@ Do not use the legacy full-stack PATCH or direct curl for a handoff.
 ## Failure Response Framework
 
 See `SOUL.md` for the 3-rule framework. Shorthand:
-- No runbook for a recurring failure → investigate, fix if safe, create the runbook.
+- No runbook for a recurring system failure → investigate, fix if safe, create the runbook.
 - Runbook exists but repair fails → report to Tom, set `repair_attempted` with `nextRetryAt` 2h out.
 - Cause unclear → report findings and wait for approval before applying anything.
 

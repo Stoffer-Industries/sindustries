@@ -1,7 +1,7 @@
 ---
 title: Agent Incidents
 type: System reference
-last_updated: 2026-07-13
+last_updated: 2026-10-09
 owner: Rowan
 repos: Stoffer-Industries/sindustries
 related_pr: 214
@@ -19,7 +19,7 @@ shipped_date: 2026-07-11
 
 ## Purpose
 
-Quinn (agent/runtime and pipeline-operation anomalies) and Lox (infra/host reliability) both maintain operational incident state files in the workspace. Before task 75ec1c8c, the two files used divergent shapes — Quinn's `brain/state/quinn-ops-state.json` used an `ops` key and lacked `recurrenceCount`/`nextRetryAt`/`details`; Lox's `brain/state/lox-incident-state.json` already used an `incidents` key but lacked `firstSeen`/`attempts`/`needsTom`/`severity`. Quinn's heartbeat had to branch on the two formats to roll up cross-agent incidents. This system doc is the durable record of the unified schema and the shared parser.
+Quinn (agent/runtime and pipeline-operation anomalies) and Lox (infra/host reliability) both maintain operational incident state files in the workspace. Before task 75ec1c8c, the two files used divergent shapes — Quinn's `brain/state/quinn-ops-state.json` used an `ops` key and lacked `recurrenceCount`/`nextRetryAt`/`details`; Lox's `brain/state/lox-incident-state.json` already used an `incidents` key but lacked `firstSeen`/`attempts`/`needsTom`/`severity`. Quinn's heartbeat had to branch on the two formats to roll up cross-agent incidents. This system doc is the durable record of the unified schema, the shared parser, and the incident/task boundary.
 
 Task-level gates, blockers, and handoffs are deliberately outside this system. They belong to the Tasks API and its ordered `attentionOwners` stack; an ordinary task waiting for a spec, tech design, QA/acceptance approval, dependency, or implementer is not an agent incident.
 
@@ -37,7 +37,7 @@ Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/system
 
 1. When an agent detects an operational incident (failed cron, lobster/runtime failure, host problem, or pipeline execution fault), it upserts a stable slug-keyed entry in its `incidents` map. Task-level gate state is written to the Tasks API instead. Repeated operational observations increment `attempts` and refresh `lastCheckedAt` rather than creating a new dated key.
 2. Each entry carries enough context (`lastAction`, `details`, `linkedPr`, `linkedRunbook`) for Tom to triage without opening the agent's logs.
-3. On every heartbeat tick, Quinn calls `agents.lib.incident_state.load_all_incidents()`, reports the queue as separate actionable and monitored counts, and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`). Resolved and false-positive entries are excluded from both counts.
+3. On every heartbeat tick, Quinn calls `agents.lib.incident_state.load_all_incidents()` and then `reportable_incidents()`. The reportable queue contains only fresh system records: resolved, false-positive, archived, task-scoped, and stale entries are excluded. Quinn reports separate actionable and monitored counts and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`).
 4. Lox's daily-review script is the source of most Lox entries; Lox's heartbeat updates existing entries (increments `attempts`, refreshes `lastCheckedAt`, sets `nextRetryAt`, marks resolved) but does not create new entries outside of the daily review.
 5. Quinn's heartbeat updates existing Quinn entries in place and never mutates Lox entries (read-only on Lox's file).
 6. Quinn escalates to Tom via Telegram the first time a `needsTom` entry has `escalatedAt == null`, then sets `escalatedAt`. Quinn does not re-escalate already-escalated items unless they are updated.
@@ -49,7 +49,8 @@ The unified entry shape (top-level `incidents` map, slug keys → entry dict):
 | Field | Type | Required | Default on read | Description |
 |---|---|---|---|---|
 | `owner` | `"lox"` \| `"quinn"` | yes | (filename-derived) | Which agent owns this entry. |
-| `status` | `"watching"` \| `"escalated"` \| `"resolved"` \| `"false_positive"` | yes | `"watching"` | Current state. Legacy Lox `"repair_attempted"` → `"watching"`; legacy `"blocked"` → `"escalated"`. |
+| `status` | `"watching"` \| `"escalated"` \| `"resolved"` \| `"false_positive"` \| `"archived"` | yes | `"watching"` | Current state. `archived` retains history without claiming the underlying condition was fixed. Legacy Lox `"repair_attempted"` → `"watching"`; legacy `"blocked"` → `"escalated"`. |
+| `scope` | `"system"` \| `"task"` | no | legacy entries are treated as `system` | Task-scoped records are retained only for historical migration/audit and are excluded from the incident queue. New task workflow findings use the Tasks API instead. |
 | `severity` | `"low"` \| `"medium"` \| `"high"` \| `"critical"` | no | `"medium"` | `high` and `critical` are auto-surfaced to Tom. |
 | `firstSeen` | ISO-8601 UTC | no | `now()` | When first observed. |
 | `lastCheckedAt` | ISO-8601 UTC | no | `now()` | Most recent check. |
@@ -79,23 +80,33 @@ The top-level object **must** have an `incidents` key (object). An optional `_me
 
 - `load_all_incidents(workspace: Path | None = None) -> list[dict]` — read both state files, return a flat list. `workspace` defaults to the `OPENCLAW_WORKSPACE` env var, falling back to `/Users/quinnstoffer/.openclaw/workspace`.
 - `parse_file(path: Path, owner: str | None = None) -> list[dict]` — read one file with the legacy normalizer for that file's known shape.
-- `needs_tom(incidents: list[dict]) -> list[dict]` — filter to entries where `needsTom is True` or `severity in {"high", "critical"}`.
+- `active_incidents(incidents: list[dict]) -> list[dict]` — exclude resolved, false-positive, and archived records.
+- `reportable_incidents(incidents: list[dict]) -> list[dict]` — retain fresh system records only; the default freshness window is 72 hours.
+- `needs_tom(incidents: list[dict]) -> list[dict]` — filter reportable entries where `needsTom is True` or `severity in {"high", "critical"}`.
 - `validate_with_schema(state, schema_path: Path | None = None) -> None` — validate a state dict against the JSON Schema. Raises `jsonschema.ValidationError`. The `jsonschema` package is imported lazily so the hot `parse_file()` path does not need it installed.
 
 The live state was migrated separately before this PR was opened. State files
 remain outside the repository and are not committed; the parser's legacy
 normalizer remains as the compatibility path for any older shape encountered
-at read time.
+at read time. The one-off `scripts/ops/archive_incident_state.py` utility
+archives task-derived and stale records with timestamped backups; it never
+deletes state.
 
 ## Runbook notes and common failure modes
 
-**Adding a new incident slug:** choose a stable kebab-case identifier derived from the failure pattern (e.g. `tasks-api-prod-down`, `firewall`, `bookmark-acpx-openai-401-no-scopes`). Slugs must be stable — they are how cross-recurrence is detected. Do not append observation dates to incident keys. For task workflow findings, include the task prefix and gate in the stable identity, for example `feature-task-0bda7aa7-ready_checks` or `backlog-spec-missing-87744315`.
+**Adding a new incident slug:** choose a stable kebab-case identifier derived from the system failure pattern (e.g. `tasks-api-prod-down`, `firewall`, `bookmark-acpx-openai-401-no-scopes`). Slugs must be stable — they are how cross-recurrence is detected. Do not append observation dates to incident keys. Do not create slugs for task workflow findings; use the task's status, approvals, comments, and ordered `attentionOwners` stack instead.
 
-There must be one active entry per logical task/gate. Repeated observations
-update that entry's `attempts`, `lastCheckedAt`, and `lastAction`. Use
-`recurrenceCount` only when a previously resolved incident reappears.
+There should be one active entry per logical system failure. Repeated
+observations update that entry's `attempts`, `lastCheckedAt`, and `lastAction`.
+Use `recurrenceCount` only when a previously resolved incident reappears.
 
 **Marking an incident resolved:** set `status: "resolved"` and `resolvedAt: <now>`. Do not delete the entry — keep it for `recurrenceCount` trending. If the same failure reappears, increment `recurrenceCount` rather than creating a new entry.
+
+**Archiving historical noise:** set `status: "archived"`, preserve the
+original record, and record `archiveReason`/`archivedAt`. Archiving is for
+task-derived or stale records that should not remain in the operational queue;
+it does not assert that the underlying condition was fixed. A later live check
+may create a fresh system incident if the condition is observed again.
 
 **Escalation policy:** Quinn auto-escalates the first time a `needs_tom` entry has `escalatedAt == null`. Quinn does not re-escalate already-escalated items unless they are updated with new evidence.
 
@@ -125,7 +136,7 @@ The HEARTBEAT.md files (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definit
 - **Idea doc:** `brain/ideas/unified-agent-incident-schema.md`
 - **JSON Schema:** `agents/schemas/agent-incident-state.schema.json`
 - **Parser:** `agents/lib/incident_state.py` + `agents/lib/test_incident_state.py`
-- **Live migration:** completed separately before this PR; no migration utility is shipped in the repository.
+- **Live migration:** completed separately before this PR with `scripts/ops/archive_incident_state.py`; state remains outside the repository.
 - **Heartbeat docs:** `agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`
 
 ## Lifecycle / update rules

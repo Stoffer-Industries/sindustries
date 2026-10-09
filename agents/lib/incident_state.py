@@ -12,8 +12,15 @@ Public API:
         Read one file, apply the legacy normalizer for that file's known shape,
         return the unified list.
 
+    active_incidents(incidents) -> list[dict]
+        Filter out resolved, false-positive, and archived records.
+
+    reportable_incidents(incidents) -> list[dict]
+        Return fresh, system-scoped active records for the operator queue.
+
     needs_tom(incidents) -> list[dict]
-        Filter to entries where needsTom is True or severity is high/critical.
+        Filter reportable entries where needsTom is True or severity is
+        high/critical.
 
     validate_with_schema(state) -> None
         Validate a state dict against the JSON Schema bundled in
@@ -47,7 +54,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -69,9 +76,11 @@ WORKSPACE_DEFAULT = Path(
 )
 
 VALID_OWNERS = {"lox", "quinn"}
-VALID_STATUSES = {"watching", "escalated", "resolved", "false_positive"}
+VALID_STATUSES = {"watching", "escalated", "resolved", "false_positive", "archived"}
 VALID_SEVERITIES = {"low", "medium", "high", "critical"}
 TOM_SURFACING_SEVERITIES = {"high", "critical"}
+INACTIVE_STATUSES = {"resolved", "false_positive", "archived"}
+REPORTABLE_MAX_AGE_HOURS = 72
 
 
 # ---------------------------------------------------------------------------
@@ -262,12 +271,63 @@ def load_all_incidents(workspace: Path | None = None) -> list[dict]:
     return quinn + lox
 
 
-def needs_tom(incidents: list[dict]) -> list[dict]:
-    """Filter to incidents that should be surfaced to Tom."""
-    out = []
-    for inc in incidents:
-        if not isinstance(inc, dict):
+def active_incidents(incidents: list[dict]) -> list[dict]:
+    """Return records that are still open in the incident registry.
+
+    Archived records remain in the state files for audit/history, but are not
+    operational work. This is deliberately separate from ``resolved``: an
+    archive does not claim that the underlying condition was fixed.
+    """
+    return [
+        inc for inc in incidents
+        if isinstance(inc, dict) and inc.get("status") not in INACTIVE_STATUSES
+    ]
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def reportable_incidents(
+    incidents: list[dict],
+    *,
+    now: datetime | None = None,
+    max_age_hours: int = REPORTABLE_MAX_AGE_HOURS,
+) -> list[dict]:
+    """Return fresh system incidents suitable for the operator queue.
+
+    Task gates and handoffs belong to the Tasks API, so records explicitly
+    marked ``scope: task`` never appear here. Records without a scope retain
+    legacy behaviour and are treated as system records. A record with a
+    ``lastCheckedAt`` older than the freshness window is also omitted; a new
+    observation can reopen it with fresh evidence. Missing timestamps are
+    retained for backwards compatibility with legacy state.
+    """
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = reference - timedelta(hours=max_age_hours)
+    out: list[dict] = []
+    for inc in active_incidents(incidents):
+        if inc.get("scope") == "task":
             continue
+        checked_at = _parse_timestamp(inc.get("lastCheckedAt"))
+        if checked_at is not None and checked_at < cutoff:
+            continue
+        out.append(inc)
+    return out
+
+
+def needs_tom(incidents: list[dict]) -> list[dict]:
+    """Filter fresh system incidents that should be surfaced to Tom."""
+    out = []
+    for inc in reportable_incidents(incidents):
         if inc.get("needsTom"):
             out.append(inc)
             continue
@@ -317,9 +377,13 @@ __all__ = [
     "VALID_STATUSES",
     "VALID_SEVERITIES",
     "TOM_SURFACING_SEVERITIES",
+    "INACTIVE_STATUSES",
+    "REPORTABLE_MAX_AGE_HOURS",
     "IncidentStateError",
     "parse_file",
     "load_all_incidents",
+    "active_incidents",
+    "reportable_incidents",
     "needs_tom",
     "validate_with_schema",
 ]
