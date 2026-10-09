@@ -607,6 +607,17 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
 /// Reconcile only the workflow-owned head slot. Tail entries (including
 /// duplicate names) are copied byte-for-byte; when an unrelated head is
 /// present the managed owner is prepended rather than overwriting it.
+///
+/// The baseline `acceptance -> accepted` gate is a special case: when there
+/// is no existing attention stack, `workflow_attention_owner` resolving to
+/// Tom here means only "Tom's normal sign-off is outstanding" -- a state
+/// already surfaced by the derived `workflowGates` fallback documented in
+/// `docs/systems/tasks.md` ("acceptance -> accepted"). Writing an explicit
+/// `attentionOwners = ["Tom"]` row for that baseline case duplicates the
+/// signal and pages Tom for a state the system already treats as his normal
+/// next action. A non-empty stack still gets Tom inserted/advanced
+/// normally -- that case means a stale or unrelated owner is sitting at
+/// acceptance and genuinely needs correcting to Tom.
 pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     let mut owners = task.attention_owners.clone();
     if let Some(desired) = workflow_attention_owner(task) {
@@ -624,7 +635,7 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
                 || matches!(owner.as_str(), "Quinn" | "Ash")
         }) {
             owners[0] = desired.to_string();
-        } else {
+        } else if !owners.is_empty() || !is_baseline_tom_acceptance_gate(task, &desired) {
             owners.insert(0, desired.to_string());
         }
         // An unresolved deferred QA verdict is an OpenClaw handoff to Quinn.
@@ -639,6 +650,14 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     }
     enforce_tom_acceptance_only(task, &mut owners);
     owners
+}
+
+/// True when the only reason `workflow_attention_owner` resolved to Tom is
+/// the baseline, unescalated `acceptance -> accepted` gate (see
+/// `reconciled_attention_owners`). Any other managed owner, or an acceptance
+/// task whose stack is already non-empty, is unaffected.
+fn is_baseline_tom_acceptance_gate(task: &Task, desired: &str) -> bool {
+    task.status == "acceptance" && desired.eq_ignore_ascii_case("Tom")
 }
 
 /// Explain why the workflow is changing the actionable attention slot. This
@@ -1434,6 +1453,61 @@ mod tests {
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
             vec!["Tom", "Quinn", "Ash"]
+        );
+    }
+
+    /// Tom reported (2026-10-09) that every task reaching `acceptance`
+    /// picked up a redundant `attentionOwners = ["Tom"]` row with the reason
+    /// "Final acceptance approval is required." -- even though a task with
+    /// an empty attention stack already surfaces Tom as the normal next
+    /// actor via the derived `workflowGates` fallback (see
+    /// docs/systems/tasks.md, "acceptance -> accepted"). An explicit row for
+    /// that baseline case duplicates the signal and pages Tom for a state
+    /// he already expects.
+    #[test]
+    fn routing_does_not_page_tom_for_baseline_pending_acceptance() {
+        let task = routing_task("acceptance", &[]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            Vec::<String>::new()
+        );
+    }
+
+    /// A non-empty stack at acceptance headed by the delivery assignee is a
+    /// genuine stale-owner correction (the previous QA/doing-stage managed
+    /// owner left its reconciled slot at the head) -- the baseline-case
+    /// suppression must not block that replacement.
+    #[test]
+    fn routing_still_advances_stale_assignee_head_to_tom_at_acceptance() {
+        let task = routing_task("acceptance", &["Rowan"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom"]
+        );
+    }
+
+    /// A non-empty stack headed by an unrelated owner (not the assignee, not
+    /// a managed Quinn/Ash slot) at acceptance must still get Tom inserted
+    /// at the front, preserving the existing tail -- this is a genuine
+    /// stale/unrelated-owner correction, not the baseline case.
+    #[test]
+    fn routing_still_inserts_tom_ahead_of_unrelated_stale_owner_at_acceptance() {
+        let task = routing_task("acceptance", &["Lox"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom", "Lox"]
+        );
+    }
+
+    /// The baseline-acceptance suppression is specific to Tom's gate; Quinn
+    /// paging into an empty stack at `ready` (tech design) must be
+    /// unaffected.
+    #[test]
+    fn routing_still_pages_quinn_into_empty_stack_at_ready() {
+        let task = routing_task("ready", &[]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn"]
         );
     }
     #[test]
