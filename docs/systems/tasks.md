@@ -183,6 +183,8 @@ Task responses include:
 
 **How to use it.** `attentionOwners[0]` is the explicit attention/escalation action slot. When that stack is empty, the owner of the exact current outstanding workflow gate is the normal next actor (`open → spec`, `ready → tech_design`, `doing → qa_agent`, `acceptance → accepted`). The `qa_agent` fallback is exposed only after Lobster's latest delivery-evidence sweep has cleared; while the latest Lobster state carries an unresolved delivery/progress failure, the gate remains dormant and the delivery assignee remains actionable. Assignee says who delivers and remains the final fallback when no gate is outstanding. Gate ownership is derived for queue/card presentation; it is never copied into or persisted as an attention-owner row. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
 
+**Baseline acceptance is never explicitly paged (2026-10-09).** Reaching `acceptance` without a prior attention stack means only "Tom's normal sign-off is outstanding" -- a state the derived gate fallback above already surfaces. `reconciled_attention_owners` does not create an explicit `attentionOwners = ["Tom"]` row for that baseline case; doing so duplicated the already-derived signal and paged Tom for his own expected next step. A non-empty stack at acceptance (a stale implementer/Ash/Quinn head, or an unrelated owner) still gets corrected to Tom normally -- that case is a genuine routing fix, not the baseline state.
+
 **QA capability-deferral lifecycle.** The feature-task workflow treats these
 markers as a distinct routing protocol:
 
