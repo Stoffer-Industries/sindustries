@@ -194,7 +194,7 @@ Quinn maintains a persistent operational findings registry at `brain/state/quinn
   "owner": "quinn",
   "firstSeen": "<ISO timestamp>",
   "lastCheckedAt": "<ISO timestamp>",
-  "status": "watching | escalated | resolved | false_positive",
+  "status": "watching | escalated | resolved | false_positive | archived",
   "severity": "low | medium | high | critical",
   "needsTom": false,
   "attempts": 1,
@@ -212,9 +212,9 @@ Quinn maintains a persistent operational findings registry at `brain/state/quinn
 ```python
 import sys
 sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
-from agents.lib.incident_state import load_all_incidents, needs_tom
+from agents.lib.incident_state import load_all_incidents, needs_tom, reportable_incidents
 
-all_incidents = load_all_incidents()
+all_incidents = reportable_incidents(load_all_incidents())
 for inc in needs_tom(all_incidents):
     # include in heartbeat output, set escalatedAt, etc.
     ...
@@ -253,7 +253,7 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
 - For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
 - Only escalate if the condition is confirmed present in live state this pass.
 
-1. From `read_all_incidents()`, discard entries where `status` is `resolved` or `false_positive`. Call the remainder **active findings**. Count entries where `needsTom` is true OR `severity` is `high`/`critical` as **actionable incidents**; count the rest as **monitored findings**. Do not describe the monitored count as incidents waiting on Tom.
+1. From `read_all_incidents()`, call `reportable_incidents()` to discard resolved, false-positive, archived, task-scoped, and stale records. Call the remainder **active findings**. Count entries where `needsTom` is true OR `severity` is `high`/`critical` as **actionable incidents**; count the rest as **monitored findings**. Do not describe the monitored count as incidents waiting on Tom.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
 3. **Always report the queue when active findings exist:**
    - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
@@ -274,11 +274,15 @@ STATE_FILE = '/Users/quinnstoffer/.openclaw/workspace/brain/state/quinn-ops-stat
 # isn't importable (e.g. when running outside the repo worktree).
 try:
     sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
-    from agents.lib.incident_state import load_all_incidents, needs_tom as _shared_needs_tom
+    from agents.lib.incident_state import (
+        load_all_incidents,
+        needs_tom as _shared_needs_tom,
+        reportable_incidents,
+    )
     def read_all_incidents():
-        return load_all_incidents()
+        return reportable_incidents(load_all_incidents())
     def read_needs_tom():
-        return _shared_needs_tom(load_all_incidents())
+        return _shared_needs_tom(read_all_incidents())
 except Exception:
     def read_all_incidents():
         return []  # parser unavailable; callers should log and continue

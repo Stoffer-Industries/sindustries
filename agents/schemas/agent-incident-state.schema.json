@@ -42,8 +42,13 @@
         },
         "status": {
           "type": "string",
-          "enum": ["watching", "escalated", "resolved", "false_positive"],
-          "description": "Current state of the incident. `watching` = under observation, `escalated` = needs human attention, `resolved` = fixed, `false_positive` = turned out not to be a real issue."
+          "enum": ["watching", "escalated", "resolved", "false_positive", "archived"],
+          "description": "Current state of the incident. `watching` = under observation, `escalated` = needs human attention, `resolved` = fixed, `false_positive` = turned out not to be a real issue, `archived` = retained historical record excluded from the active queue."
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["system", "task"],
+          "description": "Whether this record describes system health or a task workflow. Task records are retained for history but are not incident-queue material."
         },
         "severity": {
           "type": "string",

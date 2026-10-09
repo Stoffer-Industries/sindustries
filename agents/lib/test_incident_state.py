@@ -16,6 +16,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 from unittest import mock
@@ -269,12 +270,27 @@ class NeedsTomTests(unittest.TestCase):
         self.assertEqual(len(out), 0)
 
     def test_needs_tom_skips_resolved(self):
-        # Resolved high-severity entries still pass needs_tom() — callers can
-        # filter on `status` themselves if needed.
         out = ist.needs_tom([
             {"owner": "quinn", "needsTom": False, "severity": "high", "status": "resolved"},
         ])
-        self.assertEqual(len(out), 1)
+        self.assertEqual(len(out), 0)
+
+    def test_needs_tom_skips_archived_and_task_scope(self):
+        out = ist.needs_tom([
+            {"owner": "quinn", "needsTom": True, "severity": "high", "status": "archived"},
+            {"owner": "quinn", "needsTom": True, "severity": "high", "status": "watching", "scope": "task"},
+        ])
+        self.assertEqual(len(out), 0)
+
+    def test_reportable_incidents_excludes_stale_and_keeps_fresh_system(self):
+        now = datetime(2026, 10, 9, 0, 0, tzinfo=timezone.utc)
+        out = ist.reportable_incidents([
+            {"_slug": "fresh", "status": "watching", "lastCheckedAt": "2026-10-08T12:00:00Z"},
+            {"_slug": "stale", "status": "watching", "lastCheckedAt": "2026-10-05T23:59:00Z"},
+            {"_slug": "task", "status": "watching", "scope": "task", "lastCheckedAt": "2026-10-08T12:00:00Z"},
+            {"_slug": "archived", "status": "archived", "lastCheckedAt": "2026-10-08T12:00:00Z"},
+        ], now=now)
+        self.assertEqual([entry["_slug"] for entry in out], ["fresh"])
 
 
 class ValidateWithSchemaTests(unittest.TestCase):
