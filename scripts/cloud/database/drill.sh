@@ -109,11 +109,15 @@ cloud_db_info "step 1 inventory complete"
 # ---------------------------------------------------------------------------
 
 DUMP_OUT="${ARCHIVE_DIR}/dump-${CLOUD_DB_RUN_ID}.json"
+DUMP_KEEP_PARTIAL_FLAG=()
+if [[ "$INTERRUPTION" == "dump" ]]; then
+  DUMP_KEEP_PARTIAL_FLAG=(--keep-partial)
+fi
 DUMP_RESULT="$(
   "$(dirname "${BASH_SOURCE[0]}")/dump.sh" \
     --source-dsn-file "$SRC_TASKS_FILE" \
     --archive-dir "$ARCHIVE_DIR" \
-    $( [[ "$INTERRUPTION" == "dump" ]] && printf -- '--keep-partial' )
+    "${DUMP_KEEP_PARTIAL_FLAG[@]}"
 )"
 
 DUMP_ARCHIVE_PATH="${ARCHIVE_DIR}/$(basename "$DUMP_RESULT" .dump-result.json).dump"
@@ -128,13 +132,17 @@ fi
 # Step 3: restore
 # ---------------------------------------------------------------------------
 
+RESTORE_INTENTIONAL_FAILURE_FLAG=()
+if [[ "$INTERRUPTION" == "restore" ]]; then
+  RESTORE_INTENTIONAL_FAILURE_FLAG=(--intentional-failure-after 2)
+fi
 RESTORE_OUT="$(
   "$(dirname "${BASH_SOURCE[0]}")/restore.sh" \
     --source-dsn-file "$SRC_TASKS_FILE" \
     --destination-dsn-file "$DEST_TASKS_FILE" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
-    $( [[ "$INTERRUPTION" == "restore" ]] && printf -- '--intentional-failure-after 2' )
+    "${RESTORE_INTENTIONAL_FAILURE_FLAG[@]}"
 )"
 
 if [[ "$INTERRUPTION" == "restore" ]]; then

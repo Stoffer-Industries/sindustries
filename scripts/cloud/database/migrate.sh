@@ -62,11 +62,11 @@ cloud_db_assert_no_production_dsn "budget" "$BUDGET_DSN"
 
 # Required schema qualification so Prisma writes into the right schema.
 case "$TASKS_DSN" in
-  *"?schema=tasks_api"*|*"?schema=tasks_api&"*|*"?schema=tasks_api#"*) ;;
+  *"?schema=tasks_api"*) ;;
   *) cloud_db_die "tasks DSN must include ?schema=tasks_api" ;;
 esac
 case "$BUDGET_DSN" in
-  *"?schema=budget_api"*|*"?schema=budget_api&"*|*"?schema=budget_api#"*) ;;
+  *"?schema=budget_api"*) ;;
   *) cloud_db_die "budget DSN must include ?schema=budget_api" ;;
 esac
 
@@ -114,7 +114,6 @@ prisma_migration_state() {
 # ---------------------------------------------------------------------------
 
 declare -A SERVICE_RESULTS
-ALL_OK=1
 
 run_service_migration() {
   local service_name="$1"

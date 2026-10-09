@@ -145,7 +145,13 @@ if [[ -n "$INTENTIONAL_FAILURE_AFTER" ]]; then
     "$ARCHIVE_PATH" \
     >"${RESULT_PATH%.json}.log" 2>&1 &
   PGPID=$!
-  trap "kill -TERM '$PGPID' 2>/dev/null || true" INT TERM
+  # Use a function so $PGPID is resolved when the signal fires, not when
+  # the trap is installed. PGPID is intentionally global so the function
+  # can read it.
+  _cloud_db_restore_kill() {
+    kill -TERM "$PGPID" 2>/dev/null || true
+  }
+  trap '_cloud_db_restore_kill' INT TERM
   sleep "$INTENTIONAL_FAILURE_AFTER"
   cloud_db_info "intentional failure drill: sending SIGTERM to pg_restore (pid=$PGPID) after ${INTENTIONAL_FAILURE_AFTER}s"
   kill -TERM "$PGPID" 2>/dev/null || true

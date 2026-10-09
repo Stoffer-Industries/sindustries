@@ -305,7 +305,8 @@ cloud_db_load_secret() {
     cloud_db_die "secret file '$file_path' is empty"
   fi
   printf -v "$var_name" '%s' "$value"
-  export "$var_name"
+  # shellcheck disable=SC2163  # var_name is set by printf -v above; export intentionally takes the name.
+  export "${var_name?}"
 }
 
 # ---------------------------------------------------------------------------
