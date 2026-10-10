@@ -85,7 +85,21 @@ def api_request(method: str, base_url: str, path: str, payload=None, *, token: s
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        # The OpenClaw secret-egress proxy (HTTP_PROXY/HTTPS_PROXY) exists to
+        # substitute protected secret sentinels into requests bound for
+        # approved *external* destinations. TASKS_API_BASE_URL is always a
+        # local service call and never carries a secret sentinel, but
+        # `urllib.request`'s default opener honours the ambient proxy env
+        # vars unconditionally (NO_PROXY is not set in most agent shells).
+        # That silently routed every Tasks API call through the egress
+        # proxy, which correctly refuses non-allowlisted destinations with
+        # an HTTP 502 ("Secret egress proxy refused the request."). This
+        # looked like an intermittent Tasks API outage (urllib 502 vs. a
+        # direct `curl` 200) for multiple agents' heartbeats on 2026-10-10.
+        # Use a proxy-free opener so Tasks API calls never traverse that
+        # proxy, regardless of the caller's environment.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=30) as resp:
             body = resp.read().decode("utf-8")
             return json.loads(body) if body else {}
     except Exception as e:  # noqa: BLE001
