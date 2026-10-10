@@ -105,6 +105,13 @@ structured approvals) remain independent. A normal stack can therefore be:
 `assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
 Do not hide Ash and do not deduplicate Rowan across those roles.
 
+An ordinary Lobster delivery checklist is not itself an escalation. When the
+checklist asks the delivery assignee to correct PR/AC evidence, keep
+`attentionOwners` empty and let the assignee queue surface the task as
+actionable. Keep the downstream QA gate dormant until Lobster clears the
+evidence. Add an explicit attention row only for a genuine blocker or a
+cross-role handoff that needs ordered escalation.
+
 ### Completed delivery handoff
 
 When an implementation delivery is complete, the delivery assignee must not
@@ -118,9 +125,10 @@ completed evidence and the next gate/actor. If QA is already approved, the next
 actor is the acceptance gate rather than the delivery assignee.
 
 If a later Lobster checklist claims that delivery evidence is missing, verify
-the merged PR bodies and task evidence before acting. Address a real gap; if the
-checklist is stale, clear the stale top attention slot again. Do not leave the
-assignee in the attention stack as a passive watch state.
+the merged PR bodies and task evidence before acting. Address a real gap from
+the assignee queue; if an older sweep left the assignee in the attention stack
+solely for that checklist, clear the stale row. Do not leave the assignee in
+the attention stack as a passive watch state.
 
 ```http
 POST /tasks/<task-uuid>/attention-owners/reconcile

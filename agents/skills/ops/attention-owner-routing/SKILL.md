@@ -32,6 +32,11 @@ description: Add, replace, escalate, or clear Tasks API attention owners with or
   the real blocker.
 - **Only add Tom when a concrete action requires Tom immediately.** Do not page
   him merely because an agent's work or gate is complete.
+- **Do not turn ordinary delivery checklists into attention escalations.** A
+  Lobster checklist asking the delivery assignee to correct PR evidence is
+  normal assigned work: keep the assignee in the queue, keep downstream QA
+  dormant, and leave `attentionOwners` empty unless a genuine blocker or
+  cross-role handoff requires explicit routing.
 - **Do not route Quinn for normal delivery, QA, acceptance, or review work.**
   Quinn is an exceptional OpenClaw/runtime unblocker.
 - **Verify stale evidence before creating a blocker.** Check merged PRs,
@@ -64,7 +69,9 @@ Capability deferrals are a distinct branch: Ash routes a real verifier-capabilit
 gap to Quinn, Quinn resolves the capability task, and the original task returns
 to Ash for a fresh QA pass. A capability-resolved marker is not itself QA
 approval. Normal delivery or evidence failures return to the delivery assignee;
-they must not surface Ash until Lobster's delivery-evidence gate has passed.
+they must not surface Ash until Lobster's delivery-evidence gate has passed, but
+they also must not create a Rowan/implementer attention row merely to expose
+that ordinary work in the queue.
 
 ### Execute the routing operation
 

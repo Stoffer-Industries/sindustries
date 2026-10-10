@@ -128,6 +128,25 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual(classification, "ACTIONABLE")
         self.assertIn("delivery", reason)
 
+    def test_delivery_checklist_stays_assignee_actionable_without_attention_row(self):
+        pr_url = "https://github.com/acme/repo/pull/1"
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                taskType="feature",
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {"text": "[implementer-prs] " + pr_url},
+                    {
+                        "text": "[feature-task-progress-checklist]\n"
+                        "AC evidence needs correction before QA can act."
+                    },
+                ],
+            ),
+            delivery_prs={pr_url: pull_request(state="closed", merged_at="2026-10-10T00:00:00Z")},
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("merged", reason)
+
     def test_progress_checklist_missing_implementer_prs_is_not_external_wait(self):
         classification, _ = agent_task_queue.classify_task(
             implementation_task(
