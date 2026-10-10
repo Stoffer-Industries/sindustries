@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
@@ -886,6 +887,31 @@ class GhApiTimeoutTest(unittest.TestCase):
         ):
             with self.assertRaises(subprocess.CalledProcessError):
                 agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+
+    def test_gh_api_strips_proxy_env_so_gh_bypasses_the_secret_egress_proxy(self):
+        # `gh` is a Go binary; on macOS it does not honour SSL_CERT_FILE/
+        # CURL_CA_BUNDLE/NODE_EXTRA_CA_CERTS. The ambient HTTP_PROXY/
+        # HTTPS_PROXY route every outbound call through OpenClaw's local
+        # secret-egress proxy, whose TLS certificate `gh` correctly refuses
+        # to trust -- causing an identical x509 failure for every agent
+        # (Rowan, Ash, Quinn, Ivy), not a per-agent credential problem
+        # (2026-10-11). `_gh_api` must strip the proxy vars before shelling
+        # out so `gh` connects to github.com directly.
+        proxy_env = {
+            "HTTP_PROXY": "http://openclaw:secret@127.0.0.1:64554",
+            "HTTPS_PROXY": "http://openclaw:secret@127.0.0.1:64554",
+            "http_proxy": "http://openclaw:secret@127.0.0.1:64554",
+            "https_proxy": "http://openclaw:secret@127.0.0.1:64554",
+            "PATH": "/usr/bin",
+        }
+        with patch.dict(os.environ, proxy_env, clear=True):
+            with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
+                mock_safe_run.return_value.stdout = "[]"
+                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+        called_env = mock_safe_run.call_args.kwargs.get("env")
+        for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            self.assertNotIn(proxy_var, called_env)
+        self.assertEqual(called_env.get("PATH"), "/usr/bin")
 
 
 def _deliverable_task(pr_number):

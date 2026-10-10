@@ -581,6 +581,20 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     global _GH_API_CALL_COUNT
     _GH_API_CALL_COUNT += 1
     env = os.environ.copy()
+    # `gh` is a Go binary; on macOS its TLS trust store reads the system
+    # Keychain and does not honour SSL_CERT_FILE/CURL_CA_BUNDLE/
+    # NODE_EXTRA_CA_CERTS the way curl and Node do. The ambient
+    # HTTP_PROXY/HTTPS_PROXY env vars route every outbound call (including
+    # github.com) through OpenClaw's local secret-egress proxy, which
+    # terminates TLS with its own certificate for secret substitution. `gh`
+    # correctly refuses to trust that certificate, so every `gh api` call
+    # to GitHub failed identically for every agent (Rowan, Ash, Quinn,
+    # Ivy) with an x509 trust error -- not a per-agent credential problem.
+    # The real GitHub token (passed below, or already stored in
+    # GH_CONFIG_DIR) never needs secret-sentinel substitution, so bypass
+    # the proxy entirely for this call.
+    for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        env.pop(proxy_var, None)
     env["GH_CONFIG_DIR"] = os.path.expanduser(config_dir)
     token = env.get(token_env)
     if token:
