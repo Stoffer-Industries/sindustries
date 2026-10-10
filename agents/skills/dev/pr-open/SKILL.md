@@ -18,6 +18,7 @@ description: "Open a pull request in the Sindustries repository. Covers branch s
   - **Flat form (correct):** `AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-render - desktop)` or `AC1: Calendar renders 10 columns labelled by date. (🧪 testID: cal-render)` if "desktop" is not part of the test ID.
 - **Never omit AC checkboxes from a feature-task PR body.** Use `- [x]` (the lobster's only parseable form), not bullet, not `- [ ]`, not `✅` emoji, not plain prose. Every task AC must appear in the PR body, with the original task AC sentence copied verbatim before the evidence annotation.
 - **Never paraphrase or shorten the AC sentence text.** The lobster ignores Markdown code-span markers and line-wrapping whitespace, but it rejects omitted clauses, paraphrases, or shortened sentences. Copy the task AC sentence exactly.
+- **Never append implementation commentary to the verbatim AC sentence outside the recognised trailing evidence annotation.** A suffix such as `— implemented by ...` is parsed as part of the criterion and fails the Lobster's full-text comparison. Put concise evidence inside the final `(testID|not tested|not code|pr|sign-off: ...)` annotation, or move additional explanation to a separate paragraph outside the AC checkbox line.
 - **Never use `file:` as an AC evidence annotation.** It has been removed; use `testID` or record a substantive reason in `not tested`.
 - **Never set `--assignee` to anyone other than the implementation owner/opener.** The reviewer must not open the implementer's PR on their own account.
 - **Never create an implementation PR from a different agent's GitHub identity.** The task implementer/assignee is the intended opener; commit authorship and branch ownership are not substitutes for authenticated identity.
@@ -39,6 +40,13 @@ description: "Open a pull request in the Sindustries repository. Covers branch s
 ### 2. Compose the PR body
 
 Use the OUTPUT FORMAT section below. For feature-task PRs the body MUST include the `## Acceptance Criteria` section with every task AC as a `- [x]` line and a valid evidence annotation. For multi-task combined deliveries, group ACs under `### Task <task-id> — <short description>` so the lobster scopes AC vs task comparison per heading.
+
+Before creating or editing the PR, inspect every completed AC line as two fields:
+
+1. the task's verbatim AC sentence; and
+2. one recognised trailing evidence annotation.
+
+There must be no third field or free-form suffix on the checkbox line. Put implementation notes in `## Summary`, `## Test plan`, or a separate paragraph.
 
 ### 3. `gh pr create`
 
@@ -72,6 +80,16 @@ EOF
 (Add `--draft` if you want informal self-review before requesting the formal pass; convert to ready-for-review only after ACs are complete and the system spec / app spec / `Co-Authored-By` trailer are all in place.)
 
 ### 4. Postcondition verify — `requested_reviewers` is non-zero
+
+First read back the rendered PR body after every create or body edit:
+
+```bash
+gh pr view <number> --repo Stoffer-Industries/sindustries --json body --jq .body
+```
+
+For feature-task PRs, verify the read-back still has the exact `## Acceptance Criteria` heading and every completed line has the shape `- [x] AC<n>: <verbatim task AC sentence> (<recognised evidence>)`. Treat an unparenthesised em-dash explanation, an altered sentence, or evidence outside the final annotation as a failed postcondition and fix the body before posting `[implementer-prs]` or merging.
+
+Then verify the reviewer postcondition:
 
 ```bash
 gh api repos/Stoffer-Industries/sindustries/pulls/<number>/requested_reviewers \
