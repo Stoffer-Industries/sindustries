@@ -1,7 +1,7 @@
 # Tasks
 
 **Type:** System reference (data plane + workflows)
-**Last updated:** 2026-08-04
+**Last updated:** 2026-10-09
 **Owner:** Rowan (engineering) · Quinn (workflow orchestration) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
 **App spec:** `apps/tasks/SPEC.md`
@@ -11,6 +11,14 @@
 ## Purpose
 
 This doc is the single source of truth for everything task-shaped at Sindustries: the Tasks API (data plane and Tasks app), the shared task lifecycle, and the three workflows that orchestrate each `taskType` end-to-end (`feature`, `code`, `content`). Read it first when touching tasks API endpoints, task lifecycle rules, or any of the three workflow pipelines.
+
+Feature-task Lobster stages treat external evidence reads as a run-level
+precondition. If GitHub PR body, review, or similar inspection fails because of
+rate limiting, authentication, network, or another infrastructure error, the
+stage exits non-zero before mutating task status, attention owners, or blocker
+comments. The feature-task batch runner stops the sweep on that marked failure
+and retries after the dependency recovers; an unreadable PR is not evidence
+that ACs are missing.
 
 Cross-cutting references:
 
@@ -173,7 +181,9 @@ Task responses include:
 - Not a substitute for explicit workflow gates. When a handoff is understood well enough to encode as a `TaskApproval` gate, that gate is the source of truth.
 - Not an incident lifecycle. Attention ownership is a durable signal for possible future incident ingest, but this feature does not implement incident processing.
 
-**How to use it.** `attentionOwners[0]` is the explicit attention/escalation action slot. When that stack is empty, the owner of the exact current outstanding workflow gate is the normal next actor (`open → spec`, `ready → tech_design`, `doing → qa_agent`, `acceptance → accepted`). Assignee says who delivers and remains the final fallback when no gate is outstanding. Gate ownership is derived for queue/card presentation; it is never copied into or persisted as an attention-owner row. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
+**How to use it.** `attentionOwners[0]` is the explicit attention/escalation action slot. When that stack is empty, the owner of the exact current outstanding workflow gate is the normal next actor (`open → spec`, `ready → tech_design`, `doing → qa_agent`, `acceptance → accepted`). The `qa_agent` fallback is exposed only after Lobster's latest delivery-evidence sweep has cleared; while the latest Lobster state carries an unresolved delivery/progress failure, the gate remains dormant and the delivery assignee remains actionable. A delivery checklist is ordinary assignee work, not an escalation: it must not create an explicit assignee attention row merely to expose the work in the queue. Explicit rows are reserved for genuine blockers and cross-role handoffs. Assignee says who delivers and remains the final fallback when no gate is outstanding. Gate ownership is derived for queue/card presentation; it is never copied into or persisted as an attention-owner row. OpenClaw/runtime blockers route to Quinn at position 0. Legacy bracketed comments (including `[openclaw-needed]`) may remain as audit history but never route work.
+
+**Baseline acceptance is never explicitly paged (2026-10-09).** Reaching `acceptance` without a prior attention stack means only "Tom's normal sign-off is outstanding" -- a state the derived gate fallback above already surfaces. `reconciled_attention_owners` does not create an explicit `attentionOwners = ["Tom"]` row for that baseline case; doing so duplicated the already-derived signal and paged Tom for his own expected next step. A non-empty stack at acceptance (a stale implementer/Ash/Quinn head, or an unrelated owner) still gets corrected to Tom normally -- that case is a genuine routing fix, not the baseline state.
 
 **QA capability-deferral lifecycle.** The feature-task workflow treats these
 markers as a distinct routing protocol:

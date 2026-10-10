@@ -32,6 +32,13 @@ The classifier distinguishes explicit and dependency blocks from actionable work
 
 For each returned task, follow `WORKFLOW.md` for the execution steps in that state. If the queue contains any `ACTIONABLE` task, the pass must materially progress one before finishing: create/update a branch, commit, PR, validation result, required task comment, or a newly evidenced concrete blocker. A pass with actionable work and no such progress is a failed heartbeat and must follow **Escalate on Failure** below.
 
+Before finishing a task pass, read back the task's `assignee`, `attentionOwners`,
+approvals, and current gate. If Rowan is still `attentionOwners[0]` only because
+delivery evidence was requested, and the merged PR/evidence handoff is now
+complete, self-resolve or advance Rowan's top attention slot with a reason-bearing
+write. Keep Rowan as `assignee`; do not clear the delivery assignment. If QA is
+already approved, the next expected actor is the acceptance gate, not Rowan.
+
 **Heartbeat cadence rule — the only per-pass opinion layered on top of `WORKFLOW.md`:**
 
 If any assigned implementation task is in `open` and lacks a posted `[tech-design]` comment or `[tech-design-not-required]` waiver, prioritise writing and posting that tech design before continuing implementation on any `doing`/`acceptance` task. After posting `[tech-design]`, return to the active implementation work — do not start implementing the `open` task until Quinn approves the design.

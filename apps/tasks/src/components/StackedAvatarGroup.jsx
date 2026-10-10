@@ -212,9 +212,19 @@ export function buildAvatarAriaLabel(entry) {
 }
 
 /**
- * Stacked avatar group for task cards. Renders the ordered attention stack
- * first, then outstanding workflow-gate owners, then the delivery assignee.
- * Repeated people remain visible as separate role slots (AC5, AC6).
+ * Stacked avatar group for task cards. The DOM render order is the visual
+ * left-to-right flow: the delivery assignee renders leftmost, then outstanding
+ * workflow-gate owners, then the attention owners with the top-of-stack
+ * (position 0) rightmost. That visual ordering matches the existing
+ * z-index hierarchy — position 0 already paints on top when avatars overlap
+ * — so the most important person is both rightmost AND on top.
+ *
+ * `buildStackedOwnerLayers` still produces the role-ordered entries
+ * (attention first, then workflow-gate, then delivery); we reverse only at
+ * the render boundary so the pure helper contract and the per-slot
+ * `sameRoleEntries` / z-index math both stay anchored to the logical
+ * escalation order. Repeated people remain visible as separate role slots
+ * (AC5, AC6).
  *
  * The component is read-only and consumes the mapper-derived task payload
  * directly. It does not own any focus or click behaviour — task cards
@@ -226,6 +236,12 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
 
   const visible = entries.slice(0, maxVisible);
   const overflow = entries.length - visible.length;
+  // Render right-to-left so position 0 (current attention owner) ends up
+  // as the rightmost DOM child — i.e. the top of the visual stack matches
+  // the top of the escalation stack. The reversal is local to render;
+  // z-index math still uses the original `visible` order so position 0 of
+  // each role tier still gets the highest z within that tier.
+  const renderOrder = [...visible].reverse();
 
   return (
     <div
@@ -233,7 +249,7 @@ export function StackedAvatarGroup({ task, maxVisible = 4 }) {
       role="group"
       aria-label={`Task ownership: ${entries.map((e) => buildAvatarAriaLabel(e)).join(', ')}`}
     >
-      {visible.map((entry) => {
+      {renderOrder.map((entry) => {
         const user = findAssigneeUser(entry.owner);
         const displayName = assigneeDisplayName(entry.owner) || entry.owner;
         const initial = assigneeInitial(entry.owner);

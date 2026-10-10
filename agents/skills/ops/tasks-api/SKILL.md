@@ -68,6 +68,11 @@ original reviewer because the push dismisses the approval.
 
 ### Attention owners: ordered action and escalation stack
 
+Use `agents/skills/ops/attention-owner-routing/SKILL.md` for the complete
+decision and mutation procedure. This section records the shared data model;
+the routing skill is the single procedure for adds, replacements, escalations,
+repairs, and self-resolves.
+
 `attentionOwners` is the primary blocker/handoff control plane. It is an ordered
 list of role slots, not a set: position 0 is the next actionable owner and later
 positions are escalation targets. Repeated names are meaningful and must be
@@ -99,6 +104,31 @@ Delivery (`assignee`) and gate eligibility/context (`workflowGates` and
 structured approvals) remain independent. A normal stack can therefore be:
 `assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
 Do not hide Ash and do not deduplicate Rowan across those roles.
+
+An ordinary Lobster delivery checklist is not itself an escalation. When the
+checklist asks the delivery assignee to correct PR/AC evidence, keep
+`attentionOwners` empty and let the assignee queue surface the task as
+actionable. Keep the downstream QA gate dormant until Lobster clears the
+evidence. Add an explicit attention row only for a genuine blocker or a
+cross-role handoff that needs ordered escalation.
+
+### Completed delivery handoff
+
+When an implementation delivery is complete, the delivery assignee must not
+remain at `attentionOwners[0]` merely because the `assignee` field is still
+theirs. After the implementation PRs are merged, the acceptance-criteria
+evidence and required delivery marker are present, and no real delivery blocker
+remains, the current agent must read back the stack and self-resolve or advance
+only its own top attention slot through the reason-bearing endpoint. Preserve
+the delivery assignee and every genuine later slot. The reason must name the
+completed evidence and the next gate/actor. If QA is already approved, the next
+actor is the acceptance gate rather than the delivery assignee.
+
+If a later Lobster checklist claims that delivery evidence is missing, verify
+the merged PR bodies and task evidence before acting. Address a real gap from
+the assignee queue; if an older sweep left the assignee in the attention stack
+solely for that checklist, clear the stale row. Do not leave the assignee in
+the attention stack as a passive watch state.
 
 ```http
 POST /tasks/<task-uuid>/attention-owners/reconcile

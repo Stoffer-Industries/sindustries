@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sindustries.dev/schemas/stable-hostname-verification.schema.json",
+  "title": "Stable hostname verification result",
+  "description": "Machine-readable contract emitted by tests/cloud/scripts/stable-hostname-verification.mjs (task 5cb4a8fe, AC5). The harness walks the staging hostname matrix (infra/cloud/hostname-matrix.json) and emits one row per surface covering DNS, HTTPS, and CORS preflight. The verdict is pass when every non-skip row is ok. Dry-run mode emits skip rows for every surface; live mode requires every public surface to be ok. The representative-workflow entry points at staging-workflows.mjs which owns the authenticated body check; the production-blockers list always records the Quinn manual gate until the production CNAMEs land.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "mode",
+    "matrixPath",
+    "matrixTaskId",
+    "environment",
+    "startedAt",
+    "endedAt",
+    "surfaces",
+    "representativeWorkflow",
+    "productionBlockers",
+    "acceptedLimitations",
+    "verdict"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bump when the contract changes incompatibly. Consumers should refuse results with an unknown schemaVersion."
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]+$",
+      "description": "Stable per-run identifier. Auto-generated when STAGING_RUN_ID is not bound."
+    },
+    "intentCommit": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{7,64}$",
+      "description": "Commit SHA the run was supposed to validate. Mirrors staging-workflows.mjs's intentCommit for cross-harness correlation."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["live", "dry-run"],
+      "description": "live mode performs DNS+HTTPS+CORS calls; dry-run mode emits skip rows for every surface and never makes a network call."
+    },
+    "matrixPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the matrix file the harness walked. Default is infra/cloud/hostname-matrix.json."
+    },
+    "matrixTaskId": {
+      "type": ["string", "null"],
+      "description": "taskId recorded on the matrix (the matrix's source-of-truth metadata)."
+    },
+    "environment": {
+      "type": "object",
+      "required": ["id", "provider"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "enum": ["fly.io"] }
+      }
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "surfaces": {
+      "type": "array",
+      "description": "Ordered list of per-surface results. One entry per matrix.surfaces entry, in matrix order. Worker surfaces (publicUrl=false) emit a single skip row whose host is null.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "host", "environment", "expected", "status", "details", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+          "kind": { "type": "string", "enum": ["frontend", "api", "worker"] },
+          "host": { "type": ["string", "null"], "description": "Stable staging hostname from the matrix; null for worker surfaces." },
+          "environment": { "type": "string", "enum": ["staging", "production"] },
+          "expected": { "type": ["string", "null"], "description": "Mirror of host for reviewer convenience." },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "fail", "skip"],
+            "description": "ok = all live checks passed. fail = at least one live check failed; verdict will be fail. skip = dry-run mode or worker surface with no public URL."
+          },
+          "details": {
+            "type": "object",
+            "description": "Check-specific structured detail. dns/https/cors sub-objects appear in live mode only.",
+            "additionalProperties": true,
+            "properties": {
+              "reason": { "type": "string" },
+              "plannedChecks": { "type": "array", "items": { "type": "string" } },
+              "cnameTarget": { "type": "string" },
+              "providerFallback": { "type": ["string", "null"] },
+              "status": { "type": "integer" },
+              "allowOrigin": { "type": "string" },
+              "expected": { "type": "string" },
+              "dns": { "type": ["object", "null"] },
+              "https": { "type": ["object", "null"] },
+              "cors": { "type": ["object", "null"] }
+            }
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable summary of what was observed. Redacted (no bearer tokens, no full email addresses)."
+          }
+        }
+      }
+    },
+    "representativeWorkflow": {
+      "type": "object",
+      "description": "Placeholder for the AC5 representative authenticated workflow check, owned by staging-workflows.mjs. The stable-hostname harness asserts that staging-workflows.mjs's evidence does not include *.fly.dev fallback URLs.",
+      "required": ["status", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "fail", "skip"] },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "productionBlockers": {
+      "type": "array",
+      "description": "Findings that block the production counterpart. In live mode, the production manual gate is always recorded as a blocker until Quinn registers production CNAMEs. In dry-run mode this is empty because production DNS is not in scope yet.",
+      "items": {
+        "type": "object",
+        "required": ["code", "summary", "owner"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "reference": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "acceptedLimitations": {
+      "type": "array",
+      "description": "Findings the team has consciously accepted for this run. Required to have owner + rationale + follow-up. Allowed to be non-empty for verdict=pass.",
+      "items": {
+        "type": "object",
+        "required": ["code", "summary", "owner", "rationale", "followUp"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 },
+          "followUp": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"],
+      "description": "Final verdict. pass requires every non-skip surface row to be ok in live mode, or any state in dry-run mode (dry-run always reports pass because skip is a planned state, not a failure)."
+    }
+  }
+}

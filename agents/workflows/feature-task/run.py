@@ -40,6 +40,11 @@ FEATURE_TASK_PIPELINE = SCRIPT_DIR / "feature-task.lobster.yaml"
 # incident-specific source of truth".
 LOBSTER_SUBPROCESS_TIMEOUT_SECONDS: float = 45.0
 CODE_TASK_PIPELINE = SCRIPT_DIR / "code-task.lobster.yaml"
+# A task-level Lobster process returns this marker when external GitHub
+# evidence is unavailable. The batch runner must stop the sweep: continuing
+# other tasks would issue more requests against the same exhausted budget and
+# could turn the same infrastructure failure into task-state mutations.
+EXTERNAL_EVIDENCE_ABORT_MARKER = "[feature-task-run-abort]"
 # Kept for backwards compatibility with any caller that imports `PIPELINE`.
 PIPELINE = FEATURE_TASK_PIPELINE
 CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
@@ -255,6 +260,11 @@ def run_brain_spec_approval_reconciliation(base_url: str, dry_run: bool) -> dict
     return result
 
 
+def is_external_evidence_abort(result: dict[str, Any]) -> bool:
+    error = result.get("error")
+    return isinstance(error, str) and EXTERNAL_EVIDENCE_ABORT_MARKER in error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one feature-task workflow pass for every active feature task")
     parser.add_argument("--base-url", default=os.environ.get("TASKS_API_BASE_URL", DEFAULT_BASE_URL))
@@ -264,15 +274,19 @@ def main() -> int:
 
     reconciliation = run_brain_spec_approval_reconciliation(args.base_url, args.dry_run)
     tasks = discover_tasks(args.base_url, args.limit)
-    results = [
-        run_workflow(
+    results: list[dict[str, Any]] = []
+    aborted_after_task: str | None = None
+    for task in tasks:
+        result = run_workflow(
             str(task["id"]),
             args.base_url,
             args.dry_run,
             Path(task["_pipeline"]),
         )
-        for task in tasks
-    ]
+        results.append(result)
+        if is_external_evidence_abort(result):
+            aborted_after_task = str(task["id"])
+            break
     errors = [result for result in results if result.get("returncode") != 0 or result.get("error")]
     if (
         reconciliation.get("returncode") != 0
@@ -286,6 +300,8 @@ def main() -> int:
                 "ok": not errors,
                 "pipelines": pipelines,
                 "count": len(tasks),
+                "aborted": aborted_after_task is not None,
+                "abortedAfterTaskId": aborted_after_task,
                 "brainSpecApprovalReconciliation": reconciliation,
                 "results": results,
                 "errors": errors,

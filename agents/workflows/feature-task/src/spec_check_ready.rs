@@ -449,6 +449,17 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
+                && latest_lobster_delivery_failure(task) =>
+        {
+            // Lobster owns the delivery-evidence gate, but a failed checklist
+            // is still normal delivery work for the assignee. Keep Ash
+            // dormant without turning the checklist into an explicit
+            // attention-owner escalation; the assignee queue already makes
+            // this task actionable.
+            None
+        }
+        "doing"
+            if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && task_approvals::qa_agent_deferred_capability_extension_complete(task) =>
         {
             Some("Ash".to_string())
@@ -491,6 +502,87 @@ pub(crate) fn ash_was_last_commenter(task: &Task) -> bool {
         .is_some_and(|author| author.trim().eq_ignore_ascii_case("Ash"))
 }
 
+/// True when the latest Lobster state still reports an unresolved delivery
+/// checklist. This prevents a pre-verification sweep from routing the normal
+/// `qa_agent` gate to Ash merely because an `[implementer-prs]` marker exists.
+/// A later successful Lobster state clears the condition; a later delivery
+/// marker after a failed state keeps Ash dormant until that delivery is checked.
+fn latest_lobster_delivery_failure(task: &Task) -> bool {
+    let Some((state_index, state_text)) =
+        task.comments
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, comment)| {
+                let text = comment
+                    .text
+                    .as_deref()
+                    .or(comment.body.as_deref())
+                    .unwrap_or_default();
+                text.starts_with("[lobster-state]").then_some((index, text))
+            })
+    else {
+        return false;
+    };
+
+    let Some(json_text) = state_text
+        .split_once("```json")
+        .and_then(|(_, rest)| rest.split_once("```").map(|(json, _)| json.trim()))
+    else {
+        return false;
+    };
+    let Ok(state) = serde_json::from_str::<Value>(json_text) else {
+        return false;
+    };
+    let state_has_failure = state
+        .get("failureFingerprint")
+        .and_then(Value::as_str)
+        .is_some_and(|failure| !failure.trim().is_empty());
+    if !state_has_failure {
+        return false;
+    }
+
+    // A delivery marker posted after a failed state represents a fresh
+    // handoff that still needs this Lobster run's evidence check.
+    if task.comments.iter().skip(state_index + 1).any(|comment| {
+        let text = comment
+            .text
+            .as_deref()
+            .or(comment.body.as_deref())
+            .unwrap_or_default();
+        text.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("[implementer-prs]") || line.starts_with("[rowan-prs]")
+        })
+    }) {
+        return true;
+    }
+
+    task.comments[..=state_index]
+        .iter()
+        .rev()
+        .find_map(|comment| {
+            let text = comment
+                .text
+                .as_deref()
+                .or(comment.body.as_deref())
+                .unwrap_or_default();
+            let has = |tag: &str| text.lines().any(|line| line.trim_start().starts_with(tag));
+            if has("[qa-agent-blocked]") || has("[qa-agent-deferred]") {
+                Some(false)
+            } else if has("[feature-task-progress-checklist]")
+                || has("[code-task-progress-checklist]")
+                || has("[feature-task-blocked]")
+                || has("[code-task-blocked]")
+            {
+                Some(true)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
 pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
     match owner {
         // Removal is gated on this owner's *own* structured closeout landing,
@@ -517,6 +609,17 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
 /// Reconcile only the workflow-owned head slot. Tail entries (including
 /// duplicate names) are copied byte-for-byte; when an unrelated head is
 /// present the managed owner is prepended rather than overwriting it.
+///
+/// The baseline `acceptance -> accepted` gate is a special case: when there
+/// is no existing attention stack, `workflow_attention_owner` resolving to
+/// Tom here means only "Tom's normal sign-off is outstanding" -- a state
+/// already surfaced by the derived `workflowGates` fallback documented in
+/// `docs/systems/tasks.md` ("acceptance -> accepted"). Writing an explicit
+/// `attentionOwners = ["Tom"]` row for that baseline case duplicates the
+/// signal and pages Tom for a state the system already treats as his normal
+/// next action. A non-empty stack still gets Tom inserted/advanced
+/// normally -- that case means a stale or unrelated owner is sitting at
+/// acceptance and genuinely needs correcting to Tom.
 pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     let mut owners = task.attention_owners.clone();
     if let Some(desired) = workflow_attention_owner(task) {
@@ -534,21 +637,50 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
                 || matches!(owner.as_str(), "Quinn" | "Ash")
         }) {
             owners[0] = desired.to_string();
-        } else {
+        } else if !owners.is_empty() || !is_baseline_tom_acceptance_gate(task, &desired) {
             owners.insert(0, desired.to_string());
         }
         // An unresolved deferred QA verdict is an OpenClaw handoff to Quinn.
         // Once the original task is dependency-blocked on a capability
         // extension, `workflow_attention_owner` returns None and the managed
         // Quinn slot is removed instead of being re-added on every sweep.
-    } else if owners
-        .first()
-        .is_some_and(|owner| managed_owner_reason_satisfied(task, owner))
-    {
+    } else if owners.first().is_some_and(|owner| {
+        managed_owner_reason_satisfied(task, owner)
+            || automated_delivery_checklist_slot(task, owner)
+    }) {
         owners.remove(0);
     }
     enforce_tom_acceptance_only(task, &mut owners);
     owners
+}
+
+/// Older sweeps represented an ordinary delivery checklist as a Rowan
+/// attention row. Remove that row when it is recognisably workflow-generated,
+/// but preserve a genuine Rowan escalation with a different task-specific
+/// reason.
+fn automated_delivery_checklist_slot(task: &Task, owner: &str) -> bool {
+    let Some(assignee) = task.assignee.as_deref() else {
+        return false;
+    };
+    if !owner.eq_ignore_ascii_case(assignee) {
+        return false;
+    }
+    let expected_note = workflow_attention_reason(task, owner);
+    task.attention_owner_details.iter().any(|detail| {
+        detail.owner.eq_ignore_ascii_case(owner)
+            && detail
+                .note
+                .as_deref()
+                .is_some_and(|note| note == expected_note)
+    })
+}
+
+/// True when the only reason `workflow_attention_owner` resolved to Tom is
+/// the baseline, unescalated `acceptance -> accepted` gate (see
+/// `reconciled_attention_owners`). Any other managed owner, or an acceptance
+/// task whose stack is already non-empty, is unaffected.
+fn is_baseline_tom_acceptance_gate(task: &Task, desired: &str) -> bool {
+    task.status == "acceptance" && desired.eq_ignore_ascii_case("Tom")
 }
 
 /// Explain why the workflow is changing the actionable attention slot. This
@@ -564,7 +696,10 @@ pub(crate) fn workflow_attention_reason(task: &Task, owner: &str) -> String {
         }
         "ash" => "QA verification is required for the delivered implementation.".to_string(),
         "tom" => "Final acceptance approval is required.".to_string(),
-        "rowan" => "The delivery owner must address the outstanding workflow evidence.".to_string(),
+        "rowan" => {
+            "The delivery owner must address the outstanding workflow evidence before QA can act."
+                .to_string()
+        }
         _ => format!("Workflow reconciliation requires attention from {owner}."),
     }
 }
@@ -944,6 +1079,61 @@ mod tests {
     }
 
     #[test]
+    fn routing_keeps_delivery_work_with_assignee_while_lobster_evidence_is_open() {
+        let mut task = routing_task("doing", &[]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("feature_task_lobster".to_string()),
+            text: Some(
+                "[feature-task-progress-checklist]\nDelivery evidence is incomplete.".to_string(),
+            ),
+            ..Default::default()
+        });
+        task.comments.push(TaskComment {
+            author: Some("feature_task_lobster".to_string()),
+            text: Some(
+                "[lobster-state]\n```json\n{\"failureFingerprint\":\"delivery evidence missing\"}\n```"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+
+        assert_eq!(workflow_attention_owner(&task), None);
+        assert_eq!(reconciled_attention_owners(&task), Vec::<String>::new());
+    }
+
+    #[test]
+    fn routing_clears_legacy_checklist_attention_row_but_preserves_real_escalation() {
+        let mut task = routing_task("doing", &["Rowan"]);
+        task.attention_owner_details = vec![crate::TaskAttentionOwner {
+            owner: "Rowan".to_string(),
+            added_by: Some("Quinn".to_string()),
+            note: Some(workflow_attention_reason(&task, "Rowan")),
+        }];
+        task.comments.push(TaskComment {
+            text: Some(
+                "[lobster-state]\n```json\n{\"failureFingerprint\":\"delivery evidence missing\"}\n```"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        assert_eq!(reconciled_attention_owners(&task), Vec::<String>::new());
+
+        task.attention_owner_details[0].note = Some(
+            "Rowan must resolve a concrete external blocker before delivery can continue."
+                .to_string(),
+        );
+        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
+    }
+
+    #[test]
     fn routing_sends_deferred_qa_to_quinn_without_implicit_tom_escalation() {
         let mut task = routing_task("doing", &["Rowan"]);
         task.comments.push(TaskComment {
@@ -1310,6 +1500,61 @@ mod tests {
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
             vec!["Tom", "Quinn", "Ash"]
+        );
+    }
+
+    /// Tom reported (2026-10-09) that every task reaching `acceptance`
+    /// picked up a redundant `attentionOwners = ["Tom"]` row with the reason
+    /// "Final acceptance approval is required." -- even though a task with
+    /// an empty attention stack already surfaces Tom as the normal next
+    /// actor via the derived `workflowGates` fallback (see
+    /// docs/systems/tasks.md, "acceptance -> accepted"). An explicit row for
+    /// that baseline case duplicates the signal and pages Tom for a state
+    /// he already expects.
+    #[test]
+    fn routing_does_not_page_tom_for_baseline_pending_acceptance() {
+        let task = routing_task("acceptance", &[]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            Vec::<String>::new()
+        );
+    }
+
+    /// A non-empty stack at acceptance headed by the delivery assignee is a
+    /// genuine stale-owner correction (the previous QA/doing-stage managed
+    /// owner left its reconciled slot at the head) -- the baseline-case
+    /// suppression must not block that replacement.
+    #[test]
+    fn routing_still_advances_stale_assignee_head_to_tom_at_acceptance() {
+        let task = routing_task("acceptance", &["Rowan"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom"]
+        );
+    }
+
+    /// A non-empty stack headed by an unrelated owner (not the assignee, not
+    /// a managed Quinn/Ash slot) at acceptance must still get Tom inserted
+    /// at the front, preserving the existing tail -- this is a genuine
+    /// stale/unrelated-owner correction, not the baseline case.
+    #[test]
+    fn routing_still_inserts_tom_ahead_of_unrelated_stale_owner_at_acceptance() {
+        let task = routing_task("acceptance", &["Lox"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Tom", "Lox"]
+        );
+    }
+
+    /// The baseline-acceptance suppression is specific to Tom's gate; Quinn
+    /// paging into an empty stack at `ready` (tech design) must be
+    /// unaffected.
+    #[test]
+    fn routing_still_pages_quinn_into_empty_stack_at_ready() {
+        let task = routing_task("ready", &[]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Quinn"]
         );
     }
     #[test]

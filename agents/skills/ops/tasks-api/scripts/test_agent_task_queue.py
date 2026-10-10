@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
@@ -71,6 +72,49 @@ class AgentTaskQueueTest(unittest.TestCase):
         queue = agent_task_queue.build_queue([implementation_task(blocked=True)])
         self.assertEqual(queue["items"][0]["classification"], "BLOCKED")
 
+    def test_dependency_blocked_overrides_matching_attention_owner(self):
+        # Task d37681e1 (2026-10-08): an attentionOwners[0] note directed the
+        # implementer to proceed with delivery work while the task was still
+        # dependencyBlocked. Per agents/skills/ops/attention-owner-routing/
+        # SKILL.md, a position-0 slot overrides routing classification only,
+        # never the dependency gate itself.
+        task = implementation_task(
+            dependencyBlocked=True,
+            attentionOwners=["Rowan"],
+        )
+        queue = agent_task_queue.build_queue([task], agent="Rowan")
+        item = queue["items"][0]
+        self.assertEqual(item["classification"], "DEPENDENCY_BLOCKED")
+        self.assertEqual(item["topAttentionOwner"], "Rowan")
+
+    def test_matching_attention_owner_remains_actionable_when_not_dependency_blocked(self):
+        # Confirms the fix is scoped to the blocked case only: a normal
+        # attentionOwners[0] handoff (no incomplete dependency) must still be
+        # ACTIONABLE for the matching agent, exactly as before this change.
+        task = implementation_task(
+            dependencyBlocked=False,
+            attentionOwners=["Rowan"],
+        )
+        queue = agent_task_queue.build_queue([task], agent="Rowan")
+        item = queue["items"][0]
+        self.assertEqual(item["classification"], "ACTIONABLE")
+        self.assertEqual(item["reason"], "top attention owner is Rowan")
+        self.assertEqual(queue["actionableCount"], 1)
+
+    def test_dependency_blocked_task_is_still_visible_in_queue_not_dropped(self):
+        # DEPENDENCY_BLOCKED items must remain in the queue for visibility
+        # (e.g. Tom/Quinn auditing state) — only actionableCount excludes
+        # them, the item itself is never removed from `items`.
+        task = implementation_task(
+            id="blocked-visible",
+            dependencyBlocked=True,
+            attentionOwners=["Rowan"],
+        )
+        queue = agent_task_queue.build_queue([task], agent="Rowan")
+        self.assertEqual(len(queue["items"]), 1)
+        self.assertEqual(queue["items"][0]["id"], "blocked-visible")
+        self.assertEqual(queue["actionableCount"], 0)
+
     def test_missing_implementer_prs_is_actionable_for_feature_and_code(self):
         for task_type in ("feature", "code"):
             with self.subTest(task_type=task_type):
@@ -84,6 +128,25 @@ class AgentTaskQueueTest(unittest.TestCase):
         classification, reason = agent_task_queue.classify_task(implementation_task(taskType="feature"))
         self.assertEqual(classification, "ACTIONABLE")
         self.assertIn("delivery", reason)
+
+    def test_delivery_checklist_stays_assignee_actionable_without_attention_row(self):
+        pr_url = "https://github.com/acme/repo/pull/1"
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                taskType="feature",
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {"text": "[implementer-prs] " + pr_url},
+                    {
+                        "text": "[feature-task-progress-checklist]\n"
+                        "AC evidence needs correction before QA can act."
+                    },
+                ],
+            ),
+            delivery_prs={pr_url: pull_request(state="closed", merged_at="2026-10-10T00:00:00Z")},
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("merged", reason)
 
     def test_progress_checklist_missing_implementer_prs_is_not_external_wait(self):
         classification, _ = agent_task_queue.classify_task(
@@ -824,6 +887,31 @@ class GhApiTimeoutTest(unittest.TestCase):
         ):
             with self.assertRaises(subprocess.CalledProcessError):
                 agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+
+    def test_gh_api_strips_proxy_env_so_gh_bypasses_the_secret_egress_proxy(self):
+        # `gh` is a Go binary; on macOS it does not honour SSL_CERT_FILE/
+        # CURL_CA_BUNDLE/NODE_EXTRA_CA_CERTS. The ambient HTTP_PROXY/
+        # HTTPS_PROXY route every outbound call through OpenClaw's local
+        # secret-egress proxy, whose TLS certificate `gh` correctly refuses
+        # to trust -- causing an identical x509 failure for every agent
+        # (Rowan, Ash, Quinn, Ivy), not a per-agent credential problem
+        # (2026-10-11). `_gh_api` must strip the proxy vars before shelling
+        # out so `gh` connects to github.com directly.
+        proxy_env = {
+            "HTTP_PROXY": "http://openclaw:secret@127.0.0.1:64554",
+            "HTTPS_PROXY": "http://openclaw:secret@127.0.0.1:64554",
+            "http_proxy": "http://openclaw:secret@127.0.0.1:64554",
+            "https_proxy": "http://openclaw:secret@127.0.0.1:64554",
+            "PATH": "/usr/bin",
+        }
+        with patch.dict(os.environ, proxy_env, clear=True):
+            with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
+                mock_safe_run.return_value.stdout = "[]"
+                agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+        called_env = mock_safe_run.call_args.kwargs.get("env")
+        for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            self.assertNotIn(proxy_var, called_env)
+        self.assertEqual(called_env.get("PATH"), "/usr/bin")
 
 
 def _deliverable_task(pr_number):

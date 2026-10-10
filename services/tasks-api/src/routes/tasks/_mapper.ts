@@ -80,6 +80,58 @@ export interface MapTaskOptions {
   gateOwnersByType?: Readonly<Record<string, string>>;
 }
 
+/**
+ * The QA gate is normal next-stage work only after Lobster has accepted the
+ * current delivery evidence. A failed delivery checklist is authoritative
+ * for actionability until a later Lobster state clears it; exposing Ash from
+ * status alone makes the verifier appear actionable while the implementer is
+ * still being asked for evidence.
+ */
+function deliveryEvidenceBlocksQa(task): boolean {
+  const comments = task?.comments ?? [];
+  let stateIndex = -1;
+  let stateHasFailure = false;
+  for (let index = comments.length - 1; index >= 0; index -= 1) {
+    const text = comments[index]?.body ?? comments[index]?.text ?? '';
+    if (!text.startsWith('[lobster-state]')) continue;
+    stateIndex = index;
+    const jsonText = text.match(/```json\s*([\s\S]*?)\s*```/)?.[1];
+    if (!jsonText) return false;
+    try {
+      const state = JSON.parse(jsonText);
+      stateHasFailure = typeof state.failureFingerprint === 'string'
+        && state.failureFingerprint.trim().length > 0;
+    } catch {
+      return false;
+    }
+    break;
+  }
+  if (stateIndex < 0 || !stateHasFailure) return false;
+
+  // A fresh delivery marker after a failed state also needs a new Lobster
+  // evidence pass before Ash can become actionable.
+  if (comments.slice(stateIndex + 1).some((comment) => {
+    const text = comment?.body ?? comment?.text ?? '';
+    return text.split('\n').some((line) =>
+      line.trimStart().startsWith('[implementer-prs]')
+      || line.trimStart().startsWith('[rowan-prs]')
+    );
+  })) return true;
+
+  for (let index = stateIndex; index >= 0; index -= 1) {
+    const text = comments[index]?.body ?? comments[index]?.text ?? '';
+    const has = (tag: string) => text.split('\n').some((line) => line.trimStart().startsWith(tag));
+    if (has('[qa-agent-blocked]') || has('[qa-agent-deferred]')) return false;
+    if (
+      has('[feature-task-progress-checklist]')
+      || has('[code-task-progress-checklist]')
+      || has('[feature-task-blocked]')
+      || has('[code-task-blocked]')
+    ) return true;
+  }
+  return false;
+}
+
 export function buildMapTaskOptions(
   config: RequiredApprovalsConfig,
   taskType: string | null | undefined
@@ -141,6 +193,7 @@ export function mapTask(task, options) {
   const derivedGates = requiredApprovalTypes
     .filter((approvalType) => ACTIONABLE_STATUS_BY_APPROVAL_TYPE[approvalType] === task.status)
     .filter((approvalType) => !approvedTypes.has(approvalType))
+    .filter((approvalType) => approvalType !== 'qa_agent' || !deliveryEvidenceBlocksQa(task))
     .map((approvalType) => ({
       roleId: `${approvalType}_gate`,
       owner: gateOwnersByType[approvalType] ?? null,

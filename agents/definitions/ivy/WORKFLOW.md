@@ -243,12 +243,10 @@ Use `attentionOwners` on a task to page Quinn or Lox for something the modelled 
 - `assignee` — delivery owner
 - `attentionOwners` — anything else: product decision, platform follow-up, off-modelled ask
 
-CLI:
-
-```bash
-python3 agents/skills/ops/tasks-api/tasks_api_client.py patch \
-  --id <task-uuid> --attention-owners "Quinn"
-```
+Use `agents/skills/ops/attention-owner-routing/SKILL.md` for every attention
+owner add, replacement, escalation, or repair. Do not use the legacy
+`tasks_api_client.py patch --attention-owners` path: it can create rows without
+the authenticated actor or reason metadata.
 
 Safe clear (preserves co-owners; do NOT use `--clear-attention-owners`):
 
@@ -256,6 +254,9 @@ Safe clear (preserves co-owners; do NOT use `--clear-attention-owners`):
 from agents.skills.ops.tasks_api.tasks_api_client import remove_self_from_attention_owners
 remove_self_from_attention_owners("<task-uuid>", "Ivy")
 ```
+
+The shared routing skill's read-back requirement still applies after this
+self-resolve helper.
 
 ## Staying in Scope
 

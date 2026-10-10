@@ -39,6 +39,11 @@ import { reconcileAutoPostItems } from '../routes/autoPostReconciliation.ts';
 
 type AdapterKind = 'in-process' | 'bullmq';
 
+// BullMQ's drainDelay is measured in seconds. Five minutes keeps the worker
+// responsive enough for scheduled posts while avoiding a costly empty-queue
+// Redis housekeeping cycle every five seconds.
+const BULLMQ_DRAIN_DELAY_SECONDS = 5 * 60;
+
 function resolveAdapterKind(): AdapterKind {
   return config.CONTENT_SCHEDULER_JOB_ADAPTER;
 }
@@ -128,7 +133,7 @@ async function bootstrapBullMqWorker(adapter: ReturnType<typeof createBullMqJobS
       console.log(`[content-scheduler-worker] job itemId=${payload.itemId} v${payload.scheduleVersion} -> ${outcome}`);
       return { outcome };
     },
-    { connection }
+    { connection, drainDelay: BULLMQ_DRAIN_DELAY_SECONDS }
   );
   worker.on('failed', (job: any, err: any) => {
     // eslint-disable-next-line no-console

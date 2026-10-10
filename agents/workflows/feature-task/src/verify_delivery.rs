@@ -112,7 +112,6 @@ pub(crate) fn qa_agent_verified_failures(task: &crate::Task) -> Vec<String> {
 /// lobster gate.
 pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut env = read_envelope()?;
-    reconcile_workflow_attention(&args, &mut env)?;
     if let Some(drift) = block_on_spec_drift_fluid(&args, env.clone(), "verify_delivery")? {
         if !drift.criteria_met {
             return Ok(drift);
@@ -324,6 +323,14 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             }
         }
     }
+    // Only reconcile the QA handoff after the delivery-evidence checks below
+    // have passed. Reconciliation used to happen at function entry, which
+    // surfaced Ash before Lobster had established that the implementation
+    // evidence was complete.
+    if !mechanical_gate_failed && failures.is_empty() {
+        reconcile_workflow_attention(&args, &mut env)?;
+    }
+
     // AC1 of task f6a4d56a: short-circuit on `qa_agent` outstanding with a
     // dedicated `[qa-agent-blocked]` comment so Ash's verification gap is
     // visibly distinct from the generic `[feature-task-progress-checklist]`
@@ -393,7 +400,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
             return Ok(env);
         }
     }
-    transition_or_block(
+    let mut result = transition_or_block(
         &args,
         env,
         "acceptance",
@@ -402,7 +409,15 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         None,
         "[feature-task-progress-checklist]",
         "Feature task workflow moved task to `acceptance`.",
-    )
+    )?;
+    if !result.criteria_met && !args.dry_run {
+        // The blocker comment written by transition_or_block is the routing
+        // evidence. Re-read before reconciling so a delivery checklist routes
+        // back to the implementer instead of falling through to Ash.
+        result.task = crate::api_client::api_get_task(&args.base_url, &result.task.id)?;
+        reconcile_workflow_attention(&args, &mut result)?;
+    }
+    Ok(result)
 }
 
 /// Backwards-compatible CLI alias for the code-task pipeline. Both task

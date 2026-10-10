@@ -146,6 +146,30 @@ Until the stable CNAMEs land, deploys use the default `*.fly.dev` URLs:
 
 Once DNS lands, point `<service>.staging.sindustries.dev` CNAMEs at the matching `*.fly.dev` host and update the smoke check URLs in the deploy workflows.
 
+## Vercel env var matrix (task `5cb4a8fe`)
+
+The **Vercel half** of AC3 — the contract between the hostname matrix and the VITE_* env vars the two Vercel frontends consume at build time — lives at [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json). The contract records, per Vercel project, per environment, which VITE_* env vars to set and what value to set them to. Every matrix-derived value is the production or staging hostname from `infra/cloud/hostname-matrix.json`; the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` enforces that on every CI run.
+
+| Vercel project | App | Production env | Preview env (staging) |
+| --- | --- | --- | --- |
+| `sindustries-mission-control` | `apps/mission-control` | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` | `VITE_TASKS_API_BASE_URL`, `VITE_CONTENT_SCHEDULER_API_BASE_URL` |
+| `sindustries-tasks` | `apps/tasks` | `VITE_TASKS_API_BASE_URL` | `VITE_TASKS_API_BASE_URL` |
+
+Out of scope for this matrix (recorded in `outOfScope[]`):
+
+- `sindustries-gymtrack` — owned by the Clerk cutover (task `bb09eaed`); GymTrack's VITE_SUPABASE_URL / VITE_AUTH_PROVIDER / VITE_GYMTRACK_MCP_BASE_URL env vars are not in scope for `5cb4a8fe`.
+- `sindustries-website` — static marketing content with no API surface; no VITE_* env vars.
+
+Quinn sets the actual values in the Vercel dashboard per the contract; the contract itself is the engineer's responsibility and is the part this slice ships.
+
+The custom domains Vercel serves each project on (production: `mission-control.sindustries.co.nz` / `tasks.sindustries.co.nz`; preview → staging: `mission-control.staging.sindustries.co.nz` / `tasks.staging.sindustries.co.nz`) are also recorded in the matrix JSON and enforced by the same static check, so a typo in either the env var value or the custom domain fails CI rather than silently shipping to Vercel.
+
+## Production blockers (task `5cb4a8fe`)
+
+The full production-blockers list — DNS records, TLS certs, Vercel custom domain registration, Vercel env var provisioning, Fly secrets, and the cross-environment safety net — is tracked in [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md). Each blocker has a named owner (Quinn for DNS / TLS / Vercel / Fly secrets; separate tasks for production deploy workflows and production cutover) and a status field; the production deploy workflows and production cutover are explicitly out of scope for `5cb4a8fe` and tracked under tasks `020f423e` and `f2c23e26`.
+
+The static checks above are the cross-environment safety net: a staging URL accidentally pasted into a production Vercel environment or production fly.toml fails the cross-env drift check at compile time, not at runtime. Quinn does not need to remember "don't paste staging credentials into production"; the contract makes it impossible to ship without the matching matrix value.
+
 ---
 
 ## Credential boundary
@@ -217,6 +241,8 @@ The script is **idempotent** — re-running it does not destroy existing apps or
 - [`infra/cloud/README.md`](../../infra/cloud/README.md) — operator index, Quinn-vs-Rowan ownership table, PR-stack history.
 - [`infra/cloud/env/.env.example`](../../infra/cloud/env/.env.example) — cross-service env contract template.
 - [`infra/cloud/hostname-matrix.json`](../../infra/cloud/hostname-matrix.json) — stable hostname matrix (task `5cb4a8fe`); source of truth for the static checks under `tests/cloud/scripts/`.
+- [`infra/cloud/vercel-env-matrix.json`](../../infra/cloud/vercel-env-matrix.json) — Vercel env var contract (task `5cb4a8fe` slice 5); per-Vercel-project, per-environment VITE_* env var values, all matrix-derived; the static check `tests/cloud/scripts/check-vercel-env-matrix.mjs` enforces the host names match `infra/cloud/hostname-matrix.json`.
+- [`docs/cloud/production-blockers.md`](../cloud/production-blockers.md) — AC6 production-blockers list (task `5cb4a8fe` slice 5); named owner per blocker, status field, cross-environment safety net contract.
 - [`infra/cloud/scripts/bootstrap-staging.sh`](../../infra/cloud/scripts/bootstrap-staging.sh) — Quinn-runnable first-time setup.
 - `~/.openclaw/workspace/docs/infra/runbooks/cloud-deployment-rollback.md` — rollback procedure (was at `docs/runbooks/cloud-deployment-rollback.md`; retired in PR #583 — re-create in workspace if Quinn needs to roll back a deploy without re-deriving from `docs/specs/cloud-deployment-foundation-tech-design.md`).
 - `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` — secret rotation precedent (was at `docs/runbooks/rotate-akahu-access-tokens.md`; retired in PR #583 — re-create in workspace before rotating an Akahu token with downstream ciphertext rows).
