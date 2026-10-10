@@ -451,10 +451,12 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && latest_lobster_delivery_failure(task) =>
         {
-            // Lobster owns the delivery-evidence gate. Until its latest
-            // evidence sweep clears, Ash must remain dormant even though the
-            // task is already in `doing` and has an implementer marker.
-            task.assignee.clone()
+            // Lobster owns the delivery-evidence gate, but a failed checklist
+            // is still normal delivery work for the assignee. Keep Ash
+            // dormant without turning the checklist into an explicit
+            // attention-owner escalation; the assignee queue already makes
+            // this task actionable.
+            None
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
@@ -642,14 +644,35 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
         // Once the original task is dependency-blocked on a capability
         // extension, `workflow_attention_owner` returns None and the managed
         // Quinn slot is removed instead of being re-added on every sweep.
-    } else if owners
-        .first()
-        .is_some_and(|owner| managed_owner_reason_satisfied(task, owner))
-    {
+    } else if owners.first().is_some_and(|owner| {
+        managed_owner_reason_satisfied(task, owner)
+            || automated_delivery_checklist_slot(task, owner)
+    }) {
         owners.remove(0);
     }
     enforce_tom_acceptance_only(task, &mut owners);
     owners
+}
+
+/// Older sweeps represented an ordinary delivery checklist as a Rowan
+/// attention row. Remove that row when it is recognisably workflow-generated,
+/// but preserve a genuine Rowan escalation with a different task-specific
+/// reason.
+fn automated_delivery_checklist_slot(task: &Task, owner: &str) -> bool {
+    let Some(assignee) = task.assignee.as_deref() else {
+        return false;
+    };
+    if !owner.eq_ignore_ascii_case(assignee) {
+        return false;
+    }
+    let expected_note = workflow_attention_reason(task, owner);
+    task.attention_owner_details.iter().any(|detail| {
+        detail.owner.eq_ignore_ascii_case(owner)
+            && detail
+                .note
+                .as_deref()
+                .is_some_and(|note| note == expected_note)
+    })
 }
 
 /// True when the only reason `workflow_attention_owner` resolved to Tom is
@@ -1056,7 +1079,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_keeps_delivery_owner_while_lobster_delivery_evidence_is_open() {
+    fn routing_keeps_delivery_work_with_assignee_while_lobster_evidence_is_open() {
         let mut task = routing_task("doing", &[]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1082,7 +1105,31 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(workflow_attention_owner(&task), Some("Rowan".to_string()));
+        assert_eq!(workflow_attention_owner(&task), None);
+        assert_eq!(reconciled_attention_owners(&task), Vec::<String>::new());
+    }
+
+    #[test]
+    fn routing_clears_legacy_checklist_attention_row_but_preserves_real_escalation() {
+        let mut task = routing_task("doing", &["Rowan"]);
+        task.attention_owner_details = vec![crate::TaskAttentionOwner {
+            owner: "Rowan".to_string(),
+            added_by: Some("Quinn".to_string()),
+            note: Some(workflow_attention_reason(&task, "Rowan")),
+        }];
+        task.comments.push(TaskComment {
+            text: Some(
+                "[lobster-state]\n```json\n{\"failureFingerprint\":\"delivery evidence missing\"}\n```"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        assert_eq!(reconciled_attention_owners(&task), Vec::<String>::new());
+
+        task.attention_owner_details[0].note = Some(
+            "Rowan must resolve a concrete external blocker before delivery can continue."
+                .to_string(),
+        );
         assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
     }
 
