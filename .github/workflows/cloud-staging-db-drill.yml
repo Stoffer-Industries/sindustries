@@ -74,6 +74,16 @@ jobs:
           BUDGET_RECOVERY: ${{ secrets.RECOVERY_BUDGET_API_DSN }}
         run: |
           set -euo pipefail
+          required=(TASKS_SOURCE BUDGET_SOURCE TASKS_DEST BUDGET_DEST)
+          if [[ "${{ inputs.recovery }}" == "true" ]]; then
+            required+=(TASKS_RECOVERY BUDGET_RECOVERY)
+          fi
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "Required staging environment secret for $name is missing or empty" >&2
+              exit 11
+            fi
+          done
           mkdir -p "$RUNNER_TEMP/cloud-staging-secrets"
           chmod 0700 "$RUNNER_TEMP/cloud-staging-secrets"
           for pair in \
@@ -119,6 +129,7 @@ jobs:
             RECOVERY_FLAG="--recovery"
           fi
           RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 3)"
+          export CLOUD_DB_RUN_ID="$RUN_ID"
           ./scripts/cloud/database/drill.sh \
             --source-tasks-dsn-file  "$SEC/tasks-source-tasks.dsn" \
             --source-budget-dsn-file "$SEC/budget-source-budget.dsn" \
