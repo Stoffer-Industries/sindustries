@@ -18,6 +18,9 @@ chmod +x "${tmp_dir}/gh" "${script}"
 PATH="${tmp_dir}:${PATH}" FAKE_GH_LOGIN=rowanstoffer \
   "${script}" rowanstoffer >/dev/null
 
+PATH="${tmp_dir}:${PATH}" FAKE_GH_LOGIN=RowanStoffer \
+  "${script}" rowanstoffer >/dev/null
+
 if PATH="${tmp_dir}:${PATH}" FAKE_GH_LOGIN=quinnstoffer \
   "${script}" rowanstoffer >/dev/null 2>&1; then
   echo "expected identity mismatch to fail" >&2
