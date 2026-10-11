@@ -10,7 +10,7 @@
         {
           "uid": "sindustries-tasks-api-5xx-spike",
           "title": "tasks-api-5xx-spike",
-          "condition": "C",
+          "condition": "E",
           "data": [
             {
               "refId": "A",
@@ -18,7 +18,7 @@
               "relativeTimeRange": { "from": 600, "to": 0 },
               "datasourceUid": "prometheus",
               "model": {
-                "expr": "sum(rate(http_requests_total{service_name=\"tasks-api\",status=~\"5..\"}[5m]))",
+                "expr": "sum(rate(http_server_duration_milliseconds_count{service_name=\"tasks-api\",http_status_code=~\"5..\"}[5m]))",
                 "instant": true,
                 "refId": "A"
               }
@@ -26,12 +26,11 @@
             {
               "refId": "B",
               "queryType": "",
-              "relativeTimeRange": { "from": 0, "to": 0 },
-              "datasourceUid": "__expr__",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "prometheus",
               "model": {
-                "type": "reduce",
-                "expression": "A",
-                "reducer": "last",
+                "expr": "sum(rate(http_server_duration_milliseconds_count{service_name=\"tasks-api\"}[5m]))",
+                "instant": true,
                 "refId": "B"
               }
             },
@@ -41,18 +40,41 @@
               "relativeTimeRange": { "from": 0, "to": 0 },
               "datasourceUid": "__expr__",
               "model": {
+                "type": "math",
+                "expression": "$A / $B",
+                "refId": "C"
+              }
+            },
+            {
+              "refId": "D",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "reduce",
+                "expression": "C",
+                "reducer": "last",
+                "refId": "D"
+              }
+            },
+            {
+              "refId": "E",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
                 "type": "threshold",
-                "expression": "B",
+                "expression": "D",
                 "conditions": [
                   {
                     "type": "query",
                     "evaluator": { "type": "gt", "params": [0.05] },
                     "operator": { "type": "and" },
-                    "query": { "params": ["B"] },
+                    "query": { "params": ["D"] },
                     "reducer": { "type": "last", "params": [] }
                   }
                 ],
-                "refId": "C"
+                "refId": "E"
               }
             }
           ],
@@ -60,8 +82,8 @@
           "execErrState": "Alerting",
           "for": "5m",
           "annotations": {
-            "summary": "tasks-api 5xx error rate > 5% over 5m",
-            "description": "5xx rate on tasks-api exceeded 5% over the last 5 minutes. Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
+            "summary": "tasks-api 5xx ratio > 5% over 5m",
+            "description": "5xx ratio on tasks-api exceeded 5% over the last 5 minutes (5xx requests / total requests). Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
             "owner": "Quinn",
             "severity": "warn"
           },
