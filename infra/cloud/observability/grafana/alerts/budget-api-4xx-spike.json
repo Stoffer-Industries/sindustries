@@ -10,7 +10,7 @@
         {
           "uid": "sindustries-budget-api-4xx-spike",
           "title": "budget-api-4xx-spike",
-          "condition": "C",
+          "condition": "E",
           "data": [
             {
               "refId": "A",
@@ -18,7 +18,7 @@
               "relativeTimeRange": { "from": 600, "to": 0 },
               "datasourceUid": "prometheus",
               "model": {
-                "expr": "sum(rate(http_requests_total{service_name=\"budget-api\",status=~\"4..\"}[5m]))",
+                "expr": "sum(rate(http_server_duration_milliseconds_count{service_name=\"budget-api\",http_status_code=~\"4..\"}[5m]))",
                 "instant": true,
                 "refId": "A"
               }
@@ -26,12 +26,11 @@
             {
               "refId": "B",
               "queryType": "",
-              "relativeTimeRange": { "from": 0, "to": 0 },
-              "datasourceUid": "__expr__",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "prometheus",
               "model": {
-                "type": "reduce",
-                "expression": "A",
-                "reducer": "last",
+                "expr": "sum(rate(http_server_duration_milliseconds_count{service_name=\"budget-api\"}[5m]))",
+                "instant": true,
                 "refId": "B"
               }
             },
@@ -41,18 +40,41 @@
               "relativeTimeRange": { "from": 0, "to": 0 },
               "datasourceUid": "__expr__",
               "model": {
+                "type": "math",
+                "expression": "$A / $B",
+                "refId": "C"
+              }
+            },
+            {
+              "refId": "D",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "reduce",
+                "expression": "C",
+                "reducer": "last",
+                "refId": "D"
+              }
+            },
+            {
+              "refId": "E",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
                 "type": "threshold",
-                "expression": "B",
+                "expression": "D",
                 "conditions": [
                   {
                     "type": "query",
                     "evaluator": { "type": "gt", "params": [0.20] },
                     "operator": { "type": "and" },
-                    "query": { "params": ["B"] },
+                    "query": { "params": ["D"] },
                     "reducer": { "type": "last", "params": [] }
                   }
                 ],
-                "refId": "C"
+                "refId": "E"
               }
             }
           ],
@@ -60,8 +82,8 @@
           "execErrState": "Alerting",
           "for": "10m",
           "annotations": {
-            "summary": "budget-api 4xx error rate > 20% over 10m",
-            "description": "4xx rate on budget-api exceeded 20% over the last 10 minutes. Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
+            "summary": "budget-api 4xx ratio > 20% over 10m",
+            "description": "4xx ratio on budget-api exceeded 20% over the last 10 minutes (4xx requests / total requests). Operator: Quinn. Response: see docs/systems/observability.md 'Alert ownership' table.",
             "owner": "Quinn",
             "severity": "warn"
           },

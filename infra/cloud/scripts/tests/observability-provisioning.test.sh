@@ -8,12 +8,24 @@
 # live half is captured in the closing PR's screenshot/export.
 #
 # AC coverage:
-#   AC1 — hosted observability stack has the expected runtime artefacts
+#   AC1 (31233a0a) — hosted observability stack has the expected runtime artefacts
 #         (dashboards, datasource discovery, health probe) so a live hosted Grafana
 #         can be provisioned against them.
-#   AC2 — ten alert rules with severity + owner populated. This test
+#   AC2 (31233a0a) — alert rules with severity + owner populated. This test
 #         asserts the alert JSONs have a `labels.severity` and
 #         `labels.owner` field per the tech design §6.
+#   AC1 (2c782afb) — Cloud Overview + tasks-api-5xx-spike + budget-api-4xx-spike use
+#         the emitted `http_server_duration_milliseconds_*` contract and the
+#         ratio-based error-rate expressions. The contract enforces that no
+#         JSON file references the dead `http_requests_total` or
+#         `http_server_request_duration_seconds_*` strings, and that the two
+#         alert JSONs contain a `/` operator in their query expression.
+#   AC2 (2c782afb) — `worker-queue-stuck.json` is absent. The contract enforces
+#         that no JSON file ships the `sindustries_queue_ready` counter query.
+#   AC3 (2c782afb) — `deploy-failed.json` is absent. The contract enforces that
+#         no JSON file ships the `sindustries_deploy_failed_total` counter
+#         query. The follow-up deploy-failure telemetry design lives in
+#         `brain/ideas/deploy-failure-telemetry-pipeline.md`.
 
 set -euo pipefail
 
@@ -44,6 +56,12 @@ EXPECTED_ALERTS = [
     'budget-api-db-down.json',
     'db-query-slow.json',
     'redis-down.json',
+]
+# Removed by task 2c782afb (AC2 Path B + AC3). Re-add only when each has
+# a durable producer (see brain/ideas/deploy-failure-telemetry-pipeline.md
+# for the deploy-failure producer design; worker-queue-stuck is gated on
+# the BullMQ adapter exposing a stale-aware waiting+active count).
+REMOVED_ALERTS = [
     'worker-queue-stuck.json',
     'deploy-failed.json',
 ]
@@ -120,6 +138,127 @@ def assert_bootstrap_references() -> None:
             add_failure(f"bootstrap-observability.sh missing reference to {expected}")
 
 
+def assert_removed_alerts_absent() -> None:
+    """Task 2c782afb AC2 (worker-queue-stuck) + AC3 (deploy-failed).
+
+    The disabled alerts must be absent from the alerts directory AND must
+    not be referenced anywhere as a query expression (their dead metrics
+    should not creep back in). Re-add only when each has a durable
+    producer; see brain/ideas/deploy-failure-telemetry-pipeline.md for
+    the deploy-failure producer design.
+    """
+    alert_dir = obs / 'grafana' / 'alerts'
+    for name in REMOVED_ALERTS:
+        path = alert_dir / name
+        if path.exists():
+            add_failure(f"removed alert file still present: {path}")
+    dead_query_strings = {
+        'worker-queue-stuck': 'sindustries_queue_ready',
+        'deploy-failed': 'sindustries_deploy_failed_total',
+    }
+    if alert_dir.exists():
+        for path in alert_dir.glob('*.json'):
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                continue
+            text = json.dumps(data)
+            for label, needle in dead_query_strings.items():
+                if needle in text:
+                    add_failure(
+                        f"removed alert {label!r} query string {needle!r} "
+                        f"still present in {path}",
+                    )
+
+
+def assert_emitted_http_metric_contract() -> None:
+    """Task 2c782afb AC1.
+
+    Hosted dashboards + alert rules must use the OTel semantic-convention
+    `http_server_duration_milliseconds_*` contract that the deployed
+    stack actually emits, and must not reference the dead
+    `http_requests_total` or `http_server_request_duration_seconds_*`
+    strings.
+    """
+    dead_metric_strings = (
+        'http_requests_total',
+        'http_server_request_duration_seconds',
+    )
+    for sub in ('dashboards', 'alerts'):
+        sub_dir = obs / 'grafana' / sub
+        if not sub_dir.exists():
+            continue
+        for path in sub_dir.glob('*.json'):
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                continue
+            text = json.dumps(data)
+            for dead in dead_metric_strings:
+                if dead in text:
+                    add_failure(
+                        f"{path} references dead metric {dead!r}; "
+                        f"use http_server_duration_milliseconds instead",
+                    )
+
+
+def assert_cloud_overview_metric_contract() -> None:
+    """Task 2c782afb AC1 — Cloud Overview must reference the emitted
+    `http_server_duration_milliseconds_*` metric in its HTTP panels."""
+    path = obs / 'grafana' / 'dashboards' / 'cloud-overview.json'
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        add_failure(f"cloud-overview.json invalid JSON: {exc}")
+        return
+    text = json.dumps(data)
+    if 'http_server_duration_milliseconds' not in text:
+        add_failure(
+            'cloud-overview.json does not reference '
+            'http_server_duration_milliseconds_*',
+        )
+
+
+def assert_alert_ratio_contract() -> None:
+    """Task 2c782afb AC1 — the two HTTP error-rate alerts must use a
+    ratio expression (`/` operator across the http status regex on A
+    and the total count on B). The contract here is a static shape
+    check: the alert JSON must contain the `/` math operator. The
+    semantic ratio (5xx/total, 4xx/total) is verified by the live
+    Grafana evaluation Quinn runs during bootstrap.
+    """
+    expected_alerts = (
+        'tasks-api-5xx-spike.json',
+        'budget-api-4xx-spike.json',
+    )
+    alert_dir = obs / 'grafana' / 'alerts'
+    for name in expected_alerts:
+        path = alert_dir / name
+        if not path.exists():
+            add_failure(f"missing alert rule: {path}")
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            add_failure(f"alert JSON invalid ({path}): {exc}")
+            continue
+        text = json.dumps(data)
+        if 'http_server_duration_milliseconds' not in text:
+            add_failure(
+                f"alert {name} does not reference "
+                f'http_server_duration_milliseconds_*',
+            )
+        if ' / ' not in text:
+            add_failure(
+                f"alert {name} does not contain a ratio expression "
+                f"(` / ` math step); the error-rate alert must compute "
+                f"5xx (or 4xx) over total requests, not an absolute rate "
+                f"threshold",
+            )
+
+
 def assert_health_probe() -> None:
     probe_pkg = obs / 'health-probe' / 'package.json'
     if not probe_pkg.exists():
@@ -157,6 +296,10 @@ assert_dashboards()
 assert_alerts()
 assert_bootstrap_references()
 assert_health_probe()
+assert_removed_alerts_absent()
+assert_emitted_http_metric_contract()
+assert_cloud_overview_metric_contract()
+assert_alert_ratio_contract()
 
 if failures:
     print(f"\n{len(failures)} failure(s) detected", file=sys.stderr)
@@ -165,6 +308,7 @@ if failures:
 print(
     f"OK: {len(EXPECTED_DASHBOARDS)} dashboards, "
     f"{len(EXPECTED_ALERTS)} alert rules, "
+    f"{len(REMOVED_ALERTS)} disabled alerts absent, "
     f"hosted datasource discovery, bootstrap + health-probe present"
 )
 PY
