@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { jsonError } from '../lib/http';
+import { asyncHandler } from '../lib/asyncHandler';
 import { getCardById, getMonthlyBudget, upsertMonthlyBudget } from '../repos/cardsRepo';
 
 export const cardsRouter = Router();
@@ -11,157 +12,166 @@ function sessionUserId(req: { session?: { userId: string } }): string {
   return req.session!.userId;
 }
 
-cardsRouter.get('/cards/balance-history', async (req, res) => {
-  const userId = sessionUserId(req);
+cardsRouter.get(
+  '/cards/balance-history',
+  asyncHandler(async (req, res) => {
+    const userId = sessionUserId(req);
 
-  const now = new Date();
-  const defaultFrom = new Date(now.valueOf() - 30 * 24 * 60 * 60 * 1000);
-  const fromDate = parseQueryDate(req.query.from, defaultFrom);
-  const toDate = parseQueryDate(req.query.to, now);
-  if (!fromDate || !toDate) {
-    return jsonError(res, 400, 'BAD_REQUEST', 'from/to must be ISO dates');
-  }
-  if (fromDate > toDate) {
-    return jsonError(res, 400, 'BAD_REQUEST', 'from must be before to');
-  }
-
-  const [cards, snapshots] = await Promise.all([
-    prisma.linkedCard.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'asc' },
-      select: {
-        id: true,
-        displayName: true,
-        provider: true,
-        providerCardId: true,
-        currentBalanceCents: true,
-        availableBalanceCents: true,
-        balanceCurrency: true,
-        balanceOverdrawn: true,
-        balanceUpdatedAt: true
-      }
-    }),
-    prisma.accountBalanceSnapshot.findMany({
-      where: {
-        userId,
-        capturedAt: { gte: fromDate, lte: toDate }
-      },
-      orderBy: { capturedAt: 'asc' },
-      select: {
-        cardId: true,
-        capturedAt: true,
-        currentBalanceCents: true,
-        availableBalanceCents: true,
-        currency: true,
-        overdrawn: true
-      }
-    })
-  ]);
-
-  const series: Record<
-    string,
-    {
-      capturedAt: Date;
-      currentBalanceCents: number | null;
-      availableBalanceCents: number | null;
-      currency: string | null;
-      overdrawn: boolean | null;
-    }[]
-  > = {};
-  const totalsByCapturedAt = new Map<string, number>();
-
-  for (const snapshot of snapshots) {
-    series[snapshot.cardId] ??= [];
-    series[snapshot.cardId].push(snapshot);
-
-    const totalValue = snapshot.currentBalanceCents ?? snapshot.availableBalanceCents;
-    if (totalValue !== null) {
-      const key = snapshot.capturedAt.toISOString();
-      totalsByCapturedAt.set(key, (totalsByCapturedAt.get(key) ?? 0) + totalValue);
+    const now = new Date();
+    const defaultFrom = new Date(now.valueOf() - 30 * 24 * 60 * 60 * 1000);
+    const fromDate = parseQueryDate(req.query.from, defaultFrom);
+    const toDate = parseQueryDate(req.query.to, now);
+    if (!fromDate || !toDate) {
+      return jsonError(res, 400, 'BAD_REQUEST', 'from/to must be ISO dates');
     }
-  }
+    if (fromDate > toDate) {
+      return jsonError(res, 400, 'BAD_REQUEST', 'from must be before to');
+    }
 
-  const totalSeries = Array.from(totalsByCapturedAt.entries())
-    .map(([capturedAt, currentBalanceCents]) => ({
-      capturedAt,
-      currentBalanceCents
-    }))
-    .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
+    const [cards, snapshots] = await Promise.all([
+      prisma.linkedCard.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          displayName: true,
+          provider: true,
+          providerCardId: true,
+          currentBalanceCents: true,
+          availableBalanceCents: true,
+          balanceCurrency: true,
+          balanceOverdrawn: true,
+          balanceUpdatedAt: true
+        }
+      }),
+      prisma.accountBalanceSnapshot.findMany({
+        where: {
+          userId,
+          capturedAt: { gte: fromDate, lte: toDate }
+        },
+        orderBy: { capturedAt: 'asc' },
+        select: {
+          cardId: true,
+          capturedAt: true,
+          currentBalanceCents: true,
+          availableBalanceCents: true,
+          currency: true,
+          overdrawn: true
+        }
+      })
+    ]);
 
-  res.status(200).json({
-    from: fromDate.toISOString(),
-    to: toDate.toISOString(),
-    accounts: cards,
-    series,
-    totalSeries
-  });
-});
+    const series: Record<
+      string,
+      {
+        capturedAt: Date;
+        currentBalanceCents: number | null;
+        availableBalanceCents: number | null;
+        currency: string | null;
+        overdrawn: boolean | null;
+      }[]
+    > = {};
+    const totalsByCapturedAt = new Map<string, number>();
 
-cardsRouter.post('/cards/:cardId/budget', async (req, res) => {
-  const { cardId } = req.params;
-  const monthlyLimitCents =
-    typeof req.body?.monthlyLimitCents === 'number'
-      ? req.body.monthlyLimitCents
-      : null;
+    for (const snapshot of snapshots) {
+      series[snapshot.cardId] ??= [];
+      series[snapshot.cardId].push(snapshot);
 
-  if (!monthlyLimitCents || monthlyLimitCents <= 0) {
-    return jsonError(res, 400, 'BAD_REQUEST', 'monthlyLimitCents must be > 0');
-  }
+      const totalValue = snapshot.currentBalanceCents ?? snapshot.availableBalanceCents;
+      if (totalValue !== null) {
+        const key = snapshot.capturedAt.toISOString();
+        totalsByCapturedAt.set(key, (totalsByCapturedAt.get(key) ?? 0) + totalValue);
+      }
+    }
 
-  const card = await getCardById(cardId);
-  if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+    const totalSeries = Array.from(totalsByCapturedAt.entries())
+      .map(([capturedAt, currentBalanceCents]) => ({
+        capturedAt,
+        currentBalanceCents
+      }))
+      .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
 
-  // Ownership check: only the card's owner can set its budget.
-  if (card.userId !== req.session!.userId) {
-    return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
-  }
+    res.status(200).json({
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
+      accounts: cards,
+      series,
+      totalSeries
+    });
+  })
+);
 
-  const budget = await upsertMonthlyBudget({
-    cardId,
-    userId: card.userId,
-    month: currentMonthKey(),
-    monthlyLimitCents
-  });
+cardsRouter.post(
+  '/cards/:cardId/budget',
+  asyncHandler(async (req, res) => {
+    const { cardId } = req.params;
+    const monthlyLimitCents =
+      typeof req.body?.monthlyLimitCents === 'number'
+        ? req.body.monthlyLimitCents
+        : null;
 
-  res.status(200).json({ budget });
-});
+    if (!monthlyLimitCents || monthlyLimitCents <= 0) {
+      return jsonError(res, 400, 'BAD_REQUEST', 'monthlyLimitCents must be > 0');
+    }
 
-cardsRouter.get('/cards/:cardId/spend-summary', async (req, res) => {
-  const { cardId } = req.params;
-  const month = typeof req.query.month === 'string' ? req.query.month : null;
-  if (!month) return jsonError(res, 400, 'BAD_REQUEST', 'month is required');
+    const card = await getCardById(cardId);
+    if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
 
-  const [y, m] = month.split('-').map((s) => Number(s));
-  if (!y || !m || m < 1 || m > 12) {
-    return jsonError(res, 400, 'BAD_REQUEST', 'month must be YYYY-MM');
-  }
+    // Ownership check: only the card's owner can set its budget.
+    if (card.userId !== req.session!.userId) {
+      return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+    }
 
-  const card = await getCardById(cardId);
-  if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
-  // Ownership check: only the card's owner can read its spend summary.
-  if (card.userId !== req.session!.userId) {
-    return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
-  }
+    const budget = await upsertMonthlyBudget({
+      cardId,
+      userId: card.userId,
+      month: currentMonthKey(),
+      monthlyLimitCents
+    });
 
-  const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
-  const to = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+    res.status(200).json({ budget });
+  })
+);
 
-  const txns = await prisma.transaction.findMany({
-    where: { cardId, occurredAt: { gte: from, lt: to }, direction: 'debit' },
-    select: { amountCents: true }
-  });
+cardsRouter.get(
+  '/cards/:cardId/spend-summary',
+  asyncHandler(async (req, res) => {
+    const { cardId } = req.params;
+    const month = typeof req.query.month === 'string' ? req.query.month : null;
+    if (!month) return jsonError(res, 400, 'BAD_REQUEST', 'month is required');
 
-  const spendCents = txns.reduce((acc, t) => acc + t.amountCents, 0);
+    const [y, m] = month.split('-').map((s) => Number(s));
+    if (!y || !m || m < 1 || m > 12) {
+      return jsonError(res, 400, 'BAD_REQUEST', 'month must be YYYY-MM');
+    }
 
-  const budget = await getMonthlyBudget(cardId, month);
+    const card = await getCardById(cardId);
+    if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+    // Ownership check: only the card's owner can read its spend summary.
+    if (card.userId !== req.session!.userId) {
+      return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+    }
 
-  res.status(200).json({
-    cardId,
-    month,
-    spendCents,
-    monthlyLimitCents: budget?.monthlyLimitCents ?? null
-  });
-});
+    const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+    const to = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+
+    const txns = await prisma.transaction.findMany({
+      where: { cardId, occurredAt: { gte: from, lt: to }, direction: 'debit' },
+      select: { amountCents: true }
+    });
+
+    const spendCents = txns.reduce((acc, t) => acc + t.amountCents, 0);
+
+    const budget = await getMonthlyBudget(cardId, month);
+
+    res.status(200).json({
+      cardId,
+      month,
+      spendCents,
+      monthlyLimitCents: budget?.monthlyLimitCents ?? null
+    });
+  })
+);
 
 function currentMonthKey() {
   const now = new Date();

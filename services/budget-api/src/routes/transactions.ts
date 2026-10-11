@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { jsonError } from '../lib/http';
+import { asyncHandler } from '../lib/asyncHandler';
 import { normalizeMerchantKey } from '@sindustries/budget-domain';
 import {
   getTransactionById,
@@ -13,50 +14,56 @@ export const transactionsRouter = Router();
 // All routes here run behind requireSession (see app.ts) so userId is read
 // from req.session.userId rather than from a query/body parameter.
 
-transactionsRouter.get('/transactions', async (req, res) => {
-  const userId = req.session!.userId;
+transactionsRouter.get(
+  '/transactions',
+  asyncHandler(async (req, res) => {
+    const userId = req.session!.userId;
 
-  const txns = await listTransactionsForUser(userId);
+    const txns = await listTransactionsForUser(userId);
 
-  res.status(200).json({
-    transactions: txns.map((t) => ({
-      id: t.id,
-      occurredAt: t.occurredAt,
-      merchant: t.merchant,
-      description: t.description,
-      amountCents: t.amountCents,
-      direction: t.direction,
-      category: t.category,
-      categorySource: t.categorySource,
-      categoryConfidence: t.categoryConfidence,
-      pending: t.providerTransactionId.startsWith('akahu-pending:')
-    }))
-  });
-});
+    res.status(200).json({
+      transactions: txns.map((t) => ({
+        id: t.id,
+        occurredAt: t.occurredAt,
+        merchant: t.merchant,
+        description: t.description,
+        amountCents: t.amountCents,
+        direction: t.direction,
+        category: t.category,
+        categorySource: t.categorySource,
+        categoryConfidence: t.categoryConfidence,
+        pending: t.providerTransactionId.startsWith('akahu-pending:')
+      }))
+    });
+  })
+);
 
-transactionsRouter.patch('/transactions/:transactionId/category', async (req, res) => {
-  const { transactionId } = req.params;
-  const category = typeof req.body?.category === 'string' ? req.body.category : null;
-  if (!category) return jsonError(res, 400, 'BAD_REQUEST', 'category is required');
+transactionsRouter.patch(
+  '/transactions/:transactionId/category',
+  asyncHandler(async (req, res) => {
+    const { transactionId } = req.params;
+    const category = typeof req.body?.category === 'string' ? req.body.category : null;
+    if (!category) return jsonError(res, 400, 'BAD_REQUEST', 'category is required');
 
-  const txn = await getTransactionById(transactionId);
-  if (!txn) return jsonError(res, 404, 'NOT_FOUND', 'Transaction not found');
-  // Ownership check: only the transaction's owner can recategorize it.
-  if (txn.userId !== req.session!.userId) {
-    return jsonError(res, 404, 'NOT_FOUND', 'Transaction not found');
-  }
+    const txn = await getTransactionById(transactionId);
+    if (!txn) return jsonError(res, 404, 'NOT_FOUND', 'Transaction not found');
+    // Ownership check: only the transaction's owner can recategorize it.
+    if (txn.userId !== req.session!.userId) {
+      return jsonError(res, 404, 'NOT_FOUND', 'Transaction not found');
+    }
 
-  const updated = await updateTransactionCategory({
-    transactionId: txn.id,
-    category
-  });
+    const updated = await updateTransactionCategory({
+      transactionId: txn.id,
+      category
+    });
 
-  await recordCategorizationFeedback({
-    userId: txn.userId,
-    merchantKey: normalizeMerchantKey(txn.merchant ?? txn.description ?? 'unknown'),
-    originalCategory: txn.category,
-    correctedCategory: category
-  });
+    await recordCategorizationFeedback({
+      userId: txn.userId,
+      merchantKey: normalizeMerchantKey(txn.merchant ?? txn.description ?? 'unknown'),
+      originalCategory: txn.category,
+      correctedCategory: category
+    });
 
-  res.status(200).json({ transaction: updated });
-});
+    res.status(200).json({ transaction: updated });
+  })
+);

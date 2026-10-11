@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { jsonError } from '../lib/http';
+import { asyncHandler } from '../lib/asyncHandler';
 import { hashSessionToken } from '../auth/session';
 
 export interface SessionContext {
@@ -28,35 +29,33 @@ declare module 'express-serve-static-core' {
  * `/session/dev-login` (the login endpoint itself) and `/health` are mounted
  * separately in app.ts and never go through this middleware.
  */
-export async function requireSession(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  const auth = req.header('Authorization');
-  const token =
-    auth && auth.startsWith('Bearer ')
-      ? auth.slice('Bearer '.length).trim()
-      : null;
+export const requireSession = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const auth = req.header('Authorization');
+    const token =
+      auth && auth.startsWith('Bearer ')
+        ? auth.slice('Bearer '.length).trim()
+        : null;
 
-  if (!token) {
-    return jsonError(res, 401, 'UNAUTHORIZED', 'Missing bearer token');
+    if (!token) {
+      return jsonError(res, 401, 'UNAUTHORIZED', 'Missing bearer token');
+    }
+
+    const session = await prisma.session.findUnique({
+      where: { tokenHash: hashSessionToken(token) },
+      select: { id: true, userId: true }
+    });
+
+    if (!session) {
+      return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
+    }
+
+    req.session = {
+      id: session.id,
+      userId: session.userId,
+      expiresAt: null
+    };
+
+    next();
   }
-
-  const session = await prisma.session.findUnique({
-    where: { tokenHash: hashSessionToken(token) },
-    select: { id: true, userId: true }
-  });
-
-  if (!session) {
-    return jsonError(res, 401, 'UNAUTHORIZED', 'Invalid session');
-  }
-
-  req.session = {
-    id: session.id,
-    userId: session.userId,
-    expiresAt: null
-  };
-
-  next();
-}
+);
