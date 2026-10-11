@@ -52,6 +52,17 @@ def github_cli_env() -> dict[str, str]:
     # another agent.
     env.pop("GH_TOKEN", None)
     env.pop("GITHUB_TOKEN", None)
+    # `gh` is a Go binary; on macOS its TLS trust store reads the system
+    # Keychain, not SSL_CERT_FILE/CURL_CA_BUNDLE/NODE_EXTRA_CA_CERTS. The
+    # ambient HTTP_PROXY/HTTPS_PROXY route every outbound call (including
+    # github.com) through OpenClaw's local secret-egress proxy, which
+    # terminates TLS with its own certificate for secret substitution; `gh`
+    # correctly refuses to trust it. The real token never needs secret-
+    # sentinel substitution, so bypass the proxy entirely here too (same
+    # fix as the feature-task Rust lobster and the Tasks-API queue script,
+    # 2026-10-11).
+    for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        env.pop(proxy_var, None)
     return env
 
 

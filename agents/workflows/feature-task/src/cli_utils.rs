@@ -49,6 +49,22 @@ pub(crate) fn gh_command() -> Command {
     cmd.env("GH_CONFIG_DIR", config_dir)
         .env_remove("GH_TOKEN")
         .env_remove("GITHUB_TOKEN");
+    // `gh` is a Go binary; on macOS its TLS trust store reads the system
+    // Keychain and does not honour SSL_CERT_FILE/CURL_CA_BUNDLE/
+    // NODE_EXTRA_CA_CERTS the way curl and Node do. The ambient
+    // HTTP_PROXY/HTTPS_PROXY env vars route every outbound call (including
+    // github.com) through OpenClaw's local secret-egress proxy, which
+    // terminates TLS with its own certificate for secret substitution. `gh`
+    // correctly refuses to trust that certificate, so every lobster `gh pr
+    // view`/`gh api` read failed identically whenever those vars were
+    // present in the lobster's own process environment (2026-10-11,
+    // confirmed on task 61716ab6's post-merge PR inspection). The real
+    // GitHub token never needs secret-sentinel substitution, so bypass the
+    // proxy entirely for this process. Same fix already applied to the
+    // Python Tasks-API-queue client's `_gh_api()`.
+    for proxy_var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+        cmd.env_remove(proxy_var);
+    }
     cmd
 }
 
