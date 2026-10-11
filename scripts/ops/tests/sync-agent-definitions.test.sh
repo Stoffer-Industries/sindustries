@@ -46,6 +46,10 @@ shim_dest="$OPENCLAW_WORKSPACE_ROOT/agents/lib/gh-with-agent-token.sh"
 [[ -f "$shim_dest" ]]
 cmp "$repo_root/agents/lib/gh-with-agent-token.sh" "$shim_dest"
 [[ "$(stat -f '%Lp' "$shim_dest")" == "755" ]]
+wrapper_dest="$OPENCLAW_WORKSPACE_ROOT/agents/lib/github-cli.sh"
+[[ -f "$wrapper_dest" ]]
+cmp "$repo_root/agents/lib/github-cli.sh" "$wrapper_dest"
+[[ "$(stat -f '%Lp' "$wrapper_dest")" == "755" ]]
 
 for shim_agent in rowan ash ivy; do
   snippet="$OPENCLAW_WORKSPACE_ROOT/agents/$shim_agent/.gh-shim.sh"
@@ -96,6 +100,8 @@ fi
 TMP_SHIM_HOME="$TMP/shim-home"
 mkdir -p "$TMP_SHIM_HOME/.openclaw/workspace/agents/lib"
 cp "$repo_root/agents/lib/gh-with-agent-token.sh" "$TMP_SHIM_HOME/.openclaw/workspace/agents/lib/gh-with-agent-token.sh"
+cp "$repo_root/agents/lib/github-cli.sh" "$TMP_SHIM_HOME/.openclaw/workspace/agents/lib/github-cli.sh"
+chmod 0755 "$TMP_SHIM_HOME/.openclaw/workspace/agents/lib/github-cli.sh"
 SHIM_STUB_DIR="$TMP_SHIM_HOME/bin"
 mkdir -p "$SHIM_STUB_DIR"
 cat >"$SHIM_STUB_DIR/gh" <<'STUB'

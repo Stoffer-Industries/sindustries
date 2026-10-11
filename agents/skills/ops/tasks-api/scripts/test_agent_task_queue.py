@@ -908,9 +908,11 @@ class GhApiTimeoutTest(unittest.TestCase):
             with patch.object(agent_task_queue, "safe_run") as mock_safe_run:
                 mock_safe_run.return_value.stdout = "[]"
                 agent_task_queue._gh_api("~/.config/gh-test", "TOKEN", "/x")
+        called_args = mock_safe_run.call_args.args[0]
+        self.assertTrue(called_args[0].endswith("agents/lib/github-cli.sh"))
         called_env = mock_safe_run.call_args.kwargs.get("env")
-        for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-            self.assertNotIn(proxy_var, called_env)
+        self.assertNotIn("GH_TOKEN", called_env)
+        self.assertNotIn("GITHUB_TOKEN", called_env)
         self.assertEqual(called_env.get("PATH"), "/usr/bin")
 
 

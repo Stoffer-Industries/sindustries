@@ -82,13 +82,12 @@ def workflow_env() -> dict[str, str]:
     if existing_path:
         path_parts.append(existing_path)
     env["PATH"] = os.pathsep.join(path_parts)
-    # Feature-task GitHub reads must use Quinn's explicitly configured CLI
-    # identity. gh gives GH_TOKEN/GITHUB_TOKEN precedence over GH_CONFIG_DIR,
-    # so remove ambient credentials rather than risking the default account.
+    # Feature-task GitHub reads use Quinn's explicitly configured CLI identity.
+    # The shared agents/lib/github-cli.sh wrapper owns token/proxy cleanup for
+    # the Rust worker; keep that policy in one place.
     configured_gh_dir = env.get("FEATURE_TASK_GH_CONFIG_DIR", "~/.config/gh-quinn")
     env["GH_CONFIG_DIR"] = str(Path(configured_gh_dir).expanduser())
-    env.pop("GH_TOKEN", None)
-    env.pop("GITHUB_TOKEN", None)
+    env["OPENCLAW_GH_WRAPPER"] = str(REPO / "agents" / "lib" / "github-cli.sh")
     # The Rust worker needs Quinn's authenticated Tasks API credential for
     # status, attention-owner, and workflow-handoff PATCHes. Cron environments
     # expose the per-agent name, while the worker's stable interface is the
