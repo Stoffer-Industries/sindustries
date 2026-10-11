@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { jsonError } from '../lib/http';
+import { asyncHandler } from '../lib/asyncHandler';
 import { evaluateAlertsForUser } from '../services/alerts';
 
 export const alertsRouter = Router();
@@ -8,121 +9,139 @@ export const alertsRouter = Router();
 // All routes here run behind requireSession (see app.ts) so userId is read
 // from req.session.userId rather than from a query/body parameter.
 
-alertsRouter.post('/alerts/evaluate', async (req, res) => {
-  const userId = req.session!.userId;
-  const month = typeof req.body?.month === 'string' ? req.body.month : currentMonthKey();
+alertsRouter.post(
+  '/alerts/evaluate',
+  asyncHandler(async (req, res) => {
+    const userId = req.session!.userId;
+    const month = typeof req.body?.month === 'string' ? req.body.month : currentMonthKey();
 
-  const result = await evaluateAlertsForUser({ userId, month });
-  res.status(200).json({ ok: true, ...result });
-});
+    const result = await evaluateAlertsForUser({ userId, month });
+    res.status(200).json({ ok: true, ...result });
+  })
+);
 
-alertsRouter.get('/alerts', async (req, res) => {
-  const userId = req.session!.userId;
+alertsRouter.get(
+  '/alerts',
+  asyncHandler(async (req, res) => {
+    const userId = req.session!.userId;
 
-  const events = await prisma.notificationEvent.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
-    take: 100
-  });
+    const events = await prisma.notificationEvent.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 100
+    });
 
-  res.status(200).json({
-    alerts: events.map((e) => ({
-      id: e.id,
-      type: e.type,
-      title: e.title,
-      body: e.body,
-      createdAt: e.createdAt
-    }))
-  });
-});
+    res.status(200).json({
+      alerts: events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        title: e.title,
+        body: e.body,
+        createdAt: e.createdAt
+      }))
+    });
+  })
+);
 
-alertsRouter.delete('/alerts/:alertId', async (req, res) => {
-  const { alertId } = req.params;
-  const existing = await prisma.notificationEvent.findUnique({
-    where: { id: alertId }
-  });
-  if (!existing) return jsonError(res, 404, 'NOT_FOUND', 'Alert not found');
-  // Ownership check: only the alert's owner can delete it.
-  if (existing.userId !== req.session!.userId) {
-    return jsonError(res, 404, 'NOT_FOUND', 'Alert not found');
-  }
-  await prisma.notificationEvent.delete({ where: { id: alertId } });
-  res.status(200).json({ ok: true });
-});
-
-alertsRouter.get('/cards/:cardId/alert-config', async (req, res) => {
-  const { cardId } = req.params;
-  const card = await prisma.linkedCard.findUnique({
-    where: { id: cardId },
-    select: { userId: true }
-  });
-  if (!card || card.userId !== req.session!.userId) {
-    return res.status(200).json({ config: null });
-  }
-  const config = await prisma.balanceAlertConfig.findUnique({ where: { cardId } });
-  if (!config) return res.status(200).json({ config: null });
-  res.status(200).json({
-    config: {
-      id: config.id,
-      cardId: config.cardId,
-      condition: config.condition,
-      thresholdCents: config.thresholdCents,
-      pushEnabled: config.pushEnabled,
-      emailEnabled: config.emailEnabled
+alertsRouter.delete(
+  '/alerts/:alertId',
+  asyncHandler(async (req, res) => {
+    const { alertId } = req.params;
+    const existing = await prisma.notificationEvent.findUnique({
+      where: { id: alertId }
+    });
+    if (!existing) return jsonError(res, 404, 'NOT_FOUND', 'Alert not found');
+    // Ownership check: only the alert's owner can delete it.
+    if (existing.userId !== req.session!.userId) {
+      return jsonError(res, 404, 'NOT_FOUND', 'Alert not found');
     }
-  });
-});
+    await prisma.notificationEvent.delete({ where: { id: alertId } });
+    res.status(200).json({ ok: true });
+  })
+);
 
-alertsRouter.post('/cards/:cardId/alert-config', async (req, res) => {
-  const { cardId } = req.params;
-  const condition = req.body?.condition;
-  const thresholdCents = req.body?.thresholdCents;
-  const pushEnabled = typeof req.body?.pushEnabled === 'boolean' ? req.body.pushEnabled : true;
-  const emailEnabled = typeof req.body?.emailEnabled === 'boolean' ? req.body.emailEnabled : false;
-
-  if (condition !== 'more-than' && condition !== 'less-than') {
-    return jsonError(res, 400, 'BAD_REQUEST', 'condition must be more-than or less-than');
-  }
-  if (typeof thresholdCents !== 'number' || thresholdCents <= 0) {
-    return jsonError(res, 400, 'BAD_REQUEST', 'thresholdCents must be > 0');
-  }
-
-  const card = await prisma.linkedCard.findUnique({ where: { id: cardId } });
-  if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
-  // Ownership check: only the card's owner can configure its alert.
-  if (card.userId !== req.session!.userId) {
-    return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
-  }
-
-  const config = await prisma.balanceAlertConfig.upsert({
-    where: { cardId },
-    create: { userId: card.userId, cardId, condition, thresholdCents, pushEnabled, emailEnabled },
-    update: { condition, thresholdCents, pushEnabled, emailEnabled }
-  });
-
-  res.status(200).json({
-    config: {
-      id: config.id,
-      cardId: config.cardId,
-      condition: config.condition,
-      thresholdCents: config.thresholdCents,
-      pushEnabled: config.pushEnabled,
-      emailEnabled: config.emailEnabled
+alertsRouter.get(
+  '/cards/:cardId/alert-config',
+  asyncHandler(async (req, res) => {
+    const { cardId } = req.params;
+    const card = await prisma.linkedCard.findUnique({
+      where: { id: cardId },
+      select: { userId: true }
+    });
+    if (!card || card.userId !== req.session!.userId) {
+      return res.status(200).json({ config: null });
     }
-  });
-});
+    const config = await prisma.balanceAlertConfig.findUnique({ where: { cardId } });
+    if (!config) return res.status(200).json({ config: null });
+    res.status(200).json({
+      config: {
+        id: config.id,
+        cardId: config.cardId,
+        condition: config.condition,
+        thresholdCents: config.thresholdCents,
+        pushEnabled: config.pushEnabled,
+        emailEnabled: config.emailEnabled
+      }
+    });
+  })
+);
 
-alertsRouter.delete('/cards/:cardId/alert-config', async (req, res) => {
-  const { cardId } = req.params;
-  const existing = await prisma.balanceAlertConfig.findUnique({ where: { cardId } });
-  if (!existing) return jsonError(res, 404, 'NOT_FOUND', 'Alert config not found');
-  // Ownership check: only the card's owner can delete its alert config.
-  if (existing.userId !== req.session!.userId) {
-    return jsonError(res, 404, 'NOT_FOUND', 'Alert config not found');
-  }
-  await prisma.balanceAlertConfig.delete({ where: { cardId } });
-  res.status(200).json({ ok: true });
-});
+alertsRouter.post(
+  '/cards/:cardId/alert-config',
+  asyncHandler(async (req, res) => {
+    const { cardId } = req.params;
+    const condition = req.body?.condition;
+    const thresholdCents = req.body?.thresholdCents;
+    const pushEnabled = typeof req.body?.pushEnabled === 'boolean' ? req.body.pushEnabled : true;
+    const emailEnabled = typeof req.body?.emailEnabled === 'boolean' ? req.body.emailEnabled : false;
+
+    if (condition !== 'more-than' && condition !== 'less-than') {
+      return jsonError(res, 400, 'BAD_REQUEST', 'condition must be more-than or less-than');
+    }
+    if (typeof thresholdCents !== 'number' || thresholdCents <= 0) {
+      return jsonError(res, 400, 'BAD_REQUEST', 'thresholdCents must be > 0');
+    }
+
+    const card = await prisma.linkedCard.findUnique({ where: { id: cardId } });
+    if (!card) return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+    // Ownership check: only the card's owner can configure its alert.
+    if (card.userId !== req.session!.userId) {
+      return jsonError(res, 404, 'NOT_FOUND', 'Card not found');
+    }
+
+    const config = await prisma.balanceAlertConfig.upsert({
+      where: { cardId },
+      create: { userId: card.userId, cardId, condition, thresholdCents, pushEnabled, emailEnabled },
+      update: { condition, thresholdCents, pushEnabled, emailEnabled }
+    });
+
+    res.status(200).json({
+      config: {
+        id: config.id,
+        cardId: config.cardId,
+        condition: config.condition,
+        thresholdCents: config.thresholdCents,
+        pushEnabled: config.pushEnabled,
+        emailEnabled: config.emailEnabled
+      }
+    });
+  })
+);
+
+alertsRouter.delete(
+  '/cards/:cardId/alert-config',
+  asyncHandler(async (req, res) => {
+    const { cardId } = req.params;
+    const existing = await prisma.balanceAlertConfig.findUnique({ where: { cardId } });
+    if (!existing) return jsonError(res, 404, 'NOT_FOUND', 'Alert config not found');
+    // Ownership check: only the card's owner can delete its alert config.
+    if (existing.userId !== req.session!.userId) {
+      return jsonError(res, 404, 'NOT_FOUND', 'Alert config not found');
+    }
+    await prisma.balanceAlertConfig.delete({ where: { cardId } });
+    res.status(200).json({ ok: true });
+  })
+);
 
 function currentMonthKey() {
   const now = new Date();
