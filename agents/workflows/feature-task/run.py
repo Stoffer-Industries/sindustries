@@ -126,7 +126,21 @@ def workflow_env() -> dict[str, str]:
 
 
 def api_get(base_url: str, path: str) -> dict[str, Any]:
-    with urllib.request.urlopen(base_url.rstrip("/") + path, timeout=20) as response:
+    # OpenClaw's local secret-egress proxy (HTTP_PROXY/HTTPS_PROXY) exists
+    # only to substitute protected secret sentinels into requests bound for
+    # approved *external* destinations. base_url here is always the local
+    # Tasks API and never carries a secret sentinel, but urllib's default
+    # opener honours the ambient proxy vars unconditionally. The proxy
+    # correctly refuses that non-allowlisted local destination with HTTP 502
+    # ("Secret egress proxy refused the request."), which is indistinguishable
+    # from a real Tasks API outage from this caller's perspective. This is
+    # the exact function the "Task Lobsters" cron calls for task discovery
+    # on every run (agents/skills/ops/tasks-api/tasks_api_client.py already
+    # got this fix on 2026-10-10; this duplicate implementation did not).
+    # Confirmed live: every Task Lobsters cron run was still failing here
+    # with 502 as of 2026-10-12, well after that earlier fix shipped.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(base_url.rstrip("/") + path, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
