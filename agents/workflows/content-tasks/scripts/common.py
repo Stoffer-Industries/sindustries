@@ -26,6 +26,7 @@ if _w is not None and str(_w) not in _sys.path:
 del _sys, _p, _w
 
 from agents.lib import safe_run
+from agents.lib.github_cli import gh_command, gh_env
 
 # Compute repo-owned paths relative to this file so cron runs do not depend on
 # OPENCLAW_WORKSPACE_ROOT being set. Keep WORKSPACE as the OpenClaw workspace root for
@@ -44,26 +45,8 @@ DEFAULT_GH_CONFIG_DIR = "~/.config/gh-ivy"
 
 def github_cli_env() -> dict[str, str]:
     """Run content-task GitHub reads as Ivy, never as an ambient account."""
-    env = dict(os.environ)
-    configured_dir = env.get("CONTENT_TASKS_GH_CONFIG_DIR", DEFAULT_GH_CONFIG_DIR)
-    env["GH_CONFIG_DIR"] = str(Path(configured_dir).expanduser())
-    # A GH_TOKEN/GITHUB_TOKEN takes precedence over GH_CONFIG_DIR in gh. Remove
-    # ambient values so a gateway or parent shell cannot silently impersonate
-    # another agent.
-    env.pop("GH_TOKEN", None)
-    env.pop("GITHUB_TOKEN", None)
-    # `gh` is a Go binary; on macOS its TLS trust store reads the system
-    # Keychain, not SSL_CERT_FILE/CURL_CA_BUNDLE/NODE_EXTRA_CA_CERTS. The
-    # ambient HTTP_PROXY/HTTPS_PROXY route every outbound call (including
-    # github.com) through OpenClaw's local secret-egress proxy, which
-    # terminates TLS with its own certificate for secret substitution; `gh`
-    # correctly refuses to trust it. The real token never needs secret-
-    # sentinel substitution, so bypass the proxy entirely here too (same
-    # fix as the feature-task Rust lobster and the Tasks-API queue script,
-    # 2026-10-11).
-    for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        env.pop(proxy_var, None)
-    return env
+    configured_dir = os.environ.get("CONTENT_TASKS_GH_CONFIG_DIR", DEFAULT_GH_CONFIG_DIR)
+    return gh_env(config_dir=configured_dir)
 
 
 STATE_TAG = "[lobster-state]"
@@ -421,7 +404,7 @@ def _run_gh_json(cmd: list[str]) -> Any:
 
 
 def gh_pr_view(url: str, fields: list[str]) -> dict[str, Any]:
-    cmd = ["gh", "pr", "view", url, "--json", ",".join(fields)]
+    cmd = gh_command("pr", "view", url, "--json", ",".join(fields))
     data = _run_gh_json(cmd)
     return data if isinstance(data, dict) else {}
 
@@ -441,7 +424,7 @@ def gh_pr_assignees(url: str) -> list[str]:
 
 
 def gh_api(path: str) -> Any:
-    return _run_gh_json(["gh", "api", path])
+    return _run_gh_json(gh_command("api", path))
 
 
 def _check_name(check: dict[str, Any]) -> str:

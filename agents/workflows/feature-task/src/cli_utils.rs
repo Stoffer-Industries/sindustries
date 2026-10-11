@@ -25,6 +25,7 @@
 //! Slice 2 of the W38+ second tranche.
 
 use anyhow::{anyhow, Result};
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::api_client;
@@ -38,7 +39,10 @@ use crate::{Envelope, Task};
 /// account that owns the read. Kept as `pub(crate)` because four sibling
 /// modules read it.
 pub(crate) fn gh_command() -> Command {
-    let mut cmd = Command::new("gh");
+    let wrapper = std::env::var_os("OPENCLAW_GH_WRAPPER").map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lib/github-cli.sh")
+    });
+    let mut cmd = Command::new(wrapper);
     let config_dir = std::env::var("FEATURE_TASK_GH_CONFIG_DIR")
         .unwrap_or_else(|_| "~/.config/gh-quinn".to_string());
     let config_dir = if let Some(home) = std::env::var_os("HOME") {
@@ -46,26 +50,20 @@ pub(crate) fn gh_command() -> Command {
     } else {
         config_dir
     };
-    cmd.env("GH_CONFIG_DIR", config_dir)
-        .env_remove("GH_TOKEN")
-        .env_remove("GITHUB_TOKEN");
-    // `gh` is a Go binary; on macOS its TLS trust store reads the system
-    // Keychain and does not honour SSL_CERT_FILE/CURL_CA_BUNDLE/
-    // NODE_EXTRA_CA_CERTS the way curl and Node do. The ambient
-    // HTTP_PROXY/HTTPS_PROXY env vars route every outbound call (including
-    // github.com) through OpenClaw's local secret-egress proxy, which
-    // terminates TLS with its own certificate for secret substitution. `gh`
-    // correctly refuses to trust that certificate, so every lobster `gh pr
-    // view`/`gh api` read failed identically whenever those vars were
-    // present in the lobster's own process environment (2026-10-11,
-    // confirmed on task 61716ab6's post-merge PR inspection). The real
-    // GitHub token never needs secret-sentinel substitution, so bypass the
-    // proxy entirely for this process. Same fix already applied to the
-    // Python Tasks-API-queue client's `_gh_api()`.
-    for proxy_var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
-        cmd.env_remove(proxy_var);
-    }
+    cmd.env("GH_CONFIG_DIR", config_dir);
     cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gh_command;
+
+    #[test]
+    fn gh_uses_the_shared_repository_wrapper() {
+        let command = gh_command();
+        let program = command.get_program().to_string_lossy();
+        assert!(program.ends_with("github-cli.sh"));
+    }
 }
 
 /// Fetch the body of a GitHub PR via `gh pr view --json body --jq .body`,

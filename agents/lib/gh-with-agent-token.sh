@@ -84,12 +84,30 @@ __gh_shim_refuse_ambient() {
   return 0
 }
 
+__gh_shim_shared_wrapper() {
+  local source_path="${BASH_SOURCE[0]:-}"
+  if [[ -z "${source_path}" && -n "${ZSH_VERSION:-}" ]]; then
+    source_path="${SHIM:-$0}"
+  fi
+  if [[ "${source_path}" == */* ]]; then
+    local candidate
+    candidate="$(cd "$(dirname "${source_path}")" && pwd)/github-cli.sh"
+    if [[ -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  fi
+  printf '%s\n' "${HOME}/.openclaw/workspace/agents/lib/github-cli.sh"
+}
+
 # The wrapper itself. Invoked as `gh <args...>` after the function below is
 # exported by sourcing.
 gh() {
+  local wrapper
+  wrapper="$(__gh_shim_shared_wrapper)"
   if ! __gh_shim_agent_allowed; then
     __gh_shim_refuse_ambient || return 1
-    command gh "$@"
+    "${wrapper}" "$@"
     return $?
   fi
 
@@ -111,14 +129,14 @@ gh() {
     # builtin `command` (which is not an executable on Linux).
     env -u GITHUB_TOKEN -u GH_TOKEN \
         GH_CONFIG_DIR="${HOME}/.config/gh-${agent}" \
-        gh "$@"
+        "${wrapper}" "$@"
     return $?
   fi
 
   env -u GITHUB_TOKEN -u GH_TOKEN \
       GH_CONFIG_DIR="${HOME}/.config/gh-${agent}" \
-      GH_TOKEN="${token_value}" \
-      gh "$@"
+      OPENCLAW_GH_TOKEN="${token_value}" \
+      "${wrapper}" "$@"
 }
 
 # Direct alias — scripts that need to bypass the function (e.g. to escape a
@@ -132,7 +150,7 @@ gh-with-agent-token() {
 # stdout instead of exporting them, polluting every shell startup.
 if [[ -n "${BASH_VERSION:-}" ]]; then
   export -f gh gh-with-agent-token 2>/dev/null || true
-  export -f __gh_shim_resolve_agent __gh_shim_agent_allowed __gh_shim_refuse_ambient 2>/dev/null || true
+  export -f __gh_shim_resolve_agent __gh_shim_agent_allowed __gh_shim_refuse_ambient __gh_shim_shared_wrapper 2>/dev/null || true
 fi
 
 # Self-test hook — when `gh-with-agent-token.sh` is invoked as a command (not
