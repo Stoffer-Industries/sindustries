@@ -54,18 +54,6 @@ pub(crate) fn gh_command() -> Command {
     cmd
 }
 
-#[cfg(test)]
-mod tests {
-    use super::gh_command;
-
-    #[test]
-    fn gh_uses_the_shared_repository_wrapper() {
-        let command = gh_command();
-        let program = command.get_program().to_string_lossy();
-        assert!(program.ends_with("github-cli.sh"));
-    }
-}
-
 /// Fetch the body of a GitHub PR via `gh pr view --json body --jq .body`,
 /// routed through `pr_gates::decode_pr_body_output` for the markdown
 /// normalisation that downstream AC parsers expect.
@@ -95,4 +83,16 @@ pub(crate) fn load_task(base_url: &str, task_id: &str) -> Result<Envelope> {
         state,
         vec![],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gh_command;
+
+    #[test]
+    fn gh_uses_the_shared_repository_wrapper() {
+        let command = gh_command();
+        let program = command.get_program().to_string_lossy();
+        assert!(program.ends_with("github-cli.sh"));
+    }
 }
