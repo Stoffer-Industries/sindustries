@@ -142,9 +142,9 @@ The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default 
 | `budget-api-db-down`           | page     | Quinn  |
 | `db-query-slow`                | warn     | Quinn  |
 | `redis-down`                   | page     | Quinn  |
-| `worker-queue-stuck`           | warn     | Quinn  |
-| `deploy-failed`                | warn     | Quinn  |
-Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P2 informational). Quinn is the canonical owner for every alert in the v1 list; the runbook documents how to reassign individual alerts to Tom or another on-call.
+| `worker-queue-stuck`           | warn     | Quinn  | **disabled 2026-Q4 (task 2c782afb AC2 Path B)** — see [Worker queue-depth alert](#worker-queue-depth-alert-disabled) |
+| `deploy-failed`                | warn     | Quinn  | **removed 2026-Q4 (task 2c782afb AC3)** — see [Deploy-failure telemetry](#deploy-failure-telemetry) |
+Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P2 informational). Quinn is the canonical owner for every alert in the v1 list; the runbook documents how to reassign individual alerts to Tom or another on-call. The two disabled/removed entries are documented below; both will return in a follow-up task with their durable producer, not by re-enabling the dead alert.
 
 ### Provisioning contract and common failures
 
@@ -155,6 +155,28 @@ Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P
 - Alert files stay in portable Grafana file-export format. Bootstrap translates each rule to the HTTP API schema (`folderUID`, `ruleGroup`, `orgID`), creates its deterministic folder if absent, then POSTs a new UID or PUTs an existing UID.
 - The health-probe starts OTel through Node's `--require @sindustries/otel-node/register` preload. `./register` is a require-only package export and must not be imported from ESM application code; `OTEL_SERVICE_NAME=health-probe` in Fly config names the preloaded SDK.
 - Fly resolves both `build.context` and `build.dockerfile` relative to the Fly config file. `infra/cloud/scripts/tests/fly-toml-context.test.sh` resolves every cloud config and rejects paths that do not reach the repository root or an existing Dockerfile.
+
+## Worker queue-depth alert (disabled)
+
+The `worker-queue-stuck` alert (file removed in task 2c782afb AC2 Path B, 2026-Q4) previously queried `sindustries_queue_ready` with a 100-ready-jobs threshold. Two problems forced the disable:
+
+1. **No producer.** No runtime service in this repo emits `sindustries_queue_ready`. The content-scheduler BullMQ adapter exposes a `queueStats()` method, but the worker's startup path does not register an `ObservableGauge` for it. A naive wiring would also be unsafe — BullMQ's "ready" count includes scheduled (delayed) jobs, so a normal "schedule a tweet for tomorrow" workload would look like backlog.
+2. **Dead-worker masking.** The original alert used `noDataState=OK`, which silently masks a worker that has crashed (no metric emitted → no alert). A correct wire-up needs both the gauge and a companion `sindustries_worker_up` indicator with a `noDataState=NoData` companion alert; neither is wired today.
+
+**Decision:** the alert is removed from `infra/cloud/observability/grafana/alerts/worker-queue-stuck.json` and the contract test asserts absence. Re-enable only when both (a) a stale-aware `waiting`+`active` count is available from the adapter, and (b) the worker-up companion can be wired into the auto-post-worker boot path. Track this as a follow-up under task 2c782afb's decomposition or as a new code task; do not re-add the alert file speculatively.
+
+## Deploy-failure telemetry
+
+The `deploy-failed` alert (file removed in task 2c782afb AC3, 2026-Q4) previously queried `sindustries_deploy_failed_total` with a 10-minute increase threshold. No producer exists for that counter, and the design for the durable producer is larger than this task can land. The full design surface is captured in `brain/ideas/deploy-failure-telemetry-pipeline.md` (created alongside this section) and decomposes into a follow-up code task with its own tech design.
+
+**Minimum shape of the future producer (recorded here so the next task can re-derive it without re-discovering the surface):**
+
+- A small webhook receiver (Fly app, serverless function, or GitHub Actions relay) that accepts `workflow_run` events from GitHub Actions and converts `conclusion != "success"` events for the deploy workflows into an OTLP `sindustries_deploy_failed_total{repo, workflow, conclusion}` counter.
+- Same OTLP endpoint as the rest of the hosted stack (`GRAFANA_CLOUD_OTLP_ENDPOINT` + `GRAFANA_CLOUD_OTLP_HEADERS`); reuse the existing `packages/otel-node` preload to keep the credential flow consistent.
+- The producer is only as durable as its deploy target — placing it on a Fly app gives one deploy/credential surface; a serverless function trades durability for a different ops surface. The follow-up task picks one with its own trade-off document.
+- The dead-metric-name contract test (`observability-provisioning.test.sh`) currently asserts that no JSON file contains `sindustries_deploy_failed_total`; the follow-up task's first action is to flip that assertion into a positive presence check once the producer ships.
+
+The bootstrap script auto-discovers and uploads everything in `infra/cloud/observability/grafana/alerts/`; the file removal + the contract test update is sufficient to drop the alert from the hosted Grafana list on the next `bootstrap-observability.sh alerts` run.
 
 ---
 

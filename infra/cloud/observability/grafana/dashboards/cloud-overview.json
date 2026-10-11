@@ -1,6 +1,6 @@
 {
   "annotations": { "list": [] },
-  "description": "Per-app p95 latency, error rate, and request count for the SIndustries cloud-hosted services. Backed by Prometheus (OTLP from packages/otel-node + NodeSDK).",
+  "description": "Per-app p95 latency, error rate, and request count for the SIndustries cloud-hosted services. Backed by Prometheus (OTLP from packages/otel-node + NodeSDK). Uses the OTel HTTP semantic conventions emitted as `http_server_duration_milliseconds_*` (task 2c782afb AC1).",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -24,22 +24,37 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(http_server_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(http_server_duration_milliseconds_bucket{service_name=~\"$service\"}[5m])))",
           "legendFormat": "{{service_name}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] }
     },
     {
       "type": "timeseries",
-      "title": "Error rate (5xx / total)",
+      "title": "5xx ratio (per service)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (service_name) (rate(http_requests_total{status=~\"5..\"}[5m])) / sum by (service_name) (rate(http_requests_total[5m]))",
+          "expr": "sum by (service_name) (rate(http_server_duration_milliseconds_count{service_name=~\"$service\",http_status_code=~\"5..\"}[5m])) / sum by (service_name) (rate(http_server_duration_milliseconds_count{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "4xx ratio (per service)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (service_name) (rate(http_server_duration_milliseconds_count{service_name=~\"$service\",http_status_code=~\"4..\"}[5m])) / sum by (service_name) (rate(http_server_duration_milliseconds_count{service_name=~\"$service\"}[5m]))",
           "legendFormat": "{{service_name}}"
         }
       ],
@@ -48,17 +63,34 @@
     {
       "type": "timeseries",
       "title": "Request count (per service)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (service_name) (rate(http_requests_total[1m]))",
+          "expr": "sum by (service_name) (rate(http_server_duration_milliseconds_count{service_name=~\"$service\"}[1m]))",
           "legendFormat": "{{service_name}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_server_duration_milliseconds_count, service_name)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "multi": true,
+        "sort": 1,
+        "refresh": 2
+      }
+    ]
+  }
 }
