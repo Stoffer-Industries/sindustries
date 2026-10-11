@@ -120,6 +120,17 @@ PY
   done
 )"
 
+# Removed alerts (task 2c782afb AC2 + AC3) — intentionally absent from the
+# alerts directory but should still appear in the evidence pack so an
+# operator can see the full alert surface (active + removed). The bootstrap
+# contract test (observability-bootstrap.test.sh) asserts n_alerts == 10
+# (8 active + 2 removed) and that the evidence md mentions each removed
+# alert's uid. Re-add each only when it has a durable producer.
+REMOVED_ALERTS_TSV="$(printf 'sindustries-worker-queue-stuck\tWorker queue stuck (disabled)\t-\t-\t-\tsindustries_queue_ready (no producer; alert disabled per task 2c782afb AC2 Path B; BullMQ ready-count would false-positive on delayed jobs and the original noDataState=OK would mask a crashed worker)\nsindustries-deploy-failed\tDeploy failure (disabled)\t-\t-\t-\tsindustries_deploy_failed_total (no producer; alert disabled per task 2c782afb AC3; the alert was permanently in noDataState=OK; see brain/ideas/deploy-failure-telemetry-pipeline.md for the separate-telemetry design)\n')"
+
+ALERTS_TSV="${ALERTS_TSV}
+${REMOVED_ALERTS_TSV}"
+
 emit() {
   # When called with arguments (e.g. `emit "string"`), print them.
   # When called with no arguments (e.g. `emit <<EOF ... EOF`), the
