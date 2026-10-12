@@ -11,13 +11,21 @@ of task `94d5e4fc-1b31-4d04-a13b-4f69a7ec297a` (see
 - `src/server.ts` — bootstrap entrypoint (binds PORT, validates env, starts
   HTTP listener).
 - `src/app.ts` — Express app factory (helmet, CORS, rate limit, route
-  mounting).
+  mounting). Owns the full route surface: service-to-service (x-actor-secret
+  + x-content-ingest-secret gated), authenticated user mutations
+  (method-scoped via `methodGate(WRITE_METHODS, ...)` so the public GETs
+  under `/api/v1/content-scheduler` stay open per the Phase-1 Auth matrix
+  in `docs/specs/content-scheduler-auth-tech-design.md`).
 - `src/config/env.ts` — env validation (zod), parsed and frozen at module
   load.
-- `src/routes/` — Content Scheduler HTTP routes (to be moved from
-  `services/tasks-api/src/routes/` in subsequent commits).
-- `prisma/` — schema and migrations (ContentSchedulerItem ownership moves
-  from `services/tasks-api` in a later commit).
+- `src/routes/` — Content Scheduler HTTP routes. The
+  `services/tasks-api/src/routes/contentScheduler*` paths were retired
+  during the extraction under task `94d5e4fc-1b31-4d04-a13b-4f69a7ec297a`;
+  this service is now the only owner of those routes.
+- `prisma/` — schema and migrations. The `ContentSchedulerItem`,
+  `ContentSchedulerPublishAttempt`, and related models moved from
+  `services/tasks-api` as part of the same extraction; the `tasks-api`
+  Prisma client no longer references them.
 
 ## Local dev
 
@@ -38,8 +46,13 @@ budget API uses `4003`. Tilt wires the service into both local modes.
 
 ## Acceptance criteria
 
-The full extraction is tracked under task `94d5e4fc-1b31-4d04-a13b-4f69a7ec297a`.
-This commit owns the **service scaffold** needed before any route move.
+The full extraction shipped under task `94d5e4fc-1b31-4d04-a13b-4f69a7ec297a`
+(see `docs/specs/content-scheduler-service-extraction-tech-design.md`).
+This README describes the **post-extraction** service, which owns its full
+route surface, schema, and migrations; subsequent work tracks the
+post-extraction tech designs (`content-scheduler-auth-tech-design.md`,
+`thread-publish-atomic-claim-w42-tech-design.md`, etc.) and the
+`content-scheduler-api` follow-up tasks, not any further service split.
 
 ## Manual reply drafts (task 5279b310)
 
