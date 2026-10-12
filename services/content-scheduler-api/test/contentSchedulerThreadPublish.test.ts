@@ -37,6 +37,22 @@ const { prismaMock } = vi.hoisted(() => {
       count: vi.fn()
     }
   };
+  // The orchestrator now wraps the claim+attempt pair in a Prisma
+  // interactive transaction. The mock needs a $transaction method that
+  // invokes the callback with a transaction client whose model methods
+  // forward to the same prismaMock — that way existing per-test setups
+  // (which mock `prismaMock.contentSchedulerItem.updateMany` and
+  // `prismaMock.contentSchedulerPublishAttempt.create` directly) keep
+  // working, and we can simulate a failed attempt insert by making the
+  // create mock throw — the transaction body then throws, $transaction
+  // propagates, and the claim is implicitly rolled back.
+  prismaMock.$transaction = vi.fn(async (fn: (tx: any) => Promise<unknown>) => {
+    return fn({
+      contentSchedulerItem: prismaMock.contentSchedulerItem,
+      contentSchedulerPublishAttempt: prismaMock.contentSchedulerPublishAttempt,
+      contentSchedulerAttemptTweet: prismaMock.contentSchedulerAttemptTweet
+    });
+  });
   return { prismaMock };
 });
 
@@ -327,6 +343,94 @@ describe('publishThreadContentSchedulerItem', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('PART_BODY_INVALID');
+  });
+
+  // W42 audit F2: the pre-fix code did `updateMany` and
+  // `attempt.create` as two separate operations. If the second one
+  // threw, the item was left in `publishing` with no journal row, and
+  // every subsequent call hit a wall. The new implementation wraps
+  // both in a Prisma interactive transaction, so a failure inside the
+  // transaction rolls the item claim back to `approved` and makes
+  // zero X calls. The mocked $transaction here just propagates the
+  // callback's error (real Postgres would rollback); the test
+  // verifies the orchestrator does not invoke X and that the error
+  // surfaces to the caller for sanitized handling.
+  it('rolls back the claim when the attempt insert fails inside the transaction (AC1)', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(threadFixture());
+    // The item claim succeeds inside the transaction…
+    prismaMock.contentSchedulerItem.updateMany.mockResolvedValue({ count: 1 });
+    // …but the attempt insert throws. Real Postgres would rollback
+    // the conditional update; the mock's $transaction propagates the
+    // error to the orchestrator.
+    prismaMock.contentSchedulerPublishAttempt.create.mockRejectedValue(
+      new Error('constraint violation: publish_attempt_item_fkey')
+    );
+
+    const client = {
+      createTweet: vi.fn(),
+      getTweetAuthor: vi.fn(),
+      deleteTweet: vi.fn()
+    };
+
+    await expect(
+      publishThreadContentSchedulerItem('22222222-2222-2222-2222-222222222222', {
+        client,
+        prismaOverride: prismaMock
+      })
+    ).rejects.toThrow(/publish_attempt_item_fkey/);
+
+    // No X calls were made — the failure happened before the publish
+    // loop. Compensation isn't relevant here because there are no
+    // tweets to delete.
+    expect(client.createTweet).not.toHaveBeenCalled();
+    expect(client.deleteTweet).not.toHaveBeenCalled();
+
+    // The transaction was entered exactly once; the conditional
+    // updateMany was attempted; the attempt create threw and the
+    // transaction body propagated. In a real DB the rollback would
+    // leave the item at `approved`; the integration test below
+    // verifies that observable state.
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.contentSchedulerItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: '22222222-2222-2222-2222-222222222222', status: 'approved' },
+        data: { status: 'publishing' }
+      })
+    );
+    expect(prismaMock.contentSchedulerPublishAttempt.create).toHaveBeenCalledTimes(1);
+  });
+
+  // When the conditional update finds 0 rows (another caller won the
+  // claim, or the item is no longer `approved`), the transaction
+  // returns null and the orchestrator surfaces PUBLISH_IN_PROGRESS.
+  // The real concurrency invariant (only one winner) is verified
+  // against real Postgres in the integration test below; this mocked
+  // case covers the "0 rows" code path that the route maps to
+  // PUBLISH_IN_PROGRESS.
+  it('returns PUBLISH_IN_PROGRESS when the conditional claim finds 0 rows (AC2 loser)', async () => {
+    prismaMock.contentSchedulerItem.findUnique.mockResolvedValue(threadFixture());
+    prismaMock.contentSchedulerItem.updateMany.mockResolvedValue({ count: 0 });
+
+    const client = {
+      createTweet: vi.fn(),
+      getTweetAuthor: vi.fn(),
+      deleteTweet: vi.fn()
+    };
+
+    const result = await publishThreadContentSchedulerItem(
+      '22222222-2222-2222-2222-222222222222',
+      { client, prismaOverride: prismaMock }
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('PUBLISH_IN_PROGRESS');
+    expect(result.message).toMatch(/no longer claimable/);
+
+    // No attempt was created on the losing call.
+    expect(prismaMock.contentSchedulerPublishAttempt.create).not.toHaveBeenCalled();
+    // No X calls.
+    expect(client.createTweet).not.toHaveBeenCalled();
   });
 });
 

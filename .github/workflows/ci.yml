@@ -376,6 +376,63 @@ jobs:
       - name: Run vitest suite
         run: npm test --workspace services/content-scheduler-api
 
+  content-scheduler-api-db-integration:
+    # W42 audit F2: the mocked `contentSchedulerThreadPublish.test.ts`
+    # suite blanket-mocks Prisma, so real DB-layer bugs (a broken
+    # transaction boundary, missing rollback, lost concurrent-claim
+    # winner) silently pass CI. This job runs the parallel
+    # `threadPublishAtomicClaimIntegration.test.ts` against the same
+    # Postgres service the unit job provisions, proving the
+    # interactive transaction actually rolls back on attempt-insert
+    # failure and serialises concurrent claims to exactly one winner.
+    # The test self-skips when `CONTENT_SCHEDULER_API_INTEGRATION_TEST`
+    # is unset so local developers running `npm test` without a
+    # Postgres instance are not broken. The unit job deliberately does
+    # not set this env var.
+    name: content-scheduler-api db integration (real Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sindustries_content_scheduler
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:***@localhost:5432/sindustries_content_scheduler?schema=content_scheduler
+      CONTENT_SCHEDULER_API_INTEGRATION_TEST: '1'
+      OTEL_SDK_DISABLED: '1'
+      X_CLIENT: fake
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace services/content-scheduler-api
+
+      - name: Apply DB migrations
+        run: npm run prisma:migrate --workspace services/content-scheduler-api
+
+      - name: Run vitest suite (integration only)
+        run: npm test --workspace services/content-scheduler-api -- threadPublishAtomicClaimIntegration
+
   feature-task-workflow-tests:
     name: feature-task workflow tests
     runs-on: ubuntu-latest
@@ -989,6 +1046,7 @@ jobs:
       - mission-control-tests
       - tasks-api-tests
       - content-scheduler-api-tests
+      - content-scheduler-api-db-integration
       - feature-task-workflow-tests
       - ash-tests
       - budget-api-unit

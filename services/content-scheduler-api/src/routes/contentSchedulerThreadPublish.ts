@@ -155,36 +155,58 @@ function normaliseParts(
 }
 
 /**
- * Atomically claim the item for publish. Uses a conditional update so
- * concurrent callers (manual click + auto-post worker firing at the
- * same minute) cannot both transition the item out of `approved`.
+ * Atomically claim the item for publish and create the publish-attempt
+ * journal row. Uses a Prisma interactive transaction so the
+ * `approved -> publishing` transition and the attempt insert either
+ * both commit or both roll back. A failure creating the attempt (DB
+ * constraint, connection drop, etc.) must NOT leave the item stranded
+ * in `publishing` with no journal row — that's the W42 audit F2
+ * defect, which forced the user into an unreachable state: subsequent
+ * publish rejected `publishing`, and retry only admitted
+ * `cleanup_required`.
+ *
+ * Concurrent callers (manual click + auto-post worker firing at the
+ * same minute) are still mutually exclusive: PostgreSQL serialises
+ * the conditional `updateMany` inside the transaction, and only the
+ * winning caller proceeds to the attempt insert. The other caller
+ * sees 0 rows updated and returns `null`; the route layer maps that to
+ * `PUBLISH_IN_PROGRESS`.
+ *
  * Returns the new attempt id, or null if the item is no longer in a
  * claimable state.
  */
-async function claimItem(
+export async function claimItem(
   itemId: string,
   db: PrismaClient,
   now: Date
 ): Promise<{ attemptId: string } | null> {
-  // Conditional update: only the caller that wins the
-  // approved -> publishing transition creates an attempt. Other callers
-  // see 0 rows updated and bail with PUBLISH_IN_PROGRESS at the route
-  // level.
-  const claimed = await db.contentSchedulerItem.updateMany({
-    where: { id: itemId, status: 'approved' },
-    data: { status: 'publishing' }
-  });
-  if (claimed.count !== 1) {
-    return null;
-  }
-  const attempt = await db.contentSchedulerPublishAttempt.create({
-    data: {
-      itemId,
-      state: 'publishing',
-      startedAt: now
+  // Short, network-free transaction. The `updateMany` and the attempt
+  // `create` use the same transaction client so a rejected `create`
+  // rolls back the item claim back to `approved`. This is the
+  // pre-X invariant: the database owns the claim/journal pairing, the
+  // X network call stays outside the transaction.
+  const result = await db.$transaction(async (tx) => {
+    const claimed = await tx.contentSchedulerItem.updateMany({
+      where: { id: itemId, status: 'approved' },
+      data: { status: 'publishing' }
+    });
+    if (claimed.count !== 1) {
+      // Another caller already won the claim, OR the item is no longer
+      // in `approved` (e.g. it was removed). Returning null (via the
+      // surrounding `null` literal below) aborts the transaction with
+      // a rollback so no attempt row is created.
+      return null;
     }
+    const attempt = await tx.contentSchedulerPublishAttempt.create({
+      data: {
+        itemId,
+        state: 'publishing',
+        startedAt: now
+      }
+    });
+    return { attemptId: attempt.id };
   });
-  return { attemptId: attempt.id };
+  return result;
 }
 
 /**
