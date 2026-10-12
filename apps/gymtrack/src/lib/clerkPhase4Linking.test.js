@@ -11,7 +11,7 @@ const clerkAuthPath = resolve(process.cwd(), 'src/lib/clerkAuth.jsx');
 const migration = readFileSync(migrationPath, 'utf8');
 const executableSql = migration
   .split('\n')
-  .map((line) line.replace(/--.*$/, ''))
+  .map((line) => line.replace(/--.*$/, ''))
   .join('\n');
 
 const clerkAuth = readFileSync(clerkAuthPath, 'utf8');
