@@ -278,6 +278,46 @@ def resolve_own_attention_owner(
     return resp if isinstance(resp, dict) else {}
 
 
+def reconcile_attention_owners(
+    task_id: str,
+    attention_owners: list[str],
+    note: str,
+    *,
+    base_url: str | None = None,
+    token: str | None = None,
+) -> dict:
+    """Replace the full attention-owner stack via the reason-bearing endpoint.
+
+    This is the supported path for cross-agent attention-owner writes
+    (task ``91864257`` AC2 / AC5). Use it whenever the caller needs to
+    add, remove, or reorder attention owners — the API records the
+    authenticated actor on every row, preserving audit metadata. A blank
+    ``note`` raises locally and the server returns 400 on the wire if a
+    caller bypasses the helper.
+
+    The ``/tasks/:id/attention-owners/reconcile`` route is POST-only; an
+    OPTIONS or GET probe returns 404, which is normal — do not treat
+    that as a deployment or credential issue. Use this helper or call
+    POST directly with an authenticated credential.
+    """
+    if not isinstance(note, str) or not note.strip():
+        raise ValueError("note is required (non-empty after trim)")
+    base = base_url or get_base_url()
+    resp = api_request(
+        "POST",
+        base,
+        f"/tasks/{task_id}/attention-owners/reconcile",
+        {
+            "attentionOwners": list(attention_owners),
+            "note": note.strip(),
+        },
+        token=token,
+    )
+    if isinstance(resp, dict) and "data" in resp:
+        return resp["data"]
+    return resp if isinstance(resp, dict) else {}
+
+
 def _blocking_comment(task: dict) -> str | None:
     """Return the text of the latest [feature-task-progress-checklist] comment, if any."""
     for comment in reversed(task.get("comments") or []):
