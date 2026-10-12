@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSession, useUser, useSignIn, useSignUp, useClerk } from '@clerk/react';
 import { AuthContext } from './authContext.jsx';
 import { getClerkPublishableKey } from './clerkConfig.js';
-import { setSupabaseAccessTokenGetter } from './supabase.js';
+import { setSupabaseAccessTokenGetter, supabase } from './supabase.js';
 
 /**
  * Clerk-backed AuthProvider. Activated when VITE_AUTH_PROVIDER === 'clerk'.
@@ -234,6 +234,95 @@ export function ClerkAuthProvider({ children }) {
     };
   }, [getAccessToken]);
 
+  /**
+   * Phase 4 linking — first-post-migration-sign-in side effect.
+   *
+   * On every Clerk session establish, call
+   * `public.link_clerk_user_to_profile(...)` (a SECURITY DEFINER
+   * function) with the verified email and the inferred signup source.
+   * The function is idempotent:
+   *
+   *   - **Already linked** (steady state): returns the existing row.
+   *   - **Pre-migration match by verified email**: sets
+   *     `clerk_user_id` on the legacy row, preserving
+   *     `legacy_auth_user_id` for the audit window.
+   *   - **Fresh sign-up**: inserts a new `public.profiles` row keyed
+   *     by the Clerk subject.
+   *
+   * Errors are logged but do NOT block sign-in. The user can still use
+   * the app on `VITE_AUTH_PROVIDER=clerk`; the only consequence of a
+   * failed linking call is that pre-migration workout history is not
+   * yet visible (RLS subquery on `workouts` resolves to NULL until the
+   * profile row exists). A retry runs on every Clerk session change,
+   * so a transient network error self-heals on the next render.
+   *
+   * The Clerk JWT is sent as the bearer token by supabase.js's
+   * `accessToken` callback. Supabase Third-Party Auth verifies it
+   * server-side; `auth.jwt()->>'sub'` in the function resolves to the
+   * Clerk subject, which the function then compares against
+   * `p_clerk_user_id` as the security guard. The function will reject
+   * any caller whose `p_clerk_user_id` does not match their own JWT
+   * sub, so a signed-in user cannot impersonate another Clerk subject
+   * to claim their legacy account.
+   *
+   * Source-of-truth: docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md
+   * Phase 4, and the migration
+   * apps/gymtrack/supabase/migrations/20261013000000_clerk_phase_4_link_existing_users.sql
+   * which defines the function.
+   */
+  useEffect(() => {
+    const clerkSubject = user?.id;
+    const primaryEmail = user?.primaryEmailAddress?.emailAddress ?? null;
+    const emailVerified =
+      user?.primaryEmailAddress?.verification?.status === 'verified';
+
+    // Not yet signed in, or Clerk has not surfaced a primary email
+    // address yet (rare but possible while Clerk finishes loading).
+    // Skip; the effect re-runs when the user changes.
+    if (!clerkSubject || !primaryEmail) {
+      return;
+    }
+
+    // Infer the signup source from Clerk's user shape so the linked
+    // row carries the right `signup_source` audit value. The function
+    // accepts these four values: 'google' | 'apple' | 'email_password'
+    // | 'clerk_first_login' | 'clerk_import'.
+    const externalProvider = user?.externalAccounts?.[0]?.provider ?? null;
+    const signupSource = externalAccountToSignupSource(externalProvider, user);
+
+    let cancelled = false;
+    supabase
+      .rpc('link_clerk_user_to_profile', {
+        p_clerk_user_id: clerkSubject,
+        p_email: primaryEmail,
+        p_email_verified: emailVerified,
+        p_signup_source: signupSource
+      })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          // Log and continue. The auth flow should not block on the
+          // linking side-effect; the next session change retries
+          // (the function is idempotent, so the second call is a
+          // cheap steady-state read).
+          // eslint-disable-next-line no-console
+          console.error(
+            'gymtrack/clerk-phase-4-linking: rpc failed',
+            { code: error.code, message: error.message, details: error.details }
+          );
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.error('gymtrack/clerk-phase-4-linking: unexpected error', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.primaryEmailAddress?.emailAddress, user?.primaryEmailAddress?.verification?.status]);
+
   const value = useMemo(
     () => ({
       session,
@@ -284,4 +373,25 @@ async function clerkSignUpPrepareEmailAddressVerification(signUpResource) {
     // Non-fatal: the next sign-in attempt will re-trigger verification
     // preparation on the server side.
   }
+}
+
+/**
+ * Map Clerk's user shape to the `signup_source` value the linking
+ * function accepts. The function's check constraint enforces
+ * 'google' | 'apple' | 'email_password' | 'clerk_first_login'
+ * | 'clerk_import'; anything outside this set is rejected at the
+ * database boundary, so this mapper is the single place that maps
+ * Clerk's provider strings to the audit value.
+ *
+ * Clerk's `externalAccounts[].provider` for OAuth is
+ * 'oauth_google' | 'oauth_apple' | etc. Email + password sign-up is
+ * distinguished by `passwordEnabled` (true if the user has a
+ * password on file at Clerk). The default 'clerk_first_login' covers
+ * any path we did not classify (e.g. SAML, magic link).
+ */
+function externalAccountToSignupSource(externalProvider, user) {
+  if (externalProvider === 'oauth_google') return 'google';
+  if (externalProvider === 'oauth_apple') return 'apple';
+  if (user?.passwordEnabled) return 'email_password';
+  return 'clerk_first_login';
 }
