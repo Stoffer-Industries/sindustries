@@ -133,16 +133,14 @@ prisma_state_json="$(
     --dbname="$SOURCE_DSN" \
     --command="
       SELECT json_build_object(
-        'tables_present', bool_or(table_name = '_prisma_migrations'),
+        'tables_present', true,
         'migrations', COALESCE(json_agg(json_build_object(
           'name', migration_name,
           'finished_at', finished_at,
           'rolled_back_at', rolled_back_at
-        ) ORDER BY started_at) FILTER (WHERE table_name = '_prisma_migrations'), '[]'::json)
+        ) ORDER BY started_at), '[]'::json)
       )
-      FROM (SELECT * FROM tasks_api._prisma_migrations) m
-      RIGHT JOIN (VALUES (true)) AS one ON true
-      LIMIT 1;"
+      FROM tasks_api._prisma_migrations;"
   )"
 
 # Source activity baseline (snapshot time only — counts of live queries).
