@@ -16,54 +16,74 @@
 
 -- ----- Aggregate row counts + distinct PK counts per table -----------------
 
+SELECT 'User'            AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "User"
+UNION ALL
+SELECT 'User'            AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "User"
+UNION ALL
+SELECT 'AkahuConnection' AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "AkahuConnection"
+UNION ALL
+SELECT 'AkahuConnection' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "AkahuConnection"
+UNION ALL
+SELECT 'Session'         AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "Session"
+UNION ALL
+SELECT 'Session'         AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "Session"
+UNION ALL
 SELECT 'LinkedCard'      AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "LinkedCard"
 UNION ALL
 SELECT 'LinkedCard'      AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "LinkedCard"
+UNION ALL
+SELECT 'AccountBalanceSnapshot' AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "AccountBalanceSnapshot"
+UNION ALL
+SELECT 'AccountBalanceSnapshot' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "AccountBalanceSnapshot"
 UNION ALL
 SELECT 'Transaction'     AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "Transaction"
 UNION ALL
 SELECT 'Transaction'     AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "Transaction"
 UNION ALL
-SELECT 'AkahuToken'      AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "AkahuToken"
+SELECT 'CardMonthlyBudget' AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "CardMonthlyBudget"
 UNION ALL
-SELECT 'AkahuToken'      AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "AkahuToken"
+SELECT 'CardMonthlyBudget' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "CardMonthlyBudget"
 UNION ALL
-SELECT 'BudgetCategory'  AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "BudgetCategory"
+SELECT 'CategorizationFeedback' AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "CategorizationFeedback"
 UNION ALL
-SELECT 'BudgetCategory'  AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "BudgetCategory"
+SELECT 'CategorizationFeedback' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "CategorizationFeedback"
 UNION ALL
-SELECT 'BudgetSettings'  AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "BudgetSettings"
+SELECT 'BalanceAlertConfig' AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "BalanceAlertConfig"
 UNION ALL
-SELECT 'BudgetSettings'  AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "BudgetSettings";
+SELECT 'BalanceAlertConfig' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "BalanceAlertConfig"
+UNION ALL
+SELECT 'NotificationEvent' AS check_name, 'row_count'         AS metric, count(*)::bigint AS value FROM "NotificationEvent"
+UNION ALL
+SELECT 'NotificationEvent' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "NotificationEvent";
 
--- ----- AkahuToken length-class check (never decrypt, never read bytes) -----
+-- ----- AkahuConnection access-token length class (never read bytes) -----
 
 -- Coarse classification: short (≤ 256 bytes), medium (≤ 1024), long.
-SELECT 'AkahuToken' || '::length_class::' ||
+SELECT 'AkahuConnection' || '::token_length_class::' ||
        CASE
-         WHEN octet_length(encrypted_token) <= 256  THEN 'short'
-         WHEN octet_length(encrypted_token) <= 1024 THEN 'medium'
+         WHEN octet_length("accessToken") <= 256  THEN 'short'
+         WHEN octet_length("accessToken") <= 1024 THEN 'medium'
          ELSE 'long'
        END AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
-FROM "AkahuToken"
+FROM "AkahuConnection"
 GROUP BY 1;
 
 -- null/length-zero safety — should be zero on both sides.
-SELECT 'AkahuToken' AS check_name, 'null_or_empty' AS metric, count(*)::bigint AS value
-FROM "AkahuToken"
-WHERE encrypted_token IS NULL OR octet_length(encrypted_token) = 0;
+SELECT 'AkahuConnection' AS check_name, 'null_or_empty_token' AS metric, count(*)::bigint AS value
+FROM "AkahuConnection"
+WHERE "accessToken" IS NULL OR octet_length("accessToken") = 0;
 
 -- ----- Transaction direction + category-source totals ----------------------
 
-SELECT 'Transaction' || '::by_direction::' || coalesce(direction, 'NULL') AS check_name,
+SELECT 'Transaction' || '::by_direction::' || coalesce(direction::text, 'NULL') AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
 FROM "Transaction"
 GROUP BY direction;
 
-SELECT 'Transaction' || '::by_category_source::' || coalesce("categorySource", 'NULL') AS check_name,
+SELECT 'Transaction' || '::by_category_source::' || coalesce("categorySource"::text, 'NULL') AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
 FROM "Transaction"
@@ -95,7 +115,7 @@ SELECT 'invariants::orphan_transactions' AS check_name,
        'count' AS metric,
        count(*)::bigint AS value
 FROM "Transaction" t
-LEFT JOIN "LinkedCard" c ON c.id = t."linkedCardId"
+LEFT JOIN "LinkedCard" c ON c.id = t."cardId"
 WHERE c.id IS NULL;
 
 -- ----- Prisma applied-migration state --------------------------------------

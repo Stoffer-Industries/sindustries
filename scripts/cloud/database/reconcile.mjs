@@ -154,9 +154,8 @@ async function withClient(dsn, schemaName, fn) {
 
 const MANIFEST_FORBIDDEN_PATTERNS = [
   { name: 'dollar-quoted body', pattern: /\$\$/u },
-  { name: 'escape-string literal', pattern: /\bE'\S/u },
-  { name: 'backslash in string literal', pattern: /'[^']*\\[^']*'/u },
-  { name: 'embedded single quote in string literal', pattern: /'[^']*'[^']*'/u },
+  { name: 'escape-string literal', pattern: /\bE'/u },
+  { name: 'backslash in manifest', pattern: /\\/u },
 ];
 
 function splitSqlStatements(sql) {
@@ -170,8 +169,8 @@ function splitSqlStatements(sql) {
     .filter((line) => !line.trim().startsWith('--'))
     .join('\n');
   // Naive split: psql-style semicolon-terminated statements, no
-  // dollar-quoted bodies in the manifest. The manifest format is
-  // deliberately constrained so this is safe.
+  // dollar-quoted bodies, escape strings, or backslashes in the manifest.
+  // The manifest format is deliberately constrained so this is safe.
   return cleaned
     .split(/;\s*\n/u)
     .map((s) => s.trim())
@@ -204,20 +203,23 @@ async function runManifest(client, manifestPath) {
 // Tables listed here MUST match the manifest's "owned tables" set.
 
 const TASKS_API_TABLES = [
-  'Task',
-  'TaskComment',
-  'TaskDependency',
-  'TaskTag',
-  'Approval',
-  'AttentionOwner',
+  { table: 'Task', columns: ['id'] },
+  { table: 'TaskComment', columns: ['id'] },
+  { table: 'TaskDependency', columns: ['taskId', 'dependsOnId'] },
+  { table: 'TaskTag', columns: ['taskId', 'tagId'] },
+  { table: 'TaskApproval', columns: ['id'] },
+  { table: 'TaskAttentionOwner', columns: ['id'] },
 ];
 
 const BUDGET_API_TABLES = [
-  'LinkedCard',
-  'Transaction',
-  'AkahuToken',
-  'BudgetCategory',
-  'BudgetSettings',
+  { table: 'LinkedCard', columns: ['id'] },
+  { table: 'Transaction', columns: ['id'] },
+  { table: 'AkahuConnection', columns: ['id'] },
+  { table: 'AccountBalanceSnapshot', columns: ['id'] },
+  { table: 'CardMonthlyBudget', columns: ['id'] },
+  { table: 'CategorizationFeedback', columns: ['id'] },
+  { table: 'BalanceAlertConfig', columns: ['id'] },
+  { table: 'NotificationEvent', columns: ['id'] },
 ];
 
 function tableSetForService(serviceName) {
@@ -227,13 +229,18 @@ function tableSetForService(serviceName) {
 async function pkDigest(client, serviceName) {
   const tables = tableSetForService(serviceName);
   const hash = createHash('sha256');
-  for (const table of tables) {
+  for (const { table, columns } of tables) {
+    const quotedTable = `"${table}"`;
+    const quotedColumns = columns.map((column) => `"${column}"`);
     const res = await client.query(
-      `SELECT id::text AS id FROM ${table} ORDER BY id::text`
+      `SELECT ${quotedColumns.map((column) => `${column}::text AS ${column}`).join(', ')} FROM ${quotedTable} ORDER BY ${quotedColumns.join(', ')}`
     );
     for (const row of res.rows) {
       hash.update(`${table}::`);
-      hash.update(row.id);
+      for (const column of columns) {
+        hash.update(String(row[column] ?? ''));
+        hash.update('|');
+      }
       hash.update('\n');
     }
   }

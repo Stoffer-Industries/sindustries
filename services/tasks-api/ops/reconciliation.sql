@@ -27,31 +27,31 @@ SELECT 'TaskComment'    AS check_name, 'distinct_pk_count' AS metric, count(DIST
 UNION ALL
 SELECT 'TaskDependency' AS check_name, 'row_count'        AS metric, count(*)::bigint AS value FROM "TaskDependency"
 UNION ALL
-SELECT 'TaskDependency' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "TaskDependency"
+SELECT 'TaskDependency' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT ("taskId", "dependsOnId"))::bigint AS value FROM "TaskDependency"
 UNION ALL
 SELECT 'TaskTag'        AS check_name, 'row_count'        AS metric, count(*)::bigint AS value FROM "TaskTag"
 UNION ALL
-SELECT 'TaskTag'        AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "TaskTag"
+SELECT 'TaskTag'        AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT ("taskId", "tagId"))::bigint AS value FROM "TaskTag"
 UNION ALL
-SELECT 'Approval'       AS check_name, 'row_count'        AS metric, count(*)::bigint AS value FROM "Approval"
+SELECT 'TaskApproval'   AS check_name, 'row_count'        AS metric, count(*)::bigint AS value FROM "TaskApproval"
 UNION ALL
-SELECT 'Approval'       AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "Approval"
+SELECT 'TaskApproval'   AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "TaskApproval"
 UNION ALL
-SELECT 'AttentionOwner' AS check_name, 'row_count'        AS metric, count(*)::bigint AS value FROM "AttentionOwner"
+SELECT 'TaskAttentionOwner' AS check_name, 'row_count'        AS metric, count(*)::bigint AS value FROM "TaskAttentionOwner"
 UNION ALL
-SELECT 'AttentionOwner' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "AttentionOwner";
+SELECT 'TaskAttentionOwner' AS check_name, 'distinct_pk_count' AS metric, count(DISTINCT id)::bigint AS value FROM "TaskAttentionOwner";
 
 -- ----- Domain aggregates ----------------------------------------------------
 
 -- Tasks grouped by status (open / doing / acceptance / done / etc).
-SELECT 'Task' || '::by_status::' || coalesce(status, 'NULL') AS check_name,
+SELECT 'Task' || '::by_status::' || coalesce(status::text, 'NULL') AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
 FROM "Task"
 GROUP BY status;
 
 -- Tasks grouped by taskType (feature / code / research / etc).
-SELECT 'Task' || '::by_type::' || coalesce("taskType", 'NULL') AS check_name,
+SELECT 'Task' || '::by_type::' || coalesce("taskType"::text, 'NULL') AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
 FROM "Task"
@@ -63,19 +63,19 @@ SELECT 'TaskComment' AS check_name, 'total' AS metric, count(*)::bigint AS value
 -- Dependency totals.
 SELECT 'TaskDependency' AS check_name, 'total' AS metric, count(*)::bigint AS value FROM "TaskDependency";
 
--- Approval totals grouped by state (approved / pending / revoked / etc).
-SELECT 'Approval' || '::by_state::' || coalesce(state, 'NULL') AS check_name,
+-- TaskApproval totals grouped by state (approved / pending / revoked / etc).
+SELECT 'TaskApproval' || '::by_state::' || coalesce(state::text, 'NULL') AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
-FROM "Approval"
+FROM "TaskApproval"
 GROUP BY state;
 
--- AttentionOwner totals grouped by owner (informational; resets between
+-- TaskAttentionOwner totals grouped by owner (informational; resets between
 -- sweeps are expected and accounted for in the runbook).
-SELECT 'AttentionOwner' || '::by_owner::' || coalesce(owner, 'NULL') AS check_name,
+SELECT 'TaskAttentionOwner' || '::by_owner::' || coalesce(owner, 'NULL') AS check_name,
        'group_count' AS metric,
        count(*)::bigint AS value
-FROM "AttentionOwner"
+FROM "TaskAttentionOwner"
 GROUP BY owner;
 
 -- ----- Invariant checks (expected zero) ------------------------------------
@@ -94,7 +94,7 @@ SELECT 'invariants::orphan_dependencies' AS check_name,
        count(*)::bigint AS value
 FROM "TaskDependency" d
 LEFT JOIN "Task" t1 ON t1.id = d."taskId"
-LEFT JOIN "Task" t2 ON t2.id = d."dependsOnTaskId"
+LEFT JOIN "Task" t2 ON t2.id = d."dependsOnId"
 WHERE t1.id IS NULL OR t2.id IS NULL;
 
 -- ----- Prisma applied-migration state --------------------------------------
