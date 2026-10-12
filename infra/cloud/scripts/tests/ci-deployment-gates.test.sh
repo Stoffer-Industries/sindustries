@@ -45,6 +45,7 @@ expected_required = {
     'mission-control-tests',
     'tasks-api-tests',
     'content-scheduler-api-tests',
+    'content-scheduler-api-db-integration',
     'feature-task-workflow-tests',
     'ash-tests',
     'budget-api-unit',
