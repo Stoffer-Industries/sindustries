@@ -406,7 +406,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://postgres:***@localhost:5432/sindustries_content_scheduler?schema=content_scheduler
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sindustries_content_scheduler?schema=content_scheduler
       CONTENT_SCHEDULER_API_INTEGRATION_TEST: '1'
       OTEL_SDK_DISABLED: '1'
       X_CLIENT: fake
