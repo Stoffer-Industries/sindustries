@@ -108,7 +108,15 @@ PGPASSWORD="" pg_dump \
   --file="$PARTIAL_PATH" \
   "$SOURCE_DSN" \
   >"${ARCHIVE_DIR}/${CLOUD_DB_RUN_ID}.dump.log" 2>&1 \
-  || cloud_db_die "pg_dump failed; see ${ARCHIVE_DIR}/${CLOUD_DB_RUN_ID}.dump.log"
+  || {
+    # The raw log stays in the local artifact directory, but GitHub Actions
+    # does not upload it. Echo its tail through the redacting logger so a
+    # remote failure remains diagnosable without exposing a DSN.
+    while IFS= read -r dump_line; do
+      cloud_db_error "pg_dump: ${dump_line}"
+    done < <(tail -n 20 "${ARCHIVE_DIR}/${CLOUD_DB_RUN_ID}.dump.log")
+    cloud_db_die "pg_dump failed; see ${ARCHIVE_DIR}/${CLOUD_DB_RUN_ID}.dump.log"
+  }
 
 pg_dump_end_epoch="$(date +%s)"
 
