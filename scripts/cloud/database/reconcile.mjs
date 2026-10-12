@@ -43,8 +43,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 const SERVICES = [
-  { name: 'tasks-api',  manifest: join(REPO_ROOT, 'services/tasks-api/ops/reconciliation.sql') },
-  { name: 'budget-api', manifest: join(REPO_ROOT, 'services/budget-api/ops/reconciliation.sql') },
+  { name: 'tasks-api',  schema: 'tasks_api',  manifest: join(REPO_ROOT, 'services/tasks-api/ops/reconciliation.sql') },
+  { name: 'budget-api', schema: 'budget_api', manifest: join(REPO_ROOT, 'services/budget-api/ops/reconciliation.sql') },
 ];
 
 // ----- arg parsing ---------------------------------------------------------
@@ -119,10 +119,16 @@ function buildClient(dsn) {
   return new Client({ connectionString: dsn });
 }
 
-async function withClient(dsn, fn) {
+async function withClient(dsn, schemaName, fn) {
   const client = buildClient(dsn);
   await client.connect();
-  try { return await fn(client); }
+  try {
+    if (!['tasks_api', 'budget_api'].includes(schemaName)) {
+      throw new Error(`unsupported reconciliation schema: ${schemaName}`);
+    }
+    await client.query(`SET search_path TO "${schemaName}", public`);
+    return await fn(client);
+  }
   finally { await client.end(); }
 }
 
@@ -264,13 +270,13 @@ async function main() {
     services: {},
   };
 
-  for (const { name, manifest } of SERVICES) {
+  for (const { name, schema, manifest } of SERVICES) {
     const dsn = dsnByService[name];
     const checks = [];
     let allMatch = true;
 
     for (const side of ['source', 'dest']) {
-      const sideResults = await withClient(dsn[side], (client) => runManifest(client, manifest));
+      const sideResults = await withClient(dsn[side], schema, (client) => runManifest(client, manifest));
       checks.push({ side, results: sideResults });
     }
 
@@ -292,8 +298,8 @@ async function main() {
     merged.sort((a, b) => (a.check + a.metric).localeCompare(b.check + b.metric));
 
     // PK digest comparison.
-    const sourceDigest = await withClient(dsn.source,  (c) => pkDigest(c, name));
-    const destDigest   = await withClient(dsn.dest,    (c) => pkDigest(c, name));
+    const sourceDigest = await withClient(dsn.source, schema, (c) => pkDigest(c, name));
+    const destDigest   = await withClient(dsn.dest,   schema, (c) => pkDigest(c, name));
     const digestMatch = sourceDigest === destDigest;
 
     envelope.services[name] = {

@@ -2,7 +2,7 @@
 # scripts/cloud/database/migrate.sh
 #
 # Runs `prisma migrate deploy` for each owning service against its
-# schema-qualified destination DSN. Each service's migration command is
+# schema-qualified destination database. Each service's migration command is
 # independent — there are no cross-schema foreign keys. The script
 # refuses to run if a previous attempt left behind failed or
 # unaccounted-pending migrations.
@@ -25,15 +25,12 @@ Usage: migrate.sh \
   --budget-dsn-file <path>
 
 Required:
-  --tasks-dsn-file <path>   Mode-0600 DSN for the tasks_api schema
-                            (must include ?schema=tasks_api).
-  --budget-dsn-file <path>  Mode-0600 DSN for the budget_api schema
-                            (must include ?schema=budget_api).
+  --tasks-dsn-file <path>   Mode-0600 direct DSN for the destination database.
+  --budget-dsn-file <path>  Mode-0600 direct DSN for the destination database.
 
-The destination DSNs are expected to be the same database, just with
-different ?schema=... query parameters. The script will not move
-budget tables into tasks_api ownership and will not let either service
-query the other's schema.
+The destination DSNs are expected to be the same database. The script adds
+the Prisma-only ?schema=... parameter when invoking each service migration;
+the raw DSNs remain valid libpq URLs for psql, pg_dump, and pg_restore.
 USAGE
 }
 
@@ -60,16 +57,6 @@ cloud_db_load_secret BUDGET_DSN "$BUDGET_DSN_FILE"
 cloud_db_assert_no_production_dsn "tasks" "$TASKS_DSN"
 cloud_db_assert_no_production_dsn "budget" "$BUDGET_DSN"
 
-# Required schema qualification so Prisma writes into the right schema.
-case "$TASKS_DSN" in
-  *"?schema=tasks_api"*) ;;
-  *) cloud_db_die "tasks DSN must include ?schema=tasks_api" ;;
-esac
-case "$BUDGET_DSN" in
-  *"?schema=budget_api"*) ;;
-  *) cloud_db_die "budget DSN must include ?schema=budget_api" ;;
-esac
-
 # ---------------------------------------------------------------------------
 # Resolve per-service Prisma schema directory
 # ---------------------------------------------------------------------------
@@ -92,7 +79,14 @@ mkdir -p "$RESULT_DIR"
 
 prisma_migration_state() {
   local service_name="$1"
-  local dsn="$2"
+  local schema_name="$2"
+  local dsn="$3"
+  local migration_table
+
+  case "$schema_name" in
+    tasks_api|budget_api) migration_table="\"${schema_name}\".\"_prisma_migrations\"" ;;
+    *) cloud_db_die "unsupported migration schema '$schema_name'" ;;
+  esac
 
   PGPASSWORD="" psql \
     --no-psqlrc --tuples-only --no-align \
@@ -101,12 +95,21 @@ prisma_migration_state() {
     --command="
       SELECT json_build_object(
         'service', '$service_name',
-        'total',          (SELECT count(*) FROM _prisma_migrations),
-        'finished',       (SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL),
-        'rolled_back',    (SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NOT NULL),
-        'failed',         (SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL),
-        'pending',        (SELECT count(*) FROM _prisma_migrations WHERE started_at IS NULL)
+        'total',          (SELECT count(*) FROM ${migration_table}),
+        'finished',       (SELECT count(*) FROM ${migration_table} WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL),
+        'rolled_back',    (SELECT count(*) FROM ${migration_table} WHERE rolled_back_at IS NOT NULL),
+        'failed',         (SELECT count(*) FROM ${migration_table} WHERE finished_at IS NULL AND rolled_back_at IS NULL),
+        'pending',        (SELECT count(*) FROM ${migration_table} WHERE started_at IS NULL)
       );"
+}
+
+prisma_dsn_for_schema() {
+  local dsn="$1"
+  local schema_name="$2"
+  case "$dsn" in
+    *\?*) printf '%s&schema=%s' "$dsn" "$schema_name" ;;
+    *)     printf '%s?schema=%s' "$dsn" "$schema_name" ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -119,12 +122,15 @@ run_service_migration() {
   local service_name="$1"
   local prisma_dir="$2"
   local dsn="$3"
+  local schema_name="$4"
   local log_path="${RESULT_DIR}/migrate-${CLOUD_DB_RUN_ID}-${service_name}.log"
-  local state
+  local state prisma_dsn
+
+  prisma_dsn="$(prisma_dsn_for_schema "$dsn" "$schema_name")"
 
   cloud_db_info "running prisma migrate deploy service=${service_name}"
 
-  state="$(prisma_migration_state "$service_name" "$dsn")"
+  state="$(prisma_migration_state "$service_name" "$schema_name" "$dsn")"
 
   # Parse the JSON with inline python so we key off the actual
   # `failed` field rather than a fragile substring match. A naive
@@ -139,20 +145,20 @@ if int(state.get("failed", 0)) > 0:
 PY
 
   ( cd "$prisma_dir" && \
-      DATABASE_URL="$dsn" \
+      DATABASE_URL="$prisma_dsn" \
       npx --no-install prisma migrate deploy \
         >"$log_path" 2>&1 ) \
     || cloud_db_die "prisma migrate deploy failed for ${service_name}; see ${log_path}"
 
   local post_state
-  post_state="$(prisma_migration_state "$service_name" "$dsn")"
+  post_state="$(prisma_migration_state "$service_name" "$schema_name" "$dsn")"
 
   SERVICE_RESULTS["$service_name"]="$post_state"
   cloud_db_info "service=${service_name} migrations ok state=${post_state}"
 }
 
-run_service_migration "tasks-api"  "$TASKS_PRISMA_DIR"  "$TASKS_DSN"
-run_service_migration "budget-api" "$BUDGET_PRISMA_DIR" "$BUDGET_DSN"
+run_service_migration "tasks-api"  "$TASKS_PRISMA_DIR"  "$TASKS_DSN"  tasks_api
+run_service_migration "budget-api" "$BUDGET_PRISMA_DIR" "$BUDGET_DSN" budget_api
 
 # ---------------------------------------------------------------------------
 # Emit result envelope
