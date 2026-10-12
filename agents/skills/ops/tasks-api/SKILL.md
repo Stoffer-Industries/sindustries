@@ -100,6 +100,14 @@ carrying them forward. Quinn is an exceptional OpenClaw/runtime unblocker, not
 a normal QA, acceptance, review, or delivery-workflow owner. Tom is added only
 when a concrete action requires Tom now.
 
+**Client helper.** `agents/skills/ops/tasks-api/tasks_api_client.py` exposes
+`reconcile_attention_owners(task_id, attention_owners, note, *, base_url=None, token=None)`
+as the supported path. Use it instead of constructing the POST manually. The
+`/tasks/:id/attention-owners/reconcile` route is POST-only; an `OPTIONS` or
+`GET` probe returns 404 and that 404 is normal — do not treat it as a
+deployment or credential regression. To verify reachability, call the helper
+(or POST directly) with an authenticated credential.
+
 Delivery (`assignee`) and gate eligibility/context (`workflowGates` and
 structured approvals) remain independent. A normal stack can therefore be:
 `assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
