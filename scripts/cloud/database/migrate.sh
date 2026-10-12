@@ -22,11 +22,14 @@ usage() {
   cat <<'USAGE'
 Usage: migrate.sh \
   --tasks-dsn-file <path> \
-  --budget-dsn-file <path>
+  --budget-dsn-file <path> \
+  [--result-dir <path>]
 
 Required:
   --tasks-dsn-file <path>   Mode-0600 direct DSN for the destination database.
   --budget-dsn-file <path>  Mode-0600 direct DSN for the destination database.
+  --result-dir <path>       Directory for redacted migration results/logs.
+                            Defaults to ./artifacts/cloud-staging.
 
 The destination DSNs are expected to be the same database. The script adds
 the Prisma-only ?schema=... parameter when invoking each service migration;
@@ -36,11 +39,13 @@ USAGE
 
 TASKS_DSN_FILE=""
 BUDGET_DSN_FILE=""
+RESULT_DIR="./artifacts/cloud-staging"
 
 while (( $# > 0 )); do
   case "$1" in
     --tasks-dsn-file)  TASKS_DSN_FILE="$2"; shift 2;;
     --budget-dsn-file) BUDGET_DSN_FILE="$2"; shift 2;;
+    --result-dir)      RESULT_DIR="$2"; shift 2;;
     --help|-h)         usage; exit 0;;
     *)                 cloud_db_die "unknown argument: $1";;
   esac
@@ -70,7 +75,6 @@ BUDGET_PRISMA_DIR="${REPO_ROOT}/services/budget-api/prisma"
 [[ -f "$TASKS_PRISMA_DIR/schema.prisma" ]]  || cloud_db_die "missing tasks-api prisma schema"
 [[ -f "$BUDGET_PRISMA_DIR/schema.prisma" ]] || cloud_db_die "missing budget-api prisma schema"
 
-RESULT_DIR="./artifacts/cloud-staging"
 mkdir -p "$RESULT_DIR"
 
 # ---------------------------------------------------------------------------
