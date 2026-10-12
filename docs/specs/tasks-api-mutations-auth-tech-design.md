@@ -64,14 +64,14 @@ Out of scope (deferred to cloud auth task `206927ed`):
 | Agent | Mutating calls | Audit-trail actor today | Notes |
 | --- | --- | --- | --- |
 | `agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py` | `POST /tasks`, `PATCH /tasks/:id` | no `x-actor`; defaults to `"unknown"` | Needs own service credential |
-| `agents/workflows/content-tasks/scripts/common.py` (`AUTHOR = "Lobster"`) | `POST /tasks/:id/comments`, `PATCH /tasks/:id` | `Lobster` (body-supplied author) | Comment author must be derived from auth, not body |
+| `agents/workflows/content-tasks/scripts/common.py` | `POST /tasks/:id/comments`, `PATCH /tasks/:id` | shared Tasks API resolver | Comment author must be derived from auth, not body; no content-only token |
 | `agents/workflows/feature-task/src/main.rs` (approval writes) | already uses `TASKS_API_APPROVAL_TOKEN` (Bearer) | `Quinn` (approval service credential actor) | Approved; stays as-is |
 | `agents/workflows/feature-task/src/analytics.rs` | `POST /feature-task-analytics/events` (idempotent) | `x-actor` header from the Rust call | Needs own service credential OR reuses parent |
 | `agents/skills/ops/tasks-api/tasks_api_client.py` | arbitrary CRUD from terminals and agents | depends on caller | Caller supplies the credential; the client already supports `TASKS_API_APPROVAL_TOKEN` |
 | `agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py` | GET only | n/a | Not a mutation; no change |
 | Tasks app UI (browser) | POST/PATCH/DELETE via the app | session cookie | Already supported via `auth/session` + cookie |
 
-The actor list will extend with two new entries for the agents that don't have one today: `bookmark_lobster` and `feature_task_lobster`. The `Lobster` actor for content-tasks stays as-is, but it moves from body-supplied to auth-derived.
+The actor list extends with entries for the dedicated bookmark and feature-task service callers. Content tasks use the calling agent's existing Tasks API credential through the shared resolver rather than introducing a `Lobster`-specific credential.
 
 ## Architecture approach
 
@@ -139,8 +139,7 @@ Each trusted agent gets its own service credential entry. The credential schema 
 [
   { "token": "<32+ chars>", "actor": "Quinn", "approvalTypes": ["tech_design"] },
   { "token": "<32+ chars>", "actor": "bookmark_lobster", "approvalTypes": [] },
-  { "token": "<32+ chars>", "actor": "feature_task_lobster", "approvalTypes": [] },
-  { "token": "<32+ chars>", "actor": "Lobster", "approvalTypes": [] }
+  { "token": "<32+ chars>", "actor": "feature_task_lobster", "approvalTypes": [] }
 ]
 ```
 
@@ -149,7 +148,7 @@ Note the empty `approvalTypes` for the new write actors — that field is for `r
 Update the call sites:
 
 - `agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py` — set `Authorization: Bearer $BOOKMARK_LOBSTER_TOKEN` (or rely on `tasks_api_client.api_request` which already reads `TASKS_API_APPROVAL_TOKEN` — rename the env to `TASKS_API_SERVICE_TOKEN` if cleaner, or keep the existing env and document which actor maps to it).
-- `agents/workflows/content-tasks/scripts/common.py` — drop the `AUTHOR = "Lobster"` constant from `POST /tasks/:id/comments`; the API will derive the author. Continue to set `Authorization: Bearer $CONTENT_TASKS_TOKEN`.
+- `agents/workflows/content-tasks/scripts/common.py` — drop the `AUTHOR = "Lobster"` constant from `POST /tasks/:id/comments`; the API will derive the author. Use the shared `tasks_api_client` credential resolver for content-task mutations; do not introduce a content-only token.
 - `agents/workflows/feature-task/src/analytics.rs` — add a `feature_task_lobster` Bearer credential and wire it into the request layer.
 
 ### x-actor header treatment
@@ -180,7 +179,7 @@ This is **Open question 1**; see below.
 
 - No new Prisma models. The `ApprovalSession` row is reused as the session backing store.
 - `TASKS_API_APPROVAL_USERS` — schema unchanged. New users may be added (e.g. a `rowan` user for the Tasks app; the existing `tom`/`quinn` users continue).
-- `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` — schema unchanged. New entries for `bookmark_lobster`, `feature_task_lobster`, `Lobster` (content-tasks).
+- `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` — schema unchanged. New entries remain for `bookmark_lobster` and `feature_task_lobster`; content-task mutations use the existing agent-scoped Tasks API credential.
 - `POST /api/v1/tasks/:id/comments` — `author` field in the response is now derived from the authenticated user. The request body may include `author` only if it matches the authenticated actor; mismatch is a 403.
 - `x-actor` header on content-scheduler writes — accepted as before but ignored for the audit trail; the authenticated actor is authoritative. Documented in `docs/systems/tasks.md`.
 
@@ -220,7 +219,7 @@ Files to modify:
 1. **Middleware skeleton + tests** (Rowan). Add `requireAuthenticatedUser`, unit tests for cookie-only, Bearer-only, neither, both, expired, revoked. Independent of any route.
 2. **Route mounting** (Rowan). Wire the middleware in `app.ts` and start skipping auth on existing tests where appropriate (mark those tests as needing credentials).
 3. **Comment author derivation** (Rowan). Fix `POST /tasks/:id/comments`. Update content-tasks caller.
-4. **Per-agent service credentials** (Rowan + Quinn). Provision tokens for `bookmark_lobster`, `feature_task_lobster`, `Lobster` (content-tasks). Update call sites.
+4. **Per-agent service credentials** (Rowan + Quinn). Provision tokens for `bookmark_lobster` and `feature_task_lobster`; content tasks use the existing agent-scoped Tasks API credential through the shared resolver.
 5. **Integration tests** (Rowan). `mutation-auth-integration.test.ts` covers each gated route with auth success, missing auth, invalid auth, and comment-author impersonation.
 6. **Docs** (Rowan). Update `docs/systems/tasks.md` to reflect the new boundary and the migration path.
 
