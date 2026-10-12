@@ -155,10 +155,10 @@ cloud_db_info "step 3 restore complete"
 # Step 4: prisma migrate deploy
 # ---------------------------------------------------------------------------
 
-"$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
+MIGRATE_OUT="$("$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
   --tasks-dsn-file "$DEST_TASKS_FILE" \
   --budget-dsn-file "$DEST_BUDGET_FILE" \
-  --result-dir "$ARCHIVE_DIR" >/dev/null
+  --result-dir "$ARCHIVE_DIR")"
 
 cloud_db_info "step 4 migrations complete"
 
@@ -244,10 +244,10 @@ OUTPUT_PATH="${OUTPUT_PATH:-${ARCHIVE_DIR}/drill-${CLOUD_DB_RUN_ID}.json}"
 
 python3 - "$OUTPUT_PATH" "$CLOUD_DB_RUN_ID" \
         "$INVENTORY_OUT" "$DUMP_OUT" "$RESTORE_OUT" \
-        "$RECONCILE_OUT" "$RECOVERY_OUT" <<'PY'
+        "$MIGRATE_OUT" "$RECONCILE_OUT" "$RECOVERY_OUT" <<'PY'
 import json, os, sys, pathlib
 
-out_path, run_id, inv, dump, restore, reconcile, recovery = sys.argv[1:]
+out_path, run_id, inv, dump, restore, migrate, reconcile, recovery = sys.argv[1:]
 
 def safe_load(p):
   if not p: return None
@@ -263,7 +263,7 @@ envelope = {
     "inventory":  os.path.basename(inv)      if inv      else None,
     "dump":       os.path.basename(dump)     if dump     else None,
     "restore":    os.path.basename(restore)  if restore  else None,
-    "migrate":    None,
+    "migrate":    os.path.basename(migrate)  if migrate  else None,
     "reconcile":  os.path.basename(reconcile) if reconcile else None,
     "recovery":   os.path.basename(recovery) if recovery  else None,
   },
