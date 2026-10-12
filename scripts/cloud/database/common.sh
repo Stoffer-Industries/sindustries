@@ -21,7 +21,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 # Required PostgreSQL client major version (matches the staging server).
-: "${CLOUD_DB_REQUIRED_PG_MAJOR:=16}"
+: "${CLOUD_DB_REQUIRED_PG_MAJOR:=18}"
 
 # Minimum bash version.
 CLOUD_DB_MIN_BASH_MAJOR=4
