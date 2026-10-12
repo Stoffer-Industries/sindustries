@@ -157,7 +157,8 @@ cloud_db_info "step 3 restore complete"
 
 "$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
   --tasks-dsn-file "$DEST_TASKS_FILE" \
-  --budget-dsn-file "$DEST_BUDGET_FILE" >/dev/null
+  --budget-dsn-file "$DEST_BUDGET_FILE" \
+  --result-dir "$ARCHIVE_DIR" >/dev/null
 
 cloud_db_info "step 4 migrations complete"
 
@@ -221,7 +222,8 @@ if (( RECOVERY )); then
 
   "$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
     --tasks-dsn-file "$RECOVERY_TASKS_FILE" \
-    --budget-dsn-file "$RECOVERY_BUDGET_FILE" >/dev/null
+    --budget-dsn-file "$RECOVERY_BUDGET_FILE" \
+    --result-dir "$ARCHIVE_DIR" >/dev/null
 
   RECOVERY_OUT="${ARCHIVE_DIR}/reconcile-recovery-${CLOUD_DB_RUN_ID}.json"
   "$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs" \
