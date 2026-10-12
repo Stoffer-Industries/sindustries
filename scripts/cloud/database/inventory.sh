@@ -34,8 +34,8 @@ Optional:
   --environment <staging>    Environment label. Defaults to "staging".
   --help                     Show this help.
 
-The source DSN must include ?schema=tasks_api (and may also include
-?schema=budget_api). inventory.sh never accepts positional DSNs.
+The source DSN must be a direct PostgreSQL URL. Schema scope is explicit in
+the inventory queries; inventory.sh never accepts positional DSNs.
 USAGE
 }
 
