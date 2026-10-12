@@ -49,8 +49,8 @@
         },
         "provider": {
           "type": "string",
-          "enum": ["fly.io"],
-          "description": "Cloud provider for the staging topology. Pinned to fly.io because the design's foundation task chose it; widen if a follow-up task onboards another provider."
+          "enum": ["fly.io", "github-actions-postgres"],
+          "description": "Cloud provider for the staging topology. fly.io is the live staging environment (task 2850c5ac). github-actions-postgres is the disposable GitHub Actions service container used by the AC4 migration-failure fixture (task d37681e1) so the schema covers both the live drill and the local CI fixture without splitting the contract."
         }
       }
     },

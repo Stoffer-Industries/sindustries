@@ -1,0 +1,116 @@
+name: cloud-staging-db-failure-fixture
+
+# AC4 CI migration-failure fixture (task d37681e1,
+# docs/specs/staging-database-migration-restore-ac4-fixture-tech-design.md).
+# workflow_dispatch only — never runs on push or PR. Exercises
+# tests/cloud/staging-db-migration-failure-drill.sh against a
+# disposable PostgreSQL 16 service container in the GitHub Actions
+# runner so the migration-failure path is provable in CI without
+# touching the live staging Environment or any of the four DSN
+# secrets Quinn is separately provisioning.
+#
+# This workflow does NOT:
+#   - read or write the live sindustries staging Environment
+#   - read or write the cloud-staging-database concurrency group
+#   - read or write any of the 4 DSN secrets (TASKS_API_SOURCE_DSN,
+#     BUDGET_API_SOURCE_DSN, TASKS_API_DEST_DSN, BUDGET_API_DEST_DSN)
+#   - mutate any production prisma/migrations/ directory
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to exercise (tasks-api, budget-api, or both)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - tasks-api
+          - budget-api
+          - both
+
+concurrency:
+  group: cloud-staging-db-failure-fixture
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  failure-fixture:
+    name: Run AC4 migration-failure fixture
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install root workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run AC4 fixture for tasks-api
+        if: ${{ inputs.service == 'tasks-api' || inputs.service == 'both' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/cloud-staging
+          bash tests/cloud/staging-db-migration-failure-drill.sh \
+            --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=tasks_api&sslmode=disable' \
+            --prisma-migrations-dir services/tasks-api/prisma/test-migrations-fixture \
+            --service tasks-api \
+            --output artifacts/cloud-staging/failure-drill-tasks-api.json \
+            --intent-commit "${{ github.sha }}" \
+            --confirm-staging
+
+      - name: Run AC4 fixture for budget-api
+        if: ${{ inputs.service == 'budget-api' || inputs.service == 'both' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/cloud-staging
+          bash tests/cloud/staging-db-migration-failure-drill.sh \
+            --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=budget_api&sslmode=disable' \
+            --prisma-migrations-dir services/budget-api/prisma/test-migrations-fixture \
+            --service budget-api \
+            --output artifacts/cloud-staging/failure-drill-budget-api.json \
+            --intent-commit "${{ github.sha }}" \
+            --confirm-staging
+
+      - name: Schema-validate envelopes
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in artifacts/cloud-staging/failure-drill-*.json; do
+            [[ -f "$f" ]] || { echo "missing envelope: $f" >&2; exit 1; }
+            node tests/cloud/scripts/check-schema.mjs "$f"
+            jq -e '.verdict == "pass"' "$f" >/dev/null \
+              || { echo "fixture verdict != pass in $f" >&2; jq . "$f" >&2; exit 1; }
+          done
+
+      - name: Upload redacted envelopes
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-staging-db-failure-fixture-envelopes
+          path: artifacts/cloud-staging/failure-drill-*.json
+          if-no-files-found: error
+          retention-days: 14
