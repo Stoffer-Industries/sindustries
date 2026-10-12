@@ -172,7 +172,7 @@ The CLI also acquires a PostgreSQL advisory lock scoped to `cto-craft-tweet-draf
 - Fetch `https://www.techmanagerweekly.com/` (override: `CTO_CRAFT_TMW_ARCHIVE_URL`) using the safe fetcher.
 - Parse the public archive and identify the latest issue URL and published date.
 - Reject any candidate issue requiring authentication or leaving HTTP(S).
-- If the source layout cannot be parsed, fail visibly as a soft operational failure; do not interpret it as “nothing new.”
+- If a transient fetch error makes the archive unavailable, record a diagnostic and finish as a no-op; there is no article list to continue with. If the source layout cannot be parsed, fail visibly as a soft operational failure; do not interpret a malformed source as “nothing new.”
 
 The implementation includes captured HTML fixtures from the current public archive. Parser selectors are isolated in `issue_source.py` so a source-layout change does not alter graph behavior.
 
@@ -183,6 +183,7 @@ The implementation includes captured HTML fixtures from the current public archi
 - Remove newsletter navigation, subscription, tracking-only, social, sponsor, and duplicate links.
 - Strip known tracking parameters before canonicalization.
 - Cap the issue at 30 eligible links to bound runtime and model cost.
+- If a transient fetch error makes the issue unavailable, record a diagnostic and finish as a no-op.
 
 #### `fetch_and_score_article`
 
@@ -548,13 +549,14 @@ These are implementation increments on one branch/PR, not separate product relea
 
 - Archive parser selects the latest issue from current fixture.
 - Source layout change produces a failure, not a silent no-op.
+- Archive/issue 5xx fetch failures produce a diagnostic no-op.
 - Issue parser canonicalizes and filters links and enforces the 30-link cap.
 - Safe fetch rejects private/loopback/reserved DNS results and revalidates redirects.
 - Safe fetch enforces timeout, redirect, content-type, and response-size limits.
 - Article extraction removes scripts/navigation and bounds text.
 - Article text containing prompt instructions cannot alter the validated output contract.
 - Parallel branches aggregate successful candidates while retrying only transient failures.
-- Permanent/gated article failures are skipped with diagnostics.
+- Article fetch failures, including 5xx responses, are skipped with diagnostics while remaining articles continue.
 - Selection returns at most five and one per canonical `sourceRef`.
 - Fewer than three qualified candidates produces no-op.
 - Checkpointed run resumes after injected process failure without repeating completed branches where LangGraph guarantees persisted completion (covered in CI with the in-memory test checkpointer; Postgres remains the live backend).

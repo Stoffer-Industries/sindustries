@@ -117,7 +117,7 @@ The CTO Craft recurring tweet-draft pipeline (LangGraph POC, see `docs/specs/cto
 4. Scores each article against Tom's worldview profile via a structured LLM call. Production runs use a one-shot OpenClaw adapter with strict JSON validation; offline CI continues to use the FakeAngleModel.
 5. Selects 3–5 distinct angles ordered by resonance score and evidence strength.
 6. Posts the batch to `POST /content-scheduler/imports/cto-craft` with the shared `CONTENT_SCHEDULER_INGEST_SECRET` header. The endpoint creates `draft` items with `source=cto_craft` and `sourceRef=<canonical article URL>`; duplicates within the batch or against pre-existing rows are silently skipped via the partial unique index.
-7. Returns a structured JSON envelope (`outcome: created | noop | failed`, `notification` text). The cron prompt at `agents/crons/prompts/cto-craft-tweet-drafts.md` announces the `notification` verbatim only on `created`, returns `NO_REPLY` on `noop`, and escalates `failed` to Lox via the standard notify-soft-fail path.
+7. Returns a structured JSON envelope (`outcome: created | noop | failed`, `notification` text). Transient source fetch failures are recorded in diagnostics and produce a no-op; individual article fetch failures are skipped so later articles can still be scored. The cron prompt at `agents/crons/prompts/cto-craft-tweet-drafts.md` announces the `notification` verbatim only on `created`, returns `NO_REPLY` on `noop`, and escalates `failed` to Lox via the standard notify-soft-fail path.
 
 Mission Control surfaces the new drafts through the existing Content Scheduler list flow. Tom approves / schedules / publishes from Mission Control; the workflow never touches approval, scheduling, or publishing state.
 

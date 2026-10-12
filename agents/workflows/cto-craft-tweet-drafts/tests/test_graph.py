@@ -44,6 +44,7 @@ def _transport(
     archive_html: bytes,
     issue_html: bytes,
     article_routes: dict[str, bytes],
+    status_by_url: dict[str, int] | None = None,
 ) -> httpx.MockTransport:
     """Build an HTTP transport that serves per-URL article bodies.
 
@@ -57,6 +58,7 @@ def _transport(
         ARCHIVE_URL: (200, archive_html, {"content-type": "text/html"}),
         ISSUE_URL: (200, issue_html, {"content-type": "text/html"}),
     }
+    status_by_url = status_by_url or {}
     for url, body in article_routes.items():
         routes[url] = (200, body, {"content-type": "text/html"})
 
@@ -68,7 +70,7 @@ def _transport(
         path = req.url.path
         for prefix, (status, body, headers) in routes.items():
             if path == urlsplit(prefix).path:
-                return httpx.Response(status, content=body, headers=headers)
+                return httpx.Response(status_by_url.get(prefix, status), content=body, headers=headers)
         return httpx.Response(404, content=b"not found", headers={"content-type": "text/plain"})
 
     return httpx.MockTransport(handler)
@@ -81,6 +83,7 @@ def _build_graph(
     article_routes: dict[str, bytes],
     fixtures: list[AngleOutput],
     import_fn=None,
+    status_by_url: dict[str, int] | None = None,
 ) -> object:
     fetcher = SafeFetcher(
         user_agent="test",
@@ -90,7 +93,7 @@ def _build_graph(
         timeout_seconds=5.0,
         client=httpx.Client(
             timeout=httpx.Timeout(5.0),
-            transport=_transport(archive_html, issue_html, article_routes),
+            transport=_transport(archive_html, issue_html, article_routes, status_by_url),
             follow_redirects=False,
         ),
     )
@@ -353,6 +356,86 @@ def test_archive_parse_failure_is_failed(
     assert final["notification"] is None
     diag_codes = [d.get("code") for d in (final.get("diagnostics") or [])]
     assert "ARCHIVE_NO_ISSUE" in diag_codes
+
+
+@pytest.mark.parametrize(
+    ("failing_url", "diagnostic_node"),
+    [
+        (ARCHIVE_URL, "discover_latest_issue"),
+        (ISSUE_URL, "extract_public_links"),
+    ],
+)
+def test_source_fetch_502_is_noop_with_diagnostic(
+    archive_html, issue_html, article_routes, failing_url, diagnostic_node
+) -> None:
+    graph = _build_graph(
+        archive_html=archive_html,
+        issue_html=issue_html,
+        article_routes=article_routes,
+        fixtures=[],
+        status_by_url={failing_url: 502},
+    )
+
+    initial = make_initial_state(
+        run_key="2026-W32",
+        thread_id="cto-craft/2026-W32-archive-502",
+        started_at="2026-08-10T09:00:00Z",
+    )
+    final = graph.invoke(initial)
+
+    assert final["outcome"] == "noop"
+    assert final["notification"] is None
+    assert any(
+        diagnostic["code"] == "HTTP_ERROR"
+        and diagnostic["node"] == diagnostic_node
+        for diagnostic in final["diagnostics"]
+    )
+
+
+def test_article_fetch_502_is_skipped_and_remaining_articles_continue(
+    archive_html, issue_html, article_routes
+) -> None:
+    fixtures = [
+        AngleOutput(
+            canonical_url=url,
+            angle=f"Angle for {url}",
+            tweet_body=f"Useful point from {url}.",
+            evidence_excerpt="Evidence",
+            resonance_score=0.80,
+            evidence_strength=0.70,
+            worldview_axes=["anti_fluff"],
+        )
+        for url in (STRONG_URL, BOUNDARY_URL, HIRING_URL)
+    ]
+    graph = _build_graph(
+        archive_html=archive_html,
+        issue_html=issue_html,
+        article_routes=article_routes,
+        fixtures=fixtures,
+        status_by_url={GENERIC_URL: 502},
+        import_fn=lambda items: {
+            "createdCount": len(items),
+            "skippedDuplicateCount": 0,
+            "createdIds": [],
+            "sourceRefs": [item["sourceRef"] for item in items],
+        },
+    )
+
+    initial = make_initial_state(
+        run_key="2026-W32",
+        thread_id="cto-craft/2026-W32-article-502",
+        started_at="2026-08-10T09:00:00Z",
+    )
+    final = graph.invoke(initial)
+
+    assert final["outcome"] == "created"
+    assert final["import_result"]["createdCount"] == 3
+    assert any(
+        diagnostic["code"] == "HTTP_ERROR"
+        and diagnostic["node"] == "fetch_and_score_article"
+        and diagnostic["url"] == GENERIC_URL
+        for diagnostic in final["diagnostics"]
+    )
 
 
 def test_selection_dedupes_by_canonical_url(
