@@ -65,6 +65,7 @@ SELECT = "select_distinct_angles"
 IMPORT = "import_drafts"
 NOTIFY = "format_notification"
 _URL_RE = re.compile(r"https?://[^\s]+")
+_HTTP_STATUS_RE = re.compile(r"^HTTP (?P<status>\d{3})$")
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,26 @@ def _emit_diagnostic(
     state.setdefault("diagnostics", []).append(diag)
 
 
+def _is_transient_fetch_error(exc: FetchError) -> bool:
+    """Return whether a source fetch failure should produce a silent no-op.
+
+    A CDN/origin can briefly return a 5xx or rate-limit response. Those
+    failures are safe to skip because the workflow has no write to retry at
+    this point. Permanent fetch failures (unsafe URLs, unsupported content,
+    and similar configuration/source-shape problems) remain visible failures.
+    """
+
+    if exc.code in {"TIMEOUT", "TRANSPORT_ERROR"}:
+        return True
+    if exc.code != "HTTP_ERROR":
+        return False
+    match = _HTTP_STATUS_RE.fullmatch(exc.message)
+    if match is None:
+        return False
+    status = int(match.group("status"))
+    return status == 429 or status >= 500
+
+
 # ---------------------------------------------------------------------------
 # Nodes.
 
@@ -103,16 +124,17 @@ def _emit_diagnostic(
 def discover_latest_issue(state: PipelineState, deps: GraphDeps) -> dict:
     """Fetch the TMW archive and resolve the latest issue URL.
 
-    A parse or fetch failure is an operational failure (``outcome='failed'``),
-    not a no-op. The cron prompt surfaces failed outcomes to the operator
-    via the standard soft-fail path.
+    A transient source fetch failure is recorded and treated as a no-op. There
+    is no article list to continue with when archive discovery is unavailable,
+    and retrying the whole workflow would only repeat the external GET. Parse
+    failures remain visible operational failures.
     """
 
     try:
         resource = deps.fetcher.fetch(deps.archive_url, kind="issue")
     except FetchError as exc:
         _emit_diagnostic(state, node="discover_latest_issue", code=exc.code, message=exc.message, url=exc.url)
-        return {"outcome": "failed"}
+        return {"outcome": "noop" if _is_transient_fetch_error(exc) else "failed"}
 
     try:
         latest: LatestIssue = parse_archive(deps.archive_url, resource.body)
@@ -139,7 +161,7 @@ def extract_public_links(state: PipelineState, deps: GraphDeps) -> dict:
         resource = deps.fetcher.fetch(issue_url, kind="issue")
     except FetchError as exc:
         _emit_diagnostic(state, node="extract_public_links", code=exc.code, message=exc.message, url=exc.url)
-        return {"outcome": "failed"}
+        return {"outcome": "noop" if _is_transient_fetch_error(exc) else "failed"}
 
     parse_fn = deps.parse_issue_links_fn or parse_issue_links
     try:
@@ -456,7 +478,7 @@ def complete_noop(state: PipelineState, deps: GraphDeps) -> dict:
 
 
 def _route_after_discover(state: PipelineState) -> str:
-    if state.get("outcome") == "failed":
+    if state.get("outcome") in ("failed", "noop"):
         return COMPLETE_NOOP
     return "extract_public_links"
 
