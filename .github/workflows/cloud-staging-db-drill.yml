@@ -58,8 +58,18 @@ jobs:
       - name: Install repository deps
         run: npm ci
 
-      - name: Install shellcheck (system binary, not an npm package)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
+      - name: Install PostgreSQL 18 client and shellcheck
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-18 shellcheck
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: Lint cloud database scripts
         run: npm run lint:cloud-db
@@ -115,7 +125,7 @@ jobs:
           [[ "$ENVIRONMENT" == "staging" ]] || { echo "ENVIRONMENT must be staging"; exit 10; }
           command -v pg_dump >/dev/null
           command -v pg_restore >/dev/null
-          psql --version | grep -q '16\.'
+          psql --version | grep -q '18\.'
 
       - name: Run the drill
         env:
