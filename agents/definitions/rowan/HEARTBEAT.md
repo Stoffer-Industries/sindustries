@@ -32,6 +32,15 @@ The classifier distinguishes explicit and dependency blocks from actionable work
 
 For each returned task, follow `WORKFLOW.md` for the execution steps in that state. If the queue contains any `ACTIONABLE` task, the pass must materially progress one before finishing: create/update a branch, commit, PR, validation result, required task comment, or a newly evidenced concrete blocker. A pass with actionable work and no such progress is a failed heartbeat and must follow **Escalate on Failure** below.
 
+**Task/PR dedupe guard — required before implementation and again immediately before `gh pr create`:**
+
+1. Derive the task's 8-character ID and inspect **all** open Sindustries PRs, not only the current branch. Match the task ID against `headRefName`, PR body, and commit messages; also inspect remote `task-<short-id>-*` branches.
+2. If an open PR or implementation branch already exists for the task, stop creating a new branch/PR. Reuse and continue the existing work. A design-only canonical branch is the implementation branch to extend, not a reason to create an agent-suffixed branch.
+3. Do not conclude "no PR exists" from an exact-head lookup alone. Another heartbeat may have used a suffixed branch name.
+4. After opening a PR, read back all open PRs for the task. If more than one exists, make no further workflow/routing writes; report the race and consolidate to one PR before continuing.
+
+This guard prevents overlapping heartbeat runs from independently implementing the same task, as happened with task `479d76f8` (PRs #811 and #812).
+
 Before finishing a task pass, read back the task's `assignee`, `attentionOwners`,
 approvals, and current gate. If Rowan is still `attentionOwners[0]` only because
 delivery evidence was requested, and the merged PR/evidence handoff is now
