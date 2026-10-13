@@ -26,9 +26,10 @@ describe('buildStackedOwnerLayers', () => {
     ]);
   });
 
-  it('collapses a cross-role duplicate into the highest-tier role (AC4)', () => {
-    // Rowan is delivery + attention at slot 0 — the attention tier outranks
-    // delivery, so the duplicate collapses into one attention row.
+  it('preserves cross-role duplicates as separate ordered entries (AC1)', () => {
+    // Rowan is delivery + attention at slot 0. No cross-role collapse: the
+    // ordered responsibility stack stays intact — three entries in the
+    // order [attention:Rowan@0, attention:Tom@1, delivery:Rowan].
     const { entries } = buildStackedOwnerLayers({
       status: 'doing',
       assignee: 'Rowan',
@@ -36,9 +37,36 @@ describe('buildStackedOwnerLayers', () => {
     });
     expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
       'attention:Rowan',
-      'attention:Tom'
+      'attention:Tom',
+      'delivery:Rowan'
     ]);
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
+  });
+
+  it('preserves combined ownership with every role slot rendered (AC2)', () => {
+    // Combined ownership: assignee + workflow-gate + two attention slots
+    // (one of which duplicates the assignee) must yield five entries in
+    // stable order. The stable per-slot key keeps DOM unique.
+    const { entries } = buildStackedOwnerLayers({
+      status: 'doing',
+      assignee: 'Rowan',
+      workflowGates: [{ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }],
+      attentionOwners: ['Rowan', 'Quinn', 'Tom']
+    });
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
+      'attention:Rowan',
+      'attention:Quinn',
+      'attention:Tom',
+      'workflow-gate:Ash',
+      'delivery:Rowan'
+    ]);
+    expect(entries.map((entry) => entry.key)).toEqual([
+      'attention:0:rowan',
+      'attention:1:quinn',
+      'attention:2:tom',
+      'workflow-gate:0:ash',
+      'delivery:rowan'
+    ]);
   });
 
   it('preserves separate attention slots when a person repeats within the attention tier only', () => {
@@ -115,12 +143,10 @@ describe('buildStackedOwnerLayers', () => {
   });
 
   it('normalises whitespace and case only inside stable per-slot keys', () => {
-    // AC4: same-name cross-tier duplicates collapse into the highest
-    // tier (attention). Workflow-gate Quinn and delivery Quinn both
-    // reduce to the existing attention-row representative. Both
-    // attention slots stay — the intra-tier repeat is part of the
-    // escalation shape. Whitespace and case differences are normalised
-    // inside the per-slot key.
+    // No cross-role collapse: workflow-gate Quinn and delivery Quinn both
+    // appear alongside the two attention Quinn slots. Whitespace and case
+    // differences are normalised inside the per-slot key so React keeps
+    // stable identity across the same normalised owner.
     const { entries } = buildStackedOwnerLayers({
       status: 'doing',
       assignee: '  Quinn  ',
@@ -129,7 +155,9 @@ describe('buildStackedOwnerLayers', () => {
     });
     expect(entries.map((entry) => entry.key)).toEqual([
       'attention:0:quinn',
-      'attention:1:quinn'
+      'attention:1:quinn',
+      'workflow-gate:0:quinn',
+      'delivery:quinn'
     ]);
   });
 
@@ -163,11 +191,11 @@ describe('buildAvatarAriaLabel', () => {
 });
 
 describe('StackedAvatarGroup', () => {
-  it('collapses a cross-role duplicate into a single attention avatar (AC4)', () => {
+  it('preserves cross-role duplicates as separate avatars with role labels (AC1, AC2)', () => {
     // Rowan is both delivery and attention at slot 0 — the avatar stack
-    // collapses that into ONE attention avatar (highest tier wins).
-    // After the render-order fix, position 0 (Rowan) is rightmost; DOM
-    // order is [Tom, Rowan] with both rows carrying the `attention` data-role.
+    // preserves both roles, so the rendered DOM is three items in the
+    // flipped order: [delivery:Rowan, attention:Tom, attention:Rowan].
+    // The stable per-slot key keeps React identity stable across renders.
     const { container } = render(<StackedAvatarGroup task={{
       status: 'doing',
       assignee: 'Rowan',
@@ -175,11 +203,18 @@ describe('StackedAvatarGroup', () => {
       attentionOwners: ['Rowan', 'Tom']
     }} />);
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
-    expect(items).toHaveLength(2);
-    expect(items.map((item) => item.getAttribute('data-role'))).toEqual(['attention', 'attention']);
+    expect(items).toHaveLength(3);
+    expect(items.map((item) => item.getAttribute('data-role'))).toEqual(['delivery', 'attention', 'attention']);
     expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
+      'delivery assignee Rowan',
       'attention owner Tom',
       'attention owner Rowan'
+    ]);
+    // Per-slot key disambiguates the cross-role repeat.
+    expect(items.map((item) => item.getAttribute('data-owner-key'))).toEqual([
+      'delivery:rowan',
+      'attention:1:tom',
+      'attention:0:rowan'
     ]);
   });
 
@@ -328,10 +363,11 @@ describe('StackedAvatarGroup', () => {
     expect(Number(rightmost.style.zIndex)).toBeGreaterThan(Number(items[items.length - 2].style.zIndex));
   });
 
-  it('preserves the no-cross-role-collapse and per-slot aria-label contracts after the render-order flip', () => {
-    // AC2 (no regressions): role-tier grouping, overflow count, and
-    // aria-labels must all stay correct after the render-order flip.
-    // This test combines the three in one fixture.
+  it('renders combined ownership, ordering, repeated identities, and baseline cases (AC4)', () => {
+    // AC4: the test fixture covers the four contracted surfaces in one
+    // pass — combined ownership (assignee + gate + 3 attention rows with
+    // an intra-tier repeat), per-slot role labels, the no-collapse
+    // invariant on the helper, and the existing baseline overflow rule.
     const task = {
       assignee: 'Quinn',
       status: 'doing',
@@ -352,6 +388,23 @@ describe('StackedAvatarGroup', () => {
     ]);
     // No overflow chip — 5 visible out of 5 entries, overflow=0.
     expect(container.querySelector('.task-owner-stack-overflow')).toBeNull();
+  });
+
+  it('preserves assignee-only, attention-owner-only, empty-state, and overflow rendering (AC3)', () => {
+    // AC3 baseline: every existing case still renders after the
+    // no-collapse change.
+    // (a) assignee-only
+    const assigneeOnly = render(<StackedAvatarGroup task={{ assignee: 'Rowan', workflowGates: [], attentionOwners: [] }} />);
+    expect(assigneeOnly.getByLabelText('delivery assignee Rowan')).toBeInTheDocument();
+    // (b) attention-owner-only
+    const attentionOnly = render(<StackedAvatarGroup task={{ assignee: '', status: 'open', workflowGates: [], attentionOwners: ['Quinn'] }} />);
+    expect(attentionOnly.getByLabelText('attention owner Quinn')).toBeInTheDocument();
+    // (c) empty-state
+    const empty = render(<StackedAvatarGroup task={{}} />);
+    expect(empty.container.querySelector('.task-owner-stack')).toBeNull();
+    // (d) overflow chip with maxVisible=2 and 4 attention owners
+    const overflow = render(<StackedAvatarGroup task={{ assignee: '', status: 'open', workflowGates: [], attentionOwners: ['A', 'B', 'C', 'D'] }} maxVisible={2} />);
+    expect(overflow.getByLabelText('2 more owners')).toBeInTheDocument();
   });
 
   it('still surfaces the overflow chip at maxVisible after the render-order flip', () => {

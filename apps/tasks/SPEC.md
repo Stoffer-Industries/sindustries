@@ -1,6 +1,6 @@
 # Tasks App — Behavioural Spec
 
-**Last updated:** 2026-09-23 (avatar stack rightmost-on-top fix, task 08362d54)
+**Last updated:** 2026-10-13 (avatar stack no-collapse alignment, task 479d76f8)
 **Original design:** `docs/designs/tasks/SPEC.md` (Mowgli/Pulse v12)
 **System doc:** `docs/systems/tasks.md`
 

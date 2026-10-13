@@ -141,7 +141,7 @@ See [Structured approval and authentication contract](#structured-approval-and-a
 
 ### TaskAttentionOwner
 
-Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional within the attention tier (intra-tier repeats stay as separate ordered slots — that is the escalation shape) and are deduplicated across case-insensitive matches on every write. Task `91864257` ("Make attention-owner escalations deduplicated, explainable, and resolvable") closed the case-insensitive duplicate path; cross-tier repeats are visually collapsed by the avatar stack but remain distinct rows on disk.
+Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional within the attention tier (intra-tier repeats stay as separate ordered slots — that is the escalation shape) and are deduplicated across case-insensitive matches on every write. Task `91864257` ("Make attention-owner escalations deduplicated, explainable, and resolvable") closed the case-insensitive duplicate path; cross-tier repeats remain distinct rows on disk AND distinct avatars in the stacked avatar group on the task card — the ordered responsibility stack is the escalation surface and is never collapsed across tiers.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -155,7 +155,7 @@ Ordered role-slot table for the primary blocker/handoff and escalation stack. `p
 
 Task responses include:
 
-- `attentionOwners` — ordered role slots; index 0 is actionable, intra-tier repeats preserved, cross-tier case-insensitive duplicates collapsed
+- `attentionOwners` — ordered role slots; index 0 is actionable, intra-tier repeats preserved, cross-tier case-insensitive duplicates allowed (each role slot renders independently in the avatar group; see `apps/tasks/SPEC.md` § 11.3)
 - `topAttentionOwner` — `attentionOwners[0]` or `null`
 - `attentionOwnerDetails` — full audit rows (`{ id, owner, position, addedBy, note, createdAt }`)
 
@@ -206,7 +206,7 @@ are not generic audit comments. A capability-resolution marker must therefore
 be followed by a new Ash verdict, never treated as evidence that QA already
 passed.
 
-Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack collapses the delivery/attention duplicate into one attention-tier avatar (highest tier wins), but the underlying rows remain distinct; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
+Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack renders every role slot — `attention:Rowan@0`, `attention:Tom@1`, `workflow-gate:Ash`, `delivery:Rowan` — with each role carrying its own label; the underlying rows remain distinct; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
 
