@@ -571,6 +571,17 @@ pub(crate) fn ac_labels_in_pr_body(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Returns the checked AC labels belonging to `task_id` in a PR body.
+/// Combined delivery PRs may contain several task subsections; only the
+/// current task's subsection counts as delivery evidence.
+pub(crate) fn task_ac_labels_in_pr_body(task_id: &str, body: &str) -> Vec<String> {
+    let section = extract_ac_section(body);
+    scoped_ac_entries(task_id, section)
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect()
+}
+
 /// Returns unchecked task ACs that are not mentioned in any of the provided merged PR bodies.
 /// These are ACs Tom added after the PRs merged — they require a new PR before QA can verify.
 pub(crate) fn ac_labels_needing_new_pr(unchecked: &[String], pr_bodies: &[String]) -> Vec<String> {
@@ -1226,6 +1237,29 @@ Lead-in.
         assert_eq!(
             labels,
             vec!["AC1".to_string(), "AC2".to_string(), "AC5".to_string()]
+        );
+    }
+
+    #[test]
+    fn task_ac_labels_in_pr_body_scopes_combined_delivery_sections() {
+        let body = "## Acceptance Criteria\n\
+            ### Task alpha\n\
+            - [x] AC1: Alpha implementation (testID: alpha)\n\
+            ### Task beta\n\
+            - [x] AC1: Beta implementation (testID: beta)\n";
+        assert_eq!(
+            task_ac_labels_in_pr_body("alpha", body),
+            vec!["AC1".to_string()]
+        );
+        assert!(task_ac_labels_in_pr_body("missing", body).is_empty());
+    }
+
+    #[test]
+    fn task_ac_labels_in_pr_body_uses_single_task_body_without_subsections() {
+        let body = "## Acceptance Criteria\n- [x] AC1: Done (testID: 1)\n- [ ] AC2: Pending\n";
+        assert_eq!(
+            task_ac_labels_in_pr_body("alpha", body),
+            vec!["AC1".to_string()]
         );
     }
 
