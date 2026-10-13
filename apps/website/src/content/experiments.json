@@ -140,10 +140,11 @@
       "A secured planned-workout API now lets connected agents create workouts, moving the experiment from a standalone logging interface toward agents as first-class users.",
       "The first agent-facing feature moved from specification to main in 48 hours with 76 tests passing, providing an end-to-end test of the delivery workflow on a consumer product.",
       "Public sign-up with Google and Apple OAuth made GymTrack multi-tenant on 2026-08-01: the first new account can now be created without manual provisioning. The agent-connect action shipped on 2026-08-06, wired to the live MCP OAuth server deployed on 2026-08-05, creating an in-product onboarding path for connected agents.",
-      "The MCP server is live in production with dynamic client registration and rate limits on public OAuth write endpoints. The next evidence gate remains repeated use by people and connected agents, not deployment readiness."
+      "The MCP server is live in production with dynamic client registration and rate limits on public OAuth write endpoints. The next evidence gate remains repeated use by people and connected agents, not deployment readiness.",
+      "A live two-user Clerk-to-Supabase boundary test passed with one isolated workout per user. Migration acceptance still depends on harness corrections, independent review, and verified-email linking."
     ],
     "startedAt": "2026-07-13",
-    "updatedAt": "2026-09-10",
+    "updatedAt": "2026-10-09",
     "links": [],
     "image": "/brand/studio/gymtrack-hero.jpg",
     "visibility": "published"
