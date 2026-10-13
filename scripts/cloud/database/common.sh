@@ -21,7 +21,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 # Required PostgreSQL client major version (matches the staging server).
-: "${CLOUD_DB_REQUIRED_PG_MAJOR:=16}"
+: "${CLOUD_DB_REQUIRED_PG_MAJOR:=18}"
 
 # Minimum bash version.
 CLOUD_DB_MIN_BASH_MAJOR=4
@@ -292,10 +292,13 @@ cloud_db_load_secret() {
     cloud_db_die "secret file '$file_path' not found"
   fi
   local perms
-  # Prefer numeric octal (`%Lp` on BSD, `%a` on GNU); fall back to the
+  # Prefer numeric octal (`%a` on GNU, `%Lp` on BSD); fall back to the
   # symbolic form if both fail so the error message still names what
   # the operator sees in `ls -l`.
-  perms="$(stat -f '%Lp' "$file_path" 2>/dev/null || stat -c '%a' "$file_path" 2>/dev/null || stat -f '%Sp' "$file_path" 2>/dev/null || stat -c '%A' "$file_path" 2>/dev/null || echo "")"
+  # GNU stat accepts `-f` as a filesystem-stat option, so trying the BSD
+  # form first can return a multi-line filesystem report instead of failing
+  # and prevent the GNU branch from ever running on Ubuntu.
+  perms="$(stat -c '%a' "$file_path" 2>/dev/null || stat -f '%Lp' "$file_path" 2>/dev/null || stat -f '%Sp' "$file_path" 2>/dev/null || stat -c '%A' "$file_path" 2>/dev/null || echo "")"
   if [[ "$perms" != "0600" && "$perms" != "600" ]]; then
     cloud_db_die "secret file '$file_path' permissions are '$perms'; expected 0600"
   fi

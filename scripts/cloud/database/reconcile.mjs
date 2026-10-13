@@ -43,8 +43,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 const SERVICES = [
-  { name: 'tasks-api',  manifest: join(REPO_ROOT, 'services/tasks-api/ops/reconciliation.sql') },
-  { name: 'budget-api', manifest: join(REPO_ROOT, 'services/budget-api/ops/reconciliation.sql') },
+  { name: 'tasks-api',  schema: 'tasks_api',  manifest: join(REPO_ROOT, 'services/tasks-api/ops/reconciliation.sql') },
+  { name: 'budget-api', schema: 'budget_api', manifest: join(REPO_ROOT, 'services/budget-api/ops/reconciliation.sql') },
 ];
 
 // ----- arg parsing ---------------------------------------------------------
@@ -119,10 +119,16 @@ function buildClient(dsn) {
   return new Client({ connectionString: dsn });
 }
 
-async function withClient(dsn, fn) {
+async function withClient(dsn, schemaName, fn) {
   const client = buildClient(dsn);
   await client.connect();
-  try { return await fn(client); }
+  try {
+    if (!['tasks_api', 'budget_api'].includes(schemaName)) {
+      throw new Error(`unsupported reconciliation schema: ${schemaName}`);
+    }
+    await client.query(`SET search_path TO "${schemaName}", public`);
+    return await fn(client);
+  }
   finally { await client.end(); }
 }
 
@@ -148,9 +154,8 @@ async function withClient(dsn, fn) {
 
 const MANIFEST_FORBIDDEN_PATTERNS = [
   { name: 'dollar-quoted body', pattern: /\$\$/u },
-  { name: 'escape-string literal', pattern: /\bE'\S/u },
-  { name: 'backslash in string literal', pattern: /'[^']*\\[^']*'/u },
-  { name: 'embedded single quote in string literal', pattern: /'[^']*'[^']*'/u },
+  { name: 'escape-string literal', pattern: /\bE'/u },
+  { name: 'backslash in manifest', pattern: /\\/u },
 ];
 
 function splitSqlStatements(sql) {
@@ -164,8 +169,8 @@ function splitSqlStatements(sql) {
     .filter((line) => !line.trim().startsWith('--'))
     .join('\n');
   // Naive split: psql-style semicolon-terminated statements, no
-  // dollar-quoted bodies in the manifest. The manifest format is
-  // deliberately constrained so this is safe.
+  // dollar-quoted bodies, escape strings, or backslashes in the manifest.
+  // The manifest format is deliberately constrained so this is safe.
   return cleaned
     .split(/;\s*\n/u)
     .map((s) => s.trim())
@@ -198,20 +203,23 @@ async function runManifest(client, manifestPath) {
 // Tables listed here MUST match the manifest's "owned tables" set.
 
 const TASKS_API_TABLES = [
-  'Task',
-  'TaskComment',
-  'TaskDependency',
-  'TaskTag',
-  'Approval',
-  'AttentionOwner',
+  { table: 'Task', columns: ['id'] },
+  { table: 'TaskComment', columns: ['id'] },
+  { table: 'TaskDependency', columns: ['taskId', 'dependsOnId'] },
+  { table: 'TaskTag', columns: ['taskId', 'tagId'] },
+  { table: 'TaskApproval', columns: ['id'] },
+  { table: 'TaskAttentionOwner', columns: ['id'] },
 ];
 
 const BUDGET_API_TABLES = [
-  'LinkedCard',
-  'Transaction',
-  'AkahuToken',
-  'BudgetCategory',
-  'BudgetSettings',
+  { table: 'LinkedCard', columns: ['id'] },
+  { table: 'Transaction', columns: ['id'] },
+  { table: 'AkahuConnection', columns: ['id'] },
+  { table: 'AccountBalanceSnapshot', columns: ['id'] },
+  { table: 'CardMonthlyBudget', columns: ['id'] },
+  { table: 'CategorizationFeedback', columns: ['id'] },
+  { table: 'BalanceAlertConfig', columns: ['id'] },
+  { table: 'NotificationEvent', columns: ['id'] },
 ];
 
 function tableSetForService(serviceName) {
@@ -221,13 +229,18 @@ function tableSetForService(serviceName) {
 async function pkDigest(client, serviceName) {
   const tables = tableSetForService(serviceName);
   const hash = createHash('sha256');
-  for (const table of tables) {
+  for (const { table, columns } of tables) {
+    const quotedTable = `"${table}"`;
+    const quotedColumns = columns.map((column) => `"${column}"`);
     const res = await client.query(
-      `SELECT id::text AS id FROM ${table} ORDER BY id::text`
+      `SELECT ${quotedColumns.map((column) => `${column}::text AS ${column}`).join(', ')} FROM ${quotedTable} ORDER BY ${quotedColumns.join(', ')}`
     );
     for (const row of res.rows) {
       hash.update(`${table}::`);
-      hash.update(row.id);
+      for (const column of columns) {
+        hash.update(String(row[column] ?? ''));
+        hash.update('|');
+      }
       hash.update('\n');
     }
   }
@@ -264,13 +277,13 @@ async function main() {
     services: {},
   };
 
-  for (const { name, manifest } of SERVICES) {
+  for (const { name, schema, manifest } of SERVICES) {
     const dsn = dsnByService[name];
     const checks = [];
     let allMatch = true;
 
     for (const side of ['source', 'dest']) {
-      const sideResults = await withClient(dsn[side], (client) => runManifest(client, manifest));
+      const sideResults = await withClient(dsn[side], schema, (client) => runManifest(client, manifest));
       checks.push({ side, results: sideResults });
     }
 
@@ -292,8 +305,8 @@ async function main() {
     merged.sort((a, b) => (a.check + a.metric).localeCompare(b.check + b.metric));
 
     // PK digest comparison.
-    const sourceDigest = await withClient(dsn.source,  (c) => pkDigest(c, name));
-    const destDigest   = await withClient(dsn.dest,    (c) => pkDigest(c, name));
+    const sourceDigest = await withClient(dsn.source, schema, (c) => pkDigest(c, name));
+    const destDigest   = await withClient(dsn.dest,   schema, (c) => pkDigest(c, name));
     const digestMatch = sourceDigest === destDigest;
 
     envelope.services[name] = {
