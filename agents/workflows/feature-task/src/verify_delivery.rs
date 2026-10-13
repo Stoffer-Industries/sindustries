@@ -87,6 +87,34 @@ pub(crate) fn verify_delivery_review_failure(
     }
 }
 
+/// A PR that claims checked task ACs is an implementation delivery, not just
+/// review evidence. It must be merged before the lobster asks Ash to run the
+/// `qa_agent` gate. Superseded PRs are filtered before this helper is called;
+/// merged PRs are always allowed.
+pub(crate) fn unmerged_ac_delivery_failure(
+    url: &str,
+    review: pr_gates::ReviewState,
+    ac_labels: &[String],
+) -> Option<String> {
+    if ac_labels.is_empty() || review == pr_gates::ReviewState::Merged {
+        return None;
+    }
+    Some(format!(
+        "PR {url} contains checked acceptance criteria ({}) but is not merged; merge it before the qa_agent gate.",
+        ac_labels.join(", ")
+    ))
+}
+
+/// The QA handoff is only eligible after every delivery/evidence check passes.
+/// In particular, an open AC-bearing PR must not be exposed to Ash merely
+/// because the mechanical evidence sub-gate happened to pass.
+pub(crate) fn qa_agent_gate_eligible(
+    mechanical_gate_failed: bool,
+    delivery_failures: &[String],
+) -> bool {
+    !mechanical_gate_failed && delivery_failures.is_empty()
+}
+
 /// Failure strings for the `qa_agent` gate. Empty when the gate is satisfied.
 /// Used by `verify_delivery` to short-circuit the transition with a
 /// `[qa-agent-blocked]` comment. Gate predicate (`task_approvals::qa_agent_verified`)
@@ -174,6 +202,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     let mut delivery_evidence = Vec::new();
     for url in &pr_urls {
         let review = inspect_pr(url);
+        let pr_is_merged = matches!(&review, Ok(pr_gates::ReviewState::Merged));
         let is_latest = is_latest_pr_url(url, &latest_urls);
         match &review {
             Ok(r) if is_latest => {
@@ -188,9 +217,9 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
         // This preserves the superseded-PR fix: a closed replacement branch
         // cannot block delivery, but a merged predecessor can still prove an
         // AC whose implementation and test remain on main.
-        let contributes_evidence = is_latest || matches!(review, Ok(pr_gates::ReviewState::Merged));
+        let contributes_evidence = is_latest || pr_is_merged;
         if !contributes_evidence {
-            if let Err(err) = review {
+            if let Err(err) = &review {
                 failures.push(format!(
                     "Could not inspect historical delivery PR {url}: {err}; cannot use it as AC evidence."
                 ));
@@ -212,9 +241,6 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 false
             }
         };
-        if docs_only {
-            continue;
-        }
         let body = match cli_utils::pr_body(url) {
             Ok(body) => body,
             Err(err) => {
@@ -224,6 +250,15 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
                 continue;
             }
         };
+        if let Ok(review_state) = review {
+            let ac_labels = ac_parsing::task_ac_labels_in_pr_body(&env.task.id, &body);
+            if let Some(failure) = unmerged_ac_delivery_failure(url, review_state, &ac_labels) {
+                failures.push(failure);
+            }
+        }
+        if docs_only {
+            continue;
+        }
         let files = match pr_gates::pr_changed_files(url) {
             Ok(files) => files,
             Err(err) => {
@@ -342,7 +377,7 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // AC2 of task 5e35dc25: skip this branch entirely when the mechanical
     // gate has already failed — Ash's qa_agent is not requested until
     // mechanical checks pass.
-    if !mechanical_gate_failed {
+    if qa_agent_gate_eligible(mechanical_gate_failed, &failures) {
         let qa_agent_failures = qa_agent_verified_failures(&env.task);
         if !qa_agent_failures.is_empty() {
             if !args.dry_run {
@@ -447,6 +482,38 @@ mod tests {
             verify_delivery_review_failure(url, pr_gates::ReviewState::ClosedUnmerged),
             Some(format!("PR {url} is closed without merge."))
         );
+    }
+
+    #[test]
+    fn unmerged_ac_delivery_blocks_qa_handoff() {
+        let url = "https://github.com/Stoffer-Industries/sindustries/pull/812";
+        let labels = vec!["AC1".to_string(), "AC4".to_string()];
+        let failure = unmerged_ac_delivery_failure(url, pr_gates::ReviewState::Approved, &labels)
+            .expect("an open AC-bearing PR must block QA");
+        assert!(failure.contains("AC1, AC4"));
+        assert!(failure.contains("not merged"));
+        assert!(failure.contains("qa_agent"));
+    }
+
+    #[test]
+    fn merged_ac_delivery_does_not_block_qa_handoff() {
+        let labels = vec!["AC1".to_string()];
+        assert!(unmerged_ac_delivery_failure(
+            "https://github.com/Stoffer-Industries/sindustries/pull/812",
+            pr_gates::ReviewState::Merged,
+            &labels,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn qa_agent_gate_requires_all_delivery_checks_to_pass() {
+        assert!(qa_agent_gate_eligible(false, &[]));
+        assert!(!qa_agent_gate_eligible(
+            false,
+            &["PR contains checked ACs but is not merged.".to_string()]
+        ));
+        assert!(!qa_agent_gate_eligible(true, &[]));
     }
 
     #[test]
