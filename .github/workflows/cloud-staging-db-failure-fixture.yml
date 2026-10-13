@@ -66,9 +66,29 @@ jobs:
       - name: Install root workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Locate prisma binary for the fixture harness
+        # The fixture's step_prisma_migration_failure_exit_code creates
+        # a per-run temp schema and runs `prisma migrate deploy` against
+        # the test-only migrations dir. PRISMA_BIN points the harness
+        # at the real installed binary so the temp-schema approach
+        # works without depending on `npx --no-install` resolving
+        # workspace-local prisma (which fails in shallow `git fetch`
+        # + no-hoist worktree layouts).
+        id: prisma-bin
+        run: |
+          set -euo pipefail
+          if [[ -x "node_modules/.bin/prisma" ]]; then
+            echo "path=node_modules/.bin/prisma" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::prisma not found in node_modules/.bin after npm ci"
+            exit 1
+          fi
+
       - name: Run AC4 fixture for tasks-api
         if: ${{ inputs.service == 'tasks-api' || inputs.service == 'both' }}
         shell: bash
+        env:
+          PRISMA_BIN: ${{ steps.prisma-bin.outputs.path }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/cloud-staging
@@ -83,6 +103,8 @@ jobs:
       - name: Run AC4 fixture for budget-api
         if: ${{ inputs.service == 'budget-api' || inputs.service == 'both' }}
         shell: bash
+        env:
+          PRISMA_BIN: ${{ steps.prisma-bin.outputs.path }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/cloud-staging
