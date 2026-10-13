@@ -280,10 +280,15 @@ step_prisma_migration_failure_exit_code() {
 }
 
 step_prisma_migration_failure_diagnostic() {
-  # The bad migration references a non-existent type, so the stderr must
-  # contain a SQL error that names the service's schema and the
-  # fixture's deliberately-invalid migration filename.
-  local grep_target="bad_migration"
+  # The bad migration references a non-existent type
+  # ("nonexistent_type_d4e3"), so PostgreSQL returns a deterministic
+  # SQL error that this assertion matches on. The migration filename
+  # ("bad_migration") is NOT asserted here because Prisma's
+  # version-specific deploy output does not always include the
+  # failing-migration filename in the surfaced error; the SQL error
+  # itself is emitted by the database engine and is therefore stable
+  # across Prisma versions.
+  local grep_target="nonexistent_type_d4e3"
   grep -qF "$grep_target" "$PRISMA_LOG"
 }
 
@@ -292,11 +297,24 @@ step_prisma_migrations_state_uniquely_failed() {
   # _prisma_migrations: the bad_migration, with finished_at set and
   # rolled_back_at NULL (Prisma's default for a non-atomic SQL error:
   # the failed migration is recorded, the rest of the schema is
-  # untouched). We use psql to query; psql is in common.sh's
-  # CLOUD_DB_REQUIRED_COMMANDS but we explicitly check here because the
-  # fixture may run on a host without the production-grade version
-  # guarantee.
+  # untouched). Prisma creates _prisma_migrations in the schema
+  # specified by the DSN's `?schema=` query param (e.g. tasks_api,
+  # budget_api), not in the default public search_path, so the psql
+  # queries below must set the search_path before the unqualified
+  # `_prisma_migrations` reference resolves. The schema name is
+  # derived from the DSN; if it is absent the assertion falls back to
+  # the per-service default.
   command -v psql >/dev/null 2>&1 || return 1
+
+  local schema_name
+  schema_name="$(printf '%s' "$source_dsn" | sed -nE 's|^[a-z]+://[^?]*\?.*schema=([^&]+).*|\1|p')"
+  if [[ -z "$schema_name" ]]; then
+    case "$service" in
+      tasks-api)  schema_name="tasks_api" ;;
+      budget-api) schema_name="budget_api" ;;
+      *) cloud_db_die "no schema= in DSN and service '$service' has no default schema" ;;
+    esac
+  fi
 
   local row_count
   local failed_name
@@ -304,19 +322,19 @@ step_prisma_migrations_state_uniquely_failed() {
   row_count="$(PGPASSWORD="" psql --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$source_dsn" \
-    --command="SELECT count(*) FROM _prisma_migrations;" 2>/dev/null | tr -d ' ')"
+    --command="SET search_path TO ${schema_name}, public; SELECT count(*) FROM _prisma_migrations;" 2>/dev/null | tr -d ' ')"
   [[ "$row_count" == "1" ]] || return 1
 
   failed_name="$(PGPASSWORD="" psql --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$source_dsn" \
-    --command="SELECT migration_name FROM _prisma_migrations;" 2>/dev/null | tr -d ' ')"
+    --command="SET search_path TO ${schema_name}, public; SELECT migration_name FROM _prisma_migrations;" 2>/dev/null | tr -d ' ')"
   [[ "$failed_name" == *"bad_migration"* ]] || return 1
 
   rolled_back="$(PGPASSWORD="" psql --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
     --dbname="$source_dsn" \
-    --command="SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+    --command="SET search_path TO ${schema_name}, public; SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NOT NULL;" 2>/dev/null | tr -d ' ')"
   [[ "$rolled_back" == "0" ]] || return 1
   return 0
 }
