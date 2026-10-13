@@ -89,16 +89,18 @@ STUB
 # Stub psql that answers the three queries the harness makes against
 # _prisma_migrations. The query is the third positional argument
 # (psql -c '...'); the harness never passes --command=foo so we match
-# by trailing query content.
+# by trailing query content. The harness now schema-qualifies the
+# table reference (e.g. `tasks_api._prisma_migrations`), so the
+# match patterns accept any leading `<schema>.` prefix.
 query="${@: -1}"
 case "$query" in
-  *"SELECT count(*) FROM _prisma_migrations;")
+  *"SELECT count(*) FROM "*._prisma_migrations";")
     printf '1\n'
     ;;
-  *"SELECT migration_name FROM _prisma_migrations;")
+  *"SELECT migration_name FROM "*._prisma_migrations";")
     printf '20260101000000_bad_migration\n'
     ;;
-  *"SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NOT NULL;")
+  *"SELECT count(*) FROM "*._prisma_migrations" WHERE rolled_back_at IS NOT NULL;")
     printf '0\n'
     ;;
   *)
