@@ -90,3 +90,137 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
     await expect(page.getByTestId('signup-submit')).toBeVisible();
   });
 });
+
+/**
+ * End-to-end coverage for the Slice C verified-email linking flow
+ * (task `bb09eaed`, Phase 4, AC3).
+ *
+ * After a successful Clerk sign-in, `apps/gymtrack/src/lib/clerkAuth.jsx`
+ * fires a one-shot useEffect that calls
+ * `supabase.rpc('link_clerk_user_to_profile', { p_clerk_user_id, p_email,
+ * p_email_verified, p_signup_source })`. The RPC is `SECURITY DEFINER` and
+ * idempotent: already-linked → return; legacy match by verified email →
+ * set `clerk_user_id`; no match → fresh insert. The user never sees the
+ * link — sign-in lands on `/workout` either way.
+ *
+ * This e2e asserts the *wiring* (browser → supabase-js → RPC URL +
+ * params), not the RPC contract itself. The RPC contract is covered by
+ * the Vitest unit test in `apps/gymtrack/src/lib/clerkPhase4Linking.test.js`,
+ * which checks the migration SQL + `clerkAuth.jsx` against the source.
+ * The e2e is the end-to-end reachability proof that the described flow
+ * fires from a real Clerk session, which neither a unit test nor a
+ * service integration test can give us.
+ *
+ * The RPC is intercepted with `page.route()` and fulfilled with a
+ * canned "fresh insert" response so the test is reproducible without
+ * a live Supabase test DB. The interception asserts the params the
+ * browser actually sent (the part the unit test cannot).
+ */
+type SliceCLinkCall = {
+  body: {
+    p_clerk_user_id?: string;
+    p_email?: string;
+    p_email_verified?: boolean;
+    p_signup_source?: string;
+  };
+};
+
+test.describe('GymTrack — Clerk Slice C verified-email linking (Phase 4)', () => {
+  test.skip(!CLERK_GATE, 'CLERK_TEST_URL not set — Slice C linking e2e skipped');
+
+  test('AC1 Slice C: real Clerk sign-in invokes link_clerk_user_to_profile with the verified email + Clerk subject, then lands on /workout', async ({ page }) => {
+    const rpcCalls: SliceCLinkCall[] = [];
+    await page.route('**/rest/v1/rpc/link_clerk_user_to_profile', async (route) => {
+      const request = route.request();
+      let body: SliceCLinkCall['body'] = {};
+      try {
+        body = JSON.parse(request.postData() || '{}');
+      } catch {
+        // Body is not JSON — leave as empty object; assertion below will
+        // surface the missing fields.
+      }
+      rpcCalls.push({ body });
+      // Canned "fresh insert" response so the e2e is reproducible
+      // without a live Supabase test DB. The shape mirrors the column
+      // names of public.profiles that the function returns.
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'profile-e2e-mock',
+            clerk_user_id: body.p_clerk_user_id ?? null,
+            email: body.p_email ?? null,
+            signup_source: body.p_signup_source ?? null,
+            linked_at: new Date().toISOString(),
+            created_at: new Date().toISOString()
+          }
+        ])
+      });
+    });
+
+    await page.goto('/login');
+    await page.getByTestId('login-email').fill(CLERK_TEST_EMAIL!);
+    await page.getByTestId('login-password').fill(CLERK_TEST_PASSWORD!);
+    await page.getByTestId('login-submit').click();
+
+    // Slice C is silent for the user: the link RPC fires after the
+    // sign-in lands on /workout. There is no loading state, no error
+    // banner, and no extra UI step.
+    await expect(page).toHaveURL(/\/workout$/, { timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'GymTrack' })).toBeVisible();
+
+    // The Slice C useEffect must have invoked the link RPC at least
+    // once. Asserting wiring + params here, not the RPC contract.
+    expect(rpcCalls.length).toBeGreaterThan(0);
+    const { body } = rpcCalls[0];
+    // The Clerk subject is a `user_…` opaque id; not asserting a
+    // specific value (it is environment-specific).
+    expect(body.p_clerk_user_id).toMatch(/^user_/);
+    // Email verification is a precondition for linking; the Clerk
+    // test user must be configured with a verified email for this
+    // e2e to exercise the happy path. A negative e2e for the
+    // unverified-email rejection lives in
+    // clerkPhase4Linking.test.js (Vitest unit, no live browser).
+    expect(body.p_email_verified).toBe(true);
+    // The function lowercases the email before lookup; the browser
+    // sends the address as Clerk returns it, but the lookup is
+    // case-insensitive per the migration assertion.
+    expect(String(body.p_email).toLowerCase()).toBe(CLERK_TEST_EMAIL!.toLowerCase());
+    // signup_source is the inferred provider; the four accepted
+    // values are documented in clerkAuth.jsx.
+    expect(['google', 'apple', 'email_password', 'clerk_first_login', 'clerk_import']).toContain(
+      body.p_signup_source
+    );
+  });
+
+  test('AC1 Slice C error tolerance: when the link RPC fails (e.g. unverified_email_cannot_link), sign-in still lands on /workout', async ({ page }) => {
+    // Slice C must NOT block sign-in on link RPC errors. The useEffect
+    // catches RPC failures and logs them; the next session change
+    // retries (the function is idempotent, so the second call is a
+    // cheap steady-state read).
+    await page.route('**/rest/v1/rpc/link_clerk_user_to_profile', async (route) => {
+      // Mirror the documented rejection shape so the test exercises
+      // the real error path in clerkAuth.jsx, not just any 500.
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 'P0001',
+          message: 'unverified_email_cannot_link',
+          details: null,
+          hint: null
+        })
+      });
+    });
+
+    await page.goto('/login');
+    await page.getByTestId('login-email').fill(CLERK_TEST_EMAIL!);
+    await page.getByTestId('login-password').fill(CLERK_TEST_PASSWORD!);
+    await page.getByTestId('login-submit').click();
+
+    // Sign-in must succeed even when the link RPC rejects the link.
+    await expect(page).toHaveURL(/\/workout$/, { timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'GymTrack' })).toBeVisible();
+  });
+});
