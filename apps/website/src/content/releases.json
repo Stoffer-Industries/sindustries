@@ -493,5 +493,25 @@
     "links": [],
     "evidence": "The aggregate merge gate, staging-to-production dependency chain, main-branch restriction, staging smoke gate, and pinned Fly, flyctl, and Supabase tooling shipped across all eight deployment workflows on 2026-09-15.",
     "visibility": "published"
+  },
+  {
+    "title": "Attention-owner escalation UI wiring",
+    "slug": "attention-owner-escalation-ui-wiring",
+    "releasedAt": "2026-10-07",
+    "summary": "Task detail now shows escalation reasons and the controls for adding, reordering, removing, and resolving attention owners.",
+    "type": "system",
+    "links": [],
+    "evidence": "The task-detail escalation panel and regression coverage shipped on 2026-10-07.",
+    "visibility": "published"
+  },
+  {
+    "title": "Feature-task runner compatibility fix",
+    "slug": "feature-task-runner-compatibility-fix",
+    "releasedAt": "2026-10-08",
+    "summary": "Feature, code, and content delivery stages now use a condition runner compatible with the installed workflow engine.",
+    "type": "system",
+    "links": [],
+    "evidence": "The shared stage-condition adapter shipped across all three delivery workflows on 2026-10-08.",
+    "visibility": "published"
   }
 ]
