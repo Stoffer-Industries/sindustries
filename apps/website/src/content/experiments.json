@@ -3,7 +3,7 @@
     "title": "Drop 1",
     "slug": "drop-1",
     "tag": "Commerce test",
-    "status": "active",
+    "status": "paused",
     "summary": "A small, real-world product drop to test demand, sourcing, positioning, and fulfilment without overbuilding.",
     "why": "The fastest way to learn whether SIndustries can generate revenue is to actually try to generate revenue. Research and planning have diminishing returns without real market feedback.\n\nA constrained commerce experiment forces decisions about sourcing, pricing, positioning, and fulfilment that can't be answered theoretically. Each step either works or produces evidence about why it doesn't.\n\nDrop 1 is designed to be small enough to complete without significant capital commitment, but real enough that the outcomes are meaningful. The goal is a complete loop, not a polished result.",
     "successCriteria": "A complete product drop runs end to end: sourcing a product, setting a price, publishing an offer, fulfilling at least one order, and capturing clear data on demand, margin, effort, and customer response.\n\nSuccess is not revenue \u2014 it's evidence. Even a failed drop that surfaces clear data about what doesn't work is a successful experiment.\n\nKey questions to answer: Can I source something viable in under a week? Does the positioning earn attention? What does fulfilment actually cost in time and money? Would I do it again at larger scale?",
@@ -12,10 +12,11 @@
       "Positioning hypothesis: the SIndustries audience responds to practical tools and systems, not lifestyle products.",
       "Fulfilment approach TBD: exploring direct-to-consumer vs marketplace to understand control/effort tradeoff.",
       "Stale-status review on 2026-07-17: no newer product-drop evidence was available in the weekly review, so the experiment remains active but needs a fresh sourcing or go/no-go update before the next content pass.",
-      "Stale-status review on 2026-08-21: no fresh sourcing or go/no-go evidence appeared in the review window, so the experiment remains active pending a current decision."
+      "Stale-status review on 2026-08-21: no fresh sourcing or go/no-go evidence appeared in the review window, so the experiment remains active pending a current decision.",
+      "Paused on 2026-10-09 after another review found no fresh sourcing, margin, or go/no-go evidence. Resume only with a current product candidate and a concrete launch decision."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-08-21",
+    "updatedAt": "2026-10-09",
     "links": [],
     "image": "/brand/studio/drop-1-hero.png",
     "visibility": "published"
@@ -49,7 +50,7 @@
     "title": "Product Market Scans",
     "slug": "product-market-scans",
     "tag": "Opportunity radar",
-    "status": "active",
+    "status": "paused",
     "summary": "Recurring scans for gaps, pricing windows, underserved niches, and first-drop candidates.",
     "why": "Inspiration is not a reliable source of product ideas. Systematic scanning is.\n\nMost founder-led companies find their first products through personal pain or accidental discovery. Both are real signals, but they're biased toward the founder's specific context and they arrive randomly. A recurring scan process surfaces opportunities outside the founder's blind spots and creates a documented decision trail.\n\nFor SIndustries, the scan criteria are: Does it fit the systems/automation/builder narrative? Is there visible demand evidence? Can it be executed as a small team or solo? Is there a clear path from experiment to revenue?",
     "successCriteria": "Scans run at least twice per month and produce a prioritised list of candidates with supporting evidence for each.\n\nEach candidate record captures: the gap or opportunity, the evidence base, the key constraints, the effort estimate, and a go/no-go recommendation with reasoning.\n\nOver time the scan database becomes a live list of tested hypotheses \u2014 things we looked at and rejected (with reasons), things we're actively pursuing, and things worth revisiting as conditions change.",
@@ -58,10 +59,11 @@
       "NZ-specific opportunities appear underexplored in the AI-native tools category \u2014 global tools often miss local compliance and context.",
       "Recurring scans need a lightweight template to avoid inconsistent depth between cycles.",
       "Stale-status review on 2026-07-17: no newer scan output was available in the weekly review, so the experiment remains active but needs a fresh scan cadence update or an explicit pause decision.",
-      "Stale-status review on 2026-08-21: no fresh scan output or cadence evidence appeared in the review window, so the experiment remains active pending a current scan or pause decision."
+      "Stale-status review on 2026-08-21: no fresh scan output or cadence evidence appeared in the review window, so the experiment remains active pending a current scan or pause decision.",
+      "Paused on 2026-10-09 after another review found no fresh scan output or evidence of the twice-monthly cadence. Resume with a dated scan and a clear owner for the next cycle."
     ],
     "startedAt": "2026-05-28",
-    "updatedAt": "2026-08-21",
+    "updatedAt": "2026-10-09",
     "links": [],
     "image": "/brand/studio/product-market-scans-hero.png",
     "visibility": "published"
