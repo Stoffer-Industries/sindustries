@@ -63,6 +63,24 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install PostgreSQL 16 client
+        # The fixture's step_prisma_migrations_state_uniquely_failed runs
+        # `psql --dbname=...` against the disposable postgres service to
+        # confirm exactly one row in <schema>._prisma_migrations named
+        # *_bad_migration* with rolled_back_at NULL. The GitHub Actions
+        # ubuntu-latest runner ships without psql, so the check returned
+        # 1 (`command -v psql` failed) on every run, causing the fixture
+        # to fail AC4 with verdict=fail. Installing the postgresql-client
+        # apt package alongside the postgres:16 service container
+        # version makes the psql binary resolvable. We install the
+        # default (current) client; psql from client-N is wire-compatible
+        # with the postgres:16 service for the trivial queries this
+        # fixture issues.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
       - name: Install root workspace dependencies
         run: npm ci --no-audit --no-fund
 

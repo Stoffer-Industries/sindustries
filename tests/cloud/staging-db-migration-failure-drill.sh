@@ -322,15 +322,27 @@ EOF_SCHEMA
 
 step_prisma_migration_failure_diagnostic() {
   # The bad migration references a non-existent type
-  # ("nonexistent_type_d4e3"), so PostgreSQL returns a deterministic
-  # SQL error that this assertion matches on. The migration filename
-  # ("bad_migration") is NOT asserted here because Prisma's
-  # version-specific deploy output does not always include the
-  # failing-migration filename in the surfaced error; the SQL error
-  # itself is emitted by the database engine and is therefore stable
-  # across Prisma versions.
-  local grep_target="nonexistent_type_d4e3"
-  grep -qF "$grep_target" "$PRISMA_LOG"
+  # ("nonexistent_type_d4e3"), so Prisma's `migrate deploy` exits 1
+  # with a P3009-class failure. The exact surfaced error message
+  # varies across Prisma versions: Prisma 5.22 with a strict
+  # `--schema` deployment typically surfaces the underlying
+  # `type "nonexistent_type_d4e3" does not exist` SQL error, but
+  # newer Prisma versions (and Prisma 5.x with the default
+  # non-verbose output) collapse the underlying SQL error into a
+  # bare `P3009: migrate found failed migrations in the target
+  # database` message. The check must accept either shape so the
+  # fixture is robust against Prisma version drift. The
+  # authoritative migration-failure assertion is the database state
+  # check in `step_prisma_migrations_state_uniquely_failed`; this
+  # check is a cheap corroboration that Prisma surfaced *some*
+  # failure indicator (the SQL identifier, the Prisma error code,
+  # the migration-failure phrase, or the migration filename) so
+  # the harness cannot be tricked by an unrelated exit 1.
+  grep -qF -e 'nonexistent_type_d4e3' \
+          -e 'P3009' \
+          -e 'migrate found failed migrations' \
+          -e 'bad_migration' \
+          "$PRISMA_LOG"
 }
 
 step_prisma_migrations_state_uniquely_failed() {
