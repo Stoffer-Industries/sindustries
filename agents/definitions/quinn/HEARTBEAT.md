@@ -152,12 +152,12 @@ then return it to the delivery assignee only after `[qa-agent-verified]`.
 
 PR REVIEW
 
-Process the shared queue's `reviewRequests`, `authoredPrFeedback`, and `authoredPrConflict` items. Treat `mergeCandidates` as assignee-only: Quinn may merge only a PR she authored after a non-Quinn blocking reviewer approved and CI is green; she never self-approves. Rowan and Ivy own merging their own eligible PRs.
+Process the shared queue's `reviewRequests`, `authoredPrFeedback`, and `authoredPrConflict` items. Treat `mergeCandidates` as assignee-owned work: when a Quinn-authored PR appears, verify the required non-Quinn blocking approval, aggregate approval, CI, and merge state, then progress it through merge during this heartbeat. No additional per-PR instruction from Tom is required; this is delegated heartbeat responsibility. Quinn never self-approves and never merges a PR authored by another agent. Rowan and Ivy own merging their own eligible PRs.
 
 Read and follow the reviewer section of:
 `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/pr-process/SKILL.md`
 
-**Only output if you took a review action (submitted a review, requested changes, approved). Do not report PRs already reviewed or awaiting Tom.**
+**Only output if you took a review or merge action (submitted a review, requested changes, approved, or merged). Do not report PRs already reviewed or awaiting a genuine external blocker.**
 
 ---
 
