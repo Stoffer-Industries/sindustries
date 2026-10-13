@@ -32,7 +32,22 @@ Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Cle
 - `apps/gymtrack/supabase/migrations/20260924000000_clerk_rls_third_party_auth_assert.sql` is the forward repair migration: it rewrites every user-owned policy from UUID-only `auth.uid()` to the verified text `auth.jwt()->>'sub'` claim, then asserts all eight policies and the Phase 2 FK shape.
 - `infra/cloud/scripts/run-clerk-rls-test.sh` verifies the control-plane integration, mints real session JWTs for two existing Clerk test users, seeds one workout each, and queries Supabase's public Data API with those bearer tokens. It passes only when each user sees exactly its own fixture.
 
-Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23 per Quinn beat 293); the Slice B runbook is the assertion that produces the AC1 evidence, and AC3 (verified-email linking on first post-migration sign-in) is Phase 4 follow-up.
+Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23 per Quinn beat 293); the Slice B runbook is the assertion that produces the AC1 evidence.
+
+### Identity verification — Slice C (Phase 4 verified-email linking)
+
+Slice C (PR #809, MERGED 2026-10-12 — merge commit `e0cc3be0` against task `bb09eaed`) wires the post-sign-in link from a freshly-issued Clerk session to the legacy `public.profiles` row that the Phase 2 FK repoint left behind. The user-visible flow runs entirely in the browser once the Clerk session is established; there is no extra UI step for the user:
+
+1. After a successful Clerk sign-in, `apps/gymtrack/src/lib/clerkAuth.jsx` watches `useUser()` + `useSession()` and, on a user/session change where the user has a `primaryEmailAddress` with `verification.status === 'verified'`, calls `supabase.rpc('link_clerk_user_to_profile', { p_clerk_user_id, p_email, p_email_verified: true, p_signup_source })`.
+2. The RPC `public.link_clerk_user_to_profile(p_clerk_user_id text, p_email text, p_email_verified boolean, p_signup_source text default 'clerk_first_login')` is `SECURITY DEFINER` and is granted `EXECUTE` to the `authenticated` role only. It enforces three idempotent cases, in order, and returns the resulting `public.profiles` row:
+   - **Already linked** — a profile with `clerk_user_id = p_clerk_user_id` already exists. Return it; no write.
+   - **Verified-email match** — a profile with `clerk_user_id IS NULL` and `lower(email) = lower(p_email)` exists. Set its `clerk_user_id` to the new Clerk subject, record `signup_source` (`google_oauth` / `email_password` / `clerk_first_login` per the inferred provider + `passwordEnabled` flag from `externalAccounts[0]`), set `linked_at`, and return the row.
+   - **Fresh insert** — no existing row matches. Insert a new `public.profiles` row with `clerk_user_id`, `email`, `signup_source`, and `linked_at = now()`, and return it.
+3. The RPC rejects unverified-email matches against a legacy row by raising `unverified_email_cannot_link` (`SQLSTATE P0001`); the caller logs and ignores it. Per `docs/ARCHITECTURE.md` § Account linking, only `email_verified: true` may merge into an existing account — verified-email ownership is the proof-of-control signal Google issues for OAuth logins.
+4. RPC errors are caught in the `useEffect` and logged but do **not** block sign-in. The function is idempotent (each of the three cases is a no-op or a single upsert keyed on `clerk_user_id`), so a transient failure self-heals on the next session change.
+5. From the user's perspective, the link is invisible: a returning Google user who previously signed up via Supabase lands on `/workout` with their existing workout history already attached to the Clerk session, and a brand-new Clerk sign-in gets a fresh `public.profiles` row created on the spot.
+
+References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Clerk); PR #809 (`e0cc3be0`); migration `apps/gymtrack/supabase/migrations/20261013000000_clerk_phase_4_link_existing_users.sql`; tests in `apps/gymtrack/src/lib/clerkPhase4Linking.test.js`; tech design § Phase 4 in `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md`.
 
 ## Users
 
