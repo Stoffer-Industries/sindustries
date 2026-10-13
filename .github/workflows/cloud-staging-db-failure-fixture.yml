@@ -107,11 +107,23 @@ jobs:
         shell: bash
         env:
           PRISMA_BIN: ${{ steps.prisma-bin.outputs.path }}
+          # The disposable postgres services container above is
+          # initialised with POSTGRES_PASSWORD=postgres, so the
+          # fixture DSN hard-codes that password. The earlier
+          # `***`-placeholder form was a copy-paste of the
+          # GitHub-Actions secret-redaction shape and sent the
+          # literal three-character password, which made every
+          # connection fail (postgres 16 uses scram-sha-256, so a
+          # wrong password surfaces as FATAL and prisma exits 1
+          # with no log to grep). The disposable DSN never leaves
+          # the runner; do not replace this with a live-staging
+          # password.
+          FIXTURE_PG_PASSWORD: postgres
         run: |
           set -euo pipefail
           mkdir -p artifacts/cloud-staging
           bash tests/cloud/staging-db-migration-failure-drill.sh \
-            --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=tasks_api&sslmode=disable' \
+            --source-dsn "postgresql://postgres:${FIXTURE_PG_PASSWORD}@localhost:5432/postgres?schema=tasks_api&sslmode=disable" \
             --prisma-migrations-dir services/tasks-api/prisma/test-migrations-fixture \
             --service tasks-api \
             --output artifacts/cloud-staging/failure-drill-tasks-api.json \
@@ -123,11 +135,12 @@ jobs:
         shell: bash
         env:
           PRISMA_BIN: ${{ steps.prisma-bin.outputs.path }}
+          FIXTURE_PG_PASSWORD: postgres
         run: |
           set -euo pipefail
           mkdir -p artifacts/cloud-staging
           bash tests/cloud/staging-db-migration-failure-drill.sh \
-            --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=budget_api&sslmode=disable' \
+            --source-dsn "postgresql://postgres:${FIXTURE_PG_PASSWORD}@localhost:5432/postgres?schema=budget_api&sslmode=disable" \
             --prisma-migrations-dir services/budget-api/prisma/test-migrations-fixture \
             --service budget-api \
             --output artifacts/cloud-staging/failure-drill-budget-api.json \

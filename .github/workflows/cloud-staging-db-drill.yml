@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: 'none'
+      cleanup_destination:
+        description: 'DESTRUCTIVE: before restore, drop and recreate the tasks_api and budget_api schemas in the destination database so the restore target is empty. Use only when a previous failed drill left pre-existing objects in the destination. Two-key auth: the workflow sets CLEANUP_DESTINATION=1 only when this is true, and the drill script also requires --cleanup-destination.'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: cloud-staging-database
@@ -131,12 +136,23 @@ jobs:
         env:
           ENVIRONMENT: staging
           CLOUD_DB_DRILL_INTERRUPTION: ${{ inputs.interruption }}
+          # Two-key auth for the destructive cleanup-destination
+          # operator action. The workflow only sets this when the
+          # operator has explicitly opted in via the
+          # cleanup_destination workflow_dispatch input; the drill
+          # script also requires the matching --cleanup-destination
+          # flag at the call site. Both keys are required.
+          CLEANUP_DESTINATION: ${{ inputs.cleanup_destination == true && '1' || '' }}
         run: |
           set -euo pipefail
           SEC="$RUNNER_TEMP/cloud-staging-secrets"
           RECOVERY_FLAG=""
           if [[ "${{ inputs.recovery }}" == "true" ]]; then
             RECOVERY_FLAG="--recovery"
+          fi
+          CLEANUP_FLAG=""
+          if [[ "${{ inputs.cleanup_destination }}" == "true" ]]; then
+            CLEANUP_FLAG="--cleanup-destination"
           fi
           RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 3)"
           export CLOUD_DB_RUN_ID="$RUN_ID"
@@ -148,6 +164,7 @@ jobs:
             --confirm "$RUN_ID" \
             --interruption "${{ inputs.interruption }}" \
             $RECOVERY_FLAG \
+            $CLEANUP_FLAG \
             --archive-dir "$RUNNER_TEMP/cloud-staging-artifacts" \
             --output      "$RUNNER_TEMP/cloud-staging-artifacts/drill-final.json"
 

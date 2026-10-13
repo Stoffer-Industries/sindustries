@@ -30,7 +30,8 @@ Usage: drill.sh \
   --source-tasks-dsn-file <path> --source-budget-dsn-file <path> \
   --dest-tasks-dsn-file <path>   --dest-budget-dsn-file <path> \
   --confirm <run-id> \
-  [--archive-dir <path>] [--recovery] [--interruption <dump|restore|none>]
+  [--archive-dir <path>] [--recovery] [--interruption <dump|restore|none>] \
+  [--cleanup-destination]
 
 Required:
   --source-tasks-dsn-file <path>     Source tasks_api DSN file.
@@ -48,6 +49,15 @@ Optional:
                                      "dump" (interrupt pg_dump),
                                      "restore" (interrupt pg_restore),
                                      or "none" (default: none).
+  --cleanup-destination              Operator-only. Before restore,
+                                     drop and recreate the
+                                     tasks_api and budget_api schemas
+                                     in the destination database so
+                                     the restore target is empty.
+                                     Requires CLEANUP_DESTINATION=1 in
+                                     the environment (two-key auth) and
+                                     is wired to a workflow_dispatch
+                                     input on the staging workflow.
   --output <path>                    Final drill-result envelope.
 USAGE
 }
@@ -57,6 +67,7 @@ DEST_TASKS_FILE="" DEST_BUDGET_FILE=""
 ARCHIVE_DIR=""
 RECOVERY=0
 INTERRUPTION="none"
+CLEANUP_DESTINATION_FLAG=0
 CONFIRM=""
 
 while (( $# > 0 )); do
@@ -68,6 +79,7 @@ while (( $# > 0 )); do
     --archive-dir)            ARCHIVE_DIR="$2";      shift 2;;
     --recovery)               RECOVERY=1;            shift;;
     --interruption)           INTERRUPTION="$2";     shift 2;;
+    --cleanup-destination)    CLEANUP_DESTINATION_FLAG=1; shift;;
     --confirm)                CONFIRM="$2";          shift 2;;
     --output)                 OUTPUT_PATH="$2";      shift 2;;
     --help|-h)                usage; exit 0;;
@@ -80,6 +92,15 @@ for v in SRC_TASKS_FILE SRC_BUDGET_FILE DEST_TASKS_FILE DEST_BUDGET_FILE CONFIRM
     cloud_db_die "--${v,,} is required"
   fi
 done
+
+# Two-key auth for the destructive operator action: the CLI flag
+# confirms intent at the call site, and CLEANUP_DESTINATION=1 in the
+# environment is the second factor that the operator (or the
+# workflow_dispatch input that maps to it) must explicitly set.
+# Refuse if either is missing.
+if [[ "$CLEANUP_DESTINATION_FLAG" -eq 1 && "${CLEANUP_DESTINATION:-0}" != "1" ]]; then
+  cloud_db_die "--cleanup-destination requires CLEANUP_DESTINATION=1 in the environment"
+fi
 
 if [[ "$CONFIRM" != "${CLOUD_DB_RUN_ID:-}" ]]; then
   cloud_db_die "--confirm must match the assigned run id (${CLOUD_DB_RUN_ID:-unset})"
@@ -126,6 +147,28 @@ cloud_db_info "step 2 dump complete archive=${DUMP_ARCHIVE_PATH} digest=${DUMP_S
 
 if [[ "$INTERRUPTION" == "dump" ]]; then
   cloud_db_die "interruption=dump drill complete; .partial intentionally left in place"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 2.5: optional destination cleanup (operator only). The
+# cleanup-destination.sh script drops and recreates the tasks_api
+# and budget_api schemas in the destination database so restore.sh
+# sees a fresh, empty target. The two-key auth (CLI flag + env
+# var) is enforced in cleanup-destination.sh itself; the drill
+# orchestrator just decides whether to invoke it.
+# ---------------------------------------------------------------------------
+
+CLEANUP_OUT=""
+if [[ "$CLEANUP_DESTINATION_FLAG" -eq 1 ]]; then
+  CLEANUP_OUT="$(
+    "$(dirname "${BASH_SOURCE[0]}")/cleanup-destination.sh" \
+      --source-tasks-dsn-file "$SRC_TASKS_FILE" \
+      --dest-tasks-dsn-file   "$DEST_TASKS_FILE" \
+      --dest-budget-dsn-file  "$DEST_BUDGET_FILE" \
+      --confirm "$CONFIRM" \
+      --confirm-cleanup-destination
+  )"
+  cloud_db_info "step 2.5 destination cleanup complete envelope=${CLEANUP_OUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -243,11 +286,11 @@ fi
 OUTPUT_PATH="${OUTPUT_PATH:-${ARCHIVE_DIR}/drill-${CLOUD_DB_RUN_ID}.json}"
 
 python3 - "$OUTPUT_PATH" "$CLOUD_DB_RUN_ID" \
-        "$INVENTORY_OUT" "$DUMP_OUT" "$RESTORE_OUT" \
+        "$INVENTORY_OUT" "$DUMP_OUT" "$CLEANUP_OUT" "$RESTORE_OUT" \
         "$MIGRATE_OUT" "$RECONCILE_OUT" "$RECOVERY_OUT" <<'PY'
 import json, os, sys, pathlib
 
-out_path, run_id, inv, dump, restore, migrate, reconcile, recovery = sys.argv[1:]
+out_path, run_id, inv, dump, cleanup, restore, migrate, reconcile, recovery = sys.argv[1:]
 
 def safe_load(p):
   if not p: return None
@@ -259,6 +302,7 @@ envelope = {
   "runId": run_id,
   "environment": "staging",
   "interruption": os.environ.get("CLOUD_DB_DRILL_INTERRUPTION", "none"),
+  "cleanupDestination": os.path.basename(cleanup) if cleanup else None,
   "steps": {
     "inventory":  os.path.basename(inv)      if inv      else None,
     "dump":       os.path.basename(dump)     if dump     else None,

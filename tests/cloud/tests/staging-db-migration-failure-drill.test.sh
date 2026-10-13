@@ -240,7 +240,7 @@ out="$(cd "$REPO_ROOT" && \
   PATH="$PATH" \
   PRISMA_BIN="$PRISMA_BIN_FOR_TEST" \
   bash "$DRILL" \
-    --source-dsn 'postgresql://app:***@localhost:5432/postgres?schema=tasks_api&sslmode=disable' \
+    --source-dsn 'postgresql://app:postgres@localhost:5432/postgres?schema=tasks_api&sslmode=disable' \
     --prisma-migrations-dir "$FIXTURE_MIG_DIR_TASKS" \
     --service tasks-api \
     --output "$TMP5/out.json" \
@@ -316,7 +316,7 @@ out="$(cd "$REPO_ROOT" && \
   PATH="$PATH" \
   PRISMA_BIN="$PRISMA_BIN_FOR_TEST" \
   bash "$DRILL" \
-    --source-dsn 'postgresql://app:***@localhost:5432/postgres?schema=budget_api&sslmode=disable' \
+    --source-dsn 'postgresql://app:postgres@localhost:5432/postgres?schema=budget_api&sslmode=disable' \
     --prisma-migrations-dir "$FIXTURE_MIG_DIR_BUDGET" \
     --service budget-api \
     --output "$TMP7/out.json" \
@@ -334,6 +334,38 @@ if [[ $rc -eq 0 ]] && [[ -s "$TMP7/out.json" ]]; then
   fi
 else
   fail "budget-api service path runs cleanly" "exit=$rc output=$out"
+fi
+
+# ---------------------------------------------------------------------------
+# Case 8: harness refuses a placeholder password on a localhost
+# DSN. The `***` shape is what the GitHub-Actions secret-redaction
+# filter renders for a real password; if a contributor copy-pastes
+# the redacted form into the workflow instead of using a real
+# secret, the literal `***` ends up in the DSN. Every connection
+# then fails with a postgres scram-sha-256 mismatch and prisma
+# exits 1 with no log to grep, silently degrading the diagnostic
+# + state checks. The check must fire before prisma is invoked.
+# ---------------------------------------------------------------------------
+
+echo "case 8: placeholder password on localhost DSN"
+TMP8="$TMP/case8"
+mkdir -p "$TMP8"
+setup_stubs
+set +e
+out="$(cd "$REPO_ROOT" && \
+  PATH="$PATH" \
+  bash "$DRILL" \
+    --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=tasks_api&sslmode=disable' \
+    --prisma-migrations-dir "$FIXTURE_MIG_DIR_TASKS" \
+    --service tasks-api \
+    --output "$TMP8/out.json" \
+    --confirm-staging 2>&1)"
+rc=$?
+set -e
+if [[ $rc -eq 1 ]] && [[ "$out" == *"placeholder password"* ]]; then
+  pass "refuses placeholder password on localhost DSN (exit=1)"
+else
+  fail "refuses placeholder password on localhost DSN" "exit=$rc output=$out"
 fi
 
 # ---------------------------------------------------------------------------
