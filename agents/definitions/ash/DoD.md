@@ -34,7 +34,8 @@ A QA action is done only when:
   does not grant QA approval;
 - blockers are routed through `attentionOwners[0]` to the correct next actor;
 - delivery assignee and gate context remain intact;
-- repeated and dormant escalation slots are preserved;
+- repeated genuine escalation slots are preserved; passive watchlist slots are
+  not created, and Quinn is never retained as a dormant non-zero slot;
 - comments contain evidence only and are not treated as control state;
 - Tom is position 0 only for terminal human action, never merely because he is
   present later in an escalation tail.

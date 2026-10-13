@@ -75,12 +75,12 @@ repairs, and self-resolves.
 
 `attentionOwners` is the primary blocker/handoff control plane. It is an ordered
 list of role slots, not a set: position 0 is the next actionable owner and later
-positions are escalation targets. Repeated names are meaningful and must be
-preserved. Tom belongs later in the tail while agents can still act. Quinn is
-the highest agent escalation; if Quinn cannot resolve the blocker, Quinn moves
-Tom to position 0. `attentionOwners=["Tom"]` is the terminal human action state:
-no fallback slot is required and no escalation exists beyond Tom. Tom merely
-appearing later in a tail is dormant, not actionable.
+positions are only genuine, explicitly justified escalation targets. Repeated
+names are meaningful when they represent distinct active role slots; do not
+create passive watchlist entries. Quinn is the highest agent escalation; if
+Quinn cannot resolve the blocker, Quinn moves Tom to position 0.
+`attentionOwners=["Tom"]` is the terminal human action state: no fallback slot
+is required and no escalation exists beyond Tom.
 
 ### Reason-bearing write contract
 
@@ -98,7 +98,11 @@ owner, and the self-resolve endpoint when the current actor is done. Preserve
 genuine tail slots; remove stale or unjustified escalation slots rather than
 carrying them forward. Quinn is an exceptional OpenClaw/runtime unblocker, not
 a normal QA, acceptance, review, or delivery-workflow owner. Tom is added only
-when a concrete action requires Tom now.
+when a concrete action requires Tom now. The API rejects automated attempts to
+put Tom on a `doing` task unless a Quinn-authored `[quinn-escalation]` is
+present; it also rejects Quinn as a dormant non-zero slot without that same
+explicit escalation. This prevents a heartbeat from paging Tom or Quinn while
+Lobster is still reporting an unresolved delivery fingerprint.
 
 **Client helper.** `agents/skills/ops/tasks-api/tasks_api_client.py` exposes
 `reconcile_attention_owners(task_id, attention_owners, note, *, base_url=None, token=None)`
@@ -109,9 +113,12 @@ deployment or credential regression. To verify reachability, call the helper
 (or POST directly) with an authenticated credential.
 
 Delivery (`assignee`) and gate eligibility/context (`workflowGates` and
-structured approvals) remain independent. A normal stack can therefore be:
-`assignee=Rowan`, `qa_agent` gate owner `Ash`, `attentionOwners=[Rowan, Tom]`.
-Do not hide Ash and do not deduplicate Rowan across those roles.
+structured approvals) remain independent. During ordinary delivery evidence
+work a normal state is `assignee=Rowan`, `qa_agent` gate owner `Ash`, and
+`attentionOwners=[]`; Rowan is already actionable through the assignee queue.
+A Tom row is only valid at `acceptance`, or as a deliberate Quinn-to-Tom
+terminal escalation. Do not hide Ash and do not deduplicate Rowan across those
+roles.
 
 An ordinary Lobster delivery checklist is not itself an escalation. When the
 checklist asks the delivery assignee to correct PR/AC evidence, keep

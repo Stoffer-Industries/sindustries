@@ -196,12 +196,11 @@ Rowan cannot write to `~/.openclaw/`. Route Quinn at `attentionOwners[0]`; comme
 ## AttentionOwners — primary blocker and handoff stack
 
 `attentionOwners` is the ordered action/escalation control plane. Position 0 is
-the next actionable agent; later slots are fallback escalation targets, with Tom
-last while agent escalation remains possible. Do not deduplicate repeated names:
-each entry is a role slot. For example, `Rowan / Ash / Rowan / Tom` means Rowan
-is the delivery assignee, Ash retains QA-gate context, Rowan is the current
-actor, and Tom is a dormant last resort. Quinn is the highest agent escalation;
-if Quinn cannot resolve the blocker, Quinn advances Tom to position 0. Tom at
+the next actionable agent; later slots are only genuine, explicitly justified
+escalation targets. Do not create passive watchlist entries or treat a future
+gate as an attention owner. Do not deduplicate repeated names when they
+represent distinct active role slots. Quinn is the highest agent escalation; if
+Quinn cannot resolve the blocker, Quinn advances Tom to position 0. Tom at
 position 0 is terminal human action, needs no later owner, and has no escalation
 beyond him.
 
@@ -263,6 +262,15 @@ work. When implementation ACs are complete and `qa_agent` is outstanding,
 Lobster should make Ash the active owner; after Ash's QA approval, the task
 should advance to Tom's acceptance gate. Add Tom to a `doing` task only when a
 concrete action is required from him immediately.
+
+Before any attention-owner write, read the latest `[lobster-state]` and its
+`failureFingerprint`. If the task is still `doing` and the latest Lobster state
+contains an unresolved delivery/evidence fingerprint, do not route Tom for
+acceptance or park Quinn as a verification tail. Keep the stack empty (or
+preserve only a genuine current position-0 runtime blocker), address the
+delivery checklist as Rowan, and let Lobster re-run. The Tasks API enforces
+this boundary for automated writes: Tom on `doing` requires a Quinn-authored
+`[quinn-escalation]`, and Quinn may not be a dormant non-zero slot.
 
 ```http
 POST /tasks/<task-uuid>/attention-owners/reconcile

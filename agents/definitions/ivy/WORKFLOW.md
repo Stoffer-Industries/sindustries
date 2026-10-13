@@ -246,7 +246,8 @@ Use `attentionOwners` on a task to page Quinn or Lox for something the modelled 
 Use `agents/skills/ops/attention-owner-routing/SKILL.md` for every attention
 owner add, replacement, escalation, or repair. Do not use the legacy
 `tasks_api_client.py patch --attention-owners` path: it can create rows without
-the authenticated actor or reason metadata.
+the authenticated actor or reason metadata. Only add an owner for a concrete
+action required now; do not create future-gate or passive verification slots.
 
 Safe clear (preserves co-owners; do NOT use `--clear-attention-owners`):
 
