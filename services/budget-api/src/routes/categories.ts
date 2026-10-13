@@ -41,9 +41,22 @@ categoriesRouter.get(
       buckets.set(key, (buckets.get(key) ?? 0) + t.amountCents);
     }
 
-    const series: Record<string, { day: string; amountCents: number }[]> = {};
+    // Use a null-prototype object so category names like 'constructor',
+    // '__proto__', and 'toString' don't trigger inherited-property reads
+    // (e.g. series[category].push is not a function on a `constructor`
+    // slot, or accidental __proto__/toString reassignment). Split the
+    // bucket key on the FIRST `|` only so a category whose name contains
+    // `|` (e.g. 'a|b') round-trips unchanged in the timeseries response
+    // instead of being silently truncated to the substring before the
+    // first `|`.
+    const series = Object.create(null) as Record<
+      string,
+      { day: string; amountCents: number }[]
+    >;
     for (const [key, amountCents] of buckets.entries()) {
-      const [day, category] = key.split('|');
+      const sep = key.indexOf('|');
+      const day = key.slice(0, sep);
+      const category = key.slice(sep + 1);
       series[category] ??= [];
       series[category].push({ day, amountCents });
     }
