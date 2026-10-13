@@ -16,12 +16,17 @@ function normalizeOwnerKeyPart(owner) {
  * accessibility label and the task-details surface can render the distinct
  * responsibilities without re-deriving them.
  *
- * Cross-role visual dedupe (AC4): a person who appears as both delivery
- * assignee AND attention owner renders ONE avatar, owned by the higher-tier
- * role (attention > workflow-gate > delivery). This closes the "Rowan is
- * shown three times for one task" defect without losing the escalation
- * semantics — within the attention tier, repeated names stay as separate
- * ordered slots because that IS the escalation shape.
+ * Every role slot is rendered exactly once, in the order it was built —
+ * cross-role repeats (the same owner string appearing in more than one
+ * tier) render as separate entries because the SPEC contract treats them
+ * as separate ordered responsibilities. Within a single tier (e.g. an
+ * attention row at slot 0 and another at slot 1 for the same person)
+ * each slot is also preserved, because intra-tier repeats are part of
+ * the escalation shape. The function never collapses or dedupes entries
+ * across or within tiers; the rendered count is always
+ * `attention.length + actionableGates.length + (assignee ? 1 : 0)`.
+ * `apps/tasks/SPEC.md` section 11 is the source of truth for the
+ * "no collapse" contract.
  *
  * `delivery` is the single-row assignee field on the task. It is allowed to
  * be empty (no assignee yet) — the layout still renders the workflow-gate
@@ -35,24 +40,12 @@ function normalizeOwnerKeyPart(owner) {
  * `attentionOwners` is the array of owner strings from the
  * `TaskAttentionOwner` table. The full details (note, addedBy) are surfaced
  * in the accessibility label and the task-details surface.
- *
- * Every role slot is rendered, including repeated people. A repeated avatar
- * communicates that the same person owns more than one ordered responsibility;
- * collapsing it would destroy the escalation path. Position 0 is the current
- * attention owner and is therefore the strongest visual layer.
  */
 const ACTIONABLE_GATE_BY_STATUS = {
   open: 'spec',
   ready: 'tech_design',
   doing: 'qa_agent',
   acceptance: 'accepted'
-};
-
-// Tier rank — higher wins on cross-role dedupe.
-const ROLE_TIER = {
-  delivery: 1,
-  'workflow-gate': 2,
-  attention: 3
 };
 
 /**
@@ -137,43 +130,17 @@ export function buildStackedOwnerLayers(task) {
     });
   }
 
-  // AC4 cross-role collapse: a name that appears in more than one role tier
-  // renders one avatar, owned by the highest-tier role. Within a single
-  // tier the repeat stays as separate slots because that IS the escalation
-  // shape (e.g. [Rowan, Rowan, Tom] is a real escalation contract); only
-  // cross-tier duplicates collapse.
-  const collapsed = [];
-  const seenAcrossTiers = new Map();
-  for (const layer of layers) {
-    const key = normalizeOwnerKeyPart(layer.owner);
-    const existing = seenAcrossTiers.get(key);
-    if (!existing) {
-      seenAcrossTiers.set(key, { tier: ROLE_TIER[layer.role], layer });
-      collapsed.push(layer);
-      continue;
-    }
-    if (ROLE_TIER[layer.role] > existing.tier) {
-      // The new layer outranks the prior; replace the prior with the new
-      // entry but keep the original index so the avatar stack's relative
-      // ordering stays stable for callers that read position-by-index.
-      const idx = collapsed.indexOf(existing.layer);
-      collapsed[idx] = layer;
-      seenAcrossTiers.set(key, { tier: ROLE_TIER[layer.role], layer });
-      continue;
-    }
-    if (ROLE_TIER[layer.role] === existing.tier) {
-      // Same-tier repeat (intra-tier): keep as separate slot. The
-      // escalation shape — e.g. Rowan listed twice intentionally at
-      // different positions — is preserved by NOT replacing the prior and
-      // NOT registering the new entry as the canonical representative.
-      collapsed.push(layer);
-      continue;
-    }
-    // Lower-tier: the higher-tier entry already represents this person;
-    // skip the duplicate.
-  }
-
-  return { entries: collapsed };
+  // No cross-role collapse. Every role slot the layer builders produced
+  // is returned exactly once, in build order, so the rendered avatar
+  // count always equals the configured role count. Cross-role repeats
+  // (the same owner in more than one tier) and intra-tier repeats (the
+  // same owner at two attention slots) are both preserved as separate
+  // ordered responsibilities per `apps/tasks/SPEC.md` section 11. The
+  // per-slot `key` already includes the role prefix and the slot index,
+  // so React still mounts each entry as a distinct DOM node and the
+  // `data-owner-key` / `data-role` attributes remain unique within the
+  // rendered output.
+  return { entries: layers };
 }
 
 /**

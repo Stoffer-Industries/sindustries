@@ -26,9 +26,12 @@ describe('buildStackedOwnerLayers', () => {
     ]);
   });
 
-  it('collapses a cross-role duplicate into the highest-tier role (AC4)', () => {
-    // Rowan is delivery + attention at slot 0 — the attention tier outranks
-    // delivery, so the duplicate collapses into one attention row.
+  it('preserves a cross-role duplicate as separate ordered slots (task 479d76f8 AC1/AC2)', () => {
+    // Rowan is delivery + attention at slot 0 — the SPEC contract is that
+    // every role slot is rendered, so the duplicate stays as two entries
+    // (one attention slot, one delivery slot) with distinct `role` and
+    // `key` values. The attention slot keeps its `slot: 0`; the delivery
+    // slot is appended after the attention layer.
     const { entries } = buildStackedOwnerLayers({
       status: 'doing',
       assignee: 'Rowan',
@@ -36,9 +39,12 @@ describe('buildStackedOwnerLayers', () => {
     });
     expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
       'attention:Rowan',
-      'attention:Tom'
+      'attention:Tom',
+      'delivery:Rowan'
     ]);
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toMatchObject({ role: 'attention', owner: 'Rowan', slot: 0, key: 'attention:0:rowan' });
+    expect(entries[2]).toMatchObject({ role: 'delivery', owner: 'Rowan', key: 'delivery:rowan' });
   });
 
   it('preserves separate attention slots when a person repeats within the attention tier only', () => {
@@ -114,13 +120,14 @@ describe('buildStackedOwnerLayers', () => {
     ]);
   });
 
-  it('normalises whitespace and case only inside stable per-slot keys', () => {
-    // AC4: same-name cross-tier duplicates collapse into the highest
-    // tier (attention). Workflow-gate Quinn and delivery Quinn both
-    // reduce to the existing attention-row representative. Both
-    // attention slots stay — the intra-tier repeat is part of the
-    // escalation shape. Whitespace and case differences are normalised
-    // inside the per-slot key.
+  it('normalises whitespace and case only inside stable per-slot keys, and keeps cross-role duplicates as distinct entries', () => {
+    // AC1/AC2 (task 479d76f8): same-name cross-tier duplicates stay as
+    // separate entries. The two attention rows for Quinn render as one
+    // entry each (intra-tier repeat preserved), the workflow-gate Quinn
+    // and the delivery Quinn each render as their own entry, and
+    // whitespace / case differences are normalised inside the per-slot
+    // key only. Five total entries, in build order, each with a
+    // role-prefixed key.
     const { entries } = buildStackedOwnerLayers({
       status: 'doing',
       assignee: '  Quinn  ',
@@ -129,7 +136,15 @@ describe('buildStackedOwnerLayers', () => {
     });
     expect(entries.map((entry) => entry.key)).toEqual([
       'attention:0:quinn',
-      'attention:1:quinn'
+      'attention:1:quinn',
+      'workflow-gate:0:quinn',
+      'delivery:quinn'
+    ]);
+    expect(entries.map((entry) => `${entry.role}:${entry.owner}`)).toEqual([
+      'attention:QUINN',
+      'attention:quinn',
+      'workflow-gate:quinn',
+      'delivery:  Quinn  '
     ]);
   });
 
@@ -163,11 +178,13 @@ describe('buildAvatarAriaLabel', () => {
 });
 
 describe('StackedAvatarGroup', () => {
-  it('collapses a cross-role duplicate into a single attention avatar (AC4)', () => {
-    // Rowan is both delivery and attention at slot 0 — the avatar stack
-    // collapses that into ONE attention avatar (highest tier wins).
-    // After the render-order fix, position 0 (Rowan) is rightmost; DOM
-    // order is [Tom, Rowan] with both rows carrying the `attention` data-role.
+  it('preserves a cross-role duplicate as separate avatar slots (task 479d76f8 AC1/AC2)', () => {
+    // Rowan is both delivery and attention at slot 0 — the SPEC contract
+    // is that every role slot is rendered, so the avatar stack shows one
+    // attention avatar (rightmost, position 0) AND one delivery avatar
+    // (leftmost after the render-order flip). The cross-role repeat is
+    // visible as two distinct entries with separate `data-role` values
+    // and separate `data-owner-key` values.
     const { container } = render(<StackedAvatarGroup task={{
       status: 'doing',
       assignee: 'Rowan',
@@ -175,11 +192,24 @@ describe('StackedAvatarGroup', () => {
       attentionOwners: ['Rowan', 'Tom']
     }} />);
     const items = [...container.querySelectorAll('.task-owner-stack-item')];
-    expect(items).toHaveLength(2);
-    expect(items.map((item) => item.getAttribute('data-role'))).toEqual(['attention', 'attention']);
+    expect(items).toHaveLength(3);
+    // DOM order is reversed from build order: delivery, then attention
+    // slot N, then attention slot 0 (rightmost). So: delivery:Rowan,
+    // attention:Tom, attention:Rowan@0.
     expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
+      'delivery assignee Rowan',
       'attention owner Tom',
       'attention owner Rowan'
+    ]);
+    expect(items.map((item) => item.getAttribute('data-role'))).toEqual([
+      'delivery',
+      'attention',
+      'attention'
+    ]);
+    expect(items.map((item) => item.getAttribute('data-owner-key'))).toEqual([
+      'delivery:rowan',
+      'attention:1:tom',
+      'attention:0:rowan'
     ]);
   });
 

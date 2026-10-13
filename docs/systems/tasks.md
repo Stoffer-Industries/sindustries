@@ -141,7 +141,7 @@ See [Structured approval and authentication contract](#structured-approval-and-a
 
 ### TaskAttentionOwner
 
-Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional within the attention tier (intra-tier repeats stay as separate ordered slots — that is the escalation shape) and are deduplicated across case-insensitive matches on every write. Task `91864257` ("Make attention-owner escalations deduplicated, explainable, and resolvable") closed the case-insensitive duplicate path; cross-tier repeats are visually collapsed by the avatar stack but remain distinct rows on disk.
+Ordered role-slot table for the primary blocker/handoff and escalation stack. `position = 0` is the next actionable owner; later positions are dormant fallbacks. Quinn is the highest agent escalation. If Quinn cannot resolve a blocker, Quinn advances Tom to position 0. Tom at position 0 is terminal human action, requires no later owner, and has no escalation beyond him; Tom later in a tail is dormant. Free-form owners mirror `Task.assignee`. Repeated people are intentional within the attention tier (intra-tier repeats stay as separate ordered slots — that is the escalation shape) and are deduplicated across case-insensitive matches on every write. Task `91864257` ("Make attention-owner escalations deduplicated, explainable, and resolvable") closed the case-insensitive duplicate path; the avatar stack now renders cross-tier repeats as separate ordered slots (task `479d76f8`) so the assignee-on-the-card signal stays visible whenever the assignee is also currently blocking the task.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -155,7 +155,7 @@ Ordered role-slot table for the primary blocker/handoff and escalation stack. `p
 
 Task responses include:
 
-- `attentionOwners` — ordered role slots; index 0 is actionable, intra-tier repeats preserved, cross-tier case-insensitive duplicates collapsed
+- `attentionOwners` — ordered role slots; index 0 is actionable, intra-tier repeats preserved, cross-tier repeats kept as separate ordered entries (the avatar stack no longer collapses them, per task `479d76f8`)
 - `topAttentionOwner` — `attentionOwners[0]` or `null`
 - `attentionOwnerDetails` — full audit rows (`{ id, owner, position, addedBy, note, createdAt }`)
 
@@ -206,7 +206,7 @@ are not generic audit comments. A capability-resolution marker must therefore
 be followed by a new Ash verdict, never treated as evidence that QA already
 passed.
 
-Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack collapses the delivery/attention duplicate into one attention-tier avatar (highest tier wins), but the underlying rows remain distinct; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
+Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack renders the delivery and attention tiers as separate ordered slots — so a card with this ownership shows `delivery:Rowan` leftmost, `workflow-gate:Ash` in the middle, `attention:Tom` next, and `attention:Rowan@0` rightmost. The underlying rows remain distinct on disk; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
 

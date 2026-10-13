@@ -186,7 +186,7 @@ new planes is scoped separately.
    * **Layer 3 — delivery assignee** (the `task.assignee` field). The
      delivery avatar remains visible as context but never obscures the current
      attention owner. Empty `assignee` is allowed.
-3. Every role slot remains visible, including repeated people. Stable keys combine role, position, and a case-insensitive trimmed owner string; duplicates are never collapsed because order communicates escalation. The
+3. Every role slot remains visible, including repeated people. Stable keys combine role, position, and a case-insensitive trimmed owner string; duplicates are never collapsed because order communicates escalation. Cross-role repeats (the same owner string appearing in more than one tier — for example, a `Rowan` assignee who is also position 0 in `attentionOwners`) render as separate ordered slots, one per role, so the assignee-on-the-card signal stays visible even when the assignee is also currently blocking the task. The
    `findAssigneeUser` lookup uses the original (un-normalised)
    `owner` string so display name and avatar asset still resolve
    correctly for the visible entry.
