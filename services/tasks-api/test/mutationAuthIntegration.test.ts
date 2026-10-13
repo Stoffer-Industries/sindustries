@@ -9,7 +9,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
   { token: 'quinn-service-token-long-enough', actor: 'Quinn', approvalTypes: ['tech_design'] },
   { token: 'bookmark-lobster-token-long-enough', actor: 'bookmark_lobster', approvalTypes: [] },
-  { token: 'content-tasks-token-long-enough', actor: 'Lobster', approvalTypes: [] },
   { token: 'feature-task-lobster-token-long', actor: 'feature_task_lobster', approvalTypes: [] }
 ]);
 

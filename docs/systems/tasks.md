@@ -759,16 +759,16 @@ Comment author is derived from the authenticated actor (task `0719a8e3` AC2). A 
 
 The content-scheduler `x-actor` header is kept as a backwards-compatible audit-trail signal (Phase 1). When set, the API logs a warning if the header disagrees with the authenticated actor and uses the authenticated actor as authoritative. Phase 2 (cloud auth, task `206927ed`) will drop the header entirely.
 
-Per-agent service credentials — each trusted writer has its own token so the comment author / audit-trail actor surfaces correctly:
+Per-agent service credentials — agent-owned callers use the shared Tasks API resolver so the authenticated runtime actor is preserved:
 
 | Env var | Actor (derived) | Used by |
 |---|---|---|
-| `TASKS_API_APPROVAL_TOKEN` | `Quinn` | Approval writes (existing) — Quinn-only `tech_design` gate |
+| `<AGENT>_TASKS_API_APPROVAL_TOKEN` | Current agent | Agent-owned Tasks API mutations, including content-task workflow transitions |
+| `TASKS_API_APPROVAL_TOKEN` | `Quinn` | Generic fallback for callers without an identifiable agent; Quinn-only `tech_design` gate |
 | `BOOKMARK_LOBSTER_TOKEN` | `bookmark_lobster` | `agents/workflows/bookmarks/scripts/lobster_create_tasks_from_proposals.py` |
-| `CONTENT_TASKS_TOKEN` | `Lobster` | `agents/workflows/content-tasks/scripts/common.py` |
 | `FEATURE_TASK_LOBSTER_TOKEN` | `feature_task_lobster` | `agents/workflows/feature-task/src/api_client.rs` (`add_comment`), `agents/workflows/feature-task/src/analytics.rs` |
 
-When both `TASKS_API_APPROVAL_USERS` and `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` are empty the API refuses every mutation with `401 AUTH_REQUIRED`. Local dev must provision at least one user or service credential — see `services/tasks-api/test/mutationAuthIntegration.test.ts` for the contract. Quinn provisions the four per-agent tokens in `~/.openclaw/.env` and the relevant agent env files; each agent only learns its own token.
+When both `TASKS_API_APPROVAL_USERS` and `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` are empty the API refuses every mutation with `401 AUTH_REQUIRED`. Local dev must provision at least one user or service credential — see `services/tasks-api/test/mutationAuthIntegration.test.ts` for the contract. Quinn provisions the relevant per-agent tokens in `~/.openclaw/.env` and the agent env files; each agent only learns its own token.
 
 ---
 

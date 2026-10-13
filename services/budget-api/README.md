@@ -44,24 +44,35 @@ npm run dev
 ## MVP endpoints
 
 - `GET /health`
-- `POST /api/v1/session/dev-login`
-- `GET /api/v1/me`
-- `POST /api/v1/akahu/sync` (demo stub)
-- `GET /api/v1/transactions?userId=...`
-- `PATCH /api/v1/transactions/:transactionId/category`
-- `GET /api/v1/categories/timeseries?userId=...&from=...&to=...`
-- `GET /api/v1/alerts?userId=...`
+- `POST /api/v1/session/dev-login` (development mode only — see Security posture)
+- `GET /api/v1/me` (requires an active session)
+- `POST /api/v1/akahu/sync` (demo stub; requires an active session)
+- `GET /api/v1/transactions` (requires an active session)
+- `PATCH /api/v1/transactions/:transactionId/category` (requires an active session)
+- `GET /api/v1/categories/timeseries?from=...&to=...` (requires an active session)
+- `GET /api/v1/alerts` (requires an active session)
 
 ## Security posture
 
-> **MVP scope: dev/Tailnet only — auth is not yet enforced.**
+> **Source behavior (see Deployment notes for the runtime exposure):**
 >
-> Every route except `/api/v1/me` accepts a `userId` from the request body or
-> query and operates on that user without verifying a session token. Treat the
-> service as reachable only over a trusted Tailnet and never expose it on the
-> public internet until the `requireSession` middleware in
-> `services/budget-api/src/app.ts` lands (tracked in the repo audit under
-> "Theme 1 — Lock down `budget-api` before any non-Tailnet deployment").
+> All user-data routers (`akahu`, `cards`, `transactions`, `categories`,
+> `categorize`, `alerts`) are gated by `requireSession` in
+> `services/budget-api/src/app.ts`. The `userId` is sourced from
+> `req.session` and never trusted from the request body or query string.
+> `GET /api/v1/me` also requires an active session.
+>
+> The `POST /api/v1/session/dev-login` endpoint remains mounted but is
+> correctly disabled outside development (`NODE_ENV !== 'development'`).
+> Production deployments must not run with `NODE_ENV=development`; the
+> rate limiter on this endpoint is in-memory and not multi-instance safe.
+>
+> The Session model has no `expiresAt` column today (see audit finding F8
+> in `docs/repo-audits/2026-W42.md`); a leaked session therefore remains
+> valid while its row exists. Treat the service as reachable only over a
+> trusted network and never expose it on the public internet until a
+> session-lifetime policy is recorded and shipped (task `8a2846e3`-style
+> decision brief expected before commissioning identity/migration work).
 
 ## HTTP hardening
 

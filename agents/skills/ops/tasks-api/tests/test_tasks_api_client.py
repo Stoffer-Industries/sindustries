@@ -196,6 +196,41 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
         self.assertEqual(result, {"topAttentionOwner": "Rowan"})
 
 
+    def test_reconcile_attention_owners_posts_to_reason_bearing_endpoint(self):
+        # Task 91864257 / Ash 5cb4a8fe incident: the reconcile route is
+        # POST-only; an OPTIONS/GET probe returns 404. The client helper
+        # must call POST with the full ordered stack and the required
+        # non-empty note. This is the supported path for cross-agent
+        # attention-owner writes.
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client,
+            "api_request",
+            return_value={"data": {"attentionOwners": ["Ash"]}},
+        ) as api_request:
+            result = tasks_api_client.reconcile_attention_owners(
+                "task-1",
+                ["Ash", "Rowan"],
+                "Ash must verify AC2 live DNS before returning to Rowan.",
+            )
+        api_request.assert_called_once_with(
+            "POST",
+            self.BASE_URL,
+            "/tasks/task-1/attention-owners/reconcile",
+            {
+                "attentionOwners": ["Ash", "Rowan"],
+                "note": "Ash must verify AC2 live DNS before returning to Rowan.",
+            },
+            token=None,
+        )
+        self.assertEqual(result, {"attentionOwners": ["Ash"]})
+
+    def test_reconcile_attention_owners_rejects_blank_note(self):
+        with self.assertRaises(ValueError):
+            tasks_api_client.reconcile_attention_owners(
+                "task-1", ["Ash"], "   "
+            )
+
+
 class TasksApiClientPatchTest(unittest.TestCase):
     def test_patch_depends_on_maps_to_depends_on_ids(self):
         parser = tasks_api_client.build_parser()
