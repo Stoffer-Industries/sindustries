@@ -166,6 +166,40 @@ case "$source_dsn" in
   *) cloud_db_die "--source-dsn must be a postgresql:// or postgres:// DSN" ;;
 esac
 
+# Defence in depth: refuse placeholder passwords (e.g. `***`, `REDACTED`,
+# `CHANGEME`) that have shipped in past iterations of the
+# cloud-staging-db-failure-fixture workflow as the GitHub-Actions
+# secret-redaction shape. A placeholder password makes every
+# connection fail (postgres 16 scram-sha-256) and surfaces only as a
+# bare FATAL in the service container log; prisma then exits 1 with
+# an empty log, which silently degrades the diagnostic + state
+# checks and masks real regressions. The disposable DSN is local
+# and the password is known, so any placeholder is a clear authoring
+# bug rather than a config choice.
+# Defence in depth: refuse placeholder passwords (e.g. ***, REDACTED,
+# CHANGEME, PLACEHOLDER) that have shipped in past iterations of the
+# cloud-staging-db-failure-fixture workflow as the GitHub-Actions
+# secret-redaction shape. A placeholder password makes every
+# connection fail (postgres 16 scram-sha-256) and surfaces only as
+# a bare FATAL in the service container log; prisma then exits 1
+# with an empty log, which silently degrades the diagnostic + state
+# checks and masks real regressions. The disposable DSN is local
+# and the password is known, so any placeholder is a clear authoring
+# bug rather than a config choice. We use [[ == ]] rather than case
+# globbing because the placeholder characters (**, ?) are glob
+# metacharacters in case patterns and escaping them is fragile
+# across bash versions.
+if [[ \
+      "$source_dsn" == *"://"*":***@"* || \
+      "$source_dsn" == *"://"*":REDACTED@"* || \
+      "$source_dsn" == *"://"*":CHANGEME@"* || \
+      "$source_dsn" == *"://"*":changeme@"* || \
+      "$source_dsn" == *"://"*":PLACEHOLDER@"* || \
+      "$source_dsn" == *"://"*":placeholder@"* \
+   ]]; then
+  cloud_db_die \
+    "--source-dsn contains a placeholder password (***, REDACTED, CHANGEME, PLACEHOLDER); the GitHub-Actions secret-redaction shape is not a valid DSN. Use the actual disposable DSN password (e.g. the runner's services container POSTGRES_PASSWORD)."
+fi
 if [[ "${STAGING_DB_FAILURE_FIXTURE:-0}" != "1" ]]; then
   case "$source_dsn" in
     *@localhost:*|*@127.0.0.1:*|*@postgres:*)
