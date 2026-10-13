@@ -206,7 +206,12 @@ are not generic audit comments. A capability-resolution marker must therefore
 be followed by a new Ash verdict, never treated as evidence that QA already
 passed.
 
-Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and `attentionOwners=["Rowan", "Tom"]`. The avatar stack renders every role slot — `attention:Rowan@0`, `attention:Tom@1`, `workflow-gate:Ash`, `delivery:Rowan` — with each role carrying its own label; the underlying rows remain distinct; Ash remains visible; Tom is a dormant last resort. After agent escalation is exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human owner.
+Example: delivery assignee `Rowan`, QA gate/context owner `Ash`, and an
+ordinary delivery-evidence failure should have `attentionOwners=[]`; Rowan is
+already actionable through the assignee queue. After agent escalation is
+exhausted, `attentionOwners=["Tom"]` makes Tom the actionable terminal human
+owner. A dormant Tom tail is invalid, and Quinn is never a passive non-zero
+verification slot.
 
 **Setting and clearing an attention owner.** Because the API treats `attentionOwners` as a full-replacement set, callers that want to drop their own name without dropping co-owners must GET, mutate, and PATCH the result — never the simple `--attention-owners <name>` flag alone. The CLI / Python helpers below implement this round-trip:
 

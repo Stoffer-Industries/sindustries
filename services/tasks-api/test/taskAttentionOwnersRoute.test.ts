@@ -191,6 +191,52 @@ describe('POST /tasks/:id/attention-owners/reconcile', () => {
     expect(response.status).toBe(400);
     expect(response.body?.error?.code).toBe('INVALID_ATTENTION_OWNER_NOTE');
   });
+
+  it('rejects a heartbeat that pages Tom and leaves Quinn dormant on a doing task', async () => {
+    prismaMock.task.findFirst.mockResolvedValueOnce(taskFixture({ attentionOwners: [] }));
+
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(ROWAN_TOKEN))
+      .send({
+        attentionOwners: ['Tom', 'Quinn'],
+        note: 'all implementation PRs merged; re-issue acceptance and verify cutover later'
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body?.error?.code).toBe('TOM_NOT_ACTIONABLE');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('allows an explicit Quinn-to-Tom terminal escalation on a doing task', async () => {
+    const task = taskFixture({
+      attentionOwners: [],
+      comments: [{
+        author: 'Quinn',
+        body: '[quinn-escalation] Tom must provision the external credential.'
+      }]
+    });
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task)
+      .mockResolvedValueOnce(taskFixture({ attentionOwners: [
+        attentionRowFixture({ owner: 'Quinn', position: 0 }),
+        attentionRowFixture({ owner: 'Tom', position: 1 })
+      ] }));
+    prismaMock.taskAttentionOwner.findMany.mockResolvedValueOnce([]);
+    prismaMock.taskAttentionOwner.create
+      .mockResolvedValueOnce(attentionRowFixture({ owner: 'Quinn', position: 0 }))
+      .mockResolvedValueOnce(attentionRowFixture({ owner: 'Tom', position: 1 }));
+
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(ROWAN_TOKEN))
+      .send({
+        attentionOwners: ['Quinn', 'Tom'],
+        note: 'Quinn cannot resolve the external credential blocker; Tom must provision it'
+      });
+
+    expect(response.status).toBe(200);
+  });
 });
 
 describe('POST /tasks/:id/attention-owners (task 91864257 AC2)', () => {
