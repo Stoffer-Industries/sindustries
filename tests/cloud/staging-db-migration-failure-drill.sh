@@ -166,6 +166,40 @@ case "$source_dsn" in
   *) cloud_db_die "--source-dsn must be a postgresql:// or postgres:// DSN" ;;
 esac
 
+# Defence in depth: refuse placeholder passwords (e.g. `***`, `REDACTED`,
+# `CHANGEME`) that have shipped in past iterations of the
+# cloud-staging-db-failure-fixture workflow as the GitHub-Actions
+# secret-redaction shape. A placeholder password makes every
+# connection fail (postgres 16 scram-sha-256) and surfaces only as a
+# bare FATAL in the service container log; prisma then exits 1 with
+# an empty log, which silently degrades the diagnostic + state
+# checks and masks real regressions. The disposable DSN is local
+# and the password is known, so any placeholder is a clear authoring
+# bug rather than a config choice.
+# Defence in depth: refuse placeholder passwords (e.g. ***, REDACTED,
+# CHANGEME, PLACEHOLDER) that have shipped in past iterations of the
+# cloud-staging-db-failure-fixture workflow as the GitHub-Actions
+# secret-redaction shape. A placeholder password makes every
+# connection fail (postgres 16 scram-sha-256) and surfaces only as
+# a bare FATAL in the service container log; prisma then exits 1
+# with an empty log, which silently degrades the diagnostic + state
+# checks and masks real regressions. The disposable DSN is local
+# and the password is known, so any placeholder is a clear authoring
+# bug rather than a config choice. We use [[ == ]] rather than case
+# globbing because the placeholder characters (**, ?) are glob
+# metacharacters in case patterns and escaping them is fragile
+# across bash versions.
+if [[ \
+      "$source_dsn" == *"://"*":***@"* || \
+      "$source_dsn" == *"://"*":REDACTED@"* || \
+      "$source_dsn" == *"://"*":CHANGEME@"* || \
+      "$source_dsn" == *"://"*":changeme@"* || \
+      "$source_dsn" == *"://"*":PLACEHOLDER@"* || \
+      "$source_dsn" == *"://"*":placeholder@"* \
+   ]]; then
+  cloud_db_die \
+    "--source-dsn contains a placeholder password (***, REDACTED, CHANGEME, PLACEHOLDER); the GitHub-Actions secret-redaction shape is not a valid DSN. Use the actual disposable DSN password (e.g. the runner's services container POSTGRES_PASSWORD)."
+fi
 if [[ "${STAGING_DB_FAILURE_FIXTURE:-0}" != "1" ]]; then
   case "$source_dsn" in
     *@localhost:*|*@127.0.0.1:*|*@postgres:*)
@@ -251,12 +285,54 @@ step_prisma_migration_failure_exit_code() {
   local schema_prisma_file="$REPO_ROOT/services/$service/prisma/schema.prisma"
   [[ -f "$schema_prisma_file" ]] || return 1
 
-  # PRISMA_BIN override: when set (typically by the unit test
-  # stub), the harness invokes "$PRISMA_BIN migrate deploy" directly
-  # so the stub PATH can intercept the call. When unset (production
-  # invocation), fall back to the npx pattern from the parent-design
-  # scripts/cloud/database/migrate.sh, which runs npx --no-install
-  # from the per-service node_modules tree.
+  # Prisma 5's `migrate deploy` resolves the migrations directory
+  # relative to the schema's directory, and the `migrate deploy`
+  # subcommand does not accept `--migrations-dir`. The earlier
+  # PR #821 approach (setting `PRISMA_MIGRATIONS_DIR` and passing
+  # the production `services/$service/prisma/schema.prisma` via
+  # `npx --no-install`) silently applied the production migrations
+  # on a fresh DB (and produced a misleading exit-1 in CI when npx
+  # could not resolve the local binary). The deterministic fix is to
+  # stand up a per-run temp schema that points at the test-only
+  # migrations dir: a minimal `schema.prisma` containing just a
+  # datasource block, plus a symlink from the temp dir's `migrations/`
+  # to the fixture's migrations dir. Prisma then resolves the test
+  # migrations relative to the temp schema and fails on the deliberate
+  # bad_migration with a stable, version-independent SQL error.
+  local fixture_schema_dir="$TMP/fixture-schema-$service"
+  rm -rf "$fixture_schema_dir"
+  mkdir -p "$fixture_schema_dir"
+
+  # Symlink the test-only migrations dir into the temp schema's
+  # expected `migrations/` location.
+  ln -s "$prisma_migrations_dir/migrations" "$fixture_schema_dir/migrations"
+
+  # Write a minimal schema.prisma: just a datasource block (the
+  # generator block is required by Prisma but its output path is
+  # irrelevant for `migrate deploy`, which never invokes
+  # prisma generate). The datasource provider matches the
+  # migration_lock.toml provider so Prisma's P3019 guard is
+  # satisfied.
+  cat >"$fixture_schema_dir/schema.prisma" <<EOF_SCHEMA
+generator client {
+  provider = "prisma-client-js"
+  output   = "$TMP/fixture-prisma-client-$service"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+EOF_SCHEMA
+
+  # PRISMA_BIN override: when set (typically by the unit test stub
+  # and now by the GHA workflow after `npm ci`), the harness
+  # invokes "$PRISMA_BIN migrate deploy" directly so the stub PATH
+  # (unit test) or the installed binary (CI) intercepts the call.
+  # When unset (legacy invocation), fall back to the npx pattern;
+  # this path is no longer used by the GHA workflow but is kept for
+  # backward compatibility with developer-machine runs that
+  # already have node_modules installed.
   local prisma_invocation
   if [[ -n "${PRISMA_BIN:-}" ]]; then
     prisma_invocation=("$PRISMA_BIN" migrate deploy)
@@ -268,8 +344,7 @@ step_prisma_migration_failure_exit_code() {
   (
     cd "$REPO_ROOT" && \
       DATABASE_URL="$source_dsn" \
-      PRISMA_MIGRATIONS_DIR="$prisma_migrations_dir" \
-      "${prisma_invocation[@]}" \
+      "${prisma_invocation[@]}" --schema "$fixture_schema_dir/schema.prisma" \
         >"$PRISMA_LOG" 2>&1
   )
   echo $? >"$PRISMA_EXIT_FILE"
@@ -280,11 +355,28 @@ step_prisma_migration_failure_exit_code() {
 }
 
 step_prisma_migration_failure_diagnostic() {
-  # The bad migration references a non-existent type, so the stderr must
-  # contain a SQL error that names the service's schema and the
-  # fixture's deliberately-invalid migration filename.
-  local grep_target="bad_migration"
-  grep -qF "$grep_target" "$PRISMA_LOG"
+  # The bad migration references a non-existent type
+  # ("nonexistent_type_d4e3"), so Prisma's `migrate deploy` exits 1
+  # with a P3009-class failure. The exact surfaced error message
+  # varies across Prisma versions: Prisma 5.22 with a strict
+  # `--schema` deployment typically surfaces the underlying
+  # `type "nonexistent_type_d4e3" does not exist` SQL error, but
+  # newer Prisma versions (and Prisma 5.x with the default
+  # non-verbose output) collapse the underlying SQL error into a
+  # bare `P3009: migrate found failed migrations in the target
+  # database` message. The check must accept either shape so the
+  # fixture is robust against Prisma version drift. The
+  # authoritative migration-failure assertion is the database state
+  # check in `step_prisma_migrations_state_uniquely_failed`; this
+  # check is a cheap corroboration that Prisma surfaced *some*
+  # failure indicator (the SQL identifier, the Prisma error code,
+  # the migration-failure phrase, or the migration filename) so
+  # the harness cannot be tricked by an unrelated exit 1.
+  grep -qF -e 'nonexistent_type_d4e3' \
+          -e 'P3009' \
+          -e 'migrate found failed migrations' \
+          -e 'bad_migration' \
+          "$PRISMA_LOG"
 }
 
 step_prisma_migrations_state_uniquely_failed() {
@@ -292,31 +384,61 @@ step_prisma_migrations_state_uniquely_failed() {
   # _prisma_migrations: the bad_migration, with finished_at set and
   # rolled_back_at NULL (Prisma's default for a non-atomic SQL error:
   # the failed migration is recorded, the rest of the schema is
-  # untouched). We use psql to query; psql is in common.sh's
-  # CLOUD_DB_REQUIRED_COMMANDS but we explicitly check here because the
-  # fixture may run on a host without the production-grade version
-  # guarantee.
+  # untouched). Prisma creates _prisma_migrations in the schema
+  # specified by the DSN's `?schema=` query param (e.g. tasks_api,
+  # budget_api), not in the default public search_path, so the psql
+  # queries below must set the search_path before the unqualified
+  # `_prisma_migrations` reference resolves. The schema name is
+  # derived from the DSN; if it is absent the assertion falls back to
+  # the per-service default.
   command -v psql >/dev/null 2>&1 || return 1
+
+  local schema_name
+  schema_name="$(printf '%s' "$source_dsn" | sed -nE 's|^[a-z]+://[^?]*\?.*schema=([^&]+).*|\1|p')"
+  if [[ -z "$schema_name" ]]; then
+    case "$service" in
+      tasks-api)  schema_name="tasks_api" ;;
+      budget-api) schema_name="budget_api" ;;
+      *) cloud_db_die "no schema= in DSN and service '$service' has no default schema" ;;
+    esac
+  fi
 
   local row_count
   local failed_name
   local rolled_back
+
+  # psql's URI form for --dbname rejects unknown query parameters
+  # with "invalid URI query parameter: \"schema\"". The DSN we
+  # receive includes `?schema=tasks_api&sslmode=disable`, but only
+  # sslmode is a real psql URI param; the schema segment is a
+  # Prisma-specific extension that must be stripped before handing
+  # the DSN to psql. We keep the connection part (scheme, userinfo,
+  # host, port, database) and drop everything from the first `?`.
+  local psql_dsn="${source_dsn%%\?*}"
+
+  # Schema-qualify the `_prisma_migrations` reference so we don't
+  # need `SET search_path` (which would otherwise leak into the
+  # captured psql output and break the tr-based parsing below).
+  # The schema name is the one Prisma was instructed to use via
+  # the DSN's `?schema=` query param.
+  local qualified_table="${schema_name}._prisma_migrations"
+
   row_count="$(PGPASSWORD="" psql --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
-    --dbname="$source_dsn" \
-    --command="SELECT count(*) FROM _prisma_migrations;" 2>/dev/null | tr -d ' ')"
+    --dbname="$psql_dsn" \
+    --command="SELECT count(*) FROM ${qualified_table};" 2>/dev/null | tr -d '[:space:]')"
   [[ "$row_count" == "1" ]] || return 1
 
   failed_name="$(PGPASSWORD="" psql --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
-    --dbname="$source_dsn" \
-    --command="SELECT migration_name FROM _prisma_migrations;" 2>/dev/null | tr -d ' ')"
+    --dbname="$psql_dsn" \
+    --command="SELECT migration_name FROM ${qualified_table};" 2>/dev/null | tr -d '[:space:]')"
   [[ "$failed_name" == *"bad_migration"* ]] || return 1
 
   rolled_back="$(PGPASSWORD="" psql --no-psqlrc --tuples-only --no-align \
     --variable=ON_ERROR_STOP=1 \
-    --dbname="$source_dsn" \
-    --command="SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+    --dbname="$psql_dsn" \
+    --command="SELECT count(*) FROM ${qualified_table} WHERE rolled_back_at IS NOT NULL;" 2>/dev/null | tr -d '[:space:]')"
   [[ "$rolled_back" == "0" ]] || return 1
   return 0
 }

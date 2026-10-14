@@ -11,7 +11,9 @@ Keep these ordered role slots separate:
 - `workflowGates`: eligibility/context owner and, only when the attention stack
   is empty, fallback actor for the exact current lifecycle gate;
 - `attentionOwners[0]`: authoritative current actor whenever the stack exists;
-- later `attentionOwners`: dormant escalation targets.
+- later `attentionOwners`: genuine escalation targets only; they are dormant
+  until promoted, but passive watchlist rows are not valid and Quinn must not
+  appear in a later slot.
 
 Ash owning `qa_agent` never creates or replaces an attention-owner row. It does
 make Ash actionable as the gate-owner fallback when `attentionOwners` is empty,

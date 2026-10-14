@@ -88,8 +88,58 @@ async function loadTask(id) {
 async function loadTaskWithAttentionOwners(id) {
   return prisma.task.findFirst({
     where: { id, archivedAt: null },
-    include: { attentionOwners: { orderBy: { position: 'asc' } } }
+    include: {
+      attentionOwners: { orderBy: { position: 'asc' } },
+      comments: { orderBy: { createdAt: 'asc' } }
+    }
   });
+}
+
+function hasExplicitQuinnTomEscalation(task) {
+  return (task?.comments ?? []).some((comment) => {
+    const author = typeof comment.author === 'string' ? comment.author.trim().toLowerCase() : '';
+    const text = comment.body ?? comment.text ?? '';
+    return author === 'quinn' && text.includes('[quinn-escalation]');
+  });
+}
+
+/**
+ * Guard the normal workflow boundary before an agent can write an
+ * attention-owner stack. The API rejects invalid new writes before the
+ * transaction; it does not infer intent from, or delete, existing tail rows.
+ * Lobster remains responsible only for its own workflow-owned head slot.
+ *
+ * Tom may still act directly, and a Quinn-authored escalation marker permits
+ * the deliberate Quinn -> Tom terminal handoff. Ordinary agent heartbeats
+ * may not manufacture either state.
+ */
+function attentionOwnerPolicyFailure(task, owners, authenticatedActor) {
+  if (task?.status !== 'doing') return null;
+
+  const actor = typeof authenticatedActor === 'string'
+    ? authenticatedActor.trim().toLowerCase()
+    : '';
+  if (actor === 'tom') return null;
+
+  const hasEscalation = hasExplicitQuinnTomEscalation(task);
+  if (owners.some((owner) => owner.trim().toLowerCase() === 'tom') && !hasEscalation) {
+    return {
+      code: 'TOM_NOT_ACTIONABLE',
+      message: 'Tom may only be routed on a doing task after an explicit Quinn escalation; acceptance is not yet the current gate'
+    };
+  }
+
+  const dormantQuinn = owners.some((owner, position) =>
+    position > 0 && owner.trim().toLowerCase() === 'quinn'
+  );
+  if (dormantQuinn && !hasEscalation) {
+    return {
+      code: 'DORMANT_QUINN_SLOT',
+      message: 'Quinn is an active position-0 runtime unblocker, not a dormant escalation slot'
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -129,6 +179,15 @@ taskAttentionOwnersRouter.post('/tasks/:id/attention-owners/reconcile', async (r
 
     const existing = await loadTaskWithAttentionOwners(id);
     if (!existing) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
+
+    const policyFailure = attentionOwnerPolicyFailure(
+      existing,
+      normalized.owners,
+      authenticatedActor
+    );
+    if (policyFailure) {
+      return sendError(res, 409, policyFailure.code, policyFailure.message);
+    }
 
     const reconciliation = await prisma.$transaction(async (tx) => {
       const currentRows = await tx.taskAttentionOwner.findMany({

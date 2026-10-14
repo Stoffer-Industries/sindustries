@@ -48,6 +48,15 @@ complete, self-resolve or advance Rowan's top attention slot with a reason-beari
 write. Keep Rowan as `assignee`; do not clear the delivery assignment. If QA is
 already approved, the next expected actor is the acceptance gate, not Rowan.
 
+Before changing `attentionOwners`, also read the latest `[lobster-state]`.
+When the task is still `doing` and its latest Lobster state has a non-empty
+`failureFingerprint`, that fingerprint is an unresolved delivery/evidence
+blocker until a newer successful Lobster state clears it. Do not add Tom for
+acceptance or Quinn as a dormant verification slot in that state; keep the
+stack empty unless there is a genuine current position-0 runtime blocker, and
+work the delivery evidence as Rowan. The Tasks API rejects the invalid
+`doing`-task stack as a final safety net.
+
 **Heartbeat cadence rule — the only per-pass opinion layered on top of `WORKFLOW.md`:**
 
 If any assigned implementation task is in `open` and lacks a posted `[tech-design]` comment or `[tech-design-not-required]` waiver, prioritise writing and posting that tech design before continuing implementation on any `doing`/`acceptance` task. After posting `[tech-design]`, return to the active implementation work — do not start implementing the `open` task until Quinn approves the design.

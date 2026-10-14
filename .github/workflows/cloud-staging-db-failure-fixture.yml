@@ -63,17 +63,67 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install PostgreSQL 16 client
+        # The fixture's step_prisma_migrations_state_uniquely_failed runs
+        # `psql --dbname=...` against the disposable postgres service to
+        # confirm exactly one row in <schema>._prisma_migrations named
+        # *_bad_migration* with rolled_back_at NULL. The GitHub Actions
+        # ubuntu-latest runner ships without psql, so the check returned
+        # 1 (`command -v psql` failed) on every run, causing the fixture
+        # to fail AC4 with verdict=fail. Installing the postgresql-client
+        # apt package alongside the postgres:16 service container
+        # version makes the psql binary resolvable. We install the
+        # default (current) client; psql from client-N is wire-compatible
+        # with the postgres:16 service for the trivial queries this
+        # fixture issues.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
       - name: Install root workspace dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Locate prisma binary for the fixture harness
+        # The fixture's step_prisma_migration_failure_exit_code creates
+        # a per-run temp schema and runs `prisma migrate deploy` against
+        # the test-only migrations dir. PRISMA_BIN points the harness
+        # at the real installed binary so the temp-schema approach
+        # works without depending on `npx --no-install` resolving
+        # workspace-local prisma (which fails in shallow `git fetch`
+        # + no-hoist worktree layouts).
+        id: prisma-bin
+        run: |
+          set -euo pipefail
+          if [[ -x "node_modules/.bin/prisma" ]]; then
+            echo "path=node_modules/.bin/prisma" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::prisma not found in node_modules/.bin after npm ci"
+            exit 1
+          fi
 
       - name: Run AC4 fixture for tasks-api
         if: ${{ inputs.service == 'tasks-api' || inputs.service == 'both' }}
         shell: bash
+        env:
+          PRISMA_BIN: ${{ steps.prisma-bin.outputs.path }}
+          # The disposable postgres services container above is
+          # initialised with POSTGRES_PASSWORD=postgres, so the
+          # fixture DSN hard-codes that password. The earlier
+          # `***`-placeholder form was a copy-paste of the
+          # GitHub-Actions secret-redaction shape and sent the
+          # literal three-character password, which made every
+          # connection fail (postgres 16 uses scram-sha-256, so a
+          # wrong password surfaces as FATAL and prisma exits 1
+          # with no log to grep). The disposable DSN never leaves
+          # the runner; do not replace this with a live-staging
+          # password.
+          FIXTURE_PG_PASSWORD: postgres
         run: |
           set -euo pipefail
           mkdir -p artifacts/cloud-staging
           bash tests/cloud/staging-db-migration-failure-drill.sh \
-            --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=tasks_api&sslmode=disable' \
+            --source-dsn "postgresql://postgres:${FIXTURE_PG_PASSWORD}@localhost:5432/postgres?schema=tasks_api&sslmode=disable" \
             --prisma-migrations-dir services/tasks-api/prisma/test-migrations-fixture \
             --service tasks-api \
             --output artifacts/cloud-staging/failure-drill-tasks-api.json \
@@ -83,11 +133,14 @@ jobs:
       - name: Run AC4 fixture for budget-api
         if: ${{ inputs.service == 'budget-api' || inputs.service == 'both' }}
         shell: bash
+        env:
+          PRISMA_BIN: ${{ steps.prisma-bin.outputs.path }}
+          FIXTURE_PG_PASSWORD: postgres
         run: |
           set -euo pipefail
           mkdir -p artifacts/cloud-staging
           bash tests/cloud/staging-db-migration-failure-drill.sh \
-            --source-dsn 'postgresql://postgres:***@localhost:5432/postgres?schema=budget_api&sslmode=disable' \
+            --source-dsn "postgresql://postgres:${FIXTURE_PG_PASSWORD}@localhost:5432/postgres?schema=budget_api&sslmode=disable" \
             --prisma-migrations-dir services/budget-api/prisma/test-migrations-fixture \
             --service budget-api \
             --output artifacts/cloud-staging/failure-drill-budget-api.json \
