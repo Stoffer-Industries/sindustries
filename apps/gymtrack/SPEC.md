@@ -171,11 +171,11 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 
 ## Auth
 
-- Supabase Auth remains the browser identity layer.
-- Email/password sign-in and sign-up continue to work.
-- Google OAuth is the minimum social-login path for both public sign-up and protected-route sign-in.
-- `detectSessionInUrl: true` handles Supabase OAuth callback parsing.
-- Apple remains disabled until Quinn removes `'apple'` from `DISABLED_OAUTH_PROVIDERS` after provider wiring exists in Supabase.
+- Browser identity is issued by Clerk (gated on `VITE_AUTH_PROVIDER=clerk`); the `supabase` value is a one-env-var rollback path that the dispatcher in `apps/gymtrack/src/lib/authDispatch.jsx` still supports. See the "Identity provider switch" section above for the cutover shape and the `public.profiles` linking contract.
+- supabase-js attaches the Clerk session JWT to every PostgREST request; Supabase Third-Party Auth verifies the JWT against Clerk's JWKS, and RLS compares the verified text `auth.jwt()->>'sub'` claim against `public.profiles.clerk_user_id` for every user-owned row. `auth.uid()` remains UUID-typed and must not be used for Clerk `user_...` subjects.
+- Email/password and Google OAuth sign-in/sign-up go through Clerk. The browser wiring lives in `apps/gymtrack/src/lib/clerkAuth.jsx` (Clerk SDK + supabase-js accessToken bridge) and the dispatcher above; the first post-migration Google sign-in links the Clerk subject to the user's existing `public.profiles` row by verified email — see "Identity verification — Slice C" above.
+- Clerk handles its own redirect and callback parsing through `<ClerkProvider>` in `apps/gymtrack/src/main.jsx`; the pre-migration `detectSessionInUrl: true` setting on the Supabase client is no longer the source of truth for the Clerk path.
+- Apple is out of scope for the Clerk migration per the Phase 0 decision in `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md` (item 4); re-enabling Apple becomes a Phase 5+ question once Clerk is the canonical issuer, not a Phase 3 cutover concern.
 
 ## Error handling
 
