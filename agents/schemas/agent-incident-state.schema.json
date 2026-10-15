@@ -108,6 +108,11 @@
           "description": "Optional list of follow-up items. Each entry is a short string (a task, PR, or note).",
           "items": { "type": "string" }
         },
+        "impactTaskIds": {
+          "type": "array",
+          "description": "Task IDs affected by this incident's shared root cause. Evidence of impact only — never the incident's identity. An incident record whose only real content is a single task ID (no distinct root-cause slug, no other affected tasks) is not a valid system incident; it is a task-level gate and belongs in the Tasks API attentionOwners plane instead, including while the Tasks API is unavailable or stale (in which case raise one incident for the unavailability itself, not per-task entries from cached data).",
+          "items": { "type": "string" }
+        },
         "dailyReviewDate": {
           "type": "string",
           "description": "Lox-specific: the daily review date that produced this entry. Format YYYY-MM-DD."
