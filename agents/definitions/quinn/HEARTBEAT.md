@@ -183,6 +183,45 @@ Run this check every heartbeat. Write at most 1 ops note per run.
 
 ---
 
+WORKFLOW STALL DETECTION
+
+Detect systemic workflow-engine stalls — delivered work not moving for a
+structural reason, not an ordinary task-level wait — and raise exactly one
+incident per shared root cause, never per task. Full model:
+`docs/systems/agent-incidents.md` "Multi-task root-cause incidents".
+
+A task qualifies as delivery-evidence-complete when its required PRs are
+merged and its required structured approvals (`tech_design`, `qa_agent`) are
+in place. If such a task's status has not advanced for roughly 24h (the same
+shape across 2+ consecutive heartbeat passes), check whether at least one
+other task shows the same shape at the same time, with a plausible shared
+cause — the same gate, the same orchestration pass, the same reconciliation
+pattern. Candidate shared causes include: the workflow engine not
+re-evaluating stalled tasks, a reconciliation pass reapplying the same
+correction to a task without its underlying approval/PR state changing, and
+two different reads of the same task/queue state disagreeing with each
+other.
+
+**If 2+ tasks share one root cause:** create or update ONE incident keyed by
+a stable root-cause slug (never a task ID). List every affected task under
+`details.impactTaskIds`. Follow the normal `OPS STATE MANAGEMENT` write rules
+below for severity, attempts, and escalation.
+
+**If only one task shows this shape:** it is an ordinary task-level wait. Do
+not create an incident. Route it through the normal
+`OPENCLAW AND ATTENTION-OWNER HANDOFFS` path instead.
+
+**Never create or keep an incident entry whose only real content is a single
+task ID.** If one is found (including a legacy entry), archive it
+immediately with `scope: "task"` and a short `archiveReason`, the same
+correction applied on 2026-10-16 to `d37681e1` and `bb09eaed`. This applies
+even when the Tasks API is unavailable or its last-known data is stale: in
+that condition, raise exactly one incident for the unavailability itself
+(e.g. `tasks-api-unavailable`), never a per-task entry built from cached
+data, and never a task mutation based on that stale snapshot.
+
+---
+
 OPS STATE MANAGEMENT
 
 Quinn maintains a persistent operational findings registry at `brain/state/quinn-ops-state.json`. This is the equivalent of Lox's `lox-incident-state.json` for agent/runtime and pipeline-operation anomalies. It is **not** a second task queue: task blockers, workflow gates, backlog hygiene, and task escalation belong in the Tasks API, using `attentionOwners`.
