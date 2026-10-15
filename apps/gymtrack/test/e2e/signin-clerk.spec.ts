@@ -71,6 +71,12 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
     // off-site (no Clerk hosted account portal, no Google consent).
     await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
 
+    const error = page.getByTestId('login-error');
+    await expect(error).toBeVisible();
+    await expect(error).not.toContainText('Additional sign-in steps required');
+    await expect(error).not.toContainText('status=undefined');
+    await expect(page.getByTestId('login-submit')).toBeEnabled();
+
     // No off-site navigation to a third-party identity provider.
     expect(page.url()).not.toMatch(/clerk\.[a-z0-9-]+\.com|accounts\.google\.com/i);
   });
@@ -88,6 +94,37 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
     await expect(page.getByTestId('signup-email')).toBeVisible();
     await expect(page.getByTestId('signup-password')).toBeVisible();
     await expect(page.getByTestId('signup-submit')).toBeVisible();
+    await expect(page.locator('#clerk-captcha')).toHaveCount(1);
+  });
+
+  test('AC1: email sign-up mounts CAPTCHA and settles instead of hanging', async ({ page }) => {
+    await page.goto('/signup');
+    await page.getByTestId('signup-show-email').click();
+
+    await expect(page.locator('#clerk-captcha')).toHaveCount(1);
+    await page.getByTestId('signup-email').fill(CLERK_TEST_EMAIL!);
+    await page.getByTestId('signup-password').fill(CLERK_TEST_PASSWORD!);
+    await page.getByTestId('signup-submit').click();
+
+    // The dedicated Clerk test account already exists, so this exercises
+    // CAPTCHA + request settlement without creating another production user.
+    await expect(page.getByTestId('signup-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('signup-submit')).toBeEnabled();
+    await expect(page.getByTestId('signup-submit')).toHaveText('Create account');
+    await expect(page).toHaveURL(/\/signup$/);
+  });
+
+  test('AC1: Google sign-in starts Clerk SSO without a client-side method error', async ({ page }) => {
+    await page.goto('/login');
+
+    await page.getByTestId('login-google').click();
+
+    await expect(page.getByTestId('login-error')).not.toBeVisible();
+    await page.waitForURL(
+      (url) => url.origin !== new URL(CLERK_TEST_URL!).origin,
+      { timeout: 15_000 }
+    );
+    expect(page.url()).not.toContain('authenticateWithRedirect');
   });
 });
 

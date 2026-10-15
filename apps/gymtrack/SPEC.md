@@ -34,6 +34,8 @@ Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Cle
 
 Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23 per Quinn beat 293); the Slice B runbook is the assertion that produces the AC1 evidence.
 
+The custom browser flow uses Clerk v6's resource methods: `signIn.password()` / `signUp.password()` return a structured `{ error }` envelope, successful flows call `finalize()`, and Google starts with `signIn.sso()`. The email/password sign-up form always mounts `#clerk-captcha` before it invokes Clerk so Turnstile can settle in the page instead of falling back to a detached invisible challenge. Failed credentials and failed sign-up attempts restore the enabled submit button and display Clerk's user-facing `longMessage` inline.
+
 ### Identity verification — Slice C (Phase 4 verified-email linking)
 
 Slice C (PR #809, MERGED 2026-10-12 — merge commit `e0cc3be0` against task `bb09eaed`) wires the post-sign-in link from a freshly-issued Clerk session to the legacy `public.profiles` row that the Phase 2 FK repoint left behind. The user-visible flow runs entirely in the browser once the Clerk session is established; there is no extra UI step for the user:
@@ -149,6 +151,7 @@ References: task `bb09eaed` (Migrate GymTrack identity from Supabase Auth to Cle
 | `/` | redirect | → `/workout` if signed in, else `/login`. |
 | `/login` | `LoginScreen` | Email/password form plus Google CTA when available; preserves protected-route destination. |
 | `/signup` | `SignUpPage` | Public sign-up — Google CTA + collapsed email/password panel. |
+| `/sso-callback` | Clerk `HandleSSOCallback` | Public continuation route for Google SSO when Clerk needs another sign-in or sign-up step. |
 | `/agent-consent` | `AgentConsentPage` | Protected consent review screen for external MCP clients. |
 | `/workout` | `WorkoutLogger` | Date picker + exercise picker + pending sets; accepts `?date=YYYY-MM-DD`. |
 | `/history` | `HistoryList` | Last-30-days grouped history. |
@@ -174,6 +177,7 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 - Browser identity is issued by Clerk (gated on `VITE_AUTH_PROVIDER=clerk`); the `supabase` value is a one-env-var rollback path that the dispatcher in `apps/gymtrack/src/lib/authDispatch.jsx` still supports. See the "Identity provider switch" section above for the cutover shape and the `public.profiles` linking contract.
 - supabase-js attaches the Clerk session JWT to every PostgREST request; Supabase Third-Party Auth verifies the JWT against Clerk's JWKS, and RLS compares the verified text `auth.jwt()->>'sub'` claim against `public.profiles.clerk_user_id` for every user-owned row. `auth.uid()` remains UUID-typed and must not be used for Clerk `user_...` subjects.
 - Email/password and Google OAuth sign-in/sign-up go through Clerk. The browser wiring lives in `apps/gymtrack/src/lib/clerkAuth.jsx` (Clerk SDK + supabase-js accessToken bridge) and the dispatcher above; the first post-migration Google sign-in links the Clerk subject to the user's existing `public.profiles` row by verified email — see "Identity verification — Slice C" above.
+- Clerk custom flows use the v6 `password`, `sso`, and `finalize` methods and consume returned `{ error }` values; the sign-up form owns the required `#clerk-captcha` mount point.
 - Clerk handles its own redirect and callback parsing through `<ClerkProvider>` in `apps/gymtrack/src/main.jsx`; the pre-migration `detectSessionInUrl: true` setting on the Supabase client is no longer the source of truth for the Clerk path.
 - Apple is out of scope for the Clerk migration per the Phase 0 decision in `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md` (item 4); re-enabling Apple becomes a Phase 5+ question once Clerk is the canonical issuer, not a Phase 3 cutover concern.
 
@@ -220,8 +224,8 @@ The MCP server always derives the acting `user_id` from the validated OAuth acce
 
 | Behaviour | Coverage |
 |---|---|
-| Email/password login + sign-up | Existing GymTrack unit/component tests + `test/e2e/signup.spec.ts` |
-| Google social login wiring | `test/e2e/signup-google.spec.ts` |
+| Clerk email/password login + sign-up, structured errors, CAPTCHA settlement | `src/lib/clerkAuth.test.jsx`, `src/components/SignUpPage.test.jsx`, and live-browser `test/e2e/signin-clerk.spec.ts` with `CLERK_TEST_URL` |
+| Google social login wiring | `src/lib/clerkAuth.test.jsx` asserts the Clerk v6 SSO contract; live-browser `test/e2e/signin-clerk.spec.ts` proves the production redirect starts without a client-side method error |
 | Planned workouts browse + connect-agent CTA visibility/provider links | `test/e2e/workouts-tab.spec.ts` + `src/components/WorkoutsTab.test.jsx` |
 | Connected agents list + revoke UI | `src/components/ConnectedAgentsPage.test.jsx` |
 | OAuth-protected REST handlers | `src/lib/oauthAuth.test.js`, `src/lib/plannedWorkoutsHandler.test.js`, `src/lib/historyHandler.test.js`, `src/lib/progressionHandler.test.js` |
@@ -230,7 +234,7 @@ The MCP server always derives the acting `user_id` from the validated OAuth acce
 | Hosted OAuth callback page — success with copy, denial with `error_description`, empty-state fallback | `apps/gymtrack/src/components/AgentOAuthCallbackPage.test.jsx` |
 | Clerk first-sign-in verified-email linking (Slice C) — the browser calls `public.link_clerk_user_to_profile` with the Clerk subject + verified email + inferred `signup_source`; errors are logged but do not block sign-in | `test/e2e/signin-clerk.spec.ts` Slice C e2e (gated on `CLERK_TEST_URL` + `CLERK_TEST_EMAIL` + `CLERK_TEST_PASSWORD`) for the browser→RPC wiring + idempotent landing on `/workout`; `src/lib/clerkPhase4Linking.test.js` (Vitest unit) for the RPC contract (signature, JWT guard ordering, three idempotent cases, `unverified_email_cannot_link` rejection, EXECUTE grant to `authenticated`, case-insensitive email) and the `clerkAuth.jsx` wiring (RPC invocation, verified-email read, error logging, signup-source mapping) |
 
-Playwright still runs against the Vite dev server on port 5179 with `iPhone 13` device emulation. There is still no end-to-end Playwright spec that drives a real external MCP client through OAuth against a live Supabase project; the current branch covers that surface with service integration tests instead.
+Playwright runs against the Vite dev server on port 5179 by default and against the exact URL in `CLERK_TEST_URL` for live Clerk/production auth verification, always with `iPhone 13` device emulation. There is still no end-to-end Playwright spec that drives a real external MCP client through OAuth against a live Supabase project; the current branch covers that surface with service integration tests instead.
 
 ## Out of scope (v1)
 
