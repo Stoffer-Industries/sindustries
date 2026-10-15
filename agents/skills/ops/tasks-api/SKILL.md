@@ -98,11 +98,13 @@ owner, and the self-resolve endpoint when the current actor is done. Preserve
 genuine tail slots; remove stale or unjustified escalation slots rather than
 carrying them forward. Quinn is an exceptional OpenClaw/runtime unblocker, not
 a normal QA, acceptance, review, or delivery-workflow owner. Tom is added only
-when a concrete action requires Tom now. The API rejects automated attempts to
-put Tom on a `doing` task unless a Quinn-authored `[quinn-escalation]` is
-present; it also rejects Quinn as a dormant non-zero slot without that same
-explicit escalation. This prevents a heartbeat from paging Tom or Quinn while
-Lobster is still reporting an unresolved delivery fingerprint.
+when a concrete action requires Tom now. The reason-bearing reconcile API
+rejects attempts to put Tom on a `doing` task unless the authenticated actor is
+Quinn (or Tom acting directly), the reason is non-empty, and Tom is the sole
+terminal attention owner. It also rejects Quinn as a dormant non-zero slot. Legacy
+`[quinn-escalation]` comments authorize nothing. This prevents a stale comment
+or ordinary heartbeat from paging Tom while Lobster is still reporting an
+unresolved delivery fingerprint.
 
 **Client helper.** `agents/skills/ops/tasks-api/tasks_api_client.py` exposes
 `reconcile_attention_owners(task_id, attention_owners, note, *, base_url=None, token=None)`

@@ -269,8 +269,9 @@ contains an unresolved delivery/evidence fingerprint, do not route Tom for
 acceptance or park Quinn as a verification tail. Keep the stack empty (or
 preserve only a genuine current position-0 runtime blocker), address the
 delivery checklist as Rowan, and let Lobster re-run. The Tasks API enforces
-this boundary for automated writes: Tom on `doing` requires a Quinn-authored
-`[quinn-escalation]`, and Quinn may not be a dormant non-zero slot.
+this boundary for automated writes: Tom on `doing` requires an authenticated,
+reason-bearing Quinn write that makes Tom the sole terminal owner; legacy
+comments authorize nothing, and Quinn may not be a dormant non-zero slot.
 
 ```http
 POST /tasks/<task-uuid>/attention-owners/reconcile

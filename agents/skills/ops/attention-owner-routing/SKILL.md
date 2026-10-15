@@ -32,6 +32,10 @@ description: Add, replace, escalate, or clear Tasks API attention owners with or
   the real blocker.
 - **Only add Tom when a concrete action requires Tom immediately.** Do not page
   him merely because an agent's work or gate is complete.
+- **A `doing`-task Quinn-to-Tom escalation is an authenticated terminal
+  handoff.** Quinn must reconcile the complete stack to `["Tom"]` with a
+  task-specific reason. Do not leave Quinn or another fallback in the tail;
+  legacy `[quinn-escalation]` comments authorize nothing.
 - **Do not turn ordinary delivery checklists into attention escalations.** A
   Lobster checklist asking the delivery assignee to correct PR evidence is
   normal assigned work: keep the assignee in the queue, keep downstream QA

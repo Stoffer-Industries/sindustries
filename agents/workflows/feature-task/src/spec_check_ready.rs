@@ -599,8 +599,9 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
         }
         "Ash" => task_approvals::qa_agent_verified(task),
         // Tom owns the accepted gate only once the task reaches acceptance.
-        // During `doing`, an explicit Quinn -> Tom escalation is preserved by
-        // `enforce_tom_acceptance_only`; Tom is never added automatically.
+        // During `doing`, an authenticated Quinn -> Tom attention row is
+        // preserved by `enforce_tom_acceptance_only`; Tom is never added
+        // automatically.
         "Tom" => task.status == "acceptance" && task_approvals::accepted_structured(task),
         _ => false,
     }
@@ -721,50 +722,60 @@ fn attention_owner_metadata_complete(task: &Task, desired: &[String]) -> bool {
 }
 
 /// Tom is only a workflow owner at `acceptance` for the structured `accepted`
-/// gate. During implementation, remove Tom slots unless Quinn has explicitly
-/// recorded a `[quinn-escalation]` marker in the task audit trail. This keeps
-/// stale workflow-generated stacks from paging Tom while still allowing Quinn
-/// to preserve a deliberate Quinn -> Tom escalation. If Quinn appears after
-/// Tom, normalize the escalation order so Quinn gets the first chance to
-/// resolve the blocker.
+/// gate. During implementation, preserve Tom only when the current terminal
+/// row was written through the reason-bearing API by authenticated Quinn (or
+/// Tom directly). Legacy comments never authorize routing. A valid escalation
+/// collapses to the sole terminal owner; otherwise stale Tom rows and dormant
+/// Quinn tails are removed.
 fn enforce_tom_acceptance_only(task: &Task, owners: &mut Vec<String>) {
     if task.status != "doing" {
         return;
     }
-    if !has_explicit_quinn_tom_escalation(task) {
-        owners.retain(|owner| !owner.eq_ignore_ascii_case("Tom"));
+    if has_structured_quinn_tom_escalation(task) {
+        owners.clear();
+        owners.push("Tom".to_string());
         return;
     }
-    let Some(quinn_index) = owners
+    owners.retain(|owner| !owner.eq_ignore_ascii_case("Tom"));
+    let mut seen_quinn = false;
+    owners.retain(|owner| {
+        if !owner.eq_ignore_ascii_case("Quinn") {
+            return true;
+        }
+        if !seen_quinn {
+            seen_quinn = true;
+            return true;
+        }
+        false
+    });
+    if let Some(quinn_index) = owners
         .iter()
         .position(|owner| owner.eq_ignore_ascii_case("Quinn"))
-    else {
-        owners.retain(|owner| !owner.eq_ignore_ascii_case("Tom"));
-        return;
-    };
-    let Some(tom_index) = owners
-        .iter()
-        .position(|owner| owner.eq_ignore_ascii_case("Tom"))
-    else {
-        return;
-    };
-    if quinn_index > tom_index {
-        let quinn = owners.remove(quinn_index);
-        owners.insert(tom_index, quinn);
+    {
+        if quinn_index > 0 {
+            owners.remove(quinn_index);
+        }
     }
 }
 
-fn has_explicit_quinn_tom_escalation(task: &Task) -> bool {
-    task.comments.iter().any(|comment| {
-        comment
-            .author
-            .as_deref()
-            .is_some_and(|author| author.trim().eq_ignore_ascii_case("Quinn"))
-            && comment
-                .text
+fn has_structured_quinn_tom_escalation(task: &Task) -> bool {
+    if !task
+        .attention_owners
+        .first()
+        .is_some_and(|owner| owner.eq_ignore_ascii_case("Tom"))
+    {
+        return false;
+    }
+    task.attention_owner_details.first().is_some_and(|detail| {
+        detail.owner.eq_ignore_ascii_case("Tom")
+            && detail.added_by.as_deref().is_some_and(|actor| {
+                actor.trim().eq_ignore_ascii_case("Quinn")
+                    || actor.trim().eq_ignore_ascii_case("Tom")
+            })
+            && detail
+                .note
                 .as_deref()
-                .or(comment.body.as_deref())
-                .is_some_and(|text| text.contains("[quinn-escalation]"))
+                .is_some_and(|note| !note.trim().is_empty())
     })
 }
 
@@ -1011,13 +1022,19 @@ mod tests {
     fn workflow_metadata_repair_is_needed_for_legacy_rows() {
         let mut task = task_with_status("doing");
         task.attention_owners = vec!["Quinn".to_string()];
-        assert!(!attention_owner_metadata_complete(&task, &task.attention_owners));
+        assert!(!attention_owner_metadata_complete(
+            &task,
+            &task.attention_owners
+        ));
         task.attention_owner_details = vec![crate::TaskAttentionOwner {
             owner: "Quinn".to_string(),
             added_by: Some("Rowan".to_string()),
             note: Some("QA is deferred".to_string()),
         }];
-        assert!(attention_owner_metadata_complete(&task, &task.attention_owners));
+        assert!(attention_owner_metadata_complete(
+            &task,
+            &task.attention_owners
+        ));
     }
 
     #[test]
@@ -1244,7 +1261,7 @@ mod tests {
 
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Rowan", "Quinn"]
+            vec!["Rowan"]
         );
     }
 
@@ -1273,7 +1290,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_preserves_explicit_tom_tail_when_deferred_qa_replaces_rowan() {
+    fn routing_ignores_legacy_escalation_comment_when_deferred_qa_replaces_rowan() {
         let mut task = routing_task("doing", &["Rowan", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1290,13 +1307,15 @@ mod tests {
         });
         task.comments.push(TaskComment {
             author: Some("Quinn".to_string()),
-            text: Some("[quinn-escalation] Tom must provision the external credential.".to_string()),
+            text: Some(
+                "[quinn-escalation] Tom must provision the external credential.".to_string(),
+            ),
             ..Default::default()
         });
 
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Quinn", "Tom"]
+            vec!["Quinn"]
         );
     }
 
@@ -1347,10 +1366,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(
-            reconciled_attention_owners(&task),
-            vec!["Ash"]
-        );
+        assert_eq!(reconciled_attention_owners(&task), vec!["Ash"]);
     }
     #[test]
     fn routing_preserves_rowan_handoff_when_ash_is_last_commenter() {
@@ -1436,22 +1452,17 @@ mod tests {
             vec!["Tom", "Lox", "Rowan", "Tom", "Tom"]
         );
     }
-    /// A `doing`-status task whose `attentionOwners` is `[Tom, Quinn, Ash]`
-    /// and whose `qa_agent` gate is closed should route back to the delivery
-    /// assignee, while keeping an explicit Quinn -> Tom escalation path and
-    /// without draining the remaining owner stack.
+    /// A reason-bearing Tom row created by Quinn is the terminal action on a
+    /// `doing` task. Lobster must not displace it with a future workflow gate
+    /// or preserve dormant tail owners.
     #[test]
-    fn routing_keeps_quinn_before_tom_without_draining_remaining_owners() {
+    fn routing_preserves_structured_quinn_to_tom_terminal_handoff() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
-        task.comments.push(TaskComment {
-            author: Some("Quinn".to_string()),
-            text: Some(
-                "[quinn-escalation] Tom must provision the external credential."
-                    .to_string(),
-            ),
-            body: None,
-            ..TaskComment::default()
-        });
+        task.attention_owner_details = vec![crate::TaskAttentionOwner {
+            owner: "Tom".to_string(),
+            added_by: Some("Quinn".to_string()),
+            note: Some("Tom must provision the external credential now.".to_string()),
+        }];
         task.comments.push(TaskComment {
             text: Some(
                 "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
@@ -1466,22 +1477,23 @@ mod tests {
             ..TaskApproval::default()
         });
         let once = crate::spec_check_ready::reconciled_attention_owners(&task);
-        assert_eq!(once, vec!["Rowan", "Quinn", "Tom", "Ash"]);
+        assert_eq!(once, vec!["Tom"]);
         task.attention_owners = once.clone();
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
             once
         );
     }
-    /// Tom's accepted gate is only actionable in acceptance. A pending
-    /// accepted approval must leave Quinn before Tom while a task is still
-    /// doing.
+    /// Legacy escalation comments are audit text only and cannot preserve a
+    /// Tom row while a task is still doing.
     #[test]
-    fn routing_moves_quinn_before_tom_head_before_acceptance() {
+    fn routing_drops_tom_despite_legacy_escalation_comment() {
         let mut task = routing_task("doing", &["Tom", "Quinn", "Ash"]);
         task.comments.push(TaskComment {
             author: Some("Quinn".to_string()),
-            text: Some("[quinn-escalation] Tom must provision the external credential.".to_string()),
+            text: Some(
+                "[quinn-escalation] Tom must provision the external credential.".to_string(),
+            ),
             ..Default::default()
         });
         task.approvals.push(TaskApproval {
@@ -1491,7 +1503,7 @@ mod tests {
         });
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Quinn", "Tom", "Ash"]
+            vec!["Quinn", "Ash"]
         );
     }
     #[test]
