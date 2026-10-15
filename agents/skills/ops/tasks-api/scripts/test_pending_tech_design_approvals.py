@@ -9,12 +9,31 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+import urllib.request
+from unittest.mock import MagicMock, patch
 
 # Make the sibling script importable
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
 import pending_tech_design_approvals as p  # noqa: E402
+
+
+class ApiRequestProxyTest(unittest.TestCase):
+    def test_bypasses_ambient_proxy_for_tasks_api_calls(self):
+        opener = MagicMock()
+        response = opener.open.return_value.__enter__.return_value
+        response.read.return_value = b'{"data": []}'
+
+        with patch.object(p.urllib.request, "build_opener", return_value=opener) as build_opener:
+            result = p.api_request("GET", "http://tasks.test/api/v1", "/tasks")
+
+        self.assertEqual(result, {"data": []})
+        build_opener.assert_called_once()
+        proxy_handler = build_opener.call_args.args[0]
+        self.assertIsInstance(proxy_handler, urllib.request.ProxyHandler)
+        self.assertEqual(proxy_handler.proxies, {})
+        opener.open.assert_called_once()
 
 
 class TaggedValuesTest(unittest.TestCase):

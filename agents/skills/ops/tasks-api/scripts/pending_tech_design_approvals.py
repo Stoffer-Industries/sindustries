@@ -34,7 +34,12 @@ def api_request(method: str, base_url: str, path: str, payload=None) -> dict:
         data = json.dumps(payload).encode("utf-8")
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    # TASKS_API_BASE_URL points at the local Tasks API.  The default urllib
+    # opener honours ambient HTTP(S)_PROXY values, which routes this local
+    # call through the secret-egress proxy and produces a misleading 502.
+    # Match tasks_api_client.py and bypass the proxy explicitly.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=30) as resp:
         body = resp.read().decode("utf-8")
         return json.loads(body) if body else {}
 
