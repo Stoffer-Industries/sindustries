@@ -3,6 +3,7 @@ import { useSession, useUser, useSignIn, useSignUp, useClerk } from '@clerk/reac
 import { AuthContext } from './authContext.jsx';
 import { getClerkPublishableKey } from './clerkConfig.js';
 import { setSupabaseAccessTokenGetter, supabase } from './supabase.js';
+import { clearClerkSsoDestination, rememberClerkSsoDestination } from './clerkSsoDestination.js';
 
 /**
  * Clerk-backed AuthProvider. Activated when VITE_AUTH_PROVIDER === 'clerk'.
@@ -209,6 +210,7 @@ export function ClerkAuthProvider({ children }) {
       const strategy = clerkStrategyForProvider(provider);
       const redirectUrl = new URL(redirectPath, window.location.origin).toString();
       const redirectCallbackUrl = new URL('/sso-callback', window.location.origin).toString();
+      rememberClerkSsoDestination(redirectPath);
       try {
         const { error } = await clerkSignIn.sso({
           strategy,
@@ -216,6 +218,7 @@ export function ClerkAuthProvider({ children }) {
           redirectCallbackUrl
         });
         if (error) {
+          clearClerkSsoDestination();
           return {
             data: null,
             error: new Error(clerkErrorMessage(error, 'OAuth redirect failed.')),
@@ -224,6 +227,7 @@ export function ClerkAuthProvider({ children }) {
         }
         return { data: { provider }, error: null, providerDisabled: false };
       } catch (err) {
+        clearClerkSsoDestination();
         return {
           data: null,
           error: new Error(clerkErrorMessage(err, 'OAuth redirect failed.')),

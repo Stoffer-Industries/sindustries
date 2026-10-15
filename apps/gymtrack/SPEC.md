@@ -34,7 +34,7 @@ Slice A (PR #734, MERGED 2026-09-23) shipped the `AuthProvider` dispatcher + Cle
 
 Live e2e + RLS verification is gated on `VITE_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` landing in Vercel + the staging environment (Quinn / Tom Phase 0 work, complete as of 2026-09-23 per Quinn beat 293); the Slice B runbook is the assertion that produces the AC1 evidence.
 
-The custom browser flow uses Clerk v6's resource methods: `signIn.password()` / `signUp.password()` return a structured `{ error }` envelope, successful flows call `finalize()`, and Google starts with `signIn.sso()`. The email/password sign-up form always mounts `#clerk-captcha` before it invokes Clerk so Turnstile can settle in the page instead of falling back to a detached invisible challenge. Failed credentials and failed sign-up attempts restore the enabled submit button and display Clerk's user-facing `longMessage` inline.
+The custom browser flow uses Clerk v6's resource methods: `signIn.password()` / `signUp.password()` return a structured `{ error }` envelope, successful flows call `finalize()`, and Google starts with `signIn.sso()`. The requested protected-route destination is stored in same-origin session storage before SSO and consumed once by `/sso-callback`; invalid or cross-origin destinations fall back to `/workout`. The email/password sign-up form always mounts `#clerk-captcha` before it invokes Clerk so Turnstile can settle in the page instead of falling back to a detached invisible challenge. Failed credentials and failed sign-up attempts restore the enabled submit button and display Clerk's user-facing `longMessage` inline.
 
 ### Identity verification — Slice C (Phase 4 verified-email linking)
 

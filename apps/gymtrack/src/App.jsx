@@ -1,8 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { HandleSSOCallback } from '@clerk/react';
 import AgentConsentPage from './components/AgentConsentPage.jsx';
 import AgentOAuthCallbackPage from './components/AgentOAuthCallbackPage.jsx';
 import AuthGate from './components/AuthGate.jsx';
+import ClerkSsoCallback from './components/ClerkSsoCallback.jsx';
 import ConnectedAgentsPage from './components/ConnectedAgentsPage.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 import SignUpPage from './components/SignUpPage.jsx';
@@ -29,15 +29,7 @@ export default function App() {
       {CLERK_ENABLED ? (
         <Route
           path="/sso-callback"
-          element={
-            <HandleSSOCallback
-              navigateToApp={({ decorateUrl }) => {
-                window.location.assign(decorateUrl('/workout'));
-              }}
-              navigateToSignIn={() => window.location.assign('/login')}
-              navigateToSignUp={() => window.location.assign('/signup')}
-            />
-          }
+          element={<ClerkSsoCallback />}
         />
       ) : null}
       <Route
