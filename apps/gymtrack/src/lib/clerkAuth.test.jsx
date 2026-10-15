@@ -1,6 +1,6 @@
 import { useContext, useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   signIn: {
@@ -8,13 +8,16 @@ const mocks = vi.hoisted(() => ({
     createdSessionId: null,
     password: vi.fn(),
     finalize: vi.fn(),
-    sso: vi.fn()
+    sso: vi.fn(),
+    supportedSecondFactors: [],
+    mfa: { sendEmailCode: vi.fn(), verifyEmailCode: vi.fn() }
   },
   signUp: {
     status: 'missing_requirements',
     createdUserId: null,
     password: vi.fn(),
     finalize: vi.fn(),
+    reset: vi.fn(),
     verifications: { sendEmailCode: vi.fn() }
   }
 }));
@@ -51,6 +54,14 @@ function Harness() {
       </button>
       <button
         onClick={async () => {
+          const result = await auth.verifySignInSecondFactor('123456');
+          setMessage(result.error?.message ?? 'verified');
+        }}
+      >
+        verify
+      </button>
+      <button
+        onClick={async () => {
           const result = await auth.signUp('person@example.com', 'valid-password');
           setMessage(result.error?.message ?? 'signed-up');
         }}
@@ -82,9 +93,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.signIn.status = 'needs_identifier';
   mocks.signIn.createdSessionId = null;
+  mocks.signIn.supportedSecondFactors = [];
   mocks.signUp.status = 'missing_requirements';
   mocks.signUp.createdUserId = null;
+  mocks.signUp.reset.mockResolvedValue({ error: null });
   mocks.signUp.verifications.sendEmailCode.mockResolvedValue({ error: null });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
@@ -119,6 +136,31 @@ describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
     expect(mocks.signIn.finalize).not.toHaveBeenCalled();
   });
 
+  it('sends and verifies an email code when Clerk requires client trust', async () => {
+    mocks.signIn.password.mockImplementation(async () => {
+      mocks.signIn.status = 'needs_client_trust';
+      mocks.signIn.supportedSecondFactors = [{ strategy: 'email_code' }];
+      return { error: null };
+    });
+    mocks.signIn.mfa.sendEmailCode.mockResolvedValue({ error: null });
+    mocks.signIn.mfa.verifyEmailCode.mockImplementation(async () => {
+      mocks.signIn.status = 'complete';
+      mocks.signIn.createdSessionId = 'sess_verified';
+      return { error: null };
+    });
+    mocks.signIn.finalize.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign in' }));
+    expect(await screen.findByText('signed-in')).toBeVisible();
+    expect(mocks.signIn.mfa.sendEmailCode).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: 'verify' }));
+    expect(await screen.findByText('verified')).toBeVisible();
+    expect(mocks.signIn.mfa.verifyEmailCode).toHaveBeenCalledWith({ code: '123456' });
+    expect(mocks.signIn.finalize).toHaveBeenCalledOnce();
+  });
+
   it('uses the v6 SSO method and preserves the requested destination', async () => {
     mocks.signIn.sso.mockResolvedValue({ error: null });
     renderProvider();
@@ -141,5 +183,19 @@ describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
 
     await waitFor(() => expect(mocks.signUp.verifications.sendEmailCode).toHaveBeenCalled());
     expect(screen.getByText('signed-up')).toBeVisible();
+  });
+
+  it('bounds a stalled sign-up security check and resets the attempt', async () => {
+    vi.useFakeTimers();
+    mocks.signUp.password.mockReturnValue(new Promise(() => {}));
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign up' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(screen.getByText('Security check timed out. Please retry.')).toBeVisible();
+    expect(mocks.signUp.reset).toHaveBeenCalledOnce();
   });
 });

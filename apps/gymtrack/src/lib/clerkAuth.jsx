@@ -5,6 +5,8 @@ import { getClerkPublishableKey } from './clerkConfig.js';
 import { setSupabaseAccessTokenGetter, supabase } from './supabase.js';
 import { clearClerkSsoDestination, rememberClerkSsoDestination } from './clerkSsoDestination.js';
 
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+
 /**
  * Clerk-backed AuthProvider. Activated when VITE_AUTH_PROVIDER === 'clerk'.
  *
@@ -112,6 +114,25 @@ export function ClerkAuthProvider({ children }) {
           }
           return { data: { session: clerkSignIn.createdSessionId }, error: null };
         }
+        if (clerkSignIn.status === 'needs_client_trust') {
+          const supportsEmailCode = clerkSignIn.supportedSecondFactors?.some(
+            (factor) => factor.strategy === 'email_code'
+          );
+          if (!supportsEmailCode) {
+            return {
+              data: null,
+              error: new Error('This browser needs an additional verification method that is not available.')
+            };
+          }
+          const { error: verificationError } = await clerkSignIn.mfa.sendEmailCode();
+          if (verificationError) {
+            return {
+              data: null,
+              error: new Error(clerkErrorMessage(verificationError, 'Could not send the verification code.'))
+            };
+          }
+          return { data: { needsSecondFactor: true, strategy: 'email_code' }, error: null };
+        }
         // First-factor succeeded but additional steps required (e.g. 2FA,
         // email link verification). Surface the prepared state so the UI
         // can branch; today's LoginScreen treats this as an error, which
@@ -134,6 +155,37 @@ export function ClerkAuthProvider({ children }) {
     [clerkSignIn]
   );
 
+  const verifySignInSecondFactor = useCallback(
+    async (code) => {
+      try {
+        const { error } = await clerkSignIn.mfa.verifyEmailCode({ code });
+        if (error) {
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(error, 'Verification failed.'))
+          };
+        }
+        if (clerkSignIn.status !== 'complete') {
+          return {
+            data: null,
+            error: new Error('Additional sign-in verification is still required.')
+          };
+        }
+        const { error: finalizeError } = await clerkSignIn.finalize();
+        if (finalizeError) {
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(finalizeError, 'Sign-in failed.'))
+          };
+        }
+        return { data: { session: clerkSignIn.createdSessionId }, error: null };
+      } catch (err) {
+        return { data: null, error: new Error(clerkErrorMessage(err, 'Verification failed.')) };
+      }
+    },
+    [clerkSignIn]
+  );
+
   /**
    * Email + password sign-up. Maps Clerk's `signUp.create({ emailAddress,
    * password })` to `{ data, error }`. Email verification (Clerk sends a
@@ -144,10 +196,14 @@ export function ClerkAuthProvider({ children }) {
   const signUp = useCallback(
     async (email, password) => {
       try {
-        const { error } = await clerkSignUp.password({
-          emailAddress: email,
-          password
-        });
+        const { error } = await withTimeout(
+          clerkSignUp.password({
+            emailAddress: email,
+            password
+          }),
+          AUTH_REQUEST_TIMEOUT_MS,
+          'Security check timed out. Please retry.'
+        );
         if (error) {
           return { data: null, error: new Error(clerkErrorMessage(error, 'Sign-up failed.')) };
         }
@@ -175,6 +231,9 @@ export function ClerkAuthProvider({ children }) {
         }
         return { data: { pendingVerification: true }, error: null };
       } catch (err) {
+        if (err?.name === 'AuthRequestTimeoutError') {
+          await clerkSignUp.reset().catch(() => {});
+        }
         return { data: null, error: new Error(clerkErrorMessage(err, 'Sign-up failed.')) };
       }
     },
@@ -363,12 +422,13 @@ export function ClerkAuthProvider({ children }) {
       user: session?.user ?? null,
       loading,
       signIn,
+      verifySignInSecondFactor,
       signUp,
       signOut,
       startOAuthRedirect,
       getAccessToken
     }),
-    [session, loading, signIn, signUp, signOut, startOAuthRedirect, getAccessToken]
+    [session, loading, signIn, verifySignInSecondFactor, signUp, signOut, startOAuthRedirect, getAccessToken]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -417,6 +477,18 @@ function clerkErrorMessage(error, fallback) {
     error?.message ??
     fallback
   );
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error(message);
+      error.name = 'AuthRequestTimeoutError';
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 
 /**
