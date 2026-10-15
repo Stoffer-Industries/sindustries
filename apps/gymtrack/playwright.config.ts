@@ -8,15 +8,17 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5179',
+    baseURL: process.env.CLERK_TEST_URL ?? 'http://localhost:5179',
     trace: 'on-first-retry'
   },
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5179',
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000
-  },
+  webServer: process.env.CLERK_TEST_URL
+    ? undefined
+    : {
+        command: 'npm run dev',
+        url: 'http://localhost:5179',
+        reuseExistingServer: !process.env.CI,
+        timeout: 60_000
+      },
   projects: [
     {
       name: 'mobile-safari',
