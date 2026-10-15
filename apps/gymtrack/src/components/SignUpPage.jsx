@@ -155,6 +155,10 @@ export default function SignUpPage() {
             </div>
           ) : null}
 
+          {/* Clerk mounts its bot-protection challenge at this stable DOM id
+              for custom sign-up flows. */}
+          <div id="clerk-captcha" data-testid="signup-captcha" />
+
           <div className="btn-row">
             <button
               type="submit"
