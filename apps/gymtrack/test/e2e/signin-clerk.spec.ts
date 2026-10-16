@@ -5,6 +5,8 @@ declare global {
   interface Window {
     Clerk: {
       loaded: boolean;
+      frontendApi?: string;
+      proxyUrl?: string;
       client: {
         signIn: {
           create(params: { strategy: 'ticket'; ticket: string }): Promise<{ createdSessionId: string }>;
@@ -89,6 +91,29 @@ async function signInWithTicket(page: Page) {
 
 test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
   test.skip(!CLERK_GATE, 'CLERK_TEST_URL not set — Clerk sign-in path skipped');
+
+  test('AC1 regression: the legacy Vercel hostname redirects to the canonical Clerk domain', async ({ page }) => {
+    test.skip(
+      new URL(CLERK_TEST_URL!).hostname !== 'gymtrack.sindustries.co.nz',
+      'canonical production-domain regression only'
+    );
+
+    await page.goto('https://gymtrack-sigma-pied.vercel.app/login?source=clerk-regression');
+
+    await expect(page).toHaveURL(
+      'https://gymtrack.sindustries.co.nz/login?source=clerk-regression'
+    );
+    await expect(page.getByTestId('login-form')).toBeVisible();
+    expect(
+      await page.evaluate(() => ({
+        frontendApi: window.Clerk?.frontendApi,
+        proxyUrl: window.Clerk?.proxyUrl
+      }))
+    ).toEqual({
+      frontendApi: 'clerk.sindustries.co.nz',
+      proxyUrl: ''
+    });
+  });
 
   test('AC1: valid password sign-in completes or presents the client-trust email code step', async ({ page }) => {
     await page.goto('/login');
