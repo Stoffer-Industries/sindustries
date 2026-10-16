@@ -6,12 +6,14 @@ import { MemoryRouter } from 'react-router-dom';
 vi.mock('../lib/supabase.js', () => ({ supabase: { auth: { getUser: vi.fn(), onAuthStateChange: vi.fn() } } }));
 
 const mockSignIn = vi.fn();
+const mockVerifySignInSecondFactor = vi.fn();
 vi.mock('../lib/auth.jsx', () => ({
   useAuth: () => ({
     session: null,
     user: null,
     loading: false,
     signIn: mockSignIn,
+    verifySignInSecondFactor: mockVerifySignInSecondFactor,
     signUp: vi.fn(),
     signOut: vi.fn()
   }),
@@ -39,6 +41,7 @@ describe('LoginScreen', () => {
     expect(screen.getByTestId('login-email')).toBeInTheDocument();
     expect(screen.getByTestId('login-password')).toBeInTheDocument();
     expect(screen.getByTestId('login-submit')).toBeInTheDocument();
+    expect(screen.getByTestId('login-captcha')).toHaveAttribute('id', 'clerk-captcha');
   });
 
   it('shows inline error when sign-in fails', async () => {
@@ -52,5 +55,23 @@ describe('LoginScreen', () => {
 
     expect(await screen.findByTestId('login-error')).toHaveTextContent(/Invalid credentials/);
     expect(mockSignIn).toHaveBeenCalledWith('tom@example.com', 'wrongpassword');
+  });
+
+  it('completes the Clerk client-trust email-code step', async () => {
+    mockSignIn.mockResolvedValueOnce({
+      data: { needsSecondFactor: true, strategy: 'email_code' },
+      error: null
+    });
+    mockVerifySignInSecondFactor.mockResolvedValueOnce({ data: { session: 'sess_1' }, error: null });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByTestId('login-email'), 'tom@example.com');
+    await user.type(screen.getByTestId('login-password'), 'correctpassword');
+    await user.click(screen.getByTestId('login-submit'));
+
+    await user.type(await screen.findByTestId('login-verification-code'), '123456');
+    await user.click(screen.getByTestId('login-verify-submit'));
+    expect(mockVerifySignInSecondFactor).toHaveBeenCalledWith('123456');
   });
 });

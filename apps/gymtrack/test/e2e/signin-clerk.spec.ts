@@ -1,4 +1,19 @@
 import { test, expect } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+declare global {
+  interface Window {
+    Clerk: {
+      loaded: boolean;
+      client: {
+        signIn: {
+          create(params: { strategy: 'ticket'; ticket: string }): Promise<{ createdSessionId: string }>;
+        };
+      };
+      setActive(params: { session: string }): Promise<void>;
+    };
+  }
+}
 
 /**
  * End-to-end smoke for the email + password sign-in path through Clerk
@@ -25,20 +40,57 @@ import { test, expect } from '@playwright/test';
  *     placeholder login attempt or a silently skipped happy path.
  */
 
-const CLERK_GATE = Boolean(process.env.CLERK_TEST_URL);
+const CLERK_TEST_URL = process.env.CLERK_TEST_URL;
+const CLERK_GATE = Boolean(CLERK_TEST_URL);
 const CLERK_TEST_EMAIL = process.env.CLERK_TEST_EMAIL;
 const CLERK_TEST_PASSWORD = process.env.CLERK_TEST_PASSWORD;
+const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 
-if (CLERK_GATE && (!CLERK_TEST_EMAIL || !CLERK_TEST_PASSWORD)) {
+if (CLERK_GATE && (!CLERK_TEST_EMAIL || !CLERK_TEST_PASSWORD || !CLERK_SECRET_KEY)) {
   throw new Error(
-    'CLERK_TEST_EMAIL and CLERK_TEST_PASSWORD are required when CLERK_TEST_URL is set'
+    'CLERK_TEST_EMAIL, CLERK_TEST_PASSWORD, and CLERK_SECRET_KEY are required when CLERK_TEST_URL is set'
   );
+}
+
+async function createSignInTicket() {
+  const headers = { Authorization: `Bearer ${CLERK_SECRET_KEY}` };
+  const usersResponse = await fetch(
+    `https://api.clerk.com/v1/users?email_address=${encodeURIComponent(CLERK_TEST_EMAIL!)}&limit=1`,
+    { headers }
+  );
+  expect(usersResponse.ok).toBe(true);
+  const usersPayload = await usersResponse.json();
+  const users = Array.isArray(usersPayload) ? usersPayload : usersPayload.data;
+  expect(users).toHaveLength(1);
+
+  const tokenResponse = await fetch('https://api.clerk.com/v1/sign_in_tokens', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: users[0].id, expires_in_seconds: 300 })
+  });
+  expect(tokenResponse.ok).toBe(true);
+  const token = await tokenResponse.json();
+  return token.token as string;
+}
+
+async function signInWithTicket(page: Page) {
+  const ticket = await createSignInTicket();
+  await page.goto('/login');
+  await page.waitForFunction(() => window.Clerk?.loaded);
+  await page.evaluate(async (signInTicket) => {
+    const attempt = await window.Clerk.client.signIn.create({
+      strategy: 'ticket',
+      ticket: signInTicket
+    });
+    await window.Clerk.setActive({ session: attempt.createdSessionId });
+  }, ticket);
+  await page.goto('/workout');
 }
 
 test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
   test.skip(!CLERK_GATE, 'CLERK_TEST_URL not set — Clerk sign-in path skipped');
 
-  test('AC1: signing in with valid email + password lands the user on /workout', async ({ page }) => {
+  test('AC1: valid password sign-in completes or presents the client-trust email code step', async ({ page }) => {
     await page.goto('/login');
 
     // The Slice A dispatcher mounts ClerkAuthProvider when VITE_AUTH_PROVIDER=clerk.
@@ -47,10 +99,20 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
     await page.getByTestId('login-password').fill(CLERK_TEST_PASSWORD!);
     await page.getByTestId('login-submit').click();
 
-    // Successful sign-in navigates to /workout (or to the originally intended
-    // protected destination; /workout is the canonical landing for now).
-    await expect(page).toHaveURL(/\/workout$/, { timeout: 15_000 });
-    await expect(page.getByRole('heading', { name: 'GymTrack' })).toBeVisible();
+    await expect
+      .poll(async () => {
+        if (/\/workout$/.test(page.url())) return 'complete';
+        if (await page.getByTestId('login-verification-code').isVisible().catch(() => false)) {
+          return 'client-trust';
+        }
+        return 'pending';
+      }, { timeout: 15_000 })
+      .toMatch(/complete|client-trust/);
+    if (/\/login$/.test(page.url())) {
+      await expect(page.getByText('We emailed you a verification code')).toBeVisible();
+      await expect(page.getByTestId('login-verify-submit')).toBeEnabled();
+      await expect(page.getByTestId('login-error')).not.toBeVisible();
+    }
   });
 
   test('AC1: invalid credentials surface a Clerk error and keep the user on /login', async ({ page }) => {
@@ -71,6 +133,12 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
     // off-site (no Clerk hosted account portal, no Google consent).
     await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
 
+    const error = page.getByTestId('login-error');
+    await expect(error).toBeVisible();
+    await expect(error).not.toContainText('Additional sign-in steps required');
+    await expect(error).not.toContainText('status=undefined');
+    await expect(page.getByTestId('login-submit')).toBeEnabled();
+
     // No off-site navigation to a third-party identity provider.
     expect(page.url()).not.toMatch(/clerk\.[a-z0-9-]+\.com|accounts\.google\.com/i);
   });
@@ -88,6 +156,37 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
     await expect(page.getByTestId('signup-email')).toBeVisible();
     await expect(page.getByTestId('signup-password')).toBeVisible();
     await expect(page.getByTestId('signup-submit')).toBeVisible();
+    await expect(page.locator('#clerk-captcha')).toHaveCount(1);
+  });
+
+  test('AC1: email sign-up mounts CAPTCHA and settles instead of hanging', async ({ page }) => {
+    await page.goto('/signup');
+    await page.getByTestId('signup-show-email').click();
+
+    await expect(page.locator('#clerk-captcha')).toHaveCount(1);
+    await page.getByTestId('signup-email').fill(CLERK_TEST_EMAIL!);
+    await page.getByTestId('signup-password').fill(CLERK_TEST_PASSWORD!);
+    await page.getByTestId('signup-submit').click();
+
+    // The dedicated Clerk test account already exists, so this exercises
+    // CAPTCHA + request settlement without creating another production user.
+    await expect(page.getByTestId('signup-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('signup-submit')).toBeEnabled();
+    await expect(page.getByTestId('signup-submit')).toHaveText('Create account');
+    await expect(page).toHaveURL(/\/signup$/);
+  });
+
+  test('AC1: Google sign-in starts Clerk SSO without a client-side method error', async ({ page }) => {
+    await page.goto('/login');
+
+    await page.getByTestId('login-google').click();
+
+    await expect(page.getByTestId('login-error')).not.toBeVisible();
+    await page.waitForURL(
+      (url) => url.origin !== new URL(CLERK_TEST_URL!).origin,
+      { timeout: 15_000 }
+    );
+    expect(page.url()).not.toContain('authenticateWithRedirect');
   });
 });
 
@@ -159,10 +258,7 @@ test.describe('GymTrack — Clerk Slice C verified-email linking (Phase 4)', () 
       });
     });
 
-    await page.goto('/login');
-    await page.getByTestId('login-email').fill(CLERK_TEST_EMAIL!);
-    await page.getByTestId('login-password').fill(CLERK_TEST_PASSWORD!);
-    await page.getByTestId('login-submit').click();
+    await signInWithTicket(page);
 
     // Slice C is silent for the user: the link RPC fires after the
     // sign-in lands on /workout. There is no loading state, no error
@@ -214,10 +310,7 @@ test.describe('GymTrack — Clerk Slice C verified-email linking (Phase 4)', () 
       });
     });
 
-    await page.goto('/login');
-    await page.getByTestId('login-email').fill(CLERK_TEST_EMAIL!);
-    await page.getByTestId('login-password').fill(CLERK_TEST_PASSWORD!);
-    await page.getByTestId('login-submit').click();
+    await signInWithTicket(page);
 
     // Sign-in must succeed even when the link RPC rejects the link.
     await expect(page).toHaveURL(/\/workout$/, { timeout: 15_000 });

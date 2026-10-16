@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import AgentConsentPage from './components/AgentConsentPage.jsx';
 import AgentOAuthCallbackPage from './components/AgentOAuthCallbackPage.jsx';
 import AuthGate from './components/AuthGate.jsx';
+import ClerkSsoCallback from './components/ClerkSsoCallback.jsx';
 import ConnectedAgentsPage from './components/ConnectedAgentsPage.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 import SignUpPage from './components/SignUpPage.jsx';
@@ -9,6 +10,9 @@ import WorkoutLogger from './components/WorkoutLogger.jsx';
 import HistoryList from './components/HistoryList.jsx';
 import WorkoutsTab from './components/WorkoutsTab.jsx';
 import { useAuth } from './lib/auth.jsx';
+import { getActiveProvider } from './lib/clerkConfig.js';
+
+const CLERK_ENABLED = getActiveProvider() === 'clerk';
 
 function Home() {
   const { session } = useAuth();
@@ -22,6 +26,12 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<LoginScreen />} />
       <Route path="/signup" element={<SignUpPage />} />
+      {CLERK_ENABLED ? (
+        <Route
+          path="/sso-callback"
+          element={<ClerkSsoCallback />}
+        />
+      ) : null}
       <Route
         path="/workout"
         element={

@@ -88,18 +88,7 @@ async function loadTask(id) {
 async function loadTaskWithAttentionOwners(id) {
   return prisma.task.findFirst({
     where: { id, archivedAt: null },
-    include: {
-      attentionOwners: { orderBy: { position: 'asc' } },
-      comments: { orderBy: { createdAt: 'asc' } }
-    }
-  });
-}
-
-function hasExplicitQuinnTomEscalation(task) {
-  return (task?.comments ?? []).some((comment) => {
-    const author = typeof comment.author === 'string' ? comment.author.trim().toLowerCase() : '';
-    const text = comment.body ?? comment.text ?? '';
-    return author === 'quinn' && text.includes('[quinn-escalation]');
+    include: { attentionOwners: { orderBy: { position: 'asc' } } }
   });
 }
 
@@ -109,9 +98,10 @@ function hasExplicitQuinnTomEscalation(task) {
  * transaction; it does not infer intent from, or delete, existing tail rows.
  * Lobster remains responsible only for its own workflow-owned head slot.
  *
- * Tom may still act directly, and a Quinn-authored escalation marker permits
- * the deliberate Quinn -> Tom terminal handoff. Ordinary agent heartbeats
- * may not manufacture either state.
+ * A deliberate Quinn -> Tom terminal handoff is authorized by Quinn's
+ * authenticated write and persisted reason, never by a reusable task comment.
+ * Tom may also act directly. Ordinary agent heartbeats may not manufacture
+ * either state, even when legacy `[quinn-escalation]` audit text exists.
  */
 function attentionOwnerPolicyFailure(task, owners, authenticatedActor) {
   if (task?.status !== 'doing') return null;
@@ -119,20 +109,27 @@ function attentionOwnerPolicyFailure(task, owners, authenticatedActor) {
   const actor = typeof authenticatedActor === 'string'
     ? authenticatedActor.trim().toLowerCase()
     : '';
-  if (actor === 'tom') return null;
-
-  const hasEscalation = hasExplicitQuinnTomEscalation(task);
-  if (owners.some((owner) => owner.trim().toLowerCase() === 'tom') && !hasEscalation) {
+  const tomPositions = owners
+    .map((owner, position) => ({ owner: owner.trim().toLowerCase(), position }))
+    .filter(({ owner }) => owner === 'tom')
+    .map(({ position }) => position);
+  if (tomPositions.length > 0 && (actor !== 'quinn' && actor !== 'tom')) {
     return {
       code: 'TOM_NOT_ACTIONABLE',
-      message: 'Tom may only be routed on a doing task after an explicit Quinn escalation; acceptance is not yet the current gate'
+      message: 'Tom may only be routed on a doing task by an authenticated Quinn escalation; acceptance is not yet the current gate'
+    };
+  }
+  if (tomPositions.length > 0 && (tomPositions[0] !== 0 || owners.length !== 1)) {
+    return {
+      code: 'TOM_NOT_ACTIONABLE',
+      message: 'A doing-task escalation to Tom must make Tom the sole terminal attention owner'
     };
   }
 
   const dormantQuinn = owners.some((owner, position) =>
     position > 0 && owner.trim().toLowerCase() === 'quinn'
   );
-  if (dormantQuinn && !hasEscalation) {
+  if (dormantQuinn) {
     return {
       code: 'DORMANT_QUINN_SLOT',
       message: 'Quinn is an active position-0 runtime unblocker, not a dormant escalation slot'

@@ -100,8 +100,8 @@ needs its normal next verifier; route those workflow transitions to their
 defined owner (for example Ash for `qa_agent`). Any Quinn or Tom escalation
 must use a reason-bearing Tasks API write with an authenticated actor and a
 specific current blocker, next action, and reason the named owner is needed.
-`[quinn-escalation]` is audit text only and does not satisfy that row metadata
-contract. Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for every
+Legacy `[quinn-escalation]` comments are audit text only and authorize nothing.
+Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for every
 add, replacement, escalation, repair, and self-resolve. Never fall back to the
 legacy full-stack PATCH or direct curl if the reason-bearing endpoint is
 unavailable; stop and report the blocker.
@@ -120,9 +120,10 @@ When Quinn is top owner:
    behind as a dormant reviewer.
 6. If Quinn cannot resolve the blocker because of a genuine external blocker
    (missing access, owner-only approval, unavailable credential, or unresolved
-   product decision), keep Quinn at position 0, post concrete evidence with a
-   `[quinn-escalation]` marker, and page Tom directly and immediately. Do not
-   silently remove Quinn or wait for another heartbeat.
+   product decision), use the authenticated reason-bearing API to replace the
+   stack with `attentionOwners=["Tom"]`, post concrete evidence, and page Tom
+   directly and immediately. Do not leave Quinn as a dormant tail, silently
+   remove the blocker, or wait for another heartbeat.
 7. Do not escalate when the only possible action is duplicate state help, such
    as repeating PR assistance or restating evidence already recorded elsewhere.
    Leave the existing stack unchanged and avoid a second page.
