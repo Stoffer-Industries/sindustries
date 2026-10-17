@@ -1,0 +1,100 @@
+{
+  "annotations": { "list": [] },
+  "description": "GymTrack browser error telemetry — uncaught exceptions, unhandled promise rejections, and explicitly handled Clerk/Supabase auth failures emitted from production builds. Backed by Loki (the relay at apps/gymtrack/api/telemetry.js forwards to the hosted Grafana Cloud Loki push endpoint). Source: task e89db27f; design docs/specs/gymtrack-browser-error-telemetry-tech-design.md.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "title": "GymTrack / Browser errors",
+  "uid": "gymtrack-browser-errors",
+  "tags": ["sindustries", "hosted", "gymtrack", "browser"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "logs",
+      "title": "Browser events (raw)",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{app=\"gymtrack\", source=\"browser\"}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Event rate by errorCode",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (errorCode) (rate({app=\"gymtrack\", source=\"browser\"} |~ \".+\" [5m]))",
+          "legendFormat": "{{errorCode}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Event rate by operation",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (operation) (rate({app=\"gymtrack\", source=\"browser\"} |~ \".+\" [5m]))",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Distinct routes emitting (15m)",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "count by () (count_over_time({app=\"gymtrack\", source=\"browser\"} |~ \".+\" [15m]) by (route))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Auth-error share of total (1h)",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum(rate({app=\"gymtrack\", source=\"browser\"} |~ \"(?i)signin|signup|verify|signout|oauth\" [1h])) / clamp_min(sum(rate({app=\"gymtrack\", source=\"browser\"} |~ \".+\" [1h])), 1e-9)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    }
+  ]
+}

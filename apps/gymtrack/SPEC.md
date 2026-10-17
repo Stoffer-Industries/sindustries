@@ -188,6 +188,7 @@ All protected routes (`/workout`, `/history`, `/workouts`, `/agent-consent`, `/s
 - The app fails fast at startup if `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are missing.
 - MCP OAuth endpoints return standard OAuth JSON errors (`invalid_request`, `invalid_grant`, etc.).
 - MCP JSON-RPC errors use standard JSON-RPC envelopes with GymTrack-specific messages.
+- Production browser errors (uncaught exceptions, unhandled promise rejections, and explicitly handled Clerk/Supabase auth failures) are reported to the hosted Grafana observability stack via a Vercel serverless relay (`apps/gymtrack/api/telemetry.js`). The telemetry surface is opt-in (`VITE_TELEMETRY_ENABLED=1`) and never bundles the Grafana Cloud credentials — only a per-deploy shared token. No user-visible UI change; failures still render inline as before. The redaction allow-list, dedupe, and volume cap are part of the public spec contract (see `docs/systems/observability.md` § "Browser-side error telemetry" and `docs/specs/gymtrack-browser-error-telemetry-tech-design.md`).
 
 ## Agent surfaces
 
