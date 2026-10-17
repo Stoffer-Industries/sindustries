@@ -748,8 +748,20 @@ step_secrets() {
 
 step_dashboards() {
   echo "==> Dashboards: upload to hosted Grafana"
+  # Dashboard JSON may live in two trees: the canonical observability
+  # dashboards (infra/cloud/observability/grafana/dashboards) and
+  # product-local dashboards co-located with the app that owns them
+  # (apps/gymtrack/grafana/dashboards for GymTrack's browser error
+  # telemetry dashboard — task e89db27f). Upload both trees so a
+  # product that ships an app-owned dashboard does not need a
+  # separate provisioning step.
+  local extra_dashboard_dirs=()
+  if [ -d "${REPO_ROOT}/apps/gymtrack/grafana/dashboards" ]; then
+    extra_dashboard_dirs+=("${REPO_ROOT}/apps/gymtrack/grafana/dashboards")
+  fi
   if [ "${DRY_RUN}" = true ]; then
-    for dashboard_file in "${DASHBOARD_DIR}"/*.json; do
+    for dashboard_file in "${DASHBOARD_DIR}"/*.json "${extra_dashboard_dirs[@]}"/*.json; do
+      [ -e "${dashboard_file}" ] || continue
       filename="$(basename "${dashboard_file}" .json)"
       echo "    [dry-run] POST \${GRAFANA_CLOUD_INSTANCE_URL}/api/dashboards/db  body=${dashboard_file}  (uid=${filename})"
     done
@@ -760,16 +772,17 @@ step_dashboards() {
   require_env_var GRAFANA_CLOUD_INSTANCE_URL
   local prometheus_uid wrapped_payload
   prometheus_uid="$(resolve_prometheus_datasource_uid)"
-  for dashboard_file in "${DASHBOARD_DIR}"/*.json; do
+  for dashboard_file in "${DASHBOARD_DIR}"/*.json "${extra_dashboard_dirs[@]}"/*.json; do
+    [ -e "${dashboard_file}" ] || continue
     filename="$(basename "${dashboard_file}" .json)"
     echo "    - ${filename}"
     wrapped_payload="$(jq -c --arg prometheus_uid "${prometheus_uid}" '
       walk(
         if type == "object" and has("datasource") then
           .datasource |= (
-            if type == "object" and (.uid == "prometheus" or .uid == "${DS_PROMETHEUS}") then
+            if type == "object" and (.uid == "prometheus" or .uid == "${DS_PROMETHEUS}" or .uid == "loki" or .uid == "${DS_LOKI}") then
               .uid = $prometheus_uid
-            elif . == "prometheus" or . == "${DS_PROMETHEUS}" then
+            elif . == "prometheus" or . == "${DS_PROMETHEUS}" or . == "loki" or . == "${DS_LOKI}" then
               $prometheus_uid
             else . end
           )
