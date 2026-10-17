@@ -49,7 +49,7 @@ describe('browserTelemetry', () => {
 
   it('redacts email addresses from error messages', () => {
     const fetchSpy = globalThis.fetch;
-    const error = new Error('Failed to sign in user [email protected]');
+    const error = new Error('Failed to sign in user foo@bar.com');
     reportAuthError(error, {
       provider: 'clerk',
       operation: 'signin',
