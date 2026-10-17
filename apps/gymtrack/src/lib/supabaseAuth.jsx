@@ -2,6 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase, setSupabaseAccessTokenGetter } from './supabase.js';
 import { AuthContext } from './authContext.jsx';
 import { isProviderDisabledError } from './authFlow.js';
+import { reportAuthError } from './browserTelemetry.js';
+
+/**
+ * Supabase error envelope → safe telemetry context. The supabase-js
+ * `AuthError` carries `.code` (a short machine-readable string) and
+ * `.status` (the HTTP status when the SDK surfaces one). The error
+ * `.message` is user-facing and is intentionally NOT sent to
+ * telemetry — only the safe code + status go out, matching the
+ * Clerk implementation's redaction contract.
+ */
+function supabaseSafeContext(error, operation) {
+  return {
+    provider: 'supabase',
+    operation,
+    errorCode: error?.code ?? null,
+    status: error?.status != null ? String(error.status) : null
+  };
+}
 
 /**
  * Supabase-backed AuthProvider. Default GymTrack identity implementation.
@@ -68,14 +86,17 @@ export function SupabaseAuthProvider({ children }) {
       loading,
       async signIn(email, password) {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) reportAuthError(error, supabaseSafeContext(error, 'signin'));
         return { data, error };
       },
       async signUp(email, password) {
         const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) reportAuthError(error, supabaseSafeContext(error, 'signup'));
         return { data, error };
       },
       async signOut() {
         const { error } = await supabase.auth.signOut();
+        if (error) reportAuthError(error, supabaseSafeContext(error, 'signout'));
         return { error };
       },
       /**

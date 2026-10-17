@@ -125,6 +125,7 @@ For the full per-alert response expectation see the "Alert ownership" table belo
 | `migration-alerts`              | NEW (hosted) — alert routing overview    | Rowan (engineering) | Quinn |
 | `tasks-api-red`                 | Existing local — ported to hosted for parity | Rowan (engineering) | Quinn |
 | `openclaw-diagnostics`          | Existing local — ported to hosted for parity | Rowan (engineering) | Quinn |
+| `gymtrack-browser-errors`       | NEW (hosted) — GymTrack browser error events (task e89db27f) | Rowan (engineering) | Quinn |
 
 All dashboard definitions live as JSON in the repo (either `infra/grafana/provisioning/dashboards/json/` for local or `infra/cloud/observability/grafana/dashboards/` for hosted). Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
 
@@ -239,6 +240,34 @@ A future operator should be able to:
 If any of those seven steps fails, the gap is filed as a follow-on feature task under the `4b3d6e9c` parent or as a new `infra` task depending on scope.
 
 ---
+
+## Browser-side error telemetry
+
+Task: `e89db27f` (Add GymTrack browser error telemetry to Grafana). The hosted stack above covers the **server** side — Fly app health, DB health, request latency, queue depth, deploy annotations — but the **browser** runs on users' devices and emits no signals to the hosted backend at all. A failing client either retries silently or surfaces as a user report. This subsection describes the browser-side surface that closes that gap for GymTrack.
+
+**Flow (production builds only, gated on `VITE_TELEMETRY_ENABLED === '1'`):**
+
+1. `apps/gymtrack/src/main.jsx` calls `installBrowserTelemetry()` once at module load (idempotent).
+2. `apps/gymtrack/src/lib/browserTelemetry.js` registers `window.addEventListener('error', …)` and `window.addEventListener('unhandledrejection', …)`, and exposes `reportAuthError(error, context)` for the Clerk / Supabase auth paths.
+3. Every event is built from a fixed allow-list (`environment`, `release`, `route`, `operation`, `provider`, `errorCode`, `status`, `message`, `stack`, `userAgent`, `timestamp`, `source`). Email addresses, `Bearer …` tokens, and `password=…` patterns are stripped from `message` and `stack` before they leave the bundle.
+4. A 60-second dedupe on `errorCode + operation + route` collapses repeats; a hard cap of 5 events per minute prevents retry storms. Both reset on `visibilitychange === 'visible'`.
+5. The browser POSTs the sanitized event to `apps/gymtrack/api/telemetry.js` (Vercel serverless function) with `Authorization: Bearer <VITE_TELEMETRY_TOKEN>`. The token is a per-deploy relay identifier, rotated by Quinn together with the server-side `TELEMETRY_RELAY_TOKEN` env var.
+6. The serverless function validates the token with `crypto.timingSafeEqual`, enforces a 32 KB raw body cap and an 8 KB structured-payload cap, re-redacts the payload (defence in depth), rate-limits at 60 events/min/token, and forwards to the hosted Grafana Cloud Loki HTTP push endpoint with the server-held `GRAFANA_CLOUD_OTLP_HEADERS`. The OTLP endpoint is rewritten from `…/v1/{traces,metrics,logs}` to `…/loki/api/v1/push` because the same host serves the Loki push path.
+7. The hosted Loki tenant absorbs the new event source. The new `gymtrack-browser-errors` dashboard (JSON in `apps/gymtrack/grafana/dashboards/gymtrack-browser-errors.json`) is provisioned by the existing `bootstrap-observability.sh`; the script's `step_dashboards` function now also walks `apps/gymtrack/grafana/dashboards/*.json` in addition to its canonical tree.
+
+**What the browser bundle does NOT hold:**
+
+- The Grafana Cloud OTLP / Loki credentials (the serverless function holds them).
+- Any user identity, session token, password, or authorization header (the redaction allow-list is the public contract; the unit tests in `apps/gymtrack/src/lib/browserTelemetry.test.js` assert the boundary with representative Clerk and Supabase envelopes).
+- The `CLERK_SECRET_KEY` (already server-only).
+
+**Ownership and verification (production):**
+
+- Quinn generates `TELEMETRY_RELAY_TOKEN` (Vercel) and `VITE_TELEMETRY_TOKEN` (build-time) with the same value, sets `VITE_TELEMETRY_ENABLED=1` in the Vercel env, and re-runs `bash infra/cloud/observability/bootstrap-observability.sh dashboards` to (re)provision the dashboard.
+- Quinn induces a wrong-password sign-in on the production host and a one-off `throw` from a temporary debug route, then queries Loki with `{app="gymtrack", source="browser"}` to confirm ingestion within 60 seconds. Evidence (timestamps + Loki query) is recorded in the PR body. The temporary debug route is removed before the PR merges.
+- Rowan owns the in-repo code (`apps/gymtrack/src/lib/browserTelemetry.js`, `apps/gymtrack/api/telemetry.js`, the dashboard JSON, the `bootstrap-observability.sh` upload step, and the unit tests). The full design and AC-by-AC test plan are in `docs/specs/gymtrack-browser-error-telemetry-tech-design.md` and `apps/gymtrack/SPEC.md` § "Error handling".
+
+**Cross-product guidance.** The relay + redaction pattern is intentionally not packaged today. If Budget, Tasks, or Mission Control adopt the same surface, the shared package is a follow-up; for now the redaction helper, the relay, and the dashboard all live in `apps/gymtrack/` to keep the change scoped to the one product that needed it.
 
 ## Out of scope (explicit non-goals)
 
