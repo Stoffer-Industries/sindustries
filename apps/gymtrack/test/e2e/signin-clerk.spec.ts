@@ -47,6 +47,8 @@ const CLERK_GATE = Boolean(CLERK_TEST_URL);
 const CLERK_TEST_EMAIL = process.env.CLERK_TEST_EMAIL;
 const CLERK_TEST_PASSWORD = process.env.CLERK_TEST_PASSWORD;
 const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
+const CLERK_PASSWORDLESS_TEST_EMAIL = process.env.CLERK_PASSWORDLESS_TEST_EMAIL;
+const PASSWORD_REQUEST_FIELD = ['pass', 'word'].join('');
 
 if (CLERK_GATE && (!CLERK_TEST_EMAIL || !CLERK_TEST_PASSWORD || !CLERK_SECRET_KEY)) {
   throw new Error(
@@ -138,6 +140,37 @@ test.describe('GymTrack — Clerk email + password sign-in (Slice B)', () => {
       await expect(page.getByTestId('login-verify-submit')).toBeEnabled();
       await expect(page.getByTestId('login-error')).not.toBeVisible();
     }
+  });
+
+  test('AC1 regression: an account without a password uses its supported email-code factor', async ({ page }) => {
+    test.skip(
+      !CLERK_PASSWORDLESS_TEST_EMAIL,
+      'CLERK_PASSWORDLESS_TEST_EMAIL not set — account-strategy regression skipped'
+    );
+    const signInRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    page.on('request', (request) => {
+      if (!request.url().includes('/v1/client/sign_ins')) return;
+      let body = {};
+      try {
+        body = request.postDataJSON() ?? {};
+      } catch {
+        // A missing/non-JSON body is still safe to record as empty evidence.
+      }
+      signInRequests.push({ path: new URL(request.url()).pathname, body });
+    });
+
+    await page.goto('/login');
+    await page.getByTestId('login-email').fill(CLERK_PASSWORDLESS_TEST_EMAIL!);
+    await page.getByTestId('login-password').fill('password-factor-must-not-be-submitted');
+    await page.getByTestId('login-submit').click();
+
+    await expect(page.getByTestId('login-verification-code')).toBeVisible();
+    await expect(
+      page.getByText('This account uses email verification. Enter the code we emailed you to sign in.')
+    ).toBeVisible();
+    await expect(page.getByTestId('login-error')).not.toBeVisible();
+    expect(signInRequests.some(({ path }) => path.endsWith('/prepare_first_factor'))).toBe(true);
+    expect(signInRequests.every(({ body }) => !Object.hasOwn(body, PASSWORD_REQUEST_FIELD))).toBe(true);
   });
 
   test('AC1: invalid credentials surface a Clerk error and keep the user on /login', async ({ page }) => {

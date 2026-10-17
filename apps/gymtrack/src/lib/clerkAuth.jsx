@@ -82,25 +82,62 @@ export function ClerkAuthProvider({ children }) {
   }, [clerkSession, user, accessToken]);
 
   /**
-   * Email + password sign-in. Maps Clerk's `signIn.create({ identifier,
-   * password })` shape to `{ data, error }`. `identifier` accepts email,
-   * phone, or username; we constrain it to email at the call-site
-   * (LoginScreen form), matching the current Supabase password path.
+   * Email + password sign-in. Identifies the account first so the app uses
+   * a factor Clerk actually exposes for that user. Password-enabled accounts
+   * continue through the password factor. Accounts imported from Google with
+   * no Clerk password fall back to their supported email-code factor instead
+   * of submitting an invalid password strategy.
    *
-   * On successful first-factor sign-in, the second-factor challenge is
-   * surfaced via Clerk's hosted account portal — the LoginScreen UI does
-   * not yet render a 2FA code field. Quinn's Phase 0 plan to deliver
-   * email-link + password as the only first factors means this code path
-   * is the production hot path. A future task can extend `signIn` to
-   * return the prepared second-factor and drive a 2FA code form.
+   * The returned verification mode tells LoginScreen whether a submitted
+   * email code completes the first factor or Clerk's client-trust challenge;
+   * both flows reuse the same code-entry form but must call different Clerk
+   * methods.
    */
   const signIn = useCallback(
     async (email, password) => {
       try {
-        const { error } = await clerkSignIn.password({
-          emailAddress: email,
-          password
-        });
+        const { error: identifyError } = await clerkSignIn.create({ identifier: email });
+        if (identifyError) {
+          return { data: null, error: new Error(clerkErrorMessage(identifyError, 'Sign-in failed.')) };
+        }
+
+        const supportedFirstFactors = clerkSignIn.supportedFirstFactors ?? [];
+        const supportsPassword = supportedFirstFactors.some(
+          (factor) => factor.strategy === 'password'
+        );
+        const supportsEmailCode = supportedFirstFactors.some(
+          (factor) => factor.strategy === 'email_code'
+        );
+
+        if (!supportsPassword) {
+          if (!supportsEmailCode) {
+            const supportsGoogle = supportedFirstFactors.some(
+              (factor) => factor.strategy === 'oauth_google'
+            );
+            return {
+              data: null,
+              error: new Error(
+                supportsGoogle
+                  ? 'This account uses Google sign-in. Choose “Continue with Google” above.'
+                  : 'This account does not support password sign-in. Choose another sign-in method.'
+              )
+            };
+          }
+
+          const { error: emailCodeError } = await clerkSignIn.emailCode.sendCode();
+          if (emailCodeError) {
+            return {
+              data: null,
+              error: new Error(clerkErrorMessage(emailCodeError, 'Could not send the verification code.'))
+            };
+          }
+          return {
+            data: { needsVerification: true, verificationMode: 'first_factor_email_code' },
+            error: null
+          };
+        }
+
+        const { error } = await clerkSignIn.password({ password });
         if (error) {
           return { data: null, error: new Error(clerkErrorMessage(error, 'Sign-in failed.')) };
         }
@@ -131,7 +168,10 @@ export function ClerkAuthProvider({ children }) {
               error: new Error(clerkErrorMessage(verificationError, 'Could not send the verification code.'))
             };
           }
-          return { data: { needsSecondFactor: true, strategy: 'email_code' }, error: null };
+          return {
+            data: { needsVerification: true, verificationMode: 'client_trust_email_code' },
+            error: null
+          };
         }
         // First-factor succeeded but additional steps required (e.g. 2FA,
         // email link verification). Surface the prepared state so the UI
@@ -155,10 +195,14 @@ export function ClerkAuthProvider({ children }) {
     [clerkSignIn]
   );
 
-  const verifySignInSecondFactor = useCallback(
-    async (code) => {
+  const verifySignInCode = useCallback(
+    async (code, verificationMode) => {
       try {
-        const { error } = await clerkSignIn.mfa.verifyEmailCode({ code });
+        const verification =
+          verificationMode === 'first_factor_email_code'
+            ? clerkSignIn.emailCode.verifyCode({ code })
+            : clerkSignIn.mfa.verifyEmailCode({ code });
+        const { error } = await verification;
         if (error) {
           return {
             data: null,
@@ -422,13 +466,13 @@ export function ClerkAuthProvider({ children }) {
       user: session?.user ?? null,
       loading,
       signIn,
-      verifySignInSecondFactor,
+      verifySignInCode,
       signUp,
       signOut,
       startOAuthRedirect,
       getAccessToken
     }),
-    [session, loading, signIn, verifySignInSecondFactor, signUp, signOut, startOAuthRedirect, getAccessToken]
+    [session, loading, signIn, verifySignInCode, signUp, signOut, startOAuthRedirect, getAccessToken]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -15,7 +15,7 @@ const INITIAL_AVAILABLE_PROVIDERS = SUPPORTED_OAUTH_PROVIDERS.filter(
 );
 
 export default function LoginScreen() {
-  const { session, signIn, verifySignInSecondFactor, startOAuthRedirect } = useAuth();
+  const { session, signIn, verifySignInCode, startOAuthRedirect } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = location.state?.from;
@@ -26,7 +26,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [needsSecondFactor, setNeedsSecondFactor] = useState(false);
+  const [verificationMode, setVerificationMode] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [availableProviders, setAvailableProviders] = useState(INITIAL_AVAILABLE_PROVIDERS);
@@ -63,8 +63,8 @@ export default function LoginScreen() {
       setError(signInError.message);
       return;
     }
-    if (data?.needsSecondFactor) {
-      setNeedsSecondFactor(true);
+    if (data?.needsVerification) {
+      setVerificationMode(data.verificationMode);
       return;
     }
     navigate(from, { replace: true });
@@ -74,7 +74,7 @@ export default function LoginScreen() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
-    const { error: verificationError } = await verifySignInSecondFactor(verificationCode);
+    const { error: verificationError } = await verifySignInCode(verificationCode, verificationMode);
     setSubmitting(false);
     if (verificationError) {
       setError(verificationError.message);
@@ -112,9 +112,13 @@ export default function LoginScreen() {
         ) : null}
       </div>
 
-      {needsSecondFactor ? (
+      {verificationMode ? (
         <form onSubmit={handleSecondFactorSubmit} className="login-form" data-testid="login-verification-form">
-          <p>We emailed you a verification code to confirm this browser.</p>
+          <p>
+            {verificationMode === 'client_trust_email_code'
+              ? 'We emailed you a verification code to confirm this browser.'
+              : 'This account uses email verification. Enter the code we emailed you to sign in.'}
+          </p>
           <label className="form-row">
             <span>Verification code</span>
             <input
