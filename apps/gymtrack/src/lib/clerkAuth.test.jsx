@@ -8,8 +8,11 @@ const mocks = vi.hoisted(() => ({
     createdSessionId: null,
     password: vi.fn(),
     finalize: vi.fn(),
+    create: vi.fn(),
     sso: vi.fn(),
     supportedSecondFactors: [],
+    supportedFirstFactors: [],
+    emailCode: { sendCode: vi.fn(), verifyCode: vi.fn() },
     mfa: { sendEmailCode: vi.fn(), verifyEmailCode: vi.fn() }
   },
   signUp: {
@@ -42,11 +45,13 @@ import { AuthContext } from './authContext.jsx';
 function Harness() {
   const auth = useContext(AuthContext);
   const [message, setMessage] = useState('');
+  const [verificationMode, setVerificationMode] = useState(null);
   return (
     <>
       <button
         onClick={async () => {
           const result = await auth.signIn('person@example.com', 'wrong-password');
+          setVerificationMode(result.data?.verificationMode ?? null);
           setMessage(result.error?.message ?? 'signed-in');
         }}
       >
@@ -54,7 +59,7 @@ function Harness() {
       </button>
       <button
         onClick={async () => {
-          const result = await auth.verifySignInSecondFactor('123456');
+          const result = await auth.verifySignInCode('123456', verificationMode);
           setMessage(result.error?.message ?? 'verified');
         }}
       >
@@ -93,6 +98,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.signIn.status = 'needs_identifier';
   mocks.signIn.createdSessionId = null;
+  mocks.signIn.create.mockResolvedValue({ error: null });
+  mocks.signIn.supportedFirstFactors = [{ strategy: 'password' }];
   mocks.signIn.supportedSecondFactors = [];
   mocks.signUp.status = 'missing_requirements';
   mocks.signUp.createdUserId = null;
@@ -130,7 +137,6 @@ describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
 
     expect(await screen.findByText('Password is incorrect. Try again.')).toBeVisible();
     expect(mocks.signIn.password).toHaveBeenCalledWith({
-      emailAddress: 'person@example.com',
       password: 'wrong-password'
     });
     expect(mocks.signIn.finalize).not.toHaveBeenCalled();
@@ -159,6 +165,45 @@ describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
     expect(await screen.findByText('verified')).toBeVisible();
     expect(mocks.signIn.mfa.verifyEmailCode).toHaveBeenCalledWith({ code: '123456' });
     expect(mocks.signIn.finalize).toHaveBeenCalledOnce();
+  });
+
+  it('uses an email code when the account does not support password sign-in', async () => {
+    mocks.signIn.supportedFirstFactors = [
+      { strategy: 'email_code', emailAddressId: 'idn_fixture' },
+      { strategy: 'oauth_google' }
+    ];
+    mocks.signIn.emailCode.sendCode.mockResolvedValue({ error: null });
+    mocks.signIn.emailCode.verifyCode.mockImplementation(async () => {
+      mocks.signIn.status = 'complete';
+      mocks.signIn.createdSessionId = 'sess_email_code';
+      return { error: null };
+    });
+    mocks.signIn.finalize.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign in' }));
+    expect(await screen.findByText('signed-in')).toBeVisible();
+    expect(mocks.signIn.create).toHaveBeenCalledWith({ identifier: 'person@example.com' });
+    expect(mocks.signIn.password).not.toHaveBeenCalled();
+    expect(mocks.signIn.emailCode.sendCode).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: 'verify' }));
+    expect(await screen.findByText('verified')).toBeVisible();
+    expect(mocks.signIn.emailCode.verifyCode).toHaveBeenCalledWith({ code: '123456' });
+    expect(mocks.signIn.mfa.verifyEmailCode).not.toHaveBeenCalled();
+  });
+
+  it('directs an OAuth-only account to Google without submitting an invalid password strategy', async () => {
+    mocks.signIn.supportedFirstFactors = [{ strategy: 'oauth_google' }];
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign in' }));
+
+    expect(
+      await screen.findByText('This account uses Google sign-in. Choose “Continue with Google” above.')
+    ).toBeVisible();
+    expect(mocks.signIn.password).not.toHaveBeenCalled();
+    expect(mocks.signIn.emailCode.sendCode).not.toHaveBeenCalled();
   });
 
   it('uses the v6 SSO method and preserves the requested destination', async () => {
