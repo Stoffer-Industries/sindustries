@@ -17,6 +17,7 @@ jobs:
       website: ${{ steps.filter.outputs.website }}
       tasks_api: ${{ steps.filter.outputs.tasks_api }}
       budget_api: ${{ steps.filter.outputs.budget_api }}
+      content_scheduler_api: ${{ steps.filter.outputs.content_scheduler_api }}
       auto_post_worker: ${{ steps.filter.outputs.auto_post_worker }}
       gymtrack: ${{ steps.filter.outputs.gymtrack }}
       gymtrack_mcp: ${{ steps.filter.outputs.gymtrack_mcp }}
