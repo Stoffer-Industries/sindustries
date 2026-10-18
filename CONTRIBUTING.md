@@ -103,7 +103,7 @@ workspaces or under CI (listed below).
 CI currently covers:
 - `services/tasks-api` unit + DB integration tests
 - `services/budget-api` unit tests (`budget-api-unit` job also runs `packages/budget-domain` test + typecheck and `apps/budget-mobile` typecheck) plus DB integration tests (`budget-api-db-integration` job runs the ownership-contract suite against real Postgres; previously ran with mocked Prisma — see W38 audit F4 for the historical gap)
-- `services/content-scheduler-api` vitest
+- `services/content-scheduler-api` vitest (unit) plus `content-scheduler-api-db-integration` (real Postgres; proves the thread-publish claim/journal atomicity the unit suite could not exercise while Prisma was mocked — see W42 audit F2)
 - `services/gymtrack-mcp` tests
 - `apps/tasks` unit/component tests + Playwright e2e (UI + API + DB)
 - `apps/website` unit tests + build
