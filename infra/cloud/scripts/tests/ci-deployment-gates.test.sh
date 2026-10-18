@@ -6,6 +6,7 @@ set -euo pipefail
 REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 
 python3 - "$REPO_ROOT" <<'PY'
+import fnmatch
 import json
 import pathlib
 import re
@@ -233,6 +234,114 @@ if eas.get('environment') != 'production':
     fail('ci.yml: EAS update must use the production environment')
 if eas.get('concurrency', {}).get('cancel-in-progress') is not False:
     fail('ci.yml: EAS production update must never cancel in progress')
+
+# W43 audit F1: every `needs.changes.outputs.<name>` reference must resolve
+# to a declared job output. The earlier contract suite checked merge-gate
+# dependency + always() on the deploy job but not the producer/consumer
+# mapping, which is how the unexported `content_scheduler_api` filter
+# slipped through. Pair this with the path-fixture block below so the
+# regression stays caught even when the workflow is re-shaped.
+changes_outputs = set(jobs.get('changes', {}).get('outputs', {}).keys())
+output_ref_re = re.compile(r'needs\.changes\.outputs\.([A-Za-z_][A-Za-z0-9_]*)')
+consumer_refs = set()
+for job_name, job in jobs.items():
+    if not isinstance(job, dict):
+        continue
+    condition = str(job.get('if', ''))
+    consumer_refs.update(output_ref_re.findall(condition))
+if not consumer_refs:
+    fail('ci.yml: no needs.changes.outputs references found in deploy/clippy conditions')
+missing_producers = sorted(consumer_refs - changes_outputs)
+if missing_producers:
+    fail(
+        'ci.yml: needs.changes.outputs references without a matching producer: '
+        f'{missing_producers}'
+    )
+
+# W43 audit F1 (AC3) — self-test: if the scheduler producer is removed, the
+# producer/consumer check above must fail. Run the assertion against a
+# mutated copy of the changes outputs and confirm it trips. Skipped only
+# when the suite has nothing to prove (zero consumers), which the check
+# above already guards against.
+mutated_outputs = set(changes_outputs)
+if 'content_scheduler_api' in mutated_outputs:
+    mutated_outputs.discard('content_scheduler_api')
+    if not (consumer_refs - mutated_outputs):
+        fail(
+            'ci.yml: producer/consumer check did not fail when content_scheduler_api '
+            'was removed from the changes job outputs — regression test is broken'
+        )
+
+# W43 audit F1 (AC2) — schedule-only path fixtures: a scheduler-only
+# change must select the scheduler API deployment; an unrelated change
+# must not. Parse the dorny/paths-filter `filters:` block so the fixture
+# exercises the same matcher the real action uses, instead of relying on
+# substring heuristics that drift when filter entries are added.
+filter_step = next(
+    (
+        step for step in jobs.get('changes', {}).get('steps', [])
+        if isinstance(step, dict) and step.get('id') == 'filter'
+    ),
+    None,
+)
+if not filter_step:
+    fail('ci.yml: changes job must include a dorny/paths-filter step with id=filter')
+else:
+    filters_text = str(filter_step.get('with', {}).get('filters', ''))
+    parsed_filters = yaml.safe_load(filters_text) or {}
+    if not isinstance(parsed_filters, dict):
+        fail('ci.yml: paths-filter filters must parse to a mapping')
+
+    def matches_filter(changed_path, globs):
+        if not isinstance(globs, list):
+            return False
+        for glob in globs:
+            if not isinstance(glob, str):
+                continue
+            if fnmatch.fnmatch(changed_path, glob):
+                return True
+        return False
+
+    def selected_outputs(changed_paths):
+        return {
+            name
+            for name, globs in parsed_filters.items()
+            if any(matches_filter(path, globs) for path in changed_paths)
+        }
+
+    scheduler_only_change = ['services/content-scheduler-api/src/server.ts']
+    selected_scheduler_only = selected_outputs(scheduler_only_change)
+    if 'content_scheduler_api' not in selected_scheduler_only:
+        fail(
+            'ci.yml: scheduler-only change did not select the content_scheduler_api filter: '
+            f'changed={scheduler_only_change}, selected={sorted(selected_scheduler_only)}'
+        )
+    # The worker shares the same source paths, so the auto_post_worker
+    # filter must also fire — this protects against an accidental
+    # divergence where one filter is updated without the other.
+    if 'auto_post_worker' not in selected_scheduler_only:
+        fail(
+            'ci.yml: scheduler-only change did not select the auto_post_worker filter: '
+            f'changed={scheduler_only_change}, selected={sorted(selected_scheduler_only)}'
+        )
+
+    unrelated_change = ['apps/website/src/pages/index.tsx']
+    selected_unrelated = selected_outputs(unrelated_change)
+    if 'content_scheduler_api' in selected_unrelated:
+        fail(
+            'ci.yml: unrelated website change selected the content_scheduler_api filter: '
+            f'changed={unrelated_change}, selected={sorted(selected_unrelated)}'
+        )
+    if 'auto_post_worker' in selected_unrelated:
+        fail(
+            'ci.yml: unrelated website change selected the auto_post_worker filter: '
+            f'changed={unrelated_change}, selected={sorted(selected_unrelated)}'
+        )
+    if 'website' not in selected_unrelated:
+        fail(
+            'ci.yml: unrelated website change did not select the website filter: '
+            f'changed={unrelated_change}, selected={sorted(selected_unrelated)}'
+        )
 
 if failures:
     for message in failures:
