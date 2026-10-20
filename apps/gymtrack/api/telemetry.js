@@ -20,13 +20,14 @@
 //           status, message, stack, userAgent, timestamp, source }
 //
 // Responses:
-//   204 No Content             — success
+//   204 No Content             — success (also: relay not configured yet)
 //   400 { error: 'invalid_request', message: '<reason>' }
 //   401 { error: 'invalid_token' }
 //   405 { error: 'method_not_allowed' }   Allow: POST
 //   413 { error: 'payload_too_large' }
 //   429 { error: 'rate_limited' }
 //   502 { error: 'upstream_failure', message: '<reason>' }
+//   502 { error: 'misconfigured_loki_endpoint', message: '<actionable>' }
 //
 // The function never returns the relay token or the upstream response
 // body to the browser.
@@ -110,18 +111,50 @@ function reRedactPayload(payload) {
  * Derive the Loki HTTP push URL from a Grafana Cloud OTLP endpoint.
  *
  * Pure so it can be asserted directly against every documented shape.
+ *
+ * Returns `null` for shapes the rewriter cannot safely transform — a bare
+ * host like `https://otlp-gateway-prod-<region>.grafana.net` has no
+ * `/v1[-suffix]` to strip, so any URL the rewriter would construct by
+ * appending `/loki/api/v1/push` is a 404 against the OTLP gateway on
+ * Grafana Cloud (OTLP and the Loki push API live on different hosts
+ * there). Callers MUST treat null as "configuration is incomplete — set
+ * `GRAFANA_CLOUD_LOKI_ENDPOINT` explicitly" rather than guessing.
  */
 export function lokiPushUrl(base) {
   if (!base) return null;
   // Already a Loki push URL — leave it alone.
   if (/\/loki\/api\/v1\/push\/?$/.test(base)) return base;
 
-  // The documented value in infra/cloud/observability/env/.env.example is
-  // `https://otlp-<region>.grafana.net/v1/` (trailing slash, no signal
-  // segment), so the rewrite MUST cover the bare `/v1` suffix as well as
-  // `/v1/{traces,metrics,logs}`. Matching only the signal form left the
-  // base URL untouched and silently POSTed Loki envelopes to the OTLP
-  // collector root, which answers non-2xx and surfaced as 502 upstream.
+  // The rewriter is only safe on SINGLE-HOST OTel-collector
+  // deployments where OTLP and the Loki push API are served from the
+  // same host. The canonical shape is exactly
+  // `https://<host>/v1[-suffix]` — no other path segments. Anything
+  // outside that shape is a multi-host trap:
+  //
+  //   * Bare host (e.g. `https://otlp-gateway-prod-<region>.grafana.net`,
+  //     the real Grafana Cloud prod shape) — OTLP lives under
+  //     `/otlp/v1/*` on this tenant and Loki push lives on the separate
+  //     `logs-prod-<stack>` host. Appending `/loki/api/v1/push` to a
+  //     bare host answers 404 because the OTLP gateway does not serve
+  //     the Loki push API.
+  //   * Multi-segment path (e.g.
+  //     `https://<host>/otlp/v1/logs`) — the canonical single-host
+  //     rewriter assumes one host serves both; on Grafana Cloud (and
+  //     similar split-tenant setups) the OTLP `/otlp/v1/*` is on the
+  //     gateway and the Loki push is on `logs-prod-*`. Stripping
+  //     `/v1/logs` and appending `/loki/api/v1/push` lands on the
+  //     wrong host.
+  //   * Anything else that does not look like the canonical
+  //     `/v1[-suffix]` shape — same root cause: we cannot derive a
+  //     working Loki URL without knowing the deployment topology.
+  //
+  // Returning null lets the caller surface a 502 `misconfigured_loki_
+  // endpoint` instead of silently no-opping or silently 404'ing. The
+  // override env var `GRAFANA_CLOUD_LOKI_ENDPOINT` is the only way to
+  // forward on multi-host tenants.
+  if (!/^https?:\/\/[^/]+\/v1(?:\/(?:traces|metrics|logs))?\/?$/.test(base)) {
+    return null;
+  }
   return (
     base
       .replace(/\/v1(?:\/(?:traces|metrics|logs))?\/?$/, '')
@@ -132,12 +165,35 @@ export function lokiPushUrl(base) {
 export function lokiEndpoint() {
   // An explicit Loki push URL always wins. Grafana Cloud serves OTLP from
   // the `otlp-prod-*` gateway host and the Loki HTTP push API from the
-  // separate `logs-prod-<stack>` host, so operators can point at the right
-  // one without a code change. The OTLP-derived value stays as the
-  // fallback for single-host deployments.
+  // separate `logs-prod-<stack>` host, so on multi-host tenants operators
+  // point at the right one via `GRAFANA_CLOUD_LOKI_ENDPOINT`. The
+  // OTLP-derived value stays as the fallback for single-host deployments
+  // where the rewriter pattern matches. Returns `null` when neither
+  // produces a URL — caller must check `lokiMisconfiguredReason()` to
+  // distinguish a missing config from a misconfigured one.
   const explicit = process.env.GRAFANA_CLOUD_LOKI_ENDPOINT;
   if (explicit) return explicit;
   return lokiPushUrl(process.env.GRAFANA_CLOUD_OTLP_ENDPOINT);
+}
+
+/**
+ * Human-readable explanation of why no Loki endpoint could be resolved,
+ * or `null` when configuration is fine. Used by the handler to choose
+ * between a 204 no-op (relay intentionally not configured) and a 502
+ * `misconfigured_loki_endpoint` (operator tried but the OTLP base is
+ * not the same host as the Loki push API).
+ */
+export function lokiMisconfiguredReason() {
+  if (process.env.GRAFANA_CLOUD_LOKI_ENDPOINT) return null;
+  const otlpBase = process.env.GRAFANA_CLOUD_OTLP_ENDPOINT;
+  if (!otlpBase) return null;
+  if (lokiPushUrl(otlpBase)) return null;
+  return (
+    'set GRAFANA_CLOUD_LOKI_ENDPOINT explicitly — the relay could not ' +
+    'derive a Loki push URL from GRAFANA_CLOUD_OTLP_ENDPOINT; on ' +
+    'Grafana Cloud tenants OTLP and the Loki push API live on ' +
+    'different hosts (otlp-prod-* vs. logs-prod-*)'
+  );
 }
 
 // Matches a bare HTTP header name per RFC 9110 token rules.
@@ -293,11 +349,31 @@ export default async function handler(req, res) {
 
   const endpoint = lokiEndpoint();
   const upstreamHeaders = lokiAuthHeaders();
-  if (!endpoint || !upstreamHeaders) {
-    // Relay is intentionally not configured in this environment — treat
-    // the request as a no-op so the auth flow stays unblocked. The
-    // function still rate-limits and validates so a misconfigured caller
-    // surfaces quickly.
+  if (!endpoint) {
+    // If the operator attempted to configure the relay but the OTLP
+    // base does not serve the Loki push API (the Grafana Cloud multi-
+    // host shape), surface a clear actionable 502 instead of silently
+    // no-oping. Silently no-oping here would have masked a config gap
+    // behind a 204, and the browser event would have been dropped with
+    // no operator-visible signal.
+    const reason = lokiMisconfiguredReason();
+    if (reason) {
+      return res.status(502).json({
+        error: 'misconfigured_loki_endpoint',
+        message: reason
+      });
+    }
+    // Relay is intentionally not configured in this environment (no
+    // OTLP and no override) — treat the request as a no-op so the auth
+    // flow stays unblocked. The function still rate-limits and validates
+    // so a misconfigured caller surfaces quickly.
+    return res.status(204).end();
+  }
+  if (!upstreamHeaders) {
+    // Endpoint resolved but credential is unset / blank — half-armed
+    // intermediate state during staged rollouts. Keep the existing
+    // no-op behaviour so the caller does not see 502 spam while
+    // credentials are still landing.
     return res.status(204).end();
   }
 
@@ -352,5 +428,6 @@ export const _testInternals = {
   tokenBuckets,
   lokiEndpoint,
   lokiPushUrl,
+  lokiMisconfiguredReason,
   lokiAuthHeaders
 };

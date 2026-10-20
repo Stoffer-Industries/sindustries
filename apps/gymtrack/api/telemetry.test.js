@@ -14,7 +14,12 @@
 
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler, { _testInternals, lokiAuthHeaders, parseOtlpHeaderString } from './telemetry.js';
+import handler, {
+  _testInternals,
+  lokiAuthHeaders,
+  lokiMisconfiguredReason,
+  parseOtlpHeaderString
+} from './telemetry.js';
 
 const RELAY_TOKEN = 'relay-token-under-test';
 const LOKI_ENDPOINT = 'https://otlp-region.grafana.net/loki/api/v1/push';
@@ -201,8 +206,12 @@ describe('telemetry relay', () => {
       ['https://otlp-region.grafana.net/v1/', 'https://otlp-region.grafana.net/loki/api/v1/push'],
       ['https://otlp-region.grafana.net/v1', 'https://otlp-region.grafana.net/loki/api/v1/push'],
       [
-        'https://otlp-prod-1.grafana.net/otlp/v1/logs',
-        'https://otlp-prod-1.grafana.net/otlp/loki/api/v1/push'
+        'https://otlp-region.grafana.net/v1/traces',
+        'https://otlp-region.grafana.net/loki/api/v1/push'
+      ],
+      [
+        'https://otlp-region.grafana.net/v1/logs/',
+        'https://otlp-region.grafana.net/loki/api/v1/push'
       ],
       [
         'https://logs-prod-1.grafana.net/loki/api/v1/push',
@@ -210,6 +219,27 @@ describe('telemetry relay', () => {
       ]
     ])('rewrites %s to %s', (base, expected) => {
       expect(_testInternals.lokiPushUrl(base)).toBe(expected);
+    });
+
+    // Multi-host Grafana Cloud tenants serve OTLP and the Loki push API
+    // on different hosts (otlp-prod-* vs. logs-prod-*). The single-host
+    // rewriter cannot produce a working Loki URL from these shapes, so
+    // it must refuse rather than append `/loki/api/v1/push` to a bare
+    // host (which answers 404). Production probe evidence from Quinn
+    // (PR #836 review, 2026-10-20 14:50Z) established that the live
+    // OTLP shape on this tenant is the bare host or an `/otlp/v1` style
+    // path, neither of which is safe to rewrite. The earlier rewriter
+    // table case `/otlp/v1/logs` was a single-host assumption that fell
+    // out of production-shape probing — it now expects null alongside
+    // the bare-host cases.
+    it.each([
+      ['https://otlp-gateway-prod-au-southeast-1.grafana.net'],
+      ['https://otlp-gateway-prod-au-southeast-1.grafana.net/'],
+      ['https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1'],
+      ['https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp'],
+      ['https://otlp-prod-1.grafana.net/otlp/v1/logs']
+    ])('refuses to rewrite %s on multi-host shapes (returns null)', (base) => {
+      expect(_testInternals.lokiPushUrl(base)).toBeNull();
     });
 
     it('prefers an explicit GRAFANA_CLOUD_LOKI_ENDPOINT over the OTLP-derived URL', async () => {
@@ -261,6 +291,64 @@ describe('telemetry relay', () => {
       const res = await post({}, JSON.stringify(validPayload));
       expect(res.statusCode).toBe(204);
       expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    // When the operator attempted to configure the relay but the OTLP
+    // base does not serve the Loki push API on this tenant (Grafana
+    // Cloud multi-host shape), the relay must surface a clear,
+    // actionable 502 instead of silently no-oping. Silently no-oping
+    // here masked the config gap: the browser event would be dropped
+    // without any operator-visible signal. Quinn's PR #836 review at
+    // 2026-10-20 14:50Z flagged this as defect 5 in the same class as
+    // four previous defects — the failure mode reads as "the telemetry
+    // relay is broken" rather than "you need to set
+    // GRAFANA_CLOUD_LOKI_ENDPOINT".
+    it('returns 502 misconfigured_loki_endpoint when the OTLP base has no /v1[-suffix] and no override', async () => {
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
+      );
+      const res = await post({}, JSON.stringify(validPayload));
+      expect(res.statusCode).toBe(502);
+      expect(res.body.error).toBe('misconfigured_loki_endpoint');
+      expect(res.body.message).toMatch(/GRAFANA_CLOUD_LOKI_ENDPOINT/);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('treats the same shape as a graceful 204 when no credential AND no OTLP endpoint are set', async () => {
+      // Half-armed intermediate state, where the operator set neither
+      // OTLP nor override, must continue to no-op silently (existing
+      // behaviour). A 502 here would generate alert spam during staged
+      // rollouts.
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_ENDPOINT', '');
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', '');
+      const res = await post({}, JSON.stringify(validPayload));
+      expect(res.statusCode).toBe(204);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lokiMisconfiguredReason returns null on a derivable base and an actionable message on an unrecognised base', () => {
+      // Empty configuration → operator has not started, no error.
+      expect(lokiMisconfiguredReason()).toBeNull();
+      vi.stubEnv('GRAFANA_CLOUD_LOKI_ENDPOINT', '');
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-region.grafana.net/v1/'
+      );
+      expect(lokiMisconfiguredReason()).toBeNull();
+      // Bare host with no override → actionable: explicit LOKI required.
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
+      );
+      expect(lokiMisconfiguredReason()).toMatch(/GRAFANA_CLOUD_LOKI_ENDPOINT/);
+      // Explicit override wins — operator pointed at the right host,
+      // the OTLP base no longer matters.
+      vi.stubEnv(
+        'GRAFANA_CLOUD_LOKI_ENDPOINT',
+        'https://logs-prod-41-prod-au-southeast-1.grafana.net/loki/api/v1/push'
+      );
+      expect(lokiMisconfiguredReason()).toBeNull();
     });
 
     it('maps a non-2xx upstream response to 502 upstream_failure', async () => {
