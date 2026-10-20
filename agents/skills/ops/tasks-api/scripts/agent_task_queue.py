@@ -771,10 +771,51 @@ def _fetch_reviews_tolerant(
         raise
 
 
-def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
-    """Read open PR state with the agent's own GitHub credentials; never mutate."""
+def _is_identity_provisioned(agent: str) -> bool:
+    """True when the agent's declared GitHub profile dir and token env both exist.
+
+    `GITHUB_IDENTITIES` is a static map; adding an entry is a code change that
+    assumes a credential nobody may have provisioned yet (profile dir created,
+    token set in ~/.openclaw/.env, account actually existing on GitHub). This
+    checks the two locally-verifiable preconditions so hydration can degrade
+    instead of raising a bare auth traceback. See
+    infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    """
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
-    prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
+    profile_exists = pathlib.Path(config_dir).expanduser().is_dir()
+    token_set = bool(os.environ.get(token_env))
+    return profile_exists or token_set
+
+
+def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
+    """Read open PR state with the agent's own GitHub credentials; never mutate.
+
+    Returns `[]` (with a WARN log) instead of raising when the agent's GitHub
+    identity is not provisioned or the hydration call otherwise fails on auth.
+    This is enrichment layered on top of the Tasks API queue, not the queue
+    itself — a missing/broken GitHub profile should degrade queue richness,
+    never destroy the queue. See
+    infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    """
+    if not _is_identity_provisioned(agent):
+        _log(
+            f"GitHub identity for {agent!r} is not provisioned (no profile dir, "
+            f"no token env); skipping PR hydration. See "
+            f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+            verbose_only=False,
+        )
+        return []
+    _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
+    try:
+        prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
+    except subprocess.CalledProcessError as exc:
+        _log(
+            f"gh api auth failure hydrating PRs for {agent!r} (exit "
+            f"{exc.returncode}); skipping PR hydration. See "
+            f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+            verbose_only=False,
+        )
+        return []
     hydrated = []
     for summary in prs:
         author = str((summary.get("user") or {}).get("login") or "").lower()
@@ -817,8 +858,9 @@ def fetch_linked_delivery_prs(
         """Hydrate one delivery URL's PR (detail + reviews + check-runs).
 
         Returns `(url, detail_or_None)`. `None` is returned (and a WARN line is
-        printed) on per-URL `_GhApiTimeout`; the caller continues hydrating
-        other URLs in the fan-out rather than aborting the whole call.
+        printed) on per-URL `_GhApiTimeout` or `gh api` auth failure; the
+        caller continues hydrating other URLs in the fan-out rather than
+        aborting the whole call.
         """
         pr_number = _pull_number_from_url(url)
         if pr_number is None:
@@ -835,6 +877,13 @@ def fetch_linked_delivery_prs(
         except _GhApiTimeout as exc:
             _log(
                 f"gh api timeout hydrating PR #{pr_number} ({url}); skipping: {exc}",
+                verbose_only=False,
+            )
+            return url, None
+        except subprocess.CalledProcessError as exc:
+            _log(
+                f"gh api auth failure hydrating PR #{pr_number} ({url}, exit "
+                f"{exc.returncode}); skipping",
                 verbose_only=False,
             )
             return url, None
@@ -1007,6 +1056,18 @@ def main() -> None:
         raise SystemExit(
             f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, Quinn, Ash, Lox, or Tom"
         )
+    # Assert identity provisioning up front so the JSON output can surface
+    # `identityNotProvisioned: true` instead of forcing every caller to infer
+    # it from empty PR-derived fields. See
+    # infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    identity_not_provisioned = not _is_identity_provisioned(args.assignee)
+    if identity_not_provisioned:
+        _log(
+            f"GitHub identity for {args.assignee!r} is not provisioned (no "
+            f"profile dir, no token env); PR-derived queue sections will be "
+            f"empty. See infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+            verbose_only=False,
+        )
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
     github_prs = fetch_github_prs(args.assignee)
@@ -1025,6 +1086,8 @@ def main() -> None:
         workflow_gate_owner_tasks=workflow_gate_owner_tasks,
         workflow_gate_owner=args.assignee,
     )
+    if identity_not_provisioned:
+        queue["identityNotProvisioned"] = True
     if args.json:
         print(json.dumps(queue, indent=2))
     else:
