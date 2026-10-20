@@ -344,9 +344,14 @@ def classify_task(
             return "ACTIONABLE", "tech design or explicit waiver is missing"
         if not has_approval and not has_waiver:
             return "WAITING_EXTERNAL", "tech design is waiting for approval"
-        if "missing `[implementer-prs]`" in latest_progress.lower():
-            return "ACTIONABLE", "progress checklist says implementer delivery is missing"
         delivery_urls = _delivery_urls(texts)
+        # A Lobster checklist is a snapshot taken when it ran. If the implementer
+        # posted `[implementer-prs]` afterwards, the checklist's "missing delivery"
+        # text is stale and must not outrank the live delivery evidence — otherwise
+        # a delivered task is re-surfaced as ACTIONABLE forever. Mirrors the
+        # acceptance branch, which already guards its checklist check with DELIVERY_TAGS.
+        if not delivery_urls and "missing `[implementer-prs]`" in latest_progress.lower():
+            return "ACTIONABLE", "progress checklist says implementer delivery is missing"
         if delivery_urls:
             actionable_reasons: list[str] = []
             waiting_reasons: list[str] = []

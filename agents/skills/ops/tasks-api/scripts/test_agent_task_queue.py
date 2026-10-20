@@ -163,6 +163,72 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertEqual(classification, "ACTIONABLE")
 
+    def test_delivery_posted_after_stale_checklist_uses_live_pr_state(self):
+        """A Lobster checklist is a snapshot. Delivery posted afterwards wins.
+
+        Regression: the "missing `[implementer-prs]`" checklist check ran before
+        the delivery check, so a task whose checklist predates its
+        `[implementer-prs]` comment was pinned ACTIONABLE forever with a reason
+        that contradicted the live evidence.
+        """
+        pr_url = "https://github.com/acme/repo/pull/1"
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {
+                        "text": "[code-task-progress-checklist]\n"
+                        "Missing `[implementer-prs]` task comment with at least one PR URL."
+                    },
+                    {"text": "[implementer-prs] " + pr_url},
+                ]
+            ),
+            delivery_prs={
+                pr_url: pull_request(
+                    html_url=pr_url,
+                    requested_reviewers=[{"login": "quinnstoffer"}],
+                )
+            },
+        )
+        self.assertEqual(classification, "WAITING_EXTERNAL")
+        self.assertIn("waiting on review", reason)
+
+    def test_stale_checklist_does_not_mask_merged_delivery(self):
+        pr_url = "https://github.com/acme/repo/pull/1"
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {
+                        "text": "[code-task-progress-checklist]\n"
+                        "Missing `[implementer-prs]` task comment with at least one PR URL."
+                    },
+                    {"text": "[implementer-prs] " + pr_url},
+                ]
+            ),
+            delivery_prs={
+                pr_url: pull_request(state="closed", merged_at="2026-10-10T00:00:00Z")
+            },
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("merged", reason)
+
+    def test_checklist_still_actionable_when_no_delivery_posted(self):
+        """The fix must not disarm the checklist signal for genuinely undelivered work."""
+        classification, reason = agent_task_queue.classify_task(
+            implementation_task(
+                comments=[
+                    {"text": "[tech-design] https://example.test/design"},
+                    {
+                        "text": "[code-task-progress-checklist]\n"
+                        "Missing `[implementer-prs]` task comment with at least one PR URL."
+                    },
+                ]
+            )
+        )
+        self.assertEqual(classification, "ACTIONABLE")
+        self.assertIn("implementer delivery is missing", reason)
+
     def test_active_handoff_owned_by_agent_overrides_stale_progress(self):
         classification, reason = agent_task_queue.classify_task(
             implementation_task(
