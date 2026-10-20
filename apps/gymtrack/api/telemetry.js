@@ -106,11 +106,38 @@ function reRedactPayload(payload) {
   };
 }
 
-function lokiEndpoint() {
-  const base = process.env.GRAFANA_CLOUD_OTLP_ENDPOINT;
+/**
+ * Derive the Loki HTTP push URL from a Grafana Cloud OTLP endpoint.
+ *
+ * Pure so it can be asserted directly against every documented shape.
+ */
+export function lokiPushUrl(base) {
   if (!base) return null;
-  // The OTLP gateway host also serves Loki's HTTP push at /loki/api/v1/push.
-  return base.replace(/\/v1\/(traces|metrics|logs)\/?$/, '/loki/api/v1/push');
+  // Already a Loki push URL — leave it alone.
+  if (/\/loki\/api\/v1\/push\/?$/.test(base)) return base;
+
+  // The documented value in infra/cloud/observability/env/.env.example is
+  // `https://otlp-<region>.grafana.net/v1/` (trailing slash, no signal
+  // segment), so the rewrite MUST cover the bare `/v1` suffix as well as
+  // `/v1/{traces,metrics,logs}`. Matching only the signal form left the
+  // base URL untouched and silently POSTed Loki envelopes to the OTLP
+  // collector root, which answers non-2xx and surfaced as 502 upstream.
+  return (
+    base
+      .replace(/\/v1(?:\/(?:traces|metrics|logs))?\/?$/, '')
+      .replace(/\/+$/, '') + '/loki/api/v1/push'
+  );
+}
+
+export function lokiEndpoint() {
+  // An explicit Loki push URL always wins. Grafana Cloud serves OTLP from
+  // the `otlp-prod-*` gateway host and the Loki HTTP push API from the
+  // separate `logs-prod-<stack>` host, so operators can point at the right
+  // one without a code change. The OTLP-derived value stays as the
+  // fallback for single-host deployments.
+  const explicit = process.env.GRAFANA_CLOUD_LOKI_ENDPOINT;
+  if (explicit) return explicit;
+  return lokiPushUrl(process.env.GRAFANA_CLOUD_OTLP_ENDPOINT);
 }
 
 function lokiAuthHeader() {
@@ -244,5 +271,7 @@ export const _testInternals = {
   reRedactPayload,
   tokenMatches,
   rateLimit,
-  tokenBuckets
+  tokenBuckets,
+  lokiEndpoint,
+  lokiPushUrl
 };
