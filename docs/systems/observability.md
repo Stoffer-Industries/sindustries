@@ -151,6 +151,42 @@ Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P
 - `GRAFANA_CLOUD_INSTANCE_URL` is the Grafana stack base URL used for dashboard, folder, datasource, and alert-rule APIs. It is not a Prometheus query endpoint.
 - `GRAFANA_CLOUD_PROVISIONING_AUTH` is a quoted `Bearer <service-account-token>` value. The service account needs datasource read plus dashboard, folder, and alert-rule write permissions.
 - `GRAFANA_CLOUD_OTLP_HEADERS` is a quoted `Authorization=Basic <base64(instance_id:access_policy_token)>` exporter header. It is a separate credential from provisioning auth.
+- `GRAFANA_CLOUD_LOKI_ENDPOINT` is optional and required on multi-host tenants: Grafana Cloud serves OTLP from an `otlp-prod-*` gateway and the Loki HTTP push API from a separate `logs-prod-*` host, so a single OTLP base cannot describe both. When set it is used verbatim as the push endpoint.
+
+### Endpoint pre-flight — `validate` resolves, not just collects
+
+`bootstrap-observability.sh validate` does two things. It proves the required vars in `.env.local` are *populated*, then it resolves each configured endpoint with a read-only reachability probe and prints the observed status code with a nameable cause.
+
+This exists because five defects behind the GymTrack browser-error-telemetry AC4 verification (PR #836, task `e89db27f`) were invisible to a green pre-flight. Each one passed `validate` and surfaced hours later, during the live run, as "telemetry is broken" — which points at the transport rather than at a misconfigured endpoint.
+
+The probed set and the shapes below come from one table in the script (`endpoint_specs`), rendered into `infra/cloud/observability/env/.env.example` and this section. `infra/cloud/scripts/tests/observability-bootstrap.test.sh` diffs the generated block against both files, so adding a row to the table without updating the docs fails CI.
+
+<!-- BEGIN generated: bootstrap-observability endpoint table — edit infra/cloud/observability/bootstrap-observability.sh instead -->
+| Endpoint id | Env var | Role | Required shape |
+| --- | --- | --- | --- |
+| `grafana_instance` | `GRAFANA_CLOUD_INSTANCE_URL` | `grafana-instance` | https://<stack>.grafana.net — stack base URL only, no trailing path |
+| `otlp_endpoint` | `GRAFANA_CLOUD_OTLP_ENDPOINT` | `otlp-endpoint` | https://<host> (Grafana Cloud serves OTLP under /otlp/v1/*) or https://<host>/v1/ |
+| `loki_push` | `GRAFANA_CLOUD_LOKI_ENDPOINT` | `loki-push-endpoint` | OPTIONAL — https://<logs-host>/loki/api/v1/push — set on multi-host tenants, where Loki push is a different host from OTLP |
+| `fly_api` | `(fixed — no env var)` | `fly-api` | https://api.fly.io/ — no path, no credentials in the URL |
+<!-- END generated: bootstrap-observability endpoint table -->
+
+**Reading the output.** Probes are unauthenticated by design, which is what makes a 401 informative rather than masked — a correctly configured Grafana Cloud instance answers an anonymous probe with `401`, a redirect to the login wall, or `405` on the POST-only Loki push path. All three are reported as `[OK]`. Only a genuinely unusable endpoint fails pre-flight:
+
+| Status | Reported as | Blocks pre-flight? |
+| --- | --- | --- |
+| `2xx` | `ok` | no |
+| `401` / `403` | `auth-required` | no |
+| `302` / `303` | `instance-auth-wall` | no |
+| `405` | `method-not-allowed` | no |
+| `404` | `path-absent` | **yes** |
+| `000` | `unreachable` | **yes** |
+| `530` | `gateway-origin-failure` | **yes** |
+| other `5xx` | `origin-error` | **yes** |
+| n/a | `not-derivable` (no Loki push URL derivable from the OTLP base) | **yes** |
+
+A `404` on the Loki push URL is the specific case AC3 targets: without this check it fails hours later as a `502 upstream_failure` relay error that reads as a broken relay rather than as a wrong endpoint.
+
+Two operational notes. `validate` now needs network egress, so set `PROBE_SKIP_NETWORK=1` for an air-gapped run — it then reports the var list only. And when required vars are still missing, probes are skipped entirely: there is nothing configured to resolve, and `validate` stays usable as secrets are handed over one at a time.
 - Dashboard upload wraps the checked-in model as `{dashboard: <model>, overwrite: true}`.
 - Alert files stay in portable Grafana file-export format. Bootstrap translates each rule to the HTTP API schema (`folderUID`, `ruleGroup`, `orgID`), creates its deterministic folder if absent, then POSTs a new UID or PUTs an existing UID.
 - The health-probe starts OTel through Node's `--require @sindustries/otel-node/register` preload. `./register` is a require-only package export and must not be imported from ESM application code; `OTEL_SERVICE_NAME=health-probe` in Fly config names the preloaded SDK.

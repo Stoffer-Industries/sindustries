@@ -311,6 +311,253 @@ else
   fail "alert upload did not PUT existing rules by UID"
 fi
 
+# 11. Endpoint-resolving validate (task f3909b89). `validate` must not only
+#     report that the vars are populated — it must resolve the endpoints they
+#     point at, classify what it sees, name the var to fix, and keep secret
+#     values out of its own output.
+mkdir -p "${TMP_DIR}/probe-bin"
+cat > "${TMP_DIR}/probe-bin/curl" <<'PROBECURL'
+#!/usr/bin/env bash
+# Scripted reachability-probe stub.
+#   PROBE_STATUS_MAP   "|host/path=code|host/path=code", first match wins.
+#   PROBE_DEFAULT      code when nothing matches (default 200).
+#   PROBE_EXIT_URL     substring whose probe exits non-zero (DNS failure).
+# Deliberately does not implement --fail or --output: probes must not use
+# them, and honouring --fail here would mask a regression that reintroduces it.
+url=''
+prev=''
+for arg in "$@"; do
+  case "${prev}" in
+    -o|--output|-w|--write-out|--max-time|--connect-timeout|-H|--header)
+      prev="${arg}"
+      continue
+      ;;
+  esac
+  case "${arg}" in http*) url="${arg}" ;; esac
+  prev="${arg}"
+done
+if [ -n "${PROBE_EXIT_URL:-}" ]; then
+  case "${url}" in
+    *"${PROBE_EXIT_URL}"*) exit 7 ;;
+  esac
+fi
+code="${PROBE_DEFAULT:-200}"
+if [ -n "${PROBE_STATUS_MAP:-}" ]; then
+  IFS='|' read -r -a entries <<< "${PROBE_STATUS_MAP}"
+  for entry in "${entries[@]}"; do
+    [ -n "${entry}" ] || continue
+    case "${url}" in
+      *"${entry%%=*}"*)
+        code="${entry##*=}"
+        break
+        ;;
+    esac
+  done
+fi
+printf '%s' "${code}"
+PROBECURL
+chmod +x "${TMP_DIR}/probe-bin/curl"
+
+PROBE_SENTINEL_HEADERS='Authorization=Basic c2VjcmV0LW9ubHktaW4tdGhpcy1lc2NhcGUtc2VudGluZWw='
+PROBE_SENTINEL_AUTH='Bearer probe-hygiene-sentinel-value'
+write_probe_env() {
+  cat > "${OBS}/.env.local" <<PROBEENV
+FLY_API_TOKEN=probe-token-sentinel
+FLY_ORG=personal
+GRAFANA_CLOUD_OTLP_ENDPOINT=${PROBE_OTLP:-https://otlp.example}
+GRAFANA_CLOUD_OTLP_HEADERS="${PROBE_SENTINEL_HEADERS}"
+GRAFANA_CLOUD_PROVISIONING_AUTH="${PROBE_SENTINEL_AUTH}"
+GRAFANA_CLOUD_INSTANCE_URL=https://grafana.example
+HEALTH_PROBE_DATABASES=x=postgres://x
+HEALTH_PROBE_FLY_APPS=x=https://x/health
+HEALTH_PROBE_REDIS=x=rediss://x
+PROBEENV
+  if [ -n "${PROBE_LOKI:-}" ]; then
+    printf 'GRAFANA_CLOUD_LOKI_ENDPOINT=%s\n' "${PROBE_LOKI}" >> "${OBS}/.env.local"
+  fi
+}
+run_validate() {
+  set +e
+  VALIDATE_OUT="$(PATH="${TMP_DIR}/probe-bin:${PATH}" bash "${BOOT}" validate 2>&1)"
+  VALIDATE_CODE=$?
+  set -e
+}
+
+# 11a. 404 on an endpoint: validate fails AND names the var to fix.
+PROBE_LOKI='https://logs.example/loki/api/v1/push'
+write_probe_env
+PROBE_STATUS_MAP='|logs.example/loki/api/v1/push=404' PROBE_DEFAULT=200 \
+  run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ]; then
+  ok "validate fails when an endpoint returns 404 (exit=${VALIDATE_CODE})"
+else
+  fail "validate exited 0 despite a 404 endpoint"
+fi
+if printf '%s\n' "${VALIDATE_OUT}" | grep -q 'path-absent'; then
+  ok "404 is classified as path-absent"
+else
+  fail "404 not classified as path-absent: ${VALIDATE_OUT}"
+fi
+if printf '%s\n' "${VALIDATE_OUT}" | grep -q 'GRAFANA_CLOUD_LOKI_ENDPOINT'; then
+  ok "404 message names GRAFANA_CLOUD_LOKI_ENDPOINT"
+else
+  fail "404 message does not name the var to fix"
+fi
+
+# 11b. 401 is a correctly-configured endpoint: passes, and is reported as
+#      auth-required rather than conflated with path-absent.
+write_probe_env
+PROBE_STATUS_MAP='|grafana.example/api/health=401|otlp.example=401|api.fly.io=401' \
+  run_validate
+if [ "${VALIDATE_CODE}" -eq 0 ]; then
+  ok "401 on every endpoint exits 0 (unauthenticated probe, path exists)"
+else
+  fail "401 should not fail validate (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+if printf '%s\n' "${VALIDATE_OUT}" | grep -q 'auth-required'; then
+  ok "401 reported as auth-required"
+else
+  fail "401 not reported as auth-required: ${VALIDATE_OUT}"
+fi
+if printf '%s\n' "${VALIDATE_OUT}" | grep -q 'path-absent'; then
+  fail "401 was conflated with path-absent"
+else
+  ok "401 not conflated with path-absent"
+fi
+
+# 11c. 200 everywhere: ok, exit 0.
+write_probe_env
+PROBE_STATUS_MAP='|grafana.example/api/health=200|otlp.example=200|logs.example=200|api.fly.io=200' \
+  run_validate
+if [ "${VALIDATE_CODE}" -eq 0 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'ok  '; then
+  ok "healthy 200 endpoints exit 0 and report ok"
+else
+  fail "200 endpoints did not exit 0 as ok (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11d. 405 on the POST-only Loki push path is proof the path exists, so it
+#      must pass. A naive 2xx-only check reports a healthy tenant as broken.
+write_probe_env
+PROBE_STATUS_MAP='|logs.example/loki/api/v1/push=405|otlp.example=401|api.fly.io=401' \
+  run_validate
+if [ "${VALIDATE_CODE}" -eq 0 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'method-not-allowed'; then
+  ok "405 on the Loki push path exits 0 as method-not-allowed"
+else
+  fail "405 mis-classified (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11e. 530 gateway origin failure fails pre-flight.
+write_probe_env
+PROBE_STATUS_MAP='|grafana.example/api/health=530' run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'gateway-origin-failure'; then
+  ok "530 exits non-zero as gateway-origin-failure"
+else
+  fail "530 did not fail validate (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11f. curl exiting non-zero is 000 (unreachable), not a silent pass.
+write_probe_env
+PROBE_EXIT_URL='api.fly.io' run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'unreachable.*000'; then
+  ok "unreachable host reports 000 and fails pre-flight"
+else
+  fail "unreachable host not caught (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11g. A bare-host OTLP base with no Loki override is the exact production
+#      tenant shape: the relay cannot derive a push URL and answers 502
+#      misconfigured_loki_endpoint. validate must fail on it by name.
+PROBE_LOKI=''
+write_probe_env
+run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ] \
+    && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'not-derivable' \
+    && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'GRAFANA_CLOUD_LOKI_ENDPOINT'; then
+  ok "non-derivable Loki push URL fails and names GRAFANA_CLOUD_LOKI_ENDPOINT"
+else
+  fail "non-derivable Loki push URL not caught (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11h. Presence behaviour is unchanged: a missing var still returns the
+#      clamped missing count, and no probe fires (nothing is configured).
+rm -f "${OBS}/.env.local"
+set +e
+presence_out="$(PATH="${TMP_DIR}/probe-bin:${PATH}" bash "${BOOT}" validate 2>&1)"
+presence_code=$?
+set -e
+if [ "${presence_code}" -ge 1 ] && [ "${presence_code}" -le 125 ]; then
+  ok "missing vars still exit with the clamped missing count (${presence_code})"
+else
+  fail "presence exit code changed: ${presence_code}"
+fi
+if printf '%s\n' "${presence_out}" | grep -q 'required var(s) missing'; then
+  ok "presence failure message unchanged"
+else
+  fail "presence failure message changed"
+fi
+if printf '%s\n' "${presence_out}" | grep -q 'endpoint probes skipped'; then
+  ok "probes skipped while required vars are missing"
+else
+  fail "probes ran despite missing required vars"
+fi
+
+# 11i. Secret hygiene: no credential value may appear anywhere in output.
+PROBE_LOKI='https://logs.example/loki/api/v1/push'
+write_probe_env
+PROBE_STATUS_MAP='|logs.example/loki/api/v1/push=404' run_validate
+leaked=0
+for sentinel in "${PROBE_SENTINEL_HEADERS}" "${PROBE_SENTINEL_AUTH}" \
+                'probe-token-sentinel' 'c2VjcmV0LW9ubHktaW4tdGhpcy1lc2NhcGUtc2VudGluZWw='; do
+  if printf '%s\n' "${VALIDATE_OUT}" | grep -qF "${sentinel}"; then
+    fail "validate output leaked a credential value"
+    leaked=1
+  fi
+done
+[ "${leaked}" -eq 0 ] && ok "validate output contains no credential values (incl. error paths)"
+
+# 11j. PROBE_SKIP_NETWORK=1 keeps validate usable with no egress.
+PROBE_SKIP_NETWORK=1 run_validate
+if [ "${VALIDATE_CODE}" -eq 0 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'PROBE_SKIP_NETWORK'; then
+  ok "PROBE_SKIP_NETWORK=1 skips probes and exits 0"
+else
+  fail "PROBE_SKIP_NETWORK=1 not honoured (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11k. Doc parity (AC6): the generated block must match, byte for byte, the
+#      copy committed to .env.example and docs/systems/observability.md. A
+#      var added to endpoint_specs without a docs update fails here.
+set +e
+dry_out="$(PATH="${TMP_DIR}/probe-bin:${PATH}" bash "${BOOT}" validate --dry-run 2>&1)"
+set -e
+sed -n '/BEGIN generated: bootstrap-observability endpoint table/,/END generated: bootstrap-observability endpoint table/p' \
+  <<<"${dry_out}" > "${TMP_DIR}/endpoint-block.md"
+if [ -s "${TMP_DIR}/endpoint-block.md" ]; then
+  ok "validate --dry-run renders the generated endpoint table"
+else
+  fail "validate --dry-run did not render the endpoint table"
+fi
+parity="$(python3 - "${TMP_DIR}/endpoint-block.md" "${OBS}/env/.env.example" \
+  "${REPO_ROOT}/docs/systems/observability.md" <<'PYEOF'
+import sys
+block = open(sys.argv[1]).read().strip()
+missing = [f for f in sys.argv[2:] if block not in open(f).read()]
+print('OK' if not missing else 'DRIFT: ' + ', '.join(missing))
+PYEOF
+)"
+if [ "${parity}" = "OK" ]; then
+  ok "generated endpoint table matches .env.example and docs/systems/observability.md"
+else
+  fail "endpoint table drifted from the docs (${parity})"
+fi
+for endpoint_id in grafana_instance otlp_endpoint loki_push fly_api; do
+  if printf '%s\n' "${VALIDATE_OUT}" | grep -q "${endpoint_id}" \
+      || printf '%s\n' "${dry_out}" | grep -q "\`${endpoint_id}\`"; then
+    ok "endpoint ${endpoint_id} is documented and probed"
+  else
+    fail "endpoint ${endpoint_id} missing from probe plan or docs"
+  fi
+done
+
 rm -f "${OBS}/.env.local"
 
 restore_env_local
