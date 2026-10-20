@@ -14,7 +14,7 @@
 
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler, { _testInternals } from './telemetry.js';
+import handler, { _testInternals, lokiAuthHeaders, parseOtlpHeaderString } from './telemetry.js';
 
 const RELAY_TOKEN = 'relay-token-under-test';
 const LOKI_ENDPOINT = 'https://otlp-region.grafana.net/loki/api/v1/push';
@@ -81,7 +81,7 @@ describe('telemetry relay', () => {
     vi.stubEnv('TELEMETRY_RELAY_TOKEN', RELAY_TOKEN);
     vi.stubEnv('GRAFANA_CLOUD_OTLP_ENDPOINT', 'https://otlp-region.grafana.net/v1/');
     vi.stubEnv('GRAFANA_CLOUD_LOKI_ENDPOINT', '');
-    vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', 'Basic dGVzdA==');
+    vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', 'Authorization=Basic dGVzdA==');
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
   });
 
@@ -230,6 +230,19 @@ describe('telemetry relay', () => {
       expect(JSON.stringify(init.body)).not.toContain(RELAY_TOKEN);
     });
 
+    it('sends the documented OTLP exporter header string as real HTTP headers', async () => {
+      // The exact shape `infra/cloud/observability/env/.env.example`,
+      // docs/systems/observability.md, and bootstrap-observability.sh all
+      // document. Passing this through verbatim as the header VALUE
+      // produced `Authorization: Authorization=Basic <b64>`, which Grafana
+      // Cloud rejects with 401 -> 502 -> "no browser events arrived".
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', 'Authorization=Basic aW5zdGFuY2U6dG9rZW4=');
+      await post({}, JSON.stringify(validPayload));
+      const [, init] = globalThis.fetch.mock.calls[0];
+      expect(init.headers.Authorization).toBe('Basic aW5zdGFuY2U6dG9rZW4=');
+      expect(init.headers.Authorization).not.toContain('Authorization=');
+    });
+
     it('labels the stream with the app, source, and retained context fields', async () => {
       await post({}, JSON.stringify(validPayload));
       const [, init] = globalThis.fetch.mock.calls[0];
@@ -263,6 +276,45 @@ describe('telemetry relay', () => {
       expect(res.statusCode).toBe(502);
       expect(res.body.error).toBe('upstream_failure');
       expect(JSON.stringify(res.body)).not.toContain(RELAY_TOKEN);
+    });
+  });
+
+  describe('OTLP exporter header parsing', () => {
+    it.each([
+      ['Authorization=Basic dGVzdA==', { Authorization: 'Basic dGVzdA==' }],
+      ['Basic dGVzdA==', { Authorization: 'Basic dGVzdA==' }],
+      ['  Basic dGVzdA==  ', { Authorization: 'Basic dGVzdA==' }],
+      [
+        'Authorization=Basic dGVzdA==,X-Scope-OrgID=42',
+        { Authorization: 'Basic dGVzdA==', 'X-Scope-OrgID': '42' }
+      ],
+      ['X-Scope-OrgID=42', { 'X-Scope-OrgID': '42' }],
+      // Base64 padding must survive: only the FIRST `=` splits.
+      ['Authorization=Basic aGVsbG8gd29ybGQhIQ==', { Authorization: 'Basic aGVsbG8gd29ybGQhIQ==' }],
+      // A space before the `=` means it is not a header pair.
+      ['Basic aGVsbG8=', { Authorization: 'Basic aGVsbG8=' }],
+      ['Authorization=Basic abc%2Fdef%3D', { Authorization: 'Basic abc/def=' }],
+      ['', {}],
+      ['   ', {}]
+    ])('parses %j', (raw, expected) => {
+      expect(parseOtlpHeaderString(raw)).toEqual(expected);
+    });
+
+    it('returns null from lokiAuthHeaders when no credential is configured', () => {
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', '');
+      expect(lokiAuthHeaders()).toBeNull();
+    });
+
+    it('returns the parsed headers from lokiAuthHeaders when configured', () => {
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', 'Authorization=Basic dGVzdA==');
+      expect(lokiAuthHeaders()).toEqual({ Authorization: 'Basic dGVzdA==' });
+    });
+
+    it('no-ops without calling upstream when the credential is blank', async () => {
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_HEADERS', '   ');
+      const res = await post({}, JSON.stringify(validPayload));
+      expect(res.statusCode).toBe(204);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
   });
 
