@@ -16,13 +16,29 @@ import { metrics } from '@opentelemetry/api';
 
 import {
   configFromEnv,
-  runProbe,
+  probeDbTargets,
+  probeFlyTargets,
+  probeRedisTargets,
   type ProbeResult,
 } from './probe.js';
 
 const PORT = Number.parseInt(process.env.PORT ?? '9090', 10);
 const INTERVAL_SECONDS = Number.parseInt(
   process.env.PROBE_INTERVAL_SECONDS ?? '30',
+  10,
+);
+// DB checks hold a live Postgres connection open on every pass, which
+// keeps a Neon compute endpoint from scaling to zero (see the Oct 2026
+// free-tier compute-hour incident: a 30s DB probe cadence against the
+// staging branch kept it "active" around the clock and burned the
+// whole org's free compute-hour allowance on a database nobody was
+// otherwise using). DB probe cadence is intentionally decoupled from
+// the Fly/Redis cadence above so it can be slowed down (e.g. daily on
+// staging) without losing the more frequent liveness signal for Fly
+// apps and Redis, which don't carry that cost. Defaults to
+// PROBE_INTERVAL_SECONDS when unset, preserving prior behaviour.
+const DB_INTERVAL_SECONDS = Number.parseInt(
+  process.env.DB_PROBE_INTERVAL_SECONDS ?? String(INTERVAL_SECONDS),
   10,
 );
 
@@ -130,18 +146,42 @@ function applyResult(result: ProbeResult): void {
   }
 }
 
-async function runOnce(): Promise<void> {
+// Fly app + Redis checks run on the fast (INTERVAL_SECONDS) cadence —
+// they're free, so there's no reason to slow them down.
+async function runNonDbOnce(): Promise<void> {
   const config = configFromEnv();
+  const timeoutMs = config.timeoutMs ?? 5000;
   try {
-    const result = await runProbe(config);
-    applyResult(result);
+    const [fly, redis] = await Promise.all([
+      probeFlyTargets(config.flyApps, timeoutMs),
+      probeRedisTargets(config.redis, timeoutMs),
+    ]);
+    applyResult({ timestamp: Date.now(), db: [], fly, redis });
     probeRuns.inc();
     probeRunsValue += 1;
   } catch (err) {
     probeErrors.inc();
     probeErrorsValue += 1;
     // eslint-disable-next-line no-console
-    console.error('probe pass failed', err);
+    console.error('probe pass failed (fly/redis)', err);
+  }
+}
+
+// DB checks run on their own (potentially much slower) cadence — see
+// the DB_INTERVAL_SECONDS comment above for why.
+async function runDbOnce(): Promise<void> {
+  const config = configFromEnv();
+  const timeoutMs = config.timeoutMs ?? 5000;
+  try {
+    const db = await probeDbTargets(config.dbs, timeoutMs);
+    applyResult({ timestamp: Date.now(), db, fly: [], redis: [] });
+    probeRuns.inc();
+    probeRunsValue += 1;
+  } catch (err) {
+    probeErrors.inc();
+    probeErrorsValue += 1;
+    // eslint-disable-next-line no-console
+    console.error('probe pass failed (db)', err);
   }
 }
 
@@ -157,14 +197,20 @@ app.get('/metrics', async (_req: Request, res: Response) => {
 });
 
 async function main(): Promise<void> {
-  await runOnce();
+  await runNonDbOnce();
+  await runDbOnce();
   setInterval(() => {
-    void runOnce();
+    void runNonDbOnce();
   }, INTERVAL_SECONDS * 1000).unref();
+  setInterval(() => {
+    void runDbOnce();
+  }, DB_INTERVAL_SECONDS * 1000).unref();
 
   app.listen(PORT, () => {
     // eslint-disable-next-line no-console
-    console.log(`health-probe listening on :${PORT} (interval=${INTERVAL_SECONDS}s)`);
+    console.log(
+      `health-probe listening on :${PORT} (interval=${INTERVAL_SECONDS}s, db-interval=${DB_INTERVAL_SECONDS}s)`,
+    );
   });
 }
 

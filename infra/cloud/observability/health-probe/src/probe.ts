@@ -132,6 +132,30 @@ export async function probeRedis(
   }
 }
 
+/** Probe every configured DB target. */
+export async function probeDbTargets(
+  dbs: DbTarget[],
+  timeoutMs: number,
+): Promise<ProbeResult['db']> {
+  return Promise.all(dbs.map((t) => probeDb(t, timeoutMs)));
+}
+
+/** Probe every configured Fly app target. */
+export async function probeFlyTargets(
+  flyApps: HttpTarget[],
+  timeoutMs: number,
+): Promise<ProbeResult['fly']> {
+  return Promise.all(flyApps.map((t) => probeFlyApp(t, timeoutMs)));
+}
+
+/** Probe every configured Redis target. */
+export async function probeRedisTargets(
+  redis: RedisTarget[],
+  timeoutMs: number,
+): Promise<ProbeResult['redis']> {
+  return Promise.all(redis.map((t) => probeRedis(t, timeoutMs)));
+}
+
 /**
  * Run a single probe pass against all configured targets. Failures on
  * one target do not abort the rest — partial results are still useful
@@ -140,9 +164,9 @@ export async function probeRedis(
 export async function runProbe(config: ProbeConfig): Promise<ProbeResult> {
   const timeoutMs = config.timeoutMs ?? 5000;
   const [db, fly, redis] = await Promise.all([
-    Promise.all(config.dbs.map((t) => probeDb(t, timeoutMs))),
-    Promise.all(config.flyApps.map((t) => probeFlyApp(t, timeoutMs))),
-    Promise.all(config.redis.map((t) => probeRedis(t, timeoutMs))),
+    probeDbTargets(config.dbs, timeoutMs),
+    probeFlyTargets(config.flyApps, timeoutMs),
+    probeRedisTargets(config.redis, timeoutMs),
   ]);
   return { timestamp: Date.now(), db, fly, redis };
 }
