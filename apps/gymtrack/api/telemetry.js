@@ -140,8 +140,86 @@ export function lokiEndpoint() {
   return lokiPushUrl(process.env.GRAFANA_CLOUD_OTLP_ENDPOINT);
 }
 
-function lokiAuthHeader() {
-  return process.env.GRAFANA_CLOUD_OTLP_HEADERS ?? '';
+// Matches a bare HTTP header name per RFC 9110 token rules.
+const HEADER_NAME_PATTERN = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
+
+/**
+ * Convert `GRAFANA_CLOUD_OTLP_HEADERS` into real HTTP headers.
+ *
+ * That variable is an OTLP *exporter header string*, not a header value.
+ * Every place that defines it documents the exporter form
+ * (`Authorization=Basic <base64>`, optionally comma-separated over several
+ * headers), because that is the format the OTel SDKs and
+ * `bootstrap-observability.sh` already consume:
+ *
+ *   infra/cloud/observability/env/.env.example
+ *     GRAFANA_CLOUD_OTLP_HEADERS="Authorization=Basic <redacted-base64>"
+ *   docs/systems/observability.md
+ *     a quoted `Authorization=Basic <base64(instance_id:access_policy_token)>`
+ *     exporter header
+ *   infra/cloud/observability/bootstrap-observability.sh
+ *     OTEL_EXPORTER_OTLP_HEADERS="${GRAFANA_CLOUD_OTLP_HEADERS}"
+ *
+ * The relay used to pass the raw string through as the `Authorization`
+ * value, so an operator who followed the documentation produced the header
+ * `Authorization: Authorization=Basic <base64>`. Grafana Cloud rejects that
+ * with 401, the relay maps it to 502 upstream_failure, and the browser
+ * event is dropped — which reads as "the telemetry relay is broken" rather
+ * than "the credential was formatted for the wrong transport".
+ *
+ * Parsing rules:
+ *   - Comma-separated `key=value` pairs become real headers. Only the
+ *     FIRST `=` splits, so base64 padding (`dGVzdA==`) survives intact.
+ *   - A segment whose leading `=`-delimited chunk is not a valid header
+ *     name is treated as a bare header value, so `Basic <b64>` keeps
+ *     working.
+ *   - Values are URL-decoded, per the OTLP header-string spec.
+ */
+export function parseOtlpHeaderString(raw) {
+  const headers = {};
+  if (typeof raw !== 'string') return headers;
+
+  const trimmed = raw.trim();
+  if (!trimmed) return headers;
+
+  for (const segment of trimmed.split(',')) {
+    const part = segment.trim();
+    if (!part) continue;
+
+    const eq = part.indexOf('=');
+    if (eq === -1) {
+      // Bare value with no `key=` prefix — a valid Authorization value.
+      headers.Authorization = part;
+      continue;
+    }
+
+    const name = part.slice(0, eq).trim();
+    if (!HEADER_NAME_PATTERN.test(name)) {
+      // Not a header pair. The `=` belongs to base64 padding, so treat the
+      // whole segment as a bare value instead of splitting on it.
+      headers.Authorization = part;
+      continue;
+    }
+
+    let value = part.slice(eq + 1);
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // Not percent-encoded; use the value as written.
+    }
+    headers[name] = value.trim();
+  }
+
+  return headers;
+}
+
+/**
+ * The server-held Grafana credential as real HTTP headers, or null when no
+ * usable credential is configured.
+ */
+export function lokiAuthHeaders() {
+  const headers = parseOtlpHeaderString(process.env.GRAFANA_CLOUD_OTLP_HEADERS);
+  return Object.keys(headers).length > 0 ? headers : null;
 }
 
 async function readRawBody(req) {
@@ -214,8 +292,8 @@ export default async function handler(req, res) {
   }
 
   const endpoint = lokiEndpoint();
-  const authHeader = lokiAuthHeader();
-  if (!endpoint || !authHeader) {
+  const upstreamHeaders = lokiAuthHeaders();
+  if (!endpoint || !upstreamHeaders) {
     // Relay is intentionally not configured in this environment — treat
     // the request as a no-op so the auth flow stays unblocked. The
     // function still rate-limits and validates so a misconfigured caller
@@ -247,7 +325,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: authHeader
+        ...upstreamHeaders
       },
       body: JSON.stringify(lokiPayload)
     });
@@ -273,5 +351,6 @@ export const _testInternals = {
   rateLimit,
   tokenBuckets,
   lokiEndpoint,
-  lokiPushUrl
+  lokiPushUrl,
+  lokiAuthHeaders
 };
