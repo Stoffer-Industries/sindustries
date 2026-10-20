@@ -247,7 +247,10 @@ status=200
 body='{}'
 case "${url}" in
   */api/datasources)
-    body='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true}]'
+    if [ -z "${FAKE_DATASOURCES:-}" ]; then
+      FAKE_DATASOURCES='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true},{"type":"loki","uid":"grafanacloud-loki"}]'
+    fi
+    body="${FAKE_DATASOURCES}"
     ;;
   */api/folders/*)
     status=404
@@ -288,6 +291,31 @@ if jq -e '.overwrite == true and (.dashboard.uid | length > 0)' <<<"${dashboard_
   ok "dashboard upload wraps the model and resolves the Prometheus datasource UID"
 else
   fail "dashboard upload payload does not match Grafana API contract"
+fi
+
+# Loki-backed dashboards must keep the Loki datasource UID. Regression guard:
+# the rewrite used to map EVERY placeholder uid (prometheus *and* loki) onto the
+# Prometheus UID, which provisioned LogQL panels pointed at a Prometheus
+# datasource — silently broken panels for the GymTrack browser-error dashboard.
+gymtrack_payload="$(awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/ {print $3}' "${FAKE_CURL_LOG}" \
+  | jq -c -s 'map(select(.dashboard.title? == "GymTrack / Browser errors")) | .[0] // empty')"
+if [ -n "${gymtrack_payload}" ] \
+    && jq -e '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then .uid else . end]
+            | length > 0 and all(. == "grafanacloud-loki")' <<<"${gymtrack_payload}" >/dev/null; then
+  ok "Loki-backed dashboard keeps the Loki datasource UID (not rewritten to Prometheus)"
+else
+  fail "Loki-backed dashboard datasource was not preserved — LogQL panels would point at Prometheus"
+fi
+
+# Fallback: a Prometheus-only Grafana must still provision, keeping the
+# placeholder Loki uid, rather than hard-failing the whole dashboards step.
+: > "${FAKE_CURL_LOG}"
+FAKE_DATASOURCES='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true}]' \
+  PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null 2>&1
+if awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/' "${FAKE_CURL_LOG}" | grep -q 'loki'; then
+  ok "Prometheus-only Grafana falls back to the placeholder Loki uid instead of failing"
+else
+  fail "dashboards step did not provision with a Prometheus-only datasource set"
 fi
 
 : > "${FAKE_CURL_LOG}"

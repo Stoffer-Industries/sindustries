@@ -554,21 +554,35 @@ grafana_auth_header() {
   printf 'Authorization: %s' "${GRAFANA_CLOUD_PROVISIONING_AUTH}"
 }
 
-resolve_prometheus_datasource_uid() {
-  local response uid
+resolve_datasource_uid() {
+  local type="$1" response uid
   response="$(curl --fail --silent --show-error \
     -H "$(grafana_auth_header)" \
     "$(grafana_api_url '/api/datasources')")"
-  uid="$(jq -r '
-    map(select(.type == "prometheus"))
+  uid="$(jq -r --arg type "${type}" '
+    map(select(.type == $type))
     | (map(select(.isDefault == true))[0] // .[0] // {})
     | .uid // empty
   ' <<<"${response}")"
+  printf '%s' "${uid}"
+}
+
+resolve_prometheus_datasource_uid() {
+  local uid
+  uid="$(resolve_datasource_uid prometheus)"
   if [ -z "${uid}" ]; then
     echo "::error::hosted Grafana has no Prometheus datasource" >&2
     return 1
   fi
   printf '%s' "${uid}"
+}
+
+# Loki is optional: canonical observability dashboards are Prometheus-backed,
+# but product dashboards (GymTrack browser error telemetry) are Loki-backed. A
+# missing Loki datasource must not fail provisioning for Prometheus-only setups,
+# so callers pass the empty string through and fall back to the placeholder uid.
+resolve_loki_datasource_uid() {
+  resolve_datasource_uid loki
 }
 
 grafana_folder_uid() {
@@ -770,20 +784,34 @@ step_dashboards() {
   source_env_local
   require_env_var GRAFANA_CLOUD_PROVISIONING_AUTH
   require_env_var GRAFANA_CLOUD_INSTANCE_URL
-  local prometheus_uid wrapped_payload
+  local prometheus_uid loki_uid wrapped_payload
   prometheus_uid="$(resolve_prometheus_datasource_uid)"
+  loki_uid="$(resolve_loki_datasource_uid)"
+  if [ -z "${loki_uid}" ]; then
+    loki_uid="loki"
+    echo "::warning::hosted Grafana has no Loki datasource; Loki-backed dashboards keep the placeholder uid" >&2
+  fi
   for dashboard_file in "${DASHBOARD_DIR}"/*.json "${extra_dashboard_dirs[@]}"/*.json; do
     [ -e "${dashboard_file}" ] || continue
     filename="$(basename "${dashboard_file}" .json)"
     echo "    - ${filename}"
-    wrapped_payload="$(jq -c --arg prometheus_uid "${prometheus_uid}" '
+    # Rewrite only the placeholder uids that dashboards ship in the repo
+    # ("prometheus" / "loki") to the real per-type datasource UIDs. Rewriting
+    # every datasource to the Prometheus UID silently breaks Loki-backed
+    # dashboards (GymTrack browser error telemetry), because LogQL panels
+    # would be pointed at a Prometheus datasource.
+    wrapped_payload="$(jq -c \
+      --arg prometheus_uid "${prometheus_uid}" \
+      --arg loki_uid "${loki_uid}" '
+      def is_loki: (.type? == "loki") or (.uid? == "loki");
+      def is_prometheus: (.type? == "prometheus") or (.uid? == "prometheus");
       walk(
         if type == "object" and has("datasource") then
           .datasource |= (
-            if type == "object" and (.uid == "prometheus" or .uid == "${DS_PROMETHEUS}" or .uid == "loki" or .uid == "${DS_LOKI}") then
-              .uid = $prometheus_uid
-            elif . == "prometheus" or . == "${DS_PROMETHEUS}" or . == "loki" or . == "${DS_LOKI}" then
-              $prometheus_uid
+            if type == "object" and (is_loki or is_prometheus) then
+              .uid = (if is_loki then $loki_uid else $prometheus_uid end)
+            elif type == "string" and (. == "loki" or . == "prometheus") then
+              (if . == "loki" then $loki_uid else $prometheus_uid end)
             else . end
           )
         else . end
