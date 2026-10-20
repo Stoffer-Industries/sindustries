@@ -119,5 +119,35 @@ class NeedsTechDesignReviewTest(unittest.TestCase):
         self.assertFalse(p.needs_tech_design_review({}))
 
 
+class ActiveStatusDefaultTest(unittest.TestCase):
+    """Regression: the CLI used to default to NO status filter, which let
+    terminal tasks into the queue whenever a tech_design row was revoked."""
+
+    def test_active_statuses_matches_agent_task_queue(self):
+        import agent_task_queue
+
+        self.assertEqual(p.ACTIVE_STATUSES, agent_task_queue.ACTIVE_STATUSES)
+
+    def test_no_status_flag_scopes_to_active_statuses(self):
+        with patch.object(p, "get_base_url", return_value="http://tasks.test/api/v1"), \
+             patch.object(sys, "argv", ["pending_tech_design_approvals.py", "--json"]), \
+             patch.object(p, "list_tasks", return_value=[]) as list_tasks, \
+             patch.object(p, "fetch_task_detail", return_value={}):
+            with patch.object(sys, "stdout"):
+                p.main()
+
+        list_tasks.assert_called_once_with("http://tasks.test/api/v1", list(p.ACTIVE_STATUSES))
+
+    def test_explicit_status_flag_still_overrides(self):
+        with patch.object(p, "get_base_url", return_value="http://tasks.test/api/v1"), \
+             patch.object(sys, "argv", ["pending_tech_design_approvals.py", "--status", "done", "--json"]), \
+             patch.object(p, "list_tasks", return_value=[]) as list_tasks, \
+             patch.object(p, "fetch_task_detail", return_value={}):
+            with patch.object(sys, "stdout"):
+                p.main()
+
+        list_tasks.assert_called_once_with("http://tasks.test/api/v1", ["done"])
+
+
 if __name__ == "__main__":
     unittest.main()

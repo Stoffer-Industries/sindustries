@@ -8,8 +8,10 @@ source shared by this queue and the feature-task Lobster.
 
 Usage:
   TASKS_API_BASE_URL=http://localhost:4001/api/v1 \\
-    python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py \\
-    --status ready --status doing --status acceptance
+    python3 agents/skills/ops/tasks-api/scripts/pending_tech_design_approvals.py
+
+  Scopes to ACTIVE_STATUSES by default. Pass --status one or more times to
+  override (including a terminal status, for deliberate forensics).
 """
 
 from __future__ import annotations
@@ -24,6 +26,11 @@ import urllib.request
 
 DEFAULT_BASE_URL_ENV = "TASKS_API_BASE_URL"
 DEFAULT_PAGE_SIZE = 100
+# Single source of truth for "still in flight". An empty status list means NO
+# filter in list_tasks(), so terminal (done/accepted) tasks leak into the queue
+# whenever a tech_design row was revoked. Keep this aligned with
+# agent_task_queue.ACTIVE_STATUSES.
+ACTIVE_STATUSES = ("open", "ready", "doing", "acceptance")
 
 
 def api_request(method: str, base_url: str, path: str, payload=None) -> dict:
@@ -141,7 +148,7 @@ def main() -> int:
         action="append",
         default=None,
         help="Filter to tasks with this status. May be passed multiple times. "
-        "Default: no status filter (only the is_feature_task filter applies).",
+        "Default: the in-flight statuses (open, ready, doing, acceptance).",
     )
     parser.add_argument(
         "--base-url",
@@ -156,7 +163,7 @@ def main() -> int:
     args = parser.parse_args()
 
     base = (args.base_url or get_base_url()).rstrip("/")
-    statuses = args.status or []
+    statuses = args.status or list(ACTIVE_STATUSES)
 
     candidates = [t for t in list_tasks(base, statuses) if needs_tech_design_review(t)]
     tasks = [fetch_task_detail(base, t["id"]) for t in candidates]
