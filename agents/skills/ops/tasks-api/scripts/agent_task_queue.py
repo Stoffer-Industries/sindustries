@@ -52,6 +52,10 @@ assert APPROVALS_SPEC.loader is not None
 APPROVALS_SPEC.loader.exec_module(pending_approvals)
 
 IMPLEMENTATION_TYPES = {"feature", "code"}
+# Single source of truth for "still in flight". Every fetch in this module must
+# scope to these; an empty/absent status list means NO server-side filter and
+# silently pulls terminal (done/accepted) tasks into the heartbeat queue.
+ACTIVE_STATUSES = ("open", "ready", "doing", "acceptance")
 DELIVERY_TAGS = ("[implementer-prs]", "[rowan-prs]")
 TECH_DESIGN_TAG = "[tech-design]"
 TECH_DESIGN_WAIVER_TAG = "[tech-design-not-required]"
@@ -437,7 +441,7 @@ def fetch_agent_tasks(assignee: str, base_url: str | None = None) -> list[dict[s
     base = base_url or tasks_api_client.get_base_url()
     summaries = tasks_api_client.list_tasks(
         limit=50,
-        status=["open", "ready", "doing", "acceptance"],
+        status=list(ACTIVE_STATUSES),
         assignee=assignee,
         base_url=base,
     )
@@ -449,7 +453,7 @@ def fetch_workflow_gate_owner_tasks(name: str, base_url: str | None = None) -> l
     base = base_url or tasks_api_client.get_base_url()
     summaries = tasks_api_client.list_tasks(
         limit=200,
-        status=["open", "ready", "doing", "acceptance"],
+        status=list(ACTIVE_STATUSES),
         workflow_gate_owner=name,
         base_url=base,
     )
@@ -523,7 +527,7 @@ def fetch_attention_owner_tasks(name: str, base_url: str | None = None) -> list[
     base = base_url or tasks_api_client.get_base_url()
     summaries = tasks_api_client.list_tasks(
         limit=200,
-        status=["open", "ready", "doing", "acceptance"],
+        status=list(ACTIVE_STATUSES),
         attention_owner=name,
         base_url=base,
     )
@@ -680,11 +684,19 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
 
 
 def fetch_pending_tech_design_approvals(base_url: str | None = None) -> list[dict[str, Any]]:
-    """Return Quinn's global approval queue, independent of task assignee."""
+    """Return Quinn's global approval queue, independent of task assignee.
+
+    Scoped to ACTIVE_STATUSES on purpose. ``pending_approvals.list_tasks``
+    treats an empty status list as "no filter", which let completed tasks
+    reach the queue and surface as phantom approvals whenever a task's
+    tech_design row was revoked (e.g. task 91864257: status=done, tech_design
+    revoked, accepted approved). That single gap produced 124+ consecutive
+    false-positive skips in Quinn's incident state.
+    """
     base = (base_url or tasks_api_client.get_base_url()).rstrip("/")
     candidates = [
         task
-        for task in pending_approvals.list_tasks(base, [])
+        for task in pending_approvals.list_tasks(base, list(ACTIVE_STATUSES))
         if pending_approvals.needs_tech_design_review(task)
     ]
     approvals = []

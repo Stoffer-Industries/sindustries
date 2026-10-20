@@ -322,6 +322,26 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         self.assertIn("open", list_tasks.call_args.kwargs["status"])
 
+    def test_pending_tech_design_approvals_scopes_to_active_statuses(self):
+        """Regression: an empty status list means NO filter.
+
+        ``pending_approvals.list_tasks`` treats ``[]`` as "no status filter",
+        which pulled terminal tasks into Quinn's approval queue. Task
+        ``91864257`` (status=done, tech_design REVOKED, accepted APPROVED) was
+        surfaced as a phantom approval for 124+ consecutive heartbeats.
+        """
+        with (
+            patch.object(agent_task_queue.pending_approvals, "list_tasks", return_value=[]) as list_tasks,
+            patch.object(agent_task_queue.tasks_api_client, "get_base_url", return_value="http://test/api/v1"),
+        ):
+            agent_task_queue.fetch_pending_tech_design_approvals()
+
+        statuses = list_tasks.call_args.args[1]
+        self.assertEqual(statuses, list(agent_task_queue.ACTIVE_STATUSES))
+        self.assertTrue(statuses)
+        for terminal in ("done", "accepted", "archived"):
+            self.assertNotIn(terminal, statuses)
+
     def test_work_queue_exposes_all_read_only_queue_keys(self):
         queue = agent_task_queue.build_work_queue(
             [implementation_task()],
