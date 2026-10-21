@@ -169,7 +169,13 @@ pre_budget_count="${pre_budget_count:-0}"
 #
 # So probe information_schema.schemata for schema EXISTENCE. Only a
 # genuinely absent schema is a no-op; present-but-empty still gets
-# dropped and recreated.
+# dropped. Cleanup must leave the destination ABSENT, not
+# recreated-empty -- restore.sh's schema-presence guard (added in
+# commit 4d7d4cc0) refuses a destination that already holds either
+# schema, and a `DROP … ; CREATE …;` sequence here would leave it
+# present-but-empty and trip that guard the moment the next restore
+# step runs. Schemas are recreated by pg_restore as part of its own
+# DDL, so cleanup's job is done at "DROP".
 _schema_exists() {
   local dsn="$1" schema="$2" found
   found="$(
@@ -207,7 +213,11 @@ envelope = {
     "tasks_api":  [],
     "budget_api": [],
   },
-  "recreated": ["tasks_api", "budget_api"],
+  "recreated": [],
+  "postCleanup": {
+    "tasks_api":  {"schemaPresent": False},
+    "budget_api": {"schemaPresent": False},
+  },
   "verdict": "SCHEMAS_ABSENT",
 }
 with open(out_path, "w", encoding="utf-8") as fh:
@@ -219,13 +229,23 @@ PY
 fi
 
 # ---------------------------------------------------------------------------
-# Drop and recreate the two service schemas. We use DROP SCHEMA
-# ... CASCADE so the cleanup is atomic per-schema; CREATE SCHEMA
-# recreates the empty targets. We do NOT touch the `public` schema
-# or any role grants — the staging database has no cross-schema
-# dependencies and pg_dump --schema=... --schema=... reproduces the
-# two target schemas on restore, so dropping them here is the
-# minimum surface needed to make restore.sh's non-empty check pass.
+# Drop the two service schemas. We use DROP SCHEMA ... CASCADE so
+# the drop is atomic per-schema. We do NOT recreate them here on
+# purpose: restore.sh's schema-presence guard (added in commit
+# 4d7d4cc0) refuses a destination that already holds either schema,
+# because the plain-format dump leads with `CREATE SCHEMA
+# tasks_api;` and `CREATE SCHEMA budget_api;`. The guard is correct
+# for the post-failure state (where pg_restore left the schema
+# empty-but-present); cleanup must therefore take the destination
+# all the way to ABSENT so the next restore sees a fresh slot. The
+# two schemas are recreated by pg_restore's own DDL during the
+# restore step; cleanup is the precondition, not the substitute.
+#
+# We do NOT touch the `public` schema or any role grants -- the
+# staging database has no cross-schema dependencies and pg_dump
+# --schema=... --schema=... reproduces the two target schemas on
+# restore, so dropping them here is the minimum surface needed to
+# make restore.sh's pre-flight pass.
 # ---------------------------------------------------------------------------
 
 cloud_db_info "cleanup: dropping tasks_api (schema present=${pre_tasks_schema_present}, pre-count=${pre_tasks_count}) and budget_api (schema present=${pre_budget_schema_present}, pre-count=${pre_budget_count})"
@@ -235,51 +255,40 @@ drop_start_epoch="$(date +%s)"
 PGPASSWORD="" psql \
   --no-psqlrc --variable=ON_ERROR_STOP=1 \
   --dbname="$DEST_TASKS_DSN" \
-  --command="DROP SCHEMA IF EXISTS tasks_api CASCADE; CREATE SCHEMA tasks_api;" \
+  --command="DROP SCHEMA IF EXISTS tasks_api CASCADE;" \
   >/dev/null
 
 PGPASSWORD="" psql \
   --no-psqlrc --variable=ON_ERROR_STOP=1 \
   --dbname="$DEST_BUDGET_DSN" \
-  --command="DROP SCHEMA IF EXISTS budget_api CASCADE; CREATE SCHEMA budget_api;" \
+  --command="DROP SCHEMA IF EXISTS budget_api CASCADE;" \
   >/dev/null
 
 drop_end_epoch="$(date +%s)"
 
-# Post-cleanup assertion: both schemas now exist and are empty.
-post_tasks_count="$(
-  PGPASSWORD="" psql \
-    --no-psqlrc --tuples-only --no-align \
-    --variable=ON_ERROR_STOP=1 \
-    --dbname="$DEST_TASKS_DSN" \
-    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema = 'tasks_api';" \
-    2>/dev/null | tr -d '[:space:]'
-)"
-post_budget_count="$(
-  PGPASSWORD="" psql \
-    --no-psqlrc --tuples-only --no-align \
-    --variable=ON_ERROR_STOP=1 \
-    --dbname="$DEST_BUDGET_DSN" \
-    --command="SELECT count(*) FROM information_schema.tables WHERE table_schema = 'budget_api';" \
-    2>/dev/null | tr -d '[:space:]'
-)"
+# Post-cleanup assertion: both schemas must now be ABSENT. The
+# previous version of this script dropped and recreated them empty,
+# leaving them present-but-empty -- which is exactly the state
+# restore.sh's schema-presence guard now refuses (drill run
+# 39594803615 died on this combination). An absent schema is
+# satisfied by a zero-table count too, so this is the only
+# assertion that distinguishes "fresh" from "present but empty".
+post_tasks_present=true
+post_budget_present=true
+if ! _schema_exists "$DEST_TASKS_DSN" tasks_api; then post_tasks_present=false; fi
+if ! _schema_exists "$DEST_BUDGET_DSN" budget_api; then post_budget_present=false; fi
 
-if [[ "$post_tasks_count" != "0" || "$post_budget_count" != "0" ]]; then
+if [[ "$post_tasks_present" != "false" || "$post_budget_present" != "false" ]]; then
   cloud_db_die \
-    "post-cleanup assertion failed: tasks_api has ${post_tasks_count} tables, budget_api has ${post_budget_count}; refusing to proceed"
-fi
-
-# The drop/recreate must have left both schemas PRESENT as well as
-# empty. Assert existence separately: a zero-table count is
-# satisfied by an absent schema too, which is precisely the state
-# that made the next restore die on CREATE SCHEMA.
-if ! _schema_exists "$DEST_TASKS_DSN" tasks_api || ! _schema_exists "$DEST_BUDGET_DSN" budget_api; then
-  cloud_db_die \
-    "post-cleanup assertion failed: a destination schema is absent; refusing to proceed"
+    "post-cleanup assertion failed: tasks_api present=${post_tasks_present}, budget_api present=${post_budget_present}; both must be ABSENT before restore runs. Refusing to proceed -- the previous behavior of leaving present-but-empty would trip restore.sh's schema-presence guard."
 fi
 
 # ---------------------------------------------------------------------------
-# Emit the cleanup envelope
+# Emit the cleanup envelope. Verdict is SCHEMAS_ABSENT (same
+# verdict the no-op early-return emits) so a downstream consumer
+# cannot tell apart "schemas were absent" from "cleanup just dropped
+# them". The `recreated` field records the empty list -- the
+# schemas are recreated by pg_restore, not by cleanup.
 # ---------------------------------------------------------------------------
 
 emitted_path="./artifacts/cloud-staging/cleanup-${CLOUD_DB_RUN_ID}.json"
@@ -287,36 +296,36 @@ mkdir -p "$(dirname "$emitted_path")"
 
 python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" \
         "$pre_tasks_count" "$pre_budget_count" \
-        "$post_tasks_count" "$post_budget_count" \
+        "$pre_tasks_schema_present" "$pre_budget_schema_present" \
         "$drop_start_epoch" "$drop_end_epoch" <<'PY'
 import json, sys
-out_path, run_id, pre_t, pre_b, post_t, post_b, start, end = sys.argv[1:]
+out_path, run_id, pre_t, pre_b, pre_t_present, pre_b_present, start, end = sys.argv[1:]
 envelope = {
   "schemaVersion": 1,
   "kind": "cloud-staging-cleanup-destination",
   "runId": run_id,
   "preCleanup": {
-    "tasks_api":  {"tableCount": int(pre_t),  "schemaPresent": True},
-    "budget_api": {"tableCount": int(pre_b), "schemaPresent": True},
+    "tasks_api":  {"tableCount": int(pre_t), "schemaPresent": pre_t_present == "true"},
+    "budget_api": {"tableCount": int(pre_b), "schemaPresent": pre_b_present == "true"},
   },
   "dropped": {
     "tasks_api":  ["CASCADE"],
     "budget_api": ["CASCADE"],
   },
-  "recreated": ["tasks_api", "budget_api"],
+  "recreated": [],
   "postCleanup": {
-    "tasks_api":  {"tableCount": int(post_t)},
-    "budget_api": {"tableCount": int(post_b)},
+    "tasks_api":  {"schemaPresent": False},
+    "budget_api": {"schemaPresent": False},
   },
   "startEpoch": int(start),
   "endEpoch":   int(end),
   "durationSeconds": int(end) - int(start),
-  "verdict": "CLEANED",
+  "verdict": "SCHEMAS_ABSENT",
 }
 with open(out_path, "w", encoding="utf-8") as fh:
   json.dump(envelope, fh, indent=2, sort_keys=True)
   fh.write("\n")
 PY
 
-cloud_db_info "cleanup: dropped tasks_api (${pre_tasks_count} tables) + budget_api (${pre_budget_count} tables); both recreated empty"
+cloud_db_info "cleanup: dropped tasks_api (${pre_tasks_count} tables) + budget_api (${pre_budget_count} tables); schemas now absent"
 printf '%s\n' "$emitted_path"

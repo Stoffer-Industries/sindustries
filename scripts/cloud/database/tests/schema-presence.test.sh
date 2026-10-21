@@ -73,9 +73,28 @@ flat="$(printf '%s' "$cmd" | tr -s '[:space:]' ' ')"
 
 case "$flat" in
   *"information_schema.schemata"*"schema_name = 'tasks_api'"*)
-      printf '%s\n' "${PSQL_TASKS_SCHEMA_EXISTS:-0}" ;;
+      # Two probes per cleanup: a pre-check before the DROP and a
+      # post-check after. The env var sets the pre state; the stub
+      # always returns "0" for the post-drop probe so the cleanup
+      # script's `_schema_exists` reflects the schemas becoming
+      # absent. Counts persist across runs in $PSQL_PROBE_COUNTER_DIR
+      # so multiple `run_cleanup` invocations in one test each see
+      # their pre+post pair.
+      _n="$(cat "$PSQL_PROBE_COUNTER_DIR/tasks_api" 2>/dev/null || printf '0')"
+      _n=$((_n + 1)); printf '%s' "$_n" > "$PSQL_PROBE_COUNTER_DIR/tasks_api"
+      if [[ "$_n" -le 1 ]]; then
+        printf '%s\n' "${PSQL_TASKS_SCHEMA_EXISTS:-0}"
+      else
+        printf '%s\n' "0"
+      fi ;;
   *"information_schema.schemata"*"schema_name = 'budget_api'"*)
-      printf '%s\n' "${PSQL_BUDGET_SCHEMA_EXISTS:-0}" ;;
+      _n="$(cat "$PSQL_PROBE_COUNTER_DIR/budget_api" 2>/dev/null || printf '0')"
+      _n=$((_n + 1)); printf '%s' "$_n" > "$PSQL_PROBE_COUNTER_DIR/budget_api"
+      if [[ "$_n" -le 1 ]]; then
+        printf '%s\n' "${PSQL_BUDGET_SCHEMA_EXISTS:-0}"
+      else
+        printf '%s\n' "0"
+      fi ;;
   *"information_schema.schemata"*"schema_name IN"*)
       # restore.sh issues this exact query twice: once as the pre-flight
       # guard and once as the post-restore verification. Answer the first
@@ -153,9 +172,17 @@ chmod 0600 "$WORK/secrets"/*.dsn
 RUN_ID="20260101T000000Z-test00"
 
 run_cleanup() {
+  # Recreate the probe counter dir outside the subshell; running it
+  # inside the &&-chain would let it consume the env-prefix
+  # (`PSQL_PROBE_COUNTER_DIR`, `CLOUD_DB_RUN_ID`, etc.) that bash
+  # needs. Each test case wipes this dir with `rm -rf` before
+  # invoking run_cleanup, so the cleanup script sees a fresh slot
+  # that the stub's per-schema probe counters can write into.
+  mkdir -p "$WORK/probe_counts"
   ( cd "$WORK/artifacts" && \
     PATH="$BIN:$PATH" \
     PSQL_SQL_LOG="$WORK/sql.log" PSQL_SCHEMA_IN_COUNT="$WORK/count" \
+    PSQL_PROBE_COUNTER_DIR="$WORK/probe_counts" \
     CLOUD_DB_RUN_ID="$RUN_ID" \
     ENVIRONMENT=staging \
     bash "$CLEANUP_SH" \
@@ -167,12 +194,19 @@ run_cleanup() {
 }
 
 # ---------------------------------------------------------------------------
-# Case 1 — THE REGRESSION. Schema present but EMPTY on both destinations.
-# Before the fix: ALREADY_EMPTY verdict, no DROP issued, next restore dies
-# on CREATE SCHEMA. After: the schemas are dropped and recreated.
+# Case 1 — THE REGRESSION. Schema present but EMPTY on both destinations,
+# then drilled through cleanup-destination.sh: the database is left
+# present-but-empty by a prior failed pg_restore. Pre-fix and pre-4d7d4cc0
+# the cleanup used a table-count probe, decided nothing-to-drop, and the
+# next restore died on CREATE SCHEMA. Post-4d7d4cc0 cleanup-destination.sh
+# dropped but RECREATED them empty, so restore.sh's new schema-presence
+# guard then died instead (drill run 39594803615). The right behaviour:
+# cleanup drops and leaves the destination ABSENT -- pg_restore recreates
+# the two schemas as part of its own DDL.
 # ---------------------------------------------------------------------------
 
 rm -f "$WORK/count"
+rm -rf "$WORK/probe_counts"
 : > "$WORK/sql.log"
 out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_BUDGET_TABLE_COUNT=0 \
        PSQL_TASKS_SCHEMA_EXISTS=1 PSQL_BUDGET_SCHEMA_EXISTS=1 \
@@ -185,11 +219,37 @@ else
   printf '%s\n' "$out" | sed 's/^/      /'
 fi
 
+if grep -q "CREATE SCHEMA" "$WORK/sql.log"; then
+  fail "cleanup recreated the schemas after dropping -- present-but-empty would trip restore.sh's schema-presence guard (drill run 39594803615)"
+  printf '%s\n' "$out" | sed 's/^/      /'
+else
+  pass "cleanup does not recreate the schemas it just dropped (drill run 39594803615 regression)"
+fi
+
 envelope="$(find "$WORK/artifacts" -name "cleanup-${RUN_ID}.json" -type f 2>/dev/null | head -1)"
 if [[ -n "$envelope" ]] && grep -q '"verdict": "SCHEMAS_ABSENT"' "$envelope"; then
-  fail "cleanup reported SCHEMAS_ABSENT while both schemas existed"
+  pass "cleanup records SCHEMAS_ABSENT verdict after dropping present-but-empty schemas"
 else
-  pass "cleanup does not report SCHEMAS_ABSENT when schemas exist"
+  fail "cleanup did not record SCHEMAS_ABSENT after dropping present-but-empty schemas"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+# Envelope must show recreated:[] (not the older ["tasks_api","budget_api"]
+# the pre-fix version emitted), so a downstream consumer can tell that
+# cleanup did not recreate anything -- pg_restore is the only thing that
+# should land CREATE SCHEMA in the catalogue after this step.
+if [[ -n "$envelope" ]] && python3 -c "import json,sys; d=json.load(open('$envelope')); sys.exit(0 if d.get('recreated') == [] else 1)" 2>/dev/null; then
+  pass "envelope records recreated=[] (cleanup is not the source of CREATE SCHEMA)"
+else
+  fail "envelope did not record recreated=[] -- a future change reintroducing recreate-empty would not be caught here"
+fi
+
+# Both schemas' post-cleanup state must be ABSENT (postCleanup.schemaPresent
+# is False for both), so the next restore step sees a fresh slot.
+if [[ -n "$envelope" ]] && python3 -c "import json,sys; d=json.load(open('$envelope')); pa=d.get('postCleanup',{}).get('tasks_api',{}).get('schemaPresent'); pb=d.get('postCleanup',{}).get('budget_api',{}).get('schemaPresent'); sys.exit(0 if pa is False and pb is False else 1)" 2>/dev/null; then
+  pass "envelope records both postCleanup.schemaPresent=False"
+else
+  fail "envelope did not record both post-cleanup schemas as absent"
 fi
 
 # ---------------------------------------------------------------------------
@@ -199,6 +259,7 @@ fi
 # ---------------------------------------------------------------------------
 
 rm -f "$WORK/count"
+rm -rf "$WORK/probe_counts"
 : > "$WORK/sql.log"
 rm -f "$WORK/artifacts/cleanup-${RUN_ID}.json"
 out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_BUDGET_TABLE_COUNT=0 \
@@ -219,11 +280,23 @@ else
   printf '%s\n' "$out" | sed 's/^/      /'
 fi
 
+# No-op path must also record recreated=[] (not the older
+# ["tasks_api","budget_api"] the pre-fix code emitted, which lied about
+# what happened -- the no-op did not recreate anything).
+if [[ -n "$envelope" ]] && python3 -c "import json,sys; d=json.load(open('$envelope')); sys.exit(0 if d.get('recreated') == [] else 1)" 2>/dev/null; then
+  pass "fresh-destination envelope records recreated=[] (no-op did not recreate)"
+else
+  fail "fresh-destination envelope did not record recreated=[]"
+fi
+
 # ---------------------------------------------------------------------------
-# Case 3 — One schema present, one absent. The asymmetric state: must drop.
+# Case 3 — One schema present, one absent. The asymmetric state: must drop
+# the present one without touching the already-absent one, and the
+# destination must be ABSENT after cleanup so restore.sh sees a fresh slot.
 # ---------------------------------------------------------------------------
 
 rm -f "$WORK/count"
+rm -rf "$WORK/probe_counts"
 : > "$WORK/sql.log"
 rm -f "$WORK/artifacts/cleanup-${RUN_ID}.json"
 out="$(PSQL_TASKS_TABLE_COUNT=0 PSQL_BUDGET_TABLE_COUNT=0 \
@@ -234,6 +307,20 @@ if grep -q "DROP SCHEMA" "$WORK/sql.log"; then
   pass "cleanup drops when exactly one destination schema exists"
 else
   fail "cleanup skipped the DROP when exactly one schema existed -- regression"
+  printf '%s\n' "$out" | sed 's/^/      /'
+fi
+
+if grep -q "CREATE SCHEMA" "$WORK/sql.log"; then
+  fail "cleanup recreated the schemas after dropping (asymmetric case)"
+else
+  pass "cleanup does not recreate (asymmetric case)"
+fi
+
+envelope="$(find "$WORK/artifacts" -name "cleanup-${RUN_ID}.json" -type f 2>/dev/null | head -1)"
+if [[ -n "$envelope" ]] && grep -q '"verdict": "SCHEMAS_ABSENT"' "$envelope"; then
+  pass "asymmetric cleanup records SCHEMAS_ABSENT verdict"
+else
+  fail "asymmetric cleanup did not record SCHEMAS_ABSENT"
   printf '%s\n' "$out" | sed 's/^/      /'
 fi
 
@@ -250,10 +337,12 @@ sha="$(PATH="$BIN:$PATH" sha256sum "$archive" | awk '{print $1}')"
 rm -f "$WORK/count"
 : > "$WORK/sql.log"
 set +e
+mkdir -p "$WORK/probe_counts"
 restore_out="$(
   cd "$WORK/artifacts" && \
   PATH="$BIN:$PATH" \
   PSQL_SQL_LOG="$WORK/sql.log" PSQL_SCHEMA_IN_COUNT="$WORK/count" \
+  PSQL_PROBE_COUNTER_DIR="$WORK/probe_counts" \
   CLOUD_DB_RUN_ID="$RUN_ID" \
   ENVIRONMENT=staging \
   PSQL_RESTORE_TABLE_COUNT=0 \
@@ -289,10 +378,12 @@ fi
 rm -f "$WORK/count"
 : > "$WORK/sql.log"
 set +e
+mkdir -p "$WORK/probe_counts"
 restore_ok="$(
   cd "$WORK/artifacts" && \
   PATH="$BIN:$PATH" \
   PSQL_SQL_LOG="$WORK/sql.log" PSQL_SCHEMA_IN_COUNT="$WORK/count" \
+  PSQL_PROBE_COUNTER_DIR="$WORK/probe_counts" \
   CLOUD_DB_RUN_ID="$RUN_ID" \
   ENVIRONMENT=staging \
   bash "$RESTORE_SH" \
