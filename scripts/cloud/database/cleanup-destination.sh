@@ -158,11 +158,38 @@ pre_budget_count="$(
 )"
 pre_budget_count="${pre_budget_count:-0}"
 
-# If both schemas are already empty, the cleanup is a no-op. Still
-# record the envelope so the audit trail is complete and the
-# operator sees the explicit "already clean" verdict.
-if [[ "$pre_tasks_count" == "0" && "$pre_budget_count" == "0" ]]; then
-  cloud_db_info "cleanup: both destination schemas already empty; nothing to drop"
+# Table counts alone cannot decide whether the destination is fresh.
+# A failed pg_restore creates the schema and then dies before it
+# creates any table, leaving the schema present but EMPTY -- invisible
+# to information_schema.tables, and fatal to the next restore, because
+# the plain-format dump leads with `CREATE SCHEMA budget_api;`. That is
+# exactly how drill run 39583824097 died on
+# `schema "budget_api" already exists` immediately after cleanup
+# reported "both destination schemas already empty; nothing to drop".
+#
+# So probe information_schema.schemata for schema EXISTENCE. Only a
+# genuinely absent schema is a no-op; present-but-empty still gets
+# dropped and recreated.
+_schema_exists() {
+  local dsn="$1" schema="$2" found
+  found="$(
+    PGPASSWORD="" psql \
+      --no-psqlrc --tuples-only --no-align \
+      --variable=ON_ERROR_STOP=1 \
+      --dbname="$dsn" \
+      --command="SELECT count(*) FROM information_schema.schemata WHERE schema_name = '${schema}';" \
+    2>/dev/null | tr -d '[:space:]'
+  )"
+  [[ "${found:-0}" != "0" ]]
+}
+
+pre_tasks_schema_present=false
+pre_budget_schema_present=false
+if _schema_exists "$DEST_TASKS_DSN" tasks_api; then pre_tasks_schema_present=true; fi
+if _schema_exists "$DEST_BUDGET_DSN" budget_api; then pre_budget_schema_present=true; fi
+
+if [[ "$pre_tasks_schema_present" == "false" && "$pre_budget_schema_present" == "false" ]]; then
+  cloud_db_info "cleanup: neither destination schema exists; nothing to drop"
   emitted_path="./artifacts/cloud-staging/cleanup-${CLOUD_DB_RUN_ID}.json"
   mkdir -p "$(dirname "$emitted_path")"
   python3 - "$emitted_path" "$CLOUD_DB_RUN_ID" "$pre_tasks_count" "$pre_budget_count" <<'PY'
@@ -173,15 +200,15 @@ envelope = {
   "kind": "cloud-staging-cleanup-destination",
   "runId": run_id,
   "preCleanup": {
-    "tasks_api":  {"tableCount": int(pre_tasks)},
-    "budget_api": {"tableCount": int(pre_budget)},
+    "tasks_api":  {"tableCount": int(pre_tasks), "schemaPresent": False},
+    "budget_api": {"tableCount": int(pre_budget), "schemaPresent": False},
   },
   "dropped": {
     "tasks_api":  [],
     "budget_api": [],
   },
   "recreated": ["tasks_api", "budget_api"],
-  "verdict": "ALREADY_EMPTY",
+  "verdict": "SCHEMAS_ABSENT",
 }
 with open(out_path, "w", encoding="utf-8") as fh:
   json.dump(envelope, fh, indent=2, sort_keys=True)
@@ -201,7 +228,7 @@ fi
 # minimum surface needed to make restore.sh's non-empty check pass.
 # ---------------------------------------------------------------------------
 
-cloud_db_info "cleanup: dropping tasks_api (pre-count=${pre_tasks_count}) and budget_api (pre-count=${pre_budget_count})"
+cloud_db_info "cleanup: dropping tasks_api (schema present=${pre_tasks_schema_present}, pre-count=${pre_tasks_count}) and budget_api (schema present=${pre_budget_schema_present}, pre-count=${pre_budget_count})"
 
 drop_start_epoch="$(date +%s)"
 
@@ -242,6 +269,15 @@ if [[ "$post_tasks_count" != "0" || "$post_budget_count" != "0" ]]; then
     "post-cleanup assertion failed: tasks_api has ${post_tasks_count} tables, budget_api has ${post_budget_count}; refusing to proceed"
 fi
 
+# The drop/recreate must have left both schemas PRESENT as well as
+# empty. Assert existence separately: a zero-table count is
+# satisfied by an absent schema too, which is precisely the state
+# that made the next restore die on CREATE SCHEMA.
+if ! _schema_exists "$DEST_TASKS_DSN" tasks_api || ! _schema_exists "$DEST_BUDGET_DSN" budget_api; then
+  cloud_db_die \
+    "post-cleanup assertion failed: a destination schema is absent; refusing to proceed"
+fi
+
 # ---------------------------------------------------------------------------
 # Emit the cleanup envelope
 # ---------------------------------------------------------------------------
@@ -260,8 +296,8 @@ envelope = {
   "kind": "cloud-staging-cleanup-destination",
   "runId": run_id,
   "preCleanup": {
-    "tasks_api":  {"tableCount": int(pre_t)},
-    "budget_api": {"tableCount": int(pre_b)},
+    "tasks_api":  {"tableCount": int(pre_t),  "schemaPresent": True},
+    "budget_api": {"tableCount": int(pre_b), "schemaPresent": True},
   },
   "dropped": {
     "tasks_api":  ["CASCADE"],
