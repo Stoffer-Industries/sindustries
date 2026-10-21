@@ -126,9 +126,11 @@ if [[ "${existing_objects// /}" != "0" ]]; then
     "destination is not empty (existing object count: ${existing_objects}); refusing to overwrite"
 fi
 
-# Table count is not the same as freshness. The archive is plain-format
-# SQL whose first DDL is `CREATE SCHEMA tasks_api; CREATE SCHEMA
-# budget_api;`, so a destination where either schema EXISTS is
+# Table count is not the same as freshness. The archive is a
+# custom-format dump (`pg_dump --format=custom`) whose TOC carries
+# `tasks_api` and `budget_api` as SCHEMA entries, so pg_restore
+# issues `CREATE SCHEMA <name>;` for each before any table DDL.
+# A destination where either schema EXISTS is therefore
 # incompatible with the archive even when it holds zero tables --
 # pg_restore dies on `schema "budget_api" already exists` and takes
 # the whole drill with it.
@@ -147,7 +149,7 @@ existing_schemas="$(
 )"
 if [[ -n "${existing_schemas:-}" ]]; then
   cloud_db_die \
-    "destination already contains schema(s): ${existing_schemas}; a plain-format archive cannot restore into it because its CREATE SCHEMA statements will collide. Re-run with --cleanup-destination (or drop the listed schema(s)) before restoring"
+    "destination already contains schema(s): ${existing_schemas}; pg_restore cannot apply its TOC's SCHEMA entries into a destination that already holds them (custom-format archives issue CREATE SCHEMA before any table DDL). Re-run with --cleanup-destination (or drop the listed schema(s)) before restoring"
 fi
 
 RESULT_DIR="${RESULT_DIR:-./artifacts/cloud-staging}"

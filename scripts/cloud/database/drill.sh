@@ -151,11 +151,11 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 2.5: optional destination cleanup (operator only). The
-# cleanup-destination.sh script drops and recreates the tasks_api
-# and budget_api schemas in the destination database so restore.sh
-# sees a fresh, empty target. The two-key auth (CLI flag + env
-# var) is enforced in cleanup-destination.sh itself; the drill
-# orchestrator just decides whether to invoke it.
+# cleanup-destination.sh script drops the tasks_api and budget_api
+# schemas and leaves them absent; pg_restore recreates them as part
+# of its own DDL during the restore step. The two-key auth (CLI
+# flag + env var) is enforced in cleanup-destination.sh itself;
+# the drill orchestrator just decides whether to invoke it.
 # ---------------------------------------------------------------------------
 
 CLEANUP_OUT=""
