@@ -46,3 +46,9 @@ infra/cloud/.env.local
 
 # Local heartbeat evidence (not committed; referenced from task comments)
 .heartbeat-evidence/
+
+# Tool state written into the checkout by CLIs invoked with cwd inside the repo.
+# `gh` without GH_CONFIG_DIR creates .local/state/gh/device-id; an untracked path
+# trips is_clean() and blocks Edge's fail-closed ff-only refresh of the canonical
+# checkout (see infra/runbooks/shared-worktree-state.md).
+.local/
