@@ -168,6 +168,41 @@ jobs:
             --archive-dir "$RUNNER_TEMP/cloud-staging-artifacts" \
             --output      "$RUNNER_TEMP/cloud-staging-artifacts/drill-final.json"
 
+      - name: Capture restore failure logs
+        if: failure()
+        run: |
+          set -euo pipefail
+          # On any drill failure, the pg_restore log lives at a relative
+          # path (`./artifacts/cloud-staging/restore-*.log`) that the
+          # upload step globs do not pick up. Copy every restore log the
+          # drill wrote into the upload directory so the actual
+          # pg_restore error text surfaces as an artifact, and tail the
+          # last one into the step summary so it is visible inline in
+          # the GitHub UI without downloading.
+          mkdir -p "$RUNNER_TEMP/cloud-staging-artifacts"
+          shopt -s nullglob
+          found=0
+          for src_log in ./artifacts/cloud-staging/restore-*.log \
+                          "$RUNNER_TEMP/cloud-staging-artifacts/restore-"*.log; do
+            [ -e "$src_log" ] || continue
+            cp -v "$src_log" "$RUNNER_TEMP/cloud-staging-artifacts/" || true
+            found=1
+          done
+          if (( found == 1 )); then
+            last="$(ls -1t "$RUNNER_TEMP/cloud-staging-artifacts/restore-"*.log 2>/dev/null | head -n1 || true)"
+            if [ -n "$last" ] && [ -e "$last" ]; then
+              {
+                echo "### restore failure detail"
+                echo
+                echo "Source log: \`${last##*/}\`"
+                echo
+                echo '```'
+                tail -300 "$last" || true
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
       - name: Upload redacted result bundle
         if: always()
         uses: actions/upload-artifact@v4
