@@ -277,6 +277,25 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 **Ownership and verification (production):**
 
 - Quinn generates `TELEMETRY_RELAY_TOKEN` (Vercel) and `VITE_TELEMETRY_TOKEN` (build-time) with the same value, sets `VITE_TELEMETRY_ENABLED=1` in the Vercel env, and re-runs `bash infra/cloud/observability/bootstrap-observability.sh dashboards` to (re)provision the dashboard.
+
+  **The generated value never appears in a tracked or public artifact.** This repository is public, and a token pasted into a PR body, review, inline comment, task comment, or chat message is permanently published — `gitleaks` scans commit diffs, not comment bodies, so CI stays green on a leaked value. Every step that handles a generated secret is therefore stated as *variable name + destination + mode*, never as a value:
+
+  | variable | destination | how the value gets there |
+  | --- | --- | --- |
+  | `TELEMETRY_RELAY_TOKEN` | GymTrack Vercel project, `production` | written to `infra/cloud/observability/.env.local` (mode `0600`, excluded via `.git/info/exclude`), then `vercel env add TELEMETRY_RELAY_TOKEN production --sensitive` reading from that file — never retyped from a message |
+  | `VITE_TELEMETRY_TOKEN` | GymTrack Vercel project, `production` | the **same** value as above; `--no-sensitive`, because it ships inside the browser bundle by design |
+  | `VITE_TELEMETRY_ENABLED` | GymTrack Vercel project, `production` | literal `1` |
+
+  Confirm both arms hold the same value without printing either one — fingerprints only:
+
+  ```bash
+  for v in TELEMETRY_RELAY_TOKEN VITE_TELEMETRY_TOKEN; do
+    printf '%s ' "$v"
+    grep "^${v}=" infra/cloud/observability/.env.local | cut -d= -f2- | tr -d '\n' | shasum -a 256 | cut -c1-8
+  done
+  ```
+
+  Equal fingerprints mean the pair is wired consistently. Unequal fingerprints mean one arm was sourced from somewhere other than the local file, and that arm must be re-set from the file. If an older value was ever pasted into a public artifact, rotate rather than reuse it: nothing should be provisioned from a value that has appeared in a thread.
 - Quinn induces a wrong-password sign-in on the production host, then captures a real uncaught browser exception by pasting this into the devtools console on that same production page:
 
   ```js
