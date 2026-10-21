@@ -175,18 +175,26 @@ jobs:
           # On any drill failure, the pg_restore log lives at a relative
           # path (`./artifacts/cloud-staging/restore-*.log`) that the
           # upload step globs do not pick up. Copy every restore log the
-          # drill wrote into the upload directory so the actual
-          # pg_restore error text surfaces as an artifact, and tail the
-          # last one into the step summary so it is visible inline in
-          # the GitHub UI without downloading.
+          # drill wrote into the upload directory, and tail the last one
+          # into the step summary so it is visible inline in the GitHub
+          # UI without downloading.
+          #
+          # Copying into the upload directory is necessary but NOT
+          # sufficient: `upload-artifact` packs only files matching the
+          # upload step's own `path:` globs. `if: always()` on that step
+          # is a run condition (whether the step executes), independent
+          # of which files it packs. Both halves are required — this step
+          # moves the file into the directory, and the `*.log` glob on the
+          # upload step below is what actually puts it in the artifact.
           mkdir -p "$RUNNER_TEMP/cloud-staging-artifacts"
           shopt -s nullglob
           found=0
           for src_log in ./artifacts/cloud-staging/restore-*.log \
                           "$RUNNER_TEMP/cloud-staging-artifacts/restore-"*.log; do
             [ -e "$src_log" ] || continue
-            cp -v "$src_log" "$RUNNER_TEMP/cloud-staging-artifacts/" || true
-            found=1
+            if cp -v "$src_log" "$RUNNER_TEMP/cloud-staging-artifacts/"; then
+              found=1
+            fi
           done
           if (( found == 1 )); then
             last="$(ls -1t "$RUNNER_TEMP/cloud-staging-artifacts/restore-"*.log 2>/dev/null | head -n1 || true)"
@@ -211,6 +219,7 @@ jobs:
           path: |
             ${{ runner.temp }}/cloud-staging-artifacts/*.json
             ${{ runner.temp }}/cloud-staging-artifacts/*.sha256
+            ${{ runner.temp }}/cloud-staging-artifacts/*.log
           retention-days: 14
           if-no-files-found: warn
 
