@@ -126,6 +126,30 @@ if [[ "${existing_objects// /}" != "0" ]]; then
     "destination is not empty (existing object count: ${existing_objects}); refusing to overwrite"
 fi
 
+# Table count is not the same as freshness. The archive is plain-format
+# SQL whose first DDL is `CREATE SCHEMA tasks_api; CREATE SCHEMA
+# budget_api;`, so a destination where either schema EXISTS is
+# incompatible with the archive even when it holds zero tables --
+# pg_restore dies on `schema "budget_api" already exists` and takes
+# the whole drill with it.
+#
+# A prior failed restore lands in exactly that state: restore.sh
+# creates the schema, then fails before creating any table. This is
+# the guard that should have caught it before pg_restore ran. Fail
+# here, with the operator fix named, instead of 200 lines into a log.
+existing_schemas="$(
+  PGPASSWORD="" psql \
+    --no-psqlrc --tuples-only --no-align \
+    --variable=ON_ERROR_STOP=1 \
+    --dbname="$DEST_DSN" \
+    --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','budget_api');" \
+  2>/dev/null | tr -d '[:space:]'
+)"
+if [[ -n "${existing_schemas:-}" ]]; then
+  cloud_db_die \
+    "destination already contains schema(s): ${existing_schemas}; a plain-format archive cannot restore into it because its CREATE SCHEMA statements will collide. Re-run with --cleanup-destination (or drop the listed schema(s)) before restoring"
+fi
+
 RESULT_DIR="${RESULT_DIR:-./artifacts/cloud-staging}"
 mkdir -p "$RESULT_DIR"
 
