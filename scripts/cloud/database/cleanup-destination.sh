@@ -162,10 +162,12 @@ pre_budget_count="${pre_budget_count:-0}"
 # A failed pg_restore creates the schema and then dies before it
 # creates any table, leaving the schema present but EMPTY -- invisible
 # to information_schema.tables, and fatal to the next restore, because
-# the plain-format dump leads with `CREATE SCHEMA budget_api;`. That is
-# exactly how drill run 39583824097 died on
-# `schema "budget_api" already exists` immediately after cleanup
-# reported "both destination schemas already empty; nothing to drop".
+# the archive carries `tasks_api` and `budget_api` as SCHEMA entries in
+# its TOC, so pg_restore issues `CREATE SCHEMA <name>;` for each
+# before any table DDL. That is exactly how drill run 39583824097
+# died on `schema "budget_api" already exists` immediately after
+# cleanup reported "both destination schemas already empty; nothing
+# to drop".
 #
 # So probe information_schema.schemata for schema EXISTENCE. Only a
 # genuinely absent schema is a no-op; present-but-empty still gets
@@ -233,8 +235,9 @@ fi
 # the drop is atomic per-schema. We do NOT recreate them here on
 # purpose: restore.sh's schema-presence guard (added in commit
 # 4d7d4cc0) refuses a destination that already holds either schema,
-# because the plain-format dump leads with `CREATE SCHEMA
-# tasks_api;` and `CREATE SCHEMA budget_api;`. The guard is correct
+# because the archive carries `tasks_api` and `budget_api` as SCHEMA
+# entries in its TOC, so pg_restore issues `CREATE SCHEMA <name>;`
+# for each before any table DDL. The guard is correct
 # for the post-failure state (where pg_restore left the schema
 # empty-but-present); cleanup must therefore take the destination
 # all the way to ABSENT so the next restore sees a fresh slot. The
