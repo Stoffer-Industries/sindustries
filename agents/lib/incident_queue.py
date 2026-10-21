@@ -179,7 +179,7 @@ def render_text(queue: dict[str, Any], *, verbose: bool = False) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=_first_line(__doc__))
     parser.add_argument("--workspace", default=None, help="workspace root holding brain/state/")
     parser.add_argument("--json", action="store_true", help="emit the structured queue")
     parser.add_argument("--verbose", action="store_true", help="list every actionable entry")
