@@ -167,8 +167,16 @@ The probed set and the shapes below come from one table in the script (`endpoint
 | `grafana_instance` | `GRAFANA_CLOUD_INSTANCE_URL` | `grafana-instance` | https://<stack>.grafana.net — stack base URL only, no trailing path |
 | `otlp_endpoint` | `GRAFANA_CLOUD_OTLP_ENDPOINT` | `otlp-endpoint` | https://<host> (Grafana Cloud serves OTLP under /otlp/v1/*) or https://<host>/v1/ |
 | `loki_push` | `GRAFANA_CLOUD_LOKI_ENDPOINT` | `loki-push-endpoint` | OPTIONAL — https://<logs-host>/loki/api/v1/push — set on multi-host tenants, where Loki push is a different host from OTLP |
+| `gymtrack_relay` | `GYMTRACK_RELAY_BASE_URL` | `gymtrack-telemetry-relay` | OPTIONAL — https://<gymtrack-host> — SPA base URL, no trailing path; validate probes <base>/api/telemetry |
 | `fly_api` | `(fixed — no env var)` | `fly-api` | https://api.fly.io/ — no path, no credentials in the URL |
 <!-- END generated: bootstrap-observability endpoint table -->
+
+**The GymTrack relay probe is the one row whose verdict is not decided by the status code.** Every other row in the table classifies an HTTP status, because for those endpoints the status is the signal. `/api/telemetry` is different: the deployed GymTrack site runs an SPA catch-all rewrite, so a request for a path that has no function behind it comes back as a successful `200` serving `index.html` — a "reachable" answer that means the opposite of what it looks like. Two counter-examples, both reproduced against production, pin down why the obvious rule is wrong:
+
+- A route that exists nowhere answers `405` on a `POST` — the same status a real POST-only function returns. Status alone cannot distinguish routed from unrouted.
+- `x-vercel-cache` is `MISS` for a routed `GET` and for an unrouted `GET` alike, so that header discriminates nothing either.
+
+The discriminator is the response shape. A real function answers with a JSON `content-type` **and** an `allow:` header (a `GET` on the POST-only relay returns `405` + `Allow: POST` + a JSON body), while the catch-all stamps `content-disposition: inline; filename="index.html"` on the built index. So `gymtrack_relay` reports `routed` (passes), `spa-catch-all` (fails — the function is not deployed, or the rewrite shadows it), or `not-a-function` (fails — a `405` with neither JSON nor `allow:`, the unrouted-counter-example shape). The probe is unauthenticated and read-only; it sends no token and receives no body.
 
 **Reading the output.** Probes are unauthenticated by design, which is what makes a 401 informative rather than masked — a correctly configured Grafana Cloud instance answers an anonymous probe with `401`, a redirect to the login wall, or `405` on the POST-only Loki push path. All three are reported as `[OK]`. Only a genuinely unusable endpoint fails pre-flight:
 
