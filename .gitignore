@@ -1,6 +1,8 @@
 .DS_Store
 node_modules/
 **/node_modules/
+# Sandbox / editor backups (root-level catch-all; scoped *.bak* entries remain in services/*).
+*.bak
 **/dist/
 # Rust build artifacts (e.g. agents/workflows/feature-task/target/ at 589 MB)
 target/
