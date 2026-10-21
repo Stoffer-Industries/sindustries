@@ -17,9 +17,13 @@
 #
 # SUBCOMMANDS
 #   validate    Pre-flight check: source .env.local, list required vars,
-#               report which are missing. Exits with the missing count.
-#               Does NOT require Fly or Grafana access. Safe to run as
-#               Tom hands over each secret.
+#               report which are missing, then resolve each configured
+#               endpoint with a read-only reachability probe and name any
+#               var that points somewhere unusable. Exits with the missing
+#               count, or with the failed-endpoint count when every var is
+#               present. Set PROBE_SKIP_NETWORK=1 for an air-gapped run.
+#               Does NOT require Fly or Grafana access — probes are
+#               unauthenticated, so a 401 is reported as healthy.
 #   secrets     Set Fly secrets from .env.local on the health-probe app.
 #   dashboards  Upload dashboard JSONs to the hosted Grafana.
 #   alerts      Upload alert rule JSONs to the hosted Grafana.
@@ -81,9 +85,13 @@ USAGE
 
 SUBCOMMANDS
   validate    Pre-flight check: source .env.local, list required vars,
-              report which are missing. Exits with the missing count.
-              Does NOT require Fly or Grafana access. Safe to run as
-              Tom hands over each secret.
+              report which are missing, then resolve each configured
+              endpoint with a read-only reachability probe and name any
+              var that points somewhere unusable. Exits with the missing
+              count, or with the failed-endpoint count when every var is
+              present. Set PROBE_SKIP_NETWORK=1 for an air-gapped run.
+              Does NOT require Fly or Grafana access — probes are
+              unauthenticated, so a 401 is reported as healthy.
   app         Create the Fly app (sindustries-health-probe-staging)
               if it doesn't already exist. Idempotent.
   secrets     Set Fly secrets from .env.local on the health-probe app.
@@ -160,6 +168,297 @@ REQUIRED_VARS=(
   HEALTH_PROBE_FLY_APPS
   HEALTH_PROBE_REDIS
 )
+
+# ---------------------------------------------------------------------------
+# Endpoint resolution (task f3909b89)
+#
+# `validate` used to prove only that the vars above are *populated*, never
+# that the URLs they point at resolve. Five defects behind PR #836's AC4
+# live-verification step were invisible to a green pre-flight for exactly
+# that reason — each surfaced hours later as "telemetry is broken", pointing
+# at the transport instead of at a misconfigured endpoint.
+#
+# ENDPOINT_SPECS is the single source of truth for BOTH the reachability
+# probes and the generated documentation block (render_endpoint_docs), so a
+# var that exists in code cannot be missing from every doc. That is the
+# `GRAFANA_CLOUD_LOKI_ENDPOINT` gap that motivated this task.
+#
+# Fields are pipe-delimited; no field may contain '|':
+#   <id>|<role>|<url-source>|<required shape>
+#
+# <url-source> is one of:
+#   env:<VAR>            base URL comes from <VAR>
+#   env:<VAR>;derive-loki-push
+#                        use <VAR> when set; when unset, derive the Loki
+#                        push URL from GRAFANA_CLOUD_OTLP_ENDPOINT using the
+#                        same strict rule the relay applies
+#   literal:<URL>        a fixed endpoint, no env var
+#
+# The table is a function rather than an array so the values are read once
+# per run (endpoint specs are read from a here-doc, not evaluated at
+# declaration time before source_env_local has populated the environment).
+ENDPOINT_DOCS_MARKER='bootstrap-observability endpoint table'
+
+endpoint_specs() {
+  cat <<'ENDPOINTS'
+grafana_instance|grafana-instance|env:GRAFANA_CLOUD_INSTANCE_URL|https://<stack>.grafana.net — stack base URL only, no trailing path
+otlp_endpoint|otlp-endpoint|env:GRAFANA_CLOUD_OTLP_ENDPOINT|https://<host> (Grafana Cloud serves OTLP under /otlp/v1/*) or https://<host>/v1/
+loki_push|loki-push-endpoint|env:GRAFANA_CLOUD_LOKI_ENDPOINT;derive-loki-push|OPTIONAL — https://<logs-host>/loki/api/v1/push — set on multi-host tenants, where Loki push is a different host from OTLP
+fly_api|fly-api|literal:https://api.fly.io/|https://api.fly.io/ — no path, no credentials in the URL
+ENDPOINTS
+}
+
+# Strips userinfo and any query string from a URL before it is printed or
+# probed. AC4: probe output must never carry a secret, and an operator can
+# legitimately write credentials into a URL by mistake.
+sanitize_url() {
+  printf '%s' "$1" | sed -E -e 's#^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@]*@#\1#' -e 's#\?.*$##'
+}
+
+# Splits a base URL into URL_SCHEME / URL_HOST / URL_PATH. URL_PATH is ''
+# when the URL has no path at all — which is the *production* Grafana Cloud
+# OTLP shape, so the bare-host case must not be treated as malformed.
+split_url() {
+  local base="${1:-}" scheme_host
+  base="${base%/}"
+  case "${base}" in
+    *://*) ;;
+    *) return 1 ;;
+  esac
+  URL_SCHEME="${base%%://*}"
+  scheme_host="${base#*://}"
+  URL_HOST="${scheme_host%%/*}"
+  case "${scheme_host}" in
+    */*) URL_PATH="/${scheme_host#*/}" ;;
+    *) URL_PATH='' ;;
+  esac
+}
+
+# Mirrors the relay's lokiPushUrl(): only a base whose entire path is
+# /v1[-{traces,metrics,logs}] is rewritten. A bare host, an /otlp prefix,
+# or any multi-segment path is NOT derivable — the relay would return
+# 502 misconfigured_loki_endpoint for those, so validate reports it here.
+# Returns 1 when no Loki push URL can be derived.
+loki_push_url() {
+  local base="${1:-}"
+  split_url "${base}" || return 1
+  case "${URL_PATH}" in
+    /v1|/v1/traces|/v1/metrics|/v1/logs)
+      printf '%s://%s/loki/api/v1/push' "${URL_SCHEME}" "${URL_HOST}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Probes the OTLP traces path rather than the configured base, because the
+# base alone is not a route: Grafana Cloud serves /otlp/v1/* on a bare host
+# while a single-host collector serves /v1/*. Either way a GET returns 405
+# (that path is POST-only) or 401, both of which prove the path exists.
+otlp_probe_url() {
+  local base="${1:-}"
+  split_url "${base}" || return 1
+  case "${URL_PATH}" in
+    "")
+      printf '%s://%s/otlp/v1/traces' "${URL_SCHEME}" "${URL_HOST}"
+      ;;
+    /v1)
+      printf '%s://%s/v1/traces' "${URL_SCHEME}" "${URL_HOST}"
+      ;;
+    *)
+      printf '%s://%s%s/traces' "${URL_SCHEME}" "${URL_HOST}" "${URL_PATH}"
+      ;;
+  esac
+}
+
+# Echoes the URL to probe for <id> given its <url-source>.
+#   exit 0 — URL printed
+#   exit 1 — endpoint not configured (optional var unset); caller skips it
+#   exit 2 — endpoint configured but no probe URL is derivable from it
+endpoint_probe_url() {
+  local id="$1" source="$2" var fallback base
+  case "${source}" in
+    literal:*)
+      printf '%s' "${source#literal:}"
+      ;;
+    env:*)
+      var="${source#env:}"
+      var="${var%%;*}"
+      if [ "${source}" = "${var}" ]; then
+        fallback=''
+      else
+        fallback="${source#*;}"
+      fi
+      base="${!var:-}"
+      if [ -z "${base}" ]; then
+        if [ "${fallback}" = 'derive-loki-push' ]; then
+          loki_push_url "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}" || return 2
+          return 0
+        fi
+        return 1
+      fi
+      case "${id}" in
+        grafana_instance)
+          printf '%s/api/health' "${base%/}"
+          ;;
+        otlp_endpoint)
+          otlp_probe_url "${base}" || return 2
+          ;;
+        *)
+          # loki_push and anything else: probe the configured value verbatim,
+          # which is what the relay actually posts to.
+          printf '%s' "${base}"
+          ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# No --fail: the status code IS the signal. --fail would collapse every
+# taxonomy code below into exit 22 and destroy the AC2 oracle. Bodies are
+# discarded so a misconfigured endpoint cannot spill content into
+# operator scrollback.
+probe_status() {
+  local url="$1" status
+  status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --max-time "${PROBE_TIMEOUT:-10}" \
+    --connect-timeout 5 \
+    "${url}" 2>/dev/null)" || status='000'
+  [ -n "${status}" ] || status='000'
+  printf '%s' "${status}"
+}
+
+classify_probe_status() {
+  case "$1" in
+    000)            printf 'unreachable' ;;
+    2??)            printf 'ok' ;;
+    401|403)        printf 'auth-required' ;;
+    302|303|307)    printf 'instance-auth-wall' ;;
+    404)            printf 'path-absent' ;;
+    405)            printf 'method-not-allowed' ;;
+    530)            printf 'gateway-origin-failure' ;;
+    5??)            printf 'origin-error' ;;
+    *)              printf 'unexpected-status' ;;
+  esac
+}
+
+# 401 / 302 / 405 are evidence the endpoint is correctly configured, not
+# broken: a real Grafana Cloud tenant answers an unauthenticated probe with
+# one of them. Failing there would make validate red on every healthy
+# instance, which is the mirror image of the bug this fixes.
+probe_blocks() {
+  case "$1" in
+    unreachable|path-absent|gateway-origin-failure|origin-error) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# AC2: the operator must never be left inferring which var is wrong.
+probe_hint() {
+  local class="$1" id="$2" url_source="$3" var="${3#env:}"
+  var="${var%%;*}"
+  case "${class}" in
+    unreachable)
+      printf 'no response (DNS, TLS, or timeout) — check the host and network egress for %s' "${var}"
+      ;;
+    gateway-origin-failure)
+      printf '%s points at a gateway whose origin is failing; the host may be wrong or the tenant down' "${var}"
+      ;;
+    origin-error)
+      printf '%s reached a host that returned a server error' "${var}"
+      ;;
+    path-absent)
+      case "${id}" in
+        grafana_instance)
+          printf '%s should be the stack base URL (e.g. https://<stack>.grafana.net); validate probes <base>/api/health' "${var}"
+          ;;
+        otlp_endpoint)
+          printf '%s should be the OTLP base (bare host, or .../v1); validate probes the traces path on it' "${var}"
+          ;;
+        loki_push)
+          printf '%s should be the Loki push URL, e.g. https://<logs-host>/loki/api/v1/push — not an OTLP or Prometheus URL' "${var}"
+          ;;
+        *)
+          printf '%s does not resolve' "${var}"
+          ;;
+      esac
+      ;;
+    *)
+      printf 'unexpected status from %s' "${var}"
+      ;;
+  esac
+}
+
+# Generated documentation block (AC6). Kept byte-identical in
+# infra/cloud/observability/env/.env.example and docs/systems/observability.md;
+# observability-bootstrap.test.sh diffs this output against both, so adding a
+# row here without updating the docs fails CI.
+render_endpoint_docs() {
+  printf '<!-- BEGIN generated: %s — edit infra/cloud/observability/bootstrap-observability.sh instead -->\n' "${ENDPOINT_DOCS_MARKER}"
+  printf '| Endpoint id | Env var | Role | Required shape |\n'
+  printf '| --- | --- | --- | --- |\n'
+  local id role url_source shape var
+  while IFS='|' read -r id role url_source shape; do
+    [ -n "${id:-}" ] || continue
+    var="${url_source#env:}"
+    var="${var%%;*}"
+    if [ "${var}" = "${url_source}" ]; then
+      var='(fixed — no env var)'
+    fi
+    printf '| `%s` | `%s` | `%s` | %s |\n' "${id}" "${var}" "${role}" "${shape}"
+  done < <(endpoint_specs)
+  printf '<!-- END generated: %s -->\n' "${ENDPOINT_DOCS_MARKER}"
+}
+
+PROBE_FAILURES=0
+
+step_probe_endpoints() {
+  PROBE_FAILURES=0
+  echo "    Endpoints (read-only reachability probe):"
+  local id role url_source shape url status class rc
+  while IFS='|' read -r id role url_source shape; do
+    [ -n "${id:-}" ] || continue
+    rc=0
+    url="$(endpoint_probe_url "${id}" "${url_source}")" || rc=$?
+    if [ "${rc}" -eq 1 ]; then
+      printf '      [SKIP] %-24s (not configured)\n' "${id}"
+      continue
+    fi
+    if [ "${rc}" -eq 2 ]; then
+      # Configured, but the URL the relay would post to cannot be derived.
+      # The relay answers 502 misconfigured_loki_endpoint for this, hours
+      # later; fail here instead, by name.
+      local fix_var="${url_source#env:}"
+      fix_var="${fix_var%%;*}"
+      if [ "${fix_var}" = "${url_source}" ]; then
+        fix_var='the endpoint definition'
+      fi
+      printf '      [FAIL] %-24s !not-derivable\n' "${id}"
+      printf '             → fix %s — %s\n' \
+        "${fix_var}" "$(probe_hint path-absent "${id}" "${url_source}")"
+      if [ "${id}" = 'loki_push' ] && [ -z "${GRAFANA_CLOUD_LOKI_ENDPOINT:-}" ]; then
+        printf '               (no Loki push URL can be derived from %s; the relay would answer 502 misconfigured_loki_endpoint)\n' \
+          'GRAFANA_CLOUD_OTLP_ENDPOINT'
+      fi
+      PROBE_FAILURES=$((PROBE_FAILURES + 1))
+      continue
+    fi
+    url="$(sanitize_url "${url}")"
+    status="$(probe_status "${url}")"
+    class="$(classify_probe_status "${status}")"
+    if probe_blocks "${class}"; then
+      printf '      [FAIL] %-24s %-6s %s\n' "${class}" "${status}" "${url}"
+      printf '             → %s\n' "$(probe_hint "${class}" "${id}" "${url_source}")"
+      PROBE_FAILURES=$((PROBE_FAILURES + 1))
+    else
+      printf '      [OK]   %-24s %-6s %s\n' "${class}" "${status}" "${url}"
+    fi
+  done < <(endpoint_specs)
+}
 
 grafana_api_url() {
   printf '%s%s' "${GRAFANA_CLOUD_INSTANCE_URL%/}" "$1"
@@ -297,9 +596,38 @@ step_validate() {
     if [ "${missing}" -gt 125 ]; then
       missing=125
     fi
+    # No reachability probe on this path: with vars missing there is
+    # nothing configured to resolve, and validate must stay usable as Tom
+    # hands over each secret one at a time.
+    echo "==> Validate: endpoint probes skipped (required vars missing)"
     return "${missing}"
   fi
-  echo "==> Validate: all required vars present"
+
+  echo
+  if [ "${DRY_RUN}" = true ]; then
+    echo "    [dry-run] endpoint plan — no probes fired:"
+    render_endpoint_docs
+  elif [ "${PROBE_SKIP_NETWORK:-0}" = '1' ]; then
+    echo "    [skip] endpoint probes disabled (PROBE_SKIP_NETWORK=1)"
+  elif ! command -v curl >/dev/null 2>&1; then
+    echo "    [skip] endpoint probes need curl, which is not installed"
+  else
+    step_probe_endpoints
+  fi
+
+  echo
+  if [ "${PROBE_FAILURES}" -gt 0 ]; then
+    echo "==> Validate: ${PROBE_FAILURES} endpoint(s) did not resolve"
+    if [ "${PROBE_FAILURES}" -gt 125 ]; then
+      PROBE_FAILURES=125
+    fi
+    return "${PROBE_FAILURES}"
+  fi
+  if [ "${DRY_RUN}" = true ] || [ "${PROBE_SKIP_NETWORK:-0}" = '1' ]; then
+    echo "==> Validate: all required vars present (endpoints not probed)"
+    return 0
+  fi
+  echo "==> Validate: all required vars present and every endpoint resolved"
   return 0
 }
 
