@@ -176,6 +176,7 @@ jobs:
           path: |
             ${{ runner.temp }}/cloud-staging-artifacts/*.json
             ${{ runner.temp }}/cloud-staging-artifacts/*.sha256
+            ${{ runner.temp }}/cloud-staging-artifacts/*.log
           retention-days: 14
           if-no-files-found: warn
 

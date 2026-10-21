@@ -185,6 +185,7 @@ RESTORE_OUT="$(
     --destination-dsn-file "$DEST_TASKS_FILE" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
+    --result-dir "$ARCHIVE_DIR" \
     "${RESTORE_INTENTIONAL_FAILURE_FLAG[@]}"
 )"
 
@@ -261,7 +262,8 @@ if (( RECOVERY )); then
     --source-dsn-file "$DEST_TASKS_FILE" \
     --destination-dsn-file "$RECOVERY_TASKS_FILE" \
     --archive "$DUMP2_ARCHIVE_PATH" \
-    --archive-sha256 "$DUMP2_SHA" >/dev/null
+    --archive-sha256 "$DUMP2_SHA" \
+    --result-dir "$ARCHIVE_DIR" >/dev/null
 
   "$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
     --tasks-dsn-file "$RECOVERY_TASKS_FILE" \

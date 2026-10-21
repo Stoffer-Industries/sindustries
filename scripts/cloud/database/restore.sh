@@ -42,6 +42,11 @@ Required:
   --archive-sha256 <digest>      Expected sha256 digest (64 hex chars).
 
 Optional:
+  --result-dir <path>            Directory for redacted restore results/logs.
+                                 Defaults to ./artifacts/cloud-staging. The
+                                 workflow passes its upload directory here so
+                                 restore-result.json and the pg_restore log are
+                                 captured as run artifacts.
   --intentional-failure-after <seconds>
                                  Drill-only flag. When set, restore.sh
                                  starts pg_restore, waits the given
@@ -58,6 +63,7 @@ DEST_DSN_FILE=""
 ARCHIVE_PATH=""
 EXPECTED_SHA=""
 INTENTIONAL_FAILURE_AFTER=""
+RESULT_DIR=""
 
 while (( $# > 0 )); do
   case "$1" in
@@ -65,6 +71,7 @@ while (( $# > 0 )); do
     --destination-dsn-file)       DEST_DSN_FILE="$2"; shift 2;;
     --archive)                    ARCHIVE_PATH="$2"; shift 2;;
     --archive-sha256)             EXPECTED_SHA="$2"; shift 2;;
+    --result-dir)                 RESULT_DIR="$2"; shift 2;;
     --intentional-failure-after)  INTENTIONAL_FAILURE_AFTER="$2"; shift 2;;
     --help|-h)                    usage; exit 0;;
     *)                            cloud_db_die "unknown argument: $1";;
@@ -119,8 +126,10 @@ if [[ "${existing_objects// /}" != "0" ]]; then
     "destination is not empty (existing object count: ${existing_objects}); refusing to overwrite"
 fi
 
-RESULT_PATH="./artifacts/cloud-staging/restore-${CLOUD_DB_RUN_ID}.json"
-mkdir -p "$(dirname "$RESULT_PATH")"
+RESULT_DIR="${RESULT_DIR:-./artifacts/cloud-staging}"
+mkdir -p "$RESULT_DIR"
+
+RESULT_PATH="${RESULT_DIR}/restore-${CLOUD_DB_RUN_ID}.json"
 
 # ---------------------------------------------------------------------------
 # Execute pg_restore
