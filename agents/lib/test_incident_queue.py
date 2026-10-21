@@ -84,6 +84,35 @@ class BuildQueueCountsTests(unittest.TestCase):
         self.assertEqual(queue["counts"]["reportable"], 1)
         self.assertEqual(queue["counts"]["actionable"], 0)
 
+    def test_schema_minimal_record_does_not_crash_the_queue(self):
+        """owner+status only is schema-legal and must not take the CLI down."""
+        minimal = {"owner": "quinn", "status": "watching"}
+        queue = iq.build_queue([minimal], now=NOW)
+        self.assertEqual(queue["counts"]["reportable"], 1)
+        self.assertEqual(queue["counts"]["actionable"], 0)
+        self.assertEqual(queue["monitored"][0]["identity"], "untitled incident")
+        self.assertIn("Incident queue: 0 actionable, 1 monitored.", iq.render_text(queue))
+
+    def test_schema_minimal_critical_still_tops_the_queue(self):
+        """Same shape but high severity — must render, not raise."""
+        minimal = {"owner": "lox", "status": "escalated", "severity": "critical"}
+        queue = iq.build_queue([minimal], now=NOW)
+        self.assertEqual(queue["counts"]["actionable"], 1)
+        rendered = iq.render_text(queue)
+        self.assertIn("1 incident(s) waiting on you.", rendered)
+        self.assertIn("untitled incident", rendered)
+
+    def test_blank_and_empty_text_fields_render_without_raising(self):
+        records = [
+            {"owner": "lox", "status": "watching", "lastAction": "", "trigger": ""},
+            {"owner": "lox", "status": "watching", "lastAction": "\n", "title": ""},
+            _incident("normal", severity="critical", needsTom=True),
+        ]
+        queue = iq.build_queue(records, now=NOW)
+        self.assertEqual(queue["counts"]["reportable"], 3)
+        self.assertEqual(queue["counts"]["actionable"], 1)
+        self.assertIn("Top unblock:", iq.render_text(queue))
+
     def test_empty_registry_reports_zero_not_an_error(self):
         queue = iq.build_queue([], now=NOW)
         self.assertEqual(queue["counts"]["reportable"], 0)

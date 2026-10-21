@@ -58,13 +58,22 @@ def _sort_key(inc: dict) -> tuple:
     )
 
 
+def _first_line(value: object) -> str:
+    """First line of ``value``, or "" — never raises on empty/blank input.
+
+    The incident schema only requires ``owner`` and ``status``, so a record with
+    no ``title``/``lastAction``/``trigger`` is legal and indexes to nothing.
+    """
+    lines = str(value or "").splitlines()
+    return lines[0].strip() if lines else ""
+
+
 def _identity(inc: dict) -> str:
     for field in ("key", "_slug", "slug", "id"):
         value = inc.get(field)
         if isinstance(value, str) and value:
             return value
-    title = inc.get("title") or inc.get("lastAction") or "untitled incident"
-    return title.splitlines()[0][:80]
+    return _first_line(inc.get("title") or inc.get("lastAction"))[:80] or "untitled incident"
 
 
 def _describe(inc: dict) -> str:
@@ -72,7 +81,7 @@ def _describe(inc: dict) -> str:
     trigger = inc.get("trigger")
     title = inc.get("title")
     if not title:
-        title = (inc.get("lastAction") or trigger or "").splitlines()[0].strip()
+        title = _first_line(inc.get("lastAction") or trigger)
     parts = [f"{_identity(inc)} ({inc.get('owner', '?')})"]
     if title:
         parts.append(title)
@@ -100,9 +109,11 @@ def build_queue(
     task-scoped, and stale (>72h since lastCheckedAt) records, so both counts
     read straight from the registry instead of a hand-maintained tally.
     """
-    records = load_all_incidents(Path(workspace) if workspace else None)
-    if incidents is not None:
-        records = incidents
+    records = (
+        incidents
+        if incidents is not None
+        else load_all_incidents(Path(workspace) if workspace else None)
+    )
     records = reportable_incidents(records, now=now)
     actionable = sorted(needs_tom(records, now=now), key=_sort_key)
     actionable_ids = {id(inc) for inc in actionable}
