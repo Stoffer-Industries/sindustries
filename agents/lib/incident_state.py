@@ -324,10 +324,15 @@ def reportable_incidents(
     return out
 
 
-def needs_tom(incidents: list[dict]) -> list[dict]:
-    """Filter fresh system incidents that should be surfaced to Tom."""
+def needs_tom(incidents: list[dict], *, now: datetime | None = None) -> list[dict]:
+    """Filter fresh system incidents that should be surfaced to Tom.
+
+    ``now`` is threaded through to ``reportable_incidents`` so callers that
+    already evaluated the reportable set at a fixed reference time (tests,
+    queue rendering) get the same cut-off instead of "now".
+    """
     out = []
-    for inc in reportable_incidents(incidents):
+    for inc in reportable_incidents(incidents, now=now):
         if inc.get("needsTom"):
             out.append(inc)
             continue
