@@ -1,7 +1,7 @@
 ---
 title: Agent Incidents
 type: System reference
-last_updated: 2026-10-16
+last_updated: 2026-10-23
 owner: Rowan
 repos: Stoffer-Industries/sindustries
 related_pr: 214
@@ -11,7 +11,7 @@ shipped_date: 2026-07-11
 # Agent Incidents
 
 **Type:** System reference (keep updated as the unified schema evolves)
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-23
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries` (parser, schema, migration script)
 **Related PR:** https://github.com/Stoffer-Industries/sindustries/pull/214 — task 75ec1c8c
@@ -130,6 +130,29 @@ A single task showing this shape alone, with no other task sharing the same
 cause, is not yet a system incident — it is still an ordinary task-level wait
 and should route through the normal attention-owner path.
 
+### Resolution semantics
+
+An incident carrying `impactTaskIds` resolves when its **shared root cause is
+fixed**, not when every impacted task independently reaches a terminal state.
+Those are different gates, and only the first one belongs here: holding the
+incident open until the last listed task lands would reintroduce exactly the
+per-task coupling this model exists to remove. A task still mid-flight after
+the root cause is gone is progressing normally — the engine is doing its job,
+and it stays in the Tasks API plane where its own gates are tracked.
+
+Do not wait for each task's lifecycle, and do not clear `impactTaskIds` to
+make an entry look tidy. On resolution, set `status: "resolved"` and
+`resolvedAt: <now>` with `impactTaskIds` left as recorded — the list is the
+evidence of what the root cause actually hit, and it is what makes a
+recurrence legible later. Resolve when the cause is gone; revisit the task
+list only when a fresh detection pass adds newly affected IDs under the same
+slug.
+
+If the root cause is fixed but some impacted tasks remain stuck anyway, that
+residual is a separate task-level wait, not a continuation of this incident:
+route each through the normal `attentionOwners` path rather than reopening the
+resolved incident.
+
 ## Runbook notes and common failure modes
 
 **Adding a new incident slug:** choose a stable kebab-case identifier derived from the system failure pattern (e.g. `tasks-api-prod-down`, `firewall`, `bookmark-acpx-openai-401-no-scopes`). Slugs must be stable — they are how cross-recurrence is detected. Do not append observation dates to incident keys. Do not create slugs for task workflow findings; use the task's status, approvals, comments, and ordered `attentionOwners` stack instead.
@@ -138,7 +161,7 @@ There should be one active entry per logical system failure. Repeated
 observations update that entry's `attempts`, `lastCheckedAt`, and `lastAction`.
 Use `recurrenceCount` only when a previously resolved incident reappears.
 
-**Marking an incident resolved:** set `status: "resolved"` and `resolvedAt: <now>`. Do not delete the entry — keep it for `recurrenceCount` trending. If the same failure reappears, increment `recurrenceCount` rather than creating a new entry.
+**Marking an incident resolved:** set `status: "resolved"` and `resolvedAt: <now>`. Do not delete the entry — keep it for `recurrenceCount` trending. If the same failure reappears, increment `recurrenceCount` rather than creating a new entry. For an entry carrying `impactTaskIds`, the resolution gate is the root cause being fixed, not every impacted task reaching a terminal state — see "Resolution semantics" above. Preserve `impactTaskIds` on resolution as impact evidence.
 
 **Archiving historical noise:** set `status: "archived"`, preserve the
 original record, and record `archiveReason`/`archivedAt`. Archiving is for

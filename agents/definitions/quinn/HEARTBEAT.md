@@ -192,15 +192,15 @@ incident per shared root cause, never per task. Full model:
 
 A task qualifies as delivery-evidence-complete when its required PRs are
 merged and its required structured approvals (`tech_design`, `qa_agent`) are
-in place. If such a task's status has not advanced for roughly 24h (the same
-shape across 2+ consecutive heartbeat passes), check whether at least one
-other task shows the same shape at the same time, with a plausible shared
-cause — the same gate, the same orchestration pass, the same reconciliation
-pattern. Candidate shared causes include: the workflow engine not
-re-evaluating stalled tasks, a reconciliation pass reapplying the same
-correction to a task without its underlying approval/PR state changing, and
-two different reads of the same task/queue state disagreeing with each
-other.
+in place. If such a task's status has not advanced across 2+ consecutive
+heartbeat passes — typically a couple of days, since passes are not evenly
+spaced — check whether at least one other task shows the same shape at the
+same time, with a plausible shared cause — the same gate, the same
+orchestration pass, the same reconciliation pattern. Candidate shared causes
+include: the workflow engine not re-evaluating stalled tasks, a
+reconciliation pass reapplying the same correction to a task without its
+underlying approval/PR state changing, and two different reads of the same
+task/queue state disagreeing with each other.
 
 **If 2+ tasks share one root cause:** create or update ONE incident keyed by
 a stable root-cause slug (never a task ID). List every affected task under
