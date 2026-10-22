@@ -7,6 +7,7 @@ import { mapTaskApproval } from './tasks/_mapper.ts';
 import { validApprovalTypes } from './tasks/_constants.ts';
 import { loadRequiredApprovalsConfig, requiredApprovalsFor } from '../config/requiredApprovals.ts';
 import { workflowHandoffForApproval } from '../config/workflowHandoffs.ts';
+import { evaluateQaAttestation, QA_EVIDENCE_GATE_BLOCKED } from '../lib/qaEvidenceAttestation.ts';
 
 export const taskApprovalsRouter = Router();
 
@@ -90,6 +91,35 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     if (note === undefined) return badRequest(res, 'INVALID_APPROVAL_NOTE', 'note must be a string when provided');
     const actor = req.approvalPrincipal!.actor;
 
+    // AC1 of task ad8346ee: a `qa_agent` grant is refused unless it carries a
+    // fresh attestation minted from the live mechanical AC-evidence check.
+    // Scoped to `qa_agent` only (design decision D4) — `spec`, `tech_design`,
+    // and `accepted` approvals are unaffected and carry no attestation.
+    //
+    // Enforced at this choke point deliberately: it is the single route through
+    // which EVERY `qa_agent` approval is written, so the gate cannot be
+    // bypassed by a future writer forgetting to call something first.
+    let evidencePins: { verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
+    if (type === 'qa_agent') {
+      const verdict = evaluateQaAttestation(req.body);
+      if (!verdict.ok) {
+        // No approval row is written on this path — that absence is asserted
+        // directly by the AC1 test, because "returned a 4xx" alone would not
+        // catch a regression that logged the rejection but still persisted.
+        return res.status(409).json({
+          error: {
+            code: QA_EVIDENCE_GATE_BLOCKED,
+            message: verdict.message,
+            details: { reason: verdict.reason, failures: verdict.failures }
+          }
+        });
+      }
+      evidencePins = {
+        verifiedPrHeadSha: verdict.headSha,
+        verifiedAcSectionDigest: verdict.acSectionDigest
+      };
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       const task = await tx.task.findUnique({
         where: { id },
@@ -115,8 +145,29 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
       const now = new Date();
       const approval = await tx.taskApproval.upsert({
         where: { taskId_type: { taskId: id, type } },
-        create: { taskId: id, type, owner: actor, note, state: 'approved', approvedAt: now },
-        update: { owner: actor, note, state: 'approved', approvedAt: now, revokedAt: null }
+        create: {
+          taskId: id,
+          type,
+          owner: actor,
+          note,
+          state: 'approved',
+          approvedAt: now,
+          ...evidencePins
+        },
+        // A re-approval overwrites the pins with the freshly attested values.
+        // This is what makes the attestation single-use in practice: a stale
+        // grant cannot survive a later approval, it is replaced by evidence
+        // that was checked at that moment. Spreading the optional fields
+        // (rather than assigning `undefined`) keeps Prisma from stripping the
+        // keys and treating them as "no change".
+        update: {
+          owner: actor,
+          note,
+          state: 'approved',
+          approvedAt: now,
+          revokedAt: null,
+          ...(evidencePins ?? { verifiedPrHeadSha: null, verifiedAcSectionDigest: null })
+        }
       });
       const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');
       if (handoffUpdate) await tx.task.update({ where: { id }, data: handoffUpdate });

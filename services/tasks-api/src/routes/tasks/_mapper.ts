@@ -24,6 +24,11 @@ export function mapTaskApproval(approval) {
     approvedAt: approval.approvedAt,
     revokedAt: approval.revokedAt ?? null,
     note: approval.note ?? null,
+    // What a `qa_agent` grant was actually verified against (task ad8346ee,
+    // AC2). `null` on non-`qa_agent` approvals and on rows written before the
+    // migration — "verified nothing", which reads as stale rather than trusted.
+    verifiedPrHeadSha: approval.verifiedPrHeadSha ?? null,
+    verifiedAcSectionDigest: approval.verifiedAcSectionDigest ?? null,
     createdAt: approval.createdAt,
     updatedAt: approval.updatedAt
   };
