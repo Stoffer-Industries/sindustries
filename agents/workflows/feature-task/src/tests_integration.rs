@@ -1162,6 +1162,8 @@ Gate the qa_agent approval on live AC evidence.
 /// exactly why a SHA-only pin would have missed this.
 const PR_BODY_AFTER_INCIDENT: &str = "test body update";
 
+const ATTESTED_PR_NUMBER: i64 = 803;
+
 fn approved_qa_task(head_sha: &str, ac_digest: &str) -> Task {
     Task {
         id: "39667e62-0000-4000-8000-000000000000".to_string(),
@@ -1171,6 +1173,7 @@ fn approved_qa_task(head_sha: &str, ac_digest: &str) -> Task {
             approval_type: "qa_agent".to_string(),
             state: "approved".to_string(),
             owner: Some("Ash".to_string()),
+            verified_pr_number: Some(ATTESTED_PR_NUMBER),
             verified_pr_head_sha: Some(head_sha.to_string()),
             verified_ac_section_digest: Some(ac_digest.to_string()),
             ..TaskApproval::default()
@@ -1195,6 +1198,7 @@ fn blanking_the_ac_section_after_qa_approval_invalidates_and_routes_the_task() {
 
     // --- The incident: the body is blanked. No code moves. ---
     let live_after = LiveEvidence {
+        pr_number: ATTESTED_PR_NUMBER,
         head_sha: head_sha.to_string(),
         ac_section_digest: qa_evidence_attest::ac_section_digest(PR_BODY_AFTER_INCIDENT),
     };
@@ -1240,6 +1244,7 @@ fn an_unchanged_pr_keeps_its_qa_approval_valid() {
     let head_sha = "deb991e0";
     let task = approved_qa_task(head_sha, &qa_evidence_attest::ac_section_digest(PR_BODY_AT_APPROVAL));
     let live = LiveEvidence {
+        pr_number: ATTESTED_PR_NUMBER,
         head_sha: head_sha.to_string(),
         ac_section_digest: qa_evidence_attest::ac_section_digest(PR_BODY_AT_APPROVAL),
     };

@@ -34,7 +34,7 @@ use crate::brain_spec_lifecycle::{
 };
 use crate::pr_gates;
 use crate::qa_evidence_attest;
-use crate::qa_evidence_drift::{detect_drift, LiveEvidence, RecordedPins};
+use crate::qa_evidence_drift::{detect_drift, EvidenceDrift, LiveEvidence, RecordedPins};
 use crate::product_spec_parsing::{
     implementer_pr_urls, inspect_pr, latest_implementer_pr_urls, workstreams,
 };
@@ -154,9 +154,10 @@ fn live_delivery_pins(
             continue;
         }
         match qa_evidence_attest::pr_head_sha(&delivery.url) {
-            Ok((_, head_sha)) => live.push((
+            Ok((number, head_sha)) => live.push((
                 delivery.url.clone(),
                 LiveEvidence {
+                    pr_number: number as i64,
                     head_sha,
                     ac_section_digest: qa_evidence_attest::ac_section_digest(&delivery.body),
                 },
@@ -195,6 +196,47 @@ fn live_delivery_pins(
 ///   `approved`, so `RecordedPins::from_task` returns `None` and later
 ///   passes no-op. No fingerprint bookkeeping is needed to avoid
 ///   re-revoking on every heartbeat.
+///
+/// Outcome of matching a granted approval's pinned PR number against the
+/// task's current live delivery set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AttestedPr {
+    /// The attested PR is still a current delivery PR. Carries its index into
+    /// the live slice.
+    Matched(usize),
+    /// The attested PR is no longer a current delivery PR — the #803 →
+    /// replacement-PR swap. Carries the current numbers for the reason.
+    Swapped { current: Vec<i64> },
+    /// No live PR could be read at all.
+    NoLivePrs,
+}
+
+/// Match a grant's pinned PR number against the current live delivery set.
+///
+/// Pure, so the multi-PR false positive this fixes is provable without a live
+/// PR or a GitHub token. A grant is pinned to *one* PR, so the lookup must be
+/// by number rather than by position: a task with two current delivery PRs
+/// legitimately mints its grant against the second, and comparing those pins
+/// against `live.first()`'s head SHA always reads `Drifted(HeadSha)` — a
+/// spurious revoke-and-route loop on exactly the multi-PR task class this gate
+/// exists to protect.
+fn match_attested_pr(pins: &RecordedPins, live: &[(String, LiveEvidence)]) -> AttestedPr {
+    if live.is_empty() {
+        return AttestedPr::NoLivePrs;
+    }
+    let current: Vec<i64> = live.iter().map(|(_, state)| state.pr_number).collect();
+    match pins
+        .pr_number
+        .and_then(|attested| live.iter().position(|(_, state)| state.pr_number == attested))
+    {
+        Some(index) => AttestedPr::Matched(index),
+        // The attested PR is not among the task's current delivery PRs, so the
+        // pins have nothing to be compared against. That *is* the swap, and it
+        // is reported as such rather than compared against an arbitrary sibling.
+        None => AttestedPr::Swapped { current },
+    }
+}
+
 fn invalidate_stale_qa_approval(
     args: &StageArgs,
     env: &mut Envelope,
@@ -203,26 +245,61 @@ fn invalidate_stale_qa_approval(
     let Some(pins) = RecordedPins::from_task(&env.task) else {
         return Ok(false);
     };
-    // A grant is pinned to one PR. Multi-PR tasks attest against the
-    // delivery PR the agent actually ran the check on, so the re-check uses
-    // the same set the attestation was minted from: the current delivery
-    // set, in order.
-    let Some((pr_url, state)) = live.first() else {
-        return Ok(false);
+    let matched = match match_attested_pr(&pins, live) {
+        AttestedPr::Matched(index) => &live[index],
+        AttestedPr::Swapped { current } => {
+            let drift = EvidenceDrift::PrSwapped {
+                attested: pins.pr_number,
+                current,
+            };
+            return revoke_and_route_stale_qa_approval(args, env, &pins, None, drift);
+        }
+        // Nothing could be read. `live_delivery_pins` already failed closed and
+        // recorded a blocking failure, so there is no state to re-check against
+        // and revoking on an unreadable PR would revoke a grant we could not
+        // check rather than one we know to be stale.
+        AttestedPr::NoLivePrs => return Ok(false),
     };
+    let state = &matched.1;
     let drift = detect_drift(&pins, state);
     if !drift.is_stale() {
         return Ok(false);
     }
+    revoke_and_route_stale_qa_approval(args, env, &pins, Some(matched), drift)
+}
+
+/// Revoke a stale `qa_agent` grant and route the task to its assignee, citing
+/// the regression in the reconcile note (AC3).
+fn revoke_and_route_stale_qa_approval(
+    args: &StageArgs,
+    env: &mut Envelope,
+    pins: &RecordedPins,
+    matched: Option<&(String, LiveEvidence)>,
+    drift: EvidenceDrift,
+) -> Result<bool> {
     let assignee = env.task.assignee.clone();
+    let attested_label = pins
+        .pr_number
+        .map(|n| format!("PR #{n}"))
+        .unwrap_or_else(|| "an unrecorded PR".to_string());
+    let state = matched.map(|(_, state)| state);
+    let pr_url = matched
+        .map(|(url, _)| url.clone())
+        .unwrap_or_else(|| attested_label.clone());
+    let live_label = match state {
+        Some(state) => format!("the live PR now reports head {} with digest {}", state.head_sha, state.ac_section_digest),
+        // Nothing matched the pin, so there is no live PR to quote. Saying
+        // "the live PR now reports ..." would name a divergence that was never
+        // measured.
+        None => "no current delivery PR matches it".to_string(),
+    };
     let note = format!(
-        "Structured `qa_agent` approval revoked by the lobster: {}. The grant pinned PR {} at head {} with AC-section digest {}; the live PR now reports head {} with digest {}. Next action: {} re-runs `feature-task mechanical-evidence-check --pr-url {}` and re-approves with the fresh attestation — POST /tasks/{}/approvals refuses an unattested `qa_agent` grant.",
+        "Structured `qa_agent` approval revoked by the lobster: {}. The grant pinned {} at head {} with AC-section digest {}; {}. Next action: {} re-runs `feature-task mechanical-evidence-check --pr-url {}` and re-approves with the fresh attestation — POST /tasks/{}/approvals refuses an unattested `qa_agent` grant.",
         drift.reason(),
-        pr_url,
+        attested_label,
         pins.head_sha.as_deref().unwrap_or("<none recorded>"),
         pins.ac_section_digest.as_deref().unwrap_or("<none recorded>"),
-        state.head_sha,
-        state.ac_section_digest,
+        live_label,
         assignee.as_deref().unwrap_or("the assignee"),
         pr_url,
         env.task.id
@@ -597,6 +674,85 @@ pub(crate) fn code_task_verify_delivery(args: StageArgs) -> Result<Envelope> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn live_pr(number: i64, head: &str, digest: &str) -> (String, LiveEvidence) {
+        (
+            format!("https://github.com/Stoffer-Industries/sindustries/pull/{number}"),
+            LiveEvidence {
+                pr_number: number,
+                head_sha: head.to_string(),
+                ac_section_digest: digest.to_string(),
+            },
+        )
+    }
+
+    fn pins_for(pr: i64, head: &str, digest: &str) -> RecordedPins {
+        RecordedPins {
+            pr_number: Some(pr),
+            head_sha: Some(head.to_string()),
+            ac_section_digest: Some(digest.to_string()),
+        }
+    }
+
+    #[test]
+    fn a_grant_minted_against_the_second_delivery_pr_is_matched_not_misread_as_drift() {
+        // The multi-PR false positive. `live.first()` would compare this
+        // grant against PR #803's head SHA, read `Drifted(HeadSha)`, and
+        // revoke-and-route a perfectly valid grant — on exactly the task class
+        // this gate exists to protect.
+        let live = vec![live_pr(803, "head-of-803", "digest-of-803"), live_pr(904, "head-of-904", "digest-of-904")];
+        let pins = pins_for(904, "head-of-904", "digest-of-904");
+
+        let matched = &live[match match_attested_pr(&pins, &live) {
+            AttestedPr::Matched(index) => index,
+            other => panic!("expected the attested PR to match, got {other:?}"),
+        }];
+        let drift = detect_drift(&pins, &matched.1);
+        assert_eq!(
+            drift,
+            EvidenceDrift::Current,
+            "a valid grant on the second delivery PR must not be revoked"
+        );
+    }
+
+    #[test]
+    fn a_task_swapped_to_a_replacement_pr_reports_the_swap_rather_than_a_sibling_head_sha() {
+        let live = vec![live_pr(904, "head-of-904", "digest-of-904")];
+        let pins = pins_for(803, "head-of-803", "digest-of-803");
+
+        assert_eq!(
+            match_attested_pr(&pins, &live),
+            AttestedPr::Swapped { current: vec![904] }
+        );
+    }
+
+    #[test]
+    fn an_unpinned_row_does_not_report_a_swap_from_a_null_pin() {
+        // A pre-migration row has no attested PR number, so there is nothing
+        // to have been swapped away from. It reads as `Unpinned` (and is
+        // handled by `detect_drift`), not as a swap.
+        let live = vec![live_pr(904, "head", "digest")];
+        let pins = RecordedPins {
+            pr_number: None,
+            head_sha: Some("head".to_string()),
+            ac_section_digest: Some("digest".to_string()),
+        };
+        assert_eq!(
+            match_attested_pr(&pins, &live),
+            AttestedPr::Swapped { current: vec![904] }
+        );
+        // ...and the drift verdict itself is the honest one.
+        assert_eq!(detect_drift(&pins, &live[0].1), EvidenceDrift::Unpinned);
+    }
+
+    #[test]
+    fn no_readable_live_pr_is_reported_separately_from_a_swap() {
+        // `live_delivery_pins` already fails closed here. Reporting it as a
+        // swap would revoke a grant we could not check, rather than one we
+        // know to be stale.
+        let pins = pins_for(803, "head", "digest");
+        assert_eq!(match_attested_pr(&pins, &[]), AttestedPr::NoLivePrs);
+    }
 
     #[test]
     fn verify_delivery_review_gate_allows_pending_review() {

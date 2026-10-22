@@ -180,23 +180,32 @@ describe('task approval boundary', () => {
       expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
     });
 
-    it('accepts a fresh failure-free attestation and pins BOTH values onto the row (AC2)', async () => {
+    it('accepts a fresh failure-free attestation and pins ALL THREE values onto the row (AC2)', async () => {
       armTask();
       const attestation = freshAttestation();
       const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation });
       expect(res.status).toBe(200);
       const written = prismaMock.taskApproval.upsert.mock.calls[0][0].create;
+      // `verifiedPrNumber` must be asserted here specifically: the gate
+      // validates it, so a regression that drops it from the write path would
+      // still validate, still 200, and still leave the pin dead — which is
+      // exactly how it stayed dead through the previous review.
+      expect(written.verifiedPrNumber).toBe(attestation.prNumber);
       expect(written.verifiedPrHeadSha).toBe(attestation.headSha);
       expect(written.verifiedAcSectionDigest).toBe(attestation.acSectionDigest);
     });
 
-    it('overwrites the pins on re-approval so a stale grant cannot survive', async () => {
+    it('pins the PR number alongside the other pins on re-approval', async () => {
+      // The #803 -> replacement-PR swap is only detectable if the row records
+      // *which* PR was attested, so the number must survive the update arm too,
+      // not just the create arm.
       armTask();
-      const later = freshAttestation({ headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
+      const later = freshAttestation({ prNumber: 904, headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: freshAttestation() });
       prismaMock.taskApproval.upsert.mockClear();
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: later });
       const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
+      expect(update.verifiedPrNumber).toBe(904);
       expect(update.verifiedPrHeadSha).toBe('aaaa111122223333444455556666777788889999');
       expect(update.verifiedAcSectionDigest).toBe('deadbeef');
     });
@@ -213,6 +222,7 @@ describe('task approval boundary', () => {
       prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'accepted', owner: 'Tom' }));
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'accepted' });
       const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
+      expect(update.verifiedPrNumber).toBeNull();
       expect(update.verifiedPrHeadSha).toBeNull();
       expect(update.verifiedAcSectionDigest).toBeNull();
     });

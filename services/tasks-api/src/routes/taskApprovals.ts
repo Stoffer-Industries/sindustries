@@ -99,7 +99,13 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     // Enforced at this choke point deliberately: it is the single route through
     // which EVERY `qa_agent` approval is written, so the gate cannot be
     // bypassed by a future writer forgetting to call something first.
-    let evidencePins: { verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
+    // All three pins must be written together. `verifiedPrNumber` is not
+    // redundant with the head SHA: it records *which* PR was attested, which
+    // is what lets AC3's invalidation pass detect the #803 -> replacement-PR
+    // swap (a grant minted on #803 whose pins still match a PR that no longer
+    // belongs to the task). Validating a pin without persisting it would make
+    // the third pin dead code.
+    let evidencePins: { verifiedPrNumber: number; verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
     if (type === 'qa_agent') {
       const verdict = evaluateQaAttestation(req.body);
       if (!verdict.ok) {
@@ -115,6 +121,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
         });
       }
       evidencePins = {
+        verifiedPrNumber: verdict.prNumber,
         verifiedPrHeadSha: verdict.headSha,
         verifiedAcSectionDigest: verdict.acSectionDigest
       };
@@ -166,7 +173,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
           state: 'approved',
           approvedAt: now,
           revokedAt: null,
-          ...(evidencePins ?? { verifiedPrHeadSha: null, verifiedAcSectionDigest: null })
+          ...(evidencePins ?? { verifiedPrNumber: null, verifiedPrHeadSha: null, verifiedAcSectionDigest: null })
         }
       });
       const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');
