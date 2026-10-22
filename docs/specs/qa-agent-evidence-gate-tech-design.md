@@ -32,8 +32,8 @@ write-path and the lobster, so PRs with no linked task have zero blast radius.
 - **Branch:** `task-ad8346ee-qa-agent-evidence-gate`
 - **Worktree:** `/Volumes/WD1/worktrees/quinn/task-ad8346ee-qa-agent-evidence-gate`
   - Note: `infra/guards/sindustries-worktree.sh` placed this under `quinn/`, not the
-    `rowan/` prefix `agents/definitions/rowan/WORKFLOW.md` documents. Flagging as a doc/code
-    drift, not blocking this task.
+    `rowan/` prefix `agents/definitions/rowan/WORKFLOW.md` documents. Confirmed by Quinn
+    (2026-10-22) as doc/code drift, **not blocking** this task; it is worth its own separate fix.
 - **Repo:** `Stoffer-Industries/sindustries` (single repo, no cross-repo work)
 - **Components touched:**
   - `agents/workflows/feature-task/` — the Rust `feature-task` lobster crate
@@ -47,11 +47,33 @@ approval row in the Tasks API plus the lobster's existing AC-parsing logic.
 
 The design principle applied throughout: **the mechanical AC-evidence check must have exactly
 one implementation.** Today it already has two, and the Rust one is explicitly documented as
-the stricter authority:
+the stricter authority. Verbatim from the block comment at
+`agents/workflows/feature-task/src/ac_parsing.rs:661-663` (banner comment opens at line 653;
+the function it documents, `mechanical_evidence_failures`, is defined at line **673**):
 
-> `agents/workflows/feature-task/src/ac_parsing.rs:654` — *"The mechanical checks are
+> `agents/workflows/feature-task/src/ac_parsing.rs:661-663` — *"The mechanical checks are
 > deliberately a strict superset of Ash's `verify.ts` behaviour so the lobster's gate is at
 > least as strict as the agent's was."*
+
+**Citation-verification note (added 2026-10-22, revision 2).** Revision 1 cited this quote
+as `ac_parsing.rs:654` and Quinn's review flagged it as fabricated, on the evidence that
+`grep -rn "strict superset" agents/workflows/feature-task/src/` returned nothing. Re-checked
+directly against the file this revision: the quote **is** present, at lines 661-663. The
+phrase is split across two comment lines (`"a strict"` / `"superset of Ash's"`), which is
+almost certainly why the grep missed it. Only the **line reference was wrong** (654 → 661-663);
+the quotation itself is accurate and load-bearing. Recorded explicitly because the failure mode
+being fixed by this task — evidence asserted rather than re-derived — is the one this revision
+had just committed on its own review cycle, and the correction is only trustworthy because it
+was established by reading the file rather than by re-running the same grep.
+
+```
+$ grep -n "strict" agents/workflows/feature-task/src/ac_parsing.rs
+448:/// task's ACs while preserving the strict checks for coverage, full semantic
+661:// run until these pass. The mechanical checks are deliberately a strict
+663:// least as strict as the agent's was.
+$ grep -n "pub(crate) fn mechanical_evidence_failures" agents/workflows/feature-task/src/ac_parsing.rs
+673:pub(crate) fn mechanical_evidence_failures(
+```
 
 The authoritative implementation is `ac_parsing::mechanical_evidence_failures` (Rust). Ash's
 `agents/ash/src/verify.ts` (175 lines) is a lighter TS re-implementation used for Ash's own
@@ -111,7 +133,9 @@ This gives one implementation, structural enforcement, and no TS duplication.
 
 ### D2 — Pin the head SHA *and* an AC-section digest (deviation from a literal reading of AC2)
 
-**This is the most important design finding and needs Quinn's explicit sign-off.**
+**APPROVED by Quinn, 2026-10-22.** Proceed with the two-field model as designed below. Quinn's
+reasoning on review: a SHA-only AC2 leaves AC3 unable to fire for the exact failure mode that
+created this task, and two nullable columns are bounded scope.
 
 AC2 asks for "the exact PR head SHA it was verified against". A head SHA pins the *code*.
 But the `39667e62` incident was a **PR body edit** — the body was replaced with
@@ -129,8 +153,9 @@ Both are structured columns, not prose. AC3 detects a regression when **either**
 the current live PR. The SHA alone catches "code moved under the approval"; the digest alone
 catches "evidence was rewritten under the approval"; together they close the incident class.
 
-**If Quinn prefers a literal AC2 (SHA only), AC3 cannot be satisfied for body-only edits and
-the task would ship with a silent gap in exactly the path it exists to close.**
+**Resolved (Quinn, 2026-10-22): two-field model approved.** A literal SHA-only AC2 is rejected —
+AC3 cannot be satisfied for body-only edits, so that reading would ship a silent gap in exactly
+the path this task exists to close.
 
 ### D3 — Revocation reuses the existing reason-bearing routing
 
@@ -168,8 +193,10 @@ enforcement and the attestation requirement branch on `type === 'qa_agent'` and 
   - must not duplicate any check that `mechanical_evidence_failures` already performs.
 - **Enforce (TS)** — in `taskApprovals.ts` `POST /tasks/:id/approvals`, for `type === 'qa_agent'`:
   - require a supplied attestation (head SHA + digest + `verifiedAt`),
-  - reject a body-supplied `owner` (already done) **and** a stale attestation
-    (`verifiedAt` older than a short TTL — propose 15 minutes),
+  - reject a body-supplied `owner` (already done) **and** a spent or stale attestation —
+    the attestation is **single-use**, consumed on the approval write (Quinn, 2026-10-22), and
+    a replayed one is additionally refused by a 15-minute TTL that exists purely as a
+    replay guard for an attestation minted but never spent,
   - on rejection: do **not** write the approval; return `409 QA_EVIDENCE_GATE_BLOCKED`
     carrying the mechanical failures so the caller can post `[qa-agent-blocked]`.
 - **Wire Ash** — `agents/ash/` runs the subcommand immediately before its approval write. On a
@@ -224,23 +251,24 @@ to `~/.openclaw/`.
   → Mitigation: the db-integration test for AC1 asserts on the *absence* of a row, not just a
   non-200 status.
 - **Backfill semantics.** Pre-migration approvals have NULL pinned values. Treat NULL as
-  stale (re-route, do not crash) — but confirm with Quinn whether a legacy in-flight task
-  should instead be grandfathered once.
-- **Attestation TTL vs. slow reviewers.** A fixed 15-minute TTL could annoy a careful reviewer
-  who takes longer between verification and approval. Mitigated by ordering: verify-then-approve
-  are adjacent steps in one workflow run, so the window is normally seconds. Flagged rather
-  than optimised.
-- **AC2's literal reading is insufficient for AC3** (D2). This is a spec gap, not an
-  implementation risk — surfaced above for an explicit decision.
+  stale (re-route, do not crash). **Resolved (Quinn, 2026-10-22): moot this cycle** — live
+  state has **0** open tasks carrying an approved `qa_agent`, so there is nothing to grandfather
+  and nothing to re-route. Implement the treat-NULL-as-stale path exactly as designed; it will
+  be correct by the time a legacy row exists.
+- **Attestation TTL vs. slow reviewers.** Resolved (Quinn, 2026-10-22): **single-use**, consumed
+  on the approval write, with the 15-minute TTL retained only as a replay guard for an attestation
+  that was minted but never spent. This is strictly stronger than TTL-alone and removes the
+  slow-reviewer friction this risk originally flagged — no optimisation pass needed.
+- **AC2's literal reading is insufficient for AC3** (D2). Resolved — see D2; two-field model
+  approved.
 
-## Open questions for Quinn
+## Previously open questions — all answered (Quinn, 2026-10-22)
 
-1. **D2 — approve the two-field model** (`verifiedPrHeadSha` + `verifiedAcSectionDigest`) over
-   AC2's literal SHA-only wording? Without the digest, AC3 cannot catch the body-edit failure
-   mode that caused this task.
-2. **Grandfathering:** should approvals granted before this ships (NULL pinned values) be
-   treated as stale-and-re-route, or grandfathered once?
-3. **Attestation TTL:** is 15 minutes acceptable, or should the attestation be single-use
-   (consumed on first approval write)?
-4. Confirm `infra/guards/sindustries-worktree.sh` writing under `quinn/` for a Rowan-owned task
-   is expected — `WORKFLOW.md` documents a `rowan/` prefix.
+1. **D2 two-field model** → **approved**, proceed with `verifiedPrHeadSha` + `verifiedAcSectionDigest`.
+2. **Grandfathering** → **moot this cycle**; 0 open tasks hold an approved `qa_agent`. Implement
+   treat-NULL-as-stale (re-route, never crash) exactly as designed.
+3. **Attestation TTL** → **single-use**, consumed on approval write; 15-minute TTL retained
+   only as a replay guard for a minted-but-unspent attestation.
+4. **Worktree prefix** → **not blocking; drift confirmed.** `infra/guards/sindustries-worktree.sh`
+   placing a Rowan-owned task under `quinn/` is doc/code drift, not intent. Do not let it gate
+   this task; it is worth its own separate fix.
