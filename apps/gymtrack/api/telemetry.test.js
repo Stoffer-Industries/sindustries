@@ -195,6 +195,215 @@ describe('telemetry relay', () => {
     });
   });
 
+  // PR #836, Quinn's review 2026-10-21 22:20Z, constraints #1 and #3.
+  // The OTLP/logs transport is ADDITIVE: `lokiPushUrl()` is untouched and
+  // its refusal cases below still assert the same nulls.
+  describe('OTLP/logs transport', () => {
+    beforeEach(() => {
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT', '');
+    });
+
+    // Live probe against otlp-gateway-prod-au-southeast-1.grafana.net
+    // (2026-10-22, unauthenticated POST):
+    //   /v1/logs      -> 404   path absent
+    //   /otlp/v1/logs -> 401   path exists, auth required
+    // Mapping a bare host to <host>/v1/logs would therefore 404 and read
+    // as "the telemetry relay is broken".
+    it.each([
+      [
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs'
+      ],
+      [
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs'
+      ],
+      [
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs'
+      ],
+      [
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs'
+      ],
+      [
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs'
+      ]
+    ])('derives the probe-verified logs endpoint from %s', (base, expected) => {
+      expect(_testInternals.otlpLogsUrl(base)).toBe(expected);
+    });
+
+    // The canonical single-host collector form stays with the Loki
+    // transport. Claiming it here would silently move existing
+    // single-host deployments off the tested Loki path.
+    it('leaves the single-host /v1 shapes to the Loki rewriter', () => {
+      expect(_testInternals.otlpLogsUrl('https://otlp-region.grafana.net/v1/')).toBeNull();
+      expect(_testInternals.otlpLogsUrl('https://otlp-region.grafana.net/v1')).toBeNull();
+      expect(_testInternals.lokiPushUrl('https://otlp-region.grafana.net/v1/')).toBe(
+        'https://otlp-region.grafana.net/loki/api/v1/push'
+      );
+    });
+
+    it('forwards a bare Grafana Cloud OTLP gateway to the /otlp/v1/logs endpoint', async () => {
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
+      );
+      const res = await post({}, JSON.stringify(validPayload));
+      expect(res.statusCode).toBe(204);
+      expect(globalThis.fetch.mock.calls[0][0]).toBe(
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp/v1/logs'
+      );
+    });
+
+    it('prefers an explicit GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT over the derived URL', async () => {
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
+      );
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT', 'https://collector.example/otlp/v1/logs');
+      await post({}, JSON.stringify(validPayload));
+      expect(globalThis.fetch.mock.calls[0][0]).toBe('https://collector.example/otlp/v1/logs');
+    });
+
+    it('still prefers an explicit Loki endpoint over the OTLP transport', async () => {
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
+      );
+      vi.stubEnv(
+        'GRAFANA_CLOUD_LOKI_ENDPOINT',
+        'https://logs-prod-41-prod-au-southeast-1.grafana.net/loki/api/v1/push'
+      );
+      await post({}, JSON.stringify(validPayload));
+      expect(globalThis.fetch.mock.calls[0][0]).toBe(
+        'https://logs-prod-41-prod-au-southeast-1.grafana.net/loki/api/v1/push'
+      );
+      expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).streams).toBeDefined();
+    });
+
+    // Constraint #3: the operator query {app="gymtrack", source="browser"}
+    // only matches INDEXED stream labels. Loki's OTLP ingestion promotes
+    // resource attributes; log-record attributes become structured
+    // metadata, which a stream selector cannot match. Pin the shape.
+    it('emits app and source as RESOURCE attributes, not log-record attributes', () => {
+      const payload = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin'
+      });
+      const [resourceLog] = payload.resourceLogs;
+      const keys = resourceLog.resource.attributes.map((a) => a.key);
+      expect(keys).toEqual(expect.arrayContaining(['app', 'source']));
+      const byKey = Object.fromEntries(
+        resourceLog.resource.attributes.map((a) => [a.key, a.value.stringValue])
+      );
+      expect(byKey.app).toBe('gymtrack');
+      expect(byKey.source).toBe('browser');
+      // Pin it in the negative direction too: nothing on the log record
+      // itself may shadow the labels.
+      const [record] = resourceLog.scopeLogs[0].logRecords;
+      expect(record.attributes ?? []).toEqual([]);
+    });
+
+    // The dashboard's `sum by (errorCode)`, `sum by (operation)` and
+    // `by (route)` panels require those to be indexed labels too.
+    // Emitting only app+source would forward cleanly, land the events,
+    // and then return empty aggregations.
+    it('emits the full Loki label set as resource attributes for dashboard parity', () => {
+      const payload = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin',
+        provider: 'clerk',
+        errorCode: 'form_password_incorrect',
+        status: '400'
+      });
+      const byKey = Object.fromEntries(
+        payload.resourceLogs[0].resource.attributes.map((a) => [a.key, a.value.stringValue])
+      );
+      expect(byKey).toMatchObject({
+        app: 'gymtrack',
+        source: 'browser',
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin',
+        provider: 'clerk',
+        errorCode: 'form_password_incorrect',
+        status: '400'
+      });
+    });
+
+    // AC4 needs BOTH halves: the window error listener
+    // (source: 'window.error') and the auth reporter (source: 'auth').
+    // Hardcoding 'browser' would silently collapse the auth half.
+    it('carries the real event source through instead of hardcoding browser', () => {
+      const payload = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        source: 'auth',
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin'
+      });
+      const byKey = Object.fromEntries(
+        payload.resourceLogs[0].resource.attributes.map((a) => [a.key, a.value.stringValue])
+      );
+      expect(byKey.source).toBe('auth');
+    });
+
+    it('keeps the sanitized event in the log record body', () => {
+      const payload = _testInternals.buildOtlpLogsPayload({
+        ...validPayload,
+        source: 'browser',
+        environment: 'production',
+        release: 'relay-test',
+        route: '/sign-in',
+        operation: 'signin'
+      });
+      const [record] = payload.resourceLogs[0].scopeLogs[0].logRecords;
+      const body = JSON.parse(record.body.stringValue);
+      expect(body.message).not.toContain('@');
+      expect(body.operation).toBe('signin');
+      expect(record.severityText).toBe('ERROR');
+    });
+
+    it('reports the OTLP transport in the upstream_failure message', async () => {
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
+      );
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+      const res = await post({}, JSON.stringify(validPayload));
+      expect(res.body).toEqual({ error: 'upstream_failure', message: 'otlp_401' });
+    });
+
+    it('returns null from resolveForwardEndpoint when nothing is configured', () => {
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_ENDPOINT', '');
+      vi.stubEnv('GRAFANA_CLOUD_LOKI_ENDPOINT', '');
+      expect(_testInternals.resolveForwardEndpoint()).toBeNull();
+    });
+
+    // The 502 now names BOTH transports it tried, so an operator can
+    // pick the right env var instead of guessing.
+    it('names both transports in the unresolvable-endpoint reason', () => {
+      vi.stubEnv(
+        'GRAFANA_CLOUD_OTLP_ENDPOINT',
+        'https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp'
+      );
+      const resolved = _testInternals.resolveForwardEndpoint();
+      expect(resolved.transport).toBeNull();
+      expect(resolved.reason).toMatch(/GRAFANA_CLOUD_LOKI_ENDPOINT/);
+      expect(resolved.reason).toMatch(/GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT/);
+    });
+  });
+
   describe('upstream forwarding', () => {
     it('forwards to the Loki push path derived from the documented /v1/ base', async () => {
       await post({}, JSON.stringify(validPayload));
