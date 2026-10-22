@@ -17,6 +17,7 @@ mod post_merge;
 mod pr_gates;
 mod product_spec_parsing;
 mod qa_evidence_attest;
+mod qa_evidence_drift;
 mod spec_check_ready;
 mod task_approvals;
 #[cfg(test)]
