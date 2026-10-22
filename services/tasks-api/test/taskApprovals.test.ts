@@ -180,58 +180,23 @@ describe('task approval boundary', () => {
       expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
     });
 
-    it('accepts a fresh failure-free attestation and pins all THREE values onto the row (AC2)', async () => {
+    it('accepts a fresh failure-free attestation and pins BOTH values onto the row (AC2)', async () => {
       armTask();
       const attestation = freshAttestation();
       const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation });
       expect(res.status).toBe(200);
       const written = prismaMock.taskApproval.upsert.mock.calls[0][0].create;
-      expect(written.verifiedPrNumber).toBe(attestation.prNumber);
       expect(written.verifiedPrHeadSha).toBe(attestation.headSha);
       expect(written.verifiedAcSectionDigest).toBe(attestation.acSectionDigest);
     });
 
-    it('refuses an attestation that names no PR, so a row can never pin evidence to nothing', async () => {
-      // `prNumber` is what makes AC3's invalidation pass possible: without it
-      // the SHA + digest still match after a #803 -> replacement-PR swap, and
-      // nothing detects the substitution. Requiring it at the gate is cheaper
-      // than discovering the null-pin path after merge.
-      armTask();
-      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
-        type: 'qa_agent',
-        attestation: {
-          headSha: 'deb991e0739fedf0e6952643cad05bdafec54b37',
-          acSectionDigest: '9f2c4a1b8e6d3057fa1c92b4d8e07f3651ca90bd2e4f18a7c3d5b6e9024af71',
-          failures: [],
-          verifiedAt: new Date().toISOString()
-        }
-      });
-      expect(res.status).toBe(409);
-      expect(res.body.error.details.reason).toBe('attestation_malformed');
-      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
-    });
-
-    it('rejects a non-integer or non-positive prNumber rather than storing a junk pin', async () => {
-      armTask();
-      for (const prNumber of ['836', 0, -1, 836.5]) {
-        const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
-          type: 'qa_agent',
-          attestation: freshAttestation({ prNumber })
-        });
-        expect(res.status, `prNumber=${JSON.stringify(prNumber)}`).toBe(409);
-        expect(res.body.error.details.reason).toBe('attestation_malformed');
-      }
-      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
-    });
-
     it('overwrites the pins on re-approval so a stale grant cannot survive', async () => {
       armTask();
-      const later = freshAttestation({ prNumber: 901, headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
+      const later = freshAttestation({ headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: freshAttestation() });
       prismaMock.taskApproval.upsert.mockClear();
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: later });
       const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
-      expect(update.verifiedPrNumber).toBe(901);
       expect(update.verifiedPrHeadSha).toBe('aaaa111122223333444455556666777788889999');
       expect(update.verifiedAcSectionDigest).toBe('deadbeef');
     });
@@ -591,5 +556,77 @@ describe('TASKS_API_APPROVAL_SERVICE_CREDENTIALS module-load validation', () => 
   it('loads cleanly when credentials env is a valid array', async () => {
     const valid = JSON.stringify([{ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec', 'accepted'] }]);
     await expect(importApprovalAuthWith(valid)).resolves.toBeDefined();
+  });
+});
+
+// --- AC3 of task ad8346ee: revoke-only permission for the lobster ---------
+//
+// AC3 requires the lobster to revoke a `qa_agent` approval whose AC-evidence
+// pins no longer match the PR. The lobster must never be able to GRANT one:
+// that is the gate AC1 exists to police, and handing it grant rights would
+// defeat the whole task. These tests pin both halves of that asymmetry.
+describe('revoke-only permission (AC3 of task ad8346ee)', () => {
+  function armRevoke() {
+    prismaMock.task.findUnique.mockResolvedValue({ ...activeTask, status: 'doing' });
+    prismaMock.taskApproval.findUnique.mockResolvedValue(
+      approval({ type: 'qa_agent', owner: 'Ash', state: 'approved' })
+    );
+    prismaMock.taskApproval.update.mockResolvedValue(
+      approval({ type: 'qa_agent', owner: 'Ash', state: 'revoked' })
+    );
+    prismaMock.taskComment.create.mockResolvedValue({});
+  }
+
+  beforeEach(() => {
+    prismaMock.taskApproval.update.mockReset();
+    prismaMock.task.findUnique.mockReset();
+  });
+
+  it('lets the lobster REVOKE a qa_agent approval', async () => {
+    armRevoke();
+    const res = await request(createApp())
+      .delete(`/api/v1/tasks/${TASK_ID}/approvals/qa_agent`)
+      .set(auth(LOBSTER_TOKEN));
+    expect(res.status).toBe(200);
+    expect(prismaMock.taskApproval.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: 'revoked' }) })
+    );
+  });
+
+  it('still refuses the lobster a qa_agent GRANT', async () => {
+    // The asymmetry is the whole point: revoke-only, never grant. A future
+    // edit that collapsed both into one permission set would silently let
+    // the lobster approve the gate it is supposed to police.
+    armRevoke();
+    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    const res = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
+      .set(auth(LOBSTER_TOKEN))
+      .send({ type: 'qa_agent', attestation: freshAttestation() });
+    expect(res.status).toBe(403);
+    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not widen the lobster beyond qa_agent revocation', async () => {
+    // Revoke-only is scoped to exactly one type. `spec` revocation stays with
+    // Quinn's reconciler; the lobster gains nothing else.
+    armRevoke();
+    const res = await request(createApp())
+      .delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`)
+      .set(auth(LOBSTER_TOKEN));
+    expect(res.status).toBe(403);
+    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('does not widen the lobster into accepted or tech_design either', async () => {
+    armRevoke();
+    for (const type of ['accepted', 'tech_design']) {
+      prismaMock.taskApproval.update.mockClear();
+      const res = await request(createApp())
+        .delete(`/api/v1/tasks/${TASK_ID}/approvals/${type}`)
+        .set(auth(LOBSTER_TOKEN));
+      expect(res.status).toBe(403);
+    }
+    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
   });
 });

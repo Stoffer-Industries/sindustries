@@ -134,6 +134,16 @@ fn pr_identity(url: &str) -> Result<(u64, String)> {
     Ok((pr_number, head_sha))
 }
 
+/// Read the PR's current head SHA.
+///
+/// Split out from `build_attestation` because AC3's invalidation pass needs
+/// the SHA alone — it re-hashes a body it has already fetched for the
+/// mechanical gate, so paying for a second `pr_body` call per delivery PR
+/// would buy nothing.
+pub(crate) fn pr_head_sha(pr_url: &str) -> Result<(u64, String)> {
+    pr_identity(pr_url)
+}
+
 /// Current UTC time as an RFC-3339 string.
 ///
 /// Hand-rolled from `SystemTime` rather than adding `chrono`/`time` for a

@@ -1128,3 +1128,125 @@ fn manual_block_guard_allows_unblocked_task_to_continue() {
 // `structured_approval_rows_are_the_only_gate_source`) reference the
 // new module via `crate::task_approvals::*` paths per the W36 carve
 // convention.
+
+// ---- AC4 of task ad8346ee: end-to-end reproduction of incident 39667e62 ----
+//
+// Task 39667e62: Ash granted the structured `qa_agent` approval on PR #803
+// against a head carrying valid AC evidence. The PR body was then blanked to
+// `"test body update"`, the code was merged anyway, and the task sat in
+// `doing` for ~10 days with QA still green because nothing ever compared the
+// granted approval against what the PR had become.
+//
+// The reproduction walks that whole sequence through the *real* predicates —
+// the same `ac_section_digest` the attestation mints from, the same drift
+// detector, the same `qa_agent_verified` gate — so it fails if any link in
+// the chain regresses. Only the two network calls (fetching the PR body and
+// revoking through the API) are stubbed, because they are the transport, not
+// the behaviour under test.
+
+/// PR body as it stood when Ash approved it: real AC text, real evidence.
+const PR_BODY_AT_APPROVAL: &str = "\
+## Summary
+Gate the qa_agent approval on live AC evidence.
+
+## Acceptance Criteria
+- [x] AC1: Uncaught browser exceptions are exported to Grafana (testID: gymtrack vitest > telemetry)
+- [x] AC2: Telemetry never includes credentials (testID: redaction suite)
+
+## Test plan
+- [x] pnpm vitest run apps/gymtrack
+";
+
+/// The post-incident body. Note the head SHA is deliberately *not*
+/// modelled as moving: a body edit does not change the code, and that is
+/// exactly why a SHA-only pin would have missed this.
+const PR_BODY_AFTER_INCIDENT: &str = "test body update";
+
+fn approved_qa_task(head_sha: &str, ac_digest: &str) -> Task {
+    Task {
+        id: "39667e62-0000-4000-8000-000000000000".to_string(),
+        status: "doing".to_string(),
+        assignee: Some("Rowan".to_string()),
+        approvals: vec![TaskApproval {
+            approval_type: "qa_agent".to_string(),
+            state: "approved".to_string(),
+            owner: Some("Ash".to_string()),
+            verified_pr_head_sha: Some(head_sha.to_string()),
+            verified_ac_section_digest: Some(ac_digest.to_string()),
+            ..TaskApproval::default()
+        }],
+        ..Task::default()
+    }
+}
+
+#[test]
+fn blanking_the_ac_section_after_qa_approval_invalidates_and_routes_the_task() {
+    use crate::qa_evidence_drift::{detect_drift, EvidenceDrift, LiveEvidence, RecordedPins};
+
+    let head_sha = "deb991e0739fedf0e6952643cad05bdafec54b37";
+
+    // --- Before the incident: the grant is honest, so the gate passes. ---
+    let task = approved_qa_task(head_sha, &qa_evidence_attest::ac_section_digest(PR_BODY_AT_APPROVAL));
+    assert!(
+        task_approvals::qa_agent_verified(&task),
+        "precondition: the qa_agent gate must be satisfied while the body still \
+         carries the evidence that was verified"
+    );
+
+    // --- The incident: the body is blanked. No code moves. ---
+    let live_after = LiveEvidence {
+        head_sha: head_sha.to_string(),
+        ac_section_digest: qa_evidence_attest::ac_section_digest(PR_BODY_AFTER_INCIDENT),
+    };
+    let drift = detect_drift(
+        &RecordedPins::from_task(&task).expect("an approved grant carries pins"),
+        &live_after,
+    );
+    assert_eq!(
+        drift,
+        EvidenceDrift::Drifted(vec![crate::qa_evidence_drift::DriftField::AcSectionDigest]),
+        "a body-only edit must invalidate even though the head SHA is unchanged — \
+         this is the assertion a SHA-only pin (literal AC2) would fail"
+    );
+
+    // --- AC4's second half: the task must not stay parked with no signal. ---
+    // After the revoke the row is no longer `approved`, so the gate fails
+    // closed and produces a visible blocking failure naming the assignee —
+    // rather than the ~10-day silent stall that created this task.
+    let mut revoked = approved_qa_task(head_sha, "digest-of-real-evidence");
+    revoked.approvals[0].state = "revoked".to_string();
+    assert!(!task_approvals::qa_agent_verified(&revoked));
+    let gate_failures = verify_delivery::qa_agent_verified_failures(&revoked);
+    assert!(
+        !gate_failures.is_empty(),
+        "a revoked grant must produce a blocking failure, not a silent pass"
+    );
+
+    // And the reconcile note cites the actual regression rather than a
+    // generic "approval invalid" string, so the assignee can act on it.
+    let reason = drift.reason();
+    assert!(reason.contains("AC-evidence section digest"));
+    assert!(reason.contains("changed under this approval"));
+
+    // Idempotency: a re-run after the revoke finds no grant, so AC3 does not
+    // re-revoke or re-route on every subsequent heartbeat.
+    assert_eq!(RecordedPins::from_task(&revoked), None);
+}
+
+#[test]
+fn an_unchanged_pr_keeps_its_qa_approval_valid() {
+    use crate::qa_evidence_drift::{detect_drift, EvidenceDrift, LiveEvidence, RecordedPins};
+
+    let head_sha = "deb991e0";
+    let task = approved_qa_task(head_sha, &qa_evidence_attest::ac_section_digest(PR_BODY_AT_APPROVAL));
+    let live = LiveEvidence {
+        head_sha: head_sha.to_string(),
+        ac_section_digest: qa_evidence_attest::ac_section_digest(PR_BODY_AT_APPROVAL),
+    };
+
+    assert_eq!(
+        detect_drift(&RecordedPins::from_task(&task).unwrap(), &live),
+        EvidenceDrift::Current
+    );
+    assert!(task_approvals::qa_agent_verified(&task));
+}

@@ -33,17 +33,20 @@ use crate::brain_spec_lifecycle::{
     block_on_spec_drift_fluid, block_with_manual_block, manual_block_failures,
 };
 use crate::pr_gates;
+use crate::qa_evidence_attest;
+use crate::qa_evidence_drift::{detect_drift, LiveEvidence, RecordedPins};
 use crate::product_spec_parsing::{
     implementer_pr_urls, inspect_pr, latest_implementer_pr_urls, workstreams,
 };
 use crate::task_approvals;
 use crate::{
     analytics,
+    api_client,
     api_client::{add_comment, read_envelope},
     cli_utils,
     lobster_state::{is_past, write_state},
     spec_check_ready::{reconcile_workflow_attention, transition_or_block},
-    Envelope, StageArgs,
+    Envelope, StageArgs, Task,
 };
 use anyhow::Result;
 
@@ -127,6 +130,128 @@ pub(crate) fn qa_agent_verified_failures(task: &crate::Task) -> Vec<String> {
     } else {
         vec!["Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.".to_string()]
     }
+}
+
+/// Current AC-evidence pins of the delivery PRs that matter right now.
+///
+/// `body` is carried alongside the head SHA because the two pins are read
+/// from different sources: the digest comes from the body already fetched
+/// for the mechanical gate, and only the SHA needs its own `gh` call.
+/// Reusing the in-memory body keeps AC3's cost at one extra call per PR
+/// rather than a second full re-fetch.
+fn live_delivery_pins(
+    latest_urls: &[String],
+    delivery_evidence: &[ac_parsing::DeliveryPrEvidence],
+) -> (Vec<(String, LiveEvidence)>, Vec<String>) {
+    let mut live = Vec::new();
+    let mut failures = Vec::new();
+    for delivery in delivery_evidence {
+        // Only the PRs the task is currently being delivered against. A
+        // superseded historical PR that still merged keeps its evidence
+        // role in the AC coverage check, but the live grant was pinned
+        // against the current set.
+        if !is_latest_pr_url(&delivery.url, latest_urls) {
+            continue;
+        }
+        match qa_evidence_attest::pr_head_sha(&delivery.url) {
+            Ok((_, head_sha)) => live.push((
+                delivery.url.clone(),
+                LiveEvidence {
+                    head_sha,
+                    ac_section_digest: qa_evidence_attest::ac_section_digest(&delivery.body),
+                },
+            )),
+            // Fail closed, never open. A grant cannot be re-checked against
+            // a PR whose head cannot be read, so the pass blocks and says
+            // so rather than waving the approval through unchecked.
+            Err(err) => failures.push(format!(
+                "Could not read the head SHA of delivery PR {} to re-check the structured `qa_agent` approval: {err}.",
+                delivery.url
+            )),
+        }
+    }
+    (live, failures)
+}
+
+/// AC3 of task `ad8346ee`: re-check a granted `qa_agent` approval against the
+/// PR's current state before the QA gate is consulted.
+///
+/// Task `39667e62` merged PR #803 with its AC-evidence section blanked to
+/// `"test body update"` *after* Ash approved it, and the task then sat in
+/// `doing` for ~10 days with QA still green. Nothing in the pipeline
+/// compared a granted approval against what the PR looks like now. This
+/// closes that: on any pin divergence the approval is revoked and the task
+/// is routed to its assignee with a reason naming the regression.
+///
+/// Two ordering rules are load-bearing:
+///
+/// - **Route first, revoke second.** The reverse can strand the task: a
+///   revoked grant whose reconcile failed leaves nothing for the next pass
+///   to act on, because AC3 only fires against an *approved* row. That is
+///   precisely the silent park AC4 exists to prevent. Routing first means a
+///   routing failure aborts before anything is mutated and the next pass
+///   retries from the same state.
+/// - **Idempotent by construction.** After the revoke, the row is no longer
+///   `approved`, so `RecordedPins::from_task` returns `None` and later
+///   passes no-op. No fingerprint bookkeeping is needed to avoid
+///   re-revoking on every heartbeat.
+fn invalidate_stale_qa_approval(
+    args: &StageArgs,
+    env: &mut Envelope,
+    live: &[(String, LiveEvidence)],
+) -> Result<bool> {
+    let Some(pins) = RecordedPins::from_task(&env.task) else {
+        return Ok(false);
+    };
+    // A grant is pinned to one PR. Multi-PR tasks attest against the
+    // delivery PR the agent actually ran the check on, so the re-check uses
+    // the same set the attestation was minted from: the current delivery
+    // set, in order.
+    let Some((pr_url, state)) = live.first() else {
+        return Ok(false);
+    };
+    let drift = detect_drift(&pins, state);
+    if !drift.is_stale() {
+        return Ok(false);
+    }
+    let assignee = env.task.assignee.clone();
+    let note = format!(
+        "Structured `qa_agent` approval revoked by the lobster: {}. The grant pinned PR {} at head {} with AC-section digest {}; the live PR now reports head {} with digest {}. Next action: {} re-runs `feature-task mechanical-evidence-check --pr-url {}` and re-approves with the fresh attestation — POST /tasks/{}/approvals refuses an unattested `qa_agent` grant.",
+        drift.reason(),
+        pr_url,
+        pins.head_sha.as_deref().unwrap_or("<none recorded>"),
+        pins.ac_section_digest.as_deref().unwrap_or("<none recorded>"),
+        state.head_sha,
+        state.ac_section_digest,
+        assignee.as_deref().unwrap_or("the assignee"),
+        pr_url,
+        env.task.id
+    );
+    if args.dry_run {
+        return Ok(true);
+    }
+    if let Some(owner) = assignee {
+        let mut desired = vec![owner];
+        for existing in &env.task.attention_owners {
+            if !desired.iter().any(|slot| slot.eq_ignore_ascii_case(existing)) {
+                desired.push(existing.clone());
+            }
+        }
+        api_client::api_reconcile_attention::<Task>(&args.base_url, &env.task.id, desired, &note)?;
+    }
+    api_client::api_delete(
+        &args.base_url,
+        &format!("/tasks/{}/approvals/qa_agent", env.task.id),
+    )?;
+    // Re-read so the QA gate below evaluates the revoked row rather than the
+    // pre-revoke snapshot still held in `env.task`.
+    env.task = api_client::api_get_task(&args.base_url, &env.task.id)?;
+    add_comment(
+        &args.base_url,
+        &env.task.id,
+        &format!("[qa-evidence-invalidated]\n{note}"),
+    )?;
+    Ok(true)
 }
 
 /// `doing → acceptance` stage handler. Verifies the latest implementer PR
@@ -377,6 +502,13 @@ pub(crate) fn verify_delivery(args: StageArgs) -> Result<Envelope> {
     // AC2 of task 5e35dc25: skip this branch entirely when the mechanical
     // gate has already failed — Ash's qa_agent is not requested until
     // mechanical checks pass.
+    // AC3 of task ad8346ee: re-check any granted `qa_agent` approval against
+    // the PR's current state *before* the QA gate is consulted, so a grant
+    // that no longer describes its PR can never satisfy the gate.
+    let (live_pins, pin_failures) = live_delivery_pins(&latest_urls, &delivery_evidence);
+    failures.extend(pin_failures);
+    invalidate_stale_qa_approval(&args, &mut env, &live_pins)?;
+
     if qa_agent_gate_eligible(mechanical_gate_failed, &failures) {
         let qa_agent_failures = qa_agent_verified_failures(&env.task);
         if !qa_agent_failures.is_empty() {

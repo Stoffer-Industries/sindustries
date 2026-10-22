@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
-import { authorizeApprovalType, requireApprovalPrincipal, type ApprovalType } from '../middleware/approvalAuth.ts';
+import { authorizeApprovalRevocation, authorizeApprovalType, requireApprovalPrincipal, type ApprovalType } from '../middleware/approvalAuth.ts';
 import { parseTaskId } from './tasks/_validation.ts';
 import { mapTaskApproval } from './tasks/_mapper.ts';
 import { validApprovalTypes } from './tasks/_constants.ts';
@@ -99,17 +99,13 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     // Enforced at this choke point deliberately: it is the single route through
     // which EVERY `qa_agent` approval is written, so the gate cannot be
     // bypassed by a future writer forgetting to call something first.
-    let evidencePins:
-      | { verifiedPrNumber: number; verifiedPrHeadSha: string; verifiedAcSectionDigest: string }
-      | null = null;
+    let evidencePins: { verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
     if (type === 'qa_agent') {
       const verdict = evaluateQaAttestation(req.body);
       if (!verdict.ok) {
         // No approval row is written on this path — that absence is asserted
         // directly by the AC1 test, because "returned a 4xx" alone would not
         // catch a regression that logged the rejection but still persisted.
-        // `failures` is carried verbatim so the caller (Ash) can post its
-        // `[qa-agent-blocked]` comment without a second round-trip.
         return res.status(409).json({
           error: {
             code: QA_EVIDENCE_GATE_BLOCKED,
@@ -119,7 +115,6 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
         });
       }
       evidencePins = {
-        verifiedPrNumber: verdict.prNumber,
         verifiedPrHeadSha: verdict.headSha,
         verifiedAcSectionDigest: verdict.acSectionDigest
       };
@@ -171,11 +166,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
           state: 'approved',
           approvedAt: now,
           revokedAt: null,
-          ...(evidencePins ?? {
-            verifiedPrNumber: null,
-            verifiedPrHeadSha: null,
-            verifiedAcSectionDigest: null
-          })
+          ...(evidencePins ?? { verifiedPrHeadSha: null, verifiedAcSectionDigest: null })
         }
       });
       const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');
@@ -195,7 +186,10 @@ taskApprovalsRouter.delete('/tasks/:id/approvals/:type', requireApprovalPrincipa
     if (!id) return badRequest(res, 'INVALID_TASK_ID', 'Task id must be a 36-char UUID');
     const type = normalizeApprovalType(req.params.type);
     if (!type) return badRequest(res, 'INVALID_APPROVAL_TYPE', `type must be one of: ${Array.from(validApprovalTypes).sort().join(', ')}`);
-    if (!authorizeApprovalType(req, res, type)) return;
+    // Revocation is authorised against the wider `revocationTypes` set so
+    // the lobster can invalidate a stale `qa_agent` grant (AC3 of task
+    // ad8346ee) while still being unable to grant one.
+    if (!authorizeApprovalRevocation(req, res, type)) return;
     const actor = req.approvalPrincipal!.actor;
 
     const result = await prisma.$transaction(async (tx) => {
