@@ -16,6 +16,7 @@ mod lobster_state;
 mod post_merge;
 mod pr_gates;
 mod product_spec_parsing;
+mod qa_evidence_attest;
 mod spec_check_ready;
 mod task_approvals;
 #[cfg(test)]
@@ -63,6 +64,24 @@ enum Commands {
     /// (e.g. iCloud/TCC `Operation not permitted`).
     ArchiveDoneTaskSpecsSweep(ArchiveDoneTaskSpecsSweepArgs),
     Analytics(AnalyticsArgs),
+    /// Mint a live AC-evidence attestation for a PR: runs the same
+    /// `mechanical_evidence_failures` the lobster's delivery gate runs, and
+    /// emits `{ prNumber, headSha, acSectionDigest, failures[], verifiedAt }`.
+    /// Ash calls this immediately before writing its `qa_agent` approval;
+    /// the Tasks API refuses an approval without a matching attestation
+    /// (AC1 of task ad8346ee).
+    MechanicalEvidenceCheck(MechanicalEvidenceCheckArgs),
+}
+
+#[derive(Parser, Clone)]
+struct MechanicalEvidenceCheckArgs {
+    #[arg(long, default_value = "http://localhost:4001/api/v1")]
+    base_url: String,
+    #[arg(long)]
+    task_id: String,
+    /// PR URL (or number) the attestation is computed against.
+    #[arg(long)]
+    pr_url: String,
 }
 
 #[derive(Parser, Clone)]
@@ -229,6 +248,18 @@ struct TaskApproval {
     note: Option<String>,
     #[serde(default)]
     approved_at: Option<String>,
+    /// PR head SHA this `qa_agent` approval was verified against (AC2 of
+    /// task ad8346ee). `None` on rows written before the migration; read as
+    /// stale rather than trusted, so a legacy grant is re-checked rather
+    /// than silently honoured.
+    #[serde(default)]
+    verified_pr_head_sha: Option<String>,
+    /// SHA-256 over the normalised AC-evidence section of the PR body at
+    /// verification time. Pins the *evidence* independently of the head
+    /// SHA, because the `39667e62` incident was a body edit that need not
+    /// move the head at all (AC3 of task ad8346ee).
+    #[serde(default)]
+    verified_ac_section_digest: Option<String>,
     #[serde(default)]
     revoked_at: Option<String>,
     #[serde(default)]
@@ -299,27 +330,54 @@ struct Workstream {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let envelope = match cli.command {
-        Commands::LoadTask { base_url, task_id } => cli_utils::load_task(&base_url, &task_id)?,
-        Commands::SpecCheck(args) => spec_check_ready::spec_check(args)?,
-        Commands::ReadyChecks(args) => spec_check_ready::ready_checks(args)?,
-        Commands::VerifyDelivery(args) => crate::verify_delivery::verify_delivery(args)?,
-        Commands::FeedbackAggregate(args) => feedback_aggregate::feedback_aggregate(args)?,
-        Commands::PostMerge(args) => crate::post_merge::post_merge(args)?,
-        Commands::CodeTaskTechDesignCheck(args) => {
-            spec_check_ready::code_task_tech_design_check(args)?
+
+    let output = match cli.command {
+        // `mechanical-evidence-check` emits an attestation rather than the
+        // standard `Envelope`. It is not a stage transition, so it has no
+        // lobster-state side effects and must not be wrapped in one.
+        Commands::MechanicalEvidenceCheck(args) => {
+            let attestation = qa_evidence_attest::mechanical_evidence_check(
+                &args.base_url,
+                &args.task_id,
+                &args.pr_url,
+            )?;
+            serde_json::to_string_pretty(&attestation)?
         }
-        Commands::CodeTaskReadyChecks(args) => spec_check_ready::code_task_ready_checks(args)?,
-        Commands::CodeTaskVerifyDelivery(args) => {
-            crate::verify_delivery::code_task_verify_delivery(args)?
+        command => {
+            let envelope = match command {
+                Commands::LoadTask { base_url, task_id } => {
+                    cli_utils::load_task(&base_url, &task_id)?
+                }
+                Commands::SpecCheck(args) => spec_check_ready::spec_check(args)?,
+                Commands::ReadyChecks(args) => spec_check_ready::ready_checks(args)?,
+                Commands::VerifyDelivery(args) => crate::verify_delivery::verify_delivery(args)?,
+                Commands::FeedbackAggregate(args) => feedback_aggregate::feedback_aggregate(args)?,
+                Commands::PostMerge(args) => crate::post_merge::post_merge(args)?,
+                Commands::CodeTaskTechDesignCheck(args) => {
+                    spec_check_ready::code_task_tech_design_check(args)?
+                }
+                Commands::CodeTaskReadyChecks(args) => {
+                    spec_check_ready::code_task_ready_checks(args)?
+                }
+                Commands::CodeTaskVerifyDelivery(args) => {
+                    crate::verify_delivery::code_task_verify_delivery(args)?
+                }
+                Commands::ReconcileBrainSpecApprovals(args) => {
+                    reconcile_brain_spec_approvals(args)?
+                }
+                Commands::ArchiveDoneTaskSpecsSweep(args) => {
+                    brain_spec_lifecycle::archive_done_task_specs_sweep(args)?
+                }
+                Commands::Analytics(args) => analytics_replay::analytics_replay(args)?,
+                // Handled above; unreachable after the outer match arm.
+                Commands::MechanicalEvidenceCheck(_) => {
+                    unreachable!("mechanical-evidence-check is handled in the outer match")
+                }
+            };
+            serde_json::to_string_pretty(&envelope)?
         }
-        Commands::ReconcileBrainSpecApprovals(args) => reconcile_brain_spec_approvals(args)?,
-        Commands::ArchiveDoneTaskSpecsSweep(args) => {
-            brain_spec_lifecycle::archive_done_task_specs_sweep(args)?
-        }
-        Commands::Analytics(args) => analytics_replay::analytics_replay(args)?,
     };
-    println!("{}", serde_json::to_string_pretty(&envelope)?);
+    println!("{output}");
     Ok(())
 }
 
