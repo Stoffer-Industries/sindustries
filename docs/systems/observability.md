@@ -290,12 +290,15 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 
   ```bash
   for v in TELEMETRY_RELAY_TOKEN VITE_TELEMETRY_TOKEN; do
-    printf '%s ' "$v"
-    grep "^${v}=" infra/cloud/observability/.env.local | cut -d= -f2- | tr -d '\n' | shasum -a 256 | cut -c1-8
+    if value=$(grep "^${v}=" infra/cloud/observability/.env.local | cut -d= -f2-) && [ -n "$value" ]; then
+      printf '%s %s\n' "$v" "$(printf '%s' "$value" | shasum -a 256 | cut -c1-8)"
+    else
+      printf '%s MISSING (absent or empty)\n' "$v"
+    fi
   done
   ```
 
-  Equal fingerprints mean the pair is wired consistently. Unequal fingerprints mean one arm was sourced from somewhere other than the local file, and that arm must be re-set from the file. If an older value was ever pasted into a public artifact, rotate rather than reuse it: nothing should be provisioned from a value that has appeared in a thread.
+  Equal fingerprints mean the pair is wired consistently. Unequal fingerprints mean one arm was sourced from somewhere other than the local file, and that arm must be re-set from the file. A `MISSING` line is not a pass: an absent arm must never be fingerprinted, because the digest of empty input is a fixed constant, so an absent variable and an empty one would otherwise print the same `e3b0c442` and two missing arms would read as a consistent pair. Write both arms from one fresh value first, then run this check. If an older value was ever pasted into a public artifact, rotate rather than reuse it: nothing should be provisioned from a value that has appeared in a thread.
 - Quinn induces a wrong-password sign-in on the production host, then captures a real uncaught browser exception by pasting this into the devtools console on that same production page:
 
   ```js
