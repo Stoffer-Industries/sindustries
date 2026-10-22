@@ -1,8 +1,10 @@
 ---
-status: draft
+status: approved
 task_id: ad8346ee-46fc-4bc7-a9b0-a8c31acfb04f
 product_spec: n/a
-shipped_pr: null
+approved_by: Quinn
+approved_date: 2026-10-22
+shipped_pr: 863
 shipped_date: null
 ---
 
@@ -157,6 +159,28 @@ catches "evidence was rewritten under the approval"; together they close the inc
 AC3 cannot be satisfied for body-only edits, so that reading would ship a silent gap in exactly
 the path this task exists to close.
 
+#### D2 amendment — third pin: `verifiedPrNumber` (Quinn, PR #863 review, 2026-10-22)
+
+Raised on PR review as a **should-fix** and accepted: the two fields above record *what* was
+verified, but not *which* PR it was verified on. AC2's wording is "the exact PR head SHA it
+was verified **against**" — against something. With no PR number on the row, AC3's invalidation
+pass has nothing to compare the task's currently-linked PR against, so a task whose linked PR
+is swapped for a replacement leaves both pins matching and the stale grant survives. That is
+precisely the #803 -> replacement-PR shape this task exists to close.
+
+- `verifiedPrNumber` — nullable `Int`; names the PR the grant was verified against.
+- Folded into the existing `20261022140000_add_qa_approval_evidence_pins` migration rather than a
+  new one: neither has shipped to `main`, so a single migration keeps one rollback story.
+- `attestation.prNumber` becomes **required** at the gate (it was parsed-and-discarded before).
+  The producer reads `number` and `headRefOid` from `pr_identity` in one call, so it always has
+  the value; requiring it closes the null-pin path now instead of after merge. A non-integer or
+  non-positive number is `attestation_malformed` rather than being coerced.
+
+Scope note, recorded deliberately rather than left implicit: this pin is *identity*, not
+*single-use*. The residual "single-use within the 15-minute window" gap called out in
+`services/tasks-api/src/lib/qaEvidenceAttestation.ts` is **not** closed by this column — closing
+it needs the mint *timestamp* persisted, which remains a separate Slice 3 decision.
+
 ### D3 — Revocation reuses the existing reason-bearing routing
 
 AC3 requires adding the current assignee to `attentionOwners[0]` with an explicit reason, and
@@ -220,7 +244,7 @@ enforcement and the attestation requirement branch on `type === 'qa_agent'` and 
 | AC | What is proven | Layer | Concrete test |
 |---|---|---|---|
 | **AC1** | A `qa_agent` approval whose live mechanical check fails is **refused**, and `[qa-agent-blocked]` is posted with the failure | Rust unit + tasks-api integration + tasks-api route integration | Rust: subcommand returns non-empty `failures` for a PR citing a file not in the diff (mirrors existing `mechanical_evidence_failures` unit tests at `ac_parsing.rs:1757+`). API: route integration test posts `qa_agent` with a failing/stale attestation → expects `409 QA_EVIDENCE_GATE_BLOCKED` and asserts **no** `TaskApproval` row was created |
-| **AC2** | The granted approval stores the verified PR head SHA as a **structured field** | tasks-api db integration (real Postgres) | Create task → approve `qa_agent` with attestation → read row directly and assert `verifiedPrHeadSha`/`verifiedAcSectionDigest` equal the attested values, and that a follow-up `GET /approvals` surfaces them |
+| **AC2** | The granted approval stores the verified PR number and head SHA as **structured fields** | tasks-api db integration (real Postgres) | Create task → approve `qa_agent` with attestation → read row directly and assert `verifiedPrNumber`/`verifiedPrHeadSha`/`verifiedAcSectionDigest` equal the attested values, and that a follow-up `GET /approvals` surfaces them |
 | **AC3** | Changing the AC-evidence section after approval auto-invalidates and routes a visible owner | Rust integration (`tests_integration.rs`) | Fixture task with `qa_agent` approved + pinned digest; edit PR body so the digest diverges; run `verify_delivery` → assert approval is `revoked`, `attentionOwners[0] == assignee`, and the reconcile reason cites the regression. **Second case: body edit only, head SHA unchanged** — the incident's exact shape |
 | **AC4** | End-to-end reproduction of `39667e62` | Rust integration, mirroring existing harness at `tests_integration.rs:1125` | Approve against a head with valid AC evidence → blank the body to `"test body update"` → next `verify_delivery` asserts **both** the AC3 invalidation **and** that the task does not remain parked in `doing` with no visible attention-owner signal (i.e. `attentionOwners` is non-empty) |
 

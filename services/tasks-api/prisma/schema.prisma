@@ -211,6 +211,14 @@ model TaskApproval {
   /// "verified nothing" — which the invalidation pass treats as stale
   /// (re-route) rather than trusted.
   verifiedPrHeadSha String?
+  /// PR number this `qa_agent` approval was verified against (task ad8346ee,
+  /// review feedback 2026-10-22). `verifiedPrHeadSha` records what was
+  /// checked, but not *which* PR it was checked on — so AC3's invalidation
+  /// pass had nothing to compare the task's currently-linked PR against. That
+  /// is the #803 -> replacement-PR shape: the evidence pins still match a PR
+  /// that no longer belongs to the task, and a stale grant survives a swap.
+  /// Nullable only for non-`qa_agent` approvals and pre-migration rows.
+  verifiedPrNumber Int?
   /// SHA-256 over the normalised AC-evidence section of the PR body at
   /// verification time (task ad8346ee, AC3). Pins the *evidence*,
   /// independently of the head SHA: the 39667e62 incident was a PR *body*
