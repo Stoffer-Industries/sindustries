@@ -169,32 +169,15 @@ export function lokiEndpoint() {
   // point at the right one via `GRAFANA_CLOUD_LOKI_ENDPOINT`. The
   // OTLP-derived value stays as the fallback for single-host deployments
   // where the rewriter pattern matches. Returns `null` when neither
-  // produces a URL — caller must check `lokiMisconfiguredReason()` to
-  // distinguish a missing config from a misconfigured one.
+  // produces a URL — the caller must distinguish a missing config
+  // (204 no-op) from a misconfigured one (502). `resolveForwardEndpoint()`
+  // owns that distinction now; it is the only load-bearing entry point.
   const explicit = process.env.GRAFANA_CLOUD_LOKI_ENDPOINT;
   if (explicit) return explicit;
   return lokiPushUrl(process.env.GRAFANA_CLOUD_OTLP_ENDPOINT);
 }
 
-/**
- * Human-readable explanation of why no Loki endpoint could be resolved,
- * or `null` when configuration is fine. Used by the handler to choose
- * between a 204 no-op (relay intentionally not configured) and a 502
- * `misconfigured_loki_endpoint` (operator tried but the OTLP base is
- * not the same host as the Loki push API).
- */
-export function lokiMisconfiguredReason() {
-  if (process.env.GRAFANA_CLOUD_LOKI_ENDPOINT) return null;
-  const otlpBase = process.env.GRAFANA_CLOUD_OTLP_ENDPOINT;
-  if (!otlpBase) return null;
-  if (lokiPushUrl(otlpBase)) return null;
-  return (
-    'set GRAFANA_CLOUD_LOKI_ENDPOINT explicitly — the relay could not ' +
-    'derive a Loki push URL from GRAFANA_CLOUD_OTLP_ENDPOINT; on ' +
-    'Grafana Cloud tenants OTLP and the Loki push API live on ' +
-    'different hosts (otlp-prod-* vs. logs-prod-*)'
-  );
-}
+
 
 // Matches a bare HTTP header name per RFC 9110 token rules.
 const HEADER_NAME_PATTERN = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
@@ -464,15 +447,20 @@ export function resolveForwardEndpoint() {
   const explicitLoki = process.env.GRAFANA_CLOUD_LOKI_ENDPOINT;
   if (explicitLoki) return { transport: 'loki', url: explicitLoki };
 
-  // An explicit OTLP/logs endpoint is the operator naming the transport
-  // directly, so it outranks anything derivable from the OTLP base.
-  const explicitOtlpLogs = process.env.GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT;
-  if (explicitOtlpLogs) return { transport: 'otlp', url: explicitOtlpLogs };
-
   const otlpBase = process.env.GRAFANA_CLOUD_OTLP_ENDPOINT;
-  if (!otlpBase) return null;
 
-  const otlpUrl = otlpLogsUrl(otlpBase);
+  // `otlpEndpoint()` is the single owner of "what is the OTLP/logs
+  // push URL" — explicit `GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT` first,
+  // else derived from the OTLP base. The resolver calls it rather than
+  // re-deriving the same answer inline, so the two cannot drift.
+  const otlpUrl = otlpEndpoint();
+
+  // No operator config at all: neither an explicit OTLP/logs endpoint
+  // nor an OTLP base to derive one from. Checked after `otlpEndpoint()`
+  // so an operator who names `GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT`
+  // directly — without also setting the OTLP base — still forwards.
+  if (!otlpUrl && !otlpBase) return null;
+
   if (otlpUrl) return { transport: 'otlp', url: otlpUrl };
 
   const lokiUrl = lokiPushUrl(otlpBase);
@@ -628,7 +616,6 @@ export const _testInternals = {
   tokenBuckets,
   lokiEndpoint,
   lokiPushUrl,
-  lokiMisconfiguredReason,
   lokiAuthHeaders,
   otlpLogsUrl,
   otlpEndpoint,

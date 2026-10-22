@@ -17,7 +17,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import handler, {
   _testInternals,
   lokiAuthHeaders,
-  lokiMisconfiguredReason,
   parseOtlpHeaderString
 } from './telemetry.js';
 
@@ -267,6 +266,20 @@ describe('telemetry relay', () => {
       expect(globalThis.fetch.mock.calls[0][0]).toBe('https://collector.example/otlp/v1/logs');
     });
 
+    it('forwards on an explicit OTLP/logs endpoint even with no OTLP base set', async () => {
+      // The operator is naming the transport directly, so there is
+      // nothing to derive from. This path has no other coverage: the
+      // test above also sets GRAFANA_CLOUD_OTLP_ENDPOINT, so a resolver
+      // that checked the OTLP base for emptiness BEFORE honouring an
+      // explicit OTLP/logs endpoint would pass that test while
+      // silently no-oping (204) here.
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_ENDPOINT', '');
+      vi.stubEnv('GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT', 'https://collector.example/otlp/v1/logs');
+      const res = await post({}, JSON.stringify(validPayload));
+      expect(res.statusCode).toBe(204);
+      expect(globalThis.fetch.mock.calls[0][0]).toBe('https://collector.example/otlp/v1/logs');
+    });
+
     it('still prefers an explicit Loki endpoint over the OTLP transport', async () => {
       vi.stubEnv(
         'GRAFANA_CLOUD_OTLP_ENDPOINT',
@@ -502,27 +515,20 @@ describe('telemetry relay', () => {
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    // When the operator attempted to configure the relay but the OTLP
-    // base does not serve the Loki push API on this tenant (Grafana
-    // Cloud multi-host shape), the relay must surface a clear,
-    // actionable 502 instead of silently no-oping. Silently no-oping
-    // here masked the config gap: the browser event would be dropped
-    // without any operator-visible signal. Quinn's PR #836 review at
-    // 2026-10-20 14:50Z flagged this as defect 5 in the same class as
-    // four previous defects — the failure mode reads as "the telemetry
-    // relay is broken" rather than "you need to set
-    // GRAFANA_CLOUD_LOKI_ENDPOINT".
-    it('returns 502 misconfigured_loki_endpoint when the OTLP base has no /v1[-suffix] and no override', async () => {
-      vi.stubEnv(
-        'GRAFANA_CLOUD_OTLP_ENDPOINT',
-        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
-      );
-      const res = await post({}, JSON.stringify(validPayload));
-      expect(res.statusCode).toBe(502);
-      expect(res.body.error).toBe('misconfigured_loki_endpoint');
-      expect(res.body.message).toMatch(/GRAFANA_CLOUD_LOKI_ENDPOINT/);
-      expect(globalThis.fetch).not.toHaveBeenCalled();
-    });
+    // The bare `otlp-gateway-prod-*` host with no override is NOT a
+    // misconfiguration any more: that shape is the OTLP/logs
+    // transport's happy path, and `resolveForwardEndpoint()` resolves it
+    // via `otlpLogsUrl()`. The former 502 assertion for this exact
+    // input was deleted rather than reinstated — restoring it would
+    // re-introduce the inverted guard Quinn's PR #836 review
+    // (2026-10-21 22:20Z, constraint #1) warned against, 502ing on
+    // precisely the configuration the OTLP branch exists to support.
+    // The 502 contract is pinned instead against the shape that
+    // genuinely cannot resolve (`…/otlp`, asserted in the
+    // endpoint-resolution block above), which is the better assertion:
+    // it pins the unresolvable shape rather than one we deliberately
+    // support. See `docs/systems/observability.md` for the transport
+    // precedence.
 
     it('treats the same shape as a graceful 204 when no credential AND no OTLP endpoint are set', async () => {
       // Half-armed intermediate state, where the operator set neither
@@ -534,30 +540,6 @@ describe('telemetry relay', () => {
       const res = await post({}, JSON.stringify(validPayload));
       expect(res.statusCode).toBe(204);
       expect(globalThis.fetch).not.toHaveBeenCalled();
-    });
-
-    it('lokiMisconfiguredReason returns null on a derivable base and an actionable message on an unrecognised base', () => {
-      // Empty configuration → operator has not started, no error.
-      expect(lokiMisconfiguredReason()).toBeNull();
-      vi.stubEnv('GRAFANA_CLOUD_LOKI_ENDPOINT', '');
-      vi.stubEnv(
-        'GRAFANA_CLOUD_OTLP_ENDPOINT',
-        'https://otlp-region.grafana.net/v1/'
-      );
-      expect(lokiMisconfiguredReason()).toBeNull();
-      // Bare host with no override → actionable: explicit LOKI required.
-      vi.stubEnv(
-        'GRAFANA_CLOUD_OTLP_ENDPOINT',
-        'https://otlp-gateway-prod-au-southeast-1.grafana.net'
-      );
-      expect(lokiMisconfiguredReason()).toMatch(/GRAFANA_CLOUD_LOKI_ENDPOINT/);
-      // Explicit override wins — operator pointed at the right host,
-      // the OTLP base no longer matters.
-      vi.stubEnv(
-        'GRAFANA_CLOUD_LOKI_ENDPOINT',
-        'https://logs-prod-41-prod-au-southeast-1.grafana.net/loki/api/v1/push'
-      );
-      expect(lokiMisconfiguredReason()).toBeNull();
     });
 
     it('maps a non-2xx upstream response to 502 upstream_failure', async () => {
