@@ -154,10 +154,40 @@ pub(crate) fn api_patch<T: for<'de> Deserialize<'de>>(
         .context("decode API patch response")
 }
 
+/// Tasks API's hard cap on `note` length
+/// (`services/tasks-api/src/routes/taskAttentionOwners.ts::normalizeNoteString`,
+/// `MAX_NOTE_LENGTH`). Notes longer than this are rejected wholesale with
+/// `400 INVALID_ATTENTION_OWNER_NOTE` rather than silently truncated
+/// server-side, so every caller must stay under the cap before sending.
+const ATTENTION_NOTE_MAX_LEN: usize = 500;
+
+/// Truncate `note` to the Tasks API's note cap on a `char` boundary, leaving
+/// room for an ellipsis marker so truncated notes are visibly incomplete
+/// rather than silently cut off mid-sentence. No-op when already within the
+/// cap.
+fn truncate_attention_note(note: &str) -> std::borrow::Cow<'_, str> {
+    if note.chars().count() <= ATTENTION_NOTE_MAX_LEN {
+        return std::borrow::Cow::Borrowed(note);
+    }
+    const MARKER: &str = "…[truncated]";
+    let budget = ATTENTION_NOTE_MAX_LEN.saturating_sub(MARKER.chars().count());
+    let mut truncated: String = note.chars().take(budget).collect();
+    truncated.push_str(MARKER);
+    std::borrow::Cow::Owned(truncated)
+}
+
 /// Reconcile the workflow-owned attention stack through the metadata-aware
 /// endpoint. Unlike the legacy full-replacement PATCH, this preserves rows
 /// that remain in the stack and records the authenticated actor/reason for
 /// every newly created or repaired row.
+///
+/// `note` is truncated to the Tasks API's 500-char cap before sending —
+/// callers (`verify_delivery::revoke_and_route_stale_qa_approval`,
+/// `spec_check_ready::reconcile_workflow_attention`) build notes by
+/// concatenating several unbounded fields (drift reason, PR labels, head
+/// SHAs, AC digests) and can exceed the cap, which the API previously
+/// rejected outright with `400 INVALID_ATTENTION_OWNER_NOTE` instead of
+/// truncating. See `docs/infra/runbooks/feature-task-lobster-attention-note-overflow.md`.
 pub(crate) fn api_reconcile_attention<T: for<'de> Deserialize<'de>>(
     base_url: &str,
     task_id: &str,
@@ -168,6 +198,7 @@ pub(crate) fn api_reconcile_attention<T: for<'de> Deserialize<'de>>(
         "{}/tasks/{task_id}/attention-owners/reconcile",
         base_url.trim_end_matches('/')
     );
+    let note = truncate_attention_note(note);
     let payload = json!({
         "attentionOwners": attention_owners,
         "note": note,
@@ -286,6 +317,49 @@ pub(crate) fn spec_checksum_mismatch_message(err: &anyhow::Error) -> Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression for the 2026-10-23 Task Lobster escalation: notes built by
+    // concatenating drift reason + PR label + head SHA + AC digest (x2) +
+    // live-PR description + next-action text (e.g.
+    // `verify_delivery::revoke_and_route_stale_qa_approval`) could exceed
+    // the Tasks API's 500-char cap, which the API rejects outright with
+    // `400 INVALID_ATTENTION_OWNER_NOTE` rather than truncating
+    // server-side.
+    #[test]
+    fn truncate_attention_note_is_noop_under_cap() {
+        let note = "short note";
+        assert_eq!(truncate_attention_note(note), note);
+    }
+
+    #[test]
+    fn truncate_attention_note_is_noop_at_exact_cap() {
+        let note = "a".repeat(ATTENTION_NOTE_MAX_LEN);
+        let truncated = truncate_attention_note(&note);
+        assert_eq!(truncated.chars().count(), ATTENTION_NOTE_MAX_LEN);
+        assert_eq!(truncated, note);
+    }
+
+    #[test]
+    fn truncate_attention_note_caps_oversized_note_with_marker() {
+        // 615 chars: the measured length of the real
+        // `revoke_and_route_stale_qa_approval` template for an
+        // `EvidenceDrift::Unpinned` approval (no pinned PR#/head SHA/digest).
+        let note = "x".repeat(615);
+        let truncated = truncate_attention_note(&note);
+        assert!(truncated.chars().count() <= ATTENTION_NOTE_MAX_LEN);
+        assert!(truncated.ends_with("…[truncated]"));
+    }
+
+    #[test]
+    fn truncate_attention_note_respects_char_boundaries_on_multibyte_input() {
+        // Guards against panicking on a byte-index slice through a
+        // multi-byte UTF-8 character; truncation must operate on `char`
+        // boundaries, not byte offsets.
+        let note = "é".repeat(615);
+        let truncated = truncate_attention_note(&note);
+        assert!(truncated.chars().count() <= ATTENTION_NOTE_MAX_LEN);
+        assert!(truncated.ends_with("…[truncated]"));
+    }
 
     // These tests mutate process-global environment variables. Cargo runs
     // unit tests in parallel, so without one shared lock the fallback test
