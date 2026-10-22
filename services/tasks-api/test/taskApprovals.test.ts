@@ -190,6 +190,32 @@ describe('task approval boundary', () => {
       expect(written.verifiedAcSectionDigest).toBe(attestation.acSectionDigest);
     });
 
+    it('persists WHICH PR was attested, not just what was attested (PR #863 review point 3)', async () => {
+      // The two pins record *what* was verified. Without the PR number there
+      // is nothing to compare a swapped linked PR against — the #803 ->
+      // replacement-PR shape is exactly what AC3's invalidation pass must
+      // catch, and it is undetectable from SHA + digest alone.
+      armTask();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: freshAttestation({ prNumber: 836 }) });
+      expect(res.status).toBe(200);
+      expect(prismaMock.taskApproval.upsert.mock.calls[0][0].create.verifiedPrNumber).toBe(836);
+    });
+
+    it('writes a null PR number rather than dropping the key when the attestation omits one', async () => {
+      // `evaluateQaAttestation` returns `prNumber: number|null`, so the write
+      // path has to tolerate its absence. Assigning `undefined` instead of
+      // `null` would let Prisma strip the key on create/update and leave the
+      // previous value silently intact on re-approval — a stale PR number
+      // surviving a fresh attestation is worse than no PR number at all.
+      armTask();
+      const { prNumber: _omitted, ...withoutPrNumber } = freshAttestation();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: withoutPrNumber });
+      expect(res.status).toBe(200);
+      const written = prismaMock.taskApproval.upsert.mock.calls[0][0].create;
+      expect(written).toHaveProperty('verifiedPrNumber');
+      expect(written.verifiedPrNumber).toBeNull();
+    });
+
     it('overwrites the pins on re-approval so a stale grant cannot survive', async () => {
       armTask();
       const later = freshAttestation({ headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
@@ -199,6 +225,10 @@ describe('task approval boundary', () => {
       const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
       expect(update.verifiedPrHeadSha).toBe('aaaa111122223333444455556666777788889999');
       expect(update.verifiedAcSectionDigest).toBe('deadbeef');
+      // All three pins move together — a re-approval that updated the SHA and
+      // digest but left the old PR number behind would describe a combination
+      // that never existed.
+      expect(update.verifiedPrNumber).toBe(836);
     });
 
     it('does NOT gate non-qa_agent approvals (design decision D4)', async () => {

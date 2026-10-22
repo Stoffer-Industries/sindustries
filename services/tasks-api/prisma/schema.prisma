@@ -217,6 +217,14 @@ model TaskApproval {
   /// edit, which need not move the head at all, so a SHA-only pin could not
   /// fire for the exact failure mode this column exists to catch.
   verifiedAcSectionDigest String?
+  /// PR number this `qa_agent` approval was verified against (task ad8346ee,
+  /// AC2 + AC3). The two pins above record *what* was verified but not
+  /// *which PR* it was verified on, so a task whose linked PR is swapped
+  /// (#803 -> replacement PR) would have nothing to compare against. One
+  /// more nullable column closes that: the invalidation pass reads the
+  /// task's currently-linked PR and re-attests against these three values
+  /// together. NULL means "no PR recorded" and is treated as stale.
+  verifiedPrNumber Int?
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 

@@ -99,7 +99,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     // Enforced at this choke point deliberately: it is the single route through
     // which EVERY `qa_agent` approval is written, so the gate cannot be
     // bypassed by a future writer forgetting to call something first.
-    let evidencePins: { verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
+    let evidencePins: { verifiedPrHeadSha: string; verifiedAcSectionDigest: string; verifiedPrNumber: number | null } | null = null;
     if (type === 'qa_agent') {
       const verdict = evaluateQaAttestation(req.body);
       if (!verdict.ok) {
@@ -116,7 +116,12 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
       }
       evidencePins = {
         verifiedPrHeadSha: verdict.headSha,
-        verifiedAcSectionDigest: verdict.acSectionDigest
+        verifiedAcSectionDigest: verdict.acSectionDigest,
+        // `evaluateQaAttestation` already parsed this and the write path was
+        // dropping it (PR #863 review point 3). Persisting it is what lets the
+        // Slice-3 invalidation pass tell a stale grant apart from a task whose
+        // linked PR was simply swapped out from under it.
+        verifiedPrNumber: verdict.prNumber
       };
     }
 
@@ -166,7 +171,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
           state: 'approved',
           approvedAt: now,
           revokedAt: null,
-          ...(evidencePins ?? { verifiedPrHeadSha: null, verifiedAcSectionDigest: null })
+          ...(evidencePins ?? { verifiedPrHeadSha: null, verifiedAcSectionDigest: null, verifiedPrNumber: null })
         }
       });
       const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 task_id: ad8346ee-46fc-4bc7-a9b0-a8c31acfb04f
 product_spec: n/a
 shipped_pr: null

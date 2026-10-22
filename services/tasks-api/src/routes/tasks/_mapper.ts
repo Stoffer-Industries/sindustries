@@ -29,6 +29,10 @@ export function mapTaskApproval(approval) {
     // migration — "verified nothing", which reads as stale rather than trusted.
     verifiedPrHeadSha: approval.verifiedPrHeadSha ?? null,
     verifiedAcSectionDigest: approval.verifiedAcSectionDigest ?? null,
+    // Which PR those two pins were taken on (task ad8346ee, PR #863 review
+    // point 3). Without it a swapped linked PR (#803 -> replacement) is
+    // undetectable — the pins alone say what was verified, not where.
+    verifiedPrNumber: approval.verifiedPrNumber ?? null,
     createdAt: approval.createdAt,
     updatedAt: approval.updatedAt
   };
