@@ -1,3 +1,4 @@
+import argparse
 import importlib.util
 import os
 import pathlib
@@ -1099,6 +1100,116 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
 
         # Two of three URLs hydrate; the first URL's timeout skips it cleanly.
         self.assertEqual(len(out), 2)
+
+
+class IdentityDegradeTest(unittest.TestCase):
+    """PR #851: unprovisioned/broken GitHub identity degrades, never raises.
+
+    Regression coverage for the `_GhApiTimeout` gap found in review: the
+    original guard caught only `subprocess.CalledProcessError`, so a hung
+    `gh api` still took the whole JSON queue down.
+    """
+
+    def setUp(self) -> None:
+        agent_task_queue._VERBOSE = False
+
+    def test_identity_provisioned_true_when_only_profile_dir_exists(self):
+        """Profile-only agents (Rowan has no ROWAN_GITHUB_TOKEN) stay provisioned."""
+        with patch.object(
+            agent_task_queue.pathlib.Path, "is_dir", return_value=True
+        ), patch.dict(os.environ, {"ROWAN_GITHUB_TOKEN": ""}):
+            self.assertTrue(agent_task_queue._is_identity_provisioned("Rowan"))
+
+    def test_identity_provisioned_true_when_only_token_env_exists(self):
+        """Token-without-profile-dir agents stay provisioned too (the `or`)."""
+        with patch.object(
+            agent_task_queue.pathlib.Path, "is_dir", return_value=False
+        ), patch.dict(os.environ, {"ROWAN_GITHUB_TOKEN": "secret"}, clear=False):
+            self.assertTrue(agent_task_queue._is_identity_provisioned("Rowan"))
+
+    def test_identity_not_provisioned_when_neither_present(self):
+        with patch.object(
+            agent_task_queue.pathlib.Path, "is_dir", return_value=False
+        ), patch.dict(os.environ, {"ROWAN_GITHUB_TOKEN": ""}):
+            self.assertFalse(agent_task_queue._is_identity_provisioned("Rowan"))
+
+    def test_fetch_github_prs_returns_empty_when_unprovisioned(self):
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=False
+        ), patch.object(agent_task_queue, "_gh_api") as gh:
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+            gh.assert_not_called()
+
+    def test_fetch_github_prs_returns_empty_on_called_process_error(self):
+        err = subprocess.CalledProcessError(4, ["gh"])
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(agent_task_queue, "_gh_api", side_effect=err):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+
+    def test_fetch_github_prs_returns_empty_on_gh_api_timeout(self):
+        """Guards finding #1: _GhApiTimeout is NOT a CalledProcessError subclass.
+
+        `exc.returncode` would AttributeError inside the handler, so this also
+        proves the message interpolation survives the timeout path.
+        """
+        self.assertFalse(
+            issubclass(agent_task_queue._GhApiTimeout, subprocess.CalledProcessError)
+        )
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue,
+            "_gh_api",
+            side_effect=agent_task_queue._GhApiTimeout("gh api exceeded 45s"),
+        ):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+
+    def test_main_sets_identity_not_provisioned_flag(self):
+        with patch.object(agent_task_queue, "_is_identity_provisioned", return_value=False), patch.object(
+            agent_task_queue, "fetch_agent_tasks", return_value=[]
+        ), patch.object(agent_task_queue, "fetch_pending_tech_design_approvals", return_value=[]), patch.object(
+            agent_task_queue, "fetch_github_prs", return_value=[]
+        ), patch.object(
+            agent_task_queue, "fetch_linked_delivery_prs", return_value=[]
+        ), patch.object(
+            agent_task_queue, "fetch_attention_owner_tasks", return_value=[]
+        ), patch.object(
+            agent_task_queue, "fetch_workflow_gate_owner_tasks", return_value=[]
+        ), patch.object(
+            agent_task_queue, "build_work_queue", return_value={"queue": []}
+        ), patch.object(
+            agent_task_queue, "build_parser"
+        ) as parser, patch.object(agent_task_queue, "print"):
+            parser.return_value.parse_args.return_value = argparse.Namespace(
+                assignee="Rowan", json=True, verbose=False, attention_owner=None
+            )
+            agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertIs(queue["identityNotProvisioned"], True)
+
+    def test_main_omits_identity_flag_when_provisioned(self):
+        with patch.object(agent_task_queue, "_is_identity_provisioned", return_value=True), patch.object(
+            agent_task_queue, "fetch_agent_tasks", return_value=[]
+        ), patch.object(agent_task_queue, "fetch_pending_tech_design_approvals", return_value=[]), patch.object(
+            agent_task_queue, "fetch_github_prs", return_value=[]
+        ), patch.object(
+            agent_task_queue, "fetch_linked_delivery_prs", return_value=[]
+        ), patch.object(
+            agent_task_queue, "fetch_attention_owner_tasks", return_value=[]
+        ), patch.object(
+            agent_task_queue, "fetch_workflow_gate_owner_tasks", return_value=[]
+        ), patch.object(
+            agent_task_queue, "build_work_queue", return_value={"queue": []}
+        ), patch.object(
+            agent_task_queue, "build_parser"
+        ) as parser, patch.object(agent_task_queue, "print"):
+            parser.return_value.parse_args.return_value = argparse.Namespace(
+                assignee="Rowan", json=True, verbose=False, attention_owner=None
+            )
+            agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertNotIn("identityNotProvisioned", queue)
 
 
 class VerboseFlagTest(unittest.TestCase):

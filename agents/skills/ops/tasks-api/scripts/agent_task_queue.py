@@ -772,13 +772,21 @@ def _fetch_reviews_tolerant(
 
 
 def _is_identity_provisioned(agent: str) -> bool:
-    """True when the agent's declared GitHub profile dir and token env both exist.
+    """True when the agent's declared GitHub profile dir OR token env is present.
 
     `GITHUB_IDENTITIES` is a static map; adding an entry is a code change that
     assumes a credential nobody may have provisioned yet (profile dir created,
     token set in ~/.openclaw/.env, account actually existing on GitHub). This
     checks the two locally-verifiable preconditions so hydration can degrade
-    instead of raising a bare auth traceback. See
+    instead of raising a bare auth traceback.
+
+    Either precondition alone is sufficient, so this is `or` and NOT `and`:
+    some agents authenticate purely through their `~/.config/gh-<agent>` profile
+    with no exported token env (ROWAN_GITHUB_TOKEN is unset in this environment;
+    Rowan's provisioning comes solely from the profile dir), while others set a
+    token with no profile dir. Do not tighten this to `and` — doing so marks a
+    profile-only agent unprovisioned and silently returns `[]` for every
+    PR-derived section, blinding the review queue behind one stderr WARN. See
     infra/runbooks/agent-github-identity-profile-unprovisioned.md.
     """
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
@@ -808,10 +816,20 @@ def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
     try:
         prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
-    except subprocess.CalledProcessError as exc:
+    except (_GhApiTimeout, subprocess.CalledProcessError) as exc:
+        # `_GhApiTimeout` is a plain Exception, NOT a CalledProcessError
+        # subclass, and `_gh_api` raises it on TimeoutExpired. It has no
+        # `returncode`, hence getattr rather than `exc.returncode` — which would
+        # AttributeError inside the handler and take the whole queue down,
+        # which is the exact failure class this guard exists to prevent.
+        reason = (
+            f"timed out after {_GH_API_TIMEOUT_SECONDS:.0f}s"
+            if isinstance(exc, _GhApiTimeout)
+            else f"exit {exc.returncode}"
+        )
         _log(
-            f"gh api auth failure hydrating PRs for {agent!r} (exit "
-            f"{exc.returncode}); skipping PR hydration. See "
+            f"gh api failure hydrating PRs for {agent!r} ({reason}); "
+            f"skipping PR hydration. See "
             f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
             verbose_only=False,
         )
