@@ -255,7 +255,7 @@ ownership, secrets, and billing"):
 - 14-day metric retention.
 
 Current usage is well under all three: **eight** committed alert-rule
-files and six committed dashboards, covering `tasks-api`, `budget-api`,
+files and five committed dashboards, covering `tasks-api`, `budget-api`,
 `redis`, and the shared database, at staging scale.
 
 Mitigations, with current status:
