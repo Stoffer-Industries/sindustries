@@ -81,8 +81,17 @@ struct MechanicalEvidenceCheckArgs {
     #[arg(long)]
     task_id: String,
     /// PR URL (or number) the attestation is computed against.
+    ///
+    /// Optional on purpose: when omitted, the PR is derived from the task's
+    /// most recent `[implementer-prs]` comment using the same
+    /// `latest_implementer_pr_urls` the delivery gate uses. That keeps PR
+    /// selection in exactly one place — a caller that had to name the PR
+    /// itself would either reimplement this rule in another language or,
+    /// worse, guess and attest against the wrong PR.
+    ///
+    /// Pass it explicitly only when the derived set is ambiguous.
     #[arg(long)]
-    pr_url: String,
+    pr_url: Option<String>,
 }
 
 #[derive(Parser, Clone)]
@@ -340,7 +349,7 @@ fn main() -> Result<()> {
             let attestation = qa_evidence_attest::mechanical_evidence_check(
                 &args.base_url,
                 &args.task_id,
-                &args.pr_url,
+                args.pr_url.as_deref(),
             )?;
             serde_json::to_string_pretty(&attestation)?
         }

@@ -206,14 +206,49 @@ pub(crate) fn build_attestation(task: &Task, pr_url: &str) -> Result<EvidenceAtt
     })
 }
 
+/// Resolve which PR the attestation should be computed against.
+///
+/// `explicit` wins when given. Otherwise the PR is derived from the task's
+/// most recent `[implementer-prs]`/`[rowan-prs]` comment via the same
+/// `latest_implementer_pr_urls` the delivery gate already uses, so "which PR
+/// is this task's delivery PR" has exactly one implementation.
+fn resolve_pr_url(task: &Task, explicit: Option<&str>) -> Result<String> {
+    if let Some(url) = explicit.map(str::trim).filter(|url| !url.is_empty()) {
+        return Ok(url.to_string());
+    }
+    let derived = crate::product_spec_parsing::latest_implementer_pr_urls(task);
+    match derived.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(anyhow!(
+            "Could not derive a PR to attest for task {}: no `[implementer-prs]` comment \
+             names one. Pass --pr-url explicitly.",
+            task.id
+        )),
+        many => Err(anyhow!(
+            "Task {} names {} PRs in its latest `[implementer-prs]` comment ({}). \
+             Refusing to guess which one to attest — pass --pr-url explicitly.",
+            task.id,
+            many.len(),
+            many.join(", ")
+        )),
+    }
+}
+
 /// Dispatch handler for the `mechanical-evidence-check` subcommand.
+///
+/// Note for callers: `main()` returns `Ok(())` regardless of `failures`, so
+/// the subcommand's *exit code* does not carry the verdict. A caller must
+/// branch on the parsed `failures` array. Checking `$?` alone would approve
+/// against a failing attestation and reproduce the exact incident this task
+/// exists to close.
 pub(crate) fn mechanical_evidence_check(
     base_url: &str,
     task_id: &str,
-    pr_url: &str,
+    pr_url: Option<&str>,
 ) -> Result<EvidenceAttestation> {
     let task: Task = api_client::api_get(base_url, &format!("/tasks/{task_id}"))?;
-    build_attestation(&task, pr_url)
+    let pr_url = resolve_pr_url(&task, pr_url)?;
+    build_attestation(&task, &pr_url)
 }
 
 #[cfg(test)]
@@ -313,5 +348,82 @@ mod tests {
         // from a failed `SystemTime` read), which would make every
         // attestation look stale to the Tasks API's TTL check.
         assert!(utc_now_rfc3339().starts_with("202"));
+    }
+
+    // ---- resolve_pr_url ----
+
+    fn task_with_pr_comments(texts: &[&str]) -> Task {
+        Task {
+            comments: texts
+                .iter()
+                .map(|text| crate::TaskComment {
+                    text: Some((*text).to_string()),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_explicit_pr_url_always_wins() {
+        // An explicit PR is trusted as given: the caller is overriding the
+        // derived value, which is the documented escape hatch for ambiguity.
+        let task = task_with_pr_comments(&["[implementer-prs] https://github.com/o/r/pull/1"]);
+        assert_eq!(
+            resolve_pr_url(&task, Some("https://github.com/o/r/pull/999")).unwrap(),
+            "https://github.com/o/r/pull/999"
+        );
+    }
+
+    #[test]
+    fn a_blank_explicit_pr_url_falls_back_to_the_derived_one() {
+        // `--pr-url ""` must not silently attest against an empty string.
+        let task = task_with_pr_comments(&["[implementer-prs] https://github.com/o/r/pull/1"]);
+        assert_eq!(
+            resolve_pr_url(&task, Some("   ")).unwrap(),
+            "https://github.com/o/r/pull/1"
+        );
+    }
+
+    #[test]
+    fn a_single_implementer_pr_is_derived_when_no_pr_url_is_passed() {
+        let task = task_with_pr_comments(&["[implementer-prs] https://github.com/o/r/pull/42"]);
+        assert_eq!(
+            resolve_pr_url(&task, None).unwrap(),
+            "https://github.com/o/r/pull/42"
+        );
+    }
+
+    #[test]
+    fn the_most_recent_implementer_comment_wins_when_prs_were_replaced() {
+        // The #803 -> replacement-PR shape: an older comment still names the
+        // abandoned PR. Attesting against it would pin the wrong PR.
+        let task = task_with_pr_comments(&[
+            "[implementer-prs] https://github.com/o/r/pull/803",
+            "[implementer-prs] https://github.com/o/r/pull/904",
+        ]);
+        assert_eq!(
+            resolve_pr_url(&task, None).unwrap(),
+            "https://github.com/o/r/pull/904"
+        );
+    }
+
+    #[test]
+    fn no_implementer_pr_is_an_error_rather_than_a_silent_pass() {
+        let task = task_with_pr_comments(&["[openclaw-needed] nothing here"]);
+        let err = resolve_pr_url(&task, None).unwrap_err().to_string();
+        assert!(err.contains("no `[implementer-prs]` comment"), "got: {err}");
+    }
+
+    #[test]
+    fn an_ambiguous_multi_pr_task_refuses_rather_than_guessing() {
+        // Guessing here would mint an attestation against the wrong PR and
+        // store a confidently-wrong pin — worse than refusing.
+        let task = task_with_pr_comments(&[
+            "[implementer-prs] https://github.com/o/r/pull/1 https://github.com/o/r/pull/2",
+        ]);
+        let err = resolve_pr_url(&task, None).unwrap_err().to_string();
+        assert!(err.contains("Refusing to guess"), "got: {err}");
     }
 }
