@@ -231,6 +231,119 @@ class TasksApiClientAttentionOwnersTest(unittest.TestCase):
             )
 
 
+class TasksApiClientAttentionNoteCapTest(unittest.TestCase):
+    """Task d0f92258: fail over-long attention notes locally, in UTF-16 units.
+
+    The server measures `trimmed.length` in JS, i.e. UTF-16 code units. A plain
+    `len()` guard agrees with it below U+10000 and diverges on every astral
+    character, so these tests pin the measurement itself, not just the cutoff.
+    """
+
+    BASE_URL = "http://tasks.test/api/v1"
+
+    def _reconcile(self, note):
+        with patch.object(tasks_api_client, "get_base_url", return_value=self.BASE_URL), patch.object(
+            tasks_api_client,
+            "api_request",
+            return_value={"data": {"attentionOwners": ["Ash"]}},
+        ) as api_request:
+            result = tasks_api_client.reconcile_attention_owners(
+                "task-1", ["Ash"], note
+            )
+        return result, api_request
+
+    def test_astral_fixture_diverges_from_len(self):
+        # AC2's load-bearing assertion: the fixture must be one a plain
+        # `len()` guard would wrongly accept, so replacing the measurement
+        # fails the suite instead of silently regressing.
+        note = "🔧" * 300
+        self.assertEqual(len(note), 300)
+        self.assertEqual(tasks_api_client._utf16_len(note), 600)
+        self.assertNotEqual(len(note), tasks_api_client._utf16_len(note))
+
+    def test_reconcile_rejects_astral_note_by_utf16_length(self):
+        # AC1: 300 scalars but 600 UTF-16 units — over the 500 cap, and only
+        # the UTF-16 measurement sees it. Must fail before any network call.
+        with patch.object(
+            tasks_api_client, "api_request", return_value={"data": {}}
+        ) as api_request:
+            with self.assertRaises(ValueError) as ctx:
+                tasks_api_client.reconcile_attention_owners("task-1", ["Ash"], "🔧" * 300)
+        api_request.assert_not_called()
+        self.assertIn("500", str(ctx.exception))
+
+    def test_reconcile_rejects_over_cap_note_before_request(self):
+        with patch.object(
+            tasks_api_client, "api_request", return_value={"data": {}}
+        ) as api_request:
+            with self.assertRaises(ValueError) as ctx:
+                tasks_api_client.reconcile_attention_owners("task-1", ["Ash"], "a" * 501)
+        api_request.assert_not_called()
+        self.assertIn("500", str(ctx.exception))
+
+    def test_reconcile_accepts_note_at_exact_cap(self):
+        # AC3: the server rejects on `>`, so exactly 500 units is legal and
+        # must be forwarded unmodified.
+        note = "a" * 500
+        result, api_request = self._reconcile(note)
+        self.assertEqual(result, {"attentionOwners": ["Ash"]})
+        api_request.assert_called_once()
+        self.assertEqual(api_request.call_args.args[3]["note"], note)
+
+    def test_reconcile_rejects_one_over_cap(self):
+        with patch.object(
+            tasks_api_client, "api_request", return_value={"data": {}}
+        ) as api_request:
+            with self.assertRaises(ValueError):
+                tasks_api_client.reconcile_attention_owners("task-1", ["Ash"], "a" * 501)
+        api_request.assert_not_called()
+
+    def test_reconcile_measures_after_trim(self):
+        # Server trims then measures, so surrounding whitespace must not
+        # push an otherwise-legal note over the cap.
+        note = "a" * 500
+        result, api_request = self._reconcile("  " + note + "\n")
+        self.assertEqual(result, {"attentionOwners": ["Ash"]})
+        self.assertEqual(api_request.call_args.args[3]["note"], note)
+
+    def test_reconcile_empty_note_error_unchanged(self):
+        # AC3: empty/whitespace still raise the pre-existing message, not the
+        # new cap error.
+        for note in ("", "   "):
+            with self.assertRaises(ValueError) as ctx:
+                tasks_api_client.reconcile_attention_owners("task-1", ["Ash"], note)
+            self.assertIn("note is required", str(ctx.exception))
+
+    def test_utf16_len_handles_lone_surrogate(self):
+        # AC4: JS counts a lone surrogate as one unit; strict encoding would
+        # raise UnicodeEncodeError and turn validation into a crash.
+        self.assertEqual(tasks_api_client._utf16_len("abc\ud800"), 4)
+
+    def test_drift_with_server_note_cap(self):
+        # AC4: the Python constant mirrors the server's, so read the server
+        # source and fail if either the value or the `>` threshold drifts.
+        server_source = (
+            pathlib.Path(__file__).resolve().parents[5]
+            / "services"
+            / "tasks-api"
+            / "src"
+            / "routes"
+            / "taskAttentionOwners.ts"
+        )
+        self.assertTrue(server_source.exists(), f"missing server source {server_source}")
+        text = server_source.read_text(encoding="utf-8")
+        self.assertIn(
+            f"const MAX_NOTE_LENGTH = {tasks_api_client.MAX_ATTENTION_OWNER_NOTE_LENGTH};",
+            text,
+            "Python MAX_ATTENTION_OWNER_NOTE_LENGTH has drifted from the server constant",
+        )
+        self.assertIn(
+            "if (trimmed.length > MAX_NOTE_LENGTH) return null;",
+            text,
+            "server threshold direction changed; the Python guard must reject on `>` too",
+        )
+
+
 class TasksApiClientPatchTest(unittest.TestCase):
     def test_patch_depends_on_maps_to_depends_on_ids(self):
         parser = tasks_api_client.build_parser()
