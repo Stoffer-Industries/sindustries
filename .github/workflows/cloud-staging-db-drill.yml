@@ -33,7 +33,7 @@ on:
         type: string
         default: 'none'
       cleanup_destination:
-        description: 'DESTRUCTIVE: before restore, drop and recreate the tasks_api and budget_api schemas in the destination database so the restore target is empty. Use only when a previous failed drill left pre-existing objects in the destination. Two-key auth: the workflow sets CLEANUP_DESTINATION=1 only when this is true, and the drill script also requires --cleanup-destination.'
+        description: 'DESTRUCTIVE: before restore, drop the tasks_api and budget_api schemas in the destination database (pg_restore will recreate them). Use only when a previous failed drill left pre-existing schemas in the destination. Two-key auth: the workflow sets CLEANUP_DESTINATION=1 only when this is true, and the drill script also requires --cleanup-destination.'
         required: false
         type: boolean
         default: false
@@ -176,6 +176,7 @@ jobs:
           path: |
             ${{ runner.temp }}/cloud-staging-artifacts/*.json
             ${{ runner.temp }}/cloud-staging-artifacts/*.sha256
+            ${{ runner.temp }}/cloud-staging-artifacts/*.log
           retention-days: 14
           if-no-files-found: warn
 

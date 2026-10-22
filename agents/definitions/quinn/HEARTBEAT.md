@@ -254,9 +254,16 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
 - For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
 - Only escalate if the condition is confirmed present in live state this pass.
 
-1. From `read_all_incidents()`, call `reportable_incidents()` to discard resolved, false-positive, archived, task-scoped, and stale records. Call the remainder **active findings**. Count entries where `needsTom` is true OR `severity` is `high`/`critical` as **actionable incidents**; count the rest as **monitored findings**. Do not describe the monitored count as incidents waiting on Tom.
+1. Run the queue CLI — it is the single source for the counts and the top candidate:
+
+   ```bash
+   cd codebases/sindustries && python3 -m agents.lib.incident_queue            # text lines
+   cd codebases/sindustries && python3 -m agents.lib.incident_queue --json     # structured
+   ```
+
+   It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
-3. **Always report the queue when active findings exist:**
+3. **Always report the queue when active findings exist** (the CLI renders these lines verbatim):
    - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
    - If actionable count is 0, output no escalation line and do not reply `HEARTBEAT_OK`; the queue summary is the useful heartbeat output.
    - If actionable count > 0, also output: `<actionable count> incident(s) waiting on you.`

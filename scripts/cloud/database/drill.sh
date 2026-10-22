@@ -151,11 +151,11 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 2.5: optional destination cleanup (operator only). The
-# cleanup-destination.sh script drops and recreates the tasks_api
-# and budget_api schemas in the destination database so restore.sh
-# sees a fresh, empty target. The two-key auth (CLI flag + env
-# var) is enforced in cleanup-destination.sh itself; the drill
-# orchestrator just decides whether to invoke it.
+# cleanup-destination.sh script drops the tasks_api and budget_api
+# schemas and leaves them absent; pg_restore recreates them as part
+# of its own DDL during the restore step. The two-key auth (CLI
+# flag + env var) is enforced in cleanup-destination.sh itself;
+# the drill orchestrator just decides whether to invoke it.
 # ---------------------------------------------------------------------------
 
 CLEANUP_OUT=""
@@ -185,6 +185,7 @@ RESTORE_OUT="$(
     --destination-dsn-file "$DEST_TASKS_FILE" \
     --archive "$DUMP_ARCHIVE_PATH" \
     --archive-sha256 "$DUMP_SHA" \
+    --result-dir "$ARCHIVE_DIR" \
     "${RESTORE_INTENTIONAL_FAILURE_FLAG[@]}"
 )"
 
@@ -261,7 +262,8 @@ if (( RECOVERY )); then
     --source-dsn-file "$DEST_TASKS_FILE" \
     --destination-dsn-file "$RECOVERY_TASKS_FILE" \
     --archive "$DUMP2_ARCHIVE_PATH" \
-    --archive-sha256 "$DUMP2_SHA" >/dev/null
+    --archive-sha256 "$DUMP2_SHA" \
+    --result-dir "$ARCHIVE_DIR" >/dev/null
 
   "$(dirname "${BASH_SOURCE[0]}")/migrate.sh" \
     --tasks-dsn-file "$RECOVERY_TASKS_FILE" \

@@ -4,8 +4,37 @@ import { AuthContext } from './authContext.jsx';
 import { getClerkPublishableKey } from './clerkConfig.js';
 import { setSupabaseAccessTokenGetter, supabase } from './supabase.js';
 import { clearClerkSsoDestination, rememberClerkSsoDestination } from './clerkSsoDestination.js';
+import { reportAuthError } from './browserTelemetry.js';
 
 const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Best-effort extraction of a Clerk error code + status for the browser
+ * telemetry surface. The Clerk envelope is documented at
+ * https://clerk.com/docs/custom-flows/error-handling — `error?.errors[0]?.code`
+ * is the canonical machine-readable code (e.g. `invalid_credentials`,
+ * `needs_client_trust`), and `error?.status` is the HTTP status when
+ * the SDK surfaces one. We never send the raw message to telemetry
+ * (the user-facing longMessage can leak internal context); the safe
+ * code is the smallest signal that still tells Quinn which code path
+ * failed.
+ */
+function clerkSafeErrorCode(error) {
+  return error?.errors?.[0]?.code ?? error?.code ?? null;
+}
+
+function clerkSafeStatus(error) {
+  return error?.status != null ? String(error.status) : null;
+}
+
+function reportClerkError(error, operation) {
+  reportAuthError(error, {
+    provider: 'clerk',
+    operation,
+    errorCode: clerkSafeErrorCode(error),
+    status: clerkSafeStatus(error)
+  });
+}
 
 /**
  * Clerk-backed AuthProvider. Activated when VITE_AUTH_PROVIDER === 'clerk'.
@@ -139,11 +168,13 @@ export function ClerkAuthProvider({ children }) {
 
         const { error } = await clerkSignIn.password({ password });
         if (error) {
+          reportClerkError(error, 'signin');
           return { data: null, error: new Error(clerkErrorMessage(error, 'Sign-in failed.')) };
         }
         if (clerkSignIn.status === 'complete') {
           const { error: finalizeError } = await clerkSignIn.finalize();
           if (finalizeError) {
+            reportClerkError(finalizeError, 'signin_finalize');
             return {
               data: null,
               error: new Error(clerkErrorMessage(finalizeError, 'Sign-in failed.'))
@@ -163,6 +194,7 @@ export function ClerkAuthProvider({ children }) {
           }
           const { error: verificationError } = await clerkSignIn.mfa.sendEmailCode();
           if (verificationError) {
+            reportClerkError(verificationError, 'signin_mfa_send');
             return {
               data: null,
               error: new Error(clerkErrorMessage(verificationError, 'Could not send the verification code.'))
@@ -189,6 +221,7 @@ export function ClerkAuthProvider({ children }) {
         // Clerk errors carry `.errors[0].longMessage` for user-facing
         // rendering. Map to plain Error so LoginScreen's `error.message`
         // access keeps working.
+        reportClerkError(err, 'signin_throw');
         return { data: null, error: new Error(clerkErrorMessage(err, 'Sign-in failed.')) };
       }
     },
@@ -204,6 +237,7 @@ export function ClerkAuthProvider({ children }) {
             : clerkSignIn.mfa.verifyEmailCode({ code });
         const { error } = await verification;
         if (error) {
+          reportClerkError(error, 'verify_signin_second_factor');
           return {
             data: null,
             error: new Error(clerkErrorMessage(error, 'Verification failed.'))
@@ -217,6 +251,7 @@ export function ClerkAuthProvider({ children }) {
         }
         const { error: finalizeError } = await clerkSignIn.finalize();
         if (finalizeError) {
+          reportClerkError(finalizeError, 'verify_signin_second_factor_finalize');
           return {
             data: null,
             error: new Error(clerkErrorMessage(finalizeError, 'Sign-in failed.'))
@@ -224,6 +259,7 @@ export function ClerkAuthProvider({ children }) {
         }
         return { data: { session: clerkSignIn.createdSessionId }, error: null };
       } catch (err) {
+        reportClerkError(err, 'verify_signin_second_factor_throw');
         return { data: null, error: new Error(clerkErrorMessage(err, 'Verification failed.')) };
       }
     },
@@ -249,11 +285,13 @@ export function ClerkAuthProvider({ children }) {
           'Security check timed out. Please retry.'
         );
         if (error) {
+          reportClerkError(error, 'signup');
           return { data: null, error: new Error(clerkErrorMessage(error, 'Sign-up failed.')) };
         }
         if (clerkSignUp.status === 'complete') {
           const { error: finalizeError } = await clerkSignUp.finalize();
           if (finalizeError) {
+            reportClerkError(finalizeError, 'signup_finalize');
             return {
               data: null,
               error: new Error(clerkErrorMessage(finalizeError, 'Sign-up failed.'))
@@ -268,6 +306,7 @@ export function ClerkAuthProvider({ children }) {
         // sign-in, status flips to 'complete'.
         const verificationError = await clerkSignUpPrepareEmailAddressVerification(clerkSignUp);
         if (verificationError) {
+          reportClerkError(verificationError, 'signup_prepare_verification');
           return {
             data: null,
             error: new Error(clerkErrorMessage(verificationError, 'Sign-up failed.'))
@@ -278,6 +317,7 @@ export function ClerkAuthProvider({ children }) {
         if (err?.name === 'AuthRequestTimeoutError') {
           await clerkSignUp.reset().catch(() => {});
         }
+        reportClerkError(err, 'signup_throw');
         return { data: null, error: new Error(clerkErrorMessage(err, 'Sign-up failed.')) };
       }
     },
@@ -289,6 +329,7 @@ export function ClerkAuthProvider({ children }) {
       await clerkSignOut();
       return { error: null };
     } catch (err) {
+      reportClerkError(err, 'signout');
       const message =
         err?.errors?.[0]?.longMessage ?? err?.message ?? 'Sign-out failed.';
       return { error: new Error(message) };
@@ -322,6 +363,7 @@ export function ClerkAuthProvider({ children }) {
         });
         if (error) {
           clearClerkSsoDestination();
+          reportClerkError(error, `oauth_${provider}`);
           return {
             data: null,
             error: new Error(clerkErrorMessage(error, 'OAuth redirect failed.')),
@@ -331,6 +373,7 @@ export function ClerkAuthProvider({ children }) {
         return { data: { provider }, error: null, providerDisabled: false };
       } catch (err) {
         clearClerkSsoDestination();
+        reportClerkError(err, `oauth_${provider}_throw`);
         return {
           data: null,
           error: new Error(clerkErrorMessage(err, 'OAuth redirect failed.')),

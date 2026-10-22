@@ -42,6 +42,11 @@ Required:
   --archive-sha256 <digest>      Expected sha256 digest (64 hex chars).
 
 Optional:
+  --result-dir <path>            Directory for redacted restore results/logs.
+                                 Defaults to ./artifacts/cloud-staging. The
+                                 workflow passes its upload directory here so
+                                 restore-result.json and the pg_restore log are
+                                 captured as run artifacts.
   --intentional-failure-after <seconds>
                                  Drill-only flag. When set, restore.sh
                                  starts pg_restore, waits the given
@@ -58,6 +63,7 @@ DEST_DSN_FILE=""
 ARCHIVE_PATH=""
 EXPECTED_SHA=""
 INTENTIONAL_FAILURE_AFTER=""
+RESULT_DIR=""
 
 while (( $# > 0 )); do
   case "$1" in
@@ -65,6 +71,7 @@ while (( $# > 0 )); do
     --destination-dsn-file)       DEST_DSN_FILE="$2"; shift 2;;
     --archive)                    ARCHIVE_PATH="$2"; shift 2;;
     --archive-sha256)             EXPECTED_SHA="$2"; shift 2;;
+    --result-dir)                 RESULT_DIR="$2"; shift 2;;
     --intentional-failure-after)  INTENTIONAL_FAILURE_AFTER="$2"; shift 2;;
     --help|-h)                    usage; exit 0;;
     *)                            cloud_db_die "unknown argument: $1";;
@@ -119,8 +126,36 @@ if [[ "${existing_objects// /}" != "0" ]]; then
     "destination is not empty (existing object count: ${existing_objects}); refusing to overwrite"
 fi
 
-RESULT_PATH="./artifacts/cloud-staging/restore-${CLOUD_DB_RUN_ID}.json"
-mkdir -p "$(dirname "$RESULT_PATH")"
+# Table count is not the same as freshness. The archive is a
+# custom-format dump (`pg_dump --format=custom`) whose TOC carries
+# `tasks_api` and `budget_api` as SCHEMA entries, so pg_restore
+# issues `CREATE SCHEMA <name>;` for each before any table DDL.
+# A destination where either schema EXISTS is therefore
+# incompatible with the archive even when it holds zero tables --
+# pg_restore dies on `schema "budget_api" already exists` and takes
+# the whole drill with it.
+#
+# A prior failed restore lands in exactly that state: restore.sh
+# creates the schema, then fails before creating any table. This is
+# the guard that should have caught it before pg_restore ran. Fail
+# here, with the operator fix named, instead of 200 lines into a log.
+existing_schemas="$(
+  PGPASSWORD="" psql \
+    --no-psqlrc --tuples-only --no-align \
+    --variable=ON_ERROR_STOP=1 \
+    --dbname="$DEST_DSN" \
+    --command="SELECT string_agg(schema_name, ',' ORDER BY schema_name) FROM information_schema.schemata WHERE schema_name IN ('tasks_api','budget_api');" \
+  2>/dev/null | tr -d '[:space:]'
+)"
+if [[ -n "${existing_schemas:-}" ]]; then
+  cloud_db_die \
+    "destination already contains schema(s): ${existing_schemas}; pg_restore cannot apply its TOC's SCHEMA entries into a destination that already holds them (custom-format archives issue CREATE SCHEMA before any table DDL). Re-run with --cleanup-destination (or drop the listed schema(s)) before restoring"
+fi
+
+RESULT_DIR="${RESULT_DIR:-./artifacts/cloud-staging}"
+mkdir -p "$RESULT_DIR"
+
+RESULT_PATH="${RESULT_DIR}/restore-${CLOUD_DB_RUN_ID}.json"
 
 # ---------------------------------------------------------------------------
 # Execute pg_restore

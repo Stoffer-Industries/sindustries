@@ -22,12 +22,127 @@ import argparse
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
 
 
 _SUPPORTED_AGENT_IDS = frozenset({"quinn", "rowan", "ash", "ivy", "lox", "vara"})
+
+
+def feature_task_manifest() -> pathlib.Path:
+    """Path to the Rust ``feature-task`` crate that owns the evidence check.
+
+    The mechanical AC-evidence check has exactly ONE implementation — the Rust
+    ``ac_parsing::mechanical_evidence_failures``. This client does not
+    reimplement it in Python; it invokes the real thing and forwards the
+    attestation it prints (design decision D1, task ad8346ee).
+    """
+    # <repo>/agents/skills/ops/tasks-api/tasks_api_client.py -> <repo>
+    repo = pathlib.Path(__file__).resolve().parents[4]
+    return repo / "agents" / "workflows" / "feature-task" / "Cargo.toml"
+
+
+def feature_task_binary() -> pathlib.Path | None:
+    """Path to a prebuilt ``feature-task`` release binary, if one exists.
+
+    The mint path is the write path for a QA approval, so it should not pay a
+    compile inside an approval write. ``cargo run`` blocks on the target-dir
+    lock held by a concurrent feature-task build and does a full build on a
+    cold cache, which is why the prebuilt binary is preferred when present.
+    """
+    manifest = feature_task_manifest()
+    binary = manifest.parent / "target" / "release" / "feature-task"
+    return binary if binary.exists() else None
+
+
+# A prebuilt binary only does network calls, so it is bounded tightly. The
+# `cargo run` fallback may need to compile first, so it gets a longer budget —
+# but never an unbounded one: an unbounded subprocess on the approval write
+# path hangs the approval with no surfaced error, because `capture_output`
+# buffers rather than streams.
+MINT_TIMEOUT_SECONDS = 120
+MINT_BUILD_TIMEOUT_SECONDS = 600
+
+
+def mint_qa_attestation(task_id: str, base_url: str, pr_url: str | None = None) -> dict:
+    """Run ``feature-task mechanical-evidence-check`` and return its attestation.
+
+    The subcommand exits 0 even when the check reports failures (``main()``
+    returns ``Ok(())`` unconditionally), so the verdict is read from the parsed
+    ``failures`` array — never from ``$?``. A caller that trusted the exit code
+    would approve against a failing attestation, which is the exact incident
+    task ``ad8346ee`` exists to close.
+    """
+    manifest = feature_task_manifest()
+    if not manifest.exists():
+        raise SystemExit(f"feature-task crate not found at {manifest}")
+
+    binary = feature_task_binary()
+    if binary is not None:
+        cmd = [str(binary)]
+        timeout = MINT_TIMEOUT_SECONDS
+    else:
+        cmd = ["cargo", "run", "--quiet", "--release", "--manifest-path", str(manifest), "--"]
+        timeout = MINT_BUILD_TIMEOUT_SECONDS
+
+    cmd += [
+        "mechanical-evidence-check",
+        "--base-url",
+        base_url,
+        "--task-id",
+        task_id,
+    ]
+    if pr_url:
+        cmd += ["--pr-url", pr_url]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except FileNotFoundError as exc:  # cargo not on PATH
+        raise SystemExit(f"cargo is required to mint a qa_agent attestation: {exc}")
+    except subprocess.TimeoutExpired as exc:
+        # Named retry step, so the operator does not have to guess. A timeout
+        # here is a build-lock or cold-cache problem, not an evidence problem,
+        # so it must not be mistaken for a failing AC-evidence check.
+        raise SystemExit(
+            f"mechanical-evidence-check did not finish within {timeout}s while minting "
+            f"the qa_agent attestation for task {task_id}.\n"
+            "This is usually a concurrent feature-task build holding the cargo "
+            "target-directory lock, or a cold build cache — not an evidence "
+            "failure.\n"
+            f"Retry step: build the binary once with `cargo build --release --manifest-path {manifest}`, "
+            "then approve again."
+        ) from exc
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise SystemExit(f"mechanical-evidence-check failed: {detail}")
+
+    try:
+        attestation = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Could not parse the attestation: {exc}\n{proc.stdout[:400]!r}")
+
+    # Failures are surfaced verbatim so the caller can post them in a
+    # `[qa-agent-blocked]` comment without a second round trip.
+    failures = attestation.get("failures") or []
+    if failures:
+        listed = "\n".join(f"  - {entry}" for entry in failures)
+        raise SystemExit(
+            "The live mechanical AC-evidence check reported failures, so this PR "
+            "cannot receive a qa_agent approval yet:\n"
+            f"{listed}\n"
+            "Fix the evidence on the PR and approve again."
+        )
+
+    return attestation
 
 
 def resolve_agent_id() -> str | None:
@@ -522,6 +637,16 @@ def cmd_approve(args):
     payload = {"type": args.type}
     if args.note is not None:
         payload["note"] = args.note
+
+    # `qa_agent` is the one approval type the Tasks API gates: it refuses any
+    # grant that does not carry a live attestation minted against the current
+    # PR head (task ad8346ee, AC1). Minting it here — in the only client that
+    # writes approvals — is what makes compute -> mint -> write ship
+    # atomically, rather than landing enforcement ahead of its producer and
+    # 409-ing every QA approval on merge.
+    if args.type == "qa_agent":
+        payload["attestation"] = mint_qa_attestation(args.id, base, getattr(args, "pr_url", None))
+
     print(json.dumps(api_request("POST", base, f"/tasks/{args.id}/approvals", payload), indent=2))
 
 
@@ -604,6 +729,14 @@ def build_parser():
     approve.add_argument("--id", required=True, help="Full task UUID")
     approve.add_argument("--type", required=True, choices=["spec", "tech_design", "qa_agent", "accepted"])
     approve.add_argument("--note", help="Optional approval rationale")
+    approve.add_argument(
+        "--pr-url",
+        help=(
+            "qa_agent only: PR URL to attest. Omit to derive it from the task's most "
+            "recent [implementer-prs] comment (the same rule the delivery gate uses). "
+            "Pass it explicitly only when that set is ambiguous."
+        ),
+    )
     approve.set_defaults(func=cmd_approve)
 
     revoke = sub.add_parser("revoke-approval", help="Revoke a structured task approval as the authenticated service actor")
