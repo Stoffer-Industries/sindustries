@@ -66,7 +66,16 @@ GITHUB_IDENTITIES = {
     "ivy": ("ivystoffer", "~/.config/gh-ivy", "IVY_GITHUB_TOKEN"),
     "quinn": ("quinnstoffer", "~/.config/gh-quinn", "QUINN_GITHUB_TOKEN"),
     "ash": ("ashstoffer", "~/.config/gh-ash", "ASH_GITHUB_TOKEN"),
-    "lox": ("loxstoffer", "~/.config/gh-lox", "LOX_GITHUB_TOKEN"),
+    # Lox has no provisioned GitHub account/profile yet (no `loxstoffer` user,
+    # no `~/.config/gh-lox`, no `LOX_GITHUB_TOKEN`) — see
+    # `infra/runbooks/agent-github-identity-profile-unprovisioned.md`
+    # (incident `lox-github-identity-unconfigured-2026-10-20`). Route PR
+    # hydration through the default keyring profile (quinnstoffer, already
+    # authenticated with repo/read:org/workflow) instead of a nonexistent
+    # `gh-lox` dir, so hydration degrades to "attributed to Quinn" rather
+    # than destroying Lox's entire queue with exit 4. Revert to a real
+    # `loxstoffer` identity once Tom provisions the account + token.
+    "lox": ("quinnstoffer", "~/.config/gh", "GITHUB_TOKEN"),
     # Tom is the terminal human attention owner. His queue remains read-only;
     # the default gh config is used only to hydrate PR context.
     "tom": ("stoff81", "~/.config/gh", "GITHUB_TOKEN"),
@@ -772,9 +781,26 @@ def _fetch_reviews_tolerant(
 
 
 def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
-    """Read open PR state with the agent's own GitHub credentials; never mutate."""
+    """Read open PR state with the agent's own GitHub credentials; never mutate.
+
+    PR hydration is enrichment layered on top of the Tasks-API-sourced queue,
+    not the queue itself. An auth failure here (unprovisioned profile dir,
+    missing token, revoked credential -- `gh api` exit 4) must degrade queue
+    *richness*, not delete the queue outright. See
+    `infra/runbooks/agent-github-identity-profile-unprovisioned.md`
+    (incident `lox-github-identity-unconfigured-2026-10-20`, also affected
+    Ivy and Rowan).
+    """
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
-    prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
+    try:
+        prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
+    except subprocess.CalledProcessError as exc:
+        _log(
+            f"fetch_github_prs: gh auth failure for {agent!r} "
+            f"(config_dir={config_dir}); returning no PRs: {exc}",
+            verbose_only=False,
+        )
+        return []
     hydrated = []
     for summary in prs:
         author = str((summary.get("user") or {}).get("login") or "").lower()

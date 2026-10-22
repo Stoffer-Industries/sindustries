@@ -745,9 +745,17 @@ class AgentTaskQueueTest(unittest.TestCase):
              patch("builtins.print"):
             agent_task_queue.main()
 
-    def test_lox_cli_identity_is_supported_for_attention_owner_queue(self):
+    def test_lox_cli_identity_routes_through_provisioned_fallback_profile(self):
+        # Lox has no provisioned GitHub account/profile (no `loxstoffer` user,
+        # no `~/.config/gh-lox`, no `LOX_GITHUB_TOKEN`) -- see
+        # infra/runbooks/agent-github-identity-profile-unprovisioned.md
+        # (incident lox-github-identity-unconfigured-2026-10-20). Routes
+        # through the default keyring profile (quinnstoffer, already
+        # authenticated with repo/read:org/workflow) instead of a dangling
+        # reference to a config dir that was never created, which previously
+        # made every `gh api` call exit 4 and destroyed the whole queue.
         self.assertEqual(
-            ("loxstoffer", "~/.config/gh-lox", "LOX_GITHUB_TOKEN"),
+            ("quinnstoffer", "~/.config/gh", "GITHUB_TOKEN"),
             agent_task_queue.GITHUB_IDENTITIES["lox"],
         )
         with patch.object(sys, "argv", ["agent_task_queue.py", "--assignee", "Lox"]), \
@@ -759,6 +767,19 @@ class AgentTaskQueueTest(unittest.TestCase):
              patch.object(agent_task_queue, "print_human"), \
              patch("builtins.print"):
             agent_task_queue.main()
+
+    def test_fetch_github_prs_degrades_to_empty_on_gh_auth_failure(self):
+        # Enrichment, not the queue itself: an auth failure (unprovisioned
+        # profile dir, missing token, exit 4) must not raise out of
+        # fetch_github_prs and destroy the whole heartbeat queue -- it must
+        # degrade to "no PRs" so the Tasks-API-sourced queue still returns.
+        with patch.object(
+            agent_task_queue,
+            "_gh_api",
+            side_effect=subprocess.CalledProcessError(4, ["gh", "api"]),
+        ):
+            result = agent_task_queue.fetch_github_prs("lox")
+        self.assertEqual([], result)
 
     def test_attention_owner_tasks_calls_list_with_attention_owner_filter(self):
         with patch.object(
