@@ -161,17 +161,35 @@ pub(crate) fn api_patch<T: for<'de> Deserialize<'de>>(
 /// server-side, so every caller must stay under the cap before sending.
 const ATTENTION_NOTE_MAX_LEN: usize = 500;
 
+/// Length of `s` in UTF-16 code units — the unit the Tasks API's
+/// `MAX_NOTE_LENGTH` check actually enforces, since JS `.length` counts
+/// UTF-16 code units rather than Unicode scalar values. The two disagree for
+/// anything above U+FFFF (every emoji), so measuring in `chars()` would let an
+/// astral-heavy note through this guard and still be rejected server-side.
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
 /// Truncate `note` to the Tasks API's note cap on a `char` boundary, leaving
 /// room for an ellipsis marker so truncated notes are visibly incomplete
 /// rather than silently cut off mid-sentence. No-op when already within the
-/// cap.
+/// cap, measured in UTF-16 code units to match the server-side enforcement.
 fn truncate_attention_note(note: &str) -> std::borrow::Cow<'_, str> {
-    if note.chars().count() <= ATTENTION_NOTE_MAX_LEN {
+    if utf16_len(note) <= ATTENTION_NOTE_MAX_LEN {
         return std::borrow::Cow::Borrowed(note);
     }
     const MARKER: &str = "…[truncated]";
-    let budget = ATTENTION_NOTE_MAX_LEN.saturating_sub(MARKER.chars().count());
-    let mut truncated: String = note.chars().take(budget).collect();
+    let budget = ATTENTION_NOTE_MAX_LEN.saturating_sub(utf16_len(MARKER));
+    let mut truncated = String::new();
+    let mut used = 0usize;
+    for ch in note.chars() {
+        let w = ch.len_utf16();
+        if used + w > budget {
+            break;
+        }
+        truncated.push(ch);
+        used += w;
+    }
     truncated.push_str(MARKER);
     std::borrow::Cow::Owned(truncated)
 }
@@ -187,7 +205,8 @@ fn truncate_attention_note(note: &str) -> std::borrow::Cow<'_, str> {
 /// concatenating several unbounded fields (drift reason, PR labels, head
 /// SHAs, AC digests) and can exceed the cap, which the API previously
 /// rejected outright with `400 INVALID_ATTENTION_OWNER_NOTE` instead of
-/// truncating. See `docs/infra/runbooks/feature-task-lobster-attention-note-overflow.md`.
+/// truncating. The cap is enforced server-side in
+/// `services/tasks-api/src/routes/taskAttentionOwners.ts`.
 pub(crate) fn api_reconcile_attention<T: for<'de> Deserialize<'de>>(
     base_url: &str,
     task_id: &str,
@@ -354,10 +373,34 @@ mod tests {
     fn truncate_attention_note_respects_char_boundaries_on_multibyte_input() {
         // Guards against panicking on a byte-index slice through a
         // multi-byte UTF-8 character; truncation must operate on `char`
-        // boundaries, not byte offsets.
+        // boundaries, not byte offsets. `é` is BMP, so it is 1 UTF-16 unit.
         let note = "é".repeat(615);
         let truncated = truncate_attention_note(&note);
-        assert!(truncated.chars().count() <= ATTENTION_NOTE_MAX_LEN);
+        assert!(utf16_len(&truncated) <= ATTENTION_NOTE_MAX_LEN);
+        assert!(truncated.ends_with("…[truncated]"));
+    }
+
+    #[test]
+    fn truncate_attention_note_caps_astral_input_in_utf16_units() {
+        // The failure mode a `chars().count()` budget misses: astral
+        // characters are 1 Unicode scalar but 2 UTF-16 code units, so an
+        // emoji-dense note can measure 500 "chars" and still be 976 against
+        // the server's 500-unit cap.
+        let note = "🔧".repeat(500);
+        let truncated = truncate_attention_note(&note);
+        assert_eq!(utf16_len(&truncated), ATTENTION_NOTE_MAX_LEN);
+        assert!(truncated.ends_with("…[truncated]"));
+    }
+
+    #[test]
+    fn truncate_attention_note_caps_mixed_bmp_and_astral_input() {
+        // Rowan's mixed case: 469 BMP + 20 astral scalars is 489 by
+        // `chars().count()` but 509 against the server's cap.
+        let mut note = "a".repeat(469);
+        note.push_str(&"💻".repeat(20));
+        assert_eq!(note.chars().count(), 489);
+        let truncated = truncate_attention_note(&note);
+        assert!(utf16_len(&truncated) <= ATTENTION_NOTE_MAX_LEN);
         assert!(truncated.ends_with("…[truncated]"));
     }
 
