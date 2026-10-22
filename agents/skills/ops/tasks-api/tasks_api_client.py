@@ -44,6 +44,28 @@ def feature_task_manifest() -> pathlib.Path:
     return repo / "agents" / "workflows" / "feature-task" / "Cargo.toml"
 
 
+def feature_task_binary() -> pathlib.Path | None:
+    """Path to a prebuilt ``feature-task`` release binary, if one exists.
+
+    The mint path is the write path for a QA approval, so it should not pay a
+    compile inside an approval write. ``cargo run`` blocks on the target-dir
+    lock held by a concurrent feature-task build and does a full build on a
+    cold cache, which is why the prebuilt binary is preferred when present.
+    """
+    manifest = feature_task_manifest()
+    binary = manifest.parent / "target" / "release" / "feature-task"
+    return binary if binary.exists() else None
+
+
+# A prebuilt binary only does network calls, so it is bounded tightly. The
+# `cargo run` fallback may need to compile first, so it gets a longer budget —
+# but never an unbounded one: an unbounded subprocess on the approval write
+# path hangs the approval with no surfaced error, because `capture_output`
+# buffers rather than streams.
+MINT_TIMEOUT_SECONDS = 120
+MINT_BUILD_TIMEOUT_SECONDS = 600
+
+
 def mint_qa_attestation(task_id: str, base_url: str, pr_url: str | None = None) -> dict:
     """Run ``feature-task mechanical-evidence-check`` and return its attestation.
 
@@ -57,13 +79,15 @@ def mint_qa_attestation(task_id: str, base_url: str, pr_url: str | None = None) 
     if not manifest.exists():
         raise SystemExit(f"feature-task crate not found at {manifest}")
 
-    cmd = [
-        "cargo",
-        "run",
-        "--quiet",
-        "--manifest-path",
-        str(manifest),
-        "--",
+    binary = feature_task_binary()
+    if binary is not None:
+        cmd = [str(binary)]
+        timeout = MINT_TIMEOUT_SECONDS
+    else:
+        cmd = ["cargo", "run", "--quiet", "--release", "--manifest-path", str(manifest), "--"]
+        timeout = MINT_BUILD_TIMEOUT_SECONDS
+
+    cmd += [
         "mechanical-evidence-check",
         "--base-url",
         base_url,
@@ -74,9 +98,28 @@ def mint_qa_attestation(task_id: str, base_url: str, pr_url: str | None = None) 
         cmd += ["--pr-url", pr_url]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
     except FileNotFoundError as exc:  # cargo not on PATH
         raise SystemExit(f"cargo is required to mint a qa_agent attestation: {exc}")
+    except subprocess.TimeoutExpired as exc:
+        # Named retry step, so the operator does not have to guess. A timeout
+        # here is a build-lock or cold-cache problem, not an evidence problem,
+        # so it must not be mistaken for a failing AC-evidence check.
+        raise SystemExit(
+            f"mechanical-evidence-check did not finish within {timeout}s while minting "
+            f"the qa_agent attestation for task {task_id}.\n"
+            "This is usually a concurrent feature-task build holding the cargo "
+            "target-directory lock, or a cold build cache — not an evidence "
+            "failure.\n"
+            f"Retry step: build the binary once with `cargo build --release --manifest-path {manifest}`, "
+            "then approve again."
+        ) from exc
 
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()

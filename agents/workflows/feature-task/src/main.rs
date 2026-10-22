@@ -264,6 +264,16 @@ struct TaskApproval {
     /// than silently honoured.
     #[serde(default)]
     verified_pr_head_sha: Option<String>,
+    /// PR *number* this `qa_agent` approval was verified against.
+    ///
+    /// `verified_pr_head_sha` records what was checked but not which PR it was
+    /// checked on, so the invalidation pass had nothing to compare a task's
+    /// currently-linked PR against — the #803 -> replacement-PR shape, where
+    /// the SHA and digest pins still match a PR that no longer belongs to the
+    /// task. `None` on rows written before the migration; read as stale rather
+    /// than trusted.
+    #[serde(default)]
+    verified_pr_number: Option<i64>,
     /// SHA-256 over the normalised AC-evidence section of the PR body at
     /// verification time. Pins the *evidence* independently of the head
     /// SHA, because the `39667e62` incident was a body edit that need not
