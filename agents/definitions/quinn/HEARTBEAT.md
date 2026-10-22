@@ -203,9 +203,15 @@ underlying approval/PR state changing, and two different reads of the same
 task/queue state disagreeing with each other.
 
 **If 2+ tasks share one root cause:** create or update ONE incident keyed by
-a stable root-cause slug (never a task ID). List every affected task under
-`details.impactTaskIds`. Follow the normal `OPS STATE MANAGEMENT` write rules
-below for severity, attempts, and escalation.
+a stable root-cause slug (never a task ID). List every affected task in the
+entry-level `impactTaskIds` array — a sibling of `details`, matching
+`agents/schemas/agent-incident-state.schema.json` and
+`docs/systems/agent-incidents.md`. Do NOT nest it under `details`: both paths
+validate today (`details` is open, the incident object allows additional
+properties), so writing to the nested path fails silently and the resolution
+reader — which looks at entry level to preserve impact evidence — finds
+nothing. Follow the normal `OPS STATE MANAGEMENT` write rules below for
+severity, attempts, and escalation.
 
 **If only one task shows this shape:** it is an ordinary task-level wait. Do
 not create an incident. Route it through the normal
@@ -243,9 +249,14 @@ Quinn maintains a persistent operational findings registry at `brain/state/quinn
   "escalatedAt": null,
   "nextRetryAt": null,
   "recurrenceCount": 0,
+  "impactTaskIds": [],
   "details": {}
 }
 ```
+
+`impactTaskIds` is entry-level (sibling of `details`), never nested inside it.
+Only multi-task root-cause incidents populate it; an ordinary task-level wait
+leaves it empty.
 
 **Reading from both agents (preferred path):** Use the shared parser at `agents/lib/incident_state.py`. Import it from the agents package and call `load_all_incidents()` / `needs_tom()` instead of hand-rolling the schema. The parser handles Lox's file too and normalizes legacy shapes on the fly, so Quinn's heartbeat does not need to branch on file format.
 
