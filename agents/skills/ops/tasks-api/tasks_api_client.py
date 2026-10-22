@@ -65,6 +65,28 @@ def feature_task_binary() -> pathlib.Path | None:
 MINT_TIMEOUT_SECONDS = 120
 MINT_BUILD_TIMEOUT_SECONDS = 600
 
+# Mirrors `MAX_NOTE_LENGTH` in
+# services/tasks-api/src/routes/taskAttentionOwners.ts (the single source of
+# truth — the API owns this contract, this client only mirrors it). Python
+# cannot import a TypeScript const, so the value is duplicated here with
+# test_drift_with_server_note_cap failing if the two ever disagree. The server
+# rejects on `> MAX_NOTE_LENGTH` after trimming, so exactly this many units is
+# still valid.
+MAX_ATTENTION_OWNER_NOTE_LENGTH = 500
+
+
+def _utf16_len(value: str) -> int:
+    """Length in UTF-16 code units, matching JS ``String.length``.
+
+    The server measures ``trimmed.length``, which counts UTF-16 code units.
+    Python's ``len()`` counts Unicode scalar values: the two agree for every
+    BMP character and diverge on every astral one (emoji), which this repo uses
+    heavily in task titles — so a plain ``len()`` guard would pass locally and
+    still 400 on the wire. ``surrogatepass`` keeps lone surrogates countable
+    rather than raising UnicodeEncodeError, matching how JS counts them.
+    """
+    return len(value.encode("utf-16-le", "surrogatepass")) // 2
+
 
 def mint_qa_attestation(task_id: str, base_url: str, pr_url: str | None = None) -> dict:
     """Run ``feature-task mechanical-evidence-check`` and return its attestation.
@@ -410,6 +432,13 @@ def reconcile_attention_owners(
     ``note`` raises locally and the server returns 400 on the wire if a
     caller bypasses the helper.
 
+    A ``note`` over ``MAX_ATTENTION_OWNER_NOTE_LENGTH`` also raises locally,
+    measured in UTF-16 code units over the trimmed string so the check matches
+    the server's ``normalizeNoteString`` exactly. It raises rather than
+    truncates: these notes are agent-authored routing text, and silently
+    clipping one drops the clause a human was meant to read while the call
+    still reports success.
+
     The ``/tasks/:id/attention-owners/reconcile`` route is POST-only; an
     OPTIONS or GET probe returns 404, which is normal — do not treat
     that as a deployment or credential issue. Use this helper or call
@@ -417,6 +446,17 @@ def reconcile_attention_owners(
     """
     if not isinstance(note, str) or not note.strip():
         raise ValueError("note is required (non-empty after trim)")
+    # Measure exactly what gets serialized: the server trims, then measures.
+    trimmed = note.strip()
+    note_length = _utf16_len(trimmed)
+    if note_length > MAX_ATTENTION_OWNER_NOTE_LENGTH:
+        raise ValueError(
+            f"note is {note_length} UTF-16 code units after trim; the Tasks API "
+            f"rejects notes longer than {MAX_ATTENTION_OWNER_NOTE_LENGTH} with "
+            "400 INVALID_ATTENTION_OWNER_NOTE (MAX_NOTE_LENGTH in "
+            "services/tasks-api/src/routes/taskAttentionOwners.ts). Shorten the "
+            "note rather than relying on truncation."
+        )
     base = base_url or get_base_url()
     resp = api_request(
         "POST",
@@ -424,7 +464,7 @@ def reconcile_attention_owners(
         f"/tasks/{task_id}/attention-owners/reconcile",
         {
             "attentionOwners": list(attention_owners),
-            "note": note.strip(),
+            "note": trimmed,
         },
         token=token,
     )
