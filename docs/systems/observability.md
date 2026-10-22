@@ -36,7 +36,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Database signal source           | Health probe service on Fly (single-purpose Node app, `sindustries_db_up` + `sindustries_db_query_duration_seconds` + `sindustries_fly_app_health` + `sindustries_redis_up`)    | Rowan  | `infra/cloud/observability/health-probe/`         |
 | Alert evaluation                 | Grafana Cloud alerting (not Alertmanager), UI/API state   | Quinn  | `infra/cloud/observability/grafana/alerts/` (10 rules, 5 page + 5 warn) |
 | Hosted datasource identity       | Discovered from Grafana Cloud `/api/datasources` at bootstrap time | Quinn | Hosted Grafana API; the repo does not duplicate SaaS datasource URLs or UIDs |
-| Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/`  | Rowan  | Provisioned via Grafana provisioning API on bootstrap        |
+| Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/` (hosted canonical tree) plus any product-owned `apps/<app>/grafana/dashboards/` | Rowan  | Provisioned via Grafana provisioning API on bootstrap; `step_dashboards` uploads both trees |
 | Dashboard definitions (local)    | `infra/grafana/provisioning/dashboards/json/` (existing) | Rowan  | Parity copy for hosted: `tasks-api-red.json`, `openclaw-diagnostics.json` |
 | Dashboard definitions (cloud, new) | `cloud-overview.json`, `db-health.json`, `migration-alerts.json` | Rowan | `infra/cloud/observability/grafana/dashboards/`   |
 | Bootstrap                        | Idempotent local script with subcommand dispatch (validate \| app \| secrets \| dashboards \| alerts \| deploy \| smoke \| evidence \| all)        | Quinn  | `infra/cloud/observability/bootstrap-observability.sh` |
@@ -127,7 +127,13 @@ For the full per-alert response expectation see the "Alert ownership" table belo
 | `openclaw-diagnostics`          | Existing local — ported to hosted for parity | Rowan (engineering) | Quinn |
 | `gymtrack-browser-errors`       | NEW (hosted) — GymTrack browser error events (task e89db27f) | Rowan (engineering) | Quinn |
 
-All dashboard definitions live as JSON in the repo (either `infra/grafana/provisioning/dashboards/json/` for local or `infra/cloud/observability/grafana/dashboards/` for hosted). Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
+All dashboard definitions live as JSON in the repo, in one of three trees:
+
+- `infra/grafana/provisioning/dashboards/json/` — local Grafana.
+- `infra/cloud/observability/grafana/dashboards/` — hosted canonical tree; observability-owned dashboards (metrics, migrations).
+- `apps/<app>/grafana/dashboards/` — product-owned, co-located with the app that owns the signal. `gymtrack-browser-errors.json` lives here (task e89db27f). A dashboard ships with its product rather than in the observability tree so the owning app is the only place that has to change when the signal changes.
+
+`bootstrap-observability.sh` `step_dashboards` uploads the hosted canonical tree **and** any product-owned tree it discovers, so a product that ships an app-owned dashboard needs no separate provisioning step. It currently discovers `apps/gymtrack/grafana/dashboards` explicitly; a second product-owned tree needs a line added there. Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
 
 The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default Prometheus datasource and rewrites repository-local `prometheus` / `${DS_PROMETHEUS}` references while constructing each API payload. The repository deliberately does not carry a Grafana Cloud `datasources.yaml`: file provisioning is not the control plane for the managed instance.
 
