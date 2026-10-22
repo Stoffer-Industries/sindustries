@@ -180,23 +180,58 @@ describe('task approval boundary', () => {
       expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
     });
 
-    it('accepts a fresh failure-free attestation and pins BOTH values onto the row (AC2)', async () => {
+    it('accepts a fresh failure-free attestation and pins all THREE values onto the row (AC2)', async () => {
       armTask();
       const attestation = freshAttestation();
       const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation });
       expect(res.status).toBe(200);
       const written = prismaMock.taskApproval.upsert.mock.calls[0][0].create;
+      expect(written.verifiedPrNumber).toBe(attestation.prNumber);
       expect(written.verifiedPrHeadSha).toBe(attestation.headSha);
       expect(written.verifiedAcSectionDigest).toBe(attestation.acSectionDigest);
     });
 
+    it('refuses an attestation that names no PR, so a row can never pin evidence to nothing', async () => {
+      // `prNumber` is what makes AC3's invalidation pass possible: without it
+      // the SHA + digest still match after a #803 -> replacement-PR swap, and
+      // nothing detects the substitution. Requiring it at the gate is cheaper
+      // than discovering the null-pin path after merge.
+      armTask();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
+        type: 'qa_agent',
+        attestation: {
+          headSha: 'deb991e0739fedf0e6952643cad05bdafec54b37',
+          acSectionDigest: '9f2c4a1b8e6d3057fa1c92b4d8e07f3651ca90bd2e4f18a7c3d5b6e9024af71',
+          failures: [],
+          verifiedAt: new Date().toISOString()
+        }
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error.details.reason).toBe('attestation_malformed');
+      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-integer or non-positive prNumber rather than storing a junk pin', async () => {
+      armTask();
+      for (const prNumber of ['836', 0, -1, 836.5]) {
+        const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
+          type: 'qa_agent',
+          attestation: freshAttestation({ prNumber })
+        });
+        expect(res.status, `prNumber=${JSON.stringify(prNumber)}`).toBe(409);
+        expect(res.body.error.details.reason).toBe('attestation_malformed');
+      }
+      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+    });
+
     it('overwrites the pins on re-approval so a stale grant cannot survive', async () => {
       armTask();
-      const later = freshAttestation({ headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
+      const later = freshAttestation({ prNumber: 901, headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: freshAttestation() });
       prismaMock.taskApproval.upsert.mockClear();
       await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: later });
       const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
+      expect(update.verifiedPrNumber).toBe(901);
       expect(update.verifiedPrHeadSha).toBe('aaaa111122223333444455556666777788889999');
       expect(update.verifiedAcSectionDigest).toBe('deadbeef');
     });

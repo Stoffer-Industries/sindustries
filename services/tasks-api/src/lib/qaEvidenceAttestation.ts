@@ -52,8 +52,10 @@
  * the 15-minute window — replaying a byte-identical attestation in that window
  * is idempotent (the route's existing same-owner/same-note branch returns the
  * existing row) rather than rejected. Closing that residual needs the mint
- * timestamp persisted, i.e. a third column, which D2 did not approve. Flagged
- * rather than quietly widened; Slice 3 can tighten it if Quinn wants it closed.
+ * timestamp persisted, which is a distinct concern from the three pins below —
+ * the third pin added in review is `verifiedPrNumber` (which PR), not the mint
+ * time, and it does not close this gap. Flagged rather than quietly widened;
+ * Slice 3 can tighten it if Quinn wants it closed.
  */
 
 /** Error code returned when the gate refuses a `qa_agent` approval. */
@@ -84,7 +86,7 @@ export const ATTESTATION_REASONS = {
 /**
  * @typedef {{ prNumber?: unknown, headSha?: unknown, acSectionDigest?: unknown,
  *            failures?: unknown, verifiedAt?: unknown }} QaAttestation
- * @typedef {{ ok: true, prNumber: number|null, headSha: string, acSectionDigest: string }
+ * @typedef {{ ok: true, prNumber: number, headSha: string, acSectionDigest: string }
  *          | { ok: false, reason: string, message: string, failures: string[] }} AttestationVerdict
  */
 
@@ -132,12 +134,31 @@ export function evaluateQaAttestation(body: unknown, now: Date = new Date()): At
 
   const headSha = asNonEmptyString(attestation.headSha);
   const acSectionDigest = asNonEmptyString(attestation.acSectionDigest);
+  const prNumber = attestation.prNumber;
 
   if (!headSha || !acSectionDigest) {
     return {
       ok: false,
       reason: ATTESTATION_REASONS.MALFORMED,
       message: '`attestation` requires non-empty `headSha` and `acSectionDigest` fields.',
+      failures: []
+    };
+  }
+
+  // `prNumber` is required, not optional, and that is a deliberate change from
+  // the first cut of this gate (Quinn, PR review 2026-10-22): the row has to
+  // record *which* PR was verified, not just what was verified. Without it the
+  // SHA + digest pins still match after a #803 -> replacement-PR swap, and AC3's
+  // invalidation pass has nothing to compare the task's currently-linked PR
+  // against — the exact hole this gate exists to close. The producer
+  // (`feature-task mechanical-evidence-check`) reads number and headRefOid from
+  // `pr_identity` in one call, so it always has this value; requiring it costs
+  // the caller nothing and closes the null-pin path now rather than after merge.
+  if (typeof prNumber !== 'number' || !Number.isInteger(prNumber) || prNumber <= 0) {
+    return {
+      ok: false,
+      reason: ATTESTATION_REASONS.MALFORMED,
+      message: '`attestation.prNumber` must be a positive integer naming the PR that was verified.',
       failures: []
     };
   }
@@ -179,10 +200,6 @@ export function evaluateQaAttestation(body: unknown, now: Date = new Date()): At
       failures: []
     };
   }
-
-  const prNumber = typeof attestation.prNumber === 'number' && Number.isFinite(attestation.prNumber)
-    ? attestation.prNumber
-    : null;
 
   return { ok: true, prNumber, headSha, acSectionDigest };
 }

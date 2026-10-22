@@ -99,13 +99,17 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     // Enforced at this choke point deliberately: it is the single route through
     // which EVERY `qa_agent` approval is written, so the gate cannot be
     // bypassed by a future writer forgetting to call something first.
-    let evidencePins: { verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
+    let evidencePins:
+      | { verifiedPrNumber: number; verifiedPrHeadSha: string; verifiedAcSectionDigest: string }
+      | null = null;
     if (type === 'qa_agent') {
       const verdict = evaluateQaAttestation(req.body);
       if (!verdict.ok) {
         // No approval row is written on this path — that absence is asserted
         // directly by the AC1 test, because "returned a 4xx" alone would not
         // catch a regression that logged the rejection but still persisted.
+        // `failures` is carried verbatim so the caller (Ash) can post its
+        // `[qa-agent-blocked]` comment without a second round-trip.
         return res.status(409).json({
           error: {
             code: QA_EVIDENCE_GATE_BLOCKED,
@@ -115,6 +119,7 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
         });
       }
       evidencePins = {
+        verifiedPrNumber: verdict.prNumber,
         verifiedPrHeadSha: verdict.headSha,
         verifiedAcSectionDigest: verdict.acSectionDigest
       };
@@ -166,7 +171,11 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
           state: 'approved',
           approvedAt: now,
           revokedAt: null,
-          ...(evidencePins ?? { verifiedPrHeadSha: null, verifiedAcSectionDigest: null })
+          ...(evidencePins ?? {
+            verifiedPrNumber: null,
+            verifiedPrHeadSha: null,
+            verifiedAcSectionDigest: null
+          })
         }
       });
       const handoffUpdate = approvalHandoffUpdate(task, type, 'approved');
