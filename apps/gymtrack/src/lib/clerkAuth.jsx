@@ -3,6 +3,38 @@ import { useSession, useUser, useSignIn, useSignUp, useClerk } from '@clerk/reac
 import { AuthContext } from './authContext.jsx';
 import { getClerkPublishableKey } from './clerkConfig.js';
 import { setSupabaseAccessTokenGetter, supabase } from './supabase.js';
+import { clearClerkSsoDestination, rememberClerkSsoDestination } from './clerkSsoDestination.js';
+import { reportAuthError } from './browserTelemetry.js';
+
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Best-effort extraction of a Clerk error code + status for the browser
+ * telemetry surface. The Clerk envelope is documented at
+ * https://clerk.com/docs/custom-flows/error-handling — `error?.errors[0]?.code`
+ * is the canonical machine-readable code (e.g. `invalid_credentials`,
+ * `needs_client_trust`), and `error?.status` is the HTTP status when
+ * the SDK surfaces one. We never send the raw message to telemetry
+ * (the user-facing longMessage can leak internal context); the safe
+ * code is the smallest signal that still tells Quinn which code path
+ * failed.
+ */
+function clerkSafeErrorCode(error) {
+  return error?.errors?.[0]?.code ?? error?.code ?? null;
+}
+
+function clerkSafeStatus(error) {
+  return error?.status != null ? String(error.status) : null;
+}
+
+function reportClerkError(error, operation) {
+  reportAuthError(error, {
+    provider: 'clerk',
+    operation,
+    errorCode: clerkSafeErrorCode(error),
+    status: clerkSafeStatus(error)
+  });
+}
 
 /**
  * Clerk-backed AuthProvider. Activated when VITE_AUTH_PROVIDER === 'clerk'.
@@ -46,8 +78,8 @@ export function ClerkAuthProvider({ children }) {
 
   const { isLoaded: sessionLoaded, session: clerkSession } = useSession();
   const { isLoaded: userLoaded, user } = useUser();
-  const { signIn: clerkSignIn, setActive: clerkSignInSetActive } = useSignIn();
-  const { signUp: clerkSignUp, setActive: clerkSignUpSetActive } = useSignUp();
+  const { signIn: clerkSignIn } = useSignIn();
+  const { signUp: clerkSignUp } = useSignUp();
   const { signOut: clerkSignOut } = useClerk();
 
   const loading = !sessionLoaded || !userLoaded;
@@ -79,28 +111,99 @@ export function ClerkAuthProvider({ children }) {
   }, [clerkSession, user, accessToken]);
 
   /**
-   * Email + password sign-in. Maps Clerk's `signIn.create({ identifier,
-   * password })` shape to `{ data, error }`. `identifier` accepts email,
-   * phone, or username; we constrain it to email at the call-site
-   * (LoginScreen form), matching the current Supabase password path.
+   * Email + password sign-in. Identifies the account first so the app uses
+   * a factor Clerk actually exposes for that user. Password-enabled accounts
+   * continue through the password factor. Accounts imported from Google with
+   * no Clerk password fall back to their supported email-code factor instead
+   * of submitting an invalid password strategy.
    *
-   * On successful first-factor sign-in, the second-factor challenge is
-   * surfaced via Clerk's hosted account portal — the LoginScreen UI does
-   * not yet render a 2FA code field. Quinn's Phase 0 plan to deliver
-   * email-link + password as the only first factors means this code path
-   * is the production hot path. A future task can extend `signIn` to
-   * return the prepared second-factor and drive a 2FA code form.
+   * The returned verification mode tells LoginScreen whether a submitted
+   * email code completes the first factor or Clerk's client-trust challenge;
+   * both flows reuse the same code-entry form but must call different Clerk
+   * methods.
    */
   const signIn = useCallback(
     async (email, password) => {
       try {
-        const result = await clerkSignIn.create({
-          identifier: email,
-          password
-        });
-        if (result.status === 'complete') {
-          await clerkSignInSetActive({ session: result.createdSessionId });
-          return { data: { user: result.createdUserId }, error: null };
+        const { error: identifyError } = await clerkSignIn.create({ identifier: email });
+        if (identifyError) {
+          return { data: null, error: new Error(clerkErrorMessage(identifyError, 'Sign-in failed.')) };
+        }
+
+        const supportedFirstFactors = clerkSignIn.supportedFirstFactors ?? [];
+        const supportsPassword = supportedFirstFactors.some(
+          (factor) => factor.strategy === 'password'
+        );
+        const supportsEmailCode = supportedFirstFactors.some(
+          (factor) => factor.strategy === 'email_code'
+        );
+
+        if (!supportsPassword) {
+          if (!supportsEmailCode) {
+            const supportsGoogle = supportedFirstFactors.some(
+              (factor) => factor.strategy === 'oauth_google'
+            );
+            return {
+              data: null,
+              error: new Error(
+                supportsGoogle
+                  ? 'This account uses Google sign-in. Choose “Continue with Google” above.'
+                  : 'This account does not support password sign-in. Choose another sign-in method.'
+              )
+            };
+          }
+
+          const { error: emailCodeError } = await clerkSignIn.emailCode.sendCode();
+          if (emailCodeError) {
+            return {
+              data: null,
+              error: new Error(clerkErrorMessage(emailCodeError, 'Could not send the verification code.'))
+            };
+          }
+          return {
+            data: { needsVerification: true, verificationMode: 'first_factor_email_code' },
+            error: null
+          };
+        }
+
+        const { error } = await clerkSignIn.password({ password });
+        if (error) {
+          reportClerkError(error, 'signin');
+          return { data: null, error: new Error(clerkErrorMessage(error, 'Sign-in failed.')) };
+        }
+        if (clerkSignIn.status === 'complete') {
+          const { error: finalizeError } = await clerkSignIn.finalize();
+          if (finalizeError) {
+            reportClerkError(finalizeError, 'signin_finalize');
+            return {
+              data: null,
+              error: new Error(clerkErrorMessage(finalizeError, 'Sign-in failed.'))
+            };
+          }
+          return { data: { session: clerkSignIn.createdSessionId }, error: null };
+        }
+        if (clerkSignIn.status === 'needs_client_trust') {
+          const supportsEmailCode = clerkSignIn.supportedSecondFactors?.some(
+            (factor) => factor.strategy === 'email_code'
+          );
+          if (!supportsEmailCode) {
+            return {
+              data: null,
+              error: new Error('This browser needs an additional verification method that is not available.')
+            };
+          }
+          const { error: verificationError } = await clerkSignIn.mfa.sendEmailCode();
+          if (verificationError) {
+            reportClerkError(verificationError, 'signin_mfa_send');
+            return {
+              data: null,
+              error: new Error(clerkErrorMessage(verificationError, 'Could not send the verification code.'))
+            };
+          }
+          return {
+            data: { needsVerification: true, verificationMode: 'client_trust_email_code' },
+            error: null
+          };
         }
         // First-factor succeeded but additional steps required (e.g. 2FA,
         // email link verification). Surface the prepared state so the UI
@@ -110,7 +213,7 @@ export function ClerkAuthProvider({ children }) {
         return {
           data: null,
           error: new Error(
-            `Additional sign-in steps required (status=${result.status}). ` +
+            `Additional sign-in steps required (status=${clerkSignIn.status}). ` +
               'Quinn: enable the 2FA code form on LoginScreen to handle this path.'
           )
         };
@@ -118,12 +221,49 @@ export function ClerkAuthProvider({ children }) {
         // Clerk errors carry `.errors[0].longMessage` for user-facing
         // rendering. Map to plain Error so LoginScreen's `error.message`
         // access keeps working.
-        const message =
-          err?.errors?.[0]?.longMessage ?? err?.message ?? 'Sign-in failed.';
-        return { data: null, error: new Error(message) };
+        reportClerkError(err, 'signin_throw');
+        return { data: null, error: new Error(clerkErrorMessage(err, 'Sign-in failed.')) };
       }
     },
-    [clerkSignIn, clerkSignInSetActive]
+    [clerkSignIn]
+  );
+
+  const verifySignInCode = useCallback(
+    async (code, verificationMode) => {
+      try {
+        const verification =
+          verificationMode === 'first_factor_email_code'
+            ? clerkSignIn.emailCode.verifyCode({ code })
+            : clerkSignIn.mfa.verifyEmailCode({ code });
+        const { error } = await verification;
+        if (error) {
+          reportClerkError(error, 'verify_signin_second_factor');
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(error, 'Verification failed.'))
+          };
+        }
+        if (clerkSignIn.status !== 'complete') {
+          return {
+            data: null,
+            error: new Error('Additional sign-in verification is still required.')
+          };
+        }
+        const { error: finalizeError } = await clerkSignIn.finalize();
+        if (finalizeError) {
+          reportClerkError(finalizeError, 'verify_signin_second_factor_finalize');
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(finalizeError, 'Sign-in failed.'))
+          };
+        }
+        return { data: { session: clerkSignIn.createdSessionId }, error: null };
+      } catch (err) {
+        reportClerkError(err, 'verify_signin_second_factor_throw');
+        return { data: null, error: new Error(clerkErrorMessage(err, 'Verification failed.')) };
+      }
+    },
+    [clerkSignIn]
   );
 
   /**
@@ -136,28 +276,52 @@ export function ClerkAuthProvider({ children }) {
   const signUp = useCallback(
     async (email, password) => {
       try {
-        const result = await clerkSignUp.create({
-          emailAddress: email,
-          password
-        });
-        if (result.status === 'complete') {
-          await clerkSignUpSetActive({ session: result.createdSessionId });
-          return { data: { user: result.createdUserId }, error: null };
+        const { error } = await withTimeout(
+          clerkSignUp.password({
+            emailAddress: email,
+            password
+          }),
+          AUTH_REQUEST_TIMEOUT_MS,
+          'Security check timed out. Please retry.'
+        );
+        if (error) {
+          reportClerkError(error, 'signup');
+          return { data: null, error: new Error(clerkErrorMessage(error, 'Sign-up failed.')) };
+        }
+        if (clerkSignUp.status === 'complete') {
+          const { error: finalizeError } = await clerkSignUp.finalize();
+          if (finalizeError) {
+            reportClerkError(finalizeError, 'signup_finalize');
+            return {
+              data: null,
+              error: new Error(clerkErrorMessage(finalizeError, 'Sign-up failed.'))
+            };
+          }
+          return { data: { user: clerkSignUp.createdUserId }, error: null };
         }
         // Status === 'missing_requirements' | 'abandoned' etc. — the
         // email-verification step is queued by Clerk. Surface as success
         // for UI parity with Supabase's email-confirmation-required flow.
         // The user verifies via Clerk's hosted email link; on next
         // sign-in, status flips to 'complete'.
-        await clerkSignUpPrepareEmailAddressVerification(result);
+        const verificationError = await clerkSignUpPrepareEmailAddressVerification(clerkSignUp);
+        if (verificationError) {
+          reportClerkError(verificationError, 'signup_prepare_verification');
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(verificationError, 'Sign-up failed.'))
+          };
+        }
         return { data: { pendingVerification: true }, error: null };
       } catch (err) {
-        const message =
-          err?.errors?.[0]?.longMessage ?? err?.message ?? 'Sign-up failed.';
-        return { data: null, error: new Error(message) };
+        if (err?.name === 'AuthRequestTimeoutError') {
+          await clerkSignUp.reset().catch(() => {});
+        }
+        reportClerkError(err, 'signup_throw');
+        return { data: null, error: new Error(clerkErrorMessage(err, 'Sign-up failed.')) };
       }
     },
-    [clerkSignUp, clerkSignUpSetActive]
+    [clerkSignUp]
   );
 
   const signOut = useCallback(async () => {
@@ -165,6 +329,7 @@ export function ClerkAuthProvider({ children }) {
       await clerkSignOut();
       return { error: null };
     } catch (err) {
+      reportClerkError(err, 'signout');
       const message =
         err?.errors?.[0]?.longMessage ?? err?.message ?? 'Sign-out failed.';
       return { error: new Error(message) };
@@ -173,7 +338,7 @@ export function ClerkAuthProvider({ children }) {
 
   /**
    * OAuth redirect entrypoint. Clerk implementation calls
-   * `clerkSignIn.authenticateWithRedirect` with the matching strategy;
+   * `clerkSignIn.sso` with the matching strategy;
    * Clerk's hosted account portal performs the actual consent screen
    * and handles the redirect. The call returns void on success — the
    * browser is already navigating to Clerk — so we synthesise the
@@ -188,17 +353,32 @@ export function ClerkAuthProvider({ children }) {
     async (provider, redirectPath = '/workout') => {
       const strategy = clerkStrategyForProvider(provider);
       const redirectUrl = new URL(redirectPath, window.location.origin).toString();
+      const redirectCallbackUrl = new URL('/sso-callback', window.location.origin).toString();
+      rememberClerkSsoDestination(redirectPath);
       try {
-        await clerkSignIn.authenticateWithRedirect({
+        const { error } = await clerkSignIn.sso({
           strategy,
           redirectUrl,
-          redirectUrlComplete: redirectUrl
+          redirectCallbackUrl
         });
-        return { data: { provider, url: redirectUrl }, error: null, providerDisabled: false };
+        if (error) {
+          clearClerkSsoDestination();
+          reportClerkError(error, `oauth_${provider}`);
+          return {
+            data: null,
+            error: new Error(clerkErrorMessage(error, 'OAuth redirect failed.')),
+            providerDisabled: false
+          };
+        }
+        return { data: { provider }, error: null, providerDisabled: false };
       } catch (err) {
-        const message =
-          err?.errors?.[0]?.longMessage ?? err?.message ?? 'OAuth redirect failed.';
-        return { data: null, error: new Error(message), providerDisabled: false };
+        clearClerkSsoDestination();
+        reportClerkError(err, `oauth_${provider}_throw`);
+        return {
+          data: null,
+          error: new Error(clerkErrorMessage(err, 'OAuth redirect failed.')),
+          providerDisabled: false
+        };
       }
     },
     [clerkSignIn]
@@ -329,12 +509,13 @@ export function ClerkAuthProvider({ children }) {
       user: session?.user ?? null,
       loading,
       signIn,
+      verifySignInCode,
       signUp,
       signOut,
       startOAuthRedirect,
       getAccessToken
     }),
-    [session, loading, signIn, signUp, signOut, startOAuthRedirect, getAccessToken]
+    [session, loading, signIn, verifySignInCode, signUp, signOut, startOAuthRedirect, getAccessToken]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -367,12 +548,34 @@ function clerkStrategyForProvider(provider) {
 async function clerkSignUpPrepareEmailAddressVerification(signUpResource) {
   try {
     if (signUpResource?.status === 'missing_requirements') {
-      await signUpResource.prepareEmailAddressVerification({ strategy: 'email_code' });
+      const { error } = await signUpResource.verifications.sendEmailCode();
+      return error;
     }
-  } catch {
-    // Non-fatal: the next sign-in attempt will re-trigger verification
-    // preparation on the server side.
+    return null;
+  } catch (err) {
+    return err;
   }
+}
+
+function clerkErrorMessage(error, fallback) {
+  return (
+    error?.longMessage ??
+    error?.errors?.[0]?.longMessage ??
+    error?.message ??
+    fallback
+  );
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error(message);
+      error.name = 'AuthRequestTimeoutError';
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 
 /**

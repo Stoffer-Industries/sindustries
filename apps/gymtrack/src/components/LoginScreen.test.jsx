@@ -6,12 +6,14 @@ import { MemoryRouter } from 'react-router-dom';
 vi.mock('../lib/supabase.js', () => ({ supabase: { auth: { getUser: vi.fn(), onAuthStateChange: vi.fn() } } }));
 
 const mockSignIn = vi.fn();
+const mockVerifySignInCode = vi.fn();
 vi.mock('../lib/auth.jsx', () => ({
   useAuth: () => ({
     session: null,
     user: null,
     loading: false,
     signIn: mockSignIn,
+    verifySignInCode: mockVerifySignInCode,
     signUp: vi.fn(),
     signOut: vi.fn()
   }),
@@ -39,6 +41,7 @@ describe('LoginScreen', () => {
     expect(screen.getByTestId('login-email')).toBeInTheDocument();
     expect(screen.getByTestId('login-password')).toBeInTheDocument();
     expect(screen.getByTestId('login-submit')).toBeInTheDocument();
+    expect(screen.getByTestId('login-captcha')).toHaveAttribute('id', 'clerk-captcha');
   });
 
   it('shows inline error when sign-in fails', async () => {
@@ -52,5 +55,44 @@ describe('LoginScreen', () => {
 
     expect(await screen.findByTestId('login-error')).toHaveTextContent(/Invalid credentials/);
     expect(mockSignIn).toHaveBeenCalledWith('tom@example.com', 'wrongpassword');
+  });
+
+  it('completes the Clerk client-trust email-code step', async () => {
+    mockSignIn.mockResolvedValueOnce({
+      data: { needsVerification: true, verificationMode: 'client_trust_email_code' },
+      error: null
+    });
+    mockVerifySignInCode.mockResolvedValueOnce({ data: { session: 'sess_1' }, error: null });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByTestId('login-email'), 'tom@example.com');
+    await user.type(screen.getByTestId('login-password'), 'correctpassword');
+    await user.click(screen.getByTestId('login-submit'));
+
+    await user.type(await screen.findByTestId('login-verification-code'), '123456');
+    await user.click(screen.getByTestId('login-verify-submit'));
+    expect(mockVerifySignInCode).toHaveBeenCalledWith('123456', 'client_trust_email_code');
+  });
+
+  it('completes an email-code first factor for an account without a password', async () => {
+    mockSignIn.mockResolvedValueOnce({
+      data: { needsVerification: true, verificationMode: 'first_factor_email_code' },
+      error: null
+    });
+    mockVerifySignInCode.mockResolvedValueOnce({ data: { session: 'sess_2' }, error: null });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByTestId('login-email'), 'oauth-only@example.com');
+    await user.type(screen.getByTestId('login-password'), 'ignored-for-this-account');
+    await user.click(screen.getByTestId('login-submit'));
+
+    expect(
+      await screen.findByText('This account uses email verification. Enter the code we emailed you to sign in.')
+    ).toBeVisible();
+    await user.type(screen.getByTestId('login-verification-code'), '654321');
+    await user.click(screen.getByTestId('login-verify-submit'));
+    expect(mockVerifySignInCode).toHaveBeenCalledWith('654321', 'first_factor_email_code');
   });
 });

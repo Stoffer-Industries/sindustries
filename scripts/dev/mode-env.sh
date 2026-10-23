@@ -26,6 +26,7 @@ case "$MODE" in
     export TASKS_API_ENV_FILE="services/tasks-api/.env.dev"
     export BUDGET_API_BASE_URL="http://localhost:${BUDGET_API_PORT}/api/v1"
     export BUDGET_API_ENV_FILE="services/budget-api/.env.dev"
+    export CONTENT_SCHEDULER_API_ENV_FILE="services/content-scheduler-api/.env.dev"
     export RESET_DB_SEED_DEFAULT="true"
     # Observability ports (per-mode isolation)
     export O11Y_PROJECT_NAME="sindustries-dev-o11y"
@@ -57,6 +58,7 @@ case "$MODE" in
     export TASKS_API_ENV_FILE="services/tasks-api/.env.prodlike"
     export BUDGET_API_BASE_URL="http://localhost:${BUDGET_API_PORT}/api/v1"
     export BUDGET_API_ENV_FILE="services/budget-api/.env.prodlike"
+    export CONTENT_SCHEDULER_API_ENV_FILE="services/content-scheduler-api/.env.prodlike"
     export RESET_DB_SEED_DEFAULT="false"
     # Observability ports (per-mode isolation)
     export O11Y_PROJECT_NAME="sindustries-prodlike-o11y"

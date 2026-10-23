@@ -15,7 +15,7 @@ const INITIAL_AVAILABLE_PROVIDERS = SUPPORTED_OAUTH_PROVIDERS.filter(
 );
 
 export default function LoginScreen() {
-  const { session, signIn, startOAuthRedirect } = useAuth();
+  const { session, signIn, verifySignInCode, startOAuthRedirect } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = location.state?.from;
@@ -25,6 +25,8 @@ export default function LoginScreen() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verificationMode, setVerificationMode] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [availableProviders, setAvailableProviders] = useState(INITIAL_AVAILABLE_PROVIDERS);
@@ -55,10 +57,27 @@ export default function LoginScreen() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
-    const { error: signInError } = await signIn(email, password);
+    const { data, error: signInError } = await signIn(email, password);
     setSubmitting(false);
     if (signInError) {
       setError(signInError.message);
+      return;
+    }
+    if (data?.needsVerification) {
+      setVerificationMode(data.verificationMode);
+      return;
+    }
+    navigate(from, { replace: true });
+  }
+
+  async function handleSecondFactorSubmit(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    const { error: verificationError } = await verifySignInCode(verificationCode, verificationMode);
+    setSubmitting(false);
+    if (verificationError) {
+      setError(verificationError.message);
       return;
     }
     navigate(from, { replace: true });
@@ -93,6 +112,36 @@ export default function LoginScreen() {
         ) : null}
       </div>
 
+      {verificationMode ? (
+        <form onSubmit={handleSecondFactorSubmit} className="login-form" data-testid="login-verification-form">
+          <p>
+            {verificationMode === 'client_trust_email_code'
+              ? 'We emailed you a verification code to confirm this browser.'
+              : 'This account uses email verification. Enter the code we emailed you to sign in.'}
+          </p>
+          <label className="form-row">
+            <span>Verification code</span>
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              required
+              value={verificationCode}
+              onChange={(e) => setVerificationCode(e.target.value)}
+              data-testid="login-verification-code"
+            />
+          </label>
+          {error ? (
+            <div className="status show error" role="alert" data-testid="login-error">
+              {error}
+            </div>
+          ) : null}
+          <div className="btn-row">
+            <button type="submit" className="btn-primary" disabled={submitting} data-testid="login-verify-submit">
+              {submitting ? 'Verifying…' : 'Verify and sign in'}
+            </button>
+          </div>
+        </form>
+      ) : (
       <form onSubmit={handleSubmit} className="login-form" data-testid="login-form">
         <label className="form-row">
           <span>Email</span>
@@ -105,6 +154,8 @@ export default function LoginScreen() {
             data-testid="login-email"
           />
         </label>
+
+        <div id="clerk-captcha" data-testid="login-captcha" />
         <label className="form-row">
           <span>Password</span>
           <input
@@ -134,6 +185,7 @@ export default function LoginScreen() {
           </button>
         </div>
       </form>
+      )}
 
       <p className="auth-alt" data-testid="login-create-account">
         New to GymTrack? <Link to="/signup" state={{ from: fromState }}>Create an account</Link>

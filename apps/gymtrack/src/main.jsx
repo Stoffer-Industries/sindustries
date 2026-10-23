@@ -5,6 +5,7 @@ import { ClerkProvider } from '@clerk/react';
 import App from './App.jsx';
 import { AuthProvider } from './lib/auth.jsx';
 import { getActiveProvider, getClerkPublishableKey } from './lib/clerkConfig.js';
+import { installBrowserTelemetry } from './lib/browserTelemetry.js';
 import './styles/index.css';
 
 /**
@@ -15,6 +16,12 @@ import './styles/index.css';
 const activeProvider = getActiveProvider();
 const clerkPublishableKey =
   activeProvider === 'clerk' ? getClerkPublishableKey() : '';
+
+// Install the production browser error telemetry listeners once at module
+// load. The function is a no-op unless VITE_TELEMETRY_ENABLED === '1',
+// so dev / preview / CI builds emit nothing. Idempotent: a re-import
+// from HMR does not register duplicate listeners.
+installBrowserTelemetry();
 
 /**
  * When the provider is Clerk, wrap the entire app in <ClerkProvider> so

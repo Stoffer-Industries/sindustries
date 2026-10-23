@@ -208,34 +208,62 @@ describe('POST /tasks/:id/attention-owners/reconcile', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('allows an explicit Quinn-to-Tom terminal escalation on a doing task', async () => {
+  it('does not let a legacy Quinn escalation comment authorize another actor', async () => {
     const task = taskFixture({
       attentionOwners: [],
-      comments: [{
-        author: 'Quinn',
-        body: '[quinn-escalation] Tom must provision the external credential.'
-      }]
+      comments: [{ author: 'Quinn', body: '[quinn-escalation] old audit evidence' }]
     });
-    prismaMock.task.findFirst
-      .mockResolvedValueOnce(task)
-      .mockResolvedValueOnce(taskFixture({ attentionOwners: [
-        attentionRowFixture({ owner: 'Quinn', position: 0 }),
-        attentionRowFixture({ owner: 'Tom', position: 1 })
-      ] }));
-    prismaMock.taskAttentionOwner.findMany.mockResolvedValueOnce([]);
-    prismaMock.taskAttentionOwner.create
-      .mockResolvedValueOnce(attentionRowFixture({ owner: 'Quinn', position: 0 }))
-      .mockResolvedValueOnce(attentionRowFixture({ owner: 'Tom', position: 1 }));
+    prismaMock.task.findFirst.mockResolvedValueOnce(task);
 
     const response = await request(createApp())
       .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
       .set(auth(ROWAN_TOKEN))
       .send({
-        attentionOwners: ['Quinn', 'Tom'],
+        attentionOwners: ['Tom'],
+        note: 'future acceptance will eventually require Tom'
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body?.error?.code).toBe('TOM_NOT_ACTIONABLE');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('allows authenticated Quinn to make Tom the terminal owner on a doing task', async () => {
+    const task = taskFixture({ attentionOwners: [] });
+    prismaMock.task.findFirst
+      .mockResolvedValueOnce(task)
+      .mockResolvedValueOnce(taskFixture({ attentionOwners: [
+        attentionRowFixture({ owner: 'Tom', position: 0, addedBy: 'Quinn' })
+      ] }));
+    prismaMock.taskAttentionOwner.findMany.mockResolvedValueOnce([]);
+    prismaMock.taskAttentionOwner.create
+      .mockResolvedValueOnce(attentionRowFixture({ owner: 'Tom', position: 0, addedBy: 'Quinn' }));
+
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(QUINN_TOKEN))
+      .send({
+        attentionOwners: ['Tom'],
         note: 'Quinn cannot resolve the external credential blocker; Tom must provision it'
       });
 
     expect(response.status).toBe(200);
+  });
+
+  it('rejects a dormant Quinn tail even when Quinn submits the write', async () => {
+    prismaMock.task.findFirst.mockResolvedValueOnce(taskFixture({ attentionOwners: [] }));
+
+    const response = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/attention-owners/reconcile`)
+      .set(auth(QUINN_TOKEN))
+      .send({
+        attentionOwners: ['Tom', 'Quinn'],
+        note: 'Tom acts now; Quinn is not a passive fallback'
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body?.error?.code).toBe('TOM_NOT_ACTIONABLE');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });
 

@@ -1,15 +1,16 @@
 # GymTrack
 
 **Status:** Live (SPA + legacy REST agent API) / Draft rollout on branch `task-1474d515-gymtrack-mcp-server-oauth-redo` (MCP OAuth server)
-**Last updated:** 2026-08-04
+**Last updated:** 2026-10-17
 **Owner:** Rowan (engineering) · Tom (product)
 **Repos:** `Stoffer-Industries/sindustries`
-**Related tasks:** `18256740`, `f520c396`, `72d7cc3b`, `1474d515`
+**Related tasks:** `18256740`, `f520c396`, `72d7cc3b`, `1474d515`, `bb09eaed`
 **Related tech designs:**
 - [GymTrack MVP](../specs/gymtrack-mvp-tech-design.md)
 - [Agent-powered workouts](../specs/gymtrack-agent-powered-workouts-tech-design.md)
 - [Public signup + social login](../specs/gymtrack-public-signup-social-login-tech-design.md)
 - [MCP server + OAuth auth](../specs/gymtrack-mcp-server-oauth-auth-tech-design.md)
+- [Clerk identity migration](../specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md)
 
 ---
 
@@ -28,7 +29,7 @@ The browser app remains the user-facing product. The MCP service is a separate m
 
 ### Code
 
-- `apps/gymtrack/` — Vite + React SPA, Supabase browser client, public sign-up/sign-in, workout logging/history/planned-workout UI, and the new `AgentConsentPage` + `ConnectedAgentsPage`.
+- `apps/gymtrack/` — Vite + React SPA, Clerk browser identity, Supabase data client, public sign-up/sign-in, workout logging/history/planned-workout UI, and the `AgentConsentPage` + `ConnectedAgentsPage`.
 - `apps/gymtrack/api/agent/*` — legacy REST handlers kept stable for task `f520c396` compatibility.
 - `apps/gymtrack/server/agentAuth.js` — static-key auth lookup for the legacy REST surface.
 - `apps/gymtrack/server/agentData.js` — shared data access/validation used by both the legacy REST handlers and the new MCP service so behaviour cannot drift silently.
@@ -60,10 +61,10 @@ The SPA owns:
 
 ### Browser auth and consent
 
-1. The user signs in to GymTrack via Supabase Auth (email/password or Google).
+1. The user signs in to GymTrack through Clerk. GymTrack identifies the account before selecting a factor: password-enabled accounts use password, imported/Google accounts without a password use a first-factor email code, and Google SSO remains available explicitly. A separate email-code mode handles Clerk's `needs_client_trust` challenge.
 2. An external MCP client starts OAuth against `services/gymtrack-mcp`.
 3. `/oauth/authorize` validates the client + redirect URI + PKCE parameters, then redirects the browser into `apps/gymtrack` at `/agent-consent`.
-4. The app checks the Supabase session via `<AuthGate>`; if needed, it redirects through `/login` and preserves the full destination.
+4. The app checks the Clerk session via `<AuthGate>`; if needed, it redirects through `/login` and preserves the full destination.
 5. `AgentConsentPage` loads the client metadata from `public.gymtrack_oauth_clients`, then POSTs the user's approve/deny decision back to the MCP service with the current Supabase access token.
 6. The MCP service verifies that Supabase token server-side, creates or updates `gymtrack_oauth_consents`, stores a hashed authorization code, and returns the client redirect URL.
 
@@ -142,6 +143,8 @@ The existing `/api/agent/planned-workouts`, `/api/agent/history`, and `/api/agen
 SPA (`apps/gymtrack`):
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `VITE_AUTH_PROVIDER=clerk`
+- `VITE_CLERK_PUBLISHABLE_KEY`
 - `VITE_GYMTRACK_MCP_BASE_URL` when the MCP service is on a different origin
 
 MCP service (`services/gymtrack-mcp`):
@@ -153,7 +156,9 @@ MCP service (`services/gymtrack-mcp`):
 
 ### Common failure modes
 
-- **Supabase Google provider not configured** — Google buttons exist in the UI, but the backend provider wiring still lives outside this repo. The button-level `providerDisabled` heuristic degrades gracefully if the provider is missing.
+- **`strategy_for_user_invalid` during sign-in** — the browser selected a factor that is not in Clerk's `supportedFirstFactors` for that account. Treat the factor list as the source of truth. In particular, Google-imported accounts can have `email_code` and `oauth_google` but no password; GymTrack must send the first-factor email code instead of submitting a password.
+- **Client-trust code prepared as a first factor, or vice versa** — Clerk exposes both flows as email codes, but they use different methods. Preserve GymTrack's `verificationMode`: first-factor codes use `signIn.emailCode.verifyCode()`, while `needs_client_trust` codes use `signIn.mfa.verifyEmailCode()`.
+- **Legacy `*.vercel.app` login errors on Safari** — production auth must begin at `https://gymtrack.sindustries.co.nz`. The legacy hostname redirects there before Clerk loads so Clerk uses its direct first-party Frontend API rather than deriving an unavailable `/__clerk` proxy.
 - **MCP client redirect URI mismatch** — `/oauth/authorize` returns `invalid_client` / `redirect_uri is not registered`. Fix the row in `gymtrack_oauth_clients` (or add the right client metadata before rollout).
 - **Consent appears revoked but a client still holds a token** — expected: the client may still possess the old plaintext token, but MCP requests fail because the service checks `consent.revoked_at` at request time.
 - **Refresh-token replay** — the family is revoked. The user must reconnect the client through the browser flow.
@@ -165,6 +170,7 @@ MCP service (`services/gymtrack-mcp`):
 2. Start an OAuth flow from a registered client and confirm `/agent-consent` loads with the expected scopes.
 3. Approve, exchange the code, call `tools/list`, then revoke from `/settings/agents` and verify the same token stops working.
 4. Re-run the three legacy REST curl examples from `apps/gymtrack/README.md` with an existing static key.
+5. In a fresh Safari/WebKit context, verify both a password-enabled account and an account without a password reach the correct code/session state without `strategy_for_user_invalid`.
 
 ---
 
@@ -178,10 +184,11 @@ This is a deliberate one-consumer build, consistent with `docs/ARCHITECTURE.md`'
 
 ## Related specs, tasks, and PRs
 
-- Tasks: `18256740`, `f520c396`, `72d7cc3b`, `1474d515`
+- Tasks: `18256740`, `f520c396`, `72d7cc3b`, `1474d515`, `bb09eaed`
 - Tech designs:
   - `docs/specs/gymtrack-mvp-tech-design.md`
   - `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`
   - `docs/specs/gymtrack-public-signup-social-login-tech-design.md`
   - `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`
+  - `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md`
 - Agent connection rollout runbook: `~/.openclaw/workspace/docs/infra/runbooks/gymtrack-agent-connect.md` (was at `docs/runbooks/gymtrack-agent-connect.md`; retired in PR #583 — re-create in workspace when onboarding a new MCP connector provider)

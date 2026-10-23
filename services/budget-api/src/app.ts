@@ -87,6 +87,16 @@ export function createApp() {
         error: { code: 'PAYLOAD_TOO_LARGE', message: 'JSON request body is too large' }
       });
     }
+    if (error?.type === 'entity.parse.failed') {
+      // Malformed JSON is a client fault, not an internal server error.
+      // Return a sanitized 400 (no payload echo, no parser internals) so
+      // clients stop treating unrecoverable requests as transient 5xx
+      // failures and retrying them. Genuine dependency/server faults
+      // continue to fall through to the 500 branch below.
+      return res.status(400).json({
+        error: { code: 'MALFORMED_JSON', message: 'Request body is not valid JSON' }
+      });
+    }
     console.error(error);
     res.status(500).json({
       error: { code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' }

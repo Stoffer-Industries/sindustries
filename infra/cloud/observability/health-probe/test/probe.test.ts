@@ -6,8 +6,11 @@ import {
   parseHttpTargets,
   parseRedisTargets,
   probeDb,
+  probeDbTargets,
   probeFlyApp,
+  probeFlyTargets,
   probeRedis,
+  probeRedisTargets,
   runProbe,
 } from '../src/probe.js';
 
@@ -221,5 +224,35 @@ describe('runProbe', () => {
     expect(result.db[0]?.up).toBe(0);
     expect(result.fly[0]).toEqual({ app: 'tasks-api', up: 1 });
     expect(result.redis[0]?.up).toBe(0);
+  });
+});
+
+describe('probeDbTargets / probeFlyTargets / probeRedisTargets', () => {
+  it('probe only their own target kind, independently of the others', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('ok', { status: 200 })),
+    );
+    const db = await probeDbTargets(
+      [{ app: 'broken', connectionString: 'postgres://no:***@127.0.0.1:1/no' }],
+      100,
+    );
+    const fly = await probeFlyTargets(
+      [{ app: 'tasks-api', url: 'https://example.test/health' }],
+      100,
+    );
+    const redis = await probeRedisTargets(
+      [{ app: 'broken-redis', url: 'rediss://127.0.0.1:1' }],
+      100,
+    );
+    expect(db[0]?.up).toBe(0);
+    expect(fly[0]).toEqual({ app: 'tasks-api', up: 1 });
+    expect(redis[0]?.up).toBe(0);
+  });
+
+  it('return empty arrays for empty target lists', async () => {
+    expect(await probeDbTargets([], 100)).toEqual([]);
+    expect(await probeFlyTargets([], 100)).toEqual([]);
+    expect(await probeRedisTargets([], 100)).toEqual([]);
   });
 });

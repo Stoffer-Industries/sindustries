@@ -25,6 +25,8 @@ For code-garden PRs, the single question is: **does this change observable behav
 
 Do not approve with failing CI. Leave one clear review comment per PR.
 
+**Never paste a secret value into any PR artifact** — body, review, inline comment. This repo is public, so a pasted value is published permanently. Cite the path and mode instead; see the secret-hygiene guardrail in `agents/skills/dev/pr-review/SKILL.md`.
+
 ---
 
 ## If you are the assignee

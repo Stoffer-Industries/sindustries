@@ -100,8 +100,8 @@ needs its normal next verifier; route those workflow transitions to their
 defined owner (for example Ash for `qa_agent`). Any Quinn or Tom escalation
 must use a reason-bearing Tasks API write with an authenticated actor and a
 specific current blocker, next action, and reason the named owner is needed.
-`[quinn-escalation]` is audit text only and does not satisfy that row metadata
-contract. Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for every
+Legacy `[quinn-escalation]` comments are audit text only and authorize nothing.
+Invoke `agents/skills/ops/attention-owner-routing/SKILL.md` for every
 add, replacement, escalation, repair, and self-resolve. Never fall back to the
 legacy full-stack PATCH or direct curl if the reason-bearing endpoint is
 unavailable; stop and report the blocker.
@@ -120,9 +120,10 @@ When Quinn is top owner:
    behind as a dormant reviewer.
 6. If Quinn cannot resolve the blocker because of a genuine external blocker
    (missing access, owner-only approval, unavailable credential, or unresolved
-   product decision), keep Quinn at position 0, post concrete evidence with a
-   `[quinn-escalation]` marker, and page Tom directly and immediately. Do not
-   silently remove Quinn or wait for another heartbeat.
+   product decision), use the authenticated reason-bearing API to replace the
+   stack with `attentionOwners=["Tom"]`, post concrete evidence, and page Tom
+   directly and immediately. Do not leave Quinn as a dormant tail, silently
+   remove the blocker, or wait for another heartbeat.
 7. Do not escalate when the only possible action is duplicate state help, such
    as repeating PR assistance or restating evidence already recorded elsewhere.
    Leave the existing stack unchanged and avoid a second page.
@@ -253,9 +254,16 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
 - For any other stall: if the original condition is no longer detectable in live state, mark `false_positive` rather than escalating.
 - Only escalate if the condition is confirmed present in live state this pass.
 
-1. From `read_all_incidents()`, call `reportable_incidents()` to discard resolved, false-positive, archived, task-scoped, and stale records. Call the remainder **active findings**. Count entries where `needsTom` is true OR `severity` is `high`/`critical` as **actionable incidents**; count the rest as **monitored findings**. Do not describe the monitored count as incidents waiting on Tom.
+1. Run the queue CLI — it is the single source for the counts and the top candidate:
+
+   ```bash
+   cd codebases/sindustries && python3 -m agents.lib.incident_queue            # text lines
+   cd codebases/sindustries && python3 -m agents.lib.incident_queue --json     # structured
+   ```
+
+   It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
-3. **Always report the queue when active findings exist:**
+3. **Always report the queue when active findings exist** (the CLI renders these lines verbatim):
    - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
    - If actionable count is 0, output no escalation line and do not reply `HEARTBEAT_OK`; the queue summary is the useful heartbeat output.
    - If actionable count > 0, also output: `<actionable count> incident(s) waiting on you.`
