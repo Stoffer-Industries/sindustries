@@ -204,6 +204,7 @@ endpoint_specs() {
 grafana_instance|grafana-instance|env:GRAFANA_CLOUD_INSTANCE_URL|https://<stack>.grafana.net — stack base URL only, no trailing path
 otlp_endpoint|otlp-endpoint|env:GRAFANA_CLOUD_OTLP_ENDPOINT|https://<host> (Grafana Cloud serves OTLP under /otlp/v1/*) or https://<host>/v1/
 loki_push|loki-push-endpoint|env:GRAFANA_CLOUD_LOKI_ENDPOINT;derive-loki-push|OPTIONAL — https://<logs-host>/loki/api/v1/push — set on multi-host tenants, where Loki push is a different host from OTLP
+gymtrack_relay|gymtrack-telemetry-relay|env:GYMTRACK_RELAY_BASE_URL|OPTIONAL — https://<gymtrack-host> — SPA base URL, no trailing path; validate probes <base>/api/telemetry
 fly_api|fly-api|literal:https://api.fly.io/|https://api.fly.io/ — no path, no credentials in the URL
 ENDPOINTS
 }
@@ -305,6 +306,11 @@ endpoint_probe_url() {
         otlp_endpoint)
           otlp_probe_url "${base}" || return 2
           ;;
+        gymtrack_relay)
+          # The base URL is the SPA origin; the relay function lives at a
+          # fixed sub-path of it.
+          printf '%s/api/telemetry' "${base%/}"
+          ;;
         *)
           # loki_push and anything else: probe the configured value verbatim,
           # which is what the relay actually posts to.
@@ -350,9 +356,73 @@ classify_probe_status() {
 # broken: a real Grafana Cloud tenant answers an unauthenticated probe with
 # one of them. Failing there would make validate red on every healthy
 # instance, which is the mirror image of the bug this fixes.
+# Header-aware probe, used only by endpoints whose reachability cannot be
+# decided from a status code (currently the GymTrack telemetry relay).
+# Emits "<header block>\n<status>" so the caller gets both in one round trip.
+# Same --fail/no --fail stance as probe_status: the body is discarded so a
+# misconfigured endpoint cannot spill content into operator scrollback.
+probe_status_and_headers() {
+  local url="$1" raw
+  raw="$(curl --silent --dump-header - --output /dev/null \
+    --write-out '\n%{http_code}' \
+    --max-time "${PROBE_TIMEOUT:-10}" \
+    --connect-timeout 5 \
+    "${url}" 2>/dev/null)" || raw=''
+  [ -n "${raw}" ] || raw=$'\n000'
+  printf '%s' "${raw%$'\n'*}"
+  printf '\n'
+  printf '%s' "${raw##*$'\n'}"
+}
+
+# AC2 of task 8bb78c2d. Decides whether /api/telemetry is actually a Vercel
+# function on the deployed site, or whether the SPA catch-all swallowed it.
+#
+# The discriminator is content-disposition, NOT the status code, and that is
+# not a stylistic choice. Two counter-examples, both reproduced live against
+# production dpl_3TeE9RPEnSa53GX2YZMgiYdJbWJW, pin the rule down:
+#
+#   * POST /api/definitely-not-a-route-xyz — a route that exists nowhere —
+#     answers 405, exactly like a real POST-only function. Status alone
+#     cannot tell routed from unrouted.
+#   * x-vercel-cache is MISS for a routed GET and for an unrouted GET
+#     alike, so that header discriminates nothing either.
+#
+# What does discriminate: the SPA catch-all serves the built index.html and
+# stamps content-disposition: inline; filename="index.html" on it. A real
+# function answers with an application/json content-type and an Allow header
+# (GET on the POST-only relay returns 405 + Allow: POST + a JSON body).
+probe_route_class() {
+  local status="$1" headers="$2" lower
+  lower="$(printf '%s' "${headers}" | tr '[:upper:]' '[:lower:]')"
+  case "${lower}" in
+    *'content-disposition:'*'filename="index.html"'*)
+      printf 'spa-catch-all'
+      return 0
+      ;;
+  esac
+  if [ "${status}" = '000' ]; then
+    classify_probe_status "${status}"
+    return 0
+  fi
+  case "${lower}" in
+    *'content-type:'*json*'allow:'*)
+      printf 'routed'
+      return 0
+      ;;
+  esac
+  # A 405 without the JSON/Allow signature is the unrouted-counter-example
+  # shape: a real function would carry both. Report it under its own class
+  # rather than the shared method-not-allowed, which passes elsewhere.
+  if [ "${status}" = '405' ]; then
+    printf 'not-a-function'
+    return 0
+  fi
+  classify_probe_status "${status}"
+}
+
 probe_blocks() {
   case "$1" in
-    unreachable|path-absent|gateway-origin-failure|origin-error) return 0 ;;
+    unreachable|path-absent|gateway-origin-failure|origin-error|spa-catch-all|not-a-function) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -370,6 +440,12 @@ probe_hint() {
       ;;
     origin-error)
       printf '%s reached a host that returned a server error' "${var}"
+      ;;
+    spa-catch-all)
+      printf '%s served the SPA index.html for /api/telemetry — the relay function is not deployed there, or the SPA catch-all rewrite shadows it; deploy apps/gymtrack/api/telemetry.js first' "${var}"
+      ;;
+    not-a-function)
+      printf '%s answered 405 without a JSON content-type and an allow: header, so /api/telemetry is not the relay function' "${var}"
       ;;
     path-absent)
       case "${id}" in
@@ -425,7 +501,7 @@ step_probe_endpoints() {
     rc=0
     url="$(endpoint_probe_url "${id}" "${url_source}")" || rc=$?
     if [ "${rc}" -eq 1 ]; then
-      printf '      [SKIP] %-24s (not configured)\n' "${id}"
+      printf '      [SKIP] %-22s %-22s (not configured)\n' "${id}" ''
       continue
     fi
     if [ "${rc}" -eq 2 ]; then
@@ -437,7 +513,7 @@ step_probe_endpoints() {
       if [ "${fix_var}" = "${url_source}" ]; then
         fix_var='the endpoint definition'
       fi
-      printf '      [FAIL] %-24s !not-derivable\n' "${id}"
+      printf '      [FAIL] %-22s %-22s %s\n' "${id}" '!not-derivable' ''
       printf '             → fix %s — %s\n' \
         "${fix_var}" "$(probe_hint path-absent "${id}" "${url_source}")"
       if [ "${id}" = 'loki_push' ] && [ -z "${GRAFANA_CLOUD_LOKI_ENDPOINT:-}" ]; then
@@ -448,14 +524,24 @@ step_probe_endpoints() {
       continue
     fi
     url="$(sanitize_url "${url}")"
-    status="$(probe_status "${url}")"
-    class="$(classify_probe_status "${status}")"
+    if [ "${id}" = 'gymtrack_relay' ]; then
+      # Header-aware: whether this is the relay function is not decidable
+      # from the status code alone (see probe_route_class).
+      local raw headers
+      raw="$(probe_status_and_headers "${url}")"
+      headers="${raw%$'\n'*}"
+      status="${raw##*$'\n'}"
+      class="$(probe_route_class "${status}" "${headers}")"
+    else
+      status="$(probe_status "${url}")"
+      class="$(classify_probe_status "${status}")"
+    fi
     if probe_blocks "${class}"; then
-      printf '      [FAIL] %-24s %-6s %s\n' "${class}" "${status}" "${url}"
+      printf '      [FAIL] %-22s %-22s %-6s %s\n' "${id}" "${class}" "${status}" "${url}"
       printf '             → %s\n' "$(probe_hint "${class}" "${id}" "${url_source}")"
       PROBE_FAILURES=$((PROBE_FAILURES + 1))
     else
-      printf '      [OK]   %-24s %-6s %s\n' "${class}" "${status}" "${url}"
+      printf '      [OK]   %-22s %-22s %-6s %s\n' "${id}" "${class}" "${status}" "${url}"
     fi
   done < <(endpoint_specs)
 }
@@ -468,21 +554,35 @@ grafana_auth_header() {
   printf 'Authorization: %s' "${GRAFANA_CLOUD_PROVISIONING_AUTH}"
 }
 
-resolve_prometheus_datasource_uid() {
-  local response uid
+resolve_datasource_uid() {
+  local type="$1" response uid
   response="$(curl --fail --silent --show-error \
     -H "$(grafana_auth_header)" \
     "$(grafana_api_url '/api/datasources')")"
-  uid="$(jq -r '
-    map(select(.type == "prometheus"))
+  uid="$(jq -r --arg type "${type}" '
+    map(select(.type == $type))
     | (map(select(.isDefault == true))[0] // .[0] // {})
     | .uid // empty
   ' <<<"${response}")"
+  printf '%s' "${uid}"
+}
+
+resolve_prometheus_datasource_uid() {
+  local uid
+  uid="$(resolve_datasource_uid prometheus)"
   if [ -z "${uid}" ]; then
     echo "::error::hosted Grafana has no Prometheus datasource" >&2
     return 1
   fi
   printf '%s' "${uid}"
+}
+
+# Loki is optional: canonical observability dashboards are Prometheus-backed,
+# but product dashboards (GymTrack browser error telemetry) are Loki-backed. A
+# missing Loki datasource must not fail provisioning for Prometheus-only setups,
+# so callers pass the empty string through and fall back to the placeholder uid.
+resolve_loki_datasource_uid() {
+  resolve_datasource_uid loki
 }
 
 grafana_folder_uid() {
@@ -662,8 +762,20 @@ step_secrets() {
 
 step_dashboards() {
   echo "==> Dashboards: upload to hosted Grafana"
+  # Dashboard JSON may live in two trees: the canonical observability
+  # dashboards (infra/cloud/observability/grafana/dashboards) and
+  # product-local dashboards co-located with the app that owns them
+  # (apps/gymtrack/grafana/dashboards for GymTrack's browser error
+  # telemetry dashboard — task e89db27f). Upload both trees so a
+  # product that ships an app-owned dashboard does not need a
+  # separate provisioning step.
+  local extra_dashboard_dirs=()
+  if [ -d "${REPO_ROOT}/apps/gymtrack/grafana/dashboards" ]; then
+    extra_dashboard_dirs+=("${REPO_ROOT}/apps/gymtrack/grafana/dashboards")
+  fi
   if [ "${DRY_RUN}" = true ]; then
-    for dashboard_file in "${DASHBOARD_DIR}"/*.json; do
+    for dashboard_file in "${DASHBOARD_DIR}"/*.json "${extra_dashboard_dirs[@]}"/*.json; do
+      [ -e "${dashboard_file}" ] || continue
       filename="$(basename "${dashboard_file}" .json)"
       echo "    [dry-run] POST \${GRAFANA_CLOUD_INSTANCE_URL}/api/dashboards/db  body=${dashboard_file}  (uid=${filename})"
     done
@@ -672,19 +784,34 @@ step_dashboards() {
   source_env_local
   require_env_var GRAFANA_CLOUD_PROVISIONING_AUTH
   require_env_var GRAFANA_CLOUD_INSTANCE_URL
-  local prometheus_uid wrapped_payload
+  local prometheus_uid loki_uid wrapped_payload
   prometheus_uid="$(resolve_prometheus_datasource_uid)"
-  for dashboard_file in "${DASHBOARD_DIR}"/*.json; do
+  loki_uid="$(resolve_loki_datasource_uid)"
+  if [ -z "${loki_uid}" ]; then
+    loki_uid="loki"
+    echo "::warning::hosted Grafana has no Loki datasource; Loki-backed dashboards keep the placeholder uid" >&2
+  fi
+  for dashboard_file in "${DASHBOARD_DIR}"/*.json "${extra_dashboard_dirs[@]}"/*.json; do
+    [ -e "${dashboard_file}" ] || continue
     filename="$(basename "${dashboard_file}" .json)"
     echo "    - ${filename}"
-    wrapped_payload="$(jq -c --arg prometheus_uid "${prometheus_uid}" '
+    # Rewrite only the placeholder uids that dashboards ship in the repo
+    # ("prometheus" / "loki") to the real per-type datasource UIDs. Rewriting
+    # every datasource to the Prometheus UID silently breaks Loki-backed
+    # dashboards (GymTrack browser error telemetry), because LogQL panels
+    # would be pointed at a Prometheus datasource.
+    wrapped_payload="$(jq -c \
+      --arg prometheus_uid "${prometheus_uid}" \
+      --arg loki_uid "${loki_uid}" '
+      def is_loki: (.type? == "loki") or (.uid? == "loki");
+      def is_prometheus: (.type? == "prometheus") or (.uid? == "prometheus");
       walk(
         if type == "object" and has("datasource") then
           .datasource |= (
-            if type == "object" and (.uid == "prometheus" or .uid == "${DS_PROMETHEUS}") then
-              .uid = $prometheus_uid
-            elif . == "prometheus" or . == "${DS_PROMETHEUS}" then
-              $prometheus_uid
+            if type == "object" and (is_loki or is_prometheus) then
+              .uid = (if is_loki then $loki_uid else $prometheus_uid end)
+            elif type == "string" and (. == "loki" or . == "prometheus") then
+              (if . == "loki" then $loki_uid else $prometheus_uid end)
             else . end
           )
         else . end

@@ -36,7 +36,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Database signal source           | Health probe service on Fly (single-purpose Node app, `sindustries_db_up` + `sindustries_db_query_duration_seconds` + `sindustries_fly_app_health` + `sindustries_redis_up`)    | Rowan  | `infra/cloud/observability/health-probe/`         |
 | Alert evaluation                 | Grafana Cloud alerting (not Alertmanager), UI/API state   | Quinn  | `infra/cloud/observability/grafana/alerts/` (10 rules, 5 page + 5 warn) |
 | Hosted datasource identity       | Discovered from Grafana Cloud `/api/datasources` at bootstrap time | Quinn | Hosted Grafana API; the repo does not duplicate SaaS datasource URLs or UIDs |
-| Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/`  | Rowan  | Provisioned via Grafana provisioning API on bootstrap        |
+| Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/` (hosted canonical tree) plus any product-owned `apps/<app>/grafana/dashboards/` | Rowan  | Provisioned via Grafana provisioning API on bootstrap; `step_dashboards` uploads both trees |
 | Dashboard definitions (local)    | `infra/grafana/provisioning/dashboards/json/` (existing) | Rowan  | Parity copy for hosted: `tasks-api-red.json`, `openclaw-diagnostics.json` |
 | Dashboard definitions (cloud, new) | `cloud-overview.json`, `db-health.json`, `migration-alerts.json` | Rowan | `infra/cloud/observability/grafana/dashboards/`   |
 | Bootstrap                        | Idempotent local script with subcommand dispatch (validate \| app \| secrets \| dashboards \| alerts \| deploy \| smoke \| evidence \| all)        | Quinn  | `infra/cloud/observability/bootstrap-observability.sh` |
@@ -125,8 +125,15 @@ For the full per-alert response expectation see the "Alert ownership" table belo
 | `migration-alerts`              | NEW (hosted) — alert routing overview    | Rowan (engineering) | Quinn |
 | `tasks-api-red`                 | Existing local — ported to hosted for parity | Rowan (engineering) | Quinn |
 | `openclaw-diagnostics`          | Existing local — ported to hosted for parity | Rowan (engineering) | Quinn |
+| `gymtrack-browser-errors`       | NEW (hosted) — GymTrack browser error events (task e89db27f) | Rowan (engineering) | Quinn |
 
-All dashboard definitions live as JSON in the repo (either `infra/grafana/provisioning/dashboards/json/` for local or `infra/cloud/observability/grafana/dashboards/` for hosted). Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
+All dashboard definitions live as JSON in the repo, in one of three trees:
+
+- `infra/grafana/provisioning/dashboards/json/` — local Grafana.
+- `infra/cloud/observability/grafana/dashboards/` — hosted canonical tree; observability-owned dashboards (metrics, migrations).
+- `apps/<app>/grafana/dashboards/` — product-owned, co-located with the app that owns the signal. `gymtrack-browser-errors.json` lives here (task e89db27f). A dashboard ships with its product rather than in the observability tree so the owning app is the only place that has to change when the signal changes.
+
+`bootstrap-observability.sh` `step_dashboards` uploads the hosted canonical tree **and** any product-owned tree it discovers, so a product that ships an app-owned dashboard needs no separate provisioning step. It currently discovers `apps/gymtrack/grafana/dashboards` explicitly; a second product-owned tree needs a line added there. Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
 
 The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default Prometheus datasource and rewrites repository-local `prometheus` / `${DS_PROMETHEUS}` references while constructing each API payload. The repository deliberately does not carry a Grafana Cloud `datasources.yaml`: file provisioning is not the control plane for the managed instance.
 
@@ -150,8 +157,8 @@ Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P
 
 - `GRAFANA_CLOUD_INSTANCE_URL` is the Grafana stack base URL used for dashboard, folder, datasource, and alert-rule APIs. It is not a Prometheus query endpoint.
 - `GRAFANA_CLOUD_PROVISIONING_AUTH` is a quoted `Bearer <service-account-token>` value. The service account needs datasource read plus dashboard, folder, and alert-rule write permissions.
-- `GRAFANA_CLOUD_OTLP_HEADERS` is a quoted `Authorization=Basic <base64(instance_id:access_policy_token)>` exporter header. It is a separate credential from provisioning auth.
-- `GRAFANA_CLOUD_LOKI_ENDPOINT` is optional and required on multi-host tenants: Grafana Cloud serves OTLP from an `otlp-prod-*` gateway and the Loki HTTP push API from a separate `logs-prod-*` host, so a single OTLP base cannot describe both. When set it is used verbatim as the push endpoint.
+- `GRAFANA_CLOUD_OTLP_HEADERS` is a quoted `Authorization=Basic <base64(instance_id:access_policy_token)>` exporter header. It is a separate credential from provisioning auth. Because it is an exporter header string rather than a bare header value, consumers that speak plain HTTP must parse it (see `apps/gymtrack/api/telemetry.js` `parseOtlpHeaderString()`); passing it through verbatim produces a malformed `Authorization: Authorization=Basic …` header that Grafana Cloud rejects with 401.
+- `GRAFANA_CLOUD_LOKI_ENDPOINT` is **optional** — set it only to force the Loki HTTP push transport. Grafana Cloud serves OTLP from an `otlp-prod-*` gateway and the Loki HTTP push API from a separate `logs-prod-*` host, so a single OTLP base cannot describe both, but that is a statement about which transport derives cleanly, not about what you must configure. When set it is used verbatim as the push endpoint and wins over every other transport; when unset, `resolveForwardEndpoint()` derives an OTLP/logs endpoint from `GRAFANA_CLOUD_OTLP_ENDPOINT` and `GRAFANA_CLOUD_OTLP_ENDPOINT` + `GRAFANA_CLOUD_OTLP_HEADERS` are sufficient on their own.
 
 ### Endpoint pre-flight — `validate` resolves, not just collects
 
@@ -167,8 +174,16 @@ The probed set and the shapes below come from one table in the script (`endpoint
 | `grafana_instance` | `GRAFANA_CLOUD_INSTANCE_URL` | `grafana-instance` | https://<stack>.grafana.net — stack base URL only, no trailing path |
 | `otlp_endpoint` | `GRAFANA_CLOUD_OTLP_ENDPOINT` | `otlp-endpoint` | https://<host> (Grafana Cloud serves OTLP under /otlp/v1/*) or https://<host>/v1/ |
 | `loki_push` | `GRAFANA_CLOUD_LOKI_ENDPOINT` | `loki-push-endpoint` | OPTIONAL — https://<logs-host>/loki/api/v1/push — set on multi-host tenants, where Loki push is a different host from OTLP |
+| `gymtrack_relay` | `GYMTRACK_RELAY_BASE_URL` | `gymtrack-telemetry-relay` | OPTIONAL — https://<gymtrack-host> — SPA base URL, no trailing path; validate probes <base>/api/telemetry |
 | `fly_api` | `(fixed — no env var)` | `fly-api` | https://api.fly.io/ — no path, no credentials in the URL |
 <!-- END generated: bootstrap-observability endpoint table -->
+
+**The GymTrack relay probe is the one row whose verdict is not decided by the status code.** Every other row in the table classifies an HTTP status, because for those endpoints the status is the signal. `/api/telemetry` is different: the deployed GymTrack site runs an SPA catch-all rewrite, so a request for a path that has no function behind it comes back as a successful `200` serving `index.html` — a "reachable" answer that means the opposite of what it looks like. Two counter-examples, both reproduced against production, pin down why the obvious rule is wrong:
+
+- A route that exists nowhere answers `405` on a `POST` — the same status a real POST-only function returns. Status alone cannot distinguish routed from unrouted.
+- `x-vercel-cache` is `MISS` for a routed `GET` and for an unrouted `GET` alike, so that header discriminates nothing either.
+
+The discriminator is the response shape. A real function answers with a JSON `content-type` **and** an `allow:` header (a `GET` on the POST-only relay returns `405` + `Allow: POST` + a JSON body), while the catch-all stamps `content-disposition: inline; filename="index.html"` on the built index. So `gymtrack_relay` reports `routed` (passes), `spa-catch-all` (fails — the function is not deployed, or the rewrite shadows it), or `not-a-function` (fails — a `405` with neither JSON nor `allow:`, the unrouted-counter-example shape). The probe is unauthenticated and read-only; it sends no token and receives no body.
 
 **Reading the output.** Probes are unauthenticated by design, which is what makes a 401 informative rather than masked — a correctly configured Grafana Cloud instance answers an anonymous probe with `401`, a redirect to the login wall, or `405` on the POST-only Loki push path. All three are reported as `[OK]`. Only a genuinely unusable endpoint fails pre-flight:
 
@@ -231,6 +246,77 @@ A future operator should be able to:
 If any of those seven steps fails, the gap is filed as a follow-on feature task under the `4b3d6e9c` parent or as a new `infra` task depending on scope.
 
 ---
+
+## Browser-side error telemetry
+
+Task: `e89db27f` (Add GymTrack browser error telemetry to Grafana). The hosted stack above covers the **server** side — Fly app health, DB health, request latency, queue depth, deploy annotations — but the **browser** runs on users' devices and emits no signals to the hosted backend at all. A failing client either retries silently or surfaces as a user report. This subsection describes the browser-side surface that closes that gap for GymTrack.
+
+**Flow (production builds only, gated on `VITE_TELEMETRY_ENABLED === '1'`):**
+
+1. `apps/gymtrack/src/main.jsx` calls `installBrowserTelemetry()` once at module load (idempotent).
+2. `apps/gymtrack/src/lib/browserTelemetry.js` registers `window.addEventListener('error', …)` and `window.addEventListener('unhandledrejection', …)`, and exposes `reportAuthError(error, context)` for the Clerk / Supabase auth paths.
+3. Every event is built from a fixed allow-list (`environment`, `release`, `route`, `operation`, `provider`, `errorCode`, `status`, `message`, `stack`, `userAgent`, `timestamp`, `source`). Email addresses, `Bearer …` tokens, and `password=…` patterns are stripped from `message` and `stack` before they leave the bundle.
+4. A 60-second dedupe on `errorCode + operation + route` collapses repeats; a hard cap of 5 events per minute prevents retry storms. Both reset on `visibilitychange === 'visible'`.
+5. The browser POSTs the sanitized event to `apps/gymtrack/api/telemetry.js` (Vercel serverless function) with `Authorization: Bearer <VITE_TELEMETRY_TOKEN>`. The token is a per-deploy relay identifier, rotated by Quinn together with the server-side `TELEMETRY_RELAY_TOKEN` env var.
+6. The serverless function validates the token with `crypto.timingSafeEqual`, enforces a 32 KB raw body cap and an 8 KB structured-payload cap, re-redacts the payload (defence in depth), rate-limits at 60 events/min/token, and forwards to the hosted Grafana Cloud Loki HTTP push endpoint with the server-held `GRAFANA_CLOUD_OTLP_HEADERS`. The push URL is resolved by `lokiEndpoint()`: an explicit `GRAFANA_CLOUD_LOKI_ENDPOINT` wins if set, otherwise the OTLP endpoint is rewritten — `…/v1` and `…/v1/{traces,metrics,logs}` (both bare and slash-terminated) all become `…/loki/api/v1/push`, and a value that is already a Loki push URL is passed through untouched. On Grafana Cloud tenants OTLP and the Loki push API are served from different hosts (`otlp-prod-*` vs. `logs-prod-*`) — that is why `lokiPushUrl()` cannot derive a push URL from a bare `otlp-gateway-prod-<region>.grafana.net` host, **not** why the variable is required. The OTLP/logs branch covers that host shape, so `GRAFANA_CLOUD_LOKI_ENDPOINT` is optional and the OTLP pair alone is sufficient. The transport is chosen by `resolveForwardEndpoint()`, in this order: an explicit `GRAFANA_CLOUD_LOKI_ENDPOINT` wins first, then an explicit `GRAFANA_CLOUD_OTLP_LOGS_ENDPOINT`, then an **OTLP/logs** endpoint derivable from the OTLP base, then the **Loki push** rewrite `lokiPushUrl()`. The OTLP/logs branch exists because the two transports are genuinely different: `lokiPushUrl()` refuses to derive from any shape that does not end in `/v1[-suffix]` (e.g. a bare `https://otlp-gateway-prod-<region>.grafana.net`, the real production shape) and returns `null`, because OTLP and the Loki push API are served from different hosts on Grafana Cloud. For those shapes `otlpLogsUrl()` derives the OTLP/logs endpoint instead, under `/otlp/v1/*`:
+
+| probe against `otlp-gateway-prod-au-southeast-1.grafana.net` | result |
+|---|---|
+| `POST /v1/logs` | `404` — path absent on this gateway |
+| `POST /otlp/v1/logs` | `401` — path exists, auth required |
+| `POST /v1/traces` | `404` |
+| `POST /otlp/v1/traces` | `401` (control) |
+
+So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix all resolve to `<base>/otlp/v1/logs`. **A bare host must NOT be rewritten to `<host>/v1/logs`** — that path is a 404 on this tenant, which is the same "config value present, URL does not resolve" failure mode that has made this path read as "the telemetry relay is broken". The canonical single-host collector shapes (`…/v1`, `…/v1/traces`, `…/v1/logs`) are deliberately left to the Loki rewriter, so single-host deployments keep forwarding exactly as before. When no transport can resolve, the handler returns **502 `misconfigured_endpoint`** (renamed from the Loki-specific `misconfigured_loki_endpoint` once two transports existed) and the message names **both** env vars it tried, so the operator can pick the right one instead of guessing. An unconfigured relay still answers `204`, and a half-armed "endpoint resolved, credential unset" state still answers `204`, so staged rollouts are unaffected.
+
+**Transport-independent label contract.** Whichever transport carries the event, the stream labels are the same: `app`, `source`, `environment`, `release`, `route`, `operation`, `provider`, `errorCode`, `status`. On the Loki push path they are the `streams[].stream` keys. On the OTLP/logs path they are **`resourceLogs[].resource.attributes`** — resource attributes, never log-record attributes. That placement is load-bearing, not cosmetic: Loki's OTLP ingestion promotes resource attributes into indexed stream labels, while log-record attributes become structured metadata, which a LogQL **stream selector cannot match**. Putting `app`/`source` on the log record instead of the resource would forward cleanly, land the events, and then make `{app="gymtrack", source="browser"}` return nothing. The dashboard's `sum by (errorCode)`, `sum by (operation)` and `count by () (… by (route))` panels need the same treatment, which is why the full label set is emitted rather than just the two keys the operator query names. `apps/gymtrack/api/telemetry.test.js` pins this in both directions: `app` and `source` must be present as resource attributes, and the log record must carry no attributes of its own.
+
+**Stated assumption (to be confirmed by AC4's live query).** The tests assert that *we emit* `app` and `source` as resource attributes; they cannot assert that the Grafana Cloud tenant's default index promotes those specific attributes to indexed labels on ingestion. If it does not, the events will land and the operator query will still return zero rows — which would look like "telemetry is broken" rather than "the labels were not promoted". **Verification path: run the query after provisioning and check for rows, not for a 200.** If rows are absent but the events are visible in the tenant's raw log view, the cause is label promotion on the tenant side, not the relay payload. `GRAFANA_CLOUD_OTLP_HEADERS` is parsed by `parseOtlpHeaderString()` rather than used as a raw header value: it arrives in the OTLP **exporter header string** form (`Authorization=Basic <base64>`, optionally comma-separated across several headers such as `X-Scope-OrgID`), which is the same format the OTel SDKs and `bootstrap-observability.sh` already consume. Splitting on the first `=` keeps base64 padding intact, values are URL-decoded, and a segment whose leading chunk is not a valid header name is treated as a bare header value so `Basic <b64>` keeps working. The relay's own unit tests live in `apps/gymtrack/api/telemetry.test.js` and assert this resolution, this header parsing, the token check, the rate limit, the redaction pass, and the size caps.
+7. The hosted Loki tenant absorbs the new event source. The new `gymtrack-browser-errors` dashboard (JSON in `apps/gymtrack/grafana/dashboards/gymtrack-browser-errors.json`) is provisioned by the existing `bootstrap-observability.sh`; the script's `step_dashboards` function now also walks `apps/gymtrack/grafana/dashboards/*.json` in addition to its canonical tree.
+
+**What the browser bundle does NOT hold:**
+
+- The Grafana Cloud OTLP / Loki credentials (the serverless function holds them).
+- Any user identity, session token, password, or authorization header (the redaction allow-list is the public contract; the unit tests in `apps/gymtrack/src/lib/browserTelemetry.test.js` and `apps/gymtrack/api/telemetry.test.js` assert the boundary on both the browser and relay sides, with representative Clerk and Supabase envelopes).
+- The `CLERK_SECRET_KEY` (already server-only).
+
+**Ownership and verification (production):**
+
+- Quinn generates `TELEMETRY_RELAY_TOKEN` (Vercel) and `VITE_TELEMETRY_TOKEN` (build-time) with the same value, sets `VITE_TELEMETRY_ENABLED=1` in the Vercel env, and re-runs `bash infra/cloud/observability/bootstrap-observability.sh dashboards` to (re)provision the dashboard.
+
+  **The generated value never appears in a tracked or public artifact.** This repository is public, and a token pasted into a PR body, review, inline comment, task comment, or chat message is permanently published — `gitleaks` scans commit diffs, not comment bodies, so CI stays green on a leaked value. Every step that handles a generated secret is therefore stated as *variable name + destination + mode*, never as a value:
+
+  | variable | destination | how the value gets there |
+  | --- | --- | --- |
+  | `TELEMETRY_RELAY_TOKEN` | GymTrack Vercel project, `production` | written to `infra/cloud/observability/.env.local` (mode `0600`, excluded via `.git/info/exclude`), then `vercel env add TELEMETRY_RELAY_TOKEN production --sensitive` reading from that file — never retyped from a message |
+  | `VITE_TELEMETRY_TOKEN` | GymTrack Vercel project, `production` | the **same** value as above; `--no-sensitive`, because it ships inside the browser bundle by design |
+  | `VITE_TELEMETRY_ENABLED` | GymTrack Vercel project, `production` | literal `1` |
+
+  Confirm both arms hold the same value without printing either one — fingerprints only:
+
+  ```bash
+  for v in TELEMETRY_RELAY_TOKEN VITE_TELEMETRY_TOKEN; do
+    if value=$(grep "^${v}=" infra/cloud/observability/.env.local | cut -d= -f2-) && [ -n "$value" ]; then
+      printf '%s %s\n' "$v" "$(printf '%s' "$value" | shasum -a 256 | cut -c1-8)"
+    else
+      printf '%s MISSING (absent or empty)\n' "$v"
+    fi
+  done
+  ```
+
+  Equal fingerprints mean the pair is wired consistently. Unequal fingerprints mean one arm was sourced from somewhere other than the local file, and that arm must be re-set from the file. A `MISSING` line is not a pass: an absent arm must never be fingerprinted, because the digest of empty input is a fixed constant, so an absent variable and an empty one would otherwise print the same `e3b0c442` and two missing arms would read as a consistent pair. Write both arms from one fresh value first, then run this check. If an older value was ever pasted into a public artifact, rotate rather than reuse it: nothing should be provisioned from a value that has appeared in a thread.
+- Quinn induces a wrong-password sign-in on the production host, then captures a real uncaught browser exception by pasting this into the devtools console on that same production page:
+
+  ```js
+  setTimeout(() => { throw new Error('gymtrack-browser-error-telemetry-evidence-YYYY-MM-DD') }, 0)
+  ```
+
+  This raises a genuine uncaught `ErrorEvent` on `window`, so it travels the same `error` listener, redaction, dedupe, and relay path as a user-visible crash — with no code change, no deploy, and nothing to clean up. A deploy-only affordance must not be used for this: a throw route shipped to production has to be removed again on a separate cadence, and a forgotten one is a live footgun. Then query Loki with `{app="gymtrack", source="browser"}` to confirm both events within 60 seconds. Evidence (timestamps + Loki query) is recorded in the PR body.
+
+  The two halves exercise different code paths into the relay, which is why AC4 needs both: the wrong-password sign-in goes through `reportAuthError` (`source: 'auth'`), the console throw through the global `error` listener (`source: 'window.error'`).
+- Rowan owns the in-repo code (`apps/gymtrack/src/lib/browserTelemetry.js`, `apps/gymtrack/api/telemetry.js`, the dashboard JSON, the `bootstrap-observability.sh` upload step, and the unit tests). The full design and AC-by-AC test plan are in `docs/specs/gymtrack-browser-error-telemetry-tech-design.md` and `apps/gymtrack/SPEC.md` § "Error handling".
+
+**Cross-product guidance.** The relay + redaction pattern is intentionally not packaged today. If Budget, Tasks, or Mission Control adopt the same surface, the shared package is a follow-up; for now the redaction helper, the relay, and the dashboard all live in `apps/gymtrack/` to keep the change scoped to the one product that needed it.
 
 ## Out of scope (explicit non-goals)
 

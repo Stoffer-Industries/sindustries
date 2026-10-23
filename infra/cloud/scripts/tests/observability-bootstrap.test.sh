@@ -247,7 +247,10 @@ status=200
 body='{}'
 case "${url}" in
   */api/datasources)
-    body='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true}]'
+    if [ -z "${FAKE_DATASOURCES:-}" ]; then
+      FAKE_DATASOURCES='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true},{"type":"loki","uid":"grafanacloud-loki"}]'
+    fi
+    body="${FAKE_DATASOURCES}"
     ;;
   */api/folders/*)
     status=404
@@ -290,6 +293,31 @@ else
   fail "dashboard upload payload does not match Grafana API contract"
 fi
 
+# Loki-backed dashboards must keep the Loki datasource UID. Regression guard:
+# the rewrite used to map EVERY placeholder uid (prometheus *and* loki) onto the
+# Prometheus UID, which provisioned LogQL panels pointed at a Prometheus
+# datasource — silently broken panels for the GymTrack browser-error dashboard.
+gymtrack_payload="$(awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/ {print $3}' "${FAKE_CURL_LOG}" \
+  | jq -c -s 'map(select(.dashboard.title? == "GymTrack / Browser errors")) | .[0] // empty')"
+if [ -n "${gymtrack_payload}" ] \
+    && jq -e '[.. | objects | select(has("datasource")) | .datasource | if type == "object" then .uid else . end]
+            | length > 0 and all(. == "grafanacloud-loki")' <<<"${gymtrack_payload}" >/dev/null; then
+  ok "Loki-backed dashboard keeps the Loki datasource UID (not rewritten to Prometheus)"
+else
+  fail "Loki-backed dashboard datasource was not preserved — LogQL panels would point at Prometheus"
+fi
+
+# Fallback: a Prometheus-only Grafana must still provision, keeping the
+# placeholder Loki uid, rather than hard-failing the whole dashboards step.
+: > "${FAKE_CURL_LOG}"
+FAKE_DATASOURCES='[{"type":"prometheus","uid":"grafanacloud-prom","isDefault":true}]' \
+  PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" dashboards >/dev/null 2>&1
+if awk -F '\t' '$2 ~ /\/api\/dashboards\/db$/' "${FAKE_CURL_LOG}" | grep -q 'loki'; then
+  ok "Prometheus-only Grafana falls back to the placeholder Loki uid instead of failing"
+else
+  fail "dashboards step did not provision with a Prometheus-only datasource set"
+fi
+
 : > "${FAKE_CURL_LOG}"
 PATH="${TMP_DIR}/bin:${PATH}" bash "${BOOT}" alerts >/dev/null
 alert_payload="$(awk -F '\t' '$1 == "POST" && $2 ~ /\/api\/v1\/provisioning\/alert-rules$/ {print $3; exit}' "${FAKE_CURL_LOG}")"
@@ -322,10 +350,14 @@ cat > "${TMP_DIR}/probe-bin/curl" <<'PROBECURL'
 #   PROBE_STATUS_MAP   "|host/path=code|host/path=code", first match wins.
 #   PROBE_DEFAULT      code when nothing matches (default 200).
 #   PROBE_EXIT_URL     substring whose probe exits non-zero (DNS failure).
+#   PROBE_HEADER_MAP   "|host/path=header1\nheader2|...", emitted when the
+#                      caller asks for headers (--dump-header). Entries are
+#                      printf-escaped so \n in the map becomes a real newline.
 # Deliberately does not implement --fail or --output: probes must not use
 # them, and honouring --fail here would mask a regression that reintroduces it.
 url=''
 prev=''
+dump_headers=0
 for arg in "$@"; do
   case "${prev}" in
     -o|--output|-w|--write-out|--max-time|--connect-timeout|-H|--header)
@@ -333,7 +365,10 @@ for arg in "$@"; do
       continue
       ;;
   esac
-  case "${arg}" in http*) url="${arg}" ;; esac
+  case "${arg}" in
+    http*) url="${arg}" ;;
+    -D|--dump-header) dump_headers=1 ;;
+  esac
   prev="${arg}"
 done
 if [ -n "${PROBE_EXIT_URL:-}" ]; then
@@ -342,6 +377,7 @@ if [ -n "${PROBE_EXIT_URL:-}" ]; then
   esac
 fi
 code="${PROBE_DEFAULT:-200}"
+headers='content-type: text/plain'
 if [ -n "${PROBE_STATUS_MAP:-}" ]; then
   IFS='|' read -r -a entries <<< "${PROBE_STATUS_MAP}"
   for entry in "${entries[@]}"; do
@@ -353,6 +389,21 @@ if [ -n "${PROBE_STATUS_MAP:-}" ]; then
         ;;
     esac
   done
+fi
+if [ -n "${PROBE_HEADER_MAP:-}" ]; then
+  IFS='|' read -r -a hentries <<< "${PROBE_HEADER_MAP}"
+  for hentry in "${hentries[@]}"; do
+    [ -n "${hentry}" ] || continue
+    case "${url}" in
+      *"${hentry%%=*}"*)
+        headers="$(printf '%b' "${hentry#*=}")"
+        break
+        ;;
+    esac
+  done
+fi
+if [ "${dump_headers}" -eq 1 ]; then
+  printf '%s\n' "${headers}"
 fi
 printf '%s' "${code}"
 PROBECURL
@@ -374,6 +425,9 @@ HEALTH_PROBE_REDIS=x=rediss://x
 PROBEENV
   if [ -n "${PROBE_LOKI:-}" ]; then
     printf 'GRAFANA_CLOUD_LOKI_ENDPOINT=%s\n' "${PROBE_LOKI}" >> "${OBS}/.env.local"
+  fi
+  if [ -n "${PROBE_RELAY:-}" ]; then
+    printf 'GYMTRACK_RELAY_BASE_URL=%s\n' "${PROBE_RELAY}" >> "${OBS}/.env.local"
   fi
 }
 run_validate() {
@@ -549,7 +603,7 @@ if [ "${parity}" = "OK" ]; then
 else
   fail "endpoint table drifted from the docs (${parity})"
 fi
-for endpoint_id in grafana_instance otlp_endpoint loki_push fly_api; do
+for endpoint_id in grafana_instance otlp_endpoint loki_push gymtrack_relay fly_api; do
   if printf '%s\n' "${VALIDATE_OUT}" | grep -q "${endpoint_id}" \
       || printf '%s\n' "${dry_out}" | grep -q "\`${endpoint_id}\`"; then
     ok "endpoint ${endpoint_id} is documented and probed"
@@ -557,6 +611,90 @@ for endpoint_id in grafana_instance otlp_endpoint loki_push fly_api; do
     fail "endpoint ${endpoint_id} missing from probe plan or docs"
   fi
 done
+
+# 11l. GymTrack telemetry relay (task 8bb78c2d). The relay's verdict cannot
+#      come from the status code: the SPA catch-all serves index.html with a
+#      200 for a path with no function behind it, and an unrouted route
+#      answers 405 on a POST just like a real POST-only function does.
+PROBE_LOKI='https://logs.example/loki/api/v1/push'
+
+# 11l-1. Deployed relay: JSON content-type + allow: header -> routed, passes.
+PROBE_RELAY='https://gymtrack.example'
+write_probe_env
+PROBE_STATUS_MAP='|gymtrack.example/api/telemetry=405' \
+  PROBE_HEADER_MAP='|gymtrack.example/api/telemetry=HTTP/1.1 405 Method Not Allowed\r\ncontent-type: application/json\r\nallow: POST\r\n\r\n{"error":"method_not_allowed"}' \
+  run_validate
+if [ "${VALIDATE_CODE}" -eq 0 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'gymtrack_relay.*routed'; then
+  ok "a routed /api/telemetry (JSON + allow:) is classified routed and passes"
+else
+  fail "routed relay not detected (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11l-2. SPA catch-all: content-disposition index.html -> FAIL. This is the
+#      case a status-code rule gets wrong, because the response is 200.
+PROBE_STATUS_MAP='|gymtrack.example/api/telemetry=200' \
+  PROBE_HEADER_MAP='|gymtrack.example/api/telemetry=HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\ncontent-disposition: inline; filename="index.html"\r\n\r\n<!doctype html>' \
+  run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'gymtrack_relay.*spa-catch-all'; then
+  ok "an SPA-catch-all /api/telemetry is classified spa-catch-all and fails"
+else
+  fail "SPA catch-all not caught (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11l-3. Unrouted 405: the counter-example that decides the rule. A 405 is a
+#      passing class everywhere else in the table, so if this passes, the
+#      check is being made on status code rather than response shape.
+PROBE_STATUS_MAP='|gymtrack.example/api/telemetry=405' \
+  PROBE_HEADER_MAP='|gymtrack.example/api/telemetry=HTTP/1.1 405 Method Not Allowed\r\ncontent-disposition: inline; filename="index.html"\r\n\r\n' \
+  run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'gymtrack_relay.*spa-catch-all'; then
+  ok "an unrouted 405 is NOT treated as OK on the relay row"
+else
+  fail "unrouted 405 wrongly passed (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11l-4. A 405 with neither JSON nor allow: is not-a-function, so it fails
+#      even when the catch-all's content-disposition is absent.
+PROBE_STATUS_MAP='|gymtrack.example/api/telemetry=405' \
+  PROBE_HEADER_MAP='|gymtrack.example/api/telemetry=HTTP/1.1 405 Method Not Allowed\r\ncontent-type: text/plain\r\n\r\n' \
+  run_validate
+if [ "${VALIDATE_CODE}" -ge 1 ] && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'gymtrack_relay.*not-a-function'; then
+  ok "a 405 without JSON/allow: is not-a-function and fails"
+else
+  fail "405 without the JSON/allow signature wrongly passed (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11l-5. Unconfigured relay: SKIP, not FAIL — consistent with the existing
+#      optional-endpoint handling for Loki.
+PROBE_RELAY=''
+write_probe_env
+PROBE_STATUS_MAP='|gymtrack.example/api/telemetry=405' run_validate
+if [ "${VALIDATE_CODE}" -eq 0 ] \
+    && printf '%s\n' "${VALIDATE_OUT}" | grep -q 'SKIP.*gymtrack_relay'; then
+  ok "an unconfigured GYMTRACK_RELAY_BASE_URL is SKIP, not FAIL"
+else
+  fail "unconfigured relay not skipped (exit=${VALIDATE_CODE}): ${VALIDATE_OUT}"
+fi
+
+# 11l-6. The probe output names the relay and its verdict is identifiable.
+if printf '%s\n' "${VALIDATE_OUT}" | grep -qE '\[(OK|FAIL|SKIP)\][[:space:]]+gymtrack_relay'; then
+  ok "relay probe line names gymtrack_relay with a verdict"
+else
+  fail "relay probe line does not name gymtrack_relay: ${VALIDATE_OUT}"
+fi
+
+# 11l-7. Secret hygiene still holds on the header-aware path: the relay
+#      probe must not echo response headers into operator scrollback.
+PROBE_RELAY='https://gymtrack.example'
+write_probe_env
+PROBE_STATUS_MAP='|gymtrack.example/api/telemetry=200' \
+  PROBE_HEADER_MAP='|gymtrack.example/api/telemetry=HTTP/1.1 200 OK\r\nset-cookie: relay-header-sentinel\r\ncontent-disposition: inline; filename="index.html"\r\n\r\n' \
+  run_validate
+if printf '%s\n' "${VALIDATE_OUT}" | grep -qF 'relay-header-sentinel'; then
+  fail "relay probe leaked a response header value into validate output"
+else
+  ok "relay probe output carries no response header values"
+fi
 
 rm -f "${OBS}/.env.local"
 
