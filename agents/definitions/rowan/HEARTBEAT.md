@@ -22,6 +22,30 @@ When `topCandidate.kind` is `reviewRequest`, `authoredPrFeedback`, `authoredPrCo
 
 If no open PRs or no unresolved comments: skip the assignee part.
 
+**Pre-publish check for any PR I open (added 2026-09-02 after a 12h stall on four PRs that lacked reviewer requests):**
+
+After `gh pr create`, before considering the PR "open", run **two separate calls** — assignees and reviewer requests are different endpoints with different paths:
+
+```bash
+# assignees: PRs ARE issues, so the /issues/ path is correct here
+gh api -X POST 'repos/Stoffer-Industries/sindustries/issues/<N>/assignees' -f 'assignees[]=rowanstoffer'
+# reviewer requests: the canonical endpoint is /pulls/, NOT /issues/
+gh api -X POST 'repos/Stoffer-Industries/sindustries/pulls/<N>/requested_reviewers' \
+  -f 'reviewers[]=quinnstoffer' -f 'reviewers[]=Stoff81'
+```
+
+**Do not bundle these into one snippet or swap the prefixes.** `POST /issues/<N>/requested_reviewers` returns `404 Not Found` — that path does not exist on GitHub's REST API — while `/issues/<N>/assignees` works and `/pulls/<N>/requested_reviewers` works. This 404 has now fired on three PRs (#603, #672, #867) purely because of a wrong prefix in the instruction, costing a retry each time and, on #867, hiding the fact that reviewers had not been requested until a follow-up read-back caught it.
+
+Verify both landed before moving on:
+
+```bash
+gh pr view <N> --json assignees,reviewRequests
+```
+
+Both arrays must be non-empty (`reviewRequests` under `gh pr view` is the correct field name — `requestedReviewers` is not a valid `gh pr view` field and errors out). If `assignees` is empty, Quinn never gets notified and `mergeCandidates` never populates, regardless of task-comment authorization. This applies to **draft** PRs too — Quinn's first-look feedback on a draft is the whole point of opening it before the next slice ships.
+
+A `404` on the reviewer-request call is a URL-pattern error, **not** a token-scope error: verify with `gh api -i /user | grep -i x-oauth-scopes` before concluding anything about the credential.
+
 ---
 
 ## Step 2 — Task work (feature + code)

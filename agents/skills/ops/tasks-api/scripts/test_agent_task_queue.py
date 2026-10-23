@@ -1,3 +1,5 @@
+import argparse
+import contextlib
 import importlib.util
 import os
 import pathlib
@@ -1099,6 +1101,222 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
 
         # Two of three URLs hydrate; the first URL's timeout skips it cleanly.
         self.assertEqual(len(out), 2)
+
+
+class IdentityDegradeTest(unittest.TestCase):
+    """PR #851: unprovisioned/broken GitHub identity degrades, never raises.
+
+    Regression coverage for the `_GhApiTimeout` gap found in review: the
+    original guard caught only `subprocess.CalledProcessError`, so a hung
+    `gh api` still took the whole JSON queue down.
+    """
+
+    def setUp(self) -> None:
+        agent_task_queue._VERBOSE = False
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+
+    def tearDown(self) -> None:
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+
+    @staticmethod
+    def _patched_main(fetch_github_prs_side_effect=None):
+        """Common `main()` patch stack; returns the started patcher stack.
+
+        `fetch_github_prs` is mocked with a side effect that writes the
+        module-level degrade reason, because that IS the real contract: the
+        function itself decides the reason and `main()` only reads it.
+        """
+        stack = contextlib.ExitStack()
+        for name, value in (
+            ("_is_identity_provisioned", True),
+            ("fetch_agent_tasks", []),
+            ("fetch_pending_tech_design_approvals", []),
+            ("fetch_linked_delivery_prs", []),
+            ("fetch_attention_owner_tasks", []),
+            ("fetch_workflow_gate_owner_tasks", []),
+            ("build_work_queue", {"queue": []}),
+        ):
+            stack.enter_context(
+                patch.object(agent_task_queue, name, return_value=value)
+            )
+        if fetch_github_prs_side_effect is None:
+
+            def _no_degrade(_agent):
+                agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+                return []
+
+            stack.enter_context(
+                patch.object(
+                    agent_task_queue, "fetch_github_prs", side_effect=_no_degrade
+                )
+            )
+        else:
+            stack.enter_context(
+                patch.object(
+                    agent_task_queue,
+                    "fetch_github_prs",
+                    side_effect=fetch_github_prs_side_effect,
+                )
+            )
+        parser = stack.enter_context(patch.object(agent_task_queue, "build_parser"))
+        parser.return_value.parse_args.return_value = argparse.Namespace(
+            assignee="Rowan", json=True, verbose=False, attention_owner=None
+        )
+        stack.enter_context(patch.object(agent_task_queue, "print"))
+        return stack
+
+    def test_identity_provisioned_true_when_only_profile_dir_exists(self):
+        """Profile-only agents (Rowan has no ROWAN_GITHUB_TOKEN) stay provisioned."""
+        with patch.object(
+            agent_task_queue.pathlib.Path, "is_dir", return_value=True
+        ), patch.dict(os.environ, {"ROWAN_GITHUB_TOKEN": ""}):
+            self.assertTrue(agent_task_queue._is_identity_provisioned("Rowan"))
+
+    def test_identity_provisioned_true_when_only_token_env_exists(self):
+        """Token-without-profile-dir agents stay provisioned too (the `or`)."""
+        with patch.object(
+            agent_task_queue.pathlib.Path, "is_dir", return_value=False
+        ), patch.dict(os.environ, {"ROWAN_GITHUB_TOKEN": "secret"}, clear=False):
+            self.assertTrue(agent_task_queue._is_identity_provisioned("Rowan"))
+
+    def test_identity_not_provisioned_when_neither_present(self):
+        with patch.object(
+            agent_task_queue.pathlib.Path, "is_dir", return_value=False
+        ), patch.dict(os.environ, {"ROWAN_GITHUB_TOKEN": ""}):
+            self.assertFalse(agent_task_queue._is_identity_provisioned("Rowan"))
+
+    def test_fetch_github_prs_returns_empty_when_unprovisioned(self):
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=False
+        ), patch.object(agent_task_queue, "_gh_api") as gh:
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+            gh.assert_not_called()
+
+    def test_fetch_github_prs_returns_empty_on_called_process_error(self):
+        err = subprocess.CalledProcessError(4, ["gh"])
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(agent_task_queue, "_gh_api", side_effect=err):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+
+    def test_fetch_github_prs_returns_empty_on_gh_api_timeout(self):
+        """Guards finding #1: _GhApiTimeout is NOT a CalledProcessError subclass.
+
+        `exc.returncode` would AttributeError inside the handler, so this also
+        proves the message interpolation survives the timeout path.
+        """
+        self.assertFalse(
+            issubclass(agent_task_queue._GhApiTimeout, subprocess.CalledProcessError)
+        )
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue,
+            "_gh_api",
+            side_effect=agent_task_queue._GhApiTimeout("gh api exceeded 45s"),
+        ):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+
+    def test_fetch_github_prs_sets_degrade_reason_when_unprovisioned(self):
+        """The unprovisioned precondition must record *why* hydration degraded."""
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=False
+        ):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+        self.assertEqual(
+            agent_task_queue._PR_HYDRATION_DEGRADE_REASON, "unprovisioned"
+        )
+
+    def test_fetch_github_prs_sets_degrade_reason_on_gh_api_timeout(self):
+        """Rowan's Important finding: a provisioned identity that fails `gh api`
+        produced an envelope byte-identical to 'no open PRs'."""
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue,
+            "_gh_api",
+            side_effect=agent_task_queue._GhApiTimeout("gh api exceeded 10s"),
+        ):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+        reason = agent_task_queue._PR_HYDRATION_DEGRADE_REASON
+        self.assertIsNotNone(reason, "provisioned-but-failing must not be silent")
+        self.assertTrue(reason.startswith("gh-api-failure"), reason)
+        self.assertIn("timed out", reason)
+
+    def test_fetch_github_prs_sets_degrade_reason_on_called_process_error(self):
+        """A revoked/expired token surfaces as a non-zero `gh api` exit."""
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue,
+            "_gh_api",
+            side_effect=subprocess.CalledProcessError(4, "gh"),
+        ):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+        self.assertEqual(
+            agent_task_queue._PR_HYDRATION_DEGRADE_REASON, "gh-api-failure: exit 4"
+        )
+
+    def test_fetch_github_prs_leaves_degrade_reason_unset_on_success(self):
+        """Happy path stays unmarked so callers keep the real 'no open PRs' signal."""
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(agent_task_queue, "_gh_api", return_value=[]):
+            self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
+        self.assertIsNone(agent_task_queue._PR_HYDRATION_DEGRADE_REASON)
+
+    def test_main_emits_pr_hydration_degraded_with_reason(self):
+        """The reason must survive into the JSON envelope callers actually read."""
+        def _degraded(_agent):
+            agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "gh-api-failure: exit 4"
+            return []
+
+        with self._patched_main(_degraded):
+            agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertEqual(queue["prHydrationDegraded"], "gh-api-failure: exit 4")
+
+    def test_main_emits_pr_hydration_degraded_when_unprovisioned(self):
+        def _unprovisioned(_agent):
+            agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "unprovisioned"
+            return []
+
+        with self._patched_main(_unprovisioned):
+            with patch.object(
+                agent_task_queue, "_is_identity_provisioned", return_value=False
+            ):
+                agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertEqual(queue["prHydrationDegraded"], "unprovisioned")
+            self.assertNotIn("identityNotProvisioned", queue)
+
+    def test_main_omits_pr_hydration_degraded_when_healthy(self):
+        with self._patched_main():
+            agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertNotIn("prHydrationDegraded", queue)
+
+    def test_main_resets_degrade_reason_between_runs(self):
+        """Module global must not leak a stale degrade into a later clean run."""
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "gh-api-failure: exit 1"
+
+        def _degraded(_agent):
+            agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "unprovisioned"
+            return []
+
+        with self._patched_main(_degraded):
+            agent_task_queue.main()
+            queue = agent_task_queue.build_work_queue.return_value
+            self.assertEqual(queue["prHydrationDegraded"], "unprovisioned")
+            # Second run is healthy: the stale reason must not resurface.
+            with self._patched_main():
+                agent_task_queue.main()
+                queue = agent_task_queue.build_work_queue.return_value
+                self.assertNotIn("prHydrationDegraded", queue)
 
 
 class VerboseFlagTest(unittest.TestCase):
