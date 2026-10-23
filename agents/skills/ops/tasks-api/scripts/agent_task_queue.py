@@ -72,6 +72,11 @@ GITHUB_IDENTITIES = {
     "tom": ("stoff81", "~/.config/gh", "GITHUB_TOKEN"),
 }
 GREEN_CHECK_CONCLUSIONS = {"success", "skipped", "neutral"}
+# Tom reviews agent-authored PRs for GitHub inbox visibility only. Per
+# pr-process/SKILL.md ("do not wait for Tom's PR approval") he must never gate
+# merge eligibility, so he is excluded from the blocking-reviewer set unless a PR
+# opts in explicitly with the tom-approval title marker.
+VISIBILITY_ONLY_REVIEWERS = {"stoff81"}
 CURRENT_GATE_BY_STATUS = {
     "open": "spec",
     "ready": "tech_design",
@@ -231,13 +236,21 @@ def _blocking_reviewers(agent: str, pr: dict[str, Any], latest: dict[str, str]) 
         known = (requested | set(latest)) & {"quinnstoffer", "stoff81"}
         return sorted(known)
     own_login = GITHUB_IDENTITIES[agent][0]
-    non_self_requested = {login for login in requested if login != own_login}
-    if non_self_requested:
-        return sorted(non_self_requested)
-    # GitHub clears requested_reviewers after a review is submitted. Retain the
-    # non-self reviewer from latest review state so an approved Quinn-authored
-    # PR can become merge-eligible without ever accepting Quinn's own review.
-    return sorted(login for login in latest if login != own_login)
+    # Tom reviews agent-authored PRs for GitHub inbox visibility only. Per
+    # pr-process/SKILL.md his review must never gate merge eligibility ("do not
+    # wait for Tom's PR approval"), so he is excluded from the blocking set
+    # unless the PR opts in explicitly via the tom-approval title marker.
+    considered = requested | set(latest)
+    if "tom-approval" not in title:
+        considered -= VISIBILITY_ONLY_REVIEWERS
+    # Prefer reviewers GitHub still lists as requested. GitHub clears
+    # requested_reviewers once a review is submitted, so fall back to latest
+    # review state — that keeps an approved Quinn-authored PR merge-eligible
+    # without ever accepting Quinn's own review.
+    still_requested = {login for login in considered if login != own_login and login in requested}
+    if still_requested:
+        return sorted(still_requested)
+    return sorted(login for login in considered if login != own_login)
 
 
 def _classify_delivery_pr(agent: str, pr: dict[str, Any]) -> tuple[str, str]:
