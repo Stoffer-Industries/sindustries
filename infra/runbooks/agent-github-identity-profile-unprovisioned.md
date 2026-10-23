@@ -44,13 +44,23 @@ not of *existence*. The structural fix therefore:
 
 - checks provisioning up front via `_is_identity_provisioned()` (profile dir **or**
   token env present) and returns `[]` with a WARN instead of raising;
-- catches `subprocess.CalledProcessError` per-URL in the fan-out hydration so one
-  bad PR link cannot abort its siblings;
-- surfaces `identityNotProvisioned: true` in the JSON envelope so callers do not
-  have to infer the cause from empty PR-derived fields.
+- catches `_GhApiTimeout` and `subprocess.CalledProcessError` per-URL in the
+  fan-out hydration so one bad PR link cannot abort its siblings;
+- surfaces `prHydrationDegraded: "<reason>"` in the JSON envelope so callers do
+  not have to infer the cause from empty PR-derived fields.
 
-Callers can then distinguish "this agent genuinely has no open PRs" from "this
-agent's identity is unprovisioned and we could not check".
+The marker covers **both** degradation causes, because both otherwise produce an
+envelope byte-identical to "genuinely no open PRs":
+
+| `prHydrationDegraded`                     | Meaning                                                    |
+| ----------------------------------------- | ---------------------------------------------------------- |
+| `unprovisioned`                            | Neither `~/.config/gh-<agent>` nor `<AGENT>_GITHUB_TOKEN`   |
+| `gh-api-failure: exit <n>`                 | Provisioned, but `gh api` exited non-zero (revoked/expired token, auth failure) |
+| `gh-api-failure: timed out after <n>s`     | Provisioned, but `gh api` exceeded `_GH_API_TIMEOUT_SECONDS`  |
+| *absent*                                  | Hydration ran; an empty PR section genuinely means no open PRs |
+
+Callers must treat an empty `reviewRequests` / `authoredPrFeedback` section as
+**unknown**, not empty, whenever this key is present.
 
 ## How to diagnose
 
@@ -73,7 +83,7 @@ The durable fix is provisioning the identity, not degrading around it:
 2. Provision `~/.config/gh-<agent>` and `<AGENT>_GITHUB_TOKEN` in
    `~/.openclaw/.env`.
 3. Re-run `agent_task_queue.py --assignee <agent> --json` and confirm
-   `identityNotProvisioned` is absent and PR hydration is populated.
+   `prHydrationDegraded` is absent and PR hydration is populated.
 
 Degradation is the safety net so an unprovisioned account costs *queue richness*
 instead of *the whole heartbeat duty*. Do not treat a green heartbeat as
