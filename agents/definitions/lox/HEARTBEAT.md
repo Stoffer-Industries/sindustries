@@ -54,7 +54,26 @@ This self-check should run on every heartbeat cycle, not just when something loo
 On every heartbeat:
 
 1. Read `infra/RUNBOOKS.md`.
-2. Read `brain/state/lox-incident-state.json` if it exists.
+2. Read `brain/state/lox-incident-state.json` if it exists — **via the bounded summary, never the raw file**:
+
+   ```bash
+   python3 infra/lox_incident_state.py summary
+   ```
+
+   The raw file is ~0.5 MB of operator prose. Reading it directly burns ~120k
+   tokens of context on every tick, which is what pushed Lox's own heartbeat past
+   its 600s budget (6 consecutive timeouts on 2026-10-24). `summary` renders the
+   same 184 incidents in ~6 KB.
+
+   For the cross-agent roll-up (both agents' state files, already bounded to
+   ~540 bytes) use:
+
+   ```bash
+   cd codebases/sindustries && python3 -m agents.lib.incident_queue
+   ```
+
+   Full history lives in `brain/state/archive/`. The live file is a triage
+   artifact, not an archive — see "Bounded state writes" below.
 3. Read the latest daily review for today if it exists.
    - Prefer the exact path in `brain/state/lox-latest-daily-review.txt`.
    - If that pointer is missing, fall back to the canonical path `brain/infra/daily-reviews/lox-daily-YYYY-MM-DD.md`.
@@ -138,6 +157,32 @@ Default routing (verify against current SOUL):
 
 The notification is a heads-up, not a demand. Keep it short: bug, root cause, why-Lox-can't-fix, fix options, tracking pointer. Let the owner decide priority and routing.
 
+## Bounded state writes (context-bloat guard)
+
+`brain/state/lox-incident-state.json` is a **triage/queue** artifact, not an
+archive. Every byte you write to it is read back on every future heartbeat, so
+unbounded prose there is a self-inflicted timeout risk.
+
+- `lastAction` is **one line** describing the most recent action (≤ 300 chars).
+  **Replace** it. Do **not** append the previous value with ` | `.
+- The running cycle log goes to `brain/state/archive/lox-incident-log/<key>.log`
+  (append one line per cycle). Never put the running log in the state file.
+- `details` keeps only what a future heartbeat needs to triage the entry
+  (≤ 6 keys, ≤ 200 chars per value).
+- `notes` keeps the last 2 entries, ≤ 200 chars each.
+- Terminal entries (`resolved` / `false_positive`) need even less — a status,
+  a timestamp, and one line of closure.
+
+When the live file exceeds ~600 KB, run:
+
+```bash
+python3 infra/lox_incident_state.py compact
+```
+
+It preserves every incident key and every machine-readable field, archives the
+original free text to `brain/state/archive/`, backs up the full original, and
+writes atomically. Runbook: `infra/runbooks/incident-state-file-context-bloat.md`.
+
 ## State Shape
 
 ```json
@@ -160,6 +205,12 @@ The notification is a heads-up, not a demand. Keep it short: bug, root cause, wh
 - Never kill existing listeners automatically.
 - Never run macOS updates, OpenClaw updates, or gateway restarts from heartbeat.
 - If the safe repair path does not match the observed failure, report and stop.
+- Never read the raw incident state file on heartbeat. Use
+  `python3 infra/lox_incident_state.py summary` (or
+  `python3 -m agents.lib.incident_queue`). Raw reads cost ~120k tokens per tick.
+- Never append to `lastAction` / `notes` without truncating first. Unbounded
+  growth in the state file is what caused the 2026-10-24 heartbeat timeout
+  cluster. See "Bounded state writes".
 
 ## Heartbeat-staleness check (peer agent main sessions)
 
