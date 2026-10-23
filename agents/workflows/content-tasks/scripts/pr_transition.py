@@ -8,6 +8,7 @@ import sys
 
 from common import (
     CHECKBOX_RE,
+    CI_NEUTRAL_STATES,
     OWNER_HEADING_RE,
     dump_json,
     extract_pr_urls_from_text,
@@ -202,7 +203,9 @@ def ci_failures_for_pr(url: str) -> tuple[list[str], list[dict[str, str]]]:
     failures = []
     for check in checks:
         state = check.get("state") or "UNKNOWN"
-        if state != "SUCCESS":
+        # SKIPPED/CANCELLED are neutral (see gh_pr_ci_state); reporting them as
+        # failures makes deploy-gated jobs fail tasks that never touched them.
+        if state != "SUCCESS" and state not in CI_NEUTRAL_STATES:
             failures.append(f"{url} CI check `{check.get('name') or 'unnamed check'}` is {state}.")
     if not failures:
         failures.append(f"{url} CI status is {ci_state}.")

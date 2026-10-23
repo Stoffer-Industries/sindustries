@@ -447,17 +447,34 @@ def gh_pr_ci_checks(url: str) -> list[dict[str, str]]:
     return checks
 
 
+CI_NEUTRAL_STATES = {"SKIPPED", "CANCELLED"}
+CI_FAILURE_STATES = {"FAILURE", "FAILED", "ERROR", "TIMED_OUT", "ACTION_REQUIRED"}
+CI_PENDING_STATES = {"PENDING", "QUEUED", "IN_PROGRESS", "REQUESTED", "WAITING", "EXPECTED"}
+
+
 def gh_pr_ci_state(url: str) -> str:
+    """Roll up a PR's statusCheckRollup into SUCCESS / FAILURE / PENDING / UNKNOWN.
+
+    SKIPPED and CANCELLED are *neutral*: deploy-gated jobs routinely skip or get
+    cancelled on changes that do not touch them, so they must not count as
+    failures. Neutral states only decide the rollup when at least one check
+    actually succeeded -- an all-neutral rollup stays UNKNOWN rather than
+    claiming SUCCESS, because nothing ran to justify it.
+
+    Hard failures win outright; pending outranks success so a still-running
+    check is never reported as a pass.
+    """
     checks = gh_pr_ci_checks(url)
     if not checks:
         return "UNKNOWN"
     states = [check["state"] for check in checks]
-    if all(state in {"SUCCESS", "SKIPPED"} for state in states):
-        return "SUCCESS"
-    if any(state in {"FAILURE", "FAILED", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"} for state in states):
+    if any(state in CI_FAILURE_STATES for state in states):
         return "FAILURE"
-    if any(state in {"PENDING", "QUEUED", "IN_PROGRESS", "REQUESTED", "WAITING", "EXPECTED"} for state in states):
+    if any(state in CI_PENDING_STATES for state in states):
         return "PENDING"
+    substantive = [state for state in states if state not in CI_NEUTRAL_STATES]
+    if substantive and all(state == "SUCCESS" for state in substantive):
+        return "SUCCESS"
     return "UNKNOWN"
 
 
