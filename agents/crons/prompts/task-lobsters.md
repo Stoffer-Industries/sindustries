@@ -18,7 +18,7 @@ state.
 ## 1. Feature Task Lobster
 
 ```
-TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/feature-task/run.py
 ```
 
 The runner discovers active tasks in `open`, `ready`, `doing`, and `acceptance` where `taskType == "feature"` (or `feature-factory` tag), then invokes Lobster for each task.
@@ -26,7 +26,7 @@ The runner discovers active tasks in `open`, `ready`, `doing`, and `acceptance` 
 
 **If the lobster reports `ready_checks_blocked` due to missing `[tech-design]`:**
 - Check if Rowan is free (no tasks in `doing` assigned to Rowan):
-  `TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status doing --summary`
+  `set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/tasks_api_client.py list --assignee Rowan --status doing --summary`
 - If Rowan is free: read the tech-design skill and spawn Rowan as a background subagent to write the tech design:
   `/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/dev/tech-design/SKILL.md`
 - If Rowan is busy: do **not** create or update an incident. The task's `attentionOwners[0]` is the authoritative handoff surface; the feature-task lobster's workflow-attention reconciliation should route the missing tech-design gate to Quinn. If the task still has no attention owner after the lobster run, use the Tasks API attention-owner helper to add Quinn while preserving the existing ordered stack, then leave an audit comment on the task. A task gate failure belongs in Tasks API state, not the agent incident registry.
@@ -34,7 +34,7 @@ The runner discovers active tasks in `open`, `ready`, `doing`, and `acceptance` 
 ## 2. Content Task Lobster
 
 ```
-TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-tasks/run.py --json
+set -a; [ -f "$HOME/.openclaw/.env" ] && . "$HOME/.openclaw/.env"; set +a; TASKS_API_BASE_URL=${TASKS_API_BASE_URL:-http://localhost:4001/api/v1} python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/workflows/content-tasks/run.py --json
 ```
 
 Report only failures, blocked closed-unmerged PRs, or meaningful transitions.
