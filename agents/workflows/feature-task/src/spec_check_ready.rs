@@ -779,6 +779,63 @@ fn has_structured_quinn_tom_escalation(task: &Task) -> bool {
     })
 }
 
+/// The attention stack to write after the lobster revokes a stale `qa_agent`
+/// grant and routes the task back to its assignee.
+///
+/// The Tasks API enforces that a `doing` task carrying Tom must make him the
+/// *sole* terminal owner (`attentionOwnerPolicyFailure` in
+/// `services/tasks-api/src/routes/taskAttentionOwners.ts`, rule B). The revoke
+/// path used to build `assignee + existing tail` unconditionally, so a task
+/// already escalated Tom-sole (`['Tom']`) produced `['Rowan', 'Tom']` — Tom at
+/// position 1, stack length 2 — and every task-lobsters tick 409'd with
+/// `TOM_NOT_ACTIONABLE`. The revoke is deterministic, so the failure repeated
+/// indefinitely instead of degrading and the affected tasks stayed stuck in
+/// `doing`.
+///
+/// The stack collapses to the assignee rather than reshaping to Tom-sole. Two
+/// reasons, both load-bearing:
+///
+/// 1. A terminal Tom escalation is authorised against a stated premise —
+///    agent-side gates all green, explicitly including `qa_agent`. This
+///    function runs precisely because that grant no longer matches its PR's
+///    live head and AC-section digest, so the revocation falsifies the very
+///    premise the escalation was written under. Keeping Tom paged would page
+///    him for a gate whose supporting evidence was just invalidated, and would
+///    keep re-paging on every tick.
+/// 2. Tom-sole is only server-valid while the reconcile runs under a
+///    Quinn-scoped credential (rule A permits a Tom write only for
+///    `quinn`/`tom`). Dropping Tom removes that undocumented coupling
+///    entirely, making the fix correct by construction rather than by
+///    coincidence — token rotation cannot reintroduce it.
+///
+/// This is deliberately *not* `enforce_tom_acceptance_only`. That helper is
+/// correct for a routine sweep reconciling a still-valid stack; but
+/// `has_structured_quinn_tom_escalation` is true on exactly the tasks this
+/// path sees, so reusing it would collapse to `['Tom']` — server-valid, but
+/// the semantic inversion above. Both rules live in this module so the
+/// terminal-stack invariant is written once rather than re-derived per call
+/// site, and the test below pins the server's own expression so the two
+/// cannot drift apart silently.
+///
+/// Off `doing` the server does not police Tom at all, so the client's job is
+/// to leave those stacks alone rather than start rewriting stacks nothing
+/// enforces.
+///
+/// Pure: no I/O, no API call, no env reads.
+pub(crate) fn attention_stack_after_qa_revocation(task: &Task, assignee: &str) -> Vec<String> {
+    let drop_terminal_tom = task.status == "doing";
+    let mut desired = vec![assignee.to_string()];
+    for existing in &task.attention_owners {
+        if drop_terminal_tom && existing.trim().eq_ignore_ascii_case("Tom") {
+            continue;
+        }
+        if !desired.iter().any(|slot| slot.eq_ignore_ascii_case(existing)) {
+            desired.push(existing.clone());
+        }
+    }
+    desired
+}
+
 pub(crate) fn reconcile_workflow_attention(args: &StageArgs, env: &mut Envelope) -> Result<()> {
     let desired = reconciled_attention_owners(&env.task);
     let metadata_needs_repair = !attention_owner_metadata_complete(&env.task, &desired);
@@ -1059,6 +1116,150 @@ mod tests {
             attention_owners: owner.iter().map(|value| (*value).to_string()).collect(),
             ..Task::default()
         }
+    }
+
+    // --- AC1-AC4: attention_stack_after_qa_revocation (task 7ae48b33) ---
+
+    #[test]
+    fn qa_revocation_drops_a_terminal_tom_escalation_instead_of_displacing_it() {
+        // The regression this task exists for: the old inline build produced
+        // ['Rowan', 'Tom'], which the Tasks API rejects with
+        // TOM_NOT_ACTIONABLE on every task-lobsters tick.
+        let task = routing_task("doing", &["Tom"]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan"]
+        );
+    }
+
+    #[test]
+    fn qa_revocation_never_emits_tom_below_position_zero_or_beside_an_owner() {
+        // AC1's invariant stated directly, so the shape is pinned for every
+        // input rather than only the one that happened to fail in production.
+        for status in ["doing", "acceptance", "ready", "open"] {
+            for owners in [
+                vec!["Tom"],
+                vec!["Quinn", "Tom"],
+                vec!["Ash", "Tom"],
+                vec!["Tom", "Ash"],
+                vec!["Rowan", "Tom", "Ash"],
+                vec!["tom"],
+            ] {
+                let mut task = routing_task(status, &owners);
+                // `routing_task` borrows; rebuild so the non-'static strs live
+                // long enough to build the Vec.
+                task.attention_owners = owners.iter().map(|o| (*o).to_string()).collect();
+                let stack = attention_stack_after_qa_revocation(&task, "Rowan");
+                if status != "doing" {
+                    continue;
+                }
+                let tom_positions: Vec<usize> = stack
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, owner)| owner.eq_ignore_ascii_case("Tom"))
+                    .map(|(index, _)| index)
+                    .collect();
+                assert!(
+                    tom_positions.is_empty(),
+                    "status={status} owners={owners:?} left Tom at {tom_positions:?} in {stack:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn qa_revocation_leaves_a_stack_without_tom_unchanged() {
+        // AC2, no-Tom half.
+        let task = routing_task("doing", &["Rowan"]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan"]
+        );
+    }
+
+    #[test]
+    fn qa_revocation_routes_to_the_assignee_from_an_empty_stack() {
+        let task = routing_task("doing", &[]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan"]
+        );
+    }
+
+    #[test]
+    fn qa_revocation_preserves_tom_off_doing_because_the_server_does_not_police_it() {
+        // AC2, non-`doing` half: `attentionOwnerPolicyFailure` returns null
+        // unless `task?.status !== 'doing'` fails, so the client must not start
+        // rewriting stacks nothing enforces.
+        let task = routing_task("acceptance", &["Ash", "Tom"]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan", "Ash", "Tom"]
+        );
+    }
+
+    #[test]
+    fn qa_revocation_deduplicates_the_assignee_case_insensitively() {
+        let task = routing_task("doing", &["rowan"]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan"]
+        );
+    }
+
+    #[test]
+    fn qa_revocation_drops_tom_but_preserves_the_rest_of_the_tail_in_order() {
+        let task = routing_task("doing", &["Ash", "Tom"]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan", "Ash"]
+        );
+    }
+
+    #[test]
+    fn qa_revocation_trims_before_comparing_so_a_padded_tom_row_is_still_terminal() {
+        let task = routing_task("doing", &[" Tom "]);
+        assert_eq!(
+            attention_stack_after_qa_revocation(&task, "Rowan"),
+            vec!["Rowan"]
+        );
+    }
+
+    /// AC4: pin the constraint as the server enforces it, not as a local copy.
+    /// A duplicated Rust constant would satisfy the letter of this test and
+    /// none of its purpose — it would keep passing after the server rule
+    /// changed and let the client drift back into the 409.
+    const ENFORCER: &str = include_str!(
+        "../../../../services/tasks-api/src/routes/taskAttentionOwners.ts"
+    );
+
+    #[test]
+    fn qa_revocation_matches_the_servers_terminal_tom_constraint() {
+        assert!(
+            ENFORCER.contains("tomPositions[0] !== 0 || owners.length !== 1"),
+            "the Tasks API terminal-Tom rule changed shape; re-derive \
+             attention_stack_after_qa_revocation against the new rule"
+        );
+        assert!(
+            ENFORCER.contains("task?.status !== 'doing'"),
+            "the Tasks API guard may no longer be doing-only; re-check whether \
+             attention_stack_after_qa_revocation should preserve Tom off `doing`"
+        );
+    }
+
+    #[test]
+    fn qa_revocation_satisfies_the_enforcer_rule_a_that_lost_the_precedence_race() {
+        // Rule A (actor must be quinn/tom) short-circuits before rule B, so
+        // the observed error was rule B's and rule A never fired — which is
+        // how a Tom-sole "fix" would have looked correct while depending on an
+        // untested credential-to-actor coupling. Dropping Tom makes both rules
+        // vacuous, so this asserts the outcome is legal under either actor.
+        let task = routing_task("doing", &["Tom"]);
+        let stack = attention_stack_after_qa_revocation(&task, "Rowan");
+        assert!(
+            !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Tom")),
+            "a stack with no Tom short-circuits both server rules regardless of actor"
+        );
     }
     #[test]
     fn routing_does_not_surface_ash_before_delivery_evidence() {
