@@ -36,7 +36,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Database signal source           | Health probe service on Fly (single-purpose Node app, `sindustries_db_up` + `sindustries_db_query_duration_seconds` + `sindustries_fly_app_health` + `sindustries_redis_up`)    | Rowan  | `infra/cloud/observability/health-probe/`         |
 | Alert evaluation                 | Grafana Cloud alerting (not Alertmanager), UI/API state   | Quinn  | `infra/cloud/observability/grafana/alerts/` (10 rules, 5 page + 5 warn) |
 | Hosted datasource identity       | Discovered from Grafana Cloud `/api/datasources` at bootstrap time | Quinn | Hosted Grafana API; the repo does not duplicate SaaS datasource URLs or UIDs |
-| Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/`  | Rowan  | Provisioned via Grafana provisioning API on bootstrap        |
+| Dashboard ownership              | JSON in `infra/cloud/observability/grafana/dashboards/` (hosted canonical tree) plus any product-owned `apps/<app>/grafana/dashboards/` | Rowan  | Provisioned via Grafana provisioning API on bootstrap; `step_dashboards` uploads both trees |
 | Dashboard definitions (local)    | `infra/grafana/provisioning/dashboards/json/` (existing) | Rowan  | Parity copy for hosted: `tasks-api-red.json`, `openclaw-diagnostics.json` |
 | Dashboard definitions (cloud, new) | `cloud-overview.json`, `db-health.json`, `migration-alerts.json` | Rowan | `infra/cloud/observability/grafana/dashboards/`   |
 | Bootstrap                        | Idempotent local script with subcommand dispatch (validate \| app \| secrets \| dashboards \| alerts \| deploy \| smoke \| evidence \| all)        | Quinn  | `infra/cloud/observability/bootstrap-observability.sh` |
@@ -127,7 +127,13 @@ For the full per-alert response expectation see the "Alert ownership" table belo
 | `openclaw-diagnostics`          | Existing local — ported to hosted for parity | Rowan (engineering) | Quinn |
 | `gymtrack-browser-errors`       | NEW (hosted) — GymTrack browser error events (task e89db27f) | Rowan (engineering) | Quinn |
 
-All dashboard definitions live as JSON in the repo (either `infra/grafana/provisioning/dashboards/json/` for local or `infra/cloud/observability/grafana/dashboards/` for hosted). Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
+All dashboard definitions live as JSON in the repo, in one of three trees:
+
+- `infra/grafana/provisioning/dashboards/json/` — local Grafana.
+- `infra/cloud/observability/grafana/dashboards/` — hosted canonical tree; observability-owned dashboards (metrics, migrations).
+- `apps/<app>/grafana/dashboards/` — product-owned, co-located with the app that owns the signal. `gymtrack-browser-errors.json` lives here (task e89db27f). A dashboard ships with its product rather than in the observability tree so the owning app is the only place that has to change when the signal changes.
+
+`bootstrap-observability.sh` `step_dashboards` uploads the hosted canonical tree **and** any product-owned tree it discovers, so a product that ships an app-owned dashboard needs no separate provisioning step. It currently discovers `apps/gymtrack/grafana/dashboards` explicitly; a second product-owned tree needs a line added there. Changes go through PR review; the bootstrap script provisions them via the Grafana provisioning API.
 
 The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default Prometheus datasource and rewrites repository-local `prometheus` / `${DS_PROMETHEUS}` references while constructing each API payload. The repository deliberately does not carry a Grafana Cloud `datasources.yaml`: file provisioning is not the control plane for the managed instance.
 
@@ -277,6 +283,28 @@ So a bare host, a bare host with a trailing slash, and an `…/otlp/v1` prefix a
 **Ownership and verification (production):**
 
 - Quinn generates `TELEMETRY_RELAY_TOKEN` (Vercel) and `VITE_TELEMETRY_TOKEN` (build-time) with the same value, sets `VITE_TELEMETRY_ENABLED=1` in the Vercel env, and re-runs `bash infra/cloud/observability/bootstrap-observability.sh dashboards` to (re)provision the dashboard.
+
+  **The generated value never appears in a tracked or public artifact.** This repository is public, and a token pasted into a PR body, review, inline comment, task comment, or chat message is permanently published — `gitleaks` scans commit diffs, not comment bodies, so CI stays green on a leaked value. Every step that handles a generated secret is therefore stated as *variable name + destination + mode*, never as a value:
+
+  | variable | destination | how the value gets there |
+  | --- | --- | --- |
+  | `TELEMETRY_RELAY_TOKEN` | GymTrack Vercel project, `production` | written to `infra/cloud/observability/.env.local` (mode `0600`, excluded via `.git/info/exclude`), then `vercel env add TELEMETRY_RELAY_TOKEN production --sensitive` reading from that file — never retyped from a message |
+  | `VITE_TELEMETRY_TOKEN` | GymTrack Vercel project, `production` | the **same** value as above; `--no-sensitive`, because it ships inside the browser bundle by design |
+  | `VITE_TELEMETRY_ENABLED` | GymTrack Vercel project, `production` | literal `1` |
+
+  Confirm both arms hold the same value without printing either one — fingerprints only:
+
+  ```bash
+  for v in TELEMETRY_RELAY_TOKEN VITE_TELEMETRY_TOKEN; do
+    if value=$(grep "^${v}=" infra/cloud/observability/.env.local | cut -d= -f2-) && [ -n "$value" ]; then
+      printf '%s %s\n' "$v" "$(printf '%s' "$value" | shasum -a 256 | cut -c1-8)"
+    else
+      printf '%s MISSING (absent or empty)\n' "$v"
+    fi
+  done
+  ```
+
+  Equal fingerprints mean the pair is wired consistently. Unequal fingerprints mean one arm was sourced from somewhere other than the local file, and that arm must be re-set from the file. A `MISSING` line is not a pass: an absent arm must never be fingerprinted, because the digest of empty input is a fixed constant, so an absent variable and an empty one would otherwise print the same `e3b0c442` and two missing arms would read as a consistent pair. Write both arms from one fresh value first, then run this check. If an older value was ever pasted into a public artifact, rotate rather than reuse it: nothing should be provisioned from a value that has appeared in a thread.
 - Quinn induces a wrong-password sign-in on the production host, then captures a real uncaught browser exception by pasting this into the devtools console on that same production page:
 
   ```js

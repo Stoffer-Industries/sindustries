@@ -7,7 +7,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 process.env.TASKS_API_APPROVAL_SERVICE_CREDENTIALS = JSON.stringify([
   { token: 'tom-service-token-long-enough', actor: 'Tom', approvalTypes: ['spec', 'accepted', 'tech_design', 'qa_agent'] },
   { token: 'quinn-service-token-long-enough', actor: 'Quinn', approvalTypes: ['tech_design'] },
-  { token: 'lobster-service-token-long-enough', actor: 'feature_task_lobster', approvalTypes: ['qa_agent'] }
+  { token: 'lobster-service-token-long-enough', actor: 'feature_task_lobster', approvalTypes: ['qa_agent'] },
+  // Ash is the canonical `qa_agent` writer (`ACTOR_PERMISSIONS` in
+  // src/middleware/approvalAuth.ts gives the *lobster* an empty set as of
+  // task d9cd8a83 - it no longer writes approval rows). The AC-evidence gate
+  // is exercised through Ash because Ash is who mints and spends the
+  // attestation in production.
+  { token: 'ash-service-token-long-enough', actor: 'Ash', approvalTypes: ['qa_agent'] }
 ]);
 
 const prismaMock = {
@@ -26,6 +32,7 @@ const TASK_ID = '11111111-1111-1111-1111-111111111111';
 const TOM_TOKEN = 'tom-service-token-long-enough';
 const QUINN_TOKEN = 'quinn-service-token-long-enough';
 const LOBSTER_TOKEN = 'lobster-service-token-long-enough';
+const ASH_TOKEN = 'ash-service-token-long-enough';
 const TOM_SESSION = 'tom-browser-session-long-enough';
 const activeTask = {
   id: TASK_ID,
@@ -37,6 +44,21 @@ const activeTask = {
   workflowHandoffReason: null
 };
 function approval(overrides = {}) { return { id: 'a1', taskId: TASK_ID, type: 'spec', owner: 'Tom', state: 'approved', approvedAt: new Date('2026-08-08T04:00:00Z'), revokedAt: null, note: null, createdAt: new Date(), updatedAt: new Date(), ...overrides }; }
+
+// A well-formed, fresh attestation, exactly as `feature-task
+// mechanical-evidence-check` would mint it. Task ad8346ee made this mandatory
+// for every `qa_agent` write, so tests that grant qa_agent for reasons *other*
+// than the evidence gate must supply one — the gate is not their subject.
+function freshAttestation(overrides = {}) {
+  return {
+    prNumber: 836,
+    headSha: 'deb991e0739fedf0e6952643cad05bdafec54b37',
+    acSectionDigest: '9f2c4a1b8e6d3057fa1c92b4d8e07f3651ca90bd2e4f18a7c3d5b6e9024af71',
+    failures: [],
+    verifiedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
 function auth(token = TOM_TOKEN) { return { Authorization: `Bearer ${token}` }; }
 
 describe('task approval boundary', () => {
@@ -88,12 +110,122 @@ describe('task approval boundary', () => {
 
     prismaMock.taskApproval.findUnique.mockReset().mockResolvedValue(null);
     prismaMock.taskApproval.upsert.mockReset().mockResolvedValue(approval({ type: 'qa_agent', owner: 'Tom' }));
-    const tomQa = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'qa_agent' });
+    const tomQa = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'qa_agent', attestation: freshAttestation() });
     expect(tomQa.status).toBe(200);
     expect(prismaMock.taskApproval.upsert.mock.calls[0][0].create.owner).toBe('Tom');
 
     const quinnSpec = await request(app).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(QUINN_TOKEN)).send({ type: 'spec' });
     expect(quinnSpec.status).toBe(403);
+  });
+
+  // --- AC1 of task ad8346ee: qa_agent is gated on live AC evidence --------
+  //
+  // The gate refuses the WRITE. Every case below asserts both the 409 AND that
+  // no approval row was persisted — a regression that returned the right status
+  // but still wrote the row would leave the incident fully unmitigated, which
+  // is exactly the shape of task 39667e62.
+  describe('qa_agent AC-evidence gate', () => {
+    function armTask() {
+      prismaMock.task.findUnique.mockResolvedValue(activeTask);
+      prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+      prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'qa_agent', owner: 'Ash' }));
+      prismaMock.taskComment.create.mockResolvedValue({});
+    }
+
+    it('refuses a qa_agent approval carrying no attestation at all', async () => {
+      armTask();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('QA_EVIDENCE_GATE_BLOCKED');
+      expect(res.body.error.details.reason).toBe('attestation_missing');
+      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the live mechanical check reported failures, and returns them', async () => {
+      armTask();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
+        type: 'qa_agent',
+        attestation: freshAttestation({ failures: ['AC2 cites file: not in the diff', 'AC3 has no evidence annotation'] })
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('QA_EVIDENCE_GATE_BLOCKED');
+      expect(res.body.error.details.reason).toBe('attestation_reports_failures');
+      // The failures must reach the caller so it can post a useful
+      // [qa-agent-blocked] comment rather than just "blocked".
+      expect(res.body.error.details.failures).toEqual(['AC2 cites file: not in the diff', 'AC3 has no evidence annotation']);
+      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses a stale attestation past the 15-minute replay guard', async () => {
+      armTask();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
+        type: 'qa_agent',
+        attestation: freshAttestation({ verifiedAt: new Date(Date.now() - 16 * 60 * 1000).toISOString() })
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error.details.reason).toBe('attestation_expired');
+      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses an attestation missing the AC3 digest, not just the head SHA', async () => {
+      // The two-field model (design decision D2) is load-bearing: a SHA-only
+      // attestation could not fire AC3 for the 39667e62 body-edit incident.
+      armTask();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({
+        type: 'qa_agent',
+        attestation: { headSha: 'deb991e0739fedf0e6952643cad05bdafec54b37', failures: [], verifiedAt: new Date().toISOString() }
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error.details.reason).toBe('attestation_malformed');
+      expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+    });
+
+    it('accepts a fresh failure-free attestation and pins ALL THREE values onto the row (AC2)', async () => {
+      armTask();
+      const attestation = freshAttestation();
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation });
+      expect(res.status).toBe(200);
+      const written = prismaMock.taskApproval.upsert.mock.calls[0][0].create;
+      // `verifiedPrNumber` must be asserted here specifically: the gate
+      // validates it, so a regression that drops it from the write path would
+      // still validate, still 200, and still leave the pin dead — which is
+      // exactly how it stayed dead through the previous review.
+      expect(written.verifiedPrNumber).toBe(attestation.prNumber);
+      expect(written.verifiedPrHeadSha).toBe(attestation.headSha);
+      expect(written.verifiedAcSectionDigest).toBe(attestation.acSectionDigest);
+    });
+
+    it('pins the PR number alongside the other pins on re-approval', async () => {
+      // The #803 -> replacement-PR swap is only detectable if the row records
+      // *which* PR was attested, so the number must survive the update arm too,
+      // not just the create arm.
+      armTask();
+      const later = freshAttestation({ prNumber: 904, headSha: 'aaaa111122223333444455556666777788889999', acSectionDigest: 'deadbeef' });
+      await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: freshAttestation() });
+      prismaMock.taskApproval.upsert.mockClear();
+      await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth(ASH_TOKEN)).send({ type: 'qa_agent', attestation: later });
+      const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
+      expect(update.verifiedPrNumber).toBe(904);
+      expect(update.verifiedPrHeadSha).toBe('aaaa111122223333444455556666777788889999');
+      expect(update.verifiedAcSectionDigest).toBe('deadbeef');
+    });
+
+    it('does NOT gate non-qa_agent approvals (design decision D4)', async () => {
+      armTask();
+      prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'accepted', owner: 'Tom' }));
+      const res = await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'accepted' });
+      expect(res.status).toBe(200);
+    });
+
+    it('clears the pins to null when a non-qa_agent type reuses the row shape', async () => {
+      armTask();
+      prismaMock.taskApproval.upsert.mockResolvedValue(approval({ type: 'accepted', owner: 'Tom' }));
+      await request(createApp()).post(`/api/v1/tasks/${TASK_ID}/approvals`).set(auth()).send({ type: 'accepted' });
+      const update = prismaMock.taskApproval.upsert.mock.calls[0][0].update;
+      expect(update.verifiedPrNumber).toBeNull();
+      expect(update.verifiedPrHeadSha).toBeNull();
+      expect(update.verifiedAcSectionDigest).toBeNull();
+    });
   });
 
   it('rejects a body owner and derives owner from the credential', async () => {
@@ -434,5 +566,77 @@ describe('TASKS_API_APPROVAL_SERVICE_CREDENTIALS module-load validation', () => 
   it('loads cleanly when credentials env is a valid array', async () => {
     const valid = JSON.stringify([{ token: 'a'.repeat(20), actor: 'Tom', approvalTypes: ['spec', 'accepted'] }]);
     await expect(importApprovalAuthWith(valid)).resolves.toBeDefined();
+  });
+});
+
+// --- AC3 of task ad8346ee: revoke-only permission for the lobster ---------
+//
+// AC3 requires the lobster to revoke a `qa_agent` approval whose AC-evidence
+// pins no longer match the PR. The lobster must never be able to GRANT one:
+// that is the gate AC1 exists to police, and handing it grant rights would
+// defeat the whole task. These tests pin both halves of that asymmetry.
+describe('revoke-only permission (AC3 of task ad8346ee)', () => {
+  function armRevoke() {
+    prismaMock.task.findUnique.mockResolvedValue({ ...activeTask, status: 'doing' });
+    prismaMock.taskApproval.findUnique.mockResolvedValue(
+      approval({ type: 'qa_agent', owner: 'Ash', state: 'approved' })
+    );
+    prismaMock.taskApproval.update.mockResolvedValue(
+      approval({ type: 'qa_agent', owner: 'Ash', state: 'revoked' })
+    );
+    prismaMock.taskComment.create.mockResolvedValue({});
+  }
+
+  beforeEach(() => {
+    prismaMock.taskApproval.update.mockReset();
+    prismaMock.task.findUnique.mockReset();
+  });
+
+  it('lets the lobster REVOKE a qa_agent approval', async () => {
+    armRevoke();
+    const res = await request(createApp())
+      .delete(`/api/v1/tasks/${TASK_ID}/approvals/qa_agent`)
+      .set(auth(LOBSTER_TOKEN));
+    expect(res.status).toBe(200);
+    expect(prismaMock.taskApproval.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: 'revoked' }) })
+    );
+  });
+
+  it('still refuses the lobster a qa_agent GRANT', async () => {
+    // The asymmetry is the whole point: revoke-only, never grant. A future
+    // edit that collapsed both into one permission set would silently let
+    // the lobster approve the gate it is supposed to police.
+    armRevoke();
+    prismaMock.taskApproval.findUnique.mockResolvedValue(null);
+    const res = await request(createApp())
+      .post(`/api/v1/tasks/${TASK_ID}/approvals`)
+      .set(auth(LOBSTER_TOKEN))
+      .send({ type: 'qa_agent', attestation: freshAttestation() });
+    expect(res.status).toBe(403);
+    expect(prismaMock.taskApproval.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not widen the lobster beyond qa_agent revocation', async () => {
+    // Revoke-only is scoped to exactly one type. `spec` revocation stays with
+    // Quinn's reconciler; the lobster gains nothing else.
+    armRevoke();
+    const res = await request(createApp())
+      .delete(`/api/v1/tasks/${TASK_ID}/approvals/spec`)
+      .set(auth(LOBSTER_TOKEN));
+    expect(res.status).toBe(403);
+    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('does not widen the lobster into accepted or tech_design either', async () => {
+    armRevoke();
+    for (const type of ['accepted', 'tech_design']) {
+      prismaMock.taskApproval.update.mockClear();
+      const res = await request(createApp())
+        .delete(`/api/v1/tasks/${TASK_ID}/approvals/${type}`)
+        .set(auth(LOBSTER_TOKEN));
+      expect(res.status).toBe(403);
+    }
+    expect(prismaMock.taskApproval.update).not.toHaveBeenCalled();
   });
 });

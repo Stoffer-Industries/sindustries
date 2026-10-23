@@ -1,10 +1,10 @@
 # Approvals
 
 **Type:** System reference (data plane + workflow bridges)
-**Last updated:** 2026-08-12
+**Last updated:** 2026-10-22
 **Owner:** Rowan (engineering) · Tom (product approval gates) · Quinn (workflow orchestration)
 **Repos:** `Stoffer-Industries/sindustries`
-**Related task:** `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` (Remove legacy task-description approval marker)
+**Related task:** `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` (Remove legacy task-description approval marker) · `ad8346ee-46fc-4bc7-a9b0-a8c31acfb04f` (`qa_agent` evidence attestation gate)
 
 ---
 
@@ -30,14 +30,15 @@ Cross-cutting references:
 
 1. [Architecture](#architecture)
 2. [Data plane: structured `TaskApproval`](#data-plane-structured-taskapproval)
-3. [Workflow bridges](#workflow-bridges)
-4. [Legacy task-description approval marker (removed)](#legacy-task-description-approval-marker-removed)
-5. [Cutover plan](#cutover-plan)
-6. [Snapshot format](#snapshot-format)
-7. [Rollback procedure](#rollback-procedure)
-8. [Regression coverage](#regression-coverage)
-9. [Operational guardrails](#operational-guardrails)
-10. [Related specs, tasks, and PRs](#related-specs-tasks-and-prs)
+3. [`qa_agent` evidence attestation gate](#qa_agent-evidence-attestation-gate)
+4. [Workflow bridges](#workflow-bridges)
+5. [Legacy task-description approval marker (removed)](#legacy-task-description-approval-marker-removed)
+6. [Cutover plan](#cutover-plan)
+7. [Snapshot format](#snapshot-format)
+8. [Rollback procedure](#rollback-procedure)
+9. [Regression coverage](#regression-coverage)
+10. [Operational guardrails](#operational-guardrails)
+11. [Related specs, tasks, and PRs](#related-specs-tasks-and-prs)
 
 ---
 
@@ -92,6 +93,64 @@ See [`docs/systems/tasks.md` § TaskApproval](../systems/tasks.md#taskapproval) 
 - `state` transitions are append-only. A revoked row stays as a row; lifecycle code never deletes it.
 - The API rejects writes from credentials that do not match the policy-declared owner.
 - Lobster audit comments `[brain_spec_approved_by_tom]`, `[tech-design-approved] true`, and `[qa-ac-verified] true` are the ONLY comment shape that produces a `TaskApproval` row. Other comment text is informational and never satisfies a gate.
+
+---
+
+## `qa_agent` evidence attestation gate
+
+A `qa_agent` approval is an assertion that a PR's acceptance evidence is real. Before task `ad8346ee` (PR #863), nothing connected that assertion to the PR's *current* state: the grant and the lobster's mechanical AC-evidence check were independent, and neither re-checked the other. Task `39667e62` is what that cost — PR #803's AC-evidence section was blanked to `"test body update"` after the approval was granted, and the task sat silently parked in `doing` for ~10 days.
+
+The gate closes that gap in three places. **Read this section before touching anything that writes or re-checks a `qa_agent` approval.**
+
+### Ownership boundary: one check, two halves
+
+The mechanical AC-evidence check has exactly **one** implementation: `ac_parsing::mechanical_evidence_failures` in the Rust `feature-task` crate. There is deliberately no TypeScript port — that would be a third implementation alongside Ash's `verify.ts`, and a guaranteed-drift bug.
+
+Because of that, the check is split across a boundary that is worth stating plainly:
+
+| Half | Lives in | Responsibility |
+|---|---|---|
+| **Compute** | `feature-task mechanical-evidence-check` (Rust) | Runs the real check against a PR head and prints an attestation. |
+| **Enforce** | `POST /tasks/:id/approvals` (`qaEvidenceAttestation.ts`) | Refuses a grant that arrives without a matching, fresh attestation. |
+| **Detect** | `verify_delivery` (`qa_evidence_drift.rs`) | Re-checks an already-granted approval against the PR's live state. |
+
+The Tasks API **does not** recompute the check — it has no GitHub access by design and must not grow one. It refuses grants; it does not verify them. The re-check lives in the lobster because that is where the PR fetchers already are.
+
+### Enforcement is structural, not advisory
+
+Enforcement sits at the single `POST /tasks/:id/approvals` choke point rather than inside Ash's workflow. A wiring that lives only in one agent's workflow reopens the "future writer forgets to call it" hole; a gate at the write path cannot be bypassed by omission.
+
+Mint centrally. `agents/skills/ops/tasks-api/tasks_api_client.py` — the only client that writes approvals — runs `mechanical-evidence-check` and attaches the attestation *before* the POST, so the gate and its only writer cannot be deployed apart.
+
+### Data contract
+
+`TaskApproval` carries three nullable evidence pins, added by migration `20261022140000_add_qa_approval_evidence_pins`:
+
+| Field | Records |
+|---|---|
+| `verifiedPrNumber` | **Which** PR was verified (positive integer). Required at the gate. |
+| `verifiedPrHeadSha` | The PR head SHA at verification time. |
+| `verifiedAcSectionDigest` | SHA-256 over the normalized AC-evidence **section**. |
+
+An approval body carries `attestation: { prNumber, headSha, acSectionDigest, failures, verifiedAt }`. On refusal the API returns `409` with `error.code = QA_EVIDENCE_GATE_BLOCKED` and `error.details = { reason, failures }`. The reasons are machine-readable so a caller can distinguish "mint a fresh attestation" (`attestation_expired`) from "fix the evidence" (`attestation_reports_failures`) and post the right `[qa-agent-blocked]` comment without a second round trip. **`failures` is carried verbatim for exactly that reason.**
+
+**Two pins, not one — because the incident was a body edit.** PR #803's head SHA never moved; only its body did. A SHA-only pin is structurally blind to the precise failure this gate exists to catch. Drift fires on `verifiedAcSectionDigest` diverging just as readily as on `verifiedPrHeadSha`.
+
+### Callers must branch on the verdict, never on `$?`
+
+`main()` in `mechanical-evidence-check` prints the attestation and returns `Ok(())` **regardless of `failures`**. The subcommand therefore **exits 0 on a failing check.** A caller that shells out and branches on the exit status alone will approve against a failing attestation and reproduce the exact incident this gate closes. Branch on the parsed `failures` array.
+
+### Drift detection (AC3)
+
+`qa_evidence_drift.rs` is the pure detect half — no I/O, no clock, no API — so a ten-day silent failure is testable without a live PR. The effectful half (`verify_delivery::invalidate_stale_qa_approval`) revokes the approval and sets the task's assignee to `attentionOwners[0]` with a reason citing **which** field diverged. Note the routing distinction: this is an active attention-owner signal, not the passive assignee-queue fallback used for ordinary progress checklists.
+
+**Legacy rows are stale, never trusted.** `NULL` pins mean "nothing was verified" — exactly the state `39667e62` left behind — so `NULL` reads as `EvidenceDrift::Unpinned` and re-routes. It never panics and never blocks; treating `NULL` as stale is the fail-safe direction.
+
+All three pins move together on re-approval, and a missing PR number is written as an explicit `null` rather than an omitted key. Both are load-bearing: Prisma strips `undefined`, so an omitted pin would silently leave the **previous** row's value intact — a stale PR number surviving a fresh attestation is worse than no PR number at all.
+
+### Known gap
+
+**Single-use within the 15-minute TTL is not enforced.** An attestation can in principle be replayed inside the window; replay is idempotent (the route's existing same-owner/same-note branch returns the existing row) rather than rejected. Closing it needs the mint timestamp persisted on the row, which is a distinct concern from the three pins — `verifiedPrNumber` records *identity*, not *single-use*. Flagged rather than quietly widened.
 
 ---
 
@@ -320,3 +379,7 @@ Tasks API unit tests. The legacy-marker-suppression invariants in [`legacyApprov
 - PR #422 — WS2: Lobster-side cleanup
 - PR #TBD — WS3: Test sweep + lint script + this doc (this PR)
 - Task `tasks-api-native-approvals` (WS0, separate task) — initial structured `TaskApproval` table and migration bridge
+- Task `ad8346ee-46fc-4bc7-a9b0-a8c31acfb04f` — Gate Ash's `qa_agent` approval on live AC-evidence + SHA-pinned invalidation
+- Task `39667e62` — the incident that motivated the gate (PR #803 body blanked post-approval)
+- PR #863 — compute + enforce + producer + invalidation
+- `docs/specs/qa-agent-evidence-gate-tech-design.md` — tech design (D1 ownership boundary, D2 pin model)

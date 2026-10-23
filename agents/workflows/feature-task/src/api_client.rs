@@ -180,13 +180,18 @@ pub(crate) fn api_reconcile_attention<T: for<'de> Deserialize<'de>>(
 /// DELETE wrapper used to revoke a structured TaskApproval row
 /// (e.g. `DELETE /tasks/:id/approvals/spec` when spec drift is detected).
 pub(crate) fn api_delete(base_url: &str, path: &str) -> Result<Value> {
-    let token = std::env::var("TASKS_API_APPROVAL_TOKEN")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            anyhow!("TASKS_API_APPROVAL_TOKEN is required to revoke structured approvals")
-        })?;
+    // Prefers the lobster's own service credential over the shared approval
+    // token. AC3's invalidation pass revokes through this path, and it runs
+    // as `feature_task_lobster` — which has revoke-only rights on `qa_agent`
+    // and no grant rights at all. Reading only TASKS_API_APPROVAL_TOKEN would
+    // make the pass depend on a token the lobster stage does not otherwise
+    // carry, and would revoke under whichever actor that token names rather
+    // than the one actually performing the check.
+    let token = lobster_service_token().ok_or_else(|| {
+        anyhow!(
+            "FEATURE_TASK_LOBSTER_TOKEN (or TASKS_API_APPROVAL_TOKEN) is required to revoke structured approvals"
+        )
+    })?;
     let url = format!("{}{}", base_url.trim_end_matches('/'), path);
     handle_api_result(
         ureq::delete(&url)

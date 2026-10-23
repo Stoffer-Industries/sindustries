@@ -102,6 +102,14 @@ _MAX_PARALLEL_PR_FETCH_WORKERS = 8
 # Module-level flag toggled by the --verbose CLI flag. Tests reset this in
 # setUp/tearDown so they don't leak verbosity across cases.
 _VERBOSE = False
+# Why PR hydration degraded, or None when it did not. Set by whichever branch
+# trips inside `fetch_github_prs` and read once by `main()`. This has to cover
+# BOTH causes — the unprovisioned precondition AND a provisioned identity whose
+# `gh api` call fails — because a caller reading the JSON envelope cannot tell a
+# revoked/expired token from "genuinely no open PRs" without it. Before this
+# flag existed the provisioned-but-failing case propagated out loud; degrading
+# it to a silent `[]` would have traded a loud crash for a blind review queue.
+_PR_HYDRATION_DEGRADE_REASON: str | None = None
 
 
 class _GhApiTimeout(Exception):
@@ -771,10 +779,72 @@ def _fetch_reviews_tolerant(
         raise
 
 
-def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
-    """Read open PR state with the agent's own GitHub credentials; never mutate."""
+def _is_identity_provisioned(agent: str) -> bool:
+    """True when the agent's declared GitHub profile dir OR token env is present.
+
+    `GITHUB_IDENTITIES` is a static map; adding an entry is a code change that
+    assumes a credential nobody may have provisioned yet (profile dir created,
+    token set in ~/.openclaw/.env, account actually existing on GitHub). This
+    checks the two locally-verifiable preconditions so hydration can degrade
+    instead of raising a bare auth traceback.
+
+    Either precondition alone is sufficient, so this is `or` and NOT `and`:
+    some agents authenticate purely through their `~/.config/gh-<agent>` profile
+    with no exported token env (ROWAN_GITHUB_TOKEN is unset in this environment;
+    Rowan's provisioning comes solely from the profile dir), while others set a
+    token with no profile dir. Do not tighten this to `and` — doing so marks a
+    profile-only agent unprovisioned and silently returns `[]` for every
+    PR-derived section, blinding the review queue behind one stderr WARN. See
+    infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    """
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
-    prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
+    profile_exists = pathlib.Path(config_dir).expanduser().is_dir()
+    token_set = bool(os.environ.get(token_env))
+    return profile_exists or token_set
+
+
+def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
+    """Read open PR state with the agent's own GitHub credentials; never mutate.
+
+    Returns `[]` (with a WARN log) instead of raising when the agent's GitHub
+    identity is not provisioned or the hydration call otherwise fails on auth.
+    This is enrichment layered on top of the Tasks API queue, not the queue
+    itself — a missing/broken GitHub profile should degrade queue richness,
+    never destroy the queue. See
+    infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    """
+    global _PR_HYDRATION_DEGRADE_REASON
+    if not _is_identity_provisioned(agent):
+        _log(
+            f"GitHub identity for {agent!r} is not provisioned (no profile dir, "
+            f"no token env); skipping PR hydration. See "
+            f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+            verbose_only=False,
+        )
+        _PR_HYDRATION_DEGRADE_REASON = "unprovisioned"
+        return []
+    _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
+    try:
+        prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
+    except (_GhApiTimeout, subprocess.CalledProcessError) as exc:
+        # `_GhApiTimeout` is a plain Exception, NOT a CalledProcessError
+        # subclass, and `_gh_api` raises it on TimeoutExpired. The two classes
+        # share no attributes, so the reason is built per-branch: reading
+        # `exc.returncode` unconditionally would AttributeError *inside* the
+        # handler and take the whole queue down, which is the exact failure
+        # class this guard exists to prevent.
+        if isinstance(exc, _GhApiTimeout):
+            reason = f"timed out after {_GH_API_TIMEOUT_SECONDS:.0f}s"
+        else:
+            reason = f"exit {exc.returncode}"
+        _log(
+            f"gh api failure hydrating PRs for {agent!r} ({reason}); "
+            f"skipping PR hydration. See "
+            f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+            verbose_only=False,
+        )
+        _PR_HYDRATION_DEGRADE_REASON = f"gh-api-failure: {reason}"
+        return []
     hydrated = []
     for summary in prs:
         author = str((summary.get("user") or {}).get("login") or "").lower()
@@ -817,8 +887,9 @@ def fetch_linked_delivery_prs(
         """Hydrate one delivery URL's PR (detail + reviews + check-runs).
 
         Returns `(url, detail_or_None)`. `None` is returned (and a WARN line is
-        printed) on per-URL `_GhApiTimeout`; the caller continues hydrating
-        other URLs in the fan-out rather than aborting the whole call.
+        printed) on per-URL `_GhApiTimeout` or `gh api` auth failure; the
+        caller continues hydrating other URLs in the fan-out rather than
+        aborting the whole call.
         """
         pr_number = _pull_number_from_url(url)
         if pr_number is None:
@@ -835,6 +906,13 @@ def fetch_linked_delivery_prs(
         except _GhApiTimeout as exc:
             _log(
                 f"gh api timeout hydrating PR #{pr_number} ({url}); skipping: {exc}",
+                verbose_only=False,
+            )
+            return url, None
+        except subprocess.CalledProcessError as exc:
+            _log(
+                f"gh api auth failure hydrating PR #{pr_number} ({url}, exit "
+                f"{exc.returncode}); skipping",
                 verbose_only=False,
             )
             return url, None
@@ -1002,10 +1080,24 @@ def main() -> None:
     global _VERBOSE, _GH_API_CALL_COUNT
     _VERBOSE = args.verbose
     _GH_API_CALL_COUNT = 0
+    global _PR_HYDRATION_DEGRADE_REASON
+    _PR_HYDRATION_DEGRADE_REASON = None
     agent_key = args.assignee.lower()
     if agent_key not in GITHUB_IDENTITIES:
         raise SystemExit(
             f"unsupported agent {args.assignee!r}; expected Rowan, Ivy, Quinn, Ash, Lox, or Tom"
+        )
+    # Report identity provisioning up front on stderr. The caller-visible
+    # signal is `prHydrationDegraded` below, which also covers a *provisioned*
+    # identity whose `gh api` call fails — see
+    # infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    identity_not_provisioned = not _is_identity_provisioned(args.assignee)
+    if identity_not_provisioned:
+        _log(
+            f"GitHub identity for {args.assignee!r} is not provisioned (no "
+            f"profile dir, no token env); PR-derived queue sections will be "
+            f"empty. See infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+            verbose_only=False,
         )
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
@@ -1025,6 +1117,13 @@ def main() -> None:
         workflow_gate_owner_tasks=workflow_gate_owner_tasks,
         workflow_gate_owner=args.assignee,
     )
+    # Report the degrade *reason*, not just that it happened. Both causes land
+    # here: the unprovisioned precondition and a provisioned identity whose
+    # `gh api` call failed (revoked token, expiry, transient network). The
+    # marker is what stops a caller reading an empty PR section as "no open
+    # PRs" — see infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+    if _PR_HYDRATION_DEGRADE_REASON is not None:
+        queue["prHydrationDegraded"] = _PR_HYDRATION_DEGRADE_REASON
     if args.json:
         print(json.dumps(queue, indent=2))
     else:
