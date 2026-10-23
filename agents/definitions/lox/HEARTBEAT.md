@@ -57,20 +57,30 @@ On every heartbeat:
 2. Read `brain/state/lox-incident-state.json` if it exists — **via the bounded summary, never the raw file**:
 
    ```bash
-   python3 infra/lox_incident_state.py summary
+   cd ~/.openclaw/workspace && python3 infra/lox_incident_state.py summary
    ```
 
    The raw file is ~0.5 MB of operator prose. Reading it directly burns ~120k
    tokens of context on every tick, which is what pushed Lox's own heartbeat past
    its 600s budget (6 consecutive timeouts on 2026-10-24). `summary` renders the
-   same 184 incidents in ~6 KB.
+   same ~187 incidents in ~6 KB — active entries by default; pass `--all` to
+   include terminal (`resolved` / `false_positive`) entries.
 
    For the cross-agent roll-up (both agents' state files, already bounded to
    ~540 bytes) use:
 
    ```bash
-   cd codebases/sindustries && python3 -m agents.lib.incident_queue
+   cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue
    ```
+
+   **Anchor these commands to `~/.openclaw/workspace`.** Lox's shell cwd is
+   `~/.openclaw/workspace/agents/lox` (per `openclaw.json`), not the workspace
+   root, so relative paths (`infra/...`, `codebases/sindustries`) fail there.
+
+   **If a bounded read fails, report the error and stop — never fall back to
+   reading the raw state file.** A failed bounded read is a path/tool problem,
+   not a reason to spend 120k tokens; that fallback is exactly what caused the
+   2026-10-24 timeout cluster.
 
    Full history lives in `brain/state/archive/`. The live file is a triage
    artifact, not an archive — see "Bounded state writes" below.
@@ -84,7 +94,7 @@ On every heartbeat:
 5. For each unresolved item:
    - If state is `resolved`, skip it.
    - If state is `repair_attempted` or `blocked` and `nextRetryAt` is still in the future, skip it.
-   - Otherwise, look up the runbook in `~/.openclaw/workspace/docs/infra/runbooks/` (operational runbooks no longer live in this repo — `codebases/sindustries/` is the Edge-managed canonical checkout, see PR #583).
+   - Otherwise, look up the runbook in `~/.openclaw/workspace/docs/infra/runbooks/` (operational runbooks no longer live in this repo — `codebases/sindustries/` is the Edge-managed canonical checkout, see PR #583). Workspace-local runbooks are indexed in `~/.openclaw/workspace/infra/RUNBOOKS.md`.
 6. For each unresolved item that maps to a safe automatic runbook, run that runbook's status command.
 7. If the status is healthy, write/update state as `resolved` and stay quiet unless another item needs action.
 8. If the status is unhealthy and the runbook says repair is safe, run the repair command once.
@@ -176,12 +186,14 @@ unbounded prose there is a self-inflicted timeout risk.
 When the live file exceeds ~600 KB, run:
 
 ```bash
-python3 infra/lox_incident_state.py compact
+cd ~/.openclaw/workspace && python3 infra/lox_incident_state.py compact
 ```
 
 It preserves every incident key and every machine-readable field, archives the
 original free text to `brain/state/archive/`, backs up the full original, and
-writes atomically. Runbook: `infra/runbooks/incident-state-file-context-bloat.md`.
+writes atomically. Runbook:
+`~/.openclaw/workspace/infra/runbooks/incident-state-file-context-bloat.md`
+(workspace repo — indexed in `~/.openclaw/workspace/infra/RUNBOOKS.md`).
 
 ## State Shape
 
@@ -206,8 +218,11 @@ writes atomically. Runbook: `infra/runbooks/incident-state-file-context-bloat.md
 - Never run macOS updates, OpenClaw updates, or gateway restarts from heartbeat.
 - If the safe repair path does not match the observed failure, report and stop.
 - Never read the raw incident state file on heartbeat. Use
-  `python3 infra/lox_incident_state.py summary` (or
-  `python3 -m agents.lib.incident_queue`). Raw reads cost ~120k tokens per tick.
+  `cd ~/.openclaw/workspace && python3 infra/lox_incident_state.py summary` (or
+  `cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue`).
+  Raw reads cost ~120k tokens per tick.
+- Never fall back to the raw state file when a bounded read fails. Report the
+  error and stop — that fallback is what caused the 2026-10-24 timeout cluster.
 - Never append to `lastAction` / `notes` without truncating first. Unbounded
   growth in the state file is what caused the 2026-10-24 heartbeat timeout
   cluster. See "Bounded state writes".
