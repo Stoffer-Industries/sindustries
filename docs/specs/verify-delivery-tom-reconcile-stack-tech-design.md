@@ -1,8 +1,8 @@
 ---
-status: draft
+status: shipped
 task_id: 7ae48b33-ff2c-4689-8876-b9b83d7b8dcb
 product_spec: n/a
-shipped_pr: null
+shipped_pr: (pending — implementation opened from branch `task-7ae48b33-verify-delivery-tom-reconcile`; PR number added on merge)
 shipped_date: null
 ---
 

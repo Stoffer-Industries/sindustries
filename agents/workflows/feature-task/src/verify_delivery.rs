@@ -45,7 +45,9 @@ use crate::{
     api_client::{add_comment, read_envelope},
     cli_utils,
     lobster_state::{is_past, write_state},
-    spec_check_ready::{reconcile_workflow_attention, transition_or_block},
+    spec_check_ready::{
+        attention_stack_after_qa_revocation, reconcile_workflow_attention, transition_or_block,
+    },
     Envelope, StageArgs, Task,
 };
 use anyhow::Result;
@@ -390,12 +392,13 @@ fn revoke_and_route_stale_qa_approval(
         return Ok(true);
     }
     if let Some(owner) = assignee {
-        let mut desired = vec![owner];
-        for existing in &env.task.attention_owners {
-            if !desired.iter().any(|slot| slot.eq_ignore_ascii_case(existing)) {
-                desired.push(existing.clone());
-            }
-        }
+        // The stack shape is not a local detail: the Tasks API rejects a
+        // `doing` task whose stack puts Tom anywhere but sole position 0, so
+        // building it inline here 409'd on every tick for any task already
+        // escalated to Tom. The rule lives in `spec_check_ready` beside the
+        // sibling terminal-stack helpers and is pinned against the server
+        // expression by its unit test.
+        let desired = attention_stack_after_qa_revocation(&env.task, &owner);
         api_client::api_reconcile_attention::<Task>(&args.base_url, &env.task.id, desired, &note)?;
     }
     api_client::api_delete(
