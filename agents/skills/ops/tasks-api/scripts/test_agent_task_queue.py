@@ -624,7 +624,43 @@ class AgentTaskQueueTest(unittest.TestCase):
         self.assertEqual([], queue["mergeCandidates"])
 
     def test_quinn_authored_pr_can_merge_after_non_self_approval(self):
+        # The non-self approver must be a real blocking reviewer. Tom is
+        # visibility-only (see VISIBILITY_ONLY_REVIEWERS), so he is NOT a valid
+        # merge gate here -- covered separately below.
         pr = pull_request(
+            user={"login": "quinnstoffer"},
+            reviews=[
+                {
+                    "user": {"login": "rowanstoffer"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        queue = agent_task_queue.classify_github_prs("Quinn", [pr])
+        self.assertEqual(["rowanstoffer"], queue["mergeCandidates"][0]["approvedBy"])
+
+    def test_tom_visibility_approval_alone_does_not_unblock_quinn_pr(self):
+        # pr-process/SKILL.md: "do not wait for Tom's PR approval". Tom's
+        # review exists for inbox visibility and must never gate merge
+        # eligibility, so a Tom-only approval yields no merge candidate.
+        pr = pull_request(
+            user={"login": "quinnstoffer"},
+            reviews=[
+                {
+                    "user": {"login": "Stoff81"},
+                    "state": "APPROVED",
+                    "submitted_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        self.assertEqual(
+            [], agent_task_queue.classify_github_prs("Quinn", [pr])["mergeCandidates"]
+        )
+
+    def test_tom_approval_title_marker_opts_back_into_merge_gating(self):
+        pr = pull_request(
+            title="fix(tasks-api): tighten gate (Tom-approval)",
             user={"login": "quinnstoffer"},
             reviews=[
                 {
@@ -636,7 +672,6 @@ class AgentTaskQueueTest(unittest.TestCase):
         )
         queue = agent_task_queue.classify_github_prs("Quinn", [pr])
         self.assertEqual(["stoff81"], queue["mergeCandidates"][0]["approvedBy"])
-
 
     # ---- attentionOwners paging (task d8fbe750) ----
 
