@@ -269,6 +269,36 @@ Update this table whenever any of the three artifacts changes; the `Last read-ba
 
 ---
 
+## Merge-gate required-job coverage (task `5674a6c1`)
+
+The aggregate `merge gate` job is the **sole** status check on `main`: repository ruleset `13513816` (`main`, `enforcement: active`) requires exactly one `required_status_checks` entry, and classic branch protection on `main` does not exist (404). A verification job that is absent from `merge-gate.needs` therefore blocks neither the merge nor any of the ten deployment jobs, because each deployment job gates only on `needs.merge-gate.result == 'success'`.
+
+This was not a theoretical gap. `gh-with-agent-token-tests` — the only regression guard for the per-agent GitHub identity shim, the `bin/deploy|status|rollback` contracts, the cloud staging workflow harness, the staging failure drill, and the stable-hostname harness/schema check — was declared in `ci.yml` but missing from `merge-gate.needs`. The contract test could not catch it because its `expected_required` set was a **second hand-maintained literal** that repeated the same omission: config and "proof" were copied from the same wrong source, so they agreed with each other and disagreed with reality.
+
+### Required vs. advisory is graph position, plus one explicit allowlist
+
+- **Required** = every job in `ci.yml` that is neither `merge-gate` itself nor downstream of it (i.e. its `needs` does not include `merge-gate`).
+- **Advisory** = named in `ADVISORY_VERIFICATION_JOBS`, an explicit empty-by-default frozenset in `infra/cloud/scripts/tests/ci-deployment-gates.test.sh`, co-located with the derivation it constrains. It is empty today: there is no verification job whose failure is allowed to not block release.
+
+`continue-on-error` is deliberately **not** the advisory marker. It already means fail-open on the `gitleaks` job (tracked separately as W43 F2, `needs-human-decision`), so it is a known gap rather than a pattern to copy. Adding a name to `ADVISORY_VERIFICATION_JOBS` is a security-posture decision and requires the same tech-design + Quinn-approval path as the task that created the allowlist.
+
+### The expected set is derived, not hand-maintained
+
+`compute_expected_required(jobs)` derives the required-job set from `ci.yml` structure, so the contract test and the workflow cannot drift apart the way the old literal and `merge-gate.needs` already had. Two self-tests keep the derivation honest:
+
+- **AC3** — the validator is driven with the *real* `merge-gate.needs` job names with `gh-with-agent-token-tests` forced to `failure`; the gate must exit 1 and name the failing job. The deploy-job loop separately asserts that every one of the ten deployment jobs requires `needs.merge-gate.result == 'success'`, so a failing required job blocks deployment.
+- **AC4** — a sentinel verification job appended to a temporary copy of `ci.yml` must make the comparison fail *and* name the omitted job; wiring it into `merge-gate.needs` in that copy must make it pass. The temp copy is normalised first so the sentinel is the only defect under test, and the fixture is hermetic — it inherits no live omission.
+
+### Ruleset coupling is asserted hermetically
+
+`merge-gate`'s `name:` field is asserted against the named constant `REQUIRED_STATUS_CHECK_CONTEXT = 'merge gate'`. The ruleset is **not** re-read live from CI: that would need `administration: read`, a second security-posture expansion riding inside a task scoped to the `needs` hole, and would couple the assertion to a numeric ruleset ID that breaks if the ruleset is recreated. The contract suite stays hermetic (file-parsing only, no network).
+
+Server-side read-back (live `gh api repos/Stoffer-Industries/sindustries/rulesets/13513816`, 2026-10-24): `enforcement: active`, `required_status_checks` = exactly one entry with context `merge gate` (GitHub's UI renders this as `CI / merge gate`, where `CI` is the workflow name). Re-verify during repo-audit passes if the ruleset changes.
+
+`skipped` remains an allowed result, so path-filtered jobs (for example `feature-task-clippy`, which only runs on `feature_task` changes) do not block unrelated pull requests.
+
+---
+
 ## Cloud staging validation (task `2850c5ac`)
 
 The first end-to-end check that the staging target is production-shaped runs through `.github/workflows/cloud-staging-validate.yml`, a `workflow_dispatch`-only job on the `cloud-staging` concurrency group with a 45-minute cap. The workflow:
