@@ -1063,6 +1063,7 @@ jobs:
       - gitleaks
       - feature-task-clippy
       - frontend-design-system-lint
+      - gh-with-agent-token-tests
     runs-on: ubuntu-latest
     env:
       REQUIRED_RESULTS: ${{ toJSON(needs) }}
