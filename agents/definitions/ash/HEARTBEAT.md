@@ -6,8 +6,7 @@
 1. Build Ash's unified queue:
 
    ```bash
-   python3 agents/skills/ops/tasks-api/scripts/agent_task_queue.py \
-     --assignee Ash --json
+   TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Ash --json
    ```
 
    The queue fetches both `attentionOwner=Ash` and
