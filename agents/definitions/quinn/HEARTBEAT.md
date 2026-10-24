@@ -307,8 +307,8 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
 1. Run the queue CLI — it is the single source for the counts and the top candidate:
 
    ```bash
-   cd codebases/sindustries && python3 -m agents.lib.incident_queue            # text lines
-   cd codebases/sindustries && python3 -m agents.lib.incident_queue --json     # structured
+   cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue            # text lines
+   cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue --json     # structured
    ```
 
    It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
