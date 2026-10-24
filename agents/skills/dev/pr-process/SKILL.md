@@ -105,9 +105,30 @@ This skill is role-based, not agent-based. Any agent can play any role on a give
 Concrete patterns in our workflows:
 
 - **Feature tasks:** The task implementer is the PR assignee. The blocking reviewer is Quinn; Tom may be added as a visibility-only reviewer for GitHub inbox visibility. The assignee merges after the required approval (normally Quinn's) and CI is green — do not wait for Tom's PR approval or ask Tom to merge. Tom tests post-merge in main; his sign-off is the structured `qa` TaskApproval. The feature-task workflow is role-based: implementer is assignee/merger, reviewer reviews. Do not hardcode a specific agent into the workflow. Apply `--label feature-task` at PR creation.
-- **Content tasks:** Assignee opens (`--assignee <self>`, `--reviewer quinn,Stoff81`, `--label content-task`). Quinn and Tom review. Assignee merges after the required approvals.
+- **Content tasks:** Assignee opens (`--assignee <self>`, `--reviewer quinnstoffer,Stoff81`, `--label content-task`). Quinn and Tom review. Assignee merges after the required approvals.
 - **Code-garden tasks:** Assignee opens with `--label code-garden`, reviewer reviews against the code-garden guardrail (no behavior change). Assignee merges after approval.
 - **Cross-repo PRs (workspace repo, infra scripts):** same pattern — assignee opens, reviewer reviews, assignee merges after approval.
-- **Direct-ask PRs (Tom asked in chat, bypassing the task queue):** the `direct-ask` label describes *origin*, not reviewer routing — it does not replace the blocking reviewer. Quinn is still the blocking reviewer (`--reviewer quinn`); add Tom too (`--reviewer quinn,Stoff81`) for visibility since he's the one who asked. Do not request only Tom — he's not in any agent's `reviewRequests` heartbeat queue, so a Tom-only review request means nobody's automation will ever pick it up, and it relies entirely on Tom manually noticing.
+- **Direct-ask PRs (Tom asked in chat, bypassing the task queue):** the `direct-ask` label describes *origin*, not reviewer routing — it does not replace the blocking reviewer. Quinn is still the blocking reviewer (`--reviewer quinnstoffer`); add Tom too (`--reviewer quinnstoffer,Stoff81`) for visibility since he's the one who asked. Do not request only Tom — he's not in any agent's `reviewRequests` heartbeat queue, so a Tom-only review request means nobody's automation will ever pick it up, and it relies entirely on Tom manually noticing.
 
 The reviewer never merges. The assignee owns getting the PR accepted and merged.
+
+### Reviewer logins must be real collaborators, and the opener cannot review itself
+
+`quinn` is **not** a collaborator on this repository. It is an unrelated GitHub account
+(id 3764), and the repo has no teams. GitHub accepts `gh pr create --reviewer quinn,...`
+with exit code 0 and prints the PR URL, but **silently drops** the request — the PR ends
+up with one fewer reviewer than instructed and no error to show for it. The
+`requested_reviewers` REST postcondition in `pr-open` is the only thing that catches this;
+`gh pr list --json reviewDecision` is not (it reflects branch protection, not assignment).
+
+Use the real account logins: `quinnstoffer`, `rowanstoffer`, `ivystoffer`, `ashstoffer`, `Stoff81`.
+
+Two consequences worth knowing before you pick a reviewer:
+
+1. **An agent that opens as `quinnstoffer` cannot request `quinnstoffer`.** Lox shares the
+   `quinnstoffer` identity with Quinn, so a Lox-opened PR has no available Quinn reviewer and
+   needs a different blocking reviewer (for example `rowanstoffer`, or `ivystoffer`/`ashstoffer`).
+   Lox is also not the merge owner for such a PR.
+2. **Prefer a reviewer whose heartbeat is actually running.** A review request only reaches an
+   agent's queue if that agent's heartbeat is healthy. Check `openclaw cron list` for the
+   reviewer's heartbeat job before treating the request as routed.
