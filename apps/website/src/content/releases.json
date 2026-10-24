@@ -513,5 +513,35 @@
     "links": [],
     "evidence": "The shared stage-condition adapter shipped across all three delivery workflows on 2026-10-08.",
     "visibility": "published"
+  },
+  {
+    "title": "Tasks API attention-owner role planes",
+    "slug": "tasks-api-attention-owner-role-planes",
+    "releasedAt": "2026-10-14",
+    "summary": "Task handoffs now keep delivery ownership, workflow gates, and exceptional attention separate, deduplicate repeated owners, require a reason, and let the current owner resolve their slot.",
+    "type": "system",
+    "links": [
+      {
+        "label": "Implementation pull request",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/751"
+      }
+    ],
+    "evidence": "Distinct role planes, case-insensitive deduplication, reason-bearing attention rows, and top-of-stack self-resolution shipped on 2026-10-14.",
+    "visibility": "published"
+  },
+  {
+    "title": "Tasks API proxy bypass for approval queue",
+    "slug": "tasks-api-approval-queue-proxy-bypass",
+    "releasedAt": "2026-10-16",
+    "summary": "The approval queue now bypasses the proxy path that caused recurring 502 errors, removing the manual workaround agents had needed on every task-discovery run.",
+    "type": "system",
+    "links": [
+      {
+        "label": "Implementation pull request",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/828"
+      }
+    ],
+    "evidence": "The proxy bypass shipped on 2026-10-16 after the recurring task-discovery failure had required a per-run workaround for two weeks.",
+    "visibility": "published"
   }
 ]
