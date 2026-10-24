@@ -13,6 +13,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -164,43 +165,57 @@ else:
         )
 
 # AC4 (task 5674a6c1): the derived expected-set must be able to go red on a
-# future omission. Append a sentinel verification job that nobody wired into
-# merge-gate.needs and assert the comparison fails AND names the omitted
-# job; then wire it in and assert the comparison passes. This proves the
-# contract test catches a job nobody added to the gate, instead of only
+# future omission. Write a temporary copy of ci.yml with a sentinel
+# verification job that nobody wired into merge-gate.needs, parse it back
+# through the same loader the real assertion uses, and assert the comparison
+# fails AND names the omitted job; then wire the sentinel into
+# merge-gate.needs in that copy and assert the comparison passes. This proves
+# the contract test catches a job nobody added to the gate, instead of only
 # describing the gap after the fact.
 sentinel_name = 'sentinel-unwired-verification-job'
-mutated_jobs = copy.deepcopy(jobs)
-mutated_jobs[sentinel_name] = {'needs': 'changes'}
-# Base the mutated gate on the derived set MINUS the sentinel, so this
-# self-test is hermetic: it proves the comparison can go red on a missing
-# job regardless of whether the live ci.yml happens to be complete. If it
-# were derived from the live gate, any pre-existing omission would leak
-# into this assertion and report a sentinel-specific failure for a
-# different cause.
-mutated_expected = compute_expected_required(mutated_jobs)
-mutated_jobs['merge-gate']['needs'] = sorted(mutated_expected - {sentinel_name})
-mutated_gate_needs = set(as_list(mutated_jobs['merge-gate'].get('needs')))
-if mutated_gate_needs == compute_expected_required(mutated_jobs):
-    fail(
-        'ci-deployment-gates: sentinel unwired job must be detected as '
-        'missing from merge-gate.needs'
+with tempfile.TemporaryDirectory() as tmpdir:
+    tmp_ci = pathlib.Path(tmpdir) / 'ci.yml'
+    mutated_doc = copy.deepcopy(ci)
+    # Normalise the gate to the derived set for the sentinel-free job map
+    # first, so this fixture is hermetic: the ONLY defect under test is the
+    # sentinel. Without this normalisation the fixture inherits whatever
+    # omissions the live ci.yml happens to have, and a pre-existing
+    # omission would make the sentinel assertion fail for a different
+    # cause — reporting a sentinel-specific message about an unrelated
+    # missing job. The live ci.yml's own completeness is asserted
+    # separately above.
+    mutated_doc['jobs']['merge-gate']['needs'] = sorted(
+        compute_expected_required(mutated_doc['jobs'])
     )
-else:
-    omitted = compute_expected_required(mutated_jobs) - mutated_gate_needs
-    if sentinel_name not in omitted:
+    mutated_doc['jobs'][sentinel_name] = {'needs': 'changes'}
+    tmp_ci.write_text(yaml.safe_dump(mutated_doc, sort_keys=False))
+    mutated_jobs = yaml.safe_load(tmp_ci.read_text())['jobs']
+    mutated_expected = compute_expected_required(mutated_jobs)
+    mutated_gate_needs = set(as_list(mutated_jobs['merge-gate'].get('needs')))
+    if mutated_gate_needs == mutated_expected:
         fail(
-            'ci-deployment-gates: the merge-gate needs diff must name the '
-            f'omitted job {sentinel_name}, got {sorted(omitted)}'
+            'ci-deployment-gates: sentinel unwired job must be detected as '
+            'missing from merge-gate.needs'
         )
-mutated_jobs['merge-gate']['needs'] = sorted(mutated_gate_needs | {sentinel_name})
-if compute_expected_required(mutated_jobs) != set(
-    as_list(mutated_jobs['merge-gate'].get('needs'))
-):
-    fail(
-        'ci-deployment-gates: adding the sentinel job to merge-gate.needs '
-        'must make the derived comparison pass'
+    else:
+        omitted = mutated_expected - mutated_gate_needs
+        if sentinel_name not in omitted:
+            fail(
+                'ci-deployment-gates: the merge-gate needs diff must name the '
+                f'omitted job {sentinel_name}, got {sorted(omitted)}'
+            )
+    mutated_doc['jobs']['merge-gate']['needs'] = sorted(
+        mutated_gate_needs | {sentinel_name}
     )
+    tmp_ci.write_text(yaml.safe_dump(mutated_doc, sort_keys=False))
+    rewired_jobs = yaml.safe_load(tmp_ci.read_text())['jobs']
+    if compute_expected_required(rewired_jobs) != set(
+        as_list(rewired_jobs['merge-gate'].get('needs'))
+    ):
+        fail(
+            'ci-deployment-gates: adding the sentinel job to merge-gate.needs '
+            'must make the derived comparison pass'
+        )
 
 deploy_jobs = {
     'deploy-website-staging',
@@ -226,6 +241,17 @@ for job_name in sorted(deploy_jobs):
         fail(f'ci.yml: {job_name} does not depend on merge-gate')
     if 'always()' not in str(job.get('if', '')):
         fail(f'ci.yml: {job_name} must override skipped-ancestor propagation with always()')
+    # AC3 (task 5674a6c1): the second half of "a failing required job prevents
+    # deployment" is that every deployment job's condition actually requires
+    # the aggregate to have SUCCEEDED — not merely that it lists merge-gate as
+    # a dependency. Without this clause a deployment job could still be
+    # scheduled while the aggregate failed, and the AC3 fixture above would
+    # prove nothing about deployment.
+    if "needs.merge-gate.result == 'success'" not in str(job.get('if', '')):
+        fail(
+            f'ci.yml: {job_name} must require the aggregate merge gate to have '
+            "succeeded (needs.merge-gate.result == 'success')"
+        )
 
 production_jobs = {name for name in deploy_jobs if name.endswith('production')}
 for job_name in sorted(production_jobs):
