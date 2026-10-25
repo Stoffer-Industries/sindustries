@@ -939,6 +939,27 @@ jobs:
             tests/cloud/stable-hostname-verification.schema.json
           echo "stable-hostname-verification dry-run: schema-valid JSON, ${GITHUB_SHA::12}"
 
+  gog-cli-tests:
+    # PR #886 (fix(agents-lib): bypass ambient proxy for the gog CLI).
+    # AC1 + AC2 regression guard for the agents/lib gog-cli.sh wrapper and
+    # the gog-with-direct-egress.sh shim. Stages a stub `gog` on PATH that
+    # records argv and the environment it received, so the assertions can
+    # verify the wrapper strips HTTP_PROXY/HTTPS_PROXY/http_proxy/
+    # https_proxy/ALL_PROXY/all_proxy, that argv and unrelated env survive
+    # the wrapper, that the sourceable shim behaves identically under bash and
+    # zsh (the ~/.zshenv production path), and that the missing-wrapper
+    # fallback branch is genuinely exercised rather than silently resolving
+    # the real wrapper.
+    # No live Google auth or network required; runs in seconds.
+    name: agents/lib gog-cli shim tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run gog-cli shim tests
+        run: bash agents/lib/tests/test_gog_cli.sh
+
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest
@@ -1063,6 +1084,8 @@ jobs:
       - gitleaks
       - feature-task-clippy
       - frontend-design-system-lint
+      - gh-with-agent-token-tests
+      - gog-cli-tests
     runs-on: ubuntu-latest
     env:
       REQUIRED_RESULTS: ${{ toJSON(needs) }}

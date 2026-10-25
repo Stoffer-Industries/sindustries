@@ -6,12 +6,14 @@ set -euo pipefail
 REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 
 python3 - "$REPO_ROOT" <<'PY'
+import copy
 import fnmatch
 import json
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -37,40 +39,68 @@ def fail(message):
 ci = load('ci.yml')
 jobs = ci.get('jobs', {})
 gate = jobs.get('merge-gate', {})
-expected_required = {
-    'changes',
-    'python-workflow-tests',
-    'cto-craft-tweet-drafts-tests',
-    'otel-node-tests',
-    'health-probe-tests',
-    'mission-control-tests',
-    'tasks-api-tests',
-    'content-scheduler-api-tests',
-    'content-scheduler-api-db-integration',
-    'feature-task-workflow-tests',
-    'ash-tests',
-    'budget-api-unit',
-    'budget-api-db-integration',
-    'tasks-app-tests',
-    'tasks-app-e2e',
-    'website-app-tests',
-    'gymtrack-tests',
-    'gymtrack-mcp-tests',
-    'design-system-sync',
-    'frontend-design-system-lint',
-    'no-absolute-paths-lint',
-    'infra-cloud-bootstrap-staging-tests',
-    'gitleaks',
-    'feature-task-clippy',
-}
 
-if gate.get('name') != 'merge gate':
-    fail("ci.yml: merge-gate must expose the stable job name 'merge gate'")
+# Jobs intentionally excluded from merge-gate.needs. Empty today — there
+# is no verification job whose failure is allowed to not block release.
+# Adding a name here is a security-posture decision and requires a tech
+# design, same as this one. Do NOT use `continue-on-error` as the
+# advisory marker — it already means fail-open on `gitleaks` (W43 F2,
+# needs-human-decision) and that is a known gap, not a pattern to copy.
+ADVISORY_VERIFICATION_JOBS = frozenset()
+
+# Verified live 2026-10-24 via
+# `gh api repos/Stoffer-Industries/sindustries/rulesets/13513816`:
+# the `main` branch ruleset's only required_status_checks entry has context
+# "merge gate", and classic branch protection on `main` is absent (404) —
+# merge-gate is the sole gate standing between a PR and main. Re-verify
+# this during repo-audit passes if the ruleset changes; this assertion only
+# catches ci.yml drifting away from the last-verified name.
+REQUIRED_STATUS_CHECK_CONTEXT = 'merge gate'
+
+
+def as_list(value):
+    """Normalise a GitHub Actions `needs:` value to a list."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
+def compute_expected_required(job_map):
+    """Derive the jobs the merge gate must depend on.
+
+    Required = every job that is neither the gate itself nor downstream of
+    it, minus the explicit advisory allowlist. Deriving this from ci.yml
+    removes the second hand-maintained literal that let
+    `gh-with-agent-token-tests` sit out of the gate while the test still
+    passed (task 5674a6c1).
+    """
+    required = set()
+    for name, job in job_map.items():
+        if name == 'merge-gate':
+            continue
+        if 'merge-gate' in as_list(job.get('needs')):
+            continue
+        if name in ADVISORY_VERIFICATION_JOBS:
+            continue
+        required.add(name)
+    return required
+
+
+expected_required = compute_expected_required(jobs)
+gate_needs = set(as_list(gate.get('needs')))
+
+if gate.get('name') != REQUIRED_STATUS_CHECK_CONTEXT:
+    fail(
+        "ci.yml: merge-gate must expose the stable job name "
+        f"'{REQUIRED_STATUS_CHECK_CONTEXT}'"
+    )
 if gate.get('if') != 'always()':
     fail('ci.yml: merge-gate must run under always()')
-if set(gate.get('needs', [])) != expected_required:
-    missing = expected_required - set(gate.get('needs', []))
-    extra = set(gate.get('needs', [])) - expected_required
+if gate_needs != expected_required:
+    missing = expected_required - gate_needs
+    extra = gate_needs - expected_required
     fail(f'ci.yml: merge-gate needs mismatch; missing={sorted(missing)}, extra={sorted(extra)}')
 gate_script = '\n'.join(
     step.get('run', '') for step in gate.get('steps', []) if isinstance(step, dict)
@@ -99,6 +129,94 @@ for results, expected_code in validator_cases:
             f'got {completed.returncode}: {completed.stderr.strip()}'
         )
 
+# AC3 (task 5674a6c1): a failing required job must actually fail the gate.
+# Drive the validator with the REAL merge-gate.needs job names rather than
+# synthetic ones, forcing the job that was previously omitted from the gate
+# to fail. Exit code 1 plus the job name in stderr proves the gate reads
+# real job names; the deploy_jobs loop below separately proves every
+# deployment job's condition requires the aggregate to have succeeded, so a
+# failing required job blocks deployment.
+AC3_PROBE_JOB = 'gh-with-agent-token-tests'
+if AC3_PROBE_JOB not in gate_needs:
+    fail(
+        f'ci.yml: merge-gate must depend on {AC3_PROBE_JOB} for AC3 to be provable'
+    )
+else:
+    ac3_results = {
+        name: {'result': 'success'} for name in sorted(gate_needs)
+    }
+    ac3_results[AC3_PROBE_JOB] = {'result': 'failure'}
+    ac3 = subprocess.run(
+        [sys.executable, str(validator)],
+        env={'REQUIRED_RESULTS': json.dumps(ac3_results)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ac3.returncode != 1:
+        fail(
+            f'check-ci-results.py: expected exit 1 when {AC3_PROBE_JOB} fails, '
+            f'got {ac3.returncode}: {ac3.stderr.strip()}'
+        )
+    if AC3_PROBE_JOB not in ac3.stderr:
+        fail(
+            f'check-ci-results.py: failure output must name {AC3_PROBE_JOB}, '
+            f'got: {ac3.stderr.strip()}'
+        )
+
+# AC4 (task 5674a6c1): the derived expected-set must be able to go red on a
+# future omission. Write a temporary copy of ci.yml with a sentinel
+# verification job that nobody wired into merge-gate.needs, parse it back
+# through the same loader the real assertion uses, and assert the comparison
+# fails AND names the omitted job; then wire the sentinel into
+# merge-gate.needs in that copy and assert the comparison passes. This proves
+# the contract test catches a job nobody added to the gate, instead of only
+# describing the gap after the fact.
+sentinel_name = 'sentinel-unwired-verification-job'
+with tempfile.TemporaryDirectory() as tmpdir:
+    tmp_ci = pathlib.Path(tmpdir) / 'ci.yml'
+    mutated_doc = copy.deepcopy(ci)
+    # Normalise the gate to the derived set for the sentinel-free job map
+    # first, so this fixture is hermetic: the ONLY defect under test is the
+    # sentinel. Without this normalisation the fixture inherits whatever
+    # omissions the live ci.yml happens to have, and a pre-existing
+    # omission would make the sentinel assertion fail for a different
+    # cause — reporting a sentinel-specific message about an unrelated
+    # missing job. The live ci.yml's own completeness is asserted
+    # separately above.
+    mutated_doc['jobs']['merge-gate']['needs'] = sorted(
+        compute_expected_required(mutated_doc['jobs'])
+    )
+    mutated_doc['jobs'][sentinel_name] = {'needs': 'changes'}
+    tmp_ci.write_text(yaml.safe_dump(mutated_doc, sort_keys=False))
+    mutated_jobs = yaml.safe_load(tmp_ci.read_text())['jobs']
+    mutated_expected = compute_expected_required(mutated_jobs)
+    mutated_gate_needs = set(as_list(mutated_jobs['merge-gate'].get('needs')))
+    if mutated_gate_needs == mutated_expected:
+        fail(
+            'ci-deployment-gates: sentinel unwired job must be detected as '
+            'missing from merge-gate.needs'
+        )
+    else:
+        omitted = mutated_expected - mutated_gate_needs
+        if sentinel_name not in omitted:
+            fail(
+                'ci-deployment-gates: the merge-gate needs diff must name the '
+                f'omitted job {sentinel_name}, got {sorted(omitted)}'
+            )
+    mutated_doc['jobs']['merge-gate']['needs'] = sorted(
+        mutated_gate_needs | {sentinel_name}
+    )
+    tmp_ci.write_text(yaml.safe_dump(mutated_doc, sort_keys=False))
+    rewired_jobs = yaml.safe_load(tmp_ci.read_text())['jobs']
+    if compute_expected_required(rewired_jobs) != set(
+        as_list(rewired_jobs['merge-gate'].get('needs'))
+    ):
+        fail(
+            'ci-deployment-gates: adding the sentinel job to merge-gate.needs '
+            'must make the derived comparison pass'
+        )
+
 deploy_jobs = {
     'deploy-website-staging',
     'deploy-website-production',
@@ -123,6 +241,17 @@ for job_name in sorted(deploy_jobs):
         fail(f'ci.yml: {job_name} does not depend on merge-gate')
     if 'always()' not in str(job.get('if', '')):
         fail(f'ci.yml: {job_name} must override skipped-ancestor propagation with always()')
+    # AC3 (task 5674a6c1): the second half of "a failing required job prevents
+    # deployment" is that every deployment job's condition actually requires
+    # the aggregate to have SUCCEEDED — not merely that it lists merge-gate as
+    # a dependency. Without this clause a deployment job could still be
+    # scheduled while the aggregate failed, and the AC3 fixture above would
+    # prove nothing about deployment.
+    if "needs.merge-gate.result == 'success'" not in str(job.get('if', '')):
+        fail(
+            f'ci.yml: {job_name} must require the aggregate merge gate to have '
+            "succeeded (needs.merge-gate.result == 'success')"
+        )
 
 production_jobs = {name for name in deploy_jobs if name.endswith('production')}
 for job_name in sorted(production_jobs):

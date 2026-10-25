@@ -123,7 +123,7 @@ On every heartbeat:
 
 ## Attention-owner pages (task d8fbe750)
 
-A task listing you as `attentionOwner` was paged via the escape hatch because the modelled surfaces (`[openclaw-needed]`, `[tech-design]`, `assignee`) didn't fit. The unified queue (`scripts/agent_task_queue.py --assignee Lox --attention-owner Lox`) surfaces these as `kind: "attentionPage"`, classification `ACTIONABLE`.
+A task listing you as `attentionOwner` was paged via the escape hatch because the modelled surfaces (`[openclaw-needed]`, `[tech-design]`, `assignee`) didn't fit. The unified queue (`/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Lox --attention-owner Lox`) surfaces these as `kind: "attentionPage"`, classification `ACTIONABLE`.
 
 When you see yourself listed as an attention owner:
 

@@ -6,7 +6,7 @@
 1. Build Ash's unified queue:
 
    ```bash
-   python3 agents/skills/ops/tasks-api/scripts/agent_task_queue.py \
+   python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py \
      --assignee Ash --json
    ```
 
