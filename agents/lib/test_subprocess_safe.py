@@ -17,6 +17,7 @@ import sys
 import time
 import unittest
 
+from agents.lib import subprocess_safe
 from agents.lib.subprocess_safe import DEFAULT_TIMEOUT_SECONDS, safe_popen, safe_run
 
 
@@ -110,6 +111,22 @@ class SafeRunTests(unittest.TestCase):
 
 
 class ModuleSurfaceTests(unittest.TestCase):
+    def test_docstring_states_the_cleanup_on_timeout_contract(self) -> None:
+        # AC4: the module docstring used to advertise "On timeout, the proc is
+        # not auto-killed" as a deliberate non-feature. The behaviour changed, so
+        # the docstring must state the new contract — and must not still claim
+        # the child is left running, which is the exact trap this task closes.
+        docstring = subprocess_safe.__doc__ or ""
+        self.assertIn("process group is killed", docstring)
+        self.assertNotIn(
+            "not auto-killed",
+            docstring,
+            msg=(
+                "the module docstring still says the proc is 'not auto-killed', "
+                "but the helper now kills the child's process group on timeout"
+            ),
+        )
+
     """The helper is exposed both via the module and via `agents.lib.safe_run`."""
 
     def test_module_default_constant_is_twenty_five_seconds(self) -> None:
