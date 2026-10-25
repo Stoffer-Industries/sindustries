@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: a7b6fc43-51bb-48e7-8859-4766ff50a4a1
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 883
+shipped_date: 2026-10-25
 ---
 
 # Tech Design — Kill the child process group on timeout in `safe_popen`
