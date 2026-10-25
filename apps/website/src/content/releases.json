@@ -517,16 +517,20 @@
   {
     "title": "Tasks API attention-owner role planes",
     "slug": "tasks-api-attention-owner-role-planes",
-    "releasedAt": "2026-10-14",
+    "releasedAt": "2026-10-13",
     "summary": "Task handoffs now keep delivery ownership, workflow gates, and exceptional attention separate, deduplicate repeated owners, require a reason, and let the current owner resolve their slot.",
     "type": "system",
     "links": [
       {
-        "label": "Implementation pull request",
+        "label": "Attention-owner escalation pull request",
         "url": "https://github.com/Stoffer-Industries/sindustries/pull/751"
+      },
+      {
+        "label": "Role-plane UI pull request",
+        "url": "https://github.com/Stoffer-Industries/sindustries/pull/812"
       }
     ],
-    "evidence": "Distinct role planes, case-insensitive deduplication, reason-bearing attention rows, and top-of-stack self-resolution shipped on 2026-10-14.",
+    "evidence": "Distinct role planes, case-insensitive deduplication, reason-bearing attention rows, and top-of-stack self-resolution were all on main by 2026-10-13.",
     "visibility": "published"
   },
   {
