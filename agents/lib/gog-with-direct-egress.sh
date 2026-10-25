@@ -61,7 +61,14 @@ gog() {
 
 # Export functions only in bash. In zsh, `export -f` prints function bodies to
 # stdout instead of exporting them, polluting every shell startup.
+#
+# `__gog_shim_dir` is exported alongside the functions so a child bash shell
+# resolves the sibling wrapper through the same directory the parent used,
+# instead of degenerating to the root-absolute `/gog-cli.sh` candidate and
+# relying on the `${HOME}/.openclaw/workspace/agents/lib/gog-cli.sh` path
+# staying correct.
 if [[ -n "${BASH_VERSION:-}" ]]; then
+  export __gog_shim_dir
   export -f gog __gog_shim_resolve_wrapper 2>/dev/null || true
 fi
 

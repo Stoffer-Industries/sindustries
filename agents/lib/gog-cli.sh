@@ -3,7 +3,10 @@ set -euo pipefail
 
 # All repository-owned `gog` subprocesses must enter through this wrapper.
 # Keep proxy policy here so Python, Go, and shell callers cannot drift apart
-# again — same contract as the sibling `github-cli.sh`.
+# again — same contract as the sibling `github-cli.sh`, with one deliberate
+# superset: this wrapper also strips ALL_PROXY / all_proxy, which
+# `github-cli.sh` leaves in place. The superset is the safer behaviour, so
+# do not narrow it to match the sibling exactly.
 
 # ---------------------------------------------------------------------------
 # Why `gog` must not traverse the secret-egress proxy (2026-10-26)

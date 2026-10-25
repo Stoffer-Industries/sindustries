@@ -103,6 +103,18 @@ assert_proxy_free() {
   done
 }
 
+# Assert the stub `gog` actually ran. Without this, an empty log would make
+# every `assert_proxy_free` check pass vacuously — the wrapper could never be
+# invoked at all and the suite would still be green.
+assert_stub_invoked() {
+  local log_file="$1" context="$2"
+  if grep -q '^--- invocation ---$' "${log_file}"; then
+    pass "${context}: stub gog was invoked"
+  else
+    fail "${context}: stub gog was never invoked (empty log)"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # 1 + 2. The wrapper strips the proxy and forwards argv / unrelated env.
 # ---------------------------------------------------------------------------
@@ -121,6 +133,7 @@ all_proxy="http://proxy.invalid:3128" \
   >/dev/null
 
 assert_proxy_free "${LOG_FILE}" "wrapper"
+assert_stub_invoked "${LOG_FILE}" "wrapper"
 
 if grep -q '^arg:calendar$' "${LOG_FILE}" &&
    grep -q '^arg:--account$' "${LOG_FILE}" &&
@@ -153,6 +166,7 @@ all_proxy="http://proxy.invalid:3128" \
   bash -c "source '${SHIM}'; gog calendar list --from 2026-01-01" >/dev/null
 
 assert_proxy_free "${LOG_FILE}" "shim/bash"
+assert_stub_invoked "${LOG_FILE}" "shim/bash"
 
 if grep -q '^arg:--from$' "${LOG_FILE}" && grep -q '^arg:2026-01-01$' "${LOG_FILE}"; then
   pass "shim/bash: argv forwarded unchanged"
@@ -177,6 +191,7 @@ if command -v zsh >/dev/null 2>&1; then
     zsh -c "source '${SHIM}'; gog gmail search 'newer_than:1d'" >/dev/null
 
   assert_proxy_free "${LOG_FILE}" "shim/zsh"
+  assert_stub_invoked "${LOG_FILE}" "shim/zsh"
 
   if grep -q '^arg:gmail$' "${LOG_FILE}" && grep -q '^arg:search$' "${LOG_FILE}"; then
     pass "shim/zsh: argv forwarded unchanged"
@@ -189,10 +204,32 @@ fi
 
 # ---------------------------------------------------------------------------
 # 5. Fallback when the shared wrapper cannot be found.
+#
+# The shim recomputes `__gog_shim_dir` at source time from BASH_SOURCE, so
+# clearing the variable *before* sourcing does not isolate the shim: the
+# sibling-dir candidate still resolves to the real wrapper. To genuinely
+# exercise the fallback we source a COPY of the shim from an isolated
+# directory that has no sibling `gog-cli.sh`, with HOME pointed at the temp
+# dir so the `${HOME}/.openclaw/...` candidate cannot resolve either.
+# We then assert that resolution actually failed before invoking `gog`, so
+# the test fails if resolution unexpectedly succeeds.
 # ---------------------------------------------------------------------------
 echo "== shim: missing-wrapper fallback =="
+ISOLATED_DIR="${TMPDIR_TEST}/isolated"
+mkdir -p "${ISOLATED_DIR}"
+cp "${SHIM}" "${ISOLATED_DIR}/gog-with-direct-egress.sh"
+
+# Guard the fixture: the isolated directory must not contain a wrapper.
+if [[ -e "${ISOLATED_DIR}/gog-cli.sh" ]]; then
+  fail "shim/fallback: isolated fixture unexpectedly contains gog-cli.sh"
+else
+  pass "shim/fallback: isolated fixture has no sibling gog-cli.sh"
+fi
+
 : >"${LOG_FILE}"
-PATH="${STUB_DIR}:${PATH}" \
+fallback_out=""
+fallback_rc=0
+fallback_out="$(PATH="${STUB_DIR}:${PATH}" \
 GOG_STUB_LOG="${LOG_FILE}" \
 HTTP_PROXY="http://proxy.invalid:3128" \
 HTTPS_PROXY="http://proxy.invalid:3128" \
@@ -200,9 +237,36 @@ http_proxy="http://proxy.invalid:3128" \
 https_proxy="http://proxy.invalid:3128" \
 ALL_PROXY="http://proxy.invalid:3128" \
 all_proxy="http://proxy.invalid:3128" \
-  bash -c "HOME='${TMPDIR_TEST}'; unset __gog_shim_dir; __gog_shim_dir=''; source '${SHIM}'; gog drive search 'x'" >/dev/null
+  bash -c "HOME='${TMPDIR_TEST}'; source '${ISOLATED_DIR}/gog-with-direct-egress.sh'; \
+    if __gog_shim_resolve_wrapper >/dev/null 2>&1; then echo 'RESOLVED'; else echo 'UNRESOLVED'; fi; \
+    gog drive search 'x'" 2>&1)" || fallback_rc=$?
+
+if [[ "${fallback_out}" == *"UNRESOLVED"* ]]; then
+  pass "shim/fallback: wrapper resolution failed as intended (fallback branch taken)"
+else
+  fail "shim/fallback: expected UNRESOLVED, got: ${fallback_out}"
+fi
+
+if [[ "${fallback_out}" == *"RESOLVED"* && "${fallback_out}" != *"UNRESOLVED"* ]]; then
+  fail "shim/fallback: wrapper resolved unexpectedly — fallback branch was NOT exercised"
+else
+  pass "shim/fallback: fallback branch was actually exercised"
+fi
+
+if [[ "${fallback_rc}" -eq 0 ]]; then
+  pass "shim/fallback: fallback invocation succeeded"
+else
+  fail "shim/fallback: fallback invocation failed (exit ${fallback_rc})"
+fi
 
 assert_proxy_free "${LOG_FILE}" "shim/fallback"
+assert_stub_invoked "${LOG_FILE}" "shim/fallback"
+
+if grep -q '^arg:drive$' "${LOG_FILE}" && grep -q '^arg:search$' "${LOG_FILE}"; then
+  pass "shim/fallback: argv forwarded unchanged"
+else
+  fail "shim/fallback: argv not forwarded unchanged"
+fi
 
 # ---------------------------------------------------------------------------
 # 6. Sourcing the shim must not print anything to the sourcing shell.
