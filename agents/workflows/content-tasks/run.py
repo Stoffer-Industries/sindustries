@@ -29,6 +29,25 @@ PIPELINE = SCRIPT_DIR / "content-task.lobster.yaml"
 CODEBASE_REPO = SCRIPT_DIR.parent.parent.parent
 REPO = Path(os.environ.get("SINDUSTRIES_REPO") or CODEBASE_REPO)
 
+# Lobster subprocess timeout (raised above DEFAULT_TIMEOUT_SECONDS=25s for the
+# content-task lobster — the 2026-10-25 task-lobsters cron tick raced that bound
+# and killed the wrapper with subprocess.TimeoutExpired after 25.0s).
+# The content lobster needs ~22-24s for a single task, so the shared 25s default
+# left only ~2s of headroom; a run that overran it raised TimeoutExpired inside
+# run_workflow(), so run.py died with a traceback and exited 1 *even though the
+# lobster subprocess had already completed and written a valid `ok: true`
+# envelope*. The runner therefore reported a failure for a successful run.
+#
+# The feature-task runner already solved this exact class and is the precedent
+# to copy: agents/workflows/feature-task/run.py pins a named 45s timeout on its
+# safe_popen Lobster call, with a comment naming the incident it came from
+# (`task-lobsters-cron-runner-termination-2026-09-13`). Per-rowan review on
+# PR #660: "keep agents/lib shared default at 25s because heartbeat/interactive
+# callers still rely on the 5s margin below a 30s parent timeout; apply a named
+# timeout explicitly to the runner safe_popen Lobster call, which is the
+# incident-specific source of truth".
+LOBSTER_SUBPROCESS_TIMEOUT_SECONDS: float = 45.0
+
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -61,6 +80,7 @@ def run_workflow(task_id: str, capacity_limit: int) -> dict:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
+        timeout=LOBSTER_SUBPROCESS_TIMEOUT_SECONDS,
     )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []

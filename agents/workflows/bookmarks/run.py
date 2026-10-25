@@ -27,6 +27,16 @@ WORKSPACE = Path(_env_ws).resolve() if _env_ws else Path(__file__).resolve().par
 PIPELINE = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "bookmarks.lobster.yaml"
 REQUEST_APPROVAL = WORKSPACE / "codebases" / "sindustries" / "agents" / "workflows" / "bookmarks" / "scripts" / "request_topic_approval.py"
 STATE_PATH = WORKSPACE / "brain" / "state" / "bookmark-review-state.json"
+
+# Lobster subprocess timeout (raised above DEFAULT_TIMEOUT_SECONDS=25s).
+# Same defect class as the content-task runner fix on 2026-10-25: this call site
+# passed no explicit timeout=, so it inherited the shared 25s default and
+# intermittently raised subprocess.TimeoutExpired inside run(), killing the
+# runner with a traceback even when the subprocess had already completed.
+# See agents/workflows/content-tasks/run.py for the full rationale and the
+# feature-task runner precedent (timeout=LOBSTER_SUBPROCESS_TIMEOUT_SECONDS,
+# incident `task-lobsters-cron-runner-termination-2026-09-13`).
+LOBSTER_SUBPROCESS_TIMEOUT_SECONDS: float = 45.0
 DEFAULT_ARGS = {
     "sourceRoot": "brain/bookmarks/x",
     "reviewsRoot": "brain/bookmarks/summaries",
@@ -89,6 +99,7 @@ def run(cmd: list[str], stdin_text: str | None = None, env: dict[str, str] | Non
         stderr=subprocess.PIPE,
         env=env,
         bufsize=1,
+        timeout=LOBSTER_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     stdout_lines: list[str] = []
