@@ -113,6 +113,15 @@ def generate_pkce():
     return verifier, challenge
 
 
+# Tokens for this script live on disk (TOKEN_FILE), never via the Gateway's
+# secret-egress proxy, so these calls have no reason to route through it.
+# Build an opener that ignores the ambient HTTP_PROXY/HTTPS_PROXY env vars
+# (set for other commands in the same cron/exec context that DO need secret
+# injection) so a defect in the proxy's MITM leaf cert can't break token
+# refresh. See the OpenClaw ops runbook for x-auth token-refresh TLS failures.
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def exchange_code(code: str, verifier: str, client_id: str, client_secret: str = "") -> dict:
     data = urllib.parse.urlencode({
         "grant_type": "authorization_code",
@@ -129,7 +138,7 @@ def exchange_code(code: str, verifier: str, client_id: str, client_secret: str =
         creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
         req.add_header("Authorization", f"Basic {creds}")
 
-    with urllib.request.urlopen(req) as resp:
+    with _DIRECT_OPENER.open(req) as resp:
         return json.loads(resp.read())
 
 
@@ -147,7 +156,7 @@ def refresh_access_token(refresh_token: str, client_id: str, client_secret: str 
         creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
         req.add_header("Authorization", f"Basic {creds}")
 
-    with urllib.request.urlopen(req) as resp:
+    with _DIRECT_OPENER.open(req) as resp:
         return json.loads(resp.read())
 
 
