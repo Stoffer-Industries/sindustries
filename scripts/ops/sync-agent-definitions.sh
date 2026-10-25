@@ -15,6 +15,19 @@ AGENTS=(quinn rowan lox ivy vara ash)
 # are intentionally absent — see the shim's allow-list header.
 SHIM_SOURCE_RELPATH=agents/lib/gh-with-agent-token.sh
 GH_WRAPPER_SOURCE_RELPATH=agents/lib/github-cli.sh
+# Google Workspace CLI (`gog`) proxy shim (2026-10-26). `gog` is a cgo-enabled
+# Go binary, so macOS validates its TLS chain with the platform verifier,
+# which ignores the proxy trust bundle every other client on this host uses.
+# Behind the ambient secret-egress proxy every `gog` call fails at the OAuth
+# token refresh with:
+#   tls: failed to verify certificate: x509: "oauth2.googleapis.com"
+#   certificate is not trusted
+# `gog` authenticates with local OAuth tokens and never needs secret-egress
+# sentinel injection, so it must not traverse that proxy. Both files are
+# materialised beside the GitHub equivalents so a single ~/.zshenv source line
+# fixes `gog` for every agent session and cron job.
+GOG_WRAPPER_SOURCE_RELPATH=agents/lib/gog-cli.sh
+GOG_SHIM_SOURCE_RELPATH=agents/lib/gog-with-direct-egress.sh
 SHIM_AGENTS=(rowan ash ivy)
 SHIM_DEST_DIR="$WORKSPACE_ROOT/agents/lib"
 # Non-quinn agents also need the canonical AGENTS.md copied from the
@@ -214,6 +227,76 @@ else
   wrapper_installed=1
 fi
 rm -f "$wrapper_staged"
+
+# ---------------------------------------------------------------------------
+# Google Workspace CLI (`gog`) proxy shim wiring (2026-10-26).
+#
+# This block:
+#   1. Materialises the shared wrapper at `$WORKSPACE_ROOT/agents/lib/gog-cli.sh`
+#      so all proxy policy for `gog` lives in exactly one file (same contract as
+#      `github-cli.sh`).
+#   2. Materialises the sourceable shim at
+#      `$WORKSPACE_ROOT/agents/lib/gog-with-direct-egress.sh`, which defines the
+#      `gog` shell function.
+#
+# Host-side wiring (Lox, .openclaw boundary): add one line to ~/.zshenv:
+#   [[ -f "$HOME/.openclaw/workspace/agents/lib/gog-with-direct-egress.sh" ]] && source "$HOME/.openclaw/workspace/agents/lib/gog-with-direct-egress.sh"
+# ---------------------------------------------------------------------------
+
+gog_sync_installed=0
+for gog_entry in \
+  "${GOG_WRAPPER_SOURCE_RELPATH}:gog-cli.sh:0755" \
+  "${GOG_SHIM_SOURCE_RELPATH}:gog-with-direct-egress.sh:0755"; do
+  gog_relpath="${gog_entry%%:*}"
+  gog_rest="${gog_entry#*:}"
+  gog_destname="${gog_rest%%:*}"
+  gog_mode="${gog_rest#*:}"
+  gog_destination="$SHIM_DEST_DIR/$gog_destname"
+
+  gog_staged=$(mktemp "${TMPDIR:-/tmp}/agent-gog-shim.XXXXXX")
+  # Unlike the GitHub shim block above, a missing source here must NOT abort
+  # the whole sync: this block is additive, and the agent-definition
+  # materialisation that follows is the critical path. Skip with a warning so
+  # an older ref (or another worktree) cannot stop AGENTS.md syncing.
+  gog_source_ok=1
+  if [[ "$SOURCE_REF" == "WORKTREE" ]]; then
+    if [[ ! -f "$REPO_ROOT/$gog_relpath" ]]; then
+      echo "skipping gog shim (source missing in worktree): $gog_relpath" >&2
+      gog_source_ok=0
+    else
+      cat "$REPO_ROOT/$gog_relpath" > "$gog_staged"
+    fi
+  else
+    if ! git -C "$REPO_ROOT" cat-file -e "$SOURCE_REF:$gog_relpath" 2>/dev/null; then
+      echo "skipping gog shim (source missing on $SOURCE_REF): $gog_relpath" >&2
+      gog_source_ok=0
+    else
+      git -C "$REPO_ROOT" show "$SOURCE_REF:$gog_relpath" > "$gog_staged"
+    fi
+  fi
+  if [[ "$gog_source_ok" -eq 0 ]]; then
+    rm -f "$gog_staged"
+    continue
+  fi
+
+  if [[ ! -L "$gog_destination" && -f "$gog_destination" ]] && cmp -s "$gog_staged" "$gog_destination"; then
+    :
+  else
+    if [[ -e "$gog_destination" || -L "$gog_destination" ]]; then
+      mkdir -p "$backup_dir/lib"
+      cp -pL "$gog_destination" "$backup_dir/lib/$gog_destname"
+      rm -f "$gog_destination"
+    fi
+    install -m "$gog_mode" "$gog_staged" "$gog_destination"
+    echo "synced $gog_relpath -> $gog_destination"
+    gog_sync_installed=1
+  fi
+  rm -f "$gog_staged"
+done
+
+if [[ "$gog_sync_installed" -ne 0 ]]; then
+  echo "gog shim wiring refreshed — verify host-side sourcing in ~/.zshenv"
+fi
 
 for shim_agent in "${SHIM_AGENTS[@]}"; do
   shim_snippet="$WORKSPACE_ROOT/agents/$shim_agent/.gh-shim.sh"
