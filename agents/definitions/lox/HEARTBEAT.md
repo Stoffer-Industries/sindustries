@@ -313,6 +313,25 @@ Tom confirmed brain operational on 2026-07-25 (Telegram msg #3897) while `brctl 
 
 ---
 
+## Inter-session message payloads (an empty body is a no-op)
+
+An inter-session message can arrive with **no body** — routing metadata only
+(`sourceSession`, `sourceTool`) — and still wake a heartbeat turn.
+
+- **Treat an empty payload as a no-op.** Do not infer an instruction from the fact that a turn
+  fired, do not re-derive context, and do not re-log it as new evidence.
+- **Before assuming loss, read the source transcript.** `sessions_history` on the source session
+  key holds the authoritative body. A `pendingInputs` row with `state: "queued"` is an
+  accepted-but-unbound input (late binding), not data loss.
+- **A duplicate empty copy of a message you already received is noise, not news** — nothing was
+  missed; check whether that source already delivered a body earlier in the session.
+- **Do not reply to an empty payload.** Replying to noise produces more noise.
+- Work already in flight continues; this rule only governs what an *empty* payload can start.
+
+Runbook: `infra/runbooks/inter-session-relay-empty-payload-redelivery.md` (workspace repo).
+Tracked as incident `inter-session-relay-empty-payload-redelivery-2026-10-26` — Lox-owned,
+no Tom page (noise, not loss).
+
 ## Retro notes scan
 
 After completing all heartbeat sections, if recent infra/cron/host work surfaced a recurring pattern (same failure or remediation appearing for the second or later time), append a row to today's `brain/ops/retro-notes/YYYY-MM-DD.md` via the `retro-notes` skill before finishing this pass. Cite the runbook path and incident key in the `evidence:` field so observations can be cross-referenced. Do not duplicate a `pattern-slug` already in this week's files — the weekly `factory-retro` dedupes by slug, and the highest-impact one becomes an auto-created feature task for Tom's approval.
