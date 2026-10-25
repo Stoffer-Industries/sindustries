@@ -11,12 +11,35 @@ Task 8a2df49c-791b-4f09-a37a-446fa8c6fd5d, AC3. Five sub-cases:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
 import unittest
 
 from agents.lib.subprocess_safe import DEFAULT_TIMEOUT_SECONDS, safe_popen, safe_run
+
+
+def _pid_is_gone(pid: int, timeout: float = 5.0) -> bool:
+    """True once `pid` no longer exists as a process.
+
+    A killed child can linger as a zombie for a moment before it is reaped, and
+    `os.kill(pid, 0)` still succeeds against a zombie, so poll rather than
+    check once.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            # Exists but owned by someone else — not our child, so it is not
+            # something we killed. Treat as not-gone so the assertion fails loudly.
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 class SafeRunTests(unittest.TestCase):
@@ -220,6 +243,58 @@ class SafePopenTests(unittest.TestCase):
             if proc.poll() is None:
                 proc.kill()
                 proc.wait(timeout=5)
+
+    def test_f_wait_kills_child_on_timeout(self) -> None:
+        # AC1/AC3: when the bound fires, the child must be dead — not merely
+        # "Python thinks it exited". We assert on the OS process directly
+        # (os.kill(pid, 0) must raise ProcessLookupError), which is exactly the
+        # guarantee that regressed before: the runner exited and left the
+        # `lobster` child running unsupervised.
+        proc = safe_popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            timeout=0.3,
+        )
+        child_pid = proc.pid
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait()
+        self.assertTrue(
+            _pid_is_gone(child_pid),
+            msg=(
+                "child process "
+                f"{child_pid} survived the parent's timeout; the helper must "
+                "kill it before re-raising TimeoutExpired"
+            ),
+        )
+
+    def test_g_wait_kills_descendant_in_process_group_on_timeout(self) -> None:
+        # AC1/AC3: the fix must reach the whole process group, not just the
+        # direct child. The child shells out to a background `sleep` (its own
+        # grandchild) and blocks; a bare `proc.kill()` would kill the shell but
+        # leave the `sleep` running, which is the "runner exits, child(ren)
+        # survive" bug this task exists to close.
+        proc = safe_popen(
+            ["sh", "-c", "sleep 30 & echo $!; wait"],
+            timeout=0.3,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            grandchild_pid = int((proc.stdout.readline() or "").strip())
+        except ValueError:
+            self.fail("could not read the grandchild pid from the child's stdout")
+        self.assertGreater(grandchild_pid, 0)
+
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait()
+
+        self.assertTrue(
+            _pid_is_gone(grandchild_pid),
+            msg=(
+                f"grandchild process {grandchild_pid} survived the parent's "
+                "timeout; the helper must kill the child's whole process group"
+            ),
+        )
+        proc.stdout.close()
 
 
 if __name__ == "__main__":

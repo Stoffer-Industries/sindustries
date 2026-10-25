@@ -460,6 +460,32 @@ during shell startup.
 Operational recovery and credential-precedence detail live in
 `infra/runbooks/github-ambient-token-override.md`.
 
+### Shared subprocess helper
+
+`agents/lib/subprocess_safe.py` is the shared wrapper for bounded-time
+subprocess calls. It exposes `safe_run` (blocking `subprocess.run` with a
+default timeout) and `safe_popen` (a `Popen` proxy whose `.wait()` is bounded).
+
+The contract that matters to callers:
+
+- **A timeout kills the child.** `safe_popen` starts the child in its own
+  session (`start_new_session=True`), so on timeout `wait()` kills the child's
+  whole process group and reaps it before re-raising `TimeoutExpired`. The child
+  does not survive the parent's exit, and neither do processes the child forked.
+- **The exception is unchanged.** `TimeoutExpired` still propagates with the same
+  `.cmd`/`.timeout` attributes; only the child's fate changed. Callers own the
+  policy (raise, retry, or record-and-skip) as before.
+- **A call site that opts out loses the guarantee.** Passing an explicit
+  `start_new_session=False` or a custom `preexec_fn` to `safe_popen` breaks the
+  process-group-leader assumption, and the helper degrades to a direct-child
+  kill — grandchildren survive. `tests/test_runner_cleanup_on_timeout.py` fails
+  if a lobster-spawning runner does this.
+
+The three lobster-spawning runners — `agents/workflows/feature-task/run.py`,
+`agents/workflows/content-tasks/run.py`, and `agents/workflows/bookmarks/run.py`
+— all inherit this cleanup path because the fix lives in the helper rather than
+in three duplicated call-site wrappers.
+
 **Config:** `openclaw.json` — edit via `openclaw config set <field> <value>` or direct JSON edit. Restart after changes: `openclaw gateway restart`. Key fields: `agents.defaults.workspace`, `agents.defaults.heartbeat.every`, `channels.telegram.allowFrom`, `crons`.
 
 **Cron jobs:** Defined in `agents/crons/prompts/` as `.md` files. Registered in `openclaw.json`. Run `cron list` to verify. `openclaw gateway status` / `openclaw gateway restart` for health.
@@ -470,6 +496,7 @@ Operational recovery and credential-precedence detail live in
 
 - `docs/systems/bookmark-workflow.md` — bookmark workflow state machine and script map
 - `docs/systems/tasks.md` — Tasks API data model, comment tag protocol, dependency system, all three workflows
+- `docs/specs/kill-child-on-timeout-subprocess-safe-tech-design.md` — design for the shared helper's cleanup-on-timeout contract
 - `infra/runbooks/github-ambient-token-override.md` — per-agent GitHub credential recovery and diagnostics
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
