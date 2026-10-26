@@ -304,6 +304,13 @@ jobs:
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace services/tasks-api
 
+      - name: Typecheck gate (tasks-api)
+        # Task 876114be: ratcheting compiler gate — tsc output is compared
+        # against services/tasks-api/typecheck-baseline.json; the gate
+        # fails on growth (R1) or a new/grown diagnostic fingerprint (R2).
+        # See docs/specs/backend-typecheck-gate-tech-design.md Decision 3.
+        run: npm run typecheck:gate --workspace services/tasks-api
+
       - name: Check Prisma migration prefixes
         run: ./scripts/check-migration-prefixes.sh
 
@@ -370,6 +377,9 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace services/content-scheduler-api
+
+      - name: Typecheck gate (content-scheduler-api)
+        run: npm run typecheck:gate --workspace services/content-scheduler-api
 
       - name: Apply DB migrations
         run: npm run prisma:migrate --workspace services/content-scheduler-api
@@ -522,6 +532,9 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace services/budget-api
+
+      - name: Typecheck gate (budget-api)
+        run: npm run typecheck:gate --workspace services/budget-api
 
       - name: Run unit tests
         run: npm test --workspace services/budget-api
@@ -835,6 +848,36 @@ jobs:
       - name: Run no-absolute-paths lint unit tests
         run: node --test scripts/test/check-no-absolute-paths.test.mjs
 
+  typecheck-gate-tests:
+    # Task 876114be: self-test for scripts/typecheck-gate.mjs, the shared
+    # ratcheting compiler-gate tool used by the tasks-api, budget-api and
+    # content-scheduler-api jobs. Each test creates and removes its own
+    # disposable services/__tcgate_test_<id>__/ workspace member and runs
+    # the real tsc binary against it — needs a real `npm ci` (unlike the
+    # no-absolute-paths lint above), since the tool shells out to
+    # `npm run typecheck --workspace <fixture>`. This job is added to
+    # merge-gate.needs because infra/cloud/scripts/tests/ci-deployment-gates.test.sh
+    # derives the required job set from this file — see
+    # docs/specs/backend-typecheck-gate-tech-design.md Decision 4.
+    name: typecheck-gate tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run typecheck-gate unit tests
+        run: node --test scripts/test/typecheck-gate.test.mjs
+
   infra-cloud-bootstrap-staging-tests:
     # Task 5baf6809 (Fix Fly staging deploy infra blockers). Three shell
     # tests that gate AC1 (bootstrap-staging.sh `fly apps create` arg shape
@@ -1080,6 +1123,7 @@ jobs:
       - gymtrack-mcp-tests
       - design-system-sync
       - no-absolute-paths-lint
+      - typecheck-gate-tests
       - infra-cloud-bootstrap-staging-tests
       - gitleaks
       - feature-task-clippy

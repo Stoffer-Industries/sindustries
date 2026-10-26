@@ -1,0 +1,8 @@
+{
+  "service": "budget-api",
+  "generatedAt": "2026-10-26",
+  "generatedBy": "npm run typecheck:baseline --workspace services/budget-api",
+  "tscVersion": "5.9.3",
+  "totalDiagnostics": 0,
+  "fingerprints": {}
+}
