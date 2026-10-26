@@ -9,6 +9,11 @@
     // that are not defects. Any future move
     // to a compiled runtime (e.g. `node dist/*.js`) MUST revisit these two
     // keys in the same PR that makes the move.
+    // `moduleResolution: bundler` implies TypeScript's default conditions
+    // (`import`/`types`), while `tsx`/esbuild on Node resolves with
+    // `node`/`import`/`default`. A dependency whose `exports` map branches on
+    // a `node` condition with different typings could therefore resolve
+    // differently than the runtime — no service here depends on one today.
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": false,
