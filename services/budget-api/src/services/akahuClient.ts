@@ -79,15 +79,62 @@ export class AkahuHttpError extends Error {
   }
 }
 
-/** A deadline shared across a set of calls, e.g. the whole `/akahu/sync` request. */
+/**
+ * The caller cancelled the request (e.g. the HTTP client disconnected).
+ * Deliberately distinct from `AkahuTimeoutError`: a user closing the app
+ * must not surface as a provider timeout.
+ */
+export class AkahuCancelledError extends Error {
+  readonly code = 'AKAHU_CANCELLED' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'AkahuCancelledError';
+  }
+}
+
+/**
+ * A cursor traversal stopped early because a page could not be fetched. The
+ * pages that were fetched before the failure are carried on the error so the
+ * caller can persist them (idempotently) and report an incomplete sync
+ * instead of pretending the window was covered.
+ */
+export class AkahuTraversalError extends Error {
+  readonly code = 'AKAHU_TRAVERSAL_FAILED' as const;
+  readonly items: AkahuTransaction[];
+  readonly pagesFetched: number;
+  readonly cause?: unknown;
+  constructor(
+    message: string,
+    opts: { items: AkahuTransaction[]; pagesFetched: number; cause?: unknown }
+  ) {
+    super(message);
+    this.name = 'AkahuTraversalError';
+    this.items = opts.items;
+    this.pagesFetched = opts.pagesFetched;
+    this.cause = opts.cause;
+  }
+}
+
+/**
+ * A deadline shared across a set of calls, e.g. the whole `/akahu/sync` request.
+ *
+ * The deadline is measured on a monotonic clock: a wall-clock adjustment (NTP
+ * step, manual change) must not extend or collapse an in-flight budget.
+ */
 export type AkahuBudget = { readonly deadlineAt: number };
 
+function monotonicNowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
 export function createAkahuBudget(ms: number): AkahuBudget {
-  return { deadlineAt: Date.now() + ms };
+  return { deadlineAt: monotonicNowMs() + ms };
 }
 
 function remainingBudgetMs(budget: AkahuBudget | undefined): number {
-  return budget ? budget.deadlineAt - Date.now() : Infinity;
+  return budget ? budget.deadlineAt - monotonicNowMs() : Infinity;
 }
 
 // Read lazily (not hoisted to a module-load-time constant) so it stays
@@ -95,7 +142,7 @@ function remainingBudgetMs(budget: AkahuBudget | undefined): number {
 // override it without needing to re-import the module.
 function defaultPerCallTimeoutMs(): number {
   const raw = Number(process.env.AKAHU_PER_CALL_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 10_000;
 }
 const READ_MAX_ATTEMPTS = 4;
 const RETRYABLE_READ_STATUSES = new Set([429, 502, 503, 504]);
@@ -123,11 +170,16 @@ function isAbortError(err: unknown): boolean {
 function raceWithAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal,
-  timeoutError: AkahuTimeoutError
+  abortError: () => Error
 ): Promise<T> {
-  if (signal.aborted) return Promise.reject(timeoutError);
+  if (signal.aborted) {
+    // Do not orphan `promise`: if it rejects later, Node's default
+    // unhandled-rejection behaviour would take the service down.
+    promise.catch(() => {});
+    return Promise.reject(abortError());
+  }
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(timeoutError);
+    const onAbort = () => reject(abortError());
     signal.addEventListener('abort', onAbort, { once: true });
     promise.then(
       (value) => {
@@ -136,7 +188,7 @@ function raceWithAbort<T>(
       },
       (err) => {
         signal.removeEventListener('abort', onAbort);
-        reject(isAbortError(err) ? timeoutError : err);
+        reject(isAbortError(err) ? abortError() : err);
       }
     );
   });
@@ -145,15 +197,23 @@ function raceWithAbort<T>(
 async function fetchAkahuOnce(
   url: string | URL,
   init: RequestInit,
-  timeoutMs: number
+  timeoutMs: number,
+  opts: { signal?: AbortSignal } = {}
 ): Promise<FetchAkahuResult> {
-  const signal = AbortSignal.timeout(timeoutMs);
-  const timeoutError = new AkahuTimeoutError(
-    `Akahu request to ${String(url)} timed out after ${timeoutMs}ms`
-  );
+  const callerSignal = opts.signal;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
+  const abortError = (): Error => {
+    if (callerSignal?.aborted) {
+      return new AkahuCancelledError(`Akahu request to ${String(url)} was cancelled by the caller`);
+    }
+    return new AkahuTimeoutError(
+      `Akahu request to ${String(url)} timed out after ${timeoutMs}ms`
+    );
+  };
 
-  const res = await raceWithAbort(fetch(url, { ...init, signal }), signal, timeoutError);
-  const text = await raceWithAbort(res.text(), signal, timeoutError);
+  const res = await raceWithAbort(fetch(url, { ...init, signal }), signal, abortError);
+  const text = await raceWithAbort(res.text(), signal, abortError);
   let json: unknown = null;
   if (text) {
     try {
@@ -192,12 +252,17 @@ function sleep(ms: number): Promise<void> {
 async function fetchAkahu(
   url: string | URL,
   init: RequestInit,
-  opts: { kind: AkahuCallKind; timeoutMs?: number; budget?: AkahuBudget }
+  opts: {
+    kind: AkahuCallKind;
+    timeoutMs?: number;
+    budget?: AkahuBudget;
+    signal?: AbortSignal;
+  }
 ): Promise<FetchAkahuResult> {
   const timeoutMs = opts.timeoutMs ?? defaultPerCallTimeoutMs();
 
   if (opts.kind === 'write') {
-    return fetchAkahuOnce(url, init, timeoutMs);
+    return fetchAkahuOnce(url, init, timeoutMs, { signal: opts.signal });
   }
 
   // The first attempt always runs regardless of budget — only a *retry*
@@ -206,12 +271,25 @@ async function fetchAkahu(
   let lastResult: FetchAkahuResult | undefined;
   for (let attempt = 1; attempt <= READ_MAX_ATTEMPTS; attempt++) {
     if (attempt > 1 && remainingBudgetMs(opts.budget) <= 0) {
-      if (lastResult) return lastResult;
-      throw new AkahuTimeoutError('Akahu whole-sync budget exhausted before a retry could start');
+      // The whole-sync budget is the binding constraint. This is a deadline
+      // overrun, not a provider HTTP failure, so it must not be reported as
+      // the last transient status (e.g. a 429) the provider returned.
+      throw new AkahuTimeoutError(
+        'Akahu whole-sync budget exhausted before a retry could start'
+      );
     }
 
+    // A single call may never outlive the whole-sync budget: the per-call
+    // deadline is clamped to whatever is left of the budget.
+    const remaining = remainingBudgetMs(opts.budget);
+    const effectiveTimeoutMs = Number.isFinite(remaining)
+      ? Math.max(1, Math.floor(Math.min(timeoutMs, remaining)))
+      : timeoutMs;
+
     try {
-      const result = await fetchAkahuOnce(url, init, timeoutMs);
+      const result = await fetchAkahuOnce(url, init, effectiveTimeoutMs, {
+        signal: opts.signal
+      });
       const retryable = RETRYABLE_READ_STATUSES.has(result.status);
       if (!retryable || attempt === READ_MAX_ATTEMPTS) {
         return result;
@@ -224,6 +302,8 @@ async function fetchAkahu(
         )
       );
     } catch (err) {
+      // A caller cancellation is never retried: the request is gone.
+      if (err instanceof AkahuCancelledError) throw err;
       if (err instanceof AkahuTimeoutError && attempt < READ_MAX_ATTEMPTS) {
         if (remainingBudgetMs(opts.budget) <= 0) throw err;
         await sleep(Math.min(backoffDelayMs(attempt, null), Math.max(0, remainingBudgetMs(opts.budget))));
@@ -279,7 +359,11 @@ export async function exchangeAuthorizationCode(params: {
   return { accessToken: json.access_token, scope: json.scope ?? null };
 }
 
-export async function akahuGetAccounts(params: { accessToken: string; budget?: AkahuBudget }) {
+export async function akahuGetAccounts(params: {
+  accessToken: string;
+  budget?: AkahuBudget;
+  signal?: AbortSignal;
+}) {
   const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
   const result = await fetchAkahu(
     'https://api.akahu.io/v1/accounts',
@@ -289,13 +373,17 @@ export async function akahuGetAccounts(params: { accessToken: string; budget?: A
         'X-Akahu-Id': appIdToken
       }
     },
-    { kind: 'read', budget: params.budget }
+    { kind: 'read', budget: params.budget, signal: params.signal }
   );
 
   return parseAkahuList<AkahuAccount>(result, '/accounts').items;
 }
 
-export async function akahuRefreshAllAccounts(params: { accessToken: string; budget?: AkahuBudget }) {
+export async function akahuRefreshAllAccounts(params: {
+  accessToken: string;
+  budget?: AkahuBudget;
+  signal?: AbortSignal;
+}) {
   const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
   const result = await fetchAkahu(
     'https://api.akahu.io/v1/refresh',
@@ -306,7 +394,7 @@ export async function akahuRefreshAllAccounts(params: { accessToken: string; bud
         'X-Akahu-Id': appIdToken
       }
     },
-    { kind: 'write' }
+    { kind: 'write', budget: params.budget, signal: params.signal }
   );
 
   const json = result.json as AkahuActionResponse | null;
@@ -333,6 +421,7 @@ export async function akahuGetTransactions(params: {
   endMs?: number;
   cursor?: string;
   budget?: AkahuBudget;
+  signal?: AbortSignal;
 }): Promise<{ items: AkahuTransaction[]; nextCursor: string | null }> {
   const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
   const url = new URL('https://api.akahu.io/v1/transactions');
@@ -352,7 +441,7 @@ export async function akahuGetTransactions(params: {
         'X-Akahu-Id': appIdToken
       }
     },
-    { kind: 'read', budget: params.budget }
+    { kind: 'read', budget: params.budget, signal: params.signal }
   );
 
   const json = parseAkahuList<AkahuTransaction>(result, '/transactions');
@@ -362,7 +451,11 @@ export async function akahuGetTransactions(params: {
   return { items: json.items, nextCursor };
 }
 
-export async function akahuGetPendingTransactions(params: { accessToken: string; budget?: AkahuBudget }) {
+export async function akahuGetPendingTransactions(params: {
+  accessToken: string;
+  budget?: AkahuBudget;
+  signal?: AbortSignal;
+}) {
   const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
   const result = await fetchAkahu(
     'https://api.akahu.io/v1/transactions/pending',
@@ -372,7 +465,7 @@ export async function akahuGetPendingTransactions(params: { accessToken: string;
         'X-Akahu-Id': appIdToken
       }
     },
-    { kind: 'read', budget: params.budget }
+    { kind: 'read', budget: params.budget, signal: params.signal }
   );
 
   return parseAkahuList<AkahuPendingTransaction>(result, '/transactions/pending').items;
@@ -393,6 +486,7 @@ export async function paginateAkahuTransactions(params: {
   endMs?: number;
   budget?: AkahuBudget;
   pageCap?: number;
+  signal?: AbortSignal;
 }): Promise<{ items: AkahuTransaction[]; complete: boolean; pagesFetched: number }> {
   const pageCap = params.pageCap ?? AKAHU_TRANSACTIONS_PAGE_CAP;
   const items: AkahuTransaction[] = [];
@@ -401,13 +495,33 @@ export async function paginateAkahuTransactions(params: {
   let pagesFetched = 0;
 
   while (true) {
-    const page = await akahuGetTransactions({
-      accessToken: params.accessToken,
-      startMs: params.startMs,
-      endMs: params.endMs,
-      cursor,
-      budget: params.budget
-    });
+    // The whole-sync budget is checked before every page, not only inside a
+    // single call: a long traversal must not outlive the budget just
+    // because each individual page was quick.
+    if (params.budget && remainingBudgetMs(params.budget) <= 0) {
+      throw new AkahuTimeoutError(
+        'Akahu whole-sync budget exhausted before the next page could be fetched'
+      );
+    }
+
+    let page: { items: AkahuTransaction[]; nextCursor: string | null };
+    try {
+      page = await akahuGetTransactions({
+        accessToken: params.accessToken,
+        startMs: params.startMs,
+        endMs: params.endMs,
+        cursor,
+        budget: params.budget,
+        signal: params.signal
+      });
+    } catch (err) {
+      // Carry the pages that were already fetched so the caller can persist
+      // them (idempotently) and report an incomplete traversal.
+      throw new AkahuTraversalError(
+        err instanceof Error ? err.message : 'Akahu transaction traversal failed',
+        { items, pagesFetched, cause: err }
+      );
+    }
     pagesFetched += 1;
     items.push(...page.items);
 

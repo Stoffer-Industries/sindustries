@@ -8,8 +8,13 @@ import {
   akahuGetAccounts,
   akahuGetPendingTransactions,
   akahuRefreshAllAccounts,
-  akahuGetTransactions,
-  exchangeAuthorizationCode
+  AkahuCancelledError,
+  AkahuTimeoutError,
+  AkahuTraversalError,
+  createAkahuBudget,
+  exchangeAuthorizationCode,
+  paginateAkahuTransactions,
+  type AkahuTransaction
 } from '../services/akahuClient';
 import {
   getAkahuConnectionForUser,
@@ -23,6 +28,17 @@ export const akahuRouter = Router();
 const INCREMENTAL_OVERLAP_MS = 7 * 24 * 60 * 60 * 1000;
 const FORCE_SYNC_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 const AKAHU_PENDING_PROVIDER_ID_PREFIX = 'akahu-pending:';
+const AKAHU_SYNC_BUDGET_MS_DEFAULT = 20_000;
+
+/**
+ * Whole-sync budget shared by every provider call and every pagination
+ * round of one `/akahu/sync` request. Env-configurable so the deployed
+ * latency can be tuned without a code change (tech design open question #3).
+ */
+function akahuSyncBudgetMs(): number {
+  const raw = Number(process.env.AKAHU_SYNC_BUDGET_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : AKAHU_SYNC_BUDGET_MS_DEFAULT;
+}
 
 // All routes here run behind requireSession (see app.ts) so userId is read
 // from req.session.userId rather than from a query/body parameter. The user
@@ -103,26 +119,70 @@ akahuRouter.post(
               ? Math.max(0, conn.lastSyncedAt.getTime() - INCREMENTAL_OVERLAP_MS)
               : undefined;
       const syncEndMs = typeof endMs === 'number' ? endMs : nowMs;
-      const refresh = force ? await akahuRefreshAllAccounts({ accessToken }) : null;
+      const budget = createAkahuBudget(akahuSyncBudgetMs());
+      // Request-scoped signal: a client disconnect stops provider work
+      // instead of leaving it running until the per-call deadline.
+      const requestController = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) requestController.abort();
+      });
+      const signal = requestController.signal;
 
-      const [accounts, transactionsPage, pendingTxns] = await Promise.all([
+      const refresh = force
+        ? await akahuRefreshAllAccounts({ accessToken, budget, signal })
+        : null;
+
+      const [accounts, pendingTxns] = await Promise.all([
         akahuGetAccounts({
-          accessToken
+          accessToken,
+          budget,
+          signal
         }),
-        akahuGetTransactions({
+        akahuGetPendingTransactions({
+          accessToken,
+          budget,
+          signal
+        })
+      ]);
+
+      // Traverse the settled-transaction window to exhaustion. A partial
+      // traversal is reported as `complete: false` and never advances the
+      // checkpoint (invariant I1).
+      let txns: AkahuTransaction[] = [];
+      let pagesFetched = 0;
+      let traversalComplete = false;
+      let traversalError: string | null = null;
+      try {
+        const traversal = await paginateAkahuTransactions({
           accessToken,
           // Akahu can surface transactions after the bank date has already passed,
           // especially for cards. Keep a larger overlap so late arrivals are upserted.
           startMs: syncStartMs,
-          endMs: syncEndMs
-        }),
-        akahuGetPendingTransactions({
-          accessToken
-        })
-      ]);
-      // NOTE: this syncs only the first page of settled transactions; cursor
-      // traversal to exhaustion lands in a follow-up PR (task a37b31c9 AC4).
-      const txns = transactionsPage.items;
+          endMs: syncEndMs,
+          budget,
+          signal
+        });
+        txns = traversal.items;
+        pagesFetched = traversal.pagesFetched;
+        traversalComplete = traversal.complete;
+      } catch (err) {
+        if (err instanceof AkahuTraversalError) {
+          const cause = err.cause;
+          // A deadline overrun or a client disconnect aborts the sync: those
+          // are not partial-but-usable results.
+          if (cause instanceof AkahuTimeoutError || cause instanceof AkahuCancelledError) {
+            throw cause;
+          }
+          // A provider failure on a later page keeps the pages already
+          // fetched (the upsert is idempotent) and reports an incomplete sync.
+          txns = err.items;
+          pagesFetched = err.pagesFetched;
+          traversalComplete = false;
+          traversalError = err.message;
+        } else {
+          throw err;
+        }
+      }
 
       // Upsert accounts into LinkedCard so the rest of the app can treat them "card-like".
       const cardsByProviderId = new Map<string, { id: string }>();
@@ -292,12 +352,22 @@ akahuRouter.post(
         pendingCreated += 1;
       }
 
-      await markAkahuSyncComplete({ userId, lastSyncedAt: new Date() });
+      // The checkpoint advances only on a complete traversal: an incomplete
+      // window is re-requested by the next sync (safe — the upsert is
+      // idempotent by providerTransactionId).
+      const checkpointAdvanced = traversalComplete;
+      if (checkpointAdvanced) {
+        await markAkahuSyncComplete({ userId, lastSyncedAt: new Date() });
+      }
 
       const month = currentMonthKey();
       const alerts = await evaluateAlertsForUser({ userId, month });
       res.status(200).json({
         ok: true,
+        complete: traversalComplete,
+        checkpointAdvanced,
+        pagesFetched,
+        transactionsFetched: txns.length,
         accounts: accounts.length,
         created,
         updated,
@@ -305,9 +375,18 @@ akahuRouter.post(
         balanceSnapshotsCreated,
         categorized,
         refresh,
-        alerts
+        alerts,
+        ...(traversalError ? { error: traversalError } : {})
       });
     } catch (e: any) {
+      // A deadline overrun and a client disconnect are distinguishable from
+      // an ordinary provider failure.
+      if (e instanceof AkahuTimeoutError) {
+        return jsonError(res, 400, 'AKAHU_TIMEOUT', e?.message ?? 'Akahu sync timed out');
+      }
+      if (e instanceof AkahuCancelledError) {
+        return jsonError(res, 400, 'AKAHU_CANCELLED', e?.message ?? 'Akahu sync was cancelled');
+      }
       return jsonError(res, 400, 'BAD_REQUEST', e?.message ?? 'Akahu sync failed');
     }
   })

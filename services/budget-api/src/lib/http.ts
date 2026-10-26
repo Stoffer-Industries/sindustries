@@ -4,7 +4,9 @@ export type ApiErrorCode =
   | 'BAD_REQUEST'
   | 'UNAUTHORIZED'
   | 'NOT_FOUND'
-  | 'INTERNAL_SERVER_ERROR';
+  | 'INTERNAL_SERVER_ERROR'
+  | 'AKAHU_TIMEOUT'
+  | 'AKAHU_CANCELLED';
 
 export function jsonError(
   res: Response,
