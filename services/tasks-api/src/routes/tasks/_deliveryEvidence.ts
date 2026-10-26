@@ -15,6 +15,8 @@
 // superset of the comments the rule reads, which is what makes the list and
 // detail projections agree (see `deliveryEvidence.test.ts`).
 
+import type { Prisma } from '../../../generated/prisma/index.js';
+
 const LOBSTER_STATE_MARKER = '[lobster-state]';
 const IMPLEMENTER_PRS_MARKER = '[implementer-prs]';
 const IMPLEMENTER_PRS_MARKER_ALT = '[rowan-prs]';
@@ -64,7 +66,7 @@ export function isDeliveryEvidenceComment(text: unknown): boolean {
  * full comment history of every listed task is never loaded (task 7db08a30,
  * AC4).
  */
-export function deliveryEvidenceCommentWhere() {
+export function deliveryEvidenceCommentWhere(): Prisma.TaskCommentWhereInput {
   return {
     OR: DELIVERY_EVIDENCE_MARKERS.map((marker) => ({ body: { contains: marker } }))
   };
