@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: a37b31c9-1ddc-4732-b8c8-9968726c9c0c
 product_spec: brain/research/akahu-sync-completeness-and-deadlines.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 889
+shipped_date: 2026-10-26
 ---
 
 # Budget / Akahu — pagination completeness and request deadlines
@@ -14,7 +14,7 @@ shipped_date: null
 **Repository:** `Stoffer-Industries/sindustries`
 **Branch:** `task-a37b31c9-akahu-pagination-deadlines`
 **Worktree:** `/Volumes/WD1/worktrees/rowan/rowan-a37b31c9-akahu-pagination`
-**Author:** Rowan · **Date:** 2026-10-26 · **Status:** draft, awaiting Quinn's `tech_design` approval
+**Author:** Rowan · **Date:** 2026-10-26 · **Status:** shipped — PR #889, merged 2026-10-26
 
 ---
 
@@ -192,7 +192,7 @@ None. No lobster workflow, cron job, or skill is added or modified by this task.
 
 **Layers available:** `services/budget-api` runs `vitest run` (`services/budget-api/package.json:6`); `supertest` is available for route-level tests; `vi.stubGlobal('fetch', …)` is the established mocking mechanism (`services/budget-api/test/akahuClient.test.ts:24`).
 
-**E2E note:** no AC here is a browser/app-flow AC. The ACs are provider-contract, deadline, and persistence assertions that require deterministic control of the transport boundary and the provider's page boundaries — neither is achievable through a mobile E2E harness, and doing so would require live banking credentials, which the research explicitly kept out of scope. **Fallback layers:** `unit` (client, mocked `fetch`), route integration (real client against mocked `fetch` and a Prisma double), and AC6 DB integration (real Prisma/Postgres). The user-visible consequence of a partial sync is covered by the mobile app's own contract test surface rather than by a browser E2E.
+**E2E note:** no AC here is a browser/app-flow AC. The ACs are provider-contract, deadline, and persistence assertions that require deterministic control of the transport boundary and the provider's page boundaries — neither is achievable through a mobile E2E harness, and doing so would require live banking credentials, which the research explicitly kept out of scope. **Fallback layers:** `unit` (client, mocked `fetch`), route integration (real client against mocked `fetch` and a Prisma double), and AC6 DB integration (real Prisma/Postgres). The user-visible consequence of a partial sync is **not** covered by a mobile E2E: `apps/budget-mobile` defines no test script, no `test/e2e/` directory and no Playwright config — its only CI check is `npm run typecheck` — and `packages/budget-domain` has no sync or completeness coverage (its only suites are `budgets.test.ts` and `categories.test.ts`). The layer that actually applies to Budget Mobile is TypeScript validation (`npm run typecheck --workspace apps/budget-mobile`, green in CI) plus manual TestFlight/EAS verification, consistent with `apps/budget-mobile/SPEC.md`'s own "E2E coverage" section.
 
 | AC | Planned verification | Layer | Fixture | Assertion |
 |---|---|---|---|---|
