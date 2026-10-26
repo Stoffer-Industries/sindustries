@@ -105,7 +105,7 @@ akahuRouter.post(
       const syncEndMs = typeof endMs === 'number' ? endMs : nowMs;
       const refresh = force ? await akahuRefreshAllAccounts({ accessToken }) : null;
 
-      const [accounts, txns, pendingTxns] = await Promise.all([
+      const [accounts, transactionsPage, pendingTxns] = await Promise.all([
         akahuGetAccounts({
           accessToken
         }),
@@ -120,6 +120,9 @@ akahuRouter.post(
           accessToken
         })
       ]);
+      // NOTE: this syncs only the first page of settled transactions; cursor
+      // traversal to exhaustion lands in a follow-up PR (task a37b31c9 AC4).
+      const txns = transactionsPage.items;
 
       // Upsert accounts into LinkedCard so the rest of the app can treat them "card-like".
       const cardsByProviderId = new Map<string, { id: string }>();
