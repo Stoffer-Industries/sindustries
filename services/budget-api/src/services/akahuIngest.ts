@@ -170,7 +170,7 @@ export async function upsertAkahuSettledTransactions(params: {
     }
 
     const amountCentsAbs = Math.round(Math.abs(t.amount) * 100);
-    const direction = t.amount < 0 ? 'debit' : 'credit';
+    const direction: 'debit' | 'credit' = t.amount < 0 ? 'debit' : 'credit';
     const merchant = t.merchant?.name ?? null;
     const providerTransactionId = `akahu:${t._id}`;
 
