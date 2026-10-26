@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Prisma, TaskPriority } from '../../generated/prisma/index.js';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
 
@@ -97,6 +98,17 @@ function cursorWhere(cursor) {
   };
 }
 
+/**
+ * Narrow an Express query value to a plain string. Express types a query
+ * parameter as `string | ParsedQs | (string | ParsedQs)[]`, and only the
+ * string form is a usable filter value. Narrowing once at the boundary
+ * keeps the filter values type-safe instead of handing Prisma the wider
+ * union.
+ */
+function queryString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
 tasksRouter.get('/tasks', async (req, res, next) => {
   try {
     const {
@@ -126,15 +138,28 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       }
     }
 
-    if (priority && !validPriorities.has(priority)) {
+    // Narrow the query parameters to plain strings before they are used as
+    // filter values. Express types a query parameter as
+    // `string | ParsedQs | (string | ParsedQs)[]`; only the string form is a
+    // usable filter, so the wider union never reaches Prisma.
+    const priorityValue = queryString(priority);
+    const assigneeValue = queryString(assignee);
+    const taskTypeValue = queryString(taskType);
+    const tagValue = queryString(tag);
+    const qValue = queryString(q);
+    const sortValue = queryString(sort) ?? 'priority';
+    const workflowGateOwnerValue = queryString(workflowGateOwner)?.trim() ?? '';
+    const attentionOwnerValue = queryString(attentionOwner)?.trim() ?? '';
+
+    if (priorityValue && !validPriorities.has(priorityValue)) {
       return badRequest(res, 'INVALID_PRIORITY_FILTER', 'Invalid priority filter');
     }
 
-    if (taskType && !validTaskTypes.has(String(taskType))) {
+    if (taskTypeValue && !validTaskTypes.has(taskTypeValue)) {
       return badRequest(res, 'INVALID_TASK_TYPE_FILTER', 'Invalid taskType filter');
     }
 
-    if (sort && !validSorts.has(sort)) {
+    if (!validSorts.has(sortValue)) {
       return badRequest(res, 'INVALID_SORT_VALUE', 'Invalid sort value');
     }
 
@@ -169,47 +194,46 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // `attentionOwner` scopes to explicit attention rows. Combining them via
     // AND lets a user view both normal gate work and exceptional attention
     // requests without conflating the two planes.
-    const workflowGateOwnerRequested =
-      typeof workflowGateOwner === 'string' && workflowGateOwner.trim().length > 0;
+    const workflowGateOwnerRequested = workflowGateOwnerValue.length > 0;
     const workflowGateOwnerFilter = workflowGateOwnerRequested
-      ? buildWorkflowGateOwnerWhere(workflowGateOwner.trim())
+      ? buildWorkflowGateOwnerWhere(workflowGateOwnerValue)
       : [];
     const attentionOwnerFilter =
-      typeof attentionOwner === 'string' && attentionOwner.trim().length > 0
+      attentionOwnerValue.length > 0
         ? {
             attentionOwners: {
               some: {
-                owner: { equals: attentionOwner.trim(), mode: 'insensitive' as const },
+                owner: { equals: attentionOwnerValue, mode: 'insensitive' as const },
                 position: 0
               }
             }
           }
         : {};
 
-    const where = {
+    const where: Prisma.TaskWhereInput = {
       ...(includeArchived === 'true' ? {} : { archivedAt: null }),
       ...statusFilter,
-      ...(priority ? { priority } : {}),
-      ...(taskType ? { taskType: String(taskType) } : {}),
-      ...(assignee
-        ? assignee === 'unassigned'
+      ...(priorityValue ? { priority: priorityValue as TaskPriority } : {}),
+      ...(taskTypeValue ? { taskType: taskTypeValue } : {}),
+      ...(assigneeValue
+        ? assigneeValue === 'unassigned'
           ? { OR: [{ assignee: null }, { assignee: '' }] }
-          : { assignee: { equals: assignee, mode: 'insensitive' } }
+          : { assignee: { equals: assigneeValue, mode: 'insensitive' as const } }
         : {}),
-      ...(q
+      ...(qValue
         ? {
             OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { description: { contains: q, mode: 'insensitive' } }
+              { title: { contains: qValue, mode: 'insensitive' as const } },
+              { description: { contains: qValue, mode: 'insensitive' as const } }
             ]
           }
         : {}),
-      ...(tag
+      ...(tagValue
         ? {
             tags: {
               some: {
                 tag: {
-                  name: { equals: tag, mode: 'insensitive' }
+                  name: { equals: tagValue, mode: 'insensitive' as const }
                 }
               }
             }
@@ -243,7 +267,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // detail projection, so it loads the comments the delivery-evidence rule
     // reads — and only those (AC4). The full comment history of every listed
     // task is never loaded.
-    const taskListInclude = {
+    const taskListInclude: Prisma.TaskInclude = {
       tags: {
         include: {
           tag: true
@@ -275,7 +299,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // after mapping keeps the filter and the payload it filters in agreement
     // (AC2).
     const gateOwnerKey = workflowGateOwnerRequested
-      ? workflowGateOwner.trim().toLowerCase()
+      ? workflowGateOwnerValue.toLowerCase()
       : null;
     const hasOutstandingGateForOwner = (mapped) => !gateOwnerKey
       || (mapped.workflowGates ?? []).some((gate) =>
@@ -296,7 +320,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
         take: limit + 1
       });
 
-      const sortedTasks = sortTaskRows(tasks, sort);
+      const sortedTasks = sortTaskRows(tasks, sortValue);
       hasNextPage = sortedTasks.length > limit;
       const pageTasks = sortedTasks.slice(0, limit);
       pagePayloads = pageTasks.map(mapListTask);
@@ -323,7 +347,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
           break;
         }
 
-        const candidates = sortTaskRows(rows, sort)
+        const candidates = sortTaskRows(rows, sortValue)
           .map((row) => ({ row, payload: mapListTask(row) }))
           .filter((candidate) => hasOutstandingGateForOwner(candidate.payload));
 
@@ -351,7 +375,7 @@ tasksRouter.get('/tasks', async (req, res, next) => {
 
       if (batches >= MAX_FILTER_BATCHES && emitted.length < limit) {
         console.warn('[tasks] workflowGateOwner narrowing reached the batch bound', {
-          owner: workflowGateOwner.trim(),
+          owner: workflowGateOwnerValue,
           limit,
           batches: MAX_FILTER_BATCHES
         });

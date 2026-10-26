@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.ts';
 import { badRequest } from '../../lib/http.ts';
+import type { Prisma, TaskStatus, ApprovalType, ApprovalState } from '../../../generated/prisma/index.js';
 import { loadRequiredApprovalsConfig } from '../../config/requiredApprovals.ts';
 import { buildMapTaskOptions, type MapTaskOptions } from './_mapper.ts';
 
@@ -29,7 +30,7 @@ export function mapTaskOptionsFor(task): MapTaskOptions {
  * is normal gate discovery, not an attention-owner write; a populated
  * `attentionOwners` stack remains authoritative in the agent queue.
  */
-export function buildWorkflowGateOwnerWhere(owner: string): Array<Record<string, unknown>> {
+export function buildWorkflowGateOwnerWhere(owner: string): Prisma.TaskWhereInput[] {
   const config = loadRequiredApprovalsConfig();
   const ownerKey = owner.trim().toLowerCase();
   const actionableStatusByApprovalType: Record<string, string> = {
@@ -48,10 +49,14 @@ export function buildWorkflowGateOwnerWhere(owner: string): Array<Record<string,
         .filter(([, required]) => required.includes(approvalType))
         .map(([taskType]) => taskType);
       return {
-        status: actionableStatusByApprovalType[approvalType],
+        status: actionableStatusByApprovalType[approvalType] as TaskStatus,
         taskType: { in: taskTypes },
         approvals: {
-          none: { type: approvalType, state: 'approved', revokedAt: null }
+          none: {
+            type: approvalType as ApprovalType,
+            state: 'approved' as ApprovalState,
+            revokedAt: null
+          }
         }
       };
     })
