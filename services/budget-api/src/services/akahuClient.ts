@@ -451,6 +451,47 @@ export async function akahuGetTransactions(params: {
   return { items: json.items, nextCursor };
 }
 
+/**
+ * The provider's view of the linked connection.
+ *
+ * `access_granted_at` is the bound the provider itself will serve history
+ * from — it is the only trustworthy source for "how far back may a backfill
+ * go". It is read, never guessed: when the provider does not report it the
+ * caller must supply an explicit bound (see `runAkahuBackfill`).
+ */
+export async function akahuGetMe(params: {
+  accessToken: string;
+  budget?: AkahuBudget;
+  signal?: AbortSignal;
+}): Promise<{ accessGrantedAtMs: number | null }> {
+  const appIdToken = requiredEnv('AKAHU_CLIENT_ID');
+  const result = await fetchAkahu(
+    'https://api.akahu.io/v1/me',
+    {
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        'X-Akahu-Id': appIdToken
+      }
+    },
+    { kind: 'read', budget: params.budget, signal: params.signal }
+  );
+
+  const json = result.json as
+    | { access_granted_at?: string | number | null; message?: string }
+    | null;
+  if (!result.ok) {
+    throw new AkahuHttpError(
+      result.status,
+      `Akahu /me failed: ${json?.message ?? `HTTP ${result.status}`}`
+    );
+  }
+
+  const raw = json?.access_granted_at;
+  const parsedMs =
+    typeof raw === 'number' ? raw : typeof raw === 'string' ? Date.parse(raw) : NaN;
+  return { accessGrantedAtMs: Number.isFinite(parsedMs) ? parsedMs : null };
+}
+
 export async function akahuGetPendingTransactions(params: {
   accessToken: string;
   budget?: AkahuBudget;
