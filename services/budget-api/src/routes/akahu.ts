@@ -22,6 +22,10 @@ import {
   upsertAkahuConnection
 } from '../repos/akahuRepo';
 import { categorizeTransaction } from '../services/categorizer';
+import {
+  ensureAkahuCards,
+  upsertAkahuSettledTransactions
+} from '../services/akahuIngest';
 
 export const akahuRouter = Router();
 
@@ -185,125 +189,21 @@ akahuRouter.post(
       }
 
       // Upsert accounts into LinkedCard so the rest of the app can treat them "card-like".
-      const cardsByProviderId = new Map<string, { id: string }>();
-      const balanceCapturedAt = new Date();
-      let balanceSnapshotsCreated = 0;
-      for (const acc of accounts) {
-        const currentBalanceCents = akahuAmountToCents(acc.balance?.current);
-        const availableBalanceCents = akahuAmountToCents(acc.balance?.available);
-        const balanceCurrency = acc.balance?.currency ?? null;
-        const balanceOverdrawn =
-          typeof acc.balance?.overdrawn === 'boolean' ? acc.balance.overdrawn : null;
-        const hasBalance =
-          currentBalanceCents !== null ||
-          availableBalanceCents !== null ||
-          balanceCurrency !== null ||
-          balanceOverdrawn !== null;
-
-        const card = await prisma.linkedCard.upsert({
-          where: {
-            provider_providerCardId: { provider: 'akahu', providerCardId: acc._id }
-          },
-          update: {
-            displayName: acc.name ?? 'Akahu account',
-            currentBalanceCents,
-            availableBalanceCents,
-            balanceCurrency,
-            balanceOverdrawn,
-            balanceUpdatedAt: hasBalance ? balanceCapturedAt : null
-          },
-          create: {
-            userId,
-            provider: 'akahu',
-            providerCardId: acc._id,
-            displayName: acc.name ?? 'Akahu account',
-            last4: null,
-            currentBalanceCents,
-            availableBalanceCents,
-            balanceCurrency,
-            balanceOverdrawn,
-            balanceUpdatedAt: hasBalance ? balanceCapturedAt : null
-          },
-          select: { id: true }
-        });
-        cardsByProviderId.set(acc._id, card);
-
-        if (hasBalance) {
-          await prisma.accountBalanceSnapshot.create({
-            data: {
-              userId,
-              cardId: card.id,
-              currentBalanceCents,
-              availableBalanceCents,
-              currency: balanceCurrency,
-              overdrawn: balanceOverdrawn,
-              capturedAt: balanceCapturedAt
-            }
-          });
-          balanceSnapshotsCreated += 1;
-        }
-      }
+      const { cardsByProviderId, balanceSnapshotsCreated } = await ensureAkahuCards({
+        userId,
+        accounts,
+        captureBalanceSnapshots: true
+      });
 
       // Upsert transactions (idempotent by providerTransactionId).
-      let created = 0;
-      let updated = 0;
-      let categorized = 0;
-      for (const t of txns) {
-        const card = cardsByProviderId.get(t._account);
-        if (!card) continue;
-
-        const amountCentsAbs = Math.round(Math.abs(t.amount) * 100);
-        const direction = t.amount < 0 ? 'debit' : 'credit';
-        const merchant = t.merchant?.name ?? null;
-        const providerTransactionId = `akahu:${t._id}`;
-
-        const existing = await prisma.transaction.findUnique({
-          where: { providerTransactionId },
-          select: { id: true }
-        });
-
-        if (existing) {
-          await prisma.transaction.update({
-            where: { providerTransactionId },
-            data: {
-              occurredAt: new Date(t.date),
-              merchant,
-              description: t.description,
-              amountCents: amountCentsAbs,
-              direction
-            }
-          });
-          updated += 1;
-          continue;
-        }
-
-        const categoryInputMerchant = merchant ?? t.description ?? 'unknown';
-        const cat = await categorizeTransaction({
+      const { created, updated, categorized: settledCategorized } =
+        await upsertAkahuSettledTransactions({
           userId,
-          merchant: categoryInputMerchant,
-          description: t.description,
-          amountCents: amountCentsAbs
+          transactions: txns,
+          cardsByProviderId
         });
-        categorized += 1;
-
-        await prisma.transaction.create({
-          data: {
-            userId,
-            cardId: card.id,
-            provider: 'akahu',
-            providerTransactionId,
-            occurredAt: new Date(t.date),
-            merchant,
-            description: t.description,
-            amountCents: amountCentsAbs,
-            direction,
-            category: cat.category,
-            categoryConfidence: cat.confidence,
-            categorySource: cat.source
-          }
-        });
-        created += 1;
-      }
+      // Pending rows are categorised too, so the reported total covers both.
+      let categorized = settledCategorized;
 
       // Pending transactions have no stable Akahu id. Rebuild our local pending set each sync
       // so items disappear once Akahu moves them into settled /transactions.
@@ -420,7 +320,4 @@ function pendingProviderTransactionId(
   return `${AKAHU_PENDING_PROVIDER_ID_PREFIX}${digest}`;
 }
 
-function akahuAmountToCents(amount: number | undefined) {
-  return typeof amount === 'number' && Number.isFinite(amount) ? Math.round(amount * 100) : null;
-}
 

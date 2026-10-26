@@ -21,6 +21,27 @@ import { useSession, type Session } from '../state/SessionContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
+/**
+ * The sync route's completeness contract.
+ *
+ * `complete: false` means the window was only partially traversed, so some
+ * history may be missing and the app must not claim a complete sync.
+ */
+type AkahuSyncResult = {
+  ok?: boolean;
+  complete?: boolean;
+  checkpointAdvanced?: boolean;
+  pagesFetched?: number;
+  transactionsFetched?: number;
+};
+
+function syncOutcomeLabel(result: AkahuSyncResult | undefined, complete: string): string {
+  if (result && result.complete === false) {
+    return 'Sync incomplete — some history may be missing';
+  }
+  return complete;
+}
+
 type BalanceAccount = {
   id: string;
   displayName: string;
@@ -187,14 +208,14 @@ export function DashboardScreen({ navigation }: Props) {
         setAkahuStatus('Syncing transactions...');
         const now = Date.now();
         const startMs = now - 30 * 24 * 60 * 60 * 1000;
-        await apiFetch('/akahu/sync', {
+        const syncResult = await apiFetch<AkahuSyncResult>('/akahu/sync', {
           method: 'POST',
           body: JSON.stringify({ userId: activeSession.user.id, startMs, endMs: now }),
           session: activeSession
         });
 
         if (alive) {
-          setAkahuStatus('Akahu linked and synced');
+          setAkahuStatus(syncOutcomeLabel(syncResult, 'Akahu linked and synced'));
           setSyncVersion((value) => value + 1);
         }
       } catch (e: any) {
@@ -444,12 +465,12 @@ export function DashboardScreen({ navigation }: Props) {
                   setAkahuStatus('Refreshing Akahu and syncing transactions...');
                   const now = Date.now();
                   const startMs = now - 90 * 24 * 60 * 60 * 1000;
-                  await apiFetch('/akahu/sync', {
+                  const syncResult = await apiFetch<AkahuSyncResult>('/akahu/sync', {
                     method: 'POST',
                     body: JSON.stringify({ userId: session.user.id, startMs, endMs: now, force: true }),
                     session
                   });
-                  setAkahuStatus('Sync complete');
+                  setAkahuStatus(syncOutcomeLabel(syncResult, 'Sync complete'));
                   setSyncVersion((value) => value + 1);
                 } catch (e: any) {
                   setAkahuStatus('');

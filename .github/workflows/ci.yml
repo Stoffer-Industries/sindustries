@@ -616,8 +616,12 @@ jobs:
       - name: Seed DB
         run: npm run prisma:seed --workspace services/budget-api
 
-      - name: Run ownership-contract integration (real DB)
-        run: npm test --workspace services/budget-api -- ownership-contract-integration
+      - name: Run ownership-contract + Akahu backfill integration (real DB)
+        # `akahuBackfillDb` is the real-Postgres counterpart of the Akahu
+        # backfill's AC6 evidence (task a37b31c9): "a second apply creates
+        # no duplicates" is a claim about a unique constraint, so it is
+        # asserted against the real schema, not a Prisma double.
+        run: npm test --workspace services/budget-api -- ownership-contract-integration akahuBackfillDb
 
   tasks-app-tests:
     name: tasks app tests
