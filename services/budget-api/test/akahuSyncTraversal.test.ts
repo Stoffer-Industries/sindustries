@@ -114,7 +114,7 @@ function page(items: number[], next: string | null, from = 0) {
   };
 }
 
-describe('POST /api/v1/akahu/sync — cursor traversal and completeness', () => {
+describe('POST /api/v1/akahu/sync - cursor traversal and completeness', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();

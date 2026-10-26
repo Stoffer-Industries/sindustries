@@ -204,7 +204,7 @@ describe('akahuClient', () => {
       process.env.AKAHU_PER_CALL_TIMEOUT_MS = '30';
     });
 
-    it('rejects with AKAHU_TIMEOUT when the provider never responds (stalled header)', async () => {
+    it('rejects with AKAHU_TIMEOUT when the provider never responds - stalled header', async () => {
       vi.stubGlobal('fetch', neverResolves());
 
       await expect(akahuGetAccounts({ accessToken: 't' })).rejects.toThrow(AkahuTimeoutError);
