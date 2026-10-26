@@ -16,7 +16,10 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:gate": "node ../../scripts/typecheck-gate.mjs --service budget-api",
+    "typecheck:baseline": "node ../../scripts/typecheck-gate.mjs --service budget-api --write-baseline"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
