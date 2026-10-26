@@ -134,6 +134,8 @@ Closed: see `docs/repo-audits/2026-W38.md` F4 and PR #673.
 - **Pay down debt:** fix diagnostics, then regenerate that service's baseline deliberately — `npm run typecheck:baseline --workspace services/<name>` — and commit the diff. Never hand-edit `typecheck-baseline.json`; the regenerate command is the only way it should change, so the PR diff is always a real measurement.
 - **Never suppress to pass:** `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, or enabling `strict` wholesale are all out of scope for this gate — see Decision 6 of the tech design. If a diagnostic can't be fixed yet, it stays in the baseline as counted, visible debt.
 - A TypeScript version bump can shift diagnostics; the gate hard-fails on a `tscVersion` mismatch between the baseline and the `tsc` actually run, forcing a deliberate baseline regenerate in the same PR as the bump.
+- The gate validates that `totalDiagnostics` equals the sum of the committed fingerprint counts and that the service's `typecheck` script still invokes `tsc --noEmit`; malformed metadata cannot silently weaken it.
+- Exit codes: `0` = within baseline/baseline written, `1` = ratchet or baseline violation, `2` = invocation/toolchain/environment failure (including missing generated Prisma clients or a TypeScript version mismatch).
 
 ## System spec maintenance
 

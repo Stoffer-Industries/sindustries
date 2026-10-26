@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { normaliseDiagnosticPath, normaliseMessage } from '../typecheck-gate.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = resolve(REPO_ROOT, 'scripts', 'typecheck-gate.mjs');
@@ -205,6 +206,23 @@ test('R3 — an unparseable baseline file is a hard failure', () => {
   }
 });
 
+test('R3 — an internally inconsistent baseline is a hard failure', () => {
+  const fixture = makeServiceFixture("const x: number = 'nope';\n");
+  try {
+    assert.equal(runGate(['--service', fixture.service, '--write-baseline']).status, 0);
+    const baselinePath = resolve(fixture.dir, 'typecheck-baseline.json');
+    const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+    baseline.totalDiagnostics = 99;
+    writeFileSync(baselinePath, JSON.stringify(baseline, null, 2));
+
+    const gate = runGate(['--service', fixture.service]);
+    assert.equal(gate.status, 1);
+    assert.match(gate.stderr, /invalid baseline/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('R4 — a tscVersion mismatch is a hard failure that asks for a deliberate regenerate', () => {
   const fixture = makeServiceFixture('const ok: number = 1;\n');
   try {
@@ -223,17 +241,38 @@ test('R4 — a tscVersion mismatch is a hard failure that asks for a deliberate 
   }
 });
 
-test('a missing bare @prisma/client import is a pointed hard failure, not a baseline comparison', () => {
+test('an installed but ungenerated @prisma/client is a pointed hard failure, not a baseline comparison', () => {
   // Checked before any baseline read/write — a service whose Prisma
   // client was never generated must fail with this specific hint in both
   // gate and --write-baseline mode, not fall through to R3's "missing
-  // baseline" message. content-scheduler-api imports `@prisma/client`
-  // this way; a nonexistent scoped-package-shaped specifier reproduces
-  // the same TS2307 shape without depending on repo install state.
+  // baseline" message. The package includes the real ungenerated public
+  // `index.d.ts` re-export shape; its resolved default declaration exposes
+  // no PrismaClient, producing the real import-site TS2305 rather than the
+  // old fixture's proxy TS2307 for an entirely absent package.
   const fixture = makeServiceFixture(
-    "import { PrismaClient } from '@prisma/client-does-not-exist';\nnew PrismaClient();\n",
+    "import { PrismaClient } from '@prisma/client';\nnew PrismaClient();\n",
+    {
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      baseUrl: '.',
+      paths: { '@prisma/client': ['./node_modules/@prisma/client/default.d.ts'] },
+    },
   );
   try {
+    const prismaPackage = resolve(fixture.dir, 'node_modules', '@prisma', 'client');
+    mkdirSync(prismaPackage, { recursive: true });
+    writeFileSync(resolve(prismaPackage, 'package.json'), JSON.stringify({
+      name: '@prisma/client',
+      version: '0.0.0-test',
+      types: 'default.d.ts',
+      exports: { '.': { types: './default.d.ts', default: './default.js' } },
+    }));
+    writeFileSync(
+      resolve(prismaPackage, 'default.d.ts'),
+      'export type __UngeneratedClientStub = never;\n',
+    );
+    writeFileSync(resolve(prismaPackage, 'index.d.ts'), "export * from '.prisma/client/default';\n");
+
     const gate = runGate(['--service', fixture.service, '--write-baseline']);
     assert.equal(gate.status, 2, `expected exit 2\nstdout: ${gate.stdout}\nstderr: ${gate.stderr}`);
     assert.match(gate.stderr, /missing Prisma client module/);
@@ -256,6 +295,47 @@ test('a missing relative generated/prisma import is a pointed hard failure (task
     assert.equal(gate.status, 2, `expected exit 2\nstdout: ${gate.stdout}\nstderr: ${gate.stderr}`);
     assert.match(gate.stderr, /missing Prisma client module/);
     assert.match(gate.stderr, /prisma:generate/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('fingerprint normalisation collapses module-resolution-dependent rendered model order', () => {
+  const first = normaliseMessage(
+    "Argument of type '{ id: string; status: string; nested: { a: number; }; ... 16 more ...; }' " +
+      "is not assignable to parameter of type 'Pick<{ status: string; id: string; ... 16 more ...; }, \"status\">'.",
+  );
+  const second = normaliseMessage(
+    "Argument of type '{ status: string; id: string; nested: { b: number; }; ... 22 more ...; }' " +
+      "is not assignable to parameter of type 'Pick<{ id: string; status: string; ... 22 more ...; }, \"status\">'.",
+  );
+  assert.equal(first, second);
+  assert.match(first, /Pick<\{…\}/);
+});
+
+test('diagnostic paths are normalised relative to the service directory', () => {
+  const serviceDir = resolve(REPO_ROOT, 'services', 'tasks-api');
+  assert.equal(
+    normaliseDiagnosticPath(resolve(serviceDir, 'src', 'routes', 'tasks.ts'), serviceDir),
+    'src/routes/tasks.ts',
+  );
+  assert.equal(
+    normaliseDiagnosticPath('services/tasks-api/src/routes/tasks.ts', serviceDir),
+    'src/routes/tasks.ts',
+  );
+});
+
+test('a typecheck script that does not invoke tsc --noEmit fails closed', () => {
+  const fixture = makeServiceFixture('const ok: number = 1;\n');
+  try {
+    const packagePath = resolve(fixture.dir, 'package.json');
+    const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
+    packageJson.scripts.typecheck = 'true';
+    writeFileSync(packagePath, JSON.stringify(packageJson, null, 2));
+
+    const gate = runGate(['--service', fixture.service]);
+    assert.equal(gate.status, 2);
+    assert.match(gate.stderr, /must invoke tsc with --noEmit/);
   } finally {
     fixture.cleanup();
   }
