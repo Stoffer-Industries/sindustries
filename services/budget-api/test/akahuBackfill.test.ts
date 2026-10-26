@@ -11,7 +11,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  *   - a dry run writes nothing (no transaction rows, no run record),
  *   - a second apply over the same window creates no duplicates,
  *   - a window outside the provider's configured historical allowance is
- *     refused before any transaction page is requested.
+ *     refused before any transaction page is requested,
+ *   - a concurrent writer that inserts the same provider transaction first
+ *     is converged on rather than crashing the run, and is not rewritten
+ *     when it belongs to another user.
  *
  * The store double is a faithful Prisma double rather than a set of spies:
  * `transaction.create` appends, `transaction.update` mutates in place, and
@@ -348,6 +351,116 @@ describe('Akahu bounded backfill', () => {
     const mine = store.transactions.filter((t) => t.userId === 'user_1');
     expect(mine).toHaveLength(2);
     expect(mine.every((t) => t.providerTransactionId !== 'akahu:trans_0')).toBe(true);
+  });
+
+  it('converges on a row a concurrent writer inserted', async () => {
+    // The write path is a read-then-write, so two backfills over the same
+    // window can both miss the row and race to create it. The loser of
+    // that race gets a unique-constraint violation; it must converge on
+    // the row the winner inserted rather than failing the run.
+    //
+    // `prisma.transaction.create` throws P2002 *after* the concurrent
+    // writer's row lands in the store, which is the race the real unique
+    // constraint produces.
+    const winner: StoredTransaction = {
+      id: 'txn_concurrent_winner',
+      userId: 'user_1',
+      cardId: 'card_acc_1',
+      provider: 'akahu',
+      providerTransactionId: 'akahu:trans_0',
+      occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+      merchant: 'STALE MERCHANT',
+      description: 'STALE DESCRIPTION',
+      amountCents: 1,
+      direction: 'debit',
+      category: 'stale',
+      categoryConfidence: 0.1,
+      categorySource: 'model'
+    };
+    mocks.prisma.transaction.create.mockImplementationOnce(async () => {
+      store.transactions.push(winner);
+      const err: any = new Error('Unique constraint failed on the fields: (`providerTransactionId`)');
+      err.code = 'P2002';
+      throw err;
+    });
+
+    const { fetchMock } = stubFetch([page([0], null)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAkahuBackfill({
+      userId: 'user_1',
+      accessToken: 'user_token',
+      startMs: Date.parse('2026-02-01T00:00:00.000Z'),
+      endMs: Date.parse('2026-03-01T00:00:00.000Z'),
+      dryRun: false,
+      nowMs: NOW_MS
+    });
+
+    // The run did not fail, and it did not duplicate the row: the single
+    // transaction in the page resolves to the one row the concurrent
+    // writer inserted.
+    expect(store.transactions).toHaveLength(1);
+    expect(store.transactions[0].id).toBe('txn_concurrent_winner');
+    // And it converged on the winner's row with this run's settlement
+    // values, rather than leaving the stale ones in place.
+    expect(store.transactions[0].amountCents).toBe(2500);
+    expect(store.transactions[0].merchant).toBe('Backfilled Merchant');
+    expect(store.transactions[0].description).toBe('BACKFILLED PURCHASE 0');
+    expect(store.transactions[0].userId).toBe('user_1');
+    expect(result.rowsUpdated).toBe(1);
+  });
+
+  it('does not rewrite a row a concurrent writer inserted for another user', async () => {
+    // Same race, but the winner's row belongs to a different budget-api
+    // user. `providerTransactionId` is globally unique, so converging on it
+    // would rewrite another user's financial record. The row must be left
+    // exactly as the other writer wrote it and reported as skipped.
+    const winner: StoredTransaction = {
+      id: 'txn_other_user_winner',
+      userId: 'user_2',
+      cardId: 'card_acc_1',
+      provider: 'akahu',
+      providerTransactionId: 'akahu:trans_0',
+      occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+      merchant: 'Other User Merchant',
+      description: 'OTHER USER PURCHASE',
+      amountCents: 999,
+      direction: 'debit',
+      category: 'other',
+      categoryConfidence: 0.5,
+      categorySource: 'model'
+    };
+    mocks.prisma.transaction.create.mockImplementationOnce(async () => {
+      store.transactions.push(winner);
+      const err: any = new Error('Unique constraint failed on the fields: (`providerTransactionId`)');
+      err.code = 'P2002';
+      throw err;
+    });
+
+    const { fetchMock } = stubFetch([page([0], null)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAkahuBackfill({
+      userId: 'user_1',
+      accessToken: 'user_token',
+      startMs: Date.parse('2026-02-01T00:00:00.000Z'),
+      endMs: Date.parse('2026-03-01T00:00:00.000Z'),
+      dryRun: false,
+      nowMs: NOW_MS
+    });
+
+    // Byte-for-byte what the other user wrote.
+    const other = store.transactions.find((t) => t.id === 'txn_other_user_winner');
+    expect(other.userId).toBe('user_2');
+    expect(other.amountCents).toBe(999);
+    expect(other.merchant).toBe('Other User Merchant');
+    expect(other.description).toBe('OTHER USER PURCHASE');
+    expect(other.category).toBe('other');
+
+    // Reported, not silently dropped, and no write was attempted on it.
+    expect(result.rowsSkippedCrossTenant).toBe(1);
+    expect(result.rowsUpdated).toBe(0);
+    expect(mocks.prisma.transaction.update).not.toHaveBeenCalled();
   });
 
   it('refuses a window outside the configured historical allowance', async () => {
