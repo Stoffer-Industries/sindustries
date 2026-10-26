@@ -8,8 +8,8 @@
 -- The table is additive: no existing table is altered, and no settled
 -- transaction row is ever deleted by the backfill.
 --
--- Every statement is schema-qualified (`"budget_api"."…"`), like every
--- other migration in this service. The budget_api schema exists only via
+-- Every statement in this migration is schema-qualified (`"budget_api"."…"`),
+-- following the service's current migration convention. The budget_api schema exists only via
 -- the `?schema=budget_api` parameter in DATABASE_URL, and the Prisma
 -- models declare no `@@schema`, so an unqualified CREATE TABLE lands in
 -- whichever schema the connection's `search_path` happens to name. Under
@@ -34,8 +34,7 @@ CREATE TABLE "budget_api"."AkahuBackfillRun" (
     CONSTRAINT "AkahuBackfillRun_pkey" PRIMARY KEY ("id")
 );
 
--- Index for the per-user run history lookup (the runbook's "what did we
--- already backfill for this user" query).
+-- Index for an operator's per-user run-history lookup.
 CREATE INDEX "AkahuBackfillRun_userId_windowStartMs_idx"
   ON "budget_api"."AkahuBackfillRun"("userId", "windowStartMs");
 

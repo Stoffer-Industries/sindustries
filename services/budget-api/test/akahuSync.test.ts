@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => {
   class MockAkahuCancelledError extends Error {
     readonly code = 'AKAHU_CANCELLED';
   }
+  class MockAkahuNetworkError extends Error {
+    readonly code = 'AKAHU_NETWORK';
+  }
   class MockAkahuTraversalError extends Error {
     readonly code = 'AKAHU_TRAVERSAL_FAILED';
   }
@@ -46,6 +49,7 @@ const mocks = vi.hoisted(() => {
     categorizeTransaction: vi.fn(),
     MockAkahuTimeoutError,
     MockAkahuCancelledError,
+    MockAkahuNetworkError,
     MockAkahuTraversalError
   };
 });
@@ -60,6 +64,7 @@ vi.mock('../src/services/akahuClient.ts', () => ({
   createAkahuBudget: (ms: number) => ({ deadlineAt: Date.now() + ms }),
   AkahuTimeoutError: mocks.MockAkahuTimeoutError,
   AkahuCancelledError: mocks.MockAkahuCancelledError,
+  AkahuNetworkError: mocks.MockAkahuNetworkError,
   AkahuTraversalError: mocks.MockAkahuTraversalError
 }));
 vi.mock('../src/services/alerts.ts', () => ({
@@ -162,6 +167,7 @@ describe('POST /api/v1/akahu/sync', () => {
       startMs: new Date('2026-02-11T00:00:00.000Z').getTime(),
       endMs: new Date('2026-05-12T00:00:00.000Z').getTime(),
       budget: expect.anything(),
+      pageCap: 5,
       signal: expect.anything()
     });
     expect(mocks.akahuGetPendingTransactions).toHaveBeenCalledWith({
@@ -219,7 +225,24 @@ describe('POST /api/v1/akahu/sync', () => {
       startMs: new Date('2026-05-03T00:00:00.000Z').getTime(),
       endMs: new Date('2026-05-12T00:00:00.000Z').getTime(),
       budget: expect.anything(),
+      pageCap: 5,
       signal: expect.anything()
+    });
+  });
+
+  it('maps exhausted Akahu transport failures to the typed 502 contract', async () => {
+    mocks.akahuGetAccounts.mockRejectedValueOnce(
+      new mocks.MockAkahuNetworkError('Akahu request failed')
+    );
+
+    const res = await request(createApp())
+      .post('/api/v1/akahu/sync')
+      .set('Authorization', 'Bearer test-token-1')
+      .send({})
+      .expect(502);
+
+    expect(res.body).toEqual({
+      error: { code: 'AKAHU_NETWORK', message: 'Akahu request failed' }
     });
   });
 

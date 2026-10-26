@@ -6,7 +6,8 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'INTERNAL_SERVER_ERROR'
   | 'AKAHU_TIMEOUT'
-  | 'AKAHU_CANCELLED';
+  | 'AKAHU_CANCELLED'
+  | 'AKAHU_NETWORK';
 
 export function jsonError(
   res: Response,
