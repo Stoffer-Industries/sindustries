@@ -41,6 +41,7 @@ vi.mock('../src/lib/prisma.ts', () => ({
 }));
 
 const { createApp } = await import('../src/app.ts');
+const { deliveryEvidenceCommentWhere } = await import('../src/routes/tasks/_deliveryEvidence.ts');
 
 function task(overrides = {}) {
   return {
@@ -1069,5 +1070,166 @@ describe('tasks api endpoints', () => {
     expect(response.status).toBe(201);
     expect(response.body.data.name).toBe('backend');
     expect(prismaMock.tag.upsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('GET /api/v1/tasks — list/detail gate parity (task 7db08a30)', () => {
+  const FAILED_STATE = '[lobster-state]\n```json\n{"version":1,"failureFingerprint":"Missing `[implementer-prs]` comment."}\n```';
+  const CLEAN_STATE = '[lobster-state]\n```json\n{"version":1,"failureFingerprint":null}\n```';
+  const ASH_GATE = [{
+    roleId: 'qa_agent_gate',
+    owner: 'Ash',
+    gate: 'qa_agent',
+    reason: null,
+    state: 'outstanding'
+  }];
+
+  function gateTask(overrides = {}) {
+    return task({
+      status: 'doing',
+      taskType: 'code',
+      comments: [],
+      approvals: [],
+      attentionOwners: [],
+      ...overrides
+    });
+  }
+
+  function commentRow(id: string, body: string, createdAt: string) {
+    return {
+      id,
+      body,
+      author: 'feature_task_lobster',
+      createdAt: new Date(createdAt),
+      updatedAt: new Date(createdAt)
+    };
+  }
+
+  /**
+   * The delivery-evidence rule blocks the `qa_agent` gate when the latest
+   * Lobster state carries a failure fingerprint *and* a delivery checklist
+   * is outstanding. Both markers are therefore part of a blocked fixture.
+   */
+  function blockedComments(id: string) {
+    return [
+      commentRow(`${id}-checklist`, '[code-task-progress-checklist]\nMissing `[implementer-prs]`.', '2026-10-26T10:00:00.000Z'),
+      commentRow(`${id}-state`, FAILED_STATE, '2026-10-26T10:01:00.000Z')
+    ];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+  });
+
+  it('reports the same workflowGates from the list and the detail projection (AC1)', async () => {
+    const blocked = gateTask({
+      id: '11111111-1111-1111-1111-111111111111',
+      comments: blockedComments('c')
+    });
+    prismaMock.task.findMany.mockResolvedValue([blocked]);
+    prismaMock.task.findFirst.mockResolvedValue(blocked);
+
+    const app = createApp();
+    const list = await authedRequest(app).get('/api/v1/tasks');
+    const detail = await authedRequest(app).get(`/api/v1/tasks/${blocked.id}`);
+
+    expect(list.status).toBe(200);
+    expect(detail.status).toBe(200);
+    expect(list.body.data[0].workflowGates).toEqual([]);
+    expect(list.body.data[0].workflowGates).toEqual(detail.body.data.workflowGates);
+  });
+
+  it('?workflowGateOwner excludes delivery-evidence-blocked tasks and keeps live gates (AC2)', async () => {
+    const blocked = gateTask({
+      id: '11111111-1111-1111-1111-111111111111',
+      comments: blockedComments('c')
+    });
+    const live = gateTask({
+      id: '22222222-2222-2222-2222-222222222222',
+      comments: [commentRow('c2', CLEAN_STATE, '2026-10-26T10:00:00.000Z')]
+    });
+    // The SQL pre-filter cannot see comments, so it matches both tasks. The
+    // derived-gate narrowing is what keeps only the task whose `qa_agent`
+    // gate is actually outstanding.
+    prismaMock.task.findMany.mockResolvedValue([blocked, live]);
+
+    const response = await authedRequest(createApp())
+      .get('/api/v1/tasks')
+      .query({ workflowGateOwner: 'Ash' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((entry) => entry.id)).toEqual([live.id]);
+  });
+
+  it('still reports the outstanding qa_agent gate when the latest state has no failure (AC3)', async () => {
+    const live = gateTask({
+      id: '11111111-1111-1111-1111-111111111111',
+      comments: [commentRow('c1', CLEAN_STATE, '2026-10-26T10:00:00.000Z')]
+    });
+    prismaMock.task.findMany.mockResolvedValue([live]);
+    prismaMock.task.findFirst.mockResolvedValue(live);
+
+    const app = createApp();
+    const list = await authedRequest(app).get('/api/v1/tasks');
+    const detail = await authedRequest(app).get(`/api/v1/tasks/${live.id}`);
+    const filtered = await authedRequest(app).get('/api/v1/tasks').query({ workflowGateOwner: 'Ash' });
+
+    expect(list.body.data[0].workflowGates).toEqual(ASH_GATE);
+    expect(detail.body.data.workflowGates).toEqual(ASH_GATE);
+    expect(filtered.body.data[0].workflowGates).toEqual(ASH_GATE);
+  });
+
+  it('loads only delivery-evidence marker comments in the list query (AC4)', async () => {
+    prismaMock.task.findMany.mockResolvedValue([]);
+
+    await authedRequest(createApp()).get('/api/v1/tasks');
+
+    const include = prismaMock.task.findMany.mock.calls[0][0].include;
+    expect(include.comments).toEqual({
+      where: deliveryEvidenceCommentWhere(),
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+    });
+    expect(include.comments).not.toBe(true);
+  });
+
+  it('keeps the list payload comment-free while deriving the gate (response shape)', async () => {
+    const blocked = gateTask({
+      id: '11111111-1111-1111-1111-111111111111',
+      comments: blockedComments('c')
+    });
+    prismaMock.task.findMany.mockResolvedValue([blocked]);
+
+    const response = await authedRequest(createApp()).get('/api/v1/tasks');
+
+    expect(response.body.data[0].comments).toEqual([]);
+    expect(response.body.data[0].workflowGates).toEqual([]);
+  });
+
+  it('fills the page from a later candidate batch when the pre-filter over-approximates', async () => {
+    const blockedOne = gateTask({
+      id: '11111111-1111-1111-1111-111111111111',
+      comments: blockedComments('c1')
+    });
+    const blockedTwo = gateTask({
+      id: '22222222-2222-2222-2222-222222222222',
+      comments: blockedComments('c2')
+    });
+    const live = gateTask({
+      id: '33333333-3333-3333-3333-333333333333',
+      comments: [commentRow('c3', CLEAN_STATE, '2026-10-26T10:00:00.000Z')]
+    });
+    prismaMock.task.findMany
+      .mockResolvedValueOnce([blockedOne, blockedTwo])
+      .mockResolvedValueOnce([live]);
+
+    const response = await authedRequest(createApp())
+      .get('/api/v1/tasks')
+      .query({ workflowGateOwner: 'Ash', limit: 1 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((entry) => entry.id)).toEqual([live.id]);
+    expect(prismaMock.task.findMany).toHaveBeenCalledTimes(2);
+    expect(response.body.page.hasNextPage).toBe(false);
   });
 });

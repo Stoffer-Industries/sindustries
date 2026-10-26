@@ -299,12 +299,12 @@ Task ownership is split into five **independent** planes. No plane silently deri
 The API surfaces each plane independently:
 
 - `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
-- `approvals` (raw rows) and `workflowGates` (read-only metadata for the one exact current-stage gate, with its configured owner and outstanding state). This is a derived view for normal gate discovery and card rendering; it is not an attention-owner stack and does not replace explicit attention rows.
+- `approvals` (raw rows) and `workflowGates` (read-only metadata for the one exact current-stage gate, with its configured owner and outstanding state). This is a derived view for normal gate discovery and card rendering; it is not an attention-owner stack and does not replace explicit attention rows. The list and detail projections derive `workflowGates` from the **same** delivery-evidence rule and the same evidence (the latest Lobster state plus the delivery-checklist markers), so the two always agree; the list projection loads only the marker-bearing comments the rule reads, never the full comment history. A `qa_agent` gate stays dormant while Lobster's latest delivery-evidence state carries an unresolved failure, and no projection or filter reports it as outstanding.
 - `attentionOwners` / `topAttentionOwner` / `attentionOwnerDetails` (ordered action/escalation).
 
 Discovery filters on `GET /tasks`:
 
-- `?workflowGateOwner=<name>` — tasks whose exact current-stage outstanding gate is owned by `<name>`; this covers `spec`, `tech_design`, `qa_agent`, and `accepted` according to status and task-type policy.
+- `?workflowGateOwner=<name>` — tasks whose exact current-stage outstanding gate is owned by `<name>`; this covers `spec`, `tech_design`, `qa_agent`, and `accepted` according to status and task-type policy. The filter selects on the **derived** gates, not on a database-side approximation of them: a SQL pre-filter narrows the candidates (status, task type, no satisfied approval), and the result is then narrowed again to the tasks whose derived `workflowGates` actually contain an outstanding gate for `<name>`. A task whose gate is dormant — for example while Lobster's latest delivery-evidence state still carries a failure fingerprint — is therefore absent from the result, and the filter agrees with the payload it filters by construction.
 - `?attentionOwner=<name>` — tasks whose position-0 `TaskAttentionOwner` matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
