@@ -616,12 +616,28 @@ jobs:
       - name: Seed DB
         run: npm run prisma:seed --workspace services/budget-api
 
-      - name: Run ownership-contract + Akahu backfill integration (real DB)
+      - name: Run ownership-contract integration (real DB)
+        # `ownership-contract-integration` TRUNCATEs every domain table in
+        # its `beforeAll` to get a clean slate.
+        run: npm test --workspace services/budget-api -- --no-file-parallelism ownership-contract-integration
+
+      - name: Run Akahu backfill integration (real DB)
         # `akahuBackfillDb` is the real-Postgres counterpart of the Akahu
         # backfill's AC6 evidence (task a37b31c9): "a second apply creates
         # no duplicates" is a claim about a unique constraint, so it is
         # asserted against the real schema, not a Prisma double.
-        run: npm test --workspace services/budget-api -- ownership-contract-integration akahuBackfillDb
+        #
+        # This file also TRUNCATEs every domain table in its `beforeAll`,
+        # and it runs in its own vitest invocation on purpose. The two
+        # integration files share one Postgres service, and vitest runs test
+        # files in parallel workers by default — so when both files ran in
+        # one invocation, whichever `beforeAll` landed last wiped the other
+        # file's fixtures mid-test, and the backfill's second apply died on a
+        # foreign-key violation against a `User` row the sibling file had
+        # just deleted. Each file's TRUNCATE + seed now completes before the
+        # next file's TRUNCATE, and `--no-file-parallelism` keeps it that way
+        # if a file is ever added to one of these invocations.
+        run: npm test --workspace services/budget-api -- --no-file-parallelism akahuBackfillDb
 
   tasks-app-tests:
     name: tasks app tests

@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
     user: { findUnique: vi.fn() },
     session: { findUnique: vi.fn() },
     akahuConnection: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
-    linkedCard: { upsert: vi.fn(), findMany: vi.fn() },
+    linkedCard: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
     transaction: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -134,6 +134,7 @@ describe('POST /api/v1/akahu/sync - cursor traversal and completeness', () => {
       lastSyncedAt: new Date('2026-05-10T00:00:00.000Z')
     });
     mocks.prisma.akahuConnection.update.mockResolvedValue({});
+    mocks.prisma.linkedCard.findUnique.mockResolvedValue(null);
     mocks.prisma.linkedCard.upsert.mockResolvedValue({ id: 'card_1' });
     mocks.prisma.transaction.findUnique.mockResolvedValue(null);
     mocks.prisma.transaction.update.mockResolvedValue({});

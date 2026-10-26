@@ -57,7 +57,7 @@ type StoredRun = {
 const store = vi.hoisted(() => ({
   transactions: [] as any[],
   runs: [] as any[],
-  cards: new Map<string, { id: string }>()
+  cards: new Map<string, { id: string; userId: string }>()
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -67,7 +67,7 @@ const mocks = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn()
     },
-    linkedCard: { upsert: vi.fn() },
+    linkedCard: { findUnique: vi.fn(), upsert: vi.fn() },
     akahuBackfillRun: {
       findFirst: vi.fn(),
       create: vi.fn(),
@@ -178,10 +178,18 @@ describe('Akahu bounded backfill', () => {
 
     // Faithful Prisma double: appends, mutates in place, and is keyed by
     // the same unique column the real schema declares.
+    mocks.prisma.linkedCard.findUnique.mockImplementation(async (args: any) => {
+      const cardId = args.where.provider_providerCardId.providerCardId;
+      const found = store.cards.get(cardId);
+      // The lookup selects the owner: `LinkedCard` is unique on
+      // (provider, providerCardId) globally, so the card it finds may
+      // belong to another user.
+      return found ? { id: found.id, userId: found.userId } : null;
+    });
     mocks.prisma.linkedCard.upsert.mockImplementation(async (args: any) => {
       const cardId = args.where.provider_providerCardId.providerCardId;
       if (!store.cards.has(cardId)) {
-        store.cards.set(cardId, { id: `card_${cardId}` });
+        store.cards.set(cardId, { id: `card_${cardId}`, userId: args.create.userId });
       }
       return store.cards.get(cardId);
     });
@@ -189,7 +197,9 @@ describe('Akahu bounded backfill', () => {
       const found = store.transactions.find(
         (t) => t.providerTransactionId === args.where.providerTransactionId
       );
-      return found ? { id: found.id } : null;
+      // The lookup selects the owner as well as the id: `providerTransactionId`
+      // is globally unique, so the row it finds may belong to another user.
+      return found ? { id: found.id, userId: found.userId } : null;
     });
     mocks.prisma.transaction.create.mockImplementation(async (args: any) => {
       const row: StoredTransaction = {
@@ -201,7 +211,9 @@ describe('Akahu bounded backfill', () => {
     });
     mocks.prisma.transaction.update.mockImplementation(async (args: any) => {
       const found = store.transactions.find(
-        (t) => t.providerTransactionId === args.where.providerTransactionId
+        (t) =>
+          (args.where.id && t.id === args.where.id) ||
+          (!args.where.id && t.providerTransactionId === args.where.providerTransactionId)
       );
       if (found) Object.assign(found, args.data);
       return found;
@@ -287,6 +299,55 @@ describe('Akahu bounded backfill', () => {
     expect(store.runs).toHaveLength(1);
     expect(store.runs[0].rowsUpserted).toBe(5);
     expect(store.runs[0].status).toBe('completed');
+  });
+
+  it('leaves a provider transaction owned by another user untouched', async () => {
+    // `providerTransactionId` is globally unique, so the same provider
+    // transaction can already exist under a different budget-api user (an
+    // Akahu account linked twice, or a reconnect that re-points the
+    // connection). The backfill must not rewrite that user's record.
+    store.transactions.push({
+      id: 'txn_other_user',
+      userId: 'user_2',
+      cardId: 'card_acc_1',
+      provider: 'akahu',
+      providerTransactionId: 'akahu:trans_0',
+      occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+      merchant: 'Other User Merchant',
+      description: 'OTHER USER PURCHASE',
+      amountCents: 999,
+      direction: 'debit',
+      category: 'other',
+      categoryConfidence: 0.5,
+      categorySource: 'model'
+    });
+
+    const { fetchMock } = stubFetch([page([0, 1, 2], null)]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAkahuBackfill({
+      userId: 'user_1',
+      accessToken: 'user_token',
+      startMs: Date.parse('2026-02-01T00:00:00.000Z'),
+      endMs: Date.parse('2026-03-01T00:00:00.000Z'),
+      dryRun: false,
+      nowMs: NOW_MS
+    });
+
+    // The other user's row is byte-for-byte what it was.
+    const other = store.transactions.find((t) => t.id === 'txn_other_user');
+    expect(other.userId).toBe('user_2');
+    expect(other.amountCents).toBe(999);
+    expect(other.merchant).toBe('Other User Merchant');
+    expect(other.description).toBe('OTHER USER PURCHASE');
+
+    // It is reported, not silently dropped, and the other two transactions
+    // are still written for the requesting user.
+    expect(result.rowsSkippedCrossTenant).toBe(1);
+    expect(result.rowsUpserted).toBe(2);
+    const mine = store.transactions.filter((t) => t.userId === 'user_1');
+    expect(mine).toHaveLength(2);
+    expect(mine.every((t) => t.providerTransactionId !== 'akahu:trans_0')).toBe(true);
   });
 
   it('refuses a window outside the configured historical allowance', async () => {
