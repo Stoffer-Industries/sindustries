@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  AkahuCancelledError,
   AkahuTimeoutError,
   akahuGetAccounts,
   akahuGetPendingTransactions,
@@ -214,6 +215,40 @@ describe('akahuClient', () => {
 
       await expect(akahuGetAccounts({ accessToken: 't' })).rejects.toThrow(AkahuTimeoutError);
     });
+
+    it('reports a caller cancellation as AKAHU_CANCELLED rather than a timeout', async () => {
+      vi.stubGlobal('fetch', neverResolves());
+      const controller = new AbortController();
+      controller.abort();
+
+      const err = await akahuGetAccounts({
+        accessToken: 't',
+        signal: controller.signal
+      }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(AkahuCancelledError);
+      expect(err).not.toBeInstanceOf(AkahuTimeoutError);
+      expect(err.code).toBe('AKAHU_CANCELLED');
+    });
+
+    it('reports a mid-flight cancellation as AKAHU_CANCELLED rather than a timeout', async () => {
+      const controller = new AbortController();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => {
+          controller.abort();
+          return new Promise(() => {});
+        })
+      );
+
+      const err = await akahuGetAccounts({
+        accessToken: 't',
+        signal: controller.signal
+      }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(AkahuCancelledError);
+      expect(err.code).toBe('AKAHU_CANCELLED');
+    });
   });
 
   describe('retry policy', () => {
@@ -264,7 +299,12 @@ describe('akahuClient', () => {
       // so the first attempt still happens but the retry is skipped.
       await new Promise((resolve) => setTimeout(resolve, 20));
 
-      await expect(akahuGetAccounts({ accessToken: 't', budget })).rejects.toThrow();
+      // The budget overrun is a deadline failure, not the provider's 429:
+      // the two must be distinguishable at the route boundary.
+      const err = await akahuGetAccounts({ accessToken: 't', budget }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(AkahuTimeoutError);
+      expect(err.code).toBe('AKAHU_TIMEOUT');
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
