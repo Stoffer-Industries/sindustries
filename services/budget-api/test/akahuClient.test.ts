@@ -103,7 +103,7 @@ describe('akahuClient', () => {
     );
   });
 
-  describe('paginated transactions (AC1, AC2)', () => {
+  describe('paginated transactions', () => {
     it('returns every page and repeats start/end with the cursor param', async () => {
       const pageOne = {
         success: true,
@@ -198,7 +198,7 @@ describe('akahuClient', () => {
     });
   });
 
-  describe('request deadlines (AC3)', () => {
+  describe('request deadlines', () => {
     beforeEach(() => {
       process.env.AKAHU_PER_CALL_TIMEOUT_MS = '30';
     });
@@ -216,7 +216,7 @@ describe('akahuClient', () => {
     });
   });
 
-  describe('retry policy (AC5)', () => {
+  describe('retry policy', () => {
     beforeEach(() => {
       process.env.AKAHU_PER_CALL_TIMEOUT_MS = '5000';
     });
