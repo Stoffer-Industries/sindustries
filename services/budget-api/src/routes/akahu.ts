@@ -9,6 +9,7 @@ import {
   akahuGetPendingTransactions,
   akahuRefreshAllAccounts,
   AkahuCancelledError,
+  AkahuNetworkError,
   AkahuTimeoutError,
   AkahuTraversalError,
   createAkahuBudget,
@@ -33,6 +34,10 @@ const INCREMENTAL_OVERLAP_MS = 7 * 24 * 60 * 60 * 1000;
 const FORCE_SYNC_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 const AKAHU_PENDING_PROVIDER_ID_PREFIX = 'akahu-pending:';
 const AKAHU_SYNC_BUDGET_MS_DEFAULT = 20_000;
+// Keep the interactive sync's serial categorisation/write phase bounded to
+// roughly 500 settled rows. Larger windows remain incomplete and are retried
+// or repaired with the operator backfill, whose page cap is intentionally 50.
+const AKAHU_SYNC_PAGE_CAP = 5;
 
 /**
  * Whole-sync budget shared by every provider call and every pagination
@@ -164,6 +169,7 @@ akahuRouter.post(
           startMs: syncStartMs,
           endMs: syncEndMs,
           budget,
+          pageCap: AKAHU_SYNC_PAGE_CAP,
           signal
         });
         txns = traversal.items;
@@ -197,7 +203,7 @@ akahuRouter.post(
         });
 
       // Upsert transactions (idempotent by providerTransactionId).
-      const { created, updated, categorized: settledCategorized, skippedCrossTenant } =
+      const { created, updated, categorized: settledCategorized, skipped, skippedCrossTenant } =
         await upsertAkahuSettledTransactions({
           userId,
           transactions: txns,
@@ -256,9 +262,11 @@ akahuRouter.post(
       // The checkpoint advances only on a complete traversal: an incomplete
       // window is re-requested by the next sync (safe — the upsert is
       // idempotent by providerTransactionId).
-      const checkpointAdvanced = traversalComplete;
+      // Missing-card rows are not persisted. Keep the provider window open so
+      // the next sync can retry them after the card mapping is repaired.
+      const checkpointAdvanced = traversalComplete && skipped === 0;
       if (checkpointAdvanced) {
-        await markAkahuSyncComplete({ userId, lastSyncedAt: new Date() });
+        await markAkahuSyncComplete({ userId, lastSyncedAt: new Date(syncEndMs) });
       }
 
       const month = currentMonthKey();
@@ -276,6 +284,7 @@ akahuRouter.post(
         balanceSnapshotsCreated,
         categorized,
         cardsSkippedCrossTenant,
+        transactionsSkippedNoCard: skipped,
         transactionsSkippedCrossTenant: skippedCrossTenant,
         refresh,
         alerts,
@@ -289,6 +298,9 @@ akahuRouter.post(
       }
       if (e instanceof AkahuCancelledError) {
         return jsonError(res, 400, 'AKAHU_CANCELLED', e?.message ?? 'Akahu sync was cancelled');
+      }
+      if (e instanceof AkahuNetworkError) {
+        return jsonError(res, 502, 'AKAHU_NETWORK', e?.message ?? 'Akahu transport failed');
       }
       return jsonError(res, 400, 'BAD_REQUEST', e?.message ?? 'Akahu sync failed');
     }

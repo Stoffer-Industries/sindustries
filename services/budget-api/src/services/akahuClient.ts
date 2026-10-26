@@ -55,7 +55,7 @@ function requiredEnv(name: string): string {
 // ---------------------------------------------------------------------------
 // Per-call deadlines, typed timeout/HTTP errors, and a kind-scoped retry
 // policy. `kind: 'read'` calls (accounts/transactions/pending) are retried on
-// 429/502/503/504 and on timeout; `kind: 'write'` calls (token exchange,
+// 429/502/503/504 and on network/timeout failures; `kind: 'write'` calls (token exchange,
 // /v1/refresh) are never retried — authorization codes are single-use and a
 // retried refresh only deepens provider throttling.
 // ---------------------------------------------------------------------------
@@ -89,6 +89,17 @@ export class AkahuCancelledError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AkahuCancelledError';
+  }
+}
+
+/** A transport failure before Akahu returned an HTTP response. */
+export class AkahuNetworkError extends Error {
+  readonly code = 'AKAHU_NETWORK' as const;
+  readonly cause?: unknown;
+  constructor(message: string, opts: { cause?: unknown } = {}) {
+    super(message);
+    this.name = 'AkahuNetworkError';
+    this.cause = opts.cause;
   }
 }
 
@@ -304,12 +315,15 @@ async function fetchAkahu(
     } catch (err) {
       // A caller cancellation is never retried: the request is gone.
       if (err instanceof AkahuCancelledError) throw err;
-      if (err instanceof AkahuTimeoutError && attempt < READ_MAX_ATTEMPTS) {
-        if (remainingBudgetMs(opts.budget) <= 0) throw err;
+      const terminalError = err instanceof AkahuTimeoutError
+        ? err
+        : new AkahuNetworkError(`Akahu request to ${String(url)} failed`, { cause: err });
+      if (attempt < READ_MAX_ATTEMPTS) {
+        if (remainingBudgetMs(opts.budget) <= 0) throw terminalError;
         await sleep(Math.min(backoffDelayMs(attempt, null), Math.max(0, remainingBudgetMs(opts.budget))));
         continue;
       }
-      throw err;
+      throw terminalError;
     }
   }
 

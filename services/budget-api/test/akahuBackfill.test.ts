@@ -88,6 +88,7 @@ vi.mock('../src/services/categorizer.ts', () => ({
 
 import {
   runAkahuBackfill,
+  resolveAkahuBackfillAllowance,
   AkahuBackfillWindowError
 } from '../src/services/akahuBackfill';
 
@@ -296,7 +297,7 @@ describe('Akahu bounded backfill', () => {
     expect(
       new Set(store.transactions.map((t) => t.providerTransactionId)).size
     ).toBe(5);
-    expect(second.rowsUpserted).toBe(0);
+    expect(second.rowsUpserted).toBe(5);
     expect(second.rowsUpdated).toBe(5);
     // The run record for the same window is updated, not duplicated.
     expect(store.runs).toHaveLength(1);
@@ -506,5 +507,34 @@ describe('Akahu bounded backfill', () => {
         nowMs: NOW_MS
       })
     ).rejects.toThrow(/--max-lookback-days/);
+  });
+
+  it('always reads the provider allowance and lets an override narrow but never widen it', async () => {
+    const { fetchMock, requestPaths } = stubFetch([]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await resolveAkahuBackfillAllowance({
+      accessToken: 'user_token',
+      maxLookbackDays: 365,
+      nowMs: NOW_MS
+    });
+
+    expect(requestPaths).toContain('/v1/me');
+    expect(result).toEqual({ earliestAllowedMs: ACCESS_GRANTED_AT_MS, source: 'provider' });
+  });
+
+  it('requires and records an override when the provider omits its allowance', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { success: true })));
+
+    const result = await resolveAkahuBackfillAllowance({
+      accessToken: 'user_token',
+      maxLookbackDays: 30,
+      nowMs: NOW_MS
+    });
+
+    expect(result).toEqual({
+      earliestAllowedMs: NOW_MS - 30 * 24 * 60 * 60 * 1000,
+      source: 'override-required'
+    });
   });
 });

@@ -192,7 +192,7 @@ d('Akahu bounded backfill — real Postgres (task a37b31c9, AC6)', () => {
     });
     expect(total).toBe(5);
     expect(new Set(distinct.map((t) => t.providerTransactionId)).size).toBe(5);
-    expect(second.rowsUpserted).toBe(0);
+    expect(second.rowsUpserted).toBe(5);
     expect(second.rowsUpdated).toBe(5);
 
     const runs = await prisma.akahuBackfillRun.findMany({ where: { userId: USER_ID } });

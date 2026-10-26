@@ -13,7 +13,7 @@ Akahu is a third-party bank-aggregation provider. The API is the boundary betwee
 - `start` and `end` must be repeated on **every** page of a traversal.
 - A `null` cursor is never sent back to the provider — Akahu errors on it. `cursor.next === null` is the only completion signal.
 
-**Deadlines.** Every provider call is bounded by a per-call deadline (10 s default, `AKAHU_PER_CALL_TIMEOUT_MS`) that covers both the header response and the body read, and a whole-sync deadline (20 s default, `AKAHU_SYNC_BUDGET_MS`) shared by every call and every pagination round of one request. The whole-sync deadline is measured on a monotonic clock, so a wall-clock adjustment cannot extend an in-flight budget. A single call's deadline is clamped to whatever remains of the whole-sync budget.
+**Deadlines.** Every provider call is bounded by a per-call deadline (10 s default, `AKAHU_PER_CALL_TIMEOUT_MS`) that covers both the header response and the body read, and a provider-I/O deadline (20 s default, `AKAHU_SYNC_BUDGET_MS`) shared by every provider call and pagination round of one request. It does not include the later database categorisation/write phase. The deadline is measured on a monotonic clock, so a wall-clock adjustment cannot extend an in-flight budget. A single call's deadline is clamped to whatever remains of the provider-I/O budget.
 
 **Retries.** Retry policy is scoped by call kind, not by convention:
 
@@ -26,7 +26,7 @@ Authorization codes are single-use, so a retried token exchange fails; a retried
 
 **Cancellation.** A request-scoped `AbortSignal` is derived from the HTTP response's `close` event, so a client disconnect stops provider work instead of leaving it running until the deadline. A cancellation is reported as `AKAHU_CANCELLED` and a deadline overrun as `AKAHU_TIMEOUT` — the two are distinguishable, and neither is reported as a provider HTTP error.
 
-**Error contract.** A provider failure surfaces as `400 BAD_REQUEST` with a message. A deadline overrun or a client disconnect surfaces as `400` with the code `AKAHU_TIMEOUT` or `AKAHU_CANCELLED`. A **partial traversal is not an error**: it is a `200` with `complete: false`.
+**Error contract.** A provider HTTP failure surfaces as `400 BAD_REQUEST` with a message. A network transport failure surfaces as `502 AKAHU_NETWORK`. A deadline overrun or a client disconnect surfaces as `400` with the code `AKAHU_TIMEOUT` or `AKAHU_CANCELLED`. A **partial traversal is not an error**: it is a `200` with `complete: false`.
 
 ## The completeness invariant
 
@@ -34,7 +34,7 @@ Authorization codes are single-use, so a retried token exchange fails; a retried
 
 - `AkahuConnection.lastSyncedAt` advances **only** when the traversal ended with `cursor.next === null` and the page cap was not hit. It is the watermark of the last **complete** sync, not the time of the last attempt.
 - A partial traversal leaves the checkpoint unchanged, so the next sync re-requests the same window. Re-requesting is safe because the upsert is idempotent by `providerTransactionId`.
-- The page cap is 50 pages (≈5 000 rows at 100 rows per page). A capped window is reported incomplete, never as success.
+- The interactive sync page cap is 5 pages (≈500 rows at 100 rows per page), bounding its serial categorisation/write phase. The operator backfill retains a 50-page cap. A capped window is reported incomplete, never as success.
 - A repeated cursor stops the traversal and is reported incomplete. It is never treated as the end of the window.
 
 The response carries the outcome explicitly:
@@ -71,14 +71,14 @@ The access token is read from the encrypted `AkahuConnection` row. It is never a
 
 **Rules the script enforces:**
 
-- The window must sit inside the provider's own historical allowance, read from `access_granted_at` on `GET /v1/me`. The allowance is read, never guessed. A window outside it is refused **before** any transaction page is requested.
-- If the provider does not report `access_granted_at`, the script refuses and requires an explicit `--max-lookback-days` bound. It never falls back to a default number.
+- The window must sit inside the provider's own historical allowance, read from `access_granted_at` on `GET /v1/me`. The allowance is always read. `--max-lookback-days` can only narrow that provider bound, never widen it. A window outside the effective bound is refused **before** any transaction page is requested.
+- If the provider does not report `access_granted_at`, the script refuses unless an explicit `--max-lookback-days` bound is supplied. That required override is recorded as `allowance.source = 'override-required'`; the script never falls back to a default number.
 - `--dry-run` counts rows and writes nothing: no transaction upserts and no run record.
 - Apply mode pages the whole window, upserts by `providerTransactionId`, and records the run in `AkahuBackfillRun`. A second run over the same window creates no duplicates and updates the same run record's counters.
 - The backfill never deletes a settled row and never touches `lastSyncedAt`. The checkpoint is the sync watermark, not a backfill artefact.
 - The backfill runs under the same per-call and whole-sync budgets as a normal sync, so it can fail part-way and be re-run safely. A part-way failure still records a run with status `partial`, and the pages already fetched are upserted.
 
-**Run record.** `AkahuBackfillRun` records the user, the window, the mode, the status (`completed` | `partial` | `failed`), the pages fetched, the rows seen and the rows upserted. It is written by the same code path that performs the backfill, so there is no second source of truth.
+**Run record.** `AkahuBackfillRun` records the user, the window, the mode, the status (`completed` | `partial` | `failed`), the pages fetched, the rows seen and the rows upserted (`created + updated`). The CLI result uses the same `rowsUpserted` definition and also reports `rowsUpdated` separately. It is written by the same code path that performs the backfill, so there is no second source of truth.
 
 ## Data ownership
 
@@ -104,6 +104,7 @@ The access token is read from the encrypted `AkahuConnection` row. It is never a
 |---|---|---|
 | `AKAHU_TIMEOUT` on a sync | The per-call or whole-sync deadline was exceeded. | The checkpoint did not advance. The next sync retries the same window. If it persists, the provider is slower than the budget — raise `AKAHU_SYNC_BUDGET_MS`. |
 | `AKAHU_CANCELLED` on a sync | The client disconnected. | Not a provider fault; the checkpoint did not advance. |
+| `AKAHU_NETWORK` on a sync | Akahu did not return an HTTP response after the bounded read retries. | Treat as a transient upstream failure and retry later. |
 | `complete: false` on a `200` | The window was only partially traversed (page cap, repeated cursor, or a later page failed). | The checkpoint did not advance. Re-run the sync; if the window is legitimately large, use the backfill. |
 | `400 BAD_REQUEST` from a sync | A provider HTTP failure that is not retryable (`400`, `401`, `403`) or a non-`AKAHU_*` error. | `401` usually means the connection needs re-linking via OAuth. |
 | Backfill refuses a window | The window is outside the provider's historical allowance. | Narrow the window, or supply an explicit `--max-lookback-days` if the provider does not report `access_granted_at`. |

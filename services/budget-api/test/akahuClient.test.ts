@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AkahuCancelledError,
+  AkahuNetworkError,
   AkahuTimeoutError,
   akahuGetAccounts,
   akahuGetPendingTransactions,
@@ -207,13 +208,23 @@ describe('akahuClient', () => {
     it('rejects with AKAHU_TIMEOUT when the provider never responds - stalled header', async () => {
       vi.stubGlobal('fetch', neverResolves());
 
-      await expect(akahuGetAccounts({ accessToken: 't' })).rejects.toThrow(AkahuTimeoutError);
+      const startedAt = performance.now();
+
+      await expect(
+        akahuGetAccounts({ accessToken: 't', budget: createAkahuBudget(200) })
+      ).rejects.toThrow(AkahuTimeoutError);
+      expect(performance.now() - startedAt).toBeLessThan(500);
     });
 
     it('rejects with AKAHU_TIMEOUT when the response body stalls', async () => {
       vi.stubGlobal('fetch', stalledBody());
 
-      await expect(akahuGetAccounts({ accessToken: 't' })).rejects.toThrow(AkahuTimeoutError);
+      const startedAt = performance.now();
+
+      await expect(
+        akahuGetAccounts({ accessToken: 't', budget: createAkahuBudget(200) })
+      ).rejects.toThrow(AkahuTimeoutError);
+      expect(performance.now() - startedAt).toBeLessThan(500);
     });
 
     it('reports a caller cancellation as AKAHU_CANCELLED rather than a timeout', async () => {
@@ -289,6 +300,19 @@ describe('akahuClient', () => {
 
       expect(res).toEqual([{ _id: 'acc_1' }]);
       expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('retries network failures for reads and returns a typed transport error', async () => {
+      const fetchMock = vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const err = await akahuGetAccounts({ accessToken: 't' }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(AkahuNetworkError);
+      expect(err.code).toBe('AKAHU_NETWORK');
+      expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
     it('bounds read retries by the whole-sync budget, not just the attempt count', async () => {

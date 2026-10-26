@@ -258,6 +258,39 @@ describe('POST /api/v1/akahu/sync - cursor traversal and completeness', () => {
     expect(mocks.prisma.transaction.create).toHaveBeenCalledTimes(3);
   });
 
+  it('reports rows with no card and leaves the checkpoint open for retry', async () => {
+    const fetchMock = vi.fn(async (input: any) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/accounts' || url.pathname === '/v1/transactions/pending') {
+        return jsonResponse(200, { success: true, items: [] });
+      }
+      if (url.pathname === '/v1/transactions') {
+        return jsonResponse(200, {
+          success: true,
+          items: [txn(1)],
+          cursor: { next: null }
+        });
+      }
+      return jsonResponse(404, { success: false, message: 'unexpected endpoint' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(createApp())
+      .post('/api/v1/akahu/sync')
+      .set('Authorization', 'Bearer test-token-1')
+      .send({})
+      .expect(200);
+
+    expect(res.body).toMatchObject({
+      complete: true,
+      checkpointAdvanced: false,
+      transactionsFetched: 1,
+      transactionsSkippedNoCard: 1
+    });
+    expect(mocks.prisma.akahuConnection.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.transaction.create).not.toHaveBeenCalled();
+  });
+
   it('aborts the sync when the whole-sync budget is exceeded and leaves the checkpoint unchanged', async () => {
     process.env.AKAHU_SYNC_BUDGET_MS = '60';
     const fetchMock = stubFetch([

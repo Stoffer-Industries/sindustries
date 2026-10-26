@@ -121,15 +121,15 @@ The provider contract is enforced in `services/budget-api` and is documented in 
 
 ### Deadlines and retries
 
-- Every provider call is bounded by a per-call deadline (10 s) that covers the header response and the body read, and by a whole-sync deadline (20 s) shared by every call and every pagination round of a request. Both are env-configurable.
-- Read calls (`/v1/accounts`, `/v1/transactions`, `/v1/transactions/pending`) are retried on `429`, `502`, `503`, `504` and on timeouts, bounded by the attempt cap and the remaining whole-sync budget.
+- Every provider call is bounded by a per-call deadline (10 s) that covers the header response and the body read, and by a provider-I/O deadline (20 s) shared by every provider call and pagination round of a request. Both are env-configurable; the database write phase is outside that deadline and is separately bounded by the interactive five-page cap.
+- Read calls (`/v1/accounts`, `/v1/transactions`, `/v1/transactions/pending`) are retried on `429`, `502`, `503`, `504`, network failures and timeouts, bounded by the attempt cap and the remaining provider-I/O budget.
 - Write calls (the authorization-code exchange and `/v1/refresh`) are never retried: authorization codes are single-use and a retried refresh deepens provider throttling.
 - A client disconnect is reported as `AKAHU_CANCELLED` and a deadline overrun as `AKAHU_TIMEOUT` — distinguishable from an ordinary provider failure.
 
 ### Backfill
 
 - A bounded, dry-run-first, idempotent backfill repairs history that the pre-fix sync truncated. It is an operator script (`services/budget-api/scripts/akahu-backfill.ts`), not an endpoint.
-- The window must sit inside the provider's own historical allowance, read from `access_granted_at` on `GET /v1/me`. A window outside it is refused before any transaction page is requested; the allowance is never guessed.
+- The window must sit inside the provider's own historical allowance, read from `access_granted_at` on `GET /v1/me`. An operator override may narrow but never widen that allowance. If the provider omits it, an explicit override is required and recorded; the allowance is never guessed.
 - A dry run writes nothing — no transaction upserts and no run record. Apply mode records the run in `AkahuBackfillRun`.
 - The backfill never deletes a settled row and never touches the checkpoint.
 

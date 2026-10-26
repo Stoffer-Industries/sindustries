@@ -52,7 +52,7 @@ export class AkahuBackfillWindowError extends Error {
 
 export type AkahuBackfillAllowance = {
   earliestAllowedMs: number;
-  source: 'provider' | 'override';
+  source: 'provider' | 'override' | 'override-required';
 };
 
 export type AkahuBackfillOptions = {
@@ -87,10 +87,9 @@ export type AkahuBackfillResult = {
  * Resolves the earliest window start the backfill may request.
  *
  * The provider's `access_granted_at` is the authoritative bound and is
- * preferred. An explicit `--max-lookback-days` takes precedence when the
- * operator supplies one — it is a deliberate narrowing of the window, and
- * the operator knows why. When neither is available the backfill refuses:
- * the allowance is never guessed.
+ * always consulted. An explicit `--max-lookback-days` can only narrow that
+ * provider bound. When the provider omits the bound, the explicit override
+ * becomes mandatory; the allowance is never guessed.
  */
 export async function resolveAkahuBackfillAllowance(params: {
   accessToken: string;
@@ -99,14 +98,11 @@ export async function resolveAkahuBackfillAllowance(params: {
   budget?: ReturnType<typeof createAkahuBudget>;
   signal?: AbortSignal;
 }): Promise<AkahuBackfillAllowance> {
-  if (typeof params.maxLookbackDays === 'number' && Number.isFinite(params.maxLookbackDays)) {
-    if (params.maxLookbackDays <= 0) {
-      throw new Error('--max-lookback-days must be greater than zero');
-    }
-    return {
-      earliestAllowedMs: params.nowMs - Math.floor(params.maxLookbackDays * DAY_MS),
-      source: 'override'
-    };
+  const overrideDays = typeof params.maxLookbackDays === 'number' && Number.isFinite(params.maxLookbackDays)
+    ? params.maxLookbackDays
+    : null;
+  if (overrideDays !== null && overrideDays <= 0) {
+    throw new Error('--max-lookback-days must be greater than zero');
   }
 
   const me = await akahuGetMe({
@@ -115,13 +111,26 @@ export async function resolveAkahuBackfillAllowance(params: {
     signal: params.signal
   });
   if (me.accessGrantedAtMs === null) {
+    if (overrideDays !== null) {
+      return {
+        earliestAllowedMs: params.nowMs - Math.floor(overrideDays * DAY_MS),
+        source: 'override-required'
+      };
+    }
     throw new Error(
       'Akahu did not report access_granted_at for this connection, so the historical ' +
         'allowance cannot be read. Re-run with an explicit --max-lookback-days bound ' +
         'rather than guessing one.'
     );
   }
-  return { earliestAllowedMs: me.accessGrantedAtMs, source: 'provider' };
+  if (overrideDays === null) {
+    return { earliestAllowedMs: me.accessGrantedAtMs, source: 'provider' };
+  }
+  const overrideBound = params.nowMs - Math.floor(overrideDays * DAY_MS);
+  return {
+    earliestAllowedMs: Math.max(me.accessGrantedAtMs, overrideBound),
+    source: overrideBound > me.accessGrantedAtMs ? 'override' : 'provider'
+  };
 }
 
 export async function runAkahuBackfill(
@@ -265,7 +274,7 @@ export async function runAkahuBackfill(
     complete,
     pagesFetched,
     rowsSeen: transactions.length,
-    rowsUpserted: created,
+    rowsUpserted: created + updated,
     rowsUpdated: updated,
     rowsSkipped: skipped,
     rowsSkippedCrossTenant: skippedCrossTenant,
