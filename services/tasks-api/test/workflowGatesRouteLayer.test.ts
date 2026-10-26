@@ -703,23 +703,30 @@ describe('explicit workflow handoffs', () => {
   });
 
   it('maps only the single persisted active handoff and resolves its current owner', () => {
+    // Deliberately `undefined`, not `mapTaskOptionsFor(task)`: this test
+    // covers the legacy single-source `workflowHandoffRoleId` mapping,
+    // which only activates when `options` is omitted (`!options` in
+    // `mapTask`). Passing real options would switch to the config-derived
+    // gate and silently stop exercising the legacy path. The explicit
+    // `undefined` keeps that path under test while still satisfying the
+    // function's required second parameter.
     expect(mapTask(baseTaskFixture({
       workflowHandoffRoleId: 'tech_design_approver',
       workflowHandoffGate: 'tech_design',
       workflowHandoffReason: 'Design needs approval',
       approvals: [{ id: 'a', type: 'spec', owner: 'Tom', state: 'revoked', approvedAt: new Date(), createdAt: new Date(), updatedAt: new Date() }]
-    })).workflowGates).toEqual([{
+    }), undefined).workflowGates).toEqual([{
       roleId: 'tech_design_approver', owner: 'Quinn', gate: 'tech_design',
       reason: 'Design needs approval', state: 'outstanding'
     }]);
-    expect(mapTask(baseTaskFixture()).workflowGates).toEqual([]);
+    expect(mapTask(baseTaskFixture(), undefined).workflowGates).toEqual([]);
   });
 
   it('omits an unresolvable persisted role instead of exposing ownerless work', () => {
     expect(mapTask(baseTaskFixture({
       workflowHandoffRoleId: 'removed_role',
       workflowHandoffGate: 'legacy'
-    })).workflowGates).toEqual([]);
+    }), undefined).workflowGates).toEqual([]);
   });
 
   it('validates set and clear payloads', () => {

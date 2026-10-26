@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mapTask, mapTaskAttentionOwner } from '../src/routes/tasks/_mapper.ts';
+import { mapTaskOptionsFor } from '../src/routes/tasks/_deps.ts';
 
 const TASK_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -67,16 +68,23 @@ describe('mapTaskAttentionOwner', () => {
 describe('mapTask — attention owners plane', () => {
   it('exposes attentionOwners and attentionOwnerDetails from a task with rows', () => {
     const task = baseTaskFixture({
+      taskType: 'code',
       attentionOwners: [
         attentionOwnerFixture({ id: 'ao-2', owner: 'Quinn', note: null, position: 1 }),
         attentionOwnerFixture({ id: 'ao-1', owner: 'Tom', position: 0 })
       ]
     });
-    const result = mapTask(task);
+    const result = mapTask(task, mapTaskOptionsFor(task));
     expect(result.attentionOwners).toEqual(['Tom', 'Quinn']);
     expect(result.topAttentionOwner).toBe('Tom');
     expect(result.attentionOwnerDetails).toHaveLength(2);
     expect(result.attentionOwnerDetails[0]).toMatchObject({ id: 'ao-1', owner: 'Tom' });
+    // Proves `mapTaskOptionsFor(task)` is actually wired through, not just
+    // present to satisfy the compiler: a `code` task `doing` with no
+    // approved `qa_agent` approval derives a real, non-empty workflow gate.
+    expect(result.workflowGates).toEqual([
+      { roleId: 'qa_agent_gate', owner: 'Ash', gate: 'qa_agent', reason: null, state: 'outstanding' }
+    ]);
     expect(result.attentionOwnerDetails[1]).toMatchObject({ id: 'ao-2', owner: 'Quinn', note: null });
   });
 
@@ -89,7 +97,7 @@ describe('mapTask — attention owners plane', () => {
         attentionOwnerFixture({ id: 'ao-2', owner: 'Rowan', position: 1 })
       ]
     });
-    const result = mapTask(task);
+    const result = mapTask(task, mapTaskOptionsFor(task));
     expect(result.attentionOwners).toEqual(['Rowan', 'Rowan', 'Tom']);
     expect(result.topAttentionOwner).toBe('Rowan');
     expect(result.attentionOwnerDetails.map((row) => row.position)).toEqual([0, 1, 2]);
@@ -97,7 +105,7 @@ describe('mapTask — attention owners plane', () => {
 
   it('returns empty arrays for a task with no attention owners', () => {
     const task = baseTaskFixture({ attentionOwners: [] });
-    const result = mapTask(task);
+    const result = mapTask(task, mapTaskOptionsFor(task));
     expect(result.attentionOwners).toEqual([]);
     expect(result.attentionOwnerDetails).toEqual([]);
   });
@@ -107,21 +115,21 @@ describe('mapTask — attention owners plane', () => {
       blocked: true,
       attentionOwners: [attentionOwnerFixture({ owner: 'Tom' })]
     });
-    const result = mapTask(task);
+    const result = mapTask(task, mapTaskOptionsFor(task));
     expect(result.blocked).toBe(true);
     expect(result.attentionOwners).toEqual(['Tom']);
   });
 
   it('preserves task.blocked = false when no attention owners exist', () => {
     const task = baseTaskFixture({ blocked: false, attentionOwners: [] });
-    const result = mapTask(task);
+    const result = mapTask(task, mapTaskOptionsFor(task));
     expect(result.blocked).toBe(false);
     expect(result.attentionOwners).toEqual([]);
   });
 
   it('does not expose the legacy blockedBy / hasBlockedBy / genericBlocked fields (renamed away)', () => {
     const task = baseTaskFixture({ attentionOwners: [attentionOwnerFixture()] });
-    const result = mapTask(task) as Record<string, unknown>;
+    const result = mapTask(task, mapTaskOptionsFor(task)) as Record<string, unknown>;
     expect(result).not.toHaveProperty('blockedBy');
     expect(result).not.toHaveProperty('blockedByIds');
     expect(result).not.toHaveProperty('hasBlockedBy');
@@ -146,7 +154,7 @@ describe('mapTask — attention owners plane', () => {
       ],
       attentionOwners: [attentionOwnerFixture({ owner: 'Tom' })]
     });
-    const result = mapTask(task);
+    const result = mapTask(task, mapTaskOptionsFor(task));
     expect(result.approvals).toHaveLength(1);
     expect(result.approvals[0]).toMatchObject({ type: 'tech_design', owner: 'Quinn' });
     expect(result.attentionOwners).toEqual(['Tom']);
