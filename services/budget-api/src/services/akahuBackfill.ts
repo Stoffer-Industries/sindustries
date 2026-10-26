@@ -75,6 +75,10 @@ export type AkahuBackfillResult = {
   rowsUpserted: number;
   rowsUpdated: number;
   rowsSkipped: number;
+  /** Rows left alone because the provider transaction belongs to another user. */
+  rowsSkippedCrossTenant: number;
+  /** Provider accounts left alone because the card belongs to another user. */
+  accountsSkippedCrossTenant: number;
   runId: string | null;
   allowance: AkahuBackfillAllowance;
 };
@@ -183,18 +187,20 @@ export async function runAkahuBackfill(
       rowsUpserted: 0,
       rowsUpdated: 0,
       rowsSkipped: 0,
+      rowsSkippedCrossTenant: 0,
+      accountsSkippedCrossTenant: 0,
       runId: null,
       allowance
     };
   }
 
-  const { cardsByProviderId } = await ensureAkahuCards({
+  const { cardsByProviderId, cardsSkippedCrossTenant } = await ensureAkahuCards({
     userId: options.userId,
     accounts,
     captureBalanceSnapshots: false
   });
 
-  const { created, updated, skipped } = await upsertAkahuSettledTransactions({
+  const { created, updated, skipped, skippedCrossTenant } = await upsertAkahuSettledTransactions({
     userId: options.userId,
     transactions,
     cardsByProviderId
@@ -262,6 +268,8 @@ export async function runAkahuBackfill(
     rowsUpserted: created,
     rowsUpdated: updated,
     rowsSkipped: skipped,
+    rowsSkippedCrossTenant: skippedCrossTenant,
+    accountsSkippedCrossTenant: cardsSkippedCrossTenant,
     runId: run.id,
     allowance
   };

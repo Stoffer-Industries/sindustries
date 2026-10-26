@@ -201,6 +201,75 @@ d('Akahu bounded backfill — real Postgres (task a37b31c9, AC6)', () => {
     expect(runs[0].rowsUpserted).toBe(5);
   });
 
+  it('leaves a provider transaction owned by another user untouched', async () => {
+    // `providerTransactionId` is globally unique, not scoped per user, so
+    // the same provider transaction can already exist under a different
+    // budget-api user (an Akahu account linked twice, or a reconnect that
+    // re-points the connection). The backfill must not rewrite that user's
+    // record.
+    const otherUserId = crypto.randomUUID();
+    await prisma.user.create({
+      data: {
+        id: otherUserId,
+        email: `akahu-backfill-other-${crypto.randomBytes(4).toString('hex')}@budget-api.test`
+      }
+    });
+    // The other user's card carries a different provider account id: a
+    // `LinkedCard` is unique on (provider, providerCardId) globally, so the
+    // same provider account cannot be linked to two users.
+    const otherCard = await prisma.linkedCard.create({
+      data: {
+        userId: otherUserId,
+        provider: 'akahu',
+        providerCardId: 'acc_other_user',
+        displayName: 'Other user card'
+      }
+    });
+    await prisma.transaction.create({
+      data: {
+        userId: otherUserId,
+        cardId: otherCard.id,
+        provider: 'akahu',
+        providerTransactionId: 'akahu:trans_0',
+        occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+        merchant: 'Other User Merchant',
+        description: 'OTHER USER PURCHASE',
+        amountCents: 999,
+        direction: 'debit'
+      }
+    });
+
+    stubAkahuFetch();
+
+    const result = await runAkahuBackfill({
+      userId: USER_ID,
+      accessToken: 'user_token',
+      startMs: WINDOW_START_MS,
+      endMs: WINDOW_END_MS,
+      dryRun: false,
+      nowMs: NOW_MS
+    });
+
+    // The other user's row is untouched — same owner, same amount, same
+    // merchant, same description.
+    const other = await prisma.transaction.findUnique({
+      where: { providerTransactionId: 'akahu:trans_0' },
+      select: { userId: true, amountCents: true, merchant: true, description: true }
+    });
+    expect(other).toEqual({
+      userId: otherUserId,
+      amountCents: 999,
+      merchant: 'Other User Merchant',
+      description: 'OTHER USER PURCHASE'
+    });
+
+    // The skip is reported rather than silently dropped, and the other four
+    // transactions are still written for the requesting user.
+    expect(result.rowsSkippedCrossTenant).toBe(1);
+    expect(result.rowsUpserted).toBe(4);
+    expect(await prisma.transaction.count({ where: { userId: USER_ID } })).toBe(4);
+  });
+
   it('refuses a window outside the configured historical allowance', async () => {
     const { requestPaths } = stubAkahuFetch();
 

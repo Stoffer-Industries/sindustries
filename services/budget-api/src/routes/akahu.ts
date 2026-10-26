@@ -189,14 +189,15 @@ akahuRouter.post(
       }
 
       // Upsert accounts into LinkedCard so the rest of the app can treat them "card-like".
-      const { cardsByProviderId, balanceSnapshotsCreated } = await ensureAkahuCards({
-        userId,
-        accounts,
-        captureBalanceSnapshots: true
-      });
+      const { cardsByProviderId, balanceSnapshotsCreated, cardsSkippedCrossTenant } =
+        await ensureAkahuCards({
+          userId,
+          accounts,
+          captureBalanceSnapshots: true
+        });
 
       // Upsert transactions (idempotent by providerTransactionId).
-      const { created, updated, categorized: settledCategorized } =
+      const { created, updated, categorized: settledCategorized, skippedCrossTenant } =
         await upsertAkahuSettledTransactions({
           userId,
           transactions: txns,
@@ -274,6 +275,8 @@ akahuRouter.post(
         pendingCreated,
         balanceSnapshotsCreated,
         categorized,
+        cardsSkippedCrossTenant,
+        transactionsSkippedCrossTenant: skippedCrossTenant,
         refresh,
         alerts,
         ...(traversalError ? { error: traversalError } : {})
