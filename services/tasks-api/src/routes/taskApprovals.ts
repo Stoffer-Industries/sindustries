@@ -108,7 +108,12 @@ taskApprovalsRouter.post('/tasks/:id/approvals', requireApprovalPrincipal, async
     let evidencePins: { verifiedPrNumber: number; verifiedPrHeadSha: string; verifiedAcSectionDigest: string } | null = null;
     if (type === 'qa_agent') {
       const verdict = evaluateQaAttestation(req.body);
-      if (!verdict.ok) {
+      // `verdict.ok === false`, not `!verdict.ok`: with `strictNullChecks`
+      // off (this service's tsconfig), TS only narrows a discriminated
+      // union through an explicit literal-equality check on the
+      // discriminant — negation and if/else-on-truthy narrowing both fail
+      // to narrow `verdict` to the `ok: false` branch below.
+      if (verdict.ok === false) {
         // No approval row is written on this path — that absence is asserted
         // directly by the AC1 test, because "returned a 4xx" alone would not
         // catch a regression that logged the rejection but still persisted.
