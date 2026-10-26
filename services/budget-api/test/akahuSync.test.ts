@@ -89,16 +89,19 @@ describe('POST /api/v1/akahu/sync', () => {
     mocks.prisma.accountBalanceSnapshot.findMany.mockResolvedValue([]);
 
     mocks.akahuGetAccounts.mockResolvedValue([{ _id: 'acc_1', name: 'Credit card' }]);
-    mocks.akahuGetTransactions.mockResolvedValue([
-      {
-        _id: 'trans_1',
-        _account: 'acc_1',
-        date: '2026-05-11T00:00:00.000Z',
-        description: 'SETTLED PURCHASE',
-        amount: -20,
-        merchant: { name: 'Settled Merchant' }
-      }
-    ]);
+    mocks.akahuGetTransactions.mockResolvedValue({
+      items: [
+        {
+          _id: 'trans_1',
+          _account: 'acc_1',
+          date: '2026-05-11T00:00:00.000Z',
+          description: 'SETTLED PURCHASE',
+          amount: -20,
+          merchant: { name: 'Settled Merchant' }
+        }
+      ],
+      nextCursor: null
+    });
     mocks.akahuGetPendingTransactions.mockResolvedValue([
       {
         _account: 'acc_1',
