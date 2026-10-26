@@ -7,9 +7,9 @@
   "fingerprints": {
     "src/routes/autoPostReconciliation.ts:TS2339:Property 'message' does not exist on type 'PublishServiceResult'.": 1,
     "src/routes/contentSchedulerPublishService.ts:TS2339:Property 'code' does not exist on type 'PublishGuardResult'.": 2,
-    "test/contentScheduler.test.ts:TS2345:Argument of type '{ id: string; body: string; source: string; sourceRef: any; status: string; scheduledFor: any; position: number; approvedAt: any; approvedBy: any; publishedAt: any; publishedUrl: any; publishError: any; createdAt: Date; updatedAt: Date; removedAt: any; }' is not assignable to parameter of type 'Pick<{ status: ContentSchedulerItemStatus; id: string; body: string; source: ContentSchedulerSource; sourceRef: string; scheduledFor: Date; ... 16 more ...; linksToItemId: string; }, \"status\" | ... 2 more ... | \"kind\">'.": 6,
+    "test/contentScheduler.test.ts:TS2345:Argument of type '{…}' is not assignable to parameter of type 'Pick<{…}, \"status\" | ... more ... | \"kind\">'.": 6,
     "test/contentSchedulerAutoPost.test.ts:TS2339:Property 'message' does not exist on type 'PublishServiceResult'.": 1,
-    "test/contentSchedulerItems.test.ts:TS2345:Argument of type '{ id: string; body: string; source: string; sourceRef: any; status: string; scheduledFor: any; position: number; approvedAt: any; approvedBy: any; publishedAt: any; publishedUrl: any; publishError: any; ... 6 more ...; linksToItemId: any; }' is not assignable to parameter of type 'Pick<{ status: ContentSchedulerItemStatus; id: string; body: string; source: ContentSchedulerSource; sourceRef: string; scheduledFor: Date; ... 16 more ...; linksToItemId: string; }, \"status\" | ... 2 more ... | \"kind\">'.": 2,
+    "test/contentSchedulerItems.test.ts:TS2345:Argument of type '{…}' is not assignable to parameter of type 'Pick<{…}, \"status\" | ... more ... | \"kind\">'.": 2,
     "test/contentSchedulerThreadPublish.test.ts:TS2339:Property 'failedAtPosition' does not exist on type 'ThreadPublishResult'.": 1,
     "test/contentSchedulerThreadPublish.test.ts:TS2339:Property 'message' does not exist on type 'ThreadPublishResult'.": 3,
     "test/contentSchedulerThreadPublish.test.ts:TS2339:Property 'undeletedTweets' does not exist on type 'ThreadPublishResult'.": 3

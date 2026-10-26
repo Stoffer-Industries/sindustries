@@ -21,7 +21,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -71,13 +71,39 @@ function runTypecheck(service) {
   });
 }
 
-function parseDiagnostics(output) {
+function normaliseDiagnosticPath(file, serviceDir) {
+  const repoRelative = file.startsWith(`services${sep}`) || file.startsWith('services/')
+    ? resolve(REPO_ROOT, file)
+    : null;
+  const absolute = isAbsolute(file) ? file : (repoRelative ?? resolve(serviceDir, file));
+  return relative(serviceDir, absolute).split(sep).join('/');
+}
+
+function normaliseMessage(message) {
+  let normalised = message.replace(/\.\.\. \d+ more \.\.\./g, '... more ...');
+  // TypeScript renders expanded object/model types in diagnostics using
+  // property declaration order, which can vary with module resolution even
+  // when the semantic error is unchanged. Collapse those balanced groups,
+  // retaining the surrounding generic/type context for useful fingerprints.
+  let previous;
+  do {
+    previous = normalised;
+    normalised = normalised.replace(/\{(?:[^{}]|\{…\})*\}/g, '{…}');
+  } while (normalised !== previous);
+  return normalised;
+}
+
+function parseDiagnostics(output, serviceDir) {
   const diagnostics = [];
   for (const line of output.split('\n')) {
     const match = DIAGNOSTIC_RE.exec(line);
     if (!match) continue;
     const [, file, , , code, message] = match;
-    diagnostics.push({ file: file.trim(), code, message: message.trim() });
+    diagnostics.push({
+      file: normaliseDiagnosticPath(file.trim(), serviceDir),
+      code,
+      message: normaliseMessage(message.trim()),
+    });
   }
   return diagnostics;
 }
@@ -103,9 +129,24 @@ function main() {
     process.exit(2);
   }
 
+  let packageJson;
+  try {
+    packageJson = JSON.parse(readFileSync(resolve(serviceDir, 'package.json'), 'utf8'));
+  } catch (err) {
+    console.error(`✗ typecheck-gate (${service}): cannot read service package.json (${err.message})`);
+    process.exit(2);
+  }
+  const typecheckScript = packageJson?.scripts?.typecheck;
+  if (typeof typecheckScript !== 'string' || !/(^|\s|\/)tsc(?:\s|$)/.test(typecheckScript) || !/--noEmit\b/.test(typecheckScript)) {
+    console.error(
+      `✗ typecheck-gate (${service}): package.json scripts.typecheck must invoke tsc with --noEmit`,
+    );
+    process.exit(2);
+  }
+
   const result = runTypecheck(service);
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  const diagnostics = parseDiagnostics(output);
+  const diagnostics = parseDiagnostics(output, serviceDir);
   const tscVersion = getTscVersion();
 
   // tsc exits non-zero on diagnostics, but also on a bad invocation (e.g. a
@@ -124,7 +165,8 @@ function main() {
   // (tasks-api, budget-api — see each service's prisma/schema.prisma).
   // Either one is unresolvable with no client generated.
   const missingPrismaClient = diagnostics.some(
-    (d) => d.code === 'TS2307' && /@prisma\/client|generated\/prisma/.test(d.message),
+    (d) => ['TS2305', 'TS2307', 'TS2614'].includes(d.code) &&
+      /(?:^|['"\s])@prisma\/client(?:['"\s]|$)|generated\/prisma/.test(d.message),
   );
   if (missingPrismaClient) {
     console.error(
@@ -183,7 +225,23 @@ function main() {
     process.exit(2);
   }
 
-  const baselineFingerprints = baseline.fingerprints ?? {};
+  const baselineFingerprints = baseline.fingerprints;
+  const validFingerprintEntries = baselineFingerprints &&
+    typeof baselineFingerprints === 'object' &&
+    !Array.isArray(baselineFingerprints) &&
+    Object.values(baselineFingerprints).every((count) => Number.isInteger(count) && count > 0);
+  const validTotal = Number.isInteger(baseline.totalDiagnostics) && baseline.totalDiagnostics >= 0;
+  const fingerprintTotal = validFingerprintEntries
+    ? Object.values(baselineFingerprints).reduce((sum, count) => sum + count, 0)
+    : null;
+  if (!validTotal || !validFingerprintEntries || fingerprintTotal !== baseline.totalDiagnostics) {
+    console.error(
+      `✗ typecheck-gate (${service}): invalid baseline — totalDiagnostics must be a non-negative integer ` +
+        `equal to the sum of positive integer fingerprint counts (R3)`,
+    );
+    process.exit(1);
+  }
+
   const violations = [];
 
   if (totalDiagnostics > baseline.totalDiagnostics) {
@@ -214,4 +272,8 @@ function main() {
   process.exit(0);
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
+
+export { normaliseDiagnosticPath, normaliseMessage };
