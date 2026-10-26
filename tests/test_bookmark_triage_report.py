@@ -20,6 +20,7 @@ import os
 import pathlib
 import sys
 import unittest
+import urllib.error
 from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -375,6 +376,44 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(payload["deliveryError"], "boom")
 
 
+    def test_api_fetch_failure_returns_1_with_clean_message(self):
+        # A Tasks API error must surface as a plain stderr line with exit 1,
+        # not as an unhandled traceback, so the cron caller can report it.
+        env = {
+            "TASKS_API_BASE_URL": "http://example.test/api/v1",
+            "TASKS_API_APPROVAL_TOKEN": "tok",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with patch.object(
+                btr,
+                "fetch_bookmark_tasks",
+                side_effect=urllib.error.HTTPError("http://example.test", 502, "Bad Gateway", {}, None),
+            ):
+                rc, out, err = self._run_main(["--json"])
+
+        self.assertEqual(rc, 1)
+        self.assertIn("502", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_api_unreachable_returns_1_with_clean_message(self):
+        env = {
+            "TASKS_API_BASE_URL": "http://example.test/api/v1",
+            "TASKS_API_APPROVAL_TOKEN": "tok",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with patch.object(
+                btr,
+                "fetch_bookmark_tasks",
+                side_effect=urllib.error.URLError("connection refused"),
+            ):
+                rc, out, err = self._run_main(["--json"])
+
+        self.assertEqual(rc, 1)
+        self.assertIn("unreachable", err)
+        self.assertIn("connection refused", err)
+        self.assertNotIn("Traceback", err)
+
+
 class SendTelegramContractTests(unittest.TestCase):
     """Hit the live Telegram HTTP endpoint with httpretty-style patching so we
     confirm the request body shape and the ok-response path."""
@@ -431,6 +470,85 @@ class SendTelegramContractTests(unittest.TestCase):
     def test_send_telegram_requires_chat_id(self):
         with self.assertRaises(RuntimeError):
             btr.send_telegram("hello", chat_id="", bot_token="abc")
+
+
+class ProxyBypassTests(unittest.TestCase):
+    """The local Tasks API must not be reached through OpenClaw's secret
+    egress proxy (HTTP_PROXY/HTTPS_PROXY).
+
+    The proxy exists to substitute protected secret sentinels into requests
+    bound for approved *external* destinations. It refuses non-allowlisted
+    local destinations with HTTP 502 ("Secret egress proxy refused the
+    request."), which from a caller's perspective is indistinguishable from
+    a real Tasks API outage (urllib 502 vs. a direct `curl` 200). That
+    mismatch broke this cron on every run once the proxy was in the
+    environment.
+
+    Telegram delivery is the opposite case: api.telegram.org IS an approved
+    external destination, so it must keep traversing the proxy.
+    """
+
+    def test_fetch_uses_a_proxy_free_opener(self):
+        captured = {}
+
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"data": []}).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _FakeOpener:
+            def __init__(self):
+                pass
+
+            def open(self, req, timeout=None):
+                captured["url"] = req.full_url
+                captured["timeout"] = timeout
+                return _FakeResp()
+
+        def fake_build_opener(*handlers):
+            captured["handlers"] = handlers
+            return _FakeOpener()
+
+        with patch.object(btr.urllib.request, "build_opener", side_effect=fake_build_opener):
+            tasks = btr.fetch_bookmark_tasks(
+                api_base="http://localhost:4001/api/v1",
+                tag="bookmarks",
+                status="open",
+                limit=5,
+            )
+
+        self.assertEqual(tasks, [])
+        self.assertIn("tag=bookmarks", captured["url"])
+        handlers = captured["handlers"]
+        self.assertEqual(len(handlers), 1)
+        self.assertIsInstance(handlers[0], btr.urllib.request.ProxyHandler)
+        # An empty proxy map is what disables proxying for this opener.
+        self.assertEqual(handlers[0].proxies, {})
+
+    def test_send_telegram_keeps_the_default_proxy_aware_opener(self):
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"ok": True, "result": {"message_id": 7}}).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(
+            btr.urllib.request,
+            "build_opener",
+            side_effect=AssertionError("telegram delivery must use the default opener"),
+        ), patch.object(btr.urllib.request, "urlopen", return_value=_FakeResp()):
+            result = btr.send_telegram("hello", chat_id="42", bot_token="abc")
+
+        self.assertTrue(result["ok"])
 
 
 if __name__ == "__main__":

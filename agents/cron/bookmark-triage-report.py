@@ -97,7 +97,23 @@ def fetch_bookmark_tasks(
     params = urllib.parse.urlencode({"tag": tag, "status": status, "limit": str(limit)})
     url = f"{base}/tasks?{params}"
     req = urllib.request.Request(url, headers=_auth_headers(), method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    # OpenClaw's secret-egress proxy (HTTP_PROXY/HTTPS_PROXY) exists only to
+    # substitute protected secret sentinels into requests bound for approved
+    # *external* destinations. TASKS_API_BASE_URL is always a local service
+    # call and never carries a secret sentinel, but urllib's default opener
+    # honours the ambient proxy env vars unconditionally (NO_PROXY is not set
+    # in the cron shell). That routed every Tasks API call through the egress
+    # proxy, which correctly refuses non-allowlisted destinations with an
+    # HTTP 502 ("Secret egress proxy refused the request.") — which is
+    # indistinguishable from a real Tasks API outage from this caller's
+    # perspective (urllib 502 vs. a direct `curl` 200). Confirmed live: this
+    # cron failed on every run once the proxy was in the environment
+    # (2026-10-26), so the triage report never reached Telegram.
+    # Use a proxy-free opener for the local Tasks API only — Telegram
+    # delivery (send_telegram) still needs the proxy, because api.telegram.org
+    # is an approved external destination.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
     payload = json.loads(body) if body else {}
     if isinstance(payload, dict) and isinstance(payload.get("data"), list):
@@ -342,6 +358,18 @@ def main(argv: list[str] | None = None) -> int:
         # missing. Re-emit the message and exit non-zero so cron surfaces it.
         print(str(exc), file=sys.stderr)
         return 2
+    except urllib.error.HTTPError as exc:
+        # The Tasks API answered with an error status. Report it as a plain
+        # message rather than a traceback so the cron caller gets something
+        # actionable. Exit 1 = the run failed before it could report.
+        body = exc.read().decode("utf-8", errors="replace").strip() if exc.fp else ""
+        detail = f": {body}" if body else ""
+        print(f"tasks api http {exc.code}{detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        # The Tasks API was unreachable (connection refused, DNS, timeout).
+        print(f"tasks api unreachable: {exc.reason}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(result, indent=2))
     elif args.dry_run:
