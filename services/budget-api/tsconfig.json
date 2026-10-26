@@ -1,8 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    // Runtime-coupled: these two keys model the `tsx` (esbuild) runtime this
+    // service actually uses, not an aspirational compiled-Node runtime. `tsx`
+    // resolves extensionless and `.ts`-suffixed relative imports; the
+    // NodeNext resolution rules demanded explicit `.js` extensions and
+    // reported 107 phantom diagnostics that are not defects. Any future move
+    // to a compiled runtime (e.g. `node dist/*.js`) MUST revisit these two
+    // keys in the same PR that makes the move.
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "strict": false,
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
