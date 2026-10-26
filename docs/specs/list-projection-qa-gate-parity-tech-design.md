@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 7db08a30-38af-48f1-af5a-9fac8660cc08
 product_spec: "n/a"
-shipped_pr: null
-shipped_date: null
+shipped_pr: 892
+shipped_date: 2026-10-27
 ---
 
 # List projection gate parity — dormant `qa_agent` gates in `GET /tasks`
