@@ -5,7 +5,8 @@
     // service actually uses, not an aspirational compiled-Node runtime. `tsx`
     // resolves extensionless and `.ts`-suffixed relative imports; the
     // NodeNext resolution rules demanded explicit `.js` extensions and
-    // reported 107 phantom diagnostics that are not defects. Any future move
+    // reported 107 phantom diagnostics across the three services (20 here)
+    // that are not defects. Any future move
     // to a compiled runtime (e.g. `node dist/*.js`) MUST revisit these two
     // keys in the same PR that makes the move.
     "module": "ESNext",
