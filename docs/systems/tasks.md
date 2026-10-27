@@ -519,13 +519,20 @@ feature-task workflow is a thin client.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/v1/feature-task-analytics/events` | Idempotent upsert by `eventKey`. Accepts a single event or a batch (max 500). Validates UUIDs and `eventType` / `cause` enums. |
-| `GET  /api/v1/feature-task-analytics/tasks/:taskId/events` | Raw events in `(occurredAt, createdAt)` order for per-task replay. |
+| `GET  /api/v1/feature-task-analytics/tasks/:taskId/events` | Raw events for per-task replay in `(occurredAt, createdAt, id)` order. Optional `limit` (default 500, hard maximum 2,000) and `cursor` query parameters return at most 2,000 events and 1 MiB per response. The response is `{"data": [...], "pagination": {"limit", "returned", "hasMore", "nextCursor"}}`; clients follow `nextCursor` until `hasMore` is false to retrieve the complete history. |
 | `GET  /api/v1/feature-task-analytics/weekly?weeks=N` | Monday-start buckets with `terminalTaskCount`, `gateFailureCount` split into `capacityFailureCount` and `qualityFailureCount`, `gateFailureRate` (null when the denominator is zero), `medianPrCycleTimeSeconds`, `p90PrCycleTimeSeconds`, and `evidenceTypeDistribution`. Reuses the `flowMetrics.isoMonday()` convention from Mission Control. |
 
 Backed by a new Prisma model `FeatureTaskAnalyticsEvent` with
 `eventKey @unique` for idempotent writes, an index on `(taskId,
 occurredAt)` for replay, and a `(weekStart, terminalStatus)` index for
 the weekly aggregation.
+
+The weekly aggregation computes bucket counts in Postgres but keeps every
+`terminal_summary` row in the requested window as a percentile input; percentile
+inputs are never sampled or truncated. Bucket boundaries are computed in the
+Tasks API using the same local Monday convention as Mission Control and passed
+to Postgres as parameters, so the response remains identical to the previous
+JavaScript aggregation for the same fixture data.
 
 ##### CLI replay
 
