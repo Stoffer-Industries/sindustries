@@ -124,8 +124,10 @@ CI currently covers:
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
 - `eas-update-on-main` (mobile OTA publishing)
 
-Every job listed above is an input to the `merge-gate` job in
-`.github/workflows/ci.yml`, which gates the deployment jobs.
+Every job listed above except `eas-update-on-main` is an input to the
+`merge-gate` job in `.github/workflows/ci.yml`, which gates the deployment
+jobs. `eas-update-on-main` is itself a deployment job: it runs *after* the
+gate passes (`needs: [changes, merge-gate]`).
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
