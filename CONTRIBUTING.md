@@ -114,11 +114,18 @@ CI currently covers:
 - Ash verifier tests
 - OpenTelemetry Node package unit tests
 - Design system sync
+- `frontend-design-system-lint` (the frontend `@shadcn/lint` design-system lint wiring and its unit tests)
 - `no-absolute-paths` lint
 - `typecheck-gate-tests` (self-test for `scripts/typecheck-gate.mjs`, the tool the three service gates above run)
 - `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests
+- `health-probe-tests` (health-probe unit tests plus the observability provisioning / bootstrap / evidence / failure-inject contract tests)
+- `gh-with-agent-token-tests` (per-agent GitHub identity shim, `infra/cloud/bin` deploy/status/rollback contracts, cloud staging workflow and failure-drill harnesses, stable-hostname verification harness)
+- `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
 - `eas-update-on-main` (mobile OTA publishing)
+
+Every job listed above is an input to the `merge-gate` job in
+`.github/workflows/ci.yml`, which gates the deployment jobs.
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
