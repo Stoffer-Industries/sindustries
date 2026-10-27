@@ -1233,3 +1233,68 @@ describe('GET /api/v1/tasks — list/detail gate parity (task 7db08a30)', () => 
     expect(response.body.page.hasNextPage).toBe(false);
   });
 });
+
+describe('GET /api/v1/tasks — filter parameter shape validation (task 7db08a30)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+  });
+
+  // A repeated query parameter arrives as an array. Collapsing it to
+  // `undefined` used to drop the filter *and* skip its validation, so a
+  // documented `400` became a silently unfiltered `200` — the same failure
+  // class the gate-parity change exists to fix. These lock in the rejection.
+  it.each([
+    { param: 'priority', values: ['high', 'low'], code: 'INVALID_PRIORITY_FILTER' },
+    { param: 'taskType', values: ['code', 'feature'], code: 'INVALID_TASK_TYPE_FILTER' },
+    { param: 'sort', values: ['createdAt', 'priority'], code: 'INVALID_SORT_VALUE' },
+    { param: 'assignee', values: ['Ash', 'Rowan'], code: 'INVALID_ASSIGNEE_FILTER' },
+    { param: 'tag', values: ['alpha', 'beta'], code: 'INVALID_TAG_FILTER' },
+    { param: 'q', values: ['alpha', 'beta'], code: 'INVALID_Q_FILTER' },
+    {
+      param: 'workflowGateOwner',
+      values: ['Ash', 'Tom'],
+      code: 'INVALID_WORKFLOW_GATE_OWNER_FILTER'
+    },
+    {
+      param: 'attentionOwner',
+      values: ['Ash', 'Tom'],
+      code: 'INVALID_ATTENTION_OWNER_FILTER'
+    }
+  ])('rejects a repeated $param parameter instead of dropping the filter', async ({ param, values, code }) => {
+    const response = await authedRequest(createApp())
+      .get('/api/v1/tasks')
+      .query({ [param]: values });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe(code);
+    // The filter is rejected before the query runs, so nothing is returned
+    // unfiltered.
+    expect(prismaMock.task.findMany).not.toHaveBeenCalled();
+  });
+
+  it('still applies a single-valued filter parameter', async () => {
+    prismaMock.task.findMany.mockResolvedValue([
+      task({ id: '11111111-1111-1111-1111-111111111111', title: 'Filtered task', priority: 'high' })
+    ]);
+
+    const response = await authedRequest(createApp())
+      .get('/api/v1/tasks')
+      .query({ priority: 'high' });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.task.findMany.mock.calls[0][0].where).toMatchObject({
+      priority: 'high'
+    });
+  });
+
+  it('rejects an empty sort value with INVALID_SORT_VALUE', async () => {
+    const response = await authedRequest(createApp())
+      .get('/api/v1/tasks')
+      .query({ sort: '' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_SORT_VALUE');
+    expect(prismaMock.task.findMany).not.toHaveBeenCalled();
+  });
+});

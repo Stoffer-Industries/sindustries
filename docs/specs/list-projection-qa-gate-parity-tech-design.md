@@ -256,6 +256,13 @@ reason is recorded here rather than assumed.
    is proportionate — but a caller asking for 10,000 tasks now also pays for
    their marker comments. Worth watching, not worth pre-emptively changing the
    limit policy here.
+   **Measured (2026-10-26, prodlike corpus):** the marker-filtered comment
+   include is a 9-way `LIKE` seq scan over 288 live tasks / 8,686 comments,
+   costing **~65 ms per board load** — and `apps/tasks/src/tasksApi.ts:168`
+   requests `limit=10000` by default, so this is the default board path rather
+   than a theoretical caller. Acceptable at current scale; cost grows linearly
+   with the comment corpus. The estimate above ("worth watching") is therefore
+   now a measurement, not a projection.
 4. **REJECTED — express dormancy in SQL** (e.g. `comments: { none: { body:
    { contains: '"failureFingerprint"' } } }`). Rejected because the rule reads the
    *latest* `[lobster-state]` and several markers at line level, which SQL cannot
