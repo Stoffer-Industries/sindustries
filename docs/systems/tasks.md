@@ -105,6 +105,23 @@ It must not become the default backend for Mission Control or other apps. New pr
 
 The API validates the `taskType` filter against the same accepted task type set used by create and update validation, then applies an exact Prisma `taskType` filter in the list query. This keeps UI filtering and automation discovery aligned with persisted task metadata. Invalid filters return `400 INVALID_TASK_TYPE_FILTER`.
 
+### List filter parameter shapes
+
+`GET /tasks` accepts one value per filter parameter. A parameter that is **absent** and a parameter that is **present in a shape the API does not accept** are different things, and the API keeps them different: an absent parameter means "no filter", while a malformed one is a client error. A repeated parameter (`?priority=high&priority=low`) arrives as an array and is rejected with `400` rather than dropped — dropping it would skip the filter's validation and return an unfiltered `200`, which is the same failure class as an over-reporting discovery filter.
+
+| Parameter | Error code for a repeated (array-valued) parameter |
+| --- | --- |
+| `priority` | `400 INVALID_PRIORITY_FILTER` |
+| `taskType` | `400 INVALID_TASK_TYPE_FILTER` |
+| `sort` | `400 INVALID_SORT_VALUE` |
+| `assignee` | `400 INVALID_ASSIGNEE_FILTER` |
+| `tag` | `400 INVALID_TAG_FILTER` |
+| `q` | `400 INVALID_Q_FILTER` |
+| `workflowGateOwner` | `400 INVALID_WORKFLOW_GATE_OWNER_FILTER` |
+| `attentionOwner` | `400 INVALID_ATTENTION_OWNER_FILTER` |
+
+An empty `?sort=` value is also rejected with `400 INVALID_SORT_VALUE`; an empty value for the other filters means "no filter", matching the long-standing behaviour of those parameters.
+
 New task type values must be added consistently across API validation, app shared options, and workflow consumers before use. Automation that needs feature-task routing should prefer first-class `taskType: feature` over tag-only conventions.
 
 ### TaskComment

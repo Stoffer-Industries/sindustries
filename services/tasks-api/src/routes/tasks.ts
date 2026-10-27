@@ -99,14 +99,34 @@ function cursorWhere(cursor) {
 }
 
 /**
+ * Narrowed form of an Express query value.
+ *
+ * `value` is the string form of the parameter, or `undefined` when the
+ * parameter was absent. `malformed` is true when the parameter was present
+ * but was not a plain string — a repeated parameter arrives as an array.
+ */
+type NarrowedQueryValue = {
+  value: string | undefined;
+  malformed: boolean;
+};
+
+/**
  * Narrow an Express query value to a plain string. Express types a query
  * parameter as `string | ParsedQs | (string | ParsedQs)[]`, and only the
  * string form is a usable filter value. Narrowing once at the boundary
  * keeps the filter values type-safe instead of handing Prisma the wider
  * union.
+ *
+ * "Absent" and "present in a shape we do not accept" stay distinct. A
+ * repeated parameter (an array) is reported as `malformed` rather than
+ * collapsed to `undefined`, because collapsing it would drop the filter
+ * *and* skip its validation — turning the documented `400` for an invalid
+ * filter into a silently unfiltered `200`.
  */
-function queryString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
+function queryString(value: unknown): NarrowedQueryValue {
+  if (value === undefined) return { value: undefined, malformed: false };
+  if (typeof value === 'string') return { value, malformed: false };
+  return { value: undefined, malformed: true };
 }
 
 tasksRouter.get('/tasks', async (req, res, next) => {
@@ -142,14 +162,62 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // filter values. Express types a query parameter as
     // `string | ParsedQs | (string | ParsedQs)[]`; only the string form is a
     // usable filter, so the wider union never reaches Prisma.
-    const priorityValue = queryString(priority);
-    const assigneeValue = queryString(assignee);
-    const taskTypeValue = queryString(taskType);
-    const tagValue = queryString(tag);
-    const qValue = queryString(q);
-    const sortValue = queryString(sort) ?? 'priority';
-    const workflowGateOwnerValue = queryString(workflowGateOwner)?.trim() ?? '';
-    const attentionOwnerValue = queryString(attentionOwner)?.trim() ?? '';
+    const priorityParam = queryString(priority);
+    const assigneeParam = queryString(assignee);
+    const taskTypeParam = queryString(taskType);
+    const tagParam = queryString(tag);
+    const qParam = queryString(q);
+    const sortParam = queryString(sort);
+    const workflowGateOwnerParam = queryString(workflowGateOwner);
+    const attentionOwnerParam = queryString(attentionOwner);
+
+    // A filter parameter that is present but not a plain string (a repeated
+    // parameter arrives as an array) is rejected rather than dropped. Dropping
+    // it would skip the filter's validation and return an unfiltered `200`
+    // where the API contract documents a `400` — the same failure class this
+    // change exists to fix. `priority`, `taskType` and `sort` keep the codes
+    // `main` already returned for a repeated parameter; the remaining filters
+    // previously failed as a `500` or were silently ignored.
+    if (priorityParam.malformed) {
+      return badRequest(res, 'INVALID_PRIORITY_FILTER', 'Invalid priority filter');
+    }
+
+    if (taskTypeParam.malformed) {
+      return badRequest(res, 'INVALID_TASK_TYPE_FILTER', 'Invalid taskType filter');
+    }
+
+    if (sortParam.malformed) {
+      return badRequest(res, 'INVALID_SORT_VALUE', 'Invalid sort value');
+    }
+
+    if (assigneeParam.malformed) {
+      return badRequest(res, 'INVALID_ASSIGNEE_FILTER', 'Invalid assignee filter');
+    }
+
+    if (tagParam.malformed) {
+      return badRequest(res, 'INVALID_TAG_FILTER', 'Invalid tag filter');
+    }
+
+    if (qParam.malformed) {
+      return badRequest(res, 'INVALID_Q_FILTER', 'Invalid q filter');
+    }
+
+    if (workflowGateOwnerParam.malformed) {
+      return badRequest(res, 'INVALID_WORKFLOW_GATE_OWNER_FILTER', 'Invalid workflowGateOwner filter');
+    }
+
+    if (attentionOwnerParam.malformed) {
+      return badRequest(res, 'INVALID_ATTENTION_OWNER_FILTER', 'Invalid attentionOwner filter');
+    }
+
+    const priorityValue = priorityParam.value;
+    const assigneeValue = assigneeParam.value;
+    const taskTypeValue = taskTypeParam.value;
+    const tagValue = tagParam.value;
+    const qValue = qParam.value;
+    const sortValue = sortParam.value ?? 'priority';
+    const workflowGateOwnerValue = workflowGateOwnerParam.value?.trim() ?? '';
+    const attentionOwnerValue = attentionOwnerParam.value?.trim() ?? '';
 
     if (priorityValue && !validPriorities.has(priorityValue)) {
       return badRequest(res, 'INVALID_PRIORITY_FILTER', 'Invalid priority filter');
@@ -288,6 +356,9 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // into the list payload.
     const mapListTask = (task) => {
       const mapped = mapTask(task, mapTaskOptionsFor(task));
+      // Restore the list contract — do not drop. The list payload carries
+      // `comments: []` for every task; without this the marker comments the
+      // delivery-evidence rule loads would leak into list responses.
       return { ...mapped, comments: [] };
     };
 
