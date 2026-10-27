@@ -28,8 +28,9 @@ use regex::Regex;
 use serde_json::{Map, Value};
 
 use crate::{
-    analytics::chrono_like_now_iso, api_client::handle_api_result, AnalyticsAction, AnalyticsArgs,
-    Envelope, LobsterState, Task,
+    analytics::{analytics_events_url, chrono_like_now_iso, collect_paged_events},
+    api_client::handle_api_result,
+    AnalyticsAction, AnalyticsArgs, Envelope, LobsterState, Task,
 };
 
 /// Replay a task's lifecycle analytics events in chronological order
@@ -53,17 +54,27 @@ pub(crate) fn analytics_replay(args: AnalyticsArgs) -> Result<Envelope> {
         ));
     }
 
-    let url = format!("{base_url}/feature-task-analytics/tasks/{task_id}/events");
-    let body: Value = handle_api_result(ureq::get(&url).call())?;
-    let events = body
-        .get("data")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let events = fetch_replay_events(&base_url, &task_id)?;
 
     let envelope = replay_envelope(&task_id, &events);
     print_replay(&task_id, &events);
     Ok(envelope)
+}
+
+/// Fetch the task's complete lifecycle event history.
+///
+/// The per-task events endpoint is bounded: a response carries one page of
+/// events plus a `pagination` envelope, so the fetch follows
+/// `pagination.nextCursor` until `pagination.hasMore` is false and
+/// concatenates the pages in order. Stopping after the first page would
+/// silently truncate the replay, so a repeated cursor, a missing cursor
+/// on a `hasMore` response, or an unbounded page count is an error.
+pub(crate) fn fetch_replay_events(base_url: &str, task_id: &str) -> Result<Vec<Value>> {
+    collect_paged_events(|cursor| {
+        let url = analytics_events_url(base_url, task_id, cursor);
+        let body: Value = handle_api_result(ureq::get(&url).call())?;
+        Ok(body)
+    })
 }
 
 /// Build the JSON envelope for the replay output. The replay is a
@@ -185,4 +196,98 @@ fn format_evidence(map: &Map<String, Value>) -> String {
         .collect();
     parts.sort();
     format!("{{{}}}", parts.join(","))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analytics::test_http::spawn_sequential_server;
+    use serde_json::json;
+
+    const TEST_TASK_ID: &str = "11111111-2222-3333-4444-555555555555";
+
+    fn page(events: Vec<Value>, has_more: bool, next_cursor: Option<&str>) -> String {
+        json!({
+            "data": events,
+            "pagination": {
+                "limit": 500,
+                "returned": events.len(),
+                "hasMore": has_more,
+                "nextCursor": next_cursor,
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn fetch_replay_events_follows_pagination_over_http() {
+        let page_one = page(
+            vec![json!({"eventType": "gate_failure", "occurredAt": "2026-10-01T00:00:00Z"})],
+            true,
+            Some("cursor-1"),
+        );
+        let page_two = page(
+            vec![json!({"eventType": "terminal_summary", "occurredAt": "2026-10-02T00:00:00Z"})],
+            false,
+            None,
+        );
+        let (base_url, server) = spawn_sequential_server(vec![page_one, page_two]);
+
+        let events = fetch_replay_events(&base_url, TEST_TASK_ID).expect("fetch replay events");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["eventType"], "gate_failure");
+        assert_eq!(events[1]["eventType"], "terminal_summary");
+
+        let paths = server.join().expect("test server thread");
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            paths[0],
+            format!("/feature-task-analytics/tasks/{TEST_TASK_ID}/events")
+        );
+        assert_eq!(
+            paths[1],
+            format!("/feature-task-analytics/tasks/{TEST_TASK_ID}/events?cursor=cursor-1")
+        );
+    }
+
+    #[test]
+    fn fetch_replay_events_accepts_legacy_single_page_response() {
+        let body = json!({"data": [{"eventType": "gate_failure"}]}).to_string();
+        let (base_url, server) = spawn_sequential_server(vec![body]);
+
+        let events = fetch_replay_events(&base_url, TEST_TASK_ID).expect("fetch replay events");
+
+        assert_eq!(events.len(), 1);
+        let paths = server.join().expect("test server thread");
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[test]
+    fn fetch_replay_events_fails_on_repeated_cursor() {
+        let body = page(
+            vec![json!({"eventType": "gate_failure"})],
+            true,
+            Some("cursor-1"),
+        );
+        let (base_url, server) = spawn_sequential_server(vec![body.clone(), body]);
+
+        let err = fetch_replay_events(&base_url, TEST_TASK_ID)
+            .expect_err("repeated cursor must fail the replay");
+        assert!(err.to_string().contains("repeated cursor"));
+
+        let _ = server.join();
+    }
+
+    #[test]
+    fn replay_envelope_counts_every_fetched_event() {
+        let events = vec![
+            json!({"eventType": "gate_failure"}),
+            json!({"eventType": "gate_failure"}),
+            json!({"eventType": "terminal_summary"}),
+        ];
+        let envelope = replay_envelope(TEST_TASK_ID, &events);
+        assert_eq!(envelope.action_taken, "analytics_replay_returned_3_events");
+        assert_eq!(envelope.task.id, TEST_TASK_ID);
+    }
 }
