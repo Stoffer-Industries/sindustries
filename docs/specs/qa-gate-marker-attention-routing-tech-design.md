@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: dbce028f-0287-4556-82a1-c405339f1d42
 product_spec: n/a (internal workflow routing)
-shipped_pr: null
-shipped_date: null
+shipped_pr: 899
+shipped_date: 2026-10-29
 ---
 
 # Distinguish the lobster's generic QA-gate marker from an evidence verdict in attention routing
@@ -351,6 +351,19 @@ E2E test is planned.
   legible but adds a contract to the API and requires Ash and the lobster to
   adopt it — and AC3 rules that out. **Default: implement the two-input
   classification as written.**
+  **Approved at the gate (Quinn, 2026-10-28) with one correction — the
+  implemented precedence is:** (1) a known verifier author is always an
+  `EvidenceVerdict`; (2) a known lobster service-account author is always a
+  `QaGatePrompt`; (3) an unknown author is a `QaGatePrompt` only when there
+  is no approved `qa_agent` attestation, and otherwise an `EvidenceVerdict`
+  (fail closed). The structured row state is a **fallback** for an unknown
+  author and never an override of a known verifier author: a blocked task
+  carries no approved attestation, so a row-state override would reclassify
+  Ash's own per-AC verdict as a gate prompt and strand the delivery owner
+  with nobody to act on it (breaking AC2). The fail-closed default for
+  unclassified shapes is retained, and the service-account author string is
+  pinned by a fixture so a rename fails a test rather than silently
+  changing routing (R-1/R-2).
 - **Q2 — arm 5 vs no explicit row for a pending QA gate.** With D2, a
   delivery-complete task whose `qa_agent` approval is pending resolves through
   arm 5 to `Ash` — an explicit attention row naming the actor the marker names.
@@ -360,7 +373,8 @@ E2E test is planned.
   explicit prompt to Ash and an explicit row makes the next actor visible to
   every agent's queue rather than only to the gate-owner fallback. If Quinn
   prefers `None`, AC1's expected owner changes and the routing test changes
-  with it.
+  with it. **Approved at the gate (Quinn, 2026-10-28): arm 5 (`Ash`) — an
+  explicit row names the actor the marker itself names.**
 
 ## Risks
 
