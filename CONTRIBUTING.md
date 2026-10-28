@@ -122,6 +122,7 @@ CI currently covers:
 - `gh-with-agent-token-tests` (per-agent GitHub identity shim, `infra/cloud/bin` deploy/status/rollback contracts, cloud staging workflow and failure-drill harnesses, stable-hostname verification harness)
 - `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
+- `changes` (detect deployment changes — computes which deployable surfaces a PR touches; a required input to the `merge-gate` job)
 - `eas-update-on-main` (mobile OTA publishing)
 
 Every job listed above except `eas-update-on-main` is an input to the
