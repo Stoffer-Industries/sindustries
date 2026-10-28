@@ -384,10 +384,14 @@ E2E test is planned.
   attestation ⇒ gate prompt) and by a fixture that pins the expected author
   string, so a rename fails a test rather than silently changing routing.
 - **R-2 — a verdict written by someone other than Ash.** If a verifier is ever
-  added under another account, its verdicts fall into the unknown-shape
-  bucket and are treated as verdicts (fail-closed), so they keep routing to
-  the delivery owner. The behaviour is correct, but the classifier should be
-  extended with the new account when that happens.
+  added under another account, its verdicts fall into the unknown-author
+  bucket, where the structured `qa_agent` row state decides. A blocked task
+  carries no approved attestation, so the marker is classified as a
+  `QaGatePrompt` and routes to the QA gate owner rather than to the delivery
+  owner — the opposite of what an earlier draft of this risk claimed. The
+  classifier should be extended with the new account when that happens, so
+  its verdicts are recognised as evidence verdicts and route to the delivery
+  owner again.
 - **R-3 — arm 2 and arm 4 must stay complementary.** Arm 2 (delivery failure
   ⇒ `None`) and arm 4 (evidence verdict ⇒ assignee) read different marker
   kinds. The implementation must not collapse them into one marker check; the
