@@ -123,11 +123,11 @@ CI currently covers:
 - `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
 - `changes` (detect deployment changes — computes which deployable surfaces a PR touches; a required input to the `merge-gate` job)
-- `eas-update-on-main` (mobile OTA publishing)
+- `eas-update-production` (mobile OTA publishing; the job's display name is `EAS update on main`)
 
-Every job listed above except `eas-update-on-main` is an input to the
+Every job listed above except `eas-update-production` is an input to the
 `merge-gate` job in `.github/workflows/ci.yml`, which gates the deployment
-jobs. `eas-update-on-main` is itself a deployment job: it runs *after* the
+jobs. `eas-update-production` is itself a deployment job: it runs *after* the
 gate passes (`needs: [changes, merge-gate]`).
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
