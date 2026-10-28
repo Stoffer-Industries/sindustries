@@ -107,12 +107,13 @@ pub(crate) fn qa_agent_verified(task: &Task) -> bool {
 // module docs for why the rule lives here rather than being re-derived by
 // each predicate.
 
-/// A QA marker comment: its position in the task's comment list and its
-/// creation timestamp.
+/// A QA marker comment: its position in the task's comment list, its
+/// creation timestamp, and the account that authored it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct QaMarker {
     index: usize,
     created_at: Option<String>,
+    author: Option<String>,
 }
 
 /// The comment body the workflow reads. The Tasks API exposes `text`; older
@@ -296,6 +297,7 @@ fn latest_qa_marker(task: &Task, tag: &str) -> Option<QaMarker> {
         .map(|(index, comment)| QaMarker {
             index,
             created_at: comment.created_at.clone(),
+            author: comment.author.clone(),
         })
         .max_by(compare_markers)
 }
@@ -313,6 +315,7 @@ fn latest_delivery_marker(task: &Task) -> Option<QaMarker> {
         .map(|(index, comment)| QaMarker {
             index,
             created_at: comment.created_at.clone(),
+            author: comment.author.clone(),
         })
         .max_by(compare_markers)
 }
@@ -332,6 +335,7 @@ fn latest_qa_verdict(task: &Task) -> Option<&'static str> {
             let marker = QaMarker {
                 index,
                 created_at: comment.created_at.clone(),
+                author: comment.author.clone(),
             };
             // The same rule the blocked-arm predicate uses: a verdict comment
             // only speaks for the pass that follows the latest attestation.
@@ -468,12 +472,87 @@ pub(crate) fn qa_agent_deferred_capability_extension_complete(task: &Task) -> bo
             .any(|dependency| dependency.status == "done")
 }
 
+/// What a `[qa-agent-blocked]` comment asserts (task `dbce028f`).
+///
+/// The tag is used for two different statements. The lobster's generic
+/// marker says the structured `qa_agent` approval has not been granted and
+/// names Ash as the actor. A verifier's marker says the delivered evidence
+/// itself is unsupported and names the delivery owner as the actor. Only the
+/// second kind is a delivery-evidence block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QaBlockKind {
+    /// The lobster's generic QA-gate prompt: the `qa_agent` approval has not
+    /// been granted yet. It says nothing about the delivery.
+    QaGatePrompt,
+    /// A verifier's per-AC blocked verdict: the delivery evidence itself is
+    /// unsupported, so the delivery owner must act.
+    EvidenceVerdict,
+}
+
+/// The QA verifier account. A blocked marker from this author is always an
+/// evidence verdict.
+const QA_VERIFIER_AUTHOR: &str = "Ash";
+
+/// The lobster service account. A blocked marker from this author is always
+/// the generic QA-gate prompt it posts when the `qa_agent` gate is open.
+const LOBSTER_AUTHOR: &str = "feature_task_lobster";
+
+/// Classify what a `[qa-agent-blocked]` marker asserts.
+///
+/// Precedence (task `dbce028f`, gate decision Q1):
+///
+/// 1. A known verifier author is always an `EvidenceVerdict`. The structured
+///    row state never overrides it: a blocked task has no approved
+///    attestation, so letting the row state decide would silently reclassify
+///    Ash's own per-AC verdict as a gate prompt and strand the delivery
+///    owner with nobody to act on it.
+/// 2. A known lobster service account is always a `QaGatePrompt`.
+/// 3. An unknown author falls back to the structured `qa_agent` row state:
+///    a gate prompt when no attestation has been approved (the QA gate is
+///    open), and an `EvidenceVerdict` otherwise. Unclassified shapes fail
+///    closed, so today's routing is preserved for anything this classifier
+///    has not explicitly recognised.
+fn classify_qa_block(task: &Task, marker: &QaMarker) -> QaBlockKind {
+    let author = marker.author.as_deref().unwrap_or_default().trim();
+    if author.eq_ignore_ascii_case(QA_VERIFIER_AUTHOR) {
+        return QaBlockKind::EvidenceVerdict;
+    }
+    if author.eq_ignore_ascii_case(LOBSTER_AUTHOR) {
+        return QaBlockKind::QaGatePrompt;
+    }
+    qa_block_kind_from_row_state(task)
+}
+
+/// The structured-state fallback for a marker whose author is neither a
+/// known verifier nor the known lobster service account.
+fn qa_block_kind_from_row_state(task: &Task) -> QaBlockKind {
+    // A `qa_agent` row in a state other than pending/approved is a shape
+    // this classifier does not recognise: fail closed and keep the routing
+    // that exists today.
+    if task.approvals.iter().any(|approval| {
+        approval.approval_type == "qa_agent"
+            && approval.state != "pending"
+            && approval.state != "approved"
+    }) {
+        return QaBlockKind::EvidenceVerdict;
+    }
+    // No approved attestation means the QA gate is open, so a blocked marker
+    // is a prompt to the gate owner rather than a verdict on a delivery.
+    if latest_approved_qa_agent_at(task).is_none() {
+        QaBlockKind::QaGatePrompt
+    } else {
+        QaBlockKind::EvidenceVerdict
+    }
+}
+
 /// True when Ash has reported an evidence blocker after an older approval.
 pub(crate) fn qa_agent_blocked(task: &Task) -> bool {
     matches!(latest_qa_verdict(task), Some("blocked"))
 }
 
-/// True when the latest blocked QA report is still current for routing.
+/// True when the latest blocked QA report is still current for routing AND
+/// it is an evidence verdict rather than the lobster's generic QA-gate
+/// prompt.
 ///
 /// A blocked report is stale when a later delivery handoff replaced it
 /// (AC3), and stale when it predates the current `qa_agent` attestation
@@ -484,10 +563,22 @@ pub(crate) fn qa_agent_blocked(task: &Task) -> bool {
 /// With no approved attestation the blocked arm behaves exactly as before
 /// (R4): the delivery comparison alone decides. A revoked or pending
 /// `qa_agent` row is not an attestation, so it never weakens this route.
+///
+/// Task `dbce028f`: the kind of the marker decides who owns it. The
+/// lobster's generic QA-gate prompt (its own `[qa-agent-blocked]` comment
+/// carrying the `qa_agent` gate fingerprint) is a prompt to the QA gate
+/// owner, not a statement about the delivery, so it must not route to the
+/// delivery assignee. A verifier's per-AC verdict is a real evidence failure
+/// and keeps its owner.
 pub(crate) fn qa_agent_blocked_after_latest_delivery(task: &Task) -> bool {
     let Some(blocked) = latest_qa_marker(task, "[qa-agent-blocked]") else {
         return false;
     };
+
+    // Task `dbce028f` AC1/AC2: only an evidence verdict is a delivery block.
+    if classify_qa_block(task, &blocked) != QaBlockKind::EvidenceVerdict {
+        return false;
+    }
 
     // AC3: a replacement delivery marker newer than the blocked comment
     // makes the block stale.
@@ -830,6 +921,22 @@ mod tests {
         task
     }
 
+    /// The same timeline as `qa_marker_task`, with every comment authored by
+    /// `author`. Task `dbce028f` needs both marker shapes on one payload, so
+    /// the author is the only thing that differs between them.
+    fn qa_marker_task_authored(
+        comments: Vec<(&str, &str)>,
+        author: &str,
+        approval_state: &str,
+        approved_at: Option<&str>,
+    ) -> Task {
+        let mut task = qa_marker_task(comments, approval_state, approved_at);
+        for comment in task.comments.iter_mut() {
+            comment.author = Some(author.to_string());
+        }
+        task
+    }
+
     const DELIVERY_MARKER: &str =
         "[implementer-prs] https://github.com/example/example/pull/1";
     const BLOCKED_MARKER: &str = "[qa-agent-blocked] The cited test fails.";
@@ -942,10 +1049,12 @@ mod tests {
         let older = QaMarker {
             index: 0,
             created_at: Some("2026-10-28T03:54:44.518Z".to_string()),
+            author: None,
         };
         let newer = QaMarker {
             index: 1,
             created_at: Some("2026-10-28T05:03:03.520Z".to_string()),
+            author: None,
         };
         assert!(marker_is_newer(&newer, &older));
         assert!(!marker_is_newer(&older, &newer));
@@ -955,6 +1064,7 @@ mod tests {
         let offset = QaMarker {
             index: 2,
             created_at: Some("2026-10-28T06:03:03.520+01:00".to_string()),
+            author: None,
         };
         assert_eq!(
             compare_timestamps(
@@ -970,6 +1080,7 @@ mod tests {
         let undated = QaMarker {
             index: 3,
             created_at: None,
+            author: None,
         };
         assert!(marker_is_newer(&undated, &older));
         assert!(!marker_is_newer(&older, &undated));
@@ -1026,5 +1137,137 @@ mod tests {
                 "{name}: the verdict reader must agree the stale block is not current"
             );
         }
+    }
+
+    // ---- task dbce028f: QA-gate prompt vs evidence verdict ----
+
+    /// AC1: the lobster's generic QA-gate prompt is not an evidence verdict.
+    /// The marker carries the same tag as a verifier's verdict, so only the
+    /// author and the body distinguish the two.
+    #[test]
+    fn qa_gate_prompt_is_not_an_evidence_verdict() {
+        let task = qa_marker_task_authored(
+            vec![
+                ("2026-10-12T03:32:55.039Z", DELIVERY_MARKER),
+                ("2026-10-28T03:55:19.852Z", BLOCKED_MARKER),
+            ],
+            LOBSTER_AUTHOR,
+            "pending",
+            None,
+        );
+
+        let marker = latest_qa_marker(&task, "[qa-agent-blocked]").expect("marker must exist");
+        assert_eq!(
+            classify_qa_block(&task, &marker),
+            QaBlockKind::QaGatePrompt
+        );
+    }
+
+    /// AC2: a verifier's per-AC verdict is an evidence verdict. The
+    /// structured row state must not override a known verifier author: a
+    /// blocked task has no approved attestation, so a row-state override
+    /// would reclassify Ash's verdict as a gate prompt and strand the
+    /// delivery owner.
+    #[test]
+    fn evidence_verdict_is_an_evidence_verdict() {
+        for state in ["pending", "approved", "revoked"] {
+            let task = qa_marker_task_authored(
+                vec![
+                    ("2026-10-12T03:32:55.039Z", DELIVERY_MARKER),
+                    ("2026-10-28T06:00:00.000Z", BLOCKED_MARKER),
+                ],
+                QA_VERIFIER_AUTHOR,
+                state,
+                None,
+            );
+
+            let marker = latest_qa_marker(&task, "[qa-agent-blocked]").expect("marker must exist");
+            assert_eq!(
+                classify_qa_block(&task, &marker),
+                QaBlockKind::EvidenceVerdict,
+                "a {state} qa_agent row must not reclassify a verifier verdict"
+            );
+        }
+    }
+
+    /// AC3: an unknown author falls back to the structured `qa_agent` row
+    /// state. No approved attestation means the QA gate is open, so the
+    /// marker is a gate prompt; anything else fails closed to a verdict.
+    #[test]
+    fn unknown_author_falls_back_to_the_structured_row_state() {
+        let open_gate = qa_marker_task_authored(
+            vec![("2026-10-28T03:55:19.852Z", BLOCKED_MARKER)],
+            "some_other_service_account",
+            "pending",
+            None,
+        );
+        let marker = latest_qa_marker(&open_gate, "[qa-agent-blocked]").expect("marker must exist");
+        assert_eq!(
+            classify_qa_block(&open_gate, &marker),
+            QaBlockKind::QaGatePrompt,
+            "an open QA gate with an unknown author is a gate prompt"
+        );
+
+        let attested = qa_marker_task_authored(
+            vec![("2026-10-28T03:55:19.852Z", BLOCKED_MARKER)],
+            "some_other_service_account",
+            "approved",
+            Some("2026-10-28T04:00:00.000Z"),
+        );
+        let marker = latest_qa_marker(&attested, "[qa-agent-blocked]").expect("marker must exist");
+        assert_eq!(
+            classify_qa_block(&attested, &marker),
+            QaBlockKind::EvidenceVerdict,
+            "an approved attestation with an unknown author fails closed to a verdict"
+        );
+
+        let unrecognised_row = qa_marker_task_authored(
+            vec![("2026-10-28T03:55:19.852Z", BLOCKED_MARKER)],
+            "some_other_service_account",
+            "revoked",
+            None,
+        );
+        let marker =
+            latest_qa_marker(&unrecognised_row, "[qa-agent-blocked]").expect("marker must exist");
+        assert_eq!(
+            classify_qa_block(&unrecognised_row, &marker),
+            QaBlockKind::EvidenceVerdict,
+            "an unrecognised approval row state fails closed to a verdict"
+        );
+    }
+
+    /// AC1/AC2: the same payload, the same marker tag, the same timestamps —
+    /// only the author differs — and the predicate answers differently. The
+    /// generic QA-gate prompt is not a delivery block; a verifier's verdict
+    /// is.
+    #[test]
+    fn a_qa_gate_prompt_is_not_a_delivery_block() {
+        let prompt = qa_marker_task_authored(
+            vec![
+                ("2026-10-12T03:32:55.039Z", DELIVERY_MARKER),
+                ("2026-10-28T06:00:00.000Z", BLOCKED_MARKER),
+            ],
+            LOBSTER_AUTHOR,
+            "pending",
+            None,
+        );
+        assert!(
+            !qa_agent_blocked_after_latest_delivery(&prompt),
+            "the generic QA-gate prompt must not block the delivery assignee"
+        );
+
+        let verdict = qa_marker_task_authored(
+            vec![
+                ("2026-10-12T03:32:55.039Z", DELIVERY_MARKER),
+                ("2026-10-28T06:00:00.000Z", BLOCKED_MARKER),
+            ],
+            QA_VERIFIER_AUTHOR,
+            "pending",
+            None,
+        );
+        assert!(
+            qa_agent_blocked_after_latest_delivery(&verdict),
+            "a verifier's evidence verdict must still block the delivery assignee"
+        );
     }
 }
