@@ -274,7 +274,8 @@ never introduce one. The rule lives in the crate that owns attention routing
 (`agents/workflows/feature-task/src/task_approvals.rs` — `classify_qa_block`,
 `qa_agent_blocked_after_latest_delivery`), not in the API or the UI.
 
- A capability-resolution marker must therefore
+These QA markers are parsed by the feature-task router as workflow state; they
+are not generic audit comments. A capability-resolution marker must therefore
 be followed by a new Ash verdict, never treated as evidence that QA already
 passed.
 
