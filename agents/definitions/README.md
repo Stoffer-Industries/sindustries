@@ -60,14 +60,15 @@ The agent doc then *references* the skill. The skill owns the how; the agent doc
 
 ## Where operational runbooks live
 
-**Operational runbooks do not live in this repo.** As of PR #583 (2026-09-08) the prior `infra/runbooks/` (3 files) and `docs/runbooks/` (7 files) directories were deleted; operational runbooks now live in `~/.openclaw/workspace/docs/infra/runbooks/` (a workspace-local path that is **not** part of any repo).
+**Operational runbooks do not live in this repo.** As of PR #583 (2026-09-08) the prior `infra/runbooks/` (3 files) and `docs/runbooks/` (7 files) directories were deleted; operational runbooks now live in the **workspace repo** (`Stoffer-Industries/workspace`) under `infra/runbooks/`, indexed by that repo's `infra/RUNBOOKS.md`. The older `docs/infra/runbooks/` path in the workspace repo is legacy — do not point new references at it.
 
-`codebases/sindustries/` is the Edge-managed canonical checkout — its `main` branch is fast-forwarded to `origin/main` by the `openclaw-edge` webhook on every push, and a 5-minute launchd guard reverts any local drift. Runbooks (which are inherently host/operator-specific) have no business there: any local file in that checkout blocks the mirror or gets reset out from under you. Use the workspace path above instead.
+`codebases/sindustries/` is the Edge-managed canonical checkout — its `main` branch is fast-forwarded to `origin/main` by the `openclaw-edge` webhook on every push, and a 5-minute launchd guard reverts any local drift. Runbooks (which are inherently host/operator-specific) have no business there: any local file in that checkout blocks the mirror or gets reset out from under you. Use the workspace repo path above instead.
 
 Per Tom 2026-09-08: *"move all runbooks to workspace and dont put any more in sindustries going forward."*
 
-When an agent doc references a runbook, point at the workspace path
-(e.g. `~/.openclaw/workspace/docs/infra/runbooks/<name>.md`). When
+When an agent doc references a runbook, point at the workspace repo path
+(e.g. `infra/runbooks/<name>.md` in `Stoffer-Industries/workspace`, with a row in that
+repo's `infra/RUNBOOKS.md`). When
 updating an agent doc, treat any lingering `infra/runbooks/...` or
 `docs/runbooks/...` link as a stale reference and remove or relocate it
 in the same change.
