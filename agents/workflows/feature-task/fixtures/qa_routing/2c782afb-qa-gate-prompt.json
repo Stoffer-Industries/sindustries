@@ -1,0 +1,57 @@
+{
+  "_source": "Reduced from task 2c782afb ('Hosted observability follow-ups') on 2026-10-28, at the 03:55:19Z live occurrence. Keeps only the fields the QA-marker and attention-routing predicates read. PR URLs are synthetic placeholders. The blocked marker is the lobster's GENERIC QA-gate prompt: its author is the lobster service account and its body is the f6a4d56a qa_agent gate fingerprint. The paired fixture 2c782afb-evidence-verdict.json holds the same task with the same marker tag and timestamps, but the marker is Ash's per-AC evidence verdict.",
+  "id": "2c782afb-qa-gate-prompt",
+  "title": "fixture: generic QA-gate prompt on a delivery-complete task",
+  "status": "doing",
+  "assignee": "Rowan",
+  "comments": [
+    {
+      "author": "Rowan",
+      "text": "[implementer-prs] https://github.com/example/example/pull/797",
+      "createdAt": "2026-10-11T16:39:55.223Z"
+    },
+    {
+      "author": "Quinn",
+      "text": "[implementer-prs] https://github.com/example/example/pull/801",
+      "createdAt": "2026-10-12T00:19:48.872Z"
+    },
+    {
+      "author": "feature_task_lobster",
+      "text": "[qa-agent-blocked]\nStructured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.",
+      "createdAt": "2026-10-28T03:55:19.852Z"
+    },
+    {
+      "author": "feature_task_lobster",
+      "text": "[lobster-state]\n```json\n{\n  \"version\": 1,\n  \"workflow\": \"code-task-workflow\",\n  \"lastOrchestratedAt\": \"2026-10-28T03:55:19.860Z\",\n  \"prUrls\": [],\n  \"reviewFeedbackRoutedAt\": null,\n  \"openclawNeeded\": false,\n  \"openclawDone\": false,\n  \"systemSpecPath\": null,\n  \"noSystemSpecChangeReason\": null,\n  \"failureFingerprint\": \"Structured `qa_agent` approval is missing or not approved; Ash must run mechanical verification (cited tests pass, cited files exist, evidence matches the diff) before this task reaches Tom's acceptance. See task `f6a4d56a` AC1.\",\n  \"specDriftUncheckApplied\": null\n}\n```",
+      "createdAt": "2026-10-28T03:55:19.860Z"
+    }
+  ],
+  "approvals": [
+    {
+      "type": "tech_design",
+      "state": "approved",
+      "owner": "Quinn",
+      "approvedAt": "2026-10-05T04:48:21.621Z"
+    },
+    {
+      "type": "qa_agent",
+      "state": "pending",
+      "owner": "Ash",
+      "approvedAt": null
+    },
+    {
+      "type": "accepted",
+      "state": "pending",
+      "owner": "Tom",
+      "approvedAt": null
+    }
+  ],
+  "attentionOwners": ["Rowan"],
+  "attentionOwnerDetails": [
+    {
+      "owner": "Rowan",
+      "addedBy": "Quinn",
+      "note": "The delivery owner must address the outstanding workflow evidence before QA can act."
+    }
+  ]
+}

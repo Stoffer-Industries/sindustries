@@ -209,7 +209,9 @@ Task responses include:
 markers as a distinct routing protocol:
 
 - `[qa-agent-blocked]` means delivery or evidence failed and routes directly
-  back to the task's delivery assignee (normally Rowan).
+  back to the task's delivery assignee (normally Rowan) — but only when it is
+  a verifier's **evidence verdict**. The lobster's generic **QA-gate prompt**
+  is not a delivery failure; it routes to the QA gate owner (see below).
 - `[qa-agent-deferred]` means Ash could not verify because a genuine external
   capability was unavailable and routes the active handoff to Quinn (or the
   capability owner).
@@ -236,8 +238,43 @@ into divergent stale-comment logic. A QA-verified `doing` task holds no
 explicit attention row at all, because explicit rows are reserved for genuine
 blockers and cross-role handoffs.
 
-These QA markers are parsed by the feature-task router as workflow state; they
-are not generic audit comments. A capability-resolution marker must therefore
+**A QA-gate marker is a gate prompt, not a delivery-evidence block (2026-10-29,
+task `dbce028f`).** `[qa-agent-blocked]` carries two different statements, and
+the routing rule has to tell them apart. The lobster's own generic marker —
+its service account authoring the comment, and the body being the `qa_agent`
+gate fingerprint ("Structured `qa_agent` approval is missing or not approved;
+Ash must run mechanical verification …") — is a **prompt to the QA gate
+owner**. It names Ash and says nothing about the delivery. A verifier's per-AC
+blocked verdict is an **evidence failure**: it names the ACs that the delivered
+evidence does not support, and it keeps the delivery owner as its actor.
+
+A delivery task whose evidence passes but whose `qa_agent` approval is still
+pending is therefore owned by the **QA gate owner (Ash)**, not by the delivery
+assignee. Routing it to the assignee re-pages the delivery owner on every
+sweep with a note ("The delivery owner must address the outstanding workflow
+evidence before QA can act.") that misdescribes the outstanding item — the
+outstanding item is Ash's QA, not a delivery gap.
+
+The distinction is derived from data the task payload already carries: the
+marker's **author** (a known verifier is always an evidence verdict; a known
+lobster service account is always a gate prompt) and, only as the fallback for
+an unrecognised author, the structured `qa_agent` row state (an open QA gate
+means a gate prompt). The structured row state never overrides a known
+verifier author: a blocked task has no approved attestation, so a row-state
+override would reclassify Ash's own verdict as a gate prompt and strand the
+delivery owner. There is **no new comment tag, no new approval type and no
+second source of truth** — the `qa_agent` row remains the sole attestation of
+record, and the Tasks API contract is unchanged.
+
+The classifier fails closed. An unrecognised author combined with an approved
+attestation, or a `qa_agent` row in a state other than pending/approved, is
+treated as an evidence verdict, so today's routing is preserved for every
+shape not explicitly classified; the change can only remove a false routing,
+never introduce one. The rule lives in the crate that owns attention routing
+(`agents/workflows/feature-task/src/task_approvals.rs` — `classify_qa_block`,
+`qa_agent_blocked_after_latest_delivery`), not in the API or the UI.
+
+ A capability-resolution marker must therefore
 be followed by a new Ash verdict, never treated as evidence that QA already
 passed.
 
