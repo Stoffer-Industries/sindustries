@@ -1,0 +1,57 @@
+{
+  "_source": "Reduced from task de9d8594 ('Contain rejected promises across Budget API handlers') on 2026-10-28. Keeps only the fields the QA-marker predicates read. The blocked marker (03:54:44.518Z) predates the fresh qa_agent attestation (05:03:03.520Z), which is the live incident shape. PR URLs are synthetic placeholders.",
+  "id": "de9d8594-stale-qa-block",
+  "title": "fixture: stale qa-agent-blocked marker after a fresh approval",
+  "status": "doing",
+  "assignee": "Rowan",
+  "comments": [
+    {
+      "author": "Rowan",
+      "text": "[implementer-prs] https://github.com/example/example/pull/1",
+      "createdAt": "2026-10-12T03:32:59.421Z"
+    },
+    {
+      "author": "feature_task_lobster",
+      "text": "[qa-agent-blocked] The approval attestation no longer matches the live PR head.",
+      "createdAt": "2026-10-28T03:54:44.518Z"
+    },
+    {
+      "author": "Ash",
+      "text": "Approval qa_agent approved by Ash.",
+      "createdAt": "2026-10-28T05:03:03.528Z"
+    },
+    {
+      "author": "Ash",
+      "text": "[qa-agent-verified] All acceptance criteria verified against the live PR head.",
+      "createdAt": "2026-10-28T05:03:35.092Z"
+    }
+  ],
+  "approvals": [
+    {
+      "type": "tech_design",
+      "state": "approved",
+      "owner": "Quinn",
+      "approvedAt": "2026-10-14T07:21:22.904Z"
+    },
+    {
+      "type": "qa_agent",
+      "state": "approved",
+      "owner": "Ash",
+      "approvedAt": "2026-10-28T05:03:03.520Z"
+    },
+    {
+      "type": "accepted",
+      "state": "pending",
+      "owner": "Tom",
+      "approvedAt": "2026-10-11T14:03:44.238Z"
+    }
+  ],
+  "attentionOwners": ["Rowan"],
+  "attentionOwnerDetails": [
+    {
+      "owner": "Rowan",
+      "addedBy": "feature_task_lobster",
+      "note": "The delivery owner must address the outstanding workflow evidence before QA can act."
+    }
+  ]
+}

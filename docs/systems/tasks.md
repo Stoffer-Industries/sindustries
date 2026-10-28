@@ -217,9 +217,24 @@ markers as a distinct routing protocol:
   and routes the task to Ash for fresh re-verification. It does not grant the
   `qa_agent` approval. Existing tasks may use `[quinn-resolved]` as a legacy
   alias for the same transition.
-- `[qa-agent-verified]` plus the structured `qa_agent` approval closes QA and
-  returns delivery to the task assignee; acceptance later routes to Tom when
-  human acceptance is the next real action.
+- `[qa-agent-verified]` plus the structured `qa_agent` approval closes QA. The
+  task then holds no explicit attention row: what remains is ordinary
+  delivery work for the assignee, which the assignee queue already surfaces.
+
+**QA marker currency follows the attestation (2026-10-28, task `1e8a430a`).**
+A QA marker speaks only for the pass that follows the latest approved
+`qa_agent` attestation. A `[qa-agent-blocked]` marker that predates the
+current attestation is stale for routing — Ash's fresh approval closes the
+stale blocked history, and the sweep must not route the delivery assignee
+again on every tick. A blocked marker that is newer than both the latest
+`[implementer-prs]`/`[rowan-prs]` delivery marker and the attestation is
+still current and still routes to the delivery assignee. With no approved
+attestation the blocked marker keeps the currency it had before. One ordering
+rule backs this: the verdict reader and the blocked-arm predicate compare
+marker timestamps against the same attestation, so the two cannot drift apart
+into divergent stale-comment logic. A QA-verified `doing` task holds no
+explicit attention row at all, because explicit rows are reserved for genuine
+blockers and cross-role handoffs.
 
 These QA markers are parsed by the feature-task router as workflow state; they
 are not generic audit comments. A capability-resolution marker must therefore

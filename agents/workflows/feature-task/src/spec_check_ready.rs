@@ -485,7 +485,15 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && task_approvals::qa_agent_verified(task) =>
         {
-            task.assignee.clone()
+            // A QA-verified delivery has no outstanding blocker. What remains
+            // is ordinary delivery work for the assignee — driving the
+            // `doing → acceptance` transition — which the assignee queue
+            // already surfaces. Explicit attention rows are reserved for
+            // genuine blockers and cross-role handoffs (`docs/systems/tasks.md`,
+            // "Task ownership planes"), so the verified path resolves to no
+            // explicit row instead of re-paging the delivery assignee on
+            // every sweep (task `1e8a430a`, decision D3).
+            None
         }
         "acceptance" if !task_approvals::accepted_structured(task) => Some("Tom".to_string()),
         _ => None,
@@ -1378,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_sends_resolved_capability_deferral_to_ash_then_rowan() {
+    fn routing_sends_resolved_capability_deferral_to_ash_then_stops_paging_the_assignee() {
         let mut task = routing_task("doing", &["Quinn", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1410,7 +1418,77 @@ mod tests {
         });
         task.approvals.push(approval_row("qa_agent", "approved"));
 
-        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
+        // A QA-verified delivery has no outstanding blocker, so the workflow
+        // resolves to no explicit attention owner (task `1e8a430a`, D3). The
+        // delivery assignee is no longer paged; the Quinn escalation row is
+        // preserved because the reconciler only clears workflow-generated
+        // head rows.
+        assert_eq!(workflow_attention_owner(&task), None);
+        let stack = reconciled_attention_owners(&task);
+        assert!(
+            !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Rowan")),
+            "a QA-verified delivery must not page the delivery assignee: {stack:?}"
+        );
+    }
+
+    // ---- task 1e8a430a: routing precedence over stale QA blocked markers ----
+
+    /// AC4: a stale blocked marker plus a fresh approval selects the
+    /// verified path — no explicit attention owner, and no re-added
+    /// delivery assignee.
+    #[test]
+    fn stale_blocked_marker_with_fresh_approval_selects_the_verified_path() {
+        for (name, raw) in [
+            (
+                "de9d8594",
+                include_str!("../fixtures/qa_routing/de9d8594-stale-qa-block.json"),
+            ),
+            (
+                "0a803329",
+                include_str!("../fixtures/qa_routing/0a803329-stale-qa-block.json"),
+            ),
+        ] {
+            let task: Task = serde_json::from_str(raw)
+                .unwrap_or_else(|error| panic!("{name} fixture must deserialize: {error}"));
+
+            assert_eq!(
+                workflow_attention_owner(&task),
+                None,
+                "{name}: a stale blocked marker must not select the delivery assignee"
+            );
+            let stack = reconciled_attention_owners(&task);
+            assert!(
+                !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Rowan")),
+                "{name}: the sweep must not re-add the delivery assignee: {stack:?}"
+            );
+        }
+    }
+
+    /// AC4: a genuinely newer blocked marker still selects the delivery
+    /// assignee.
+    #[test]
+    fn current_blocked_marker_selects_the_delivery_assignee() {
+        let mut task: Task = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/0a803329-stale-qa-block.json"
+        ))
+        .expect("fixture must deserialize");
+
+        // Make the blocked marker genuinely newer than the attestation.
+        for comment in task.comments.iter_mut() {
+            let text = comment.text.as_deref().unwrap_or_default();
+            if text.starts_with("[qa-agent-blocked]") {
+                comment.created_at = Some("2026-10-28T06:00:00.000Z".to_string());
+            }
+        }
+
+        assert_eq!(
+            workflow_attention_owner(&task),
+            Some("Rowan".to_string()),
+            "a blocked marker newer than the attestation must still route to the delivery assignee"
+        );
+        assert!(reconciled_attention_owners(&task)
+            .iter()
+            .any(|owner| owner.eq_ignore_ascii_case("Rowan")));
     }
 
     #[test]
