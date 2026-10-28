@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 1e8a430a-01a9-460f-8fe9-9e8470f962a6
 product_spec: "n/a"
-shipped_pr: null
-shipped_date: null
+shipped_pr: https://github.com/Stoffer-Industries/sindustries/pull/897
+shipped_date: 2026-10-28
 ---
 
 # Ignore stale QA blocked markers after a fresh `qa_agent` approval
