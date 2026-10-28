@@ -167,13 +167,69 @@ pub(crate) fn qa_agent_deferred(task: &Task) -> bool {
             .iter()
             .find(|approval| approval.approval_type == "qa_agent" && approval.state == "approved")
             .and_then(|approval| approval.note.as_deref())
-            .is_some_and(|note| {
-                note.lines().any(|line| {
-                    let line = line.to_ascii_lowercase();
-                    line.contains("deferred") && !line.contains("no deferred")
-                })
-            }),
+            .is_some_and(|note| note.lines().any(note_line_asserts_deferral)),
     }
+}
+
+/// True when one line of a QA approval note asserts that criteria were
+/// deferred.
+///
+/// The approval note is the only evidence available when no verdict comment
+/// follows the approval, so a mention of "deferred" in it has to be read
+/// carefully. A negation that scopes over the mention — Ash's standard
+/// closing sentence is "No blocked or deferred ACs." — is not an assertion
+/// of a deferral, and reading it as one manufactures a capability handoff
+/// that no verifier ever reported. A clause boundary between the negation
+/// and the mention ("not approved; deferred criteria remain") ends the
+/// negation's scope, so that mention still counts as an assertion.
+fn note_line_asserts_deferral(line: &str) -> bool {
+    const NEGATIONS: [&str; 8] = [
+        "no", "not", "none", "never", "zero", "without", "neither", "nor",
+    ];
+    let lower = line.to_ascii_lowercase();
+    let mut cursor = 0usize;
+    while let Some(offset) = lower[cursor..].find("deferred") {
+        let start = cursor + offset;
+        if !deferral_mention_is_negated(&lower[..start], &NEGATIONS) {
+            return true;
+        }
+        cursor = start + "deferred".len();
+    }
+    false
+}
+
+/// True when a negation in `prefix` scopes over the "deferred" mention that
+/// follows it.
+fn deferral_mention_is_negated(prefix: &str, negations: &[&str]) -> bool {
+    // `non-deferred` negates the mention directly.
+    if prefix.ends_with("non-") {
+        return true;
+    }
+    for word in negations {
+        let Some(pos) = prefix.rfind(word) else {
+            continue;
+        };
+        // The negation has to stand alone, not be part of a larger token.
+        let before_ok = prefix[..pos]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric());
+        let after = &prefix[pos + word.len()..];
+        let after_ok = after.chars().next().is_none_or(|c| !c.is_alphanumeric());
+        if !before_ok || !after_ok {
+            continue;
+        }
+        // Only a nearby negation scopes over the mention.
+        if after.split_whitespace().count() > 3 {
+            continue;
+        }
+        // A clause boundary ends the negation's scope.
+        if after.contains([',', ';', ':', '.']) {
+            continue;
+        }
+        return true;
+    }
+    false
 }
 
 /// True when a deferred Ash capability gap has been captured as a real
@@ -454,6 +510,71 @@ mod tests {
 
         assert!(!qa_agent_deferred(&task));
         assert!(qa_agent_verified(&task));
+    }
+
+    /// The production shape of task `75032fad`: the approval row carries an
+    /// `approved_at`, and a later capability-resolution comment must be able
+    /// to clear the deferral that the stale fingerprint claimed.
+    #[test]
+    fn a_capability_resolution_after_the_approval_clears_the_deferral() {
+        let mut task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        task.approvals[0].approved_at = Some("2026-10-27T14:16:02.315Z".to_string());
+        task.approvals[0].note = Some(
+            "Verified AC1-AC5 mechanically: PR #893 (merged 6a5d1bb8). No blocked or deferred ACs."
+                .to_string(),
+        );
+        task.comments.push(crate::TaskComment {
+            author: Some("Quinn".to_string()),
+            text: Some(
+                "[qa-agent-capability-resolved] The deferred-capability handoff was stale."
+                    .to_string(),
+            ),
+            created_at: Some("2026-10-28T01:50:25.074Z".to_string()),
+            ..Default::default()
+        });
+
+        assert!(!qa_agent_deferred(&task));
+        assert!(!qa_agent_blocked(&task));
+        assert!(qa_agent_verified(&task));
+        assert!(crate::verify_delivery::qa_agent_verified_failures(&task).is_empty());
+    }
+
+    /// Ash's standard closing sentence negates the deferral it mentions.
+    /// Reading it as an assertion of a deferral manufactures a capability
+    /// handoff that no verifier ever reported.
+    #[test]
+    fn an_approval_note_that_negates_deferral_is_not_a_deferral_assertion() {
+        let mut task = qa_test_task_with_approvals(vec![("qa_agent", "approved")]);
+        task.approvals[0].note = Some(
+            "Verified AC1-AC5 mechanically: PR #893 (merged 6a5d1bb8). No blocked or deferred ACs."
+                .to_string(),
+        );
+
+        assert!(!note_line_asserts_deferral("no blocked or deferred acs."));
+        assert!(!qa_agent_deferred(&task));
+        assert!(qa_agent_verified(&task));
+    }
+
+    #[test]
+    fn an_approval_note_that_asserts_deferral_is_still_detected() {
+        assert!(note_line_asserts_deferral(
+            "ac1 deferred to the w38 follow-up task."
+        ));
+        assert!(note_line_asserts_deferral(
+            "ash reported deferred acceptance criteria"
+        ));
+    }
+
+    #[test]
+    fn a_clause_boundary_breaks_the_negation_scope() {
+        // The negation governs the approval, not the deferral that follows
+        // the semicolon, so the mention still asserts a deferral.
+        assert!(note_line_asserts_deferral(
+            "ash has not approved; deferred criteria remain outstanding"
+        ));
+        assert!(note_line_asserts_deferral(
+            "not blocked, deferred pending capability"
+        ));
     }
 
     #[test]

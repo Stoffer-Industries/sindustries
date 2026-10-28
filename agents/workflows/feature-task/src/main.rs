@@ -216,6 +216,14 @@ pub(crate) struct ActiveWorkflowHandoff {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+// The Tasks API returns comment timestamps as `createdAt`. Without this
+// rename `created_at` stayed `None` for every comment the workflow read,
+// which silently disabled the QA-verdict staleness guard in
+// `task_approvals::latest_qa_verdict` — it compares a comment's
+// `created_at` against the approval's `approved_at` and skips every
+// comment whose timestamp is missing, so no verdict comment could ever
+// be seen once an approval row carried an `approved_at`.
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TaskComment {
     #[serde(default)]
     author: Option<String>,
@@ -485,5 +493,32 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn task_comments_deserialize_the_apis_camel_case_created_at() {
+        // The Tasks API returns comment timestamps as `createdAt`. The
+        // workflow's QA-verdict guard compares a comment's timestamp against
+        // the approval's `approved_at` and skips any comment whose timestamp
+        // is missing, so a missing serde mapping silently disables every
+        // verdict comment instead of just one field.
+        let raw = r#"{
+            "id": "75032fad-1b5d-4409-af5f-c803166b7933",
+            "title": "Bound Tasks API analytics reads",
+            "status": "doing",
+            "comments": [
+                {
+                    "id": "c1",
+                    "author": "Ash",
+                    "text": "[qa-agent-verified] AC1-AC5 verified.",
+                    "createdAt": "2026-10-27T15:17:54.008Z"
+                }
+            ]
+        }"#;
+        let task: Task = serde_json::from_str(raw).expect("task payload should deserialize");
+        assert_eq!(
+            task.comments[0].created_at.as_deref(),
+            Some("2026-10-27T15:17:54.008Z")
+        );
     }
 }
