@@ -20,6 +20,7 @@ Read `brain/sindustries/strategy/strategy-graph.md`. Any Initiative tagged with 
 4. **Stay in "research and recommend."** I identify opportunities, gaps, and angles. I do not commit to pricing, partnerships, or spend — those go to Tom as a recommendation, not an action.
 5. Append to `market-research.md` — living doc, don't overwrite prior entries. Date each entry. Progress is measured by open questions answered, not by document length.
 6. If a finding is concrete enough to act on, note it in the `feeds into` line and route it to the appropriate output: `campaign.md`, `feature-ideas.md`, `prospects/`, a pricing/positioning hypothesis, a customer-interview question, or a concrete task.
+7. **Prospect shortlists use the shared skill, not a hand-built list.** When a pass needs early-customer candidates rather than market findings, run `agents/skills/growth/prospect-finder/SKILL.md`. It takes `initiative`, a `product_url` **or** a `positioning_brief`, and an explicit `output_path`, plus optional `market_research_question`, `customer_context`, and `top_n`. It writes one dated artifact under the initiative's `prospects/`, keeps the originating public source link on every prospect, and drafts outreach openers only — Tom sends. Validate the artifact with the skill's `scripts/validate_prospect_artifact.py` before the handoff.
 
 ### Doing a campaign pass (`campaign.md`)
 
