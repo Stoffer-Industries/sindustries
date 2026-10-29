@@ -130,8 +130,8 @@ DOCUMENTED_NON_GATE_INPUTS = frozenset({'merge-gate', 'eas-update-production'})
 JOB_ID_SHAPE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 
 
-def inventory_job_ids(doc_lines):
-    """Job-id-shaped backticked tokens in the CONTRIBUTING.md CI inventory."""
+def inventory_section_lines(doc_lines):
+    """The CONTRIBUTING.md CI inventory section: the lines after its heading."""
     start = None
     for index, line in enumerate(doc_lines):
         if line.strip() == CONTRIBUTING_INVENTORY_HEADING:
@@ -139,10 +139,38 @@ def inventory_job_ids(doc_lines):
             break
     if start is None:
         return None
-    tokens = []
+    section = []
     for line in doc_lines[start + 1:]:
         if line.startswith('### ') or line.startswith('## '):
             break
+        section.append(line)
+    return section
+
+
+def inventory_job_ids(doc_lines):
+    """Job-id-shaped backticked tokens in the CONTRIBUTING.md CI inventory."""
+    section = inventory_section_lines(doc_lines)
+    if section is None:
+        return None
+    tokens = []
+    for line in section:
+        tokens.extend(re.findall(r'`([^`\n]+)`', line))
+    return {token for token in tokens if JOB_ID_SHAPE.match(token)}
+
+
+def inventory_prose_job_ids(section):
+    """Job-id-shaped backticked tokens in the inventory section's prose.
+
+    The bullet list names the jobs the inventory covers; the paragraphs
+    after it state the rule that list follows ("every job listed above
+    except ... is an input to the merge-gate job") and name the exceptions
+    to that rule. Only the prose is read here, so the bullet list's own job
+    ids are not mistaken for exceptions.
+    """
+    tokens = []
+    for line in section:
+        if line.lstrip().startswith('-'):
+            continue
         tokens.extend(re.findall(r'`([^`\n]+)`', line))
     return {token for token in tokens if JOB_ID_SHAPE.match(token)}
 
@@ -176,11 +204,40 @@ def inventory_parity_failures(gate_inputs, documented_ids, job_ids):
     return problems
 
 
+def exception_set_failures(prose_ids, code_exceptions, gate_inputs):
+    """Failures when the prose exception set and the code exception set differ.
+
+    The inventory's prose names the ids that are exempt from the "every
+    documented job is a merge-gate input" rule, and the parity check
+    encodes the same exemptions in DOCUMENTED_NON_GATE_INPUTS. Without an
+    assertion tying the two together they are independent sources of truth
+    for one fact: the check can exempt an id the prose never names, and the
+    prose can be edited to name a different set, with the gate green in
+    both cases.
+    """
+    prose_exceptions = prose_ids - gate_inputs - DOCUMENTED_NON_JOB_IDS
+    problems = []
+    only_prose = sorted(prose_exceptions - code_exceptions)
+    only_code = sorted(code_exceptions - prose_exceptions)
+    if only_prose:
+        problems.append(
+            'CONTRIBUTING.md: the CI inventory prose names exception ids that '
+            f'the parity check does not exempt: {only_prose}'
+        )
+    if only_code:
+        problems.append(
+            'CONTRIBUTING.md: the parity check exempts exception ids that the '
+            f'CI inventory prose does not name: {only_code}'
+        )
+    return problems
+
+
 contributing_path = root / 'CONTRIBUTING.md'
 if not contributing_path.exists():
     fail('CONTRIBUTING.md: missing from the repository root')
 else:
-    documented_ids = inventory_job_ids(contributing_path.read_text().split('\n'))
+    contributing_lines = contributing_path.read_text().split('\n')
+    documented_ids = inventory_job_ids(contributing_lines)
     if documented_ids is None:
         fail(
             'CONTRIBUTING.md: missing the '
@@ -191,6 +248,59 @@ else:
             gate_needs, documented_ids, set(jobs)
         ):
             fail(problem)
+
+        # The prose paragraph names the ids exempt from the rule the bullet
+        # list follows, and the parity check encodes the same exemptions in
+        # DOCUMENTED_NON_GATE_INPUTS. Assert the two name the same ids, so
+        # the paragraph and the check cannot drift away from each other.
+        prose_ids = inventory_prose_job_ids(
+            inventory_section_lines(contributing_lines)
+        )
+        for problem in exception_set_failures(
+            prose_ids, DOCUMENTED_NON_GATE_INPUTS, gate_needs
+        ):
+            fail(problem)
+
+        # Self-test: the exception-set assertion must be able to go red in
+        # both directions. An id named only in the prose must be reported
+        # (the check does not exempt it), and an id only the check exempts
+        # must be reported (the prose never names it). Each sentinel is
+        # matched against the message of its own assertion, so one direction
+        # cannot satisfy the other's proof.
+        sentinel_prose_only = 'sentinel-prose-only-exception'
+        exception_failures = exception_set_failures(
+            prose_ids | {sentinel_prose_only},
+            DOCUMENTED_NON_GATE_INPUTS,
+            gate_needs,
+        )
+        if not any(
+            'names exception ids that the parity check does not exempt'
+            in problem
+            and sentinel_prose_only in problem
+            for problem in exception_failures
+        ):
+            fail(
+                'ci-deployment-gates: the CONTRIBUTING.md inventory '
+                'exception-set check did not report an exception id that the '
+                'prose names but the parity check does not exempt'
+            )
+        sentinel_code_only = 'sentinel-code-only-exception'
+        exception_failures = exception_set_failures(
+            prose_ids,
+            DOCUMENTED_NON_GATE_INPUTS | {sentinel_code_only},
+            gate_needs,
+        )
+        if not any(
+            'exempts exception ids that the CI inventory prose does not name'
+            in problem
+            and sentinel_code_only in problem
+            for problem in exception_failures
+        ):
+            fail(
+                'ci-deployment-gates: the CONTRIBUTING.md inventory '
+                'exception-set check did not report an exception id that the '
+                'parity check exempts but the prose does not name'
+            )
 
         # Self-test: the parity assertions must be able to go red. Add a
         # required job nobody documented and confirm it is reported, then
