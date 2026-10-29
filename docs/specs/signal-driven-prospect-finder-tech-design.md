@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: a384d6ac-43f2-4317-b6d5-5f57ba997965
 product_spec: brain/tasks/specs/in-progress/signal-driven-prospect-finder-for-indie-product-launches-d8311c3e5fc50b94.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: 908
+shipped_date: 2026-10-30
 ---
 
 # Signal-Driven Prospect Finder — Tech Design
