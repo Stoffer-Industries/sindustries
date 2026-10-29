@@ -115,7 +115,7 @@ CI currently covers:
 - OpenTelemetry Node package unit tests
 - Design system sync
 - `frontend-design-system-lint` (the frontend `@shadcn/lint` design-system lint wiring and its unit tests)
-- `no-absolute-paths` lint
+- `no-absolute-paths-lint` (the repo lint that fails on hard-coded absolute paths such as `~/` or `/Users/<name>/` under `apps/`, `services/`, `packages/`, `agents/workflows/` and `agents/lib/`)
 - `typecheck-gate-tests` (self-test for `scripts/typecheck-gate.mjs`, the tool the three service gates above run)
 - `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests
 - `health-probe-tests` (health-probe unit tests plus the observability provisioning / bootstrap / evidence / failure-inject contract tests)
