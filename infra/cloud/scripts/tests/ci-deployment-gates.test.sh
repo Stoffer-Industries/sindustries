@@ -116,6 +116,14 @@ CONTRIBUTING_INVENTORY_HEADING = 'CI currently covers:'
 # scripts and file names are excluded by the shape rule below; these are the
 # exceptions that still look like a job id.
 DOCUMENTED_NON_JOB_IDS = frozenset({'no-pnpm-pin'})
+# Documented ids that are legitimately not merge-gate inputs: `merge-gate`
+# is the gate itself, and `eas-update-production` is the one deployment job
+# that runs *after* the gate (`needs: [changes, merge-gate]`). Every other
+# job id the inventory names must be an input to the gate, which is the
+# claim CONTRIBUTING.md makes in prose. Without this exception list the
+# inventory could name a job the gate does not require (a deployment job, or
+# a future advisory job) and stay green while contradicting that sentence.
+DOCUMENTED_NON_GATE_INPUTS = frozenset({'merge-gate', 'eas-update-production'})
 # Single-word job ids are legitimate (`changes`, `gitleaks`), so the shape
 # allows zero or more dash-separated segments. Paths, npm scripts, file
 # names and display names all contain a character this rejects.
@@ -153,6 +161,17 @@ def inventory_parity_failures(gate_inputs, documented_ids, job_ids):
         problems.append(
             'CONTRIBUTING.md: CI inventory names job ids that do not exist in '
             f'ci.yml: {unknown}'
+        )
+    not_inputs = sorted(
+        documented_ids
+        - gate_inputs
+        - DOCUMENTED_NON_GATE_INPUTS
+        - DOCUMENTED_NON_JOB_IDS
+    )
+    if not_inputs:
+        problems.append(
+            'CONTRIBUTING.md: CI inventory names jobs that are not merge-gate '
+            f'inputs: {not_inputs}'
         )
     return problems
 
@@ -195,6 +214,20 @@ else:
             fail(
                 'ci-deployment-gates: the CONTRIBUTING.md inventory parity check '
                 'did not report a documented job id with no job in ci.yml'
+            )
+        # The converse direction needs its own non-vacuity proof: a
+        # documented job id that the gate does NOT require must be reported,
+        # otherwise the inventory's sentence ("every job listed above except
+        # eas-update-production is an input to the merge-gate job") stays
+        # prose-only and can drift.
+        sentinel_not_input = 'sentinel-documented-without-a-gate-input'
+        sentinel_failures = inventory_parity_failures(
+            gate_needs, documented_ids | {sentinel_not_input}, set(jobs)
+        )
+        if not any(sentinel_not_input in problem for problem in sentinel_failures):
+            fail(
+                'ci-deployment-gates: the CONTRIBUTING.md inventory parity check '
+                'did not report a documented job id that is not a merge-gate input'
             )
 
 gate_script = '\n'.join(

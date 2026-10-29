@@ -134,7 +134,11 @@ Each entry above names its job id so the inventory can be checked against
 `merge-gate.needs` mechanically. `infra/cloud/scripts/tests/ci-deployment-gates.test.sh`
 asserts that every merge-gate input is listed here and that no listed id is
 missing from `ci.yml`, so a new or renamed required job has to be documented
-in the same change that adds or renames it.
+in the same change that adds or renames it. The same test asserts the
+converse as well: a job id named here that the gate does not require is
+reported too — `merge-gate` itself and `eas-update-production` (the one
+deployment job that runs after the gate) are the only exceptions — so the
+sentence above cannot drift away from the executable gate.
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
