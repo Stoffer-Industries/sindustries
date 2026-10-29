@@ -501,4 +501,4 @@ in three duplicated call-site wrappers.
 - `AGENTS.md` — workspace conventions
 - `MEMORY.md` — long-term memory (includes guardrails and lessons learned)
 - `agents/rowan/SOUL.md` — Rowan's operating contract
-- `agents/skills/` — individual skill docs (bookmarks/curate, product/spec-author, ops/tasks-api, content-notes, sindustries-weekly-content-review, ops/notify-soft-fail)
+- `agents/skills/` — individual skill docs (bookmarks/curate, product/spec-author, ops/tasks-api, content-notes, sindustries-weekly-content-review, ops/notify-soft-fail, growth/prospect-finder)
