@@ -140,6 +140,10 @@ reported too — `merge-gate` itself and `eas-update-production` (the one
 deployment job that runs after the gate) are the only exceptions — so the
 sentence above cannot drift away from the executable gate.
 
+Those exception ids are the only ones the check exempts, and the test
+asserts that this paragraph and the check exempt exactly the same ids, so
+neither can drift away from the other.
+
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
 - `apps/budget-mobile` typecheck (`apps/budget-mobile/package.json`)
