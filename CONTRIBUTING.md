@@ -101,23 +101,23 @@ scheduler, GymTrack, MCP, and agent verification run from their own
 workspaces or under CI (listed below).
 
 CI currently covers:
-- `services/tasks-api` unit + DB integration tests, plus a ratcheting TypeScript compiler gate (`typecheck:gate`, see below)
+- `services/tasks-api` unit + DB integration tests (`tasks-api-tests`), plus a ratcheting TypeScript compiler gate (`typecheck:gate`, see below)
 - `services/budget-api` unit tests (`budget-api-unit` job also runs `packages/budget-domain` test + typecheck and `apps/budget-mobile` typecheck), a ratcheting TypeScript compiler gate (`typecheck:gate`, see below), plus DB integration tests (`budget-api-db-integration` job runs the ownership-contract suite against real Postgres; previously ran with mocked Prisma — see W38 audit F4 for the historical gap)
-- `services/content-scheduler-api` vitest (unit), a ratcheting TypeScript compiler gate (`typecheck:gate`, see below), plus `content-scheduler-api-db-integration` (real Postgres; proves the thread-publish claim/journal atomicity the unit suite could not exercise while Prisma was mocked — see W42 audit F2)
-- `services/gymtrack-mcp` tests
-- `apps/tasks` unit/component tests + Playwright e2e (UI + API + DB)
-- `apps/website` unit tests + build
-- `apps/mission-control` tests
-- `apps/gymtrack` tests
-- Python workflow tests (`agents/workflows/` Python packages) + `cto-craft-tweet-drafts` tests
-- Rust workflow tests + clippy (`agents/workflows/feature-task`)
-- Ash verifier tests
-- OpenTelemetry Node package unit tests
-- Design system sync
+- `services/content-scheduler-api` vitest (unit) (`content-scheduler-api-tests`), a ratcheting TypeScript compiler gate (`typecheck:gate`, see below), plus `content-scheduler-api-db-integration` (real Postgres; proves the thread-publish claim/journal atomicity the unit suite could not exercise while Prisma was mocked — see W42 audit F2)
+- `services/gymtrack-mcp` tests (`gymtrack-mcp-tests`)
+- `apps/tasks` unit/component tests + Playwright e2e (UI + API + DB) (`tasks-app-tests`, `tasks-app-e2e`)
+- `apps/website` unit tests + build (`website-app-tests`)
+- `apps/mission-control` tests (`mission-control-tests`)
+- `apps/gymtrack` tests (`gymtrack-tests`)
+- Python workflow tests (`python-workflow-tests`; `agents/workflows/` Python packages) + `cto-craft-tweet-drafts-tests`
+- Rust workflow tests + clippy (`feature-task-workflow-tests`, `feature-task-clippy`; `agents/workflows/feature-task`)
+- Ash verifier tests (`ash-tests`)
+- OpenTelemetry Node package unit tests (`otel-node-tests`)
+- Design system sync (`design-system-sync`)
 - `frontend-design-system-lint` (the frontend `@shadcn/lint` design-system lint wiring and its unit tests)
 - `no-absolute-paths-lint` (the repo lint that fails on hard-coded absolute paths such as `~/` or `/Users/<name>/` under `apps/`, `services/`, `packages/`, `agents/workflows/` and `agents/lib/`)
 - `typecheck-gate-tests` (self-test for `scripts/typecheck-gate.mjs`, the tool the three service gates above run)
-- `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests
+- `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests (`infra-cloud-bootstrap-staging-tests`)
 - `health-probe-tests` (health-probe unit tests plus the observability provisioning / bootstrap / evidence / failure-inject contract tests)
 - `gh-with-agent-token-tests` (per-agent GitHub identity shim, `infra/cloud/bin` deploy/status/rollback contracts, cloud staging workflow and failure-drill harnesses, stable-hostname verification harness)
 - `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
@@ -129,6 +129,12 @@ Every job listed above except `eas-update-production` is an input to the
 `merge-gate` job in `.github/workflows/ci.yml`, which gates the deployment
 jobs. `eas-update-production` is itself a deployment job: it runs *after* the
 gate passes (`needs: [changes, merge-gate]`).
+
+Each entry above names its job id so the inventory can be checked against
+`merge-gate.needs` mechanically. `infra/cloud/scripts/tests/ci-deployment-gates.test.sh`
+asserts that every merge-gate input is listed here and that no listed id is
+missing from `ci.yml`, so a new or renamed required job has to be documented
+in the same change that adds or renames it.
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
