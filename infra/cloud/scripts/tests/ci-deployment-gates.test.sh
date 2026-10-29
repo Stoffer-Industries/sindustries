@@ -210,7 +210,16 @@ else:
         sentinel_failures = inventory_parity_failures(
             gate_needs, documented_ids | {sentinel_documented}, set(jobs)
         )
-        if not any(sentinel_documented in problem for problem in sentinel_failures):
+        # Each sentinel is matched against the message of its own assertion.
+        # Both sentinels are absent from ci.yml, so both trip both the
+        # "no job in ci.yml" and the "not a merge-gate input" comparisons; a
+        # bare substring match would let either assertion's message satisfy
+        # the other sentinel's proof.
+        if not any(
+            'do not exist in ci.yml' in problem
+            and sentinel_documented in problem
+            for problem in sentinel_failures
+        ):
             fail(
                 'ci-deployment-gates: the CONTRIBUTING.md inventory parity check '
                 'did not report a documented job id with no job in ci.yml'
@@ -224,7 +233,11 @@ else:
         sentinel_failures = inventory_parity_failures(
             gate_needs, documented_ids | {sentinel_not_input}, set(jobs)
         )
-        if not any(sentinel_not_input in problem for problem in sentinel_failures):
+        if not any(
+            'not merge-gate inputs' in problem
+            and sentinel_not_input in problem
+            for problem in sentinel_failures
+        ):
             fail(
                 'ci-deployment-gates: the CONTRIBUTING.md inventory parity check '
                 'did not report a documented job id that is not a merge-gate input'
