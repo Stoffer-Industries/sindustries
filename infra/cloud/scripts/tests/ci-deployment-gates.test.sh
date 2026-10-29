@@ -102,6 +102,101 @@ if gate_needs != expected_required:
     missing = expected_required - gate_needs
     extra = gate_needs - expected_required
     fail(f'ci.yml: merge-gate needs mismatch; missing={sorted(missing)}, extra={sorted(extra)}')
+
+# W44 audit T5: the contributor CI inventory in CONTRIBUTING.md must name
+# every merge-gate input by its job id, and must not name a job id that no
+# longer exists in ci.yml. Four consecutive audit sweeps (#895, #900, #901,
+# #904) each found one more gap, because the inventory was only ever
+# compared with the executable gate by a human re-read during an audit
+# pass. These assertions compare the two sets mechanically, so a renamed or
+# added required job fails the gate instead of drifting silently until the
+# next audit.
+CONTRIBUTING_INVENTORY_HEADING = 'CI currently covers:'
+# Backticked inventory tokens that are deliberately not job ids. Paths, npm
+# scripts and file names are excluded by the shape rule below; these are the
+# exceptions that still look like a job id.
+DOCUMENTED_NON_JOB_IDS = frozenset({'no-pnpm-pin'})
+# Single-word job ids are legitimate (`changes`, `gitleaks`), so the shape
+# allows zero or more dash-separated segments. Paths, npm scripts, file
+# names and display names all contain a character this rejects.
+JOB_ID_SHAPE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+
+def inventory_job_ids(doc_lines):
+    """Job-id-shaped backticked tokens in the CONTRIBUTING.md CI inventory."""
+    start = None
+    for index, line in enumerate(doc_lines):
+        if line.strip() == CONTRIBUTING_INVENTORY_HEADING:
+            start = index
+            break
+    if start is None:
+        return None
+    tokens = []
+    for line in doc_lines[start + 1:]:
+        if line.startswith('### ') or line.startswith('## '):
+            break
+        tokens.extend(re.findall(r'`([^`\n]+)`', line))
+    return {token for token in tokens if JOB_ID_SHAPE.match(token)}
+
+
+def inventory_parity_failures(gate_inputs, documented_ids, job_ids):
+    """Parity failures between the merge gate and the documented inventory."""
+    problems = []
+    undocumented = sorted(gate_inputs - documented_ids)
+    if undocumented:
+        problems.append(
+            'CONTRIBUTING.md: merge-gate inputs missing from the CI inventory: '
+            f'{undocumented}'
+        )
+    unknown = sorted(documented_ids - job_ids - DOCUMENTED_NON_JOB_IDS)
+    if unknown:
+        problems.append(
+            'CONTRIBUTING.md: CI inventory names job ids that do not exist in '
+            f'ci.yml: {unknown}'
+        )
+    return problems
+
+
+contributing_path = root / 'CONTRIBUTING.md'
+if not contributing_path.exists():
+    fail('CONTRIBUTING.md: missing from the repository root')
+else:
+    documented_ids = inventory_job_ids(contributing_path.read_text().split('\n'))
+    if documented_ids is None:
+        fail(
+            'CONTRIBUTING.md: missing the '
+            f'"{CONTRIBUTING_INVENTORY_HEADING}" inventory section'
+        )
+    else:
+        for problem in inventory_parity_failures(
+            gate_needs, documented_ids, set(jobs)
+        ):
+            fail(problem)
+
+        # Self-test: the parity assertions must be able to go red. Add a
+        # required job nobody documented and confirm it is reported, then
+        # document a job id that no job in ci.yml provides and confirm that
+        # is reported too. Without this, the two comparisons above could
+        # pass for the wrong reason.
+        sentinel_input = 'sentinel-undocumented-merge-gate-input'
+        sentinel_failures = inventory_parity_failures(
+            gate_needs | {sentinel_input}, documented_ids, set(jobs)
+        )
+        if not any(sentinel_input in problem for problem in sentinel_failures):
+            fail(
+                'ci-deployment-gates: the CONTRIBUTING.md inventory parity check '
+                'did not report an undocumented merge-gate input'
+            )
+        sentinel_documented = 'sentinel-documented-without-a-ci-job'
+        sentinel_failures = inventory_parity_failures(
+            gate_needs, documented_ids | {sentinel_documented}, set(jobs)
+        )
+        if not any(sentinel_documented in problem for problem in sentinel_failures):
+            fail(
+                'ci-deployment-gates: the CONTRIBUTING.md inventory parity check '
+                'did not report a documented job id with no job in ci.yml'
+            )
+
 gate_script = '\n'.join(
     step.get('run', '') for step in gate.get('steps', []) if isinstance(step, dict)
 )
