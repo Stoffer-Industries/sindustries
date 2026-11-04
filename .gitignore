@@ -54,3 +54,6 @@ infra/cloud/.env.local
 # trips is_clean() and blocks Edge's fail-closed ff-only refresh of the canonical
 # checkout (see infra/runbooks/shared-worktree-state.md).
 .local/
+
+# Model-eval run artefacts (per-model scorecards)
+agents/evals/results/

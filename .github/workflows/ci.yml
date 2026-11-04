@@ -467,6 +467,27 @@ jobs:
       - name: Run feature-task tests
         run: cargo test --manifest-path agents/workflows/feature-task/Cargo.toml
 
+      # The model-eval harness grades model output with the production
+      # parser, so it needs that binary built. `cargo test` above leaves the
+      # debug binary in place; build it explicitly so the lobster grader
+      # does not have to shell out to cargo on every case.
+      - name: Build feature-task binary for the model-eval graders
+        run: cargo build --manifest-path agents/workflows/feature-task/Cargo.toml
+
+      # Model-free eval guard: every case's grader must separate its
+      # known-good control from its known-bad one. A grader that cannot tell
+      # them apart would report every model as excellent, or every model as
+      # useless, and would look like a working eval suite from the outside.
+      - name: Run model-eval harness self-tests
+        env:
+          PYTHONPATH: agents/evals:agents/lib
+        run: python3 -m unittest discover -s agents/evals/tests -p 'test_*.py'
+
+      - name: Validate model-eval graders against their controls
+        env:
+          PYTHONPATH: agents/evals:agents/lib
+        run: python3 agents/evals/run.py --validate-only
+
   ash-tests:
     name: ash verifier tests
     runs-on: ubuntu-latest

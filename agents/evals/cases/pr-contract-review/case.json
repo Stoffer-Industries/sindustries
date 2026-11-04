@@ -1,0 +1,65 @@
+{
+  "id": "pr-contract-review",
+  "title": "Review a PR diff for contract defects",
+  "description": "The model is asked to review a real pull request for defects in the *contract* between the code and the guidance that describes it. The fixture is a frozen snapshot of the PR head, so the case does not change as the live PR moves.",
+  "why_it_matters": "Code review that checks whether the implementation matches its own documentation. Every defect in this case is invisible to a test suite: the code is correct, the prose is not, or the prose is correct and the code path it describes is a silent failure.",
+  "transport": "infer",
+  "prompt": "You are reviewing a pull request for real defects.\n\nThe PR is \"fix(agents): never report a clean incident queue from an unreadable registry\". It changes the agent incident-queue machinery so that a state file which cannot be read is reported as unverified rather than as an empty queue.\n\nRead `pr909.diff` for the change itself, and read the files under `fixtures/` for the full state of the PR head as the change leaves it — the prose and the code have to agree with each other, and a defect is anything where they do not.\n\nFind real defects:\n- logic that still reports a clean/empty result when a read or parse failed\n- error paths that swallow the failure the change was meant to surface\n- places where the documentation or an agent's contract now contradicts the code\n- places where a test would pass while the production path fails\n\nIgnore style, naming, missing docs, and lints unless they cause wrong behaviour. Do not modify any file. Do not post comments anywhere.\n\nReply in EXACTLY this format, one block per finding, nothing else before or after:\n\nFINDING: <short title>\nLOC: <file:line>\nEXPLAIN: <the exact input or condition that breaks it, and the resulting wrong behaviour>\nFIX: <suggested fix>\n\nIf you find no defects, reply with exactly: NO FINDINGS\nCap yourself at 8 findings, most defensible first.",
+  "prompt_files": [
+    "fixtures/pr909.diff",
+    "fixtures/agents/definitions/quinn/HEARTBEAT.md",
+    "fixtures/agents/definitions/lox/HEARTBEAT.md",
+    "fixtures/agents/definitions/test_definitions.py",
+    "fixtures/agents/lib/incident_queue.py",
+    "fixtures/agents/lib/incident_state.py",
+    "fixtures/docs/systems/agent-incidents.md",
+    "fixtures/infra/lox_incident_state.py"
+  ],
+  "grader": "expected_findings",
+  "grader_config": {
+    "grader": "expected_findings",
+    "expected_findings": [
+      {
+        "id": "quinn-read-ops-state-swallows-then-truncates",
+        "summary": "quinn/HEARTBEAT.md's documented read/write pattern turns a read failure into an empty registry and then writes it back with 'w', truncating the real state file and destroying every incident.",
+        "any_of": ["read_ops_state", "write_ops_state"]
+      },
+      {
+        "id": "unverified-guidance-withholds-the-counts",
+        "summary": "The UNVERIFIED guidance tells the agent to withhold the counts until it re-runs, while the code deliberately still prints them — so following the guidance re-hides the top unblock.",
+        "any_of": ["before reporting any count", "withhold the counts", "withholding"]
+      },
+      {
+        "id": "heartbeat-ok-swallows-exit-3",
+        "summary": "quinn/HEARTBEAT.md step 5 replies HEARTBEAT_OK whenever there are no active findings, which on an UNVERIFIED exit-3 run is literally true, discarding the exit code.",
+        "any_of": ["heartbeat_ok", "exit-3", "exit code 3"]
+      },
+      {
+        "id": "stale-malformed-json-doc-bullet",
+        "summary": "docs/systems/agent-incidents.md still says malformed JSON is treated as an empty file, which is the behaviour the change removes.",
+        "any_of": ["treats the file as empty", "treated as empty", "still documents", "stale"]
+      },
+      {
+        "id": "lox-primary-read-has-no-oserror-handling",
+        "summary": "Lox's own primary registry read (infra/lox_incident_state.py summary) has no OSError handling, so the dataless-placeholder case raises an unhandled traceback, and its missing-file branch is a clean zero.",
+        "any_of": ["lox_incident_state", "oserror"]
+      },
+      {
+        "id": "contract-test-only-asserts-a-substring",
+        "summary": "The new contract test asserts only that the substring 'UNVERIFIED' appears, so it passes while the guidance contradicts the code.",
+        "any_of": ["assertin", "substring", "only checks"]
+      }
+    ],
+    "must_not_mention": [
+      {
+        "id": "render-text-early-return-already-fixed",
+        "summary": "render_text returning early and dropping the actionable-detail lines was already fixed before this head; reporting it is a false positive.",
+        "any_of": ["return early", "returns early", "early return"]
+      }
+    ]
+  },
+  "controls": {
+    "must_pass": ["fixtures/control-pass.md"],
+    "must_fail": ["fixtures/control-fail.md"]
+  }
+}

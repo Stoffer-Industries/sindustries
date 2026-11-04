@@ -3,6 +3,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+mod ac_check;
 mod ac_parsing;
 mod analytics;
 mod analytics_replay;
@@ -49,6 +50,13 @@ enum Commands {
     },
     SpecCheck(StageArgs),
     ReadyChecks(StageArgs),
+    /// Grade a candidate PR body against a task description, offline.
+    ///
+    /// Runs the same AC gates `verify-delivery` runs, so a PR author can
+    /// check a body before opening the PR, and the model-eval harness can
+    /// grade a candidate body with the production parser instead of a
+    /// reimplementation of it.
+    AcCheck(AcCheckArgs),
     VerifyDelivery(StageArgs),
     FeedbackAggregate(StageArgs),
     PostMerge(StageArgs),
@@ -134,6 +142,25 @@ pub(crate) enum AnalyticsAction {
         #[arg(long)]
         task_id: String,
     },
+}
+
+#[derive(Parser, Clone)]
+pub(crate) struct AcCheckArgs {
+    /// Task description file (the ACs the PR body must cover).
+    #[arg(long)]
+    pub(crate) task_description: PathBuf,
+    /// Candidate PR body file to grade.
+    #[arg(long)]
+    pub(crate) pr_body: PathBuf,
+    /// Optional newline-delimited list of files changed in the PR.
+    #[arg(long, default_value = "")]
+    pub(crate) pr_files: PathBuf,
+    /// Task id, used only in failure messages.
+    #[arg(long, default_value = "offline")]
+    pub(crate) task_id: String,
+    /// PR URL, used only in failure messages.
+    #[arg(long, default_value = "")]
+    pub(crate) pr_url: String,
 }
 
 #[derive(Parser, Clone)]
@@ -363,6 +390,22 @@ fn main() -> Result<()> {
         // `mechanical-evidence-check` emits an attestation rather than the
         // standard `Envelope`. It is not a stage transition, so it has no
         // lobster-state side effects and must not be wrapped in one.
+        Commands::AcCheck(args) => {
+            // `ac-check` reports a verdict rather than performing a stage
+            // transition, so it emits its own JSON and no lobster state.
+            let report = crate::ac_check::ac_check(&args)?;
+            let ok = serde_json::from_str::<serde_json::Value>(&report)?
+                .get("ok")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !ok {
+                // The report is printed first so the caller can read the
+                // failures; the exit code is the machine-checkable verdict.
+                println!("{report}");
+                std::process::exit(1);
+            }
+            report
+        }
         Commands::MechanicalEvidenceCheck(args) => {
             let attestation = qa_evidence_attest::mechanical_evidence_check(
                 &args.base_url,
@@ -400,6 +443,9 @@ fn main() -> Result<()> {
                 // Handled above; unreachable after the outer match arm.
                 Commands::MechanicalEvidenceCheck(_) => {
                     unreachable!("mechanical-evidence-check is handled in the outer match")
+                }
+                Commands::AcCheck(_) => {
+                    unreachable!("ac-check is handled in the outer match")
                 }
             };
             serde_json::to_string_pretty(&envelope)?

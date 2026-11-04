@@ -107,11 +107,14 @@ fn is_external_ci_citation_name(test_id: &str) -> bool {
 /// Markdown permits a long list item to wrap over several lines; the old
 /// line-oriented parser silently dropped those continuations and compared a
 /// truncated sentence against the task AC.
-fn parse_ac_entries(section: &str) -> Vec<(String, String)> {
+pub(crate) fn parse_ac_entries(section: &str) -> Vec<(String, String)> {
     parse_ac_entries_filtered(section, false)
 }
 
-fn parse_ac_entries_filtered(section: &str, checked_only: bool) -> Vec<(String, String)> {
+pub(crate) fn parse_ac_entries_filtered(
+    section: &str,
+    checked_only: bool,
+) -> Vec<(String, String)> {
     let ac_re = Regex::new(r"^\s*-\s*\[([xX ])\]\s+(?:\*\*)?(AC\d+)(?:\*\*)?:\s*(.*)$").unwrap();
     let mut entries = Vec::new();
     let mut current: Option<(String, String)> = None;
