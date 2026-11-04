@@ -18,15 +18,20 @@ The text output is exactly what workspace ``HEARTBEAT.md`` asks for:
     🔴 Top unblock: <what it is and what Tom has to do>
 
 If a state file exists but cannot be read or parsed, the queue is not a verified
-snapshot. ``parse_file`` returns an empty list for an unreadable file exactly as
-it does for a file with no incidents, so a read failure would otherwise render
-as a clean zero. When that happens the queue says so explicitly, marks itself
-UNVERIFIED, and the CLI exits non-zero:
+snapshot. A registry that fails to load yields no records exactly as a registry
+with no incidents does, so a read failure would otherwise render as a clean
+zero. When that happens the queue says so explicitly and marks itself
+UNVERIFIED, while still reporting the counts it did compute and the top
+unblock it did find:
 
-    Incident queue: 0 actionable, 0 monitored — UNVERIFIED.
+    Incident queue: 1 actionable, 0 monitored — UNVERIFIED.
+    1 incident(s) waiting on you.
+    🔴 Top unblock: disk-critical (lox) — Disk usage 97 percent
     ⚠️ 1 state file(s) could not be read, so these counts exclude whatever is in them:
        brain/state/quinn-ops-state.json — OSError: [Errno 11] Resource deadlock avoided
        Materialise the file and re-run (macOS/iCloud): brctl download <path>
+
+The CLI exits non-zero (3) on an unverified snapshot.
 """
 
 from __future__ import annotations
@@ -41,18 +46,12 @@ from typing import Any
 if __package__ in (None, ""):  # pragma: no cover - direct `python3 incident_queue.py`
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from agents.lib.incident_state import (  # type: ignore[no-redef]
-        load_all_incidents,
         needs_tom,
+        read_registry,
         reportable_incidents,
-        state_file_read_failures,
     )
 else:
-    from .incident_state import (
-        load_all_incidents,
-        needs_tom,
-        reportable_incidents,
-        state_file_read_failures,
-    )
+    from .incident_state import needs_tom, read_registry, reportable_incidents
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}
@@ -132,14 +131,18 @@ def build_queue(
     that could not be read is not a file with no incidents, so a zero produced
     alongside a read failure is a false zero and must never be reported as a
     clean queue.
+
+    The records and the failures come from a single pass over the filesystem
+    (``read_registry``), so the counts can never disagree with the failure list
+    — iCloud can materialise a file between two separate reads.
     """
     if incidents is not None:
         failures = list(read_failures or [])
         records = incidents
     else:
-        ws = Path(workspace) if workspace else None
-        failures = state_file_read_failures(ws)
-        records = load_all_incidents(ws)
+        registry = read_registry(Path(workspace) if workspace else None)
+        failures = registry.failures
+        records = registry.records
     records = reportable_incidents(records, now=now)
     actionable = sorted(needs_tom(records, now=now), key=_sort_key)
     actionable_ids = {id(inc) for inc in actionable}
@@ -185,26 +188,31 @@ def build_queue(
 
 
 def render_text(queue: dict[str, Any], *, verbose: bool = False) -> str:
-    """Render the heartbeat queue summary lines."""
+    """Render the heartbeat queue summary lines.
+
+    An unverified registry is an *addition* to the summary, not a replacement
+    for it: the records that did load still get their counts, their
+    "waiting on you" line and their top unblock. Dropping those lines when one
+    file failed to read would hide the very incident the queue exists to
+    surface — a partially-readable registry must never silently swallow the
+    top unblock.
+    """
     counts = queue["counts"]
     actionable = counts["actionable"]
     monitored = counts["monitored"]
     failures = queue.get("readFailures") or []
-    if failures:
-        lines = [
-            f"Incident queue: {actionable} actionable, {monitored} monitored — UNVERIFIED.",
-            f"⚠️ {len(failures)} state file(s) could not be read, so these counts exclude "
-            "whatever is in them:",
-        ]
-        for failure in failures:
-            lines.append(f"   {failure.get('path')} — {failure.get('error')}")
-        lines.append(
-            "   Materialise the file and re-run (macOS/iCloud): brctl download <path>"
-        )
-        return "\n".join(lines)
-    if counts["reportable"] == 0:
+    unverified = bool(failures)
+
+    if not unverified and counts["reportable"] == 0:
         return "No active incident findings."
-    lines = [f"Incident queue: {actionable} actionable, {monitored} monitored."]
+
+    if unverified:
+        lines = [
+            f"Incident queue: {actionable} actionable, {monitored} monitored — UNVERIFIED."
+        ]
+    else:
+        lines = [f"Incident queue: {actionable} actionable, {monitored} monitored."]
+
     if actionable:
         lines.append(f"{actionable} incident(s) waiting on you.")
         top = queue["actionable"][0]
@@ -216,6 +224,16 @@ def render_text(queue: dict[str, Any], *, verbose: bool = False) -> str:
                 f"  [{entry.get('severity')}] {entry['identity']}"
                 f" — escalatedAt={entry.get('escalatedAt') or 'never'}"
             )
+    if unverified:
+        lines.append(
+            f"⚠️ {len(failures)} state file(s) could not be read, so these counts exclude "
+            "whatever is in them:"
+        )
+        for failure in failures:
+            lines.append(f"   {failure.get('path')} — {failure.get('error')}")
+        lines.append(
+            "   Materialise the file and re-run (macOS/iCloud): brctl download <path>"
+        )
     return "\n".join(lines)
 
 

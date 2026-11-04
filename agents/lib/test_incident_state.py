@@ -288,6 +288,116 @@ class StateFileReadFailuresTests(unittest.TestCase):
         failures = ist.state_file_read_failures(workspace=self.tmpdir)
         self.assertEqual({f["owner"] for f in failures}, {"quinn", "lox"})
 
+    def test_shape_invalid_json_is_reported_as_a_failure(self):
+        """Valid JSON in the wrong shape is malformed, not empty.
+
+        The schema requires a top-level object with an `incidents` object.
+        Anything else used to take a silent-empty path in `parse_file`, which
+        is the same false zero this signal exists to close.
+        """
+        shapes = {
+            "empty object": "{}",
+            "incidents is a list": json.dumps({"incidents": []}),
+            "top-level array": "[]",
+            "top-level scalar": '"a string"',
+            "no incidents container": json.dumps({"meta": {"beat": 7}}),
+            "incidents is a string": json.dumps({"incidents": "nope"}),
+        }
+        for label, body in shapes.items():
+            with self.subTest(shape=label):
+                target = self.tmpdir / "brain" / "state" / "lox-incident-state.json"
+                target.write_text(body)
+                failures = ist.state_file_read_failures(workspace=self.tmpdir)
+                self.assertEqual(len(failures), 1, f"{label} should be a failure")
+                self.assertEqual(failures[0]["owner"], "lox")
+                self.assertTrue(failures[0]["error"])
+
+    def test_legacy_ops_container_is_a_valid_registry_shape(self):
+        """The legacy `ops` container must not be reported as malformed."""
+        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
+        target.write_text(json.dumps({"ops": {"one": {"owner": "quinn", "status": "watching"}}}))
+        failures = ist.state_file_read_failures(workspace=self.tmpdir)
+        self.assertEqual(failures, [])
+
+    def test_missing_file_is_missing_not_failed(self):
+        """A missing file is genuinely empty — not a read failure."""
+        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").unlink()
+        read = ist.read_state_file(
+            self.tmpdir / "brain" / "state" / "lox-incident-state.json", owner="lox"
+        )
+        self.assertTrue(read.missing)
+        self.assertFalse(read.failed)
+        self.assertEqual(read.records, [])
+
+
+class ReadStateFileTests(unittest.TestCase):
+    """One read produces both the records and the failure reason."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self.tmp.name)
+        (self.tmpdir / "brain" / "state").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, name: str, body: str) -> Path:
+        target = self.tmpdir / "brain" / "state" / name
+        target.write_text(body)
+        return target
+
+    def test_valid_registry_reports_ok_with_its_records(self):
+        target = self._write(
+            "quinn-ops-state.json",
+            json.dumps({"incidents": {"one": {"owner": "quinn", "status": "watching"}}}),
+        )
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertEqual(read.status, ist.READ_OK)
+        self.assertFalse(read.failed)
+        self.assertEqual(len(read.records), 1)
+
+    def test_malformed_json_reports_failed_with_no_records(self):
+        target = self._write("quinn-ops-state.json", "{not json")
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertTrue(read.failed)
+        self.assertEqual(read.records, [])
+        self.assertIn("JSONDecodeError", read.error)
+
+    def test_non_utf8_file_reports_failed_rather_than_raising(self):
+        """Invalid UTF-8 used to escape `parse_file` as an uncaught decode error."""
+        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
+        target.write_bytes(b"\xff\xfe\x00binary")
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertTrue(read.failed)
+        self.assertEqual(read.records, [])
+        self.assertIn("UnicodeDecodeError", read.error)
+
+    def test_read_registry_reads_each_file_once(self):
+        self._write("quinn-ops-state.json", json.dumps({"incidents": {}}))
+        self._write("lox-incident-state.json", json.dumps({"incidents": {}}))
+        reads: list[str] = []
+        original = Path.read_text
+
+        def counting_read_text(self, *args, **kwargs):
+            reads.append(self.name)
+            return original(self, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", counting_read_text):
+            registry = ist.read_registry(self.tmpdir)
+
+        state_reads = [
+            name
+            for name in reads
+            if name in ("quinn-ops-state.json", "lox-incident-state.json")
+        ]
+        self.assertEqual(
+            sorted(state_reads),
+            ["lox-incident-state.json", "quinn-ops-state.json"],
+            "each state file must be read exactly once per registry pass",
+        )
+        self.assertTrue(registry.verified)
+        self.assertEqual(registry.failures, [])
+
 
 class WorkspaceDefaultTests(unittest.TestCase):
     """W29 audit [Low]: WORKSPACE_DEFAULT must not hard-code a laptop path."""

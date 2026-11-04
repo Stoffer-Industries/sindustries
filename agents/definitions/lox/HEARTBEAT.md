@@ -73,6 +73,22 @@ On every heartbeat:
    cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue
    ```
 
+   **If that command exits `3`, the registry was not read.** `brain/` is an
+   iCloud-backed symlink, and a state file that is only read (never written)
+   can be evicted to a dataless placeholder that fails to read with
+   `OSError [Errno 11] Resource deadlock avoided`. A file that is valid JSON
+   but the wrong shape (a JSON array, or an object with no `incidents`/`ops`
+   object) counts as malformed too. In that case the queue renders
+   `Incident queue: N actionable, M monitored — UNVERIFIED.` and lists the
+   offending path. **UNVERIFIED is an addition to the summary, not a
+   replacement for it**: the counts and the `🔴 Top unblock:` line for the
+   records that did load are still printed and must still be reported. Do
+   **not** report the counts from an UNVERIFIED run as a complete queue —
+   materialise the file (`brctl download <path>`) and re-run before reporting
+   any count. Never fall back to reading the raw state file to make the
+   failure go away: that fallback is what caused the 2026-10-24 timeout
+   cluster.
+
    **Anchor these commands to `~/.openclaw/workspace`.** Lox's shell cwd is
    `~/.openclaw/workspace/agents/lox` (per `openclaw.json`), not the workspace
    root, so relative paths (`infra/...`, `codebases/sindustries`) fail there.
@@ -223,6 +239,9 @@ writes atomically. Runbook:
   Raw reads cost ~120k tokens per tick.
 - Never fall back to the raw state file when a bounded read fails. Report the
   error and stop — that fallback is what caused the 2026-10-24 timeout cluster.
+- An incident-queue CLI run that exits `3` is an unverified snapshot, not a
+  clean queue. Report the counts and the top unblock it did print alongside
+  the UNVERIFIED banner, and never present them as a complete queue.
 - Never append to `lastAction` / `notes` without truncating first. Unbounded
   growth in the state file is what caused the 2026-10-24 heartbeat timeout
   cluster. See "Bounded state writes".

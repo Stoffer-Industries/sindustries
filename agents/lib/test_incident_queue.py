@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from textwrap import dedent
+from unittest import mock
 
 # Make the `agents` package importable when run directly from repo root.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -226,12 +228,47 @@ class ReadFailureTests(unittest.TestCase):
         self.assertIn("1 actionable, 0 monitored", text)
         self.assertIn("UNVERIFIED", text)
 
-    def test_cli_exits_non_zero_when_a_state_file_could_not_be_read(self):
-        import tempfile
-        from pathlib import Path as _Path
+    def test_unreadable_registry_still_surfaces_the_top_unblock(self):
+        """UNVERIFIED must add to the summary, not replace it.
 
+        A partially-readable registry still holds real incidents. Rendering
+        only the counts would hide the top unblock behind a banner — the
+        exact blind spot this whole change exists to close.
+        """
+        records = [
+            _incident("disk-critical", owner="lox", severity="critical", needsTom=True,
+                      title="Disk usage 97 percent"),
+        ]
+        queue = iq.build_queue(records, now=NOW, read_failures=[self._failure()])
+        text = iq.render_text(queue)
+        self.assertIn("1 incident(s) waiting on you.", text)
+        self.assertIn("Top unblock:", text)
+        self.assertIn("disk-critical (lox)", text)
+        self.assertIn("Disk usage 97 percent", text)
+        self.assertIn("UNVERIFIED", text)
+        # The banner must not swallow the escalation lines.
+        self.assertLess(
+            text.index("waiting on you"),
+            text.index("could not be read"),
+        )
+
+    def test_unreadable_registry_with_no_actionable_records_has_no_top_unblock(self):
+        """No actionable records means no top unblock line — that is correct."""
+        records = [_incident("a", severity="low")]
+        queue = iq.build_queue(records, now=NOW, read_failures=[self._failure()])
+        text = iq.render_text(queue)
+        self.assertNotIn("waiting on you", text)
+        self.assertNotIn("Top unblock", text)
+        self.assertIn("UNVERIFIED", text)
+
+    def test_unreadable_registry_never_renders_as_no_active_findings(self):
+        """The clean-zero line is reserved for a verified, empty registry."""
+        queue = iq.build_queue([], now=NOW, read_failures=[self._failure()])
+        self.assertNotEqual(iq.render_text(queue), "No active incident findings.")
+
+    def test_cli_exits_non_zero_when_a_state_file_could_not_be_read(self):
         with tempfile.TemporaryDirectory() as tmp:
-            workspace = _Path(tmp)
+            workspace = Path(tmp)
             (workspace / "brain" / "state").mkdir(parents=True)
             # Both state files present but malformed, so both reads fail.
             (workspace / "brain" / "state" / "quinn-ops-state.json").write_text("{not json")
@@ -240,11 +277,8 @@ class ReadFailureTests(unittest.TestCase):
         self.assertEqual(code, 3)
 
     def test_cli_exits_zero_when_state_files_are_readable(self):
-        import tempfile
-        from pathlib import Path as _Path
-
         with tempfile.TemporaryDirectory() as tmp:
-            workspace = _Path(tmp)
+            workspace = Path(tmp)
             (workspace / "brain" / "state").mkdir(parents=True)
             (workspace / "brain" / "state" / "quinn-ops-state.json").write_text(
                 json.dumps({"incidents": {}})
@@ -254,6 +288,167 @@ class ReadFailureTests(unittest.TestCase):
             )
             code = iq.main(["--workspace", str(workspace)])
         self.assertEqual(code, 0)
+
+
+class MalformedShapeTests(unittest.TestCase):
+    """A registry that parses as JSON but is the wrong shape is malformed.
+
+    Per `agents/schemas/agent-incident-state.schema.json` the top level must
+    be an object with an `incidents` object. A file that is valid JSON but
+    does not have that shape used to yield an empty list — the same empty
+    list a genuinely empty registry yields — so the false zero this PR
+    closes was still reachable.
+    """
+
+    def _workspace(self, tmp: str, quinn_body: str, lox_body: str) -> Path:
+        workspace = Path(tmp)
+        state_dir = workspace / "brain" / "state"
+        state_dir.mkdir(parents=True)
+        (state_dir / "quinn-ops-state.json").write_text(quinn_body)
+        (state_dir / "lox-incident-state.json").write_text(lox_body)
+        return workspace
+
+    def _cases(self):
+        return {
+            "empty_object": "{}",
+            "incidents_not_an_object": json.dumps({"incidents": []}),
+            "top_level_array": "[]",
+            "top_level_scalar": '"just a string"',
+            "no_incidents_container": json.dumps({"meta": {"beat": 7}}),
+            "incidents_is_a_string": json.dumps({"incidents": "nope"}),
+        }
+
+    def test_shape_invalid_registry_is_reported_as_a_read_failure(self):
+        for name, body in self._cases().items():
+            with self.subTest(shape=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    workspace = self._workspace(tmp, body, body)
+                    failures = ist.state_file_read_failures(workspace)
+                    self.assertEqual(
+                        len(failures), 2, f"{name} should fail to load"
+                    )
+                    for failure in failures:
+                        self.assertTrue(failure["error"])
+
+    def test_shape_invalid_registry_never_renders_as_a_clean_zero(self):
+        for name, body in self._cases().items():
+            with self.subTest(shape=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    workspace = self._workspace(tmp, body, body)
+                    code = iq.main(["--workspace", str(workspace)])
+                    self.assertEqual(code, 3, f"{name} must not exit clean")
+                    queue = iq.build_queue(workspace=workspace, now=NOW)
+                    self.assertFalse(queue["verified"])
+                    text = iq.render_text(queue)
+                    self.assertIn("UNVERIFIED", text)
+                    self.assertNotEqual(text, "No active incident findings.")
+
+    def test_shape_invalid_file_does_not_hide_the_other_files_records(self):
+        """One bad file must not blank out the good file's incidents."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            state_dir = workspace / "brain" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "quinn-ops-state.json").write_text("{}")
+            (state_dir / "lox-incident-state.json").write_text(
+                json.dumps(
+                    {
+                        "incidents": {
+                            "lox-critical": {
+                                "key": "lox-critical",
+                                "owner": "lox",
+                                "status": "escalated",
+                                "severity": "critical",
+                                "needsTom": True,
+                                "firstSeen": "2026-10-19T08:33:39+00:00",
+                                "lastCheckedAt": NOW.isoformat(),
+                                "lastAction": "df reported 97%",
+                            }
+                        }
+                    }
+                )
+            )
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertFalse(queue["verified"])
+            self.assertEqual(queue["counts"]["actionable"], 1)
+            text = iq.render_text(queue)
+            self.assertIn("1 incident(s) waiting on you.", text)
+            self.assertIn("Top unblock:", text)
+            self.assertIn("lox-critical (lox)", text)
+            self.assertIn("UNVERIFIED", text)
+
+    def test_legacy_ops_shape_is_still_a_valid_registry(self):
+        """The legacy `ops` container must not be mistaken for a malformed file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            state_dir = workspace / "brain" / "state"
+            state_dir.mkdir(parents=True)
+            legacy = json.dumps({"ops": {"legacy-one": {"owner": "quinn", "status": "watching"}}})
+            (state_dir / "quinn-ops-state.json").write_text(legacy)
+            (state_dir / "lox-incident-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            failures = ist.state_file_read_failures(workspace)
+            self.assertEqual(failures, [])
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertTrue(queue["verified"])
+            self.assertEqual(queue["counts"]["reportable"], 1)
+
+
+class SingleReadTests(unittest.TestCase):
+    """The records and the read failures must come from the same read.
+
+    Reading each state file twice (once for the failure check, once for the
+    records) opens a window where iCloud materialises the file between the
+    two reads and the queue's counts disagree with its own failure list.
+    """
+
+    def test_each_state_file_is_read_exactly_once_per_queue_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            state_dir = workspace / "brain" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "quinn-ops-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            (state_dir / "lox-incident-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            reads: list[str] = []
+            original = Path.read_text
+
+            def counting_read_text(self, *args, **kwargs):
+                reads.append(self.name)
+                return original(self, *args, **kwargs)
+
+            with mock.patch.object(Path, "read_text", counting_read_text):
+                iq.build_queue(workspace=workspace, now=NOW)
+
+            state_reads = [
+                name
+                for name in reads
+                if name in ("quinn-ops-state.json", "lox-incident-state.json")
+            ]
+            self.assertEqual(
+                sorted(state_reads),
+                ["lox-incident-state.json", "quinn-ops-state.json"],
+                "each state file must be read exactly once per queue build",
+            )
+
+    def test_records_and_failures_come_from_the_same_registry_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            state_dir = workspace / "brain" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "quinn-ops-state.json").write_text("{not json")
+            (state_dir / "lox-incident-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            registry = ist.read_registry(workspace)
+            self.assertEqual(len(registry.records), 0)
+            self.assertEqual(len(registry.failures), 1)
+            self.assertFalse(registry.verified)
+            self.assertEqual(len(registry.files), 2)
 
 
 class ParityTests(unittest.TestCase):
