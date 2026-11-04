@@ -4,7 +4,7 @@
   "description": "The model is asked to write the `## Acceptance Criteria` section of a feature-task PR body from a task description and the pr-open evidence rules. The grader is the production lobster parser (`feature-task ac-check`), so the score is whether the real gate would accept the body — not whether a reimplementation of the parser thinks so.",
   "why_it_matters": "This is the failure class that has actually cost us tasks: a PR body whose AC text or evidence annotation the lobster will not accept, so the task bounces back to `doing` at the acceptance gate. It is a clean pass/fail with a known right answer, which makes it the highest-signal eval in the set.",
   "transport": "infer",
-  "prompt": "You are writing the `## Acceptance Criteria` section of a feature-task pull request body.\n\nTwo input files:\n- `task-description.md` — the feature task description. Its `## Acceptance Criteria` block lists the task's ACs.\n- `pr-open-excerpt.md` — the evidence-annotation rules a PR author must follow, and the list of files changed in this PR.\n\nRead both files, then produce the PR body's `## Acceptance Criteria` section for that task, exactly as a careful PR author would write it under those rules:\n- every task AC appears, as a `- [x]` line, with the AC label and the AC sentence copied verbatim from the task description\n- each line ends with exactly one recognised evidence annotation\n\nOutput only the `## Acceptance Criteria` section: the heading and the AC lines. No commentary, no code fence, no trailing prose.",
+  "prompt": "You are writing the `## Acceptance Criteria` section of a feature-task pull request body.\n\nTwo input files, both reproduced in full below:\n- `task-description.md` — the feature task description. Its `## Acceptance Criteria` block lists the task's ACs.\n- `pr-open-excerpt.md` — the evidence-annotation rules a PR author must follow, and the list of files changed in this PR.\n\nUsing those, produce the PR body's `## Acceptance Criteria` section for that task, exactly as a careful PR author would write it under those rules:\n- every task AC appears, as a `- [x]` line, with the AC label and the AC sentence copied verbatim from the task description\n- each line ends with exactly one recognised evidence annotation\n\nOutput only the `## Acceptance Criteria` section: the heading and the AC lines. No commentary, no code fence, no trailing prose.",
   "prompt_files": [
     "fixtures/task-description.md",
     "fixtures/pr-open-excerpt.md",
@@ -16,7 +16,11 @@
     "pr_files": "fixtures/pr-files.txt"
   },
   "controls": {
-    "must_pass": ["fixtures/control-pass.md"],
-    "must_fail": ["fixtures/control-fail.md"]
+    "must_pass": [
+      "fixtures/control-pass.md"
+    ],
+    "must_fail": [
+      "fixtures/control-fail.md"
+    ]
   }
 }
