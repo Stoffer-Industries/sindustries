@@ -299,12 +299,37 @@ def read_state_file(path: Path, owner: str | None = None) -> "StateFileRead":
     same reason: per the schema every value under `incidents` is an incident
     object, so skipping one silently discards a record that may be the
     critical one and still reports a verified zero. The whole file is
-    therefore reported as a read failure naming the offending slug.
+    therefore reported as a read failure naming the offending slug — but the
+    valid siblings already parsed are *retained* on that failed read, so one
+    malformed record cannot hide the actionable incidents next to it. UNVERIFIED
+    augments the summary; it never replaces known data.
+
+    A missing file is only genuinely empty when its registry directory exists.
+    When the directory itself is absent — an unmounted iCloud-backed `brain`
+    symlink, or a wrong `--workspace` — the file's absence proves nothing, so
+    the read is reported as a failure rather than as an empty registry.
     """
     path = Path(path)
     try:
         raw_text = path.read_text()
     except FileNotFoundError:
+        registry_dir = path.parent
+        if not registry_dir.is_dir():
+            log.warning(
+                "incident_state.read_state_file: registry directory %s does not exist",
+                registry_dir,
+            )
+            return StateFileRead(
+                path,
+                owner or "",
+                READ_FAILED,
+                error=(
+                    f"registry directory not found: {registry_dir} "
+                    "(the registry location is absent, so a missing file cannot be "
+                    "confirmed empty — check that brain/ is mounted and the "
+                    "workspace path is correct)"
+                ),
+            )
         log.info("incident_state.read_state_file: file does not exist: %s", path)
         return StateFileRead(path, owner or "", READ_MISSING)
     except UnicodeDecodeError as exc:
@@ -380,6 +405,8 @@ def read_state_file(path: Path, owner: str | None = None) -> "StateFileRead":
             path,
             ", ".join(malformed),
         )
+        # Keep the valid siblings: one malformed record must not hide the
+        # actionable incidents parsed from the same file.
         return StateFileRead(
             path,
             default_owner,
@@ -389,6 +416,7 @@ def read_state_file(path: Path, owner: str | None = None) -> "StateFileRead":
                 + ("y" if len(malformed) == 1 else "ies")
                 + f": {', '.join(malformed)}"
             ),
+            records=out,
         )
 
     return StateFileRead(path, default_owner, READ_OK, records=out)
@@ -398,9 +426,14 @@ def parse_file(path: Path, owner: str | None = None) -> list[dict]:
     """Read one state file and return a list of unified incident dicts.
 
     Thin wrapper over :func:`read_state_file` kept for existing callers. A
-    file that could not be read or parsed yields an empty list here — use
-    :func:`read_state_file` (or :func:`read_registry`) when you need to know
-    whether an empty list means "no incidents" or "the file never loaded".
+    file that could not be read or parsed at all yields an empty list here —
+    use :func:`read_state_file` (or :func:`read_registry`) when you need to
+    know whether an empty list means "no incidents" or "the file never loaded".
+
+    A file whose *entries* are malformed is a partial read: its valid
+    siblings are returned here, and the file itself still reports `failed`
+    through :func:`read_state_file`. Discarding the good records alongside the
+    bad one would hide the incidents that did parse.
     """
     return read_state_file(path, owner=owner).records
 
@@ -431,6 +464,9 @@ def read_registry(workspace: Path | None = None) -> RegistryRead:
     The records and the failures come from the same pass over the filesystem,
     so the queue can never report a count that disagrees with the failure list
     (iCloud can materialise a file between two separate reads).
+
+    A registry whose directory is absent is a failure, not an empty registry:
+    both files report `failed` and the snapshot is not verified.
     """
     ws = Path(workspace) if workspace else WORKSPACE_DEFAULT
     reads = [
@@ -458,13 +494,16 @@ def state_file_read_failures(workspace: Path | None = None) -> list[dict]:
 
     A missing file is *not* a failure — no state file means genuinely no
     incidents. Only files that exist and could not be parsed or read are
-    reported here. "Could not be parsed" includes a file that is valid JSON
-    but not a valid registry shape (a JSON array, or an object with no
-    `incidents`/`ops` object): per the schema the top level must be an object
-    with an `incidents` object, so a shape-invalid file is malformed, not
-    empty. It also includes an entry inside the incidents container that is
-    not an incident object: per the schema every value under `incidents` is an
-    incident object, so a malformed record makes the whole registry
+    reported here, plus the case where the registry *directory* itself is
+    absent: an unmounted iCloud-backed `brain` symlink or a wrong workspace
+    path makes every file "missing" while the registry is in fact unreachable,
+    and that is a false zero. "Could not be parsed" includes a file that is
+    valid JSON but not a valid registry shape (a JSON array, or an object with
+    no `incidents`/`ops` object): per the schema the top level must be an
+    object with an `incidents` object, so a shape-invalid file is malformed,
+    not empty. It also includes an entry inside the incidents container that
+    is not an incident object: per the schema every value under `incidents` is
+    an incident object, so a malformed record makes the whole registry
     unverifiable rather than safely skippable.
 
     Returns one record per unreadable file:

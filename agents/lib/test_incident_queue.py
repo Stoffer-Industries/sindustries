@@ -476,6 +476,141 @@ class MalformedEntryTests(unittest.TestCase):
             code = iq.main(["--workspace", str(workspace)])
             self.assertEqual(code, 3)
 
+    def test_malformed_entry_does_not_hide_the_same_files_valid_records(self):
+        """One malformed record must not hide the critical sibling in the same file.
+
+        The file is still a read failure, so the snapshot stays UNVERIFIED —
+        but the records that did parse keep their counts and their top
+        unblock. Dropping them would hide a CRITICAL incident behind a
+        malformed neighbour.
+        """
+        body = json.dumps(
+            {
+                "incidents": {
+                    "quinn-critical": {
+                        "key": "quinn-critical",
+                        "owner": "quinn",
+                        "status": "escalated",
+                        "severity": "critical",
+                        "needsTom": True,
+                        "firstSeen": "2026-10-19T08:33:39+00:00",
+                        "lastCheckedAt": NOW.isoformat(),
+                        "lastAction": "registry unreadable",
+                    },
+                    "broken": "not-an-object",
+                }
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = self._workspace(tmp, body, json.dumps({"incidents": {}}))
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertFalse(queue["verified"])
+            self.assertEqual(queue["counts"]["actionable"], 1)
+            self.assertEqual(queue["actionable"][0]["identity"], "quinn-critical")
+            text = iq.render_text(queue)
+            self.assertIn("UNVERIFIED", text)
+            self.assertIn("1 incident(s) waiting on you.", text)
+            self.assertIn("quinn-critical (quinn)", text)
+
+
+class SuppliedReadFailuresTests(unittest.TestCase):
+    """A caller-supplied read failure must never be dropped.
+
+    `state_file_read_failures()` is still public, so it is easy to write the
+    old two-read call pattern: read the failures, then build the queue from
+    the records. If `build_queue()` discards the supplied failures, the queue
+    reports a verified clean zero for a registry the caller already knows was
+    unreadable.
+    """
+
+    def test_supplied_failures_survive_without_incidents(self):
+        failure = {
+            "path": "/tmp/brain/state/quinn-ops-state.json",
+            "owner": "quinn",
+            "error": "OSError: [Errno 11] Resource deadlock avoided",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "brain" / "state").mkdir(parents=True)
+            (workspace / "brain" / "state" / "quinn-ops-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            (workspace / "brain" / "state" / "lox-incident-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            queue = iq.build_queue(
+                workspace=workspace, now=NOW, read_failures=[failure]
+            )
+            self.assertFalse(queue["verified"])
+            self.assertEqual(len(queue["readFailures"]), 1)
+            self.assertEqual(queue["readFailures"][0]["path"], failure["path"])
+            self.assertIn("UNVERIFIED", iq.render_text(queue))
+
+    def test_supplied_failures_survive_alongside_incidents(self):
+        failure = {"path": "/tmp/x.json", "owner": "quinn", "error": "boom"}
+        queue = iq.build_queue(
+            [_incident("one", severity="low")], now=NOW, read_failures=[failure]
+        )
+        self.assertFalse(queue["verified"])
+        self.assertEqual(queue["readFailures"], [failure])
+
+    def test_the_same_failure_is_not_counted_twice(self):
+        failure = {"path": "/tmp/x.json", "owner": "quinn", "error": "boom"}
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "brain" / "state").mkdir(parents=True)
+            (workspace / "brain" / "state" / "quinn-ops-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            (workspace / "brain" / "state" / "lox-incident-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            queue = iq.build_queue(
+                workspace=workspace, now=NOW, read_failures=[failure]
+            )
+            self.assertEqual(len(queue["readFailures"]), 1)
+
+
+class AbsentRegistryTests(unittest.TestCase):
+    """An unreachable registry location is not an empty registry.
+
+    `brain/` is an iCloud-backed symlink. When it is not mounted — or the
+    workspace path is wrong — both state files are "missing" while the
+    registry is unreachable, and the queue used to exit 0 with "No active
+    incident findings."
+    """
+
+    def _absent_registry_workspace(self, tmp: str) -> Path:
+        workspace = Path(tmp)
+        (workspace / "brain").mkdir()  # brain/ exists, brain/state/ does not
+        return workspace
+
+    def test_absent_registry_directory_is_not_a_verified_clean_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = self._absent_registry_workspace(tmp)
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertFalse(queue["verified"])
+            self.assertEqual(len(queue["readFailures"]), 2)
+            text = iq.render_text(queue)
+            self.assertIn("UNVERIFIED", text)
+            self.assertNotIn("No active incident findings.", text)
+            self.assertIn("registry directory not found", text)
+
+    def test_absent_registry_directory_exits_three(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = self._absent_registry_workspace(tmp)
+            self.assertEqual(iq.main(["--workspace", str(workspace)]), 3)
+
+    def test_a_workspace_with_an_empty_registry_directory_is_still_verified(self):
+        """An existing registry directory with no state files is genuinely empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "brain" / "state").mkdir(parents=True)
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertTrue(queue["verified"])
+            self.assertEqual(queue["readFailures"], [])
+            self.assertEqual(iq.main(["--workspace", str(workspace)]), 0)
+
 
 class SingleReadTests(unittest.TestCase):
     """The records and the read failures must come from the same read.
