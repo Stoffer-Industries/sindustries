@@ -939,6 +939,14 @@ jobs:
       - name: Run CI and deployment gate contract test
         run: bash infra/cloud/scripts/tests/ci-deployment-gates.test.sh
 
+      - name: Run local test-command documentation parity test
+        # Keeps CONTRIBUTING.md's documented local test commands in step with
+        # the Makefile's `test` / `test-all` targets, in both directions.
+        # Closes the W44 code-garden follow-up where the documented command
+        # block omitted `make test-website` while the prose claimed
+        # `make test-all` ran the website tests.
+        run: bash infra/cloud/scripts/tests/local-test-commands.test.sh
+
       - name: Run Budget mobile OTA input paths test (task 74503fe7, W39 F3)
         # AC1 + AC2 regression guard for the `budget_mobile` change filter —
         # closes the W39 audit finding where the filter omitted
