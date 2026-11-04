@@ -91,14 +91,22 @@ Common commands:
 make test
 make test-api
 make test-app
+make test-website
 make test-e2e
+make test-all
 ```
 
-`make test-all` is a local convenience target that runs the four
-commands above (Tasks/Budget APIs, website, Tasks app + e2e); it is
-not a full local parity with CI. Mission Control, the content
-scheduler, GymTrack, MCP, and agent verification run from their own
-workspaces or under CI (listed below).
+`make test-all` is a local convenience target that runs `make test-api`,
+`make test-website`, `make test-app` and `make test-e2e` (Tasks/Budget
+APIs, website, Tasks app + e2e); it is not a full local parity with CI.
+`make test` runs `make test-api`, `make test-app` and `make test-e2e`.
+Mission Control, the content scheduler, GymTrack, MCP, and agent
+verification run from their own workspaces or under CI (listed below).
+`infra/cloud/scripts/tests/local-test-commands.test.sh` asserts that the
+commands listed here are the targets the Makefile defines, that every
+prerequisite of `make test-all` is listed here, and that the two
+sentences above name exactly the commands the Makefile runs — so the
+documented local surface cannot drift away from the executable one.
 
 CI currently covers:
 - `services/tasks-api` unit + DB integration tests (`tasks-api-tests`), plus a ratcheting TypeScript compiler gate (`typecheck:gate`, see below)
