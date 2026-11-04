@@ -186,6 +186,76 @@ class RenderTextTests(unittest.TestCase):
         self.assertIn("escalatedAt=never", text)
 
 
+class ReadFailureTests(unittest.TestCase):
+    """A queue built from an unreadable registry is not a verified snapshot.
+
+    The heartbeat renders "No active incident findings." for a zero queue. When
+    the state files could not be read at all, that line is a false zero, so the
+    queue must say so rather than look clean.
+    """
+
+    def _failure(self, path: str = "brain/state/quinn-ops-state.json") -> dict:
+        return {
+            "path": path,
+            "owner": "quinn",
+            "error": "OSError: [Errno 11] Resource deadlock avoided",
+        }
+
+    def test_queue_is_marked_unverified_when_a_state_file_could_not_be_read(self):
+        queue = iq.build_queue([], now=NOW, read_failures=[self._failure()])
+        self.assertFalse(queue["verified"])
+        self.assertEqual(len(queue["readFailures"]), 1)
+
+    def test_queue_is_verified_when_nothing_failed(self):
+        queue = iq.build_queue([], now=NOW)
+        self.assertTrue(queue["verified"])
+        self.assertEqual(queue["readFailures"], [])
+
+    def test_unreadable_registry_never_renders_as_a_clean_zero(self):
+        queue = iq.build_queue([], now=NOW, read_failures=[self._failure()])
+        text = iq.render_text(queue)
+        self.assertNotEqual(text, "No active incident findings.")
+        self.assertIn("UNVERIFIED", text)
+        self.assertIn("quinn-ops-state.json", text)
+        self.assertIn("Resource deadlock avoided", text)
+
+    def test_unreadable_registry_still_reports_the_counts_it_did_compute(self):
+        records = [_incident("a", severity="critical", needsTom=True)]
+        queue = iq.build_queue(records, now=NOW, read_failures=[self._failure()])
+        text = iq.render_text(queue)
+        self.assertIn("1 actionable, 0 monitored", text)
+        self.assertIn("UNVERIFIED", text)
+
+    def test_cli_exits_non_zero_when_a_state_file_could_not_be_read(self):
+        import tempfile
+        from pathlib import Path as _Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = _Path(tmp)
+            (workspace / "brain" / "state").mkdir(parents=True)
+            # Both state files present but malformed, so both reads fail.
+            (workspace / "brain" / "state" / "quinn-ops-state.json").write_text("{not json")
+            (workspace / "brain" / "state" / "lox-incident-state.json").write_text("{not json")
+            code = iq.main(["--workspace", str(workspace)])
+        self.assertEqual(code, 3)
+
+    def test_cli_exits_zero_when_state_files_are_readable(self):
+        import tempfile
+        from pathlib import Path as _Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = _Path(tmp)
+            (workspace / "brain" / "state").mkdir(parents=True)
+            (workspace / "brain" / "state" / "quinn-ops-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            (workspace / "brain" / "state" / "lox-incident-state.json").write_text(
+                json.dumps({"incidents": {}})
+            )
+            code = iq.main(["--workspace", str(workspace)])
+        self.assertEqual(code, 0)
+
+
 class ParityTests(unittest.TestCase):
     def test_actionable_split_matches_shared_needs_tom(self):
         records = [

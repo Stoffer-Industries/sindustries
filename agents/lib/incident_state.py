@@ -12,6 +12,11 @@ Public API:
         Read one file, apply the legacy normalizer for that file's known shape,
         return the unified list.
 
+    state_file_read_failures(workspace=None) -> list[dict]
+        Return the state files that exist but could not be read or parsed.
+        An unreadable file is not an empty one — use this to avoid reporting
+        an unverified zero for a registry that was never actually loaded.
+
     active_incidents(incidents) -> list[dict]
         Filter out resolved, false-positive, and archived records.
 
@@ -271,6 +276,45 @@ def load_all_incidents(workspace: Path | None = None) -> list[dict]:
     return quinn + lox
 
 
+def state_file_read_failures(workspace: Path | None = None) -> list[dict]:
+    """Return the state files that exist but could not be read.
+
+    An unreadable state file is not an empty one. ``parse_file`` returns an
+    empty list for both cases, so a caller that renders a health result from
+    it can report a clean zero it never verified. ``brain/`` is an
+    iCloud-backed symlink, and a state file that is only read (never written)
+    can be evicted to a dataless placeholder that fails to read with
+    ``OSError [Errno 11] Resource deadlock avoided``.
+
+    A missing file is *not* a failure — no state file means genuinely no
+    incidents. Only files that exist and could not be parsed or read are
+    reported here.
+
+    Returns one record per unreadable file:
+    ``{"path": str, "owner": str, "error": str}``.
+    """
+    ws = Path(workspace) if workspace else WORKSPACE_DEFAULT
+    failures: list[dict] = []
+    for relative, owner in (
+        (QUINN_STATE_RELATIVE, "quinn"),
+        (LOX_STATE_RELATIVE, "lox"),
+    ):
+        path = ws / relative
+        try:
+            if not path.exists():
+                continue
+            json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            failures.append(
+                {
+                    "path": str(path),
+                    "owner": owner,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+    return failures
+
+
 def active_incidents(incidents: list[dict]) -> list[dict]:
     """Return records that are still open in the incident registry.
 
@@ -387,6 +431,7 @@ __all__ = [
     "IncidentStateError",
     "parse_file",
     "load_all_incidents",
+    "state_file_read_failures",
     "active_incidents",
     "reportable_incidents",
     "needs_tom",

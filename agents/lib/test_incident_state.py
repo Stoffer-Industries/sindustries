@@ -224,6 +224,71 @@ class LoadAllIncidentsTests(unittest.TestCase):
         self.assertTrue(all(e["owner"] == "quinn" for e in out))
 
 
+class StateFileReadFailuresTests(unittest.TestCase):
+    """An unreadable state file is not an empty one.
+
+    `parse_file` returns `[]` for both, so without a separate signal a
+    read failure renders as a clean zero — the exact false negative that let
+    the incident queue report "no active findings" for six days while iCloud
+    had evicted both state files to dataless placeholders.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self.tmp.name)
+        (self.tmpdir / "brain" / "state").mkdir(parents=True)
+        (self.tmpdir / "brain" / "state" / "quinn-ops-state.json").write_text(
+            json.dumps(LEGACY_QUINN_OPS)
+        )
+        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").write_text(
+            json.dumps(LEGACY_LOX_INCIDENTS)
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_readable_files_report_no_failures(self):
+        self.assertEqual(ist.state_file_read_failures(workspace=self.tmpdir), [])
+
+    def test_missing_files_are_not_failures(self):
+        """No state file means genuinely no incidents — not a read failure."""
+        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").unlink()
+        (self.tmpdir / "brain" / "state" / "quinn-ops-state.json").unlink()
+        self.assertEqual(ist.state_file_read_failures(workspace=self.tmpdir), [])
+
+    def test_unreadable_file_is_reported_as_a_failure(self):
+        """The iCloud dataless-placeholder case: the read raises OSError."""
+        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
+        real_read_text = Path.read_text
+
+        def fake_read_text(self, *args, **kwargs):
+            if self == target:
+                raise OSError(11, "Resource deadlock avoided")
+            return real_read_text(self, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", fake_read_text):
+            failures = ist.state_file_read_failures(workspace=self.tmpdir)
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["owner"], "quinn")
+        self.assertIn("Resource deadlock avoided", failures[0]["error"])
+        self.assertIn("quinn-ops-state.json", failures[0]["path"])
+
+    def test_malformed_json_is_reported_as_a_failure(self):
+        """Malformed JSON is the same class of silent-empty as an unreadable file."""
+        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").write_text("{not json")
+        failures = ist.state_file_read_failures(workspace=self.tmpdir)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["owner"], "lox")
+        self.assertIn("JSONDecodeError", failures[0]["error"])
+
+    def test_both_files_failing_are_both_reported(self):
+        (self.tmpdir / "brain" / "state" / "quinn-ops-state.json").write_text("{not json")
+        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").write_text("{not json")
+        failures = ist.state_file_read_failures(workspace=self.tmpdir)
+        self.assertEqual({f["owner"] for f in failures}, {"quinn", "lox"})
+
+
 class WorkspaceDefaultTests(unittest.TestCase):
     """W29 audit [Low]: WORKSPACE_DEFAULT must not hard-code a laptop path."""
 

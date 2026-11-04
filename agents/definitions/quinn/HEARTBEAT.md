@@ -312,6 +312,8 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
    ```
 
    It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
+
+   **If the queue reports `UNVERIFIED`, the registry was not read.** `brain/` is an iCloud-backed symlink, and a state file that is only read (never written) can be evicted to a dataless placeholder that fails to read with `OSError [Errno 11] Resource deadlock avoided`. The queue renders that case explicitly (`Incident queue: 0 actionable, 0 monitored — UNVERIFIED.`), exits `3`, and lists the offending path. Do **not** report a zero from an UNVERIFIED run as a clean queue — materialise the file (`brctl download <path>`) and re-run before reporting any count.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
 3. **Always report the queue when active findings exist** (the CLI renders these lines verbatim):
    - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
