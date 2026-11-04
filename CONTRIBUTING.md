@@ -123,7 +123,7 @@ CI currently covers:
 - OpenTelemetry Node package unit tests (`otel-node-tests`)
 - Design system sync (`design-system-sync`)
 - `frontend-design-system-lint` (the frontend `@shadcn/lint` design-system lint wiring and its unit tests)
-- `no-absolute-paths-lint` (the repo lint that fails on hard-coded absolute paths such as `~/` or `/Users/<name>/` under `apps/`, `services/`, `packages/`, `agents/workflows/` and `agents/lib/`)
+- `no-absolute-paths-lint` (the repo lint that fails on hard-coded absolute paths such as `~/` or `/Users/<name>/`; its scanned roots and opt-outs are documented under *Path-lint scope* below)
 - `typecheck-gate-tests` (self-test for `scripts/typecheck-gate.mjs`, the tool the three service gates above run)
 - `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests (`infra-cloud-bootstrap-staging-tests`)
 - `health-probe-tests` (health-probe unit tests plus the observability provisioning / bootstrap / evidence / failure-inject contract tests)
@@ -168,6 +168,23 @@ Closed: see `docs/repo-audits/2026-W38.md` F4 and PR #673.
 - A TypeScript version bump can shift diagnostics; the gate hard-fails on a `tscVersion` mismatch between the baseline and the `tsc` actually run, forcing a deliberate baseline regenerate in the same PR as the bump.
 - The gate validates that `totalDiagnostics` equals the sum of the committed fingerprint counts and that the service's `typecheck` script still invokes `tsc --noEmit`; malformed metadata cannot silently weaken it.
 - Exit codes: `0` = within baseline/baseline written, `1` = ratchet or baseline violation, `2` = invocation/toolchain/environment failure (including missing generated Prisma clients or a TypeScript version mismatch).
+
+### Path-lint scope
+
+The `no-absolute-paths-lint` job runs `scripts/check-no-absolute-paths.mjs`,
+which scans a fixed set of roots and skips a fixed set of paths. Both lists
+live in the script, and both are documented here so a contributor can tell
+what the lint actually covers.
+`infra/cloud/scripts/tests/no-absolute-paths-scope.test.sh` asserts that both
+lists below match the script's own configuration in both directions, that
+every opt-out sits under a scanned root, and that the CI step invokes the lint
+with the documented roots. The documented scope therefore cannot drift away
+from the executable one.
+
+Scanned roots: `apps`, `services`, `packages`, `agents/workflows`, `agents/lib`.
+
+Opted out of the scan: `agents/workflows/feature-task/src` — the Rust workflow
+monolith, whose test fixtures and log strings ship hard-coded paths.
 
 ## System spec maintenance
 
