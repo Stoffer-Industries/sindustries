@@ -395,6 +395,88 @@ class MalformedShapeTests(unittest.TestCase):
             self.assertEqual(queue["counts"]["reportable"], 1)
 
 
+class MalformedEntryTests(unittest.TestCase):
+    """A malformed entry inside `incidents` is malformed, not skippable.
+
+    Per `agents/schemas/agent-incident-state.schema.json` every value under
+    `incidents` is an incident object. Skipping a non-object entry silently
+    discarded a record that may have been the critical one and still produced
+    a verified zero, so the file is now reported as a read failure.
+    """
+
+    def _workspace(self, tmp: str, quinn_body: str, lox_body: str) -> Path:
+        workspace = Path(tmp)
+        state_dir = workspace / "brain" / "state"
+        state_dir.mkdir(parents=True)
+        (state_dir / "quinn-ops-state.json").write_text(quinn_body)
+        (state_dir / "lox-incident-state.json").write_text(lox_body)
+        return workspace
+
+    def test_malformed_entry_is_reported_as_a_read_failure(self):
+        body = json.dumps({"incidents": {"critical-incident": "not-an-object"}})
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = self._workspace(tmp, body, json.dumps({"incidents": {}}))
+            failures = ist.state_file_read_failures(workspace)
+            self.assertEqual(len(failures), 1)
+            self.assertEqual(failures[0]["owner"], "quinn")
+            self.assertIn("`critical-incident`", failures[0]["error"])
+
+    def test_malformed_entry_never_renders_as_a_clean_zero(self):
+        body = json.dumps({"incidents": {"critical-incident": "not-an-object"}})
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = self._workspace(tmp, body, json.dumps({"incidents": {}}))
+            code = iq.main(["--workspace", str(workspace)])
+            self.assertEqual(code, 3)
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertFalse(queue["verified"])
+            text = iq.render_text(queue)
+            self.assertIn("UNVERIFIED", text)
+            self.assertNotIn("No active incident findings.", text)
+
+    def test_malformed_entry_does_not_hide_the_other_files_records(self):
+        """The mixed case: one file has a malformed entry, the other still counts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            state_dir = workspace / "brain" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "quinn-ops-state.json").write_text(
+                json.dumps({"incidents": {"broken": "not-an-object"}})
+            )
+            (state_dir / "lox-incident-state.json").write_text(
+                json.dumps(
+                    {
+                        "incidents": {
+                            "lox-critical": {
+                                "key": "lox-critical",
+                                "owner": "lox",
+                                "status": "escalated",
+                                "severity": "critical",
+                                "needsTom": True,
+                                "firstSeen": "2026-10-19T08:33:39+00:00",
+                                "lastCheckedAt": NOW.isoformat(),
+                                "lastAction": "df reported 97%",
+                            }
+                        }
+                    }
+                )
+            )
+            queue = iq.build_queue(workspace=workspace, now=NOW)
+            self.assertFalse(queue["verified"])
+            self.assertEqual(queue["counts"]["actionable"], 1)
+            text = iq.render_text(queue)
+            self.assertIn("1 incident(s) waiting on you.", text)
+            self.assertIn("Top unblock:", text)
+            self.assertIn("lox-critical (lox)", text)
+            self.assertIn("UNVERIFIED", text)
+
+    def test_cli_exit_code_is_three_for_a_malformed_entry(self):
+        body = json.dumps({"incidents": {"broken": ["not", "an", "object"]}})
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = self._workspace(tmp, body, body)
+            code = iq.main(["--workspace", str(workspace)])
+            self.assertEqual(code, 3)
+
+
 class SingleReadTests(unittest.TestCase):
     """The records and the read failures must come from the same read.
 

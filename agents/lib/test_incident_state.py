@@ -186,13 +186,20 @@ class ParseFileTests(unittest.TestCase):
         out = ist.parse_file(path)
         self.assertEqual(out, [])
 
-    def test_parse_skips_non_dict_entries(self):
+    def test_parse_non_object_entry_fails_the_file_rather_than_skipping_it(self):
+        """A malformed entry is not safely skippable.
+
+        Skipping it discarded a record that may be the critical one and still
+        produced a verified zero, so the whole registry is now a read failure.
+        """
         payload = {"incidents": {"good": {"owner": "quinn", "status": "watching"}, "bad": "not a dict"}}
         path = self.tmpdir / "quinn-ops-state.json"
         path.write_text(json.dumps(payload))
         out = ist.parse_file(path)
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["_slug"], "good")
+        self.assertEqual(out, [])
+        read = ist.read_state_file(path, owner="quinn")
+        self.assertTrue(read.failed)
+        self.assertIn("`bad`", read.error)
 
 
 class LoadAllIncidentsTests(unittest.TestCase):
@@ -371,6 +378,46 @@ class ReadStateFileTests(unittest.TestCase):
         self.assertTrue(read.failed)
         self.assertEqual(read.records, [])
         self.assertIn("UnicodeDecodeError", read.error)
+
+    def test_malformed_entry_reports_failed_with_its_slug(self):
+        """A non-object entry under `incidents` makes the registry unverifiable.
+
+        Skipping it discarded a record that may be the critical one and still
+        produced a verified zero — the same false-zero class this PR closes.
+        """
+        target = self._write(
+            "quinn-ops-state.json",
+            json.dumps({"incidents": {"critical-incident": "not-an-object"}}),
+        )
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertTrue(read.failed)
+        self.assertEqual(read.records, [])
+        self.assertIn("`critical-incident`", read.error)
+        self.assertIn("str", read.error)
+
+    def test_every_malformed_entry_is_named(self):
+        """All bad slugs are reported, not just the first one found."""
+        target = self._write(
+            "quinn-ops-state.json",
+            json.dumps({"incidents": {"a": "nope", "b": 7, "ok": {"owner": "quinn"}}}),
+        )
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertTrue(read.failed)
+        self.assertIn("`a`", read.error)
+        self.assertIn("`b`", read.error)
+
+    def test_registry_with_a_malformed_entry_is_not_verified(self):
+        """A malformed entry anywhere makes the whole registry unverified."""
+        self._write(
+            "quinn-ops-state.json",
+            json.dumps({"incidents": {"critical-incident": "not-an-object"}}),
+        )
+        self._write("lox-incident-state.json", json.dumps({"incidents": {}}))
+        registry = ist.read_registry(self.tmpdir)
+        self.assertFalse(registry.verified)
+        self.assertEqual(len(registry.failures), 1)
+        self.assertEqual(registry.failures[0]["owner"], "quinn")
+        self.assertIn("`critical-incident`", registry.failures[0]["error"])
 
     def test_read_registry_reads_each_file_once(self):
         self._write("quinn-ops-state.json", json.dumps({"incidents": {}}))
