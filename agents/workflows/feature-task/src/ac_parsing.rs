@@ -2053,4 +2053,107 @@ Lead-in.
         assert!(failures.is_empty(), "no-task-ACs short-circuit failed");
     }
 
+    /// The `pr-open` skill documents the AC evidence formats an agent may
+    /// write. Those examples are only correct if the parser accepts them, so
+    /// this test holds the documented examples to the parser rather than
+    /// trusting the prose.
+    ///
+    /// The rule this pins is the one that cost us real bounces: the skill
+    /// used to forbid *all* nested parentheses in an annotation and to
+    /// prescribe a flattened test id instead, on the belief that a nested
+    /// `)` truncated the capture. That belief was already false when it was
+    /// written — `parse_evidence` has allowed one level of nested
+    /// parentheses since `d9a9b254` (2026-09-14) — so the guidance sent
+    /// agents to rewrite real test titles such as
+    /// `real client header set (no Bearer, no cookie)` into a form that
+    /// matches no test CI actually ran.
+    #[test]
+    fn pr_open_skill_examples_parse_as_documented() {
+        // Every example the skill presents as valid must produce a
+        // recognised annotation.
+        for (label, ac_text, expected) in [
+            (
+                "plain testID",
+                "The calendar renders ten columns labelled by date. (🧪 testID: cal-render)",
+                "cal-render",
+            ),
+            (
+                "one level of nested parentheses is accepted",
+                "The calendar renders ten columns labelled by date. (🧪 testID: cal-render (desktop))",
+                "cal-render (desktop)",
+            ),
+            (
+                "not tested with a reason",
+                "The calendar renders ten columns labelled by date. (not tested: manual visual QA only)",
+                "manual visual QA only",
+            ),
+            (
+                "not code with a reason",
+                "The calendar renders ten columns labelled by date. (📄 not code: documented in docs/systems/x.md)",
+                "documented in docs/systems/x.md",
+            ),
+        ] {
+            match parse_evidence(ac_text) {
+                Some(Evidence::TestId(id)) => assert_eq!(id, expected, "{label}: testID mismatch"),
+                Some(Evidence::NotTested { reason }) => {
+                    assert_eq!(reason, expected, "{label}: reason mismatch")
+                }
+                Some(Evidence::NotCode { reason }) => {
+                    assert_eq!(reason, expected, "{label}: reason mismatch")
+                }
+                other => panic!("{label}: expected a recognised annotation, got {other:?}"),
+            }
+        }
+    }
+
+    /// Two levels of nested parentheses are NOT accepted, and the skill says
+    /// so. Pin the failure so the documented boundary is the real one.
+    #[test]
+    fn pr_open_skill_two_level_nesting_is_rejected_as_documented() {
+        let ac_text =
+            "The calendar renders ten columns labelled by date. (🧪 testID: cal-render (desktop (wide)))";
+        assert!(
+            parse_evidence(ac_text).is_none(),
+            "two levels of nested parentheses must not parse as an annotation"
+        );
+    }
+
+    /// A parenthetical in the AC *sentence* is fine, provided the PR copies
+    /// the sentence verbatim. The annotation is anchored at the end of the
+    /// line, so the sentence's own parentheses do not swallow it. What
+    /// breaks is not the evidence but the text comparison: a PR that drops
+    /// or rewrites the sentence's parenthetical is reported as "text
+    /// altered". The skill says to copy the sentence verbatim; pin the
+    /// behaviour that makes that advice true.
+    #[test]
+    fn pr_open_skill_parenthetical_in_ac_text_keeps_the_annotation() {
+        let ac_text =
+            "The calendar renders ten columns labelled by date (ten, exactly). (🧪 testID: cal-render)";
+        assert!(
+            matches!(parse_evidence(ac_text), Some(Evidence::TestId(ref id)) if id == "cal-render"),
+            "a parenthetical in the AC sentence must not swallow the trailing annotation"
+        );
+
+        // The same sentence with the parenthetical dropped is a text
+        // alteration, not an evidence problem.
+        let task_acs = vec![(
+            "AC1".to_string(),
+            "The calendar renders ten columns labelled by date (ten, exactly).".to_string(),
+        )];
+        let body = "## Acceptance Criteria\n\
+            - [x] AC1: The calendar renders ten columns labelled by date. (🧪 testID: cal-render)";
+        let failures = task_acs_vs_delivery_pr_failures(
+            "5e35dc25-aed5-4064-8f11-a99413d18612",
+            &task_acs,
+            &[DeliveryPrEvidence {
+                url: "https://github.com/Stoffer-Industries/sindustries/pull/0".to_string(),
+                body: body.to_string(),
+                files: Vec::new(),
+            }],
+        );
+        assert!(
+            failures.iter().any(|f| f.contains("text altered")),
+            "dropping the sentence's parenthetical must be reported as a text alteration: {failures:?}"
+        );
+    }
 }
