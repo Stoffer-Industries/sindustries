@@ -4,37 +4,55 @@
   "description": "The model is asked to review a Rust file that contains three deliberately planted defects. Each expected finding is anchored to a keyword that any correct review must contain, so the grade is deterministic rather than a judgement call about prose.",
   "why_it_matters": "Review quality is the eval that decides whether a cheaper model can take PR review off the factory's critical path. It needs a known right answer, and it needs to be able to measure false positives — a reviewer that flags everything scores as well as one that flags nothing.",
   "transport": "infer",
-  "prompt": "You are reviewing a Rust file for real production defects.\n\nThe file is at `qa_verdicts.rs`. Read it with the read tool.\n\nContext: it models QA-verdict parsing for a task-tracking workflow. The wire types are modelled after a Tasks API v1 JSON API; the structs are deserialised from that JSON, and the verdict functions decide whether a QA verdict is stale and whether a QA agent's note reports a deferral.\n\nFind real defects:\n- places where the code misbehaves on realistic inputs (including the real API JSON shape, not just the shape the tests construct)\n- places where a documented contract in a doc comment is not upheld by the code\n- places where a unit test would pass while the production path fails\n\nIgnore style, naming, missing docs, clippy lints, or error-handling preferences unless they cause wrong behaviour. Do not modify any file. Do not post comments anywhere.\n\nReply in EXACTLY this format, one block per finding, nothing else before or after:\n\nFINDING: <short title>\nLOC: <line number or line range>\nEXPLAIN: <the exact input or condition that breaks it, and the resulting wrong behaviour>\nFIX: <suggested fix>\n\nIf you find no defects, reply with exactly: NO FINDINGS\nCap yourself at 6 findings, most defensible first.",
-  "prompt_files": ["fixtures/qa_verdicts.rs"],
+  "prompt": "You are reviewing a Rust file for real production defects.\n\nThe file `qa_verdicts.rs` is reproduced in full below.\n\nContext: it models QA-verdict parsing for a task-tracking workflow. The wire types are modelled after a Tasks API v1 JSON API; the structs are deserialised from that JSON, and the verdict functions decide whether a QA verdict is stale and whether a QA agent's note reports a deferral.\n\nFind real defects:\n- places where the code misbehaves on realistic inputs (including the real API JSON shape, not just the shape the tests construct)\n- places where a documented contract in a doc comment is not upheld by the code\n- places where a unit test would pass while the production path fails\n\nIgnore style, naming, missing docs, clippy lints, or error-handling preferences unless they cause wrong behaviour. Do not modify any file. Do not post comments anywhere.\n\nReply in EXACTLY this format, one block per finding, nothing else before or after:\n\nFINDING: <short title>\nLOC: <line number or line range>\nEXPLAIN: <the exact input or condition that breaks it, and the resulting wrong behaviour>\nFIX: <suggested fix>\n\nIf you find no defects, reply with exactly: NO FINDINGS\nCap yourself at 6 findings, most defensible first.",
+  "prompt_files": [
+    "fixtures/qa_verdicts.rs"
+  ],
   "grader": "expected_findings",
   "grader_config": {
     "expected_findings": [
       {
         "id": "taskcomment-missing-camelcase",
         "summary": "TaskComment has no camelCase rename, so createdAt never deserialises into created_at and the stale-verdict guard sees no timestamps.",
-        "any_of": ["camelcase", "rename_all"]
+        "any_of": [
+          "camelcase",
+          "rename_all"
+        ]
       },
       {
         "id": "deferral-negation-wrong-string",
         "summary": "qa_agent_deferred negates against the original-case note and the literal 'no deferred', so a clean verification reads as a deferral.",
-        "any_of": ["qa_agent_deferred", "no deferred", "no blocked or deferred"]
+        "any_of": [
+          "qa_agent_deferred",
+          "no deferred",
+          "no blocked or deferred"
+        ]
       },
       {
         "id": "evidence-regex-stops-at-first-paren",
         "summary": "The evidence capture group [^)]+ stops at the first ')', truncating a test id that contains a nested parenthetical.",
-        "any_of": ["parse_evidence", "nested"]
+        "any_of": [
+          "parse_evidence",
+          "nested"
+        ]
       }
     ],
     "must_not_mention": [
       {
         "id": "severity-rank-is-clean",
         "summary": "severity_rank's match arms are correct and must not be reported as a defect.",
-        "any_of": ["severity_rank"]
+        "any_of": [
+          "severity_rank"
+        ]
       }
     ]
   },
   "controls": {
-    "must_pass": ["fixtures/control-pass.md"],
-    "must_fail": ["fixtures/control-fail.md"]
+    "must_pass": [
+      "fixtures/control-pass.md"
+    ],
+    "must_fail": [
+      "fixtures/control-fail.md"
+    ]
   }
 }
