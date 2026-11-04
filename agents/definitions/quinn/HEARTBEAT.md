@@ -258,14 +258,20 @@ Quinn maintains a persistent operational findings registry at `brain/state/quinn
 Only multi-task root-cause incidents populate it; an ordinary task-level wait
 leaves it empty.
 
-**Reading from both agents (preferred path):** Use the shared parser at `agents/lib/incident_state.py`. Import it from the agents package and call `load_all_incidents()` / `needs_tom()` instead of hand-rolling the schema. The parser handles Lox's file too and normalizes legacy shapes on the fly, so Quinn's heartbeat does not need to branch on file format.
+**Reading from both agents (preferred path):** Use the queue CLI (step 1) — it is the only path that reports a read failure. If you need the records directly, use the shared parser at `agents/lib/incident_state.py` and check `verified`: call `read_registry()` / `needs_tom()` instead of hand-rolling the schema. The parser handles Lox's file too and normalizes legacy shapes on the fly, so Quinn's heartbeat does not need to branch on file format. **Do not use `load_all_incidents()`** — it returns only the records and discards the read failures, so a state file that could not be read comes back as an empty list.
 
 ```python
 import sys
 sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
-from agents.lib.incident_state import load_all_incidents, needs_tom, reportable_incidents
+from agents.lib.incident_state import read_registry, needs_tom, reportable_incidents
 
-all_incidents = reportable_incidents(load_all_incidents())
+registry = read_registry()
+if not registry.verified:
+    # A state file could not be read. Report it; do not treat it as empty.
+    for failure in registry.failures:
+        print(f"UNVERIFIED: {failure['path']} — {failure['error']}")
+    raise SystemExit(3)
+all_incidents = reportable_incidents(registry.records)
 for inc in needs_tom(all_incidents):
     # include in heartbeat output, set escalatedAt, etc.
     ...
@@ -313,15 +319,15 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
 
    It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
 
-   **If the queue reports `UNVERIFIED`, the registry was not read.** `brain/` is an iCloud-backed symlink, and a state file that is only read (never written) can be evicted to a dataless placeholder that fails to read with `OSError [Errno 11] Resource deadlock avoided`. The queue renders that case explicitly (`Incident queue: 0 actionable, 0 monitored — UNVERIFIED.`), exits `3`, and lists the offending path. Do **not** report a zero from an UNVERIFIED run as a clean queue — materialise the file (`brctl download <path>`) and re-run before reporting any count.
+   **If the queue reports `UNVERIFIED`, the registry was not read.** `brain/` is an iCloud-backed symlink, and a state file that is only read (never written) can be evicted to a dataless placeholder that fails to read with `OSError [Errno 11] Resource deadlock avoided`. A file that is valid JSON but the wrong shape (a JSON array, or an object with no `incidents`/`ops` object) counts as malformed too. In that case the queue renders `Incident queue: N actionable, M monitored — UNVERIFIED.`, exits `3`, and lists the offending path. **UNVERIFIED is an addition to the summary, not a replacement for it**: the counts and the `🔴 Top unblock:` line for the records that did load are still printed and must still be reported. Do **not** present the counts from an UNVERIFIED run as a complete or verified queue — report them alongside the UNVERIFIED banner, and materialise the file (`brctl download <path>`) so the next run is verified.
 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
 3. **Always report the queue when active findings exist** (the CLI renders these lines verbatim):
-   - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
+   - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.` (an UNVERIFIED run appends ` — UNVERIFIED.` and the offending path — report that line verbatim too).
    - If actionable count is 0, output no escalation line and do not reply `HEARTBEAT_OK`; the queue summary is the useful heartbeat output.
    - If actionable count > 0, also output: `<actionable count> incident(s) waiting on you.`
    - Sort actionable candidates by severity (critical → high → medium → low), then by `firstSeen` (oldest first). Pick the top candidate and output: `🔴 Top unblock: <what it is and exactly what Tom needs to do>` (or 🟠/🟡 for high/medium).
 4. Repeat the compact queue summary while active findings exist, even if the counts are unchanged. Tom should be able to judge whether incident actioning needs prioritisation from the heartbeat alone.
-5. If there are no active findings at all, output nothing and reply `HEARTBEAT_OK` instead.
+5. If there are no active findings at all **and the CLI exited `0`**, output nothing and reply `HEARTBEAT_OK` instead. If the CLI exited `3`, the registry was not read: never reply `HEARTBEAT_OK` — report the UNVERIFIED summary and the offending path, because an unreadable registry is not an empty one.
 
 **State file read/write pattern (unified schema, task 75ec1c8c):**
 ```python
@@ -335,26 +341,39 @@ STATE_FILE = '/Users/quinnstoffer/.openclaw/workspace/brain/state/quinn-ops-stat
 try:
     sys.path.insert(0, "/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries")
     from agents.lib.incident_state import (
-        load_all_incidents,
+        read_registry,
         needs_tom as _shared_needs_tom,
         reportable_incidents,
     )
     def read_all_incidents():
-        return reportable_incidents(load_all_incidents())
+        # An unreadable registry is not an empty one. `read_registry` reports
+        # the failure alongside the records, so a partial read stays visible
+        # instead of silently becoming a clean zero.
+        registry = read_registry()
+        if not registry.verified:
+            raise RuntimeError(
+                "incident registry not fully read: "
+                + "; ".join(f"{f['path']} — {f['error']}" for f in registry.failures)
+            )
+        return reportable_incidents(registry.records)
     def read_needs_tom():
         return _shared_needs_tom(read_all_incidents())
-except Exception:
+except ImportError:
     def read_all_incidents():
-        return []  # parser unavailable; callers should log and continue
+        # Fail closed. An empty list here is indistinguishable from "no
+        # incidents", which is the false zero this whole contract exists to
+        # prevent. Report the error and stop instead.
+        raise RuntimeError("incident parser unavailable; report the error and stop")
     def read_needs_tom():
-        return []
+        raise RuntimeError("incident parser unavailable; report the error and stop")
 
 def read_ops_state():
-    try:
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    except Exception:
-        return {"incidents": {}}  # unified key (was "ops" pre-75ec1c8c)
+    # A read failure must NOT become an empty registry: `write_ops_state`
+    # truncates the file, so a swallowed error would destroy every incident
+    # in it and the next run would read a valid-but-empty registry as a
+    # verified clean queue. Raise instead, and let the caller report and stop.
+    with open(STATE_FILE) as f:
+        return json.load(f)  # unified key (was "ops" pre-75ec1c8c)
 
 def write_ops_state(state):
     with open(STATE_FILE, 'w') as f:
