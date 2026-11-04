@@ -83,12 +83,17 @@ export const ATTESTATION_REASONS = {
   EXPIRED: 'attestation_expired'
 } as const;
 
-/**
- * @typedef {{ prNumber?: unknown, headSha?: unknown, acSectionDigest?: unknown,
- *            failures?: unknown, verifiedAt?: unknown }} QaAttestation
- * @typedef {{ ok: true, prNumber: number, headSha: string, acSectionDigest: string }
- *          | { ok: false, reason: string, message: string, failures: string[] }} AttestationVerdict
- */
+export type QaAttestation = {
+  prNumber?: unknown;
+  headSha?: unknown;
+  acSectionDigest?: unknown;
+  failures?: unknown;
+  verifiedAt?: unknown;
+};
+
+export type AttestationVerdict =
+  | { ok: true; prNumber: number; headSha: string; acSectionDigest: string }
+  | { ok: false; reason: string; message: string; failures: string[] };
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;

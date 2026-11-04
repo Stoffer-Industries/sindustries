@@ -25,9 +25,14 @@ import { prisma } from '../src/lib/prisma';
  * `budget-api-db-integration` job sets the env var so the test runs there.
  *
  * CI Postgres service is throwaway (one container per job), so `TRUNCATE …
- * CASCADE` is safe; no other job shares this database. If a future CI
- * topology change shares the Postgres service across jobs, this test's
- * truncate would erase data mid-run — keep that constraint in mind.
+ * CASCADE` is safe *between* jobs — no other job shares this database. It
+ * is not safe *within* the job: this file and its sibling
+ * `akahuBackfillDb.test.ts` both truncate these same tables in their
+ * `beforeAll`, and vitest runs test files in parallel workers by default,
+ * so a shared truncate would wipe the other file's fixtures mid-test. The
+ * `budget-api-db-integration` job therefore runs each integration file in
+ * its own vitest invocation, sequentially. Keep that constraint in mind if
+ * the CI topology changes.
  */
 
 // Stable user UUIDs so that re-runs against the same DB (rare but possible
@@ -101,6 +106,7 @@ d('budget-api ownership contract — real Postgres (task 1eb22a09)', () => {
     // sensitive (the catalog preserves the quoted PascalCase form).
     await prisma.$executeRawUnsafe(`
       TRUNCATE TABLE
+        "budget_api"."AkahuBackfillRun",
         "budget_api"."CategorizationFeedback",
         "budget_api"."BalanceAlertConfig",
         "budget_api"."NotificationEvent",

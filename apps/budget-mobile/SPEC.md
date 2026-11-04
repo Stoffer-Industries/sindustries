@@ -16,6 +16,18 @@ Budget Mobile gives Tom an on-device view of Sindustries budget accounts, balanc
    - The app opens Settings.
    - Settings shows the current update ID, short update ID, runtime version, EAS channel, update creation timestamp, whether updates are enabled, and whether the launch is embedded or OTA.
    - User can tap **Check for updates** to ask Expo Updates whether a compatible OTA update is available.
+4. **Sync Akahu transactions**
+   - User taps **Sync now**, or links Akahu for the first time.
+   - The app calls `POST /api/v1/akahu/sync` and reads the response's completeness fields.
+
+## Sync completeness
+
+The sync route reports whether the requested window was covered in full. The app must not claim a complete sync when the response says otherwise.
+
+- `complete: true` — the window was traversed to the end. The app shows `Sync complete` (or `Akahu linked and synced` after a first-time link).
+- `complete: false` — the window was only partially traversed, so some history may be missing. The app shows `Sync incomplete — some history may be missing` instead of `Sync complete`.
+- A failed sync is reported as before: the status is cleared and an alert names the failure.
+- `AKAHU_TIMEOUT` and `AKAHU_CANCELLED` are distinct failures. A timeout means the provider exceeded the sync budget and no checkpoint was advanced; a cancellation means the request was abandoned. Both leave the checkpoint unchanged, so the next sync retries the same window.
 
 ## Screens
 

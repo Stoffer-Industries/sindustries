@@ -471,6 +471,12 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
             // Ordinary evidence failures belong to the delivery owner. A
             // blocked QA verdict is not an OpenClaw capability handoff and
             // must not fall through to Ash/Quinn/Tom escalation.
+            //
+            // Task `dbce028f`: this arm only fires for a verifier's
+            // evidence verdict. The lobster's generic QA-gate prompt (same
+            // tag, different author) is a prompt to the QA gate owner and
+            // falls through to the Ash arm below instead of re-paging the
+            // delivery assignee on every sweep.
             task.assignee.clone()
         }
         "doing"
@@ -479,13 +485,25 @@ pub(crate) fn workflow_attention_owner(task: &Task) -> Option<String> {
                 && !task_approvals::qa_agent_deferred_waiting_on_capability_extension(task)
                 && !ash_was_last_commenter(task) =>
         {
+            // The QA gate is open and nobody has verified the delivery, so
+            // the gate owner is the actor who must act next. Task
+            // `dbce028f`: this is where a generic QA-gate prompt lands —
+            // it names Ash, so the stack names Ash.
             Some("Ash".to_string())
         }
         "doing"
             if !product_spec_parsing::implementer_pr_urls(task).is_empty()
                 && task_approvals::qa_agent_verified(task) =>
         {
-            task.assignee.clone()
+            // A QA-verified delivery has no outstanding blocker. What remains
+            // is ordinary delivery work for the assignee — driving the
+            // `doing → acceptance` transition — which the assignee queue
+            // already surfaces. Explicit attention rows are reserved for
+            // genuine blockers and cross-role handoffs (`docs/systems/tasks.md`,
+            // "Task ownership planes"), so the verified path resolves to no
+            // explicit row instead of re-paging the delivery assignee on
+            // every sweep (task `1e8a430a`, decision D3).
+            None
         }
         "acceptance" if !task_approvals::accepted_structured(task) => Some("Tom".to_string()),
         _ => None,
@@ -698,6 +716,12 @@ pub(crate) fn workflow_attention_reason(task: &Task, owner: &str) -> String {
         "ash" => "QA verification is required for the delivered implementation.".to_string(),
         "tom" => "Final acceptance approval is required.".to_string(),
         "rowan" => {
+            // Task `dbce028f`: this note is written only when a verifier's
+            // evidence verdict routed the task back to the delivery owner.
+            // The lobster's generic QA-gate prompt no longer reaches this
+            // branch, so the note stays true whenever it is written. The
+            // string itself is unchanged: `automated_delivery_checklist_slot`
+            // matches it against rows already persisted with it.
             "The delivery owner must address the outstanding workflow evidence before QA can act."
                 .to_string()
         }
@@ -1378,7 +1402,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_sends_resolved_capability_deferral_to_ash_then_rowan() {
+    fn routing_sends_resolved_capability_deferral_to_ash_then_stops_paging_the_assignee() {
         let mut task = routing_task("doing", &["Quinn", "Tom"]);
         task.comments.push(TaskComment {
             author: Some("Rowan".to_string()),
@@ -1410,7 +1434,190 @@ mod tests {
         });
         task.approvals.push(approval_row("qa_agent", "approved"));
 
-        assert_eq!(reconciled_attention_owners(&task), vec!["Rowan"]);
+        // A QA-verified delivery has no outstanding blocker, so the workflow
+        // resolves to no explicit attention owner (task `1e8a430a`, D3). The
+        // delivery assignee is no longer paged; the Quinn escalation row is
+        // preserved because the reconciler only clears workflow-generated
+        // head rows.
+        assert_eq!(workflow_attention_owner(&task), None);
+        let stack = reconciled_attention_owners(&task);
+        assert!(
+            !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Rowan")),
+            "a QA-verified delivery must not page the delivery assignee: {stack:?}"
+        );
+    }
+
+    // ---- task 1e8a430a: routing precedence over stale QA blocked markers ----
+
+    /// AC4: a stale blocked marker plus a fresh approval selects the
+    /// verified path — no explicit attention owner, and no re-added
+    /// delivery assignee.
+    #[test]
+    fn stale_blocked_marker_with_fresh_approval_selects_the_verified_path() {
+        for (name, raw) in [
+            (
+                "de9d8594",
+                include_str!("../fixtures/qa_routing/de9d8594-stale-qa-block.json"),
+            ),
+            (
+                "0a803329",
+                include_str!("../fixtures/qa_routing/0a803329-stale-qa-block.json"),
+            ),
+        ] {
+            let task: Task = serde_json::from_str(raw)
+                .unwrap_or_else(|error| panic!("{name} fixture must deserialize: {error}"));
+
+            assert_eq!(
+                workflow_attention_owner(&task),
+                None,
+                "{name}: a stale blocked marker must not select the delivery assignee"
+            );
+            let stack = reconciled_attention_owners(&task);
+            assert!(
+                !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Rowan")),
+                "{name}: the sweep must not re-add the delivery assignee: {stack:?}"
+            );
+        }
+    }
+
+    /// AC4: a genuinely newer blocked marker still selects the delivery
+    /// assignee.
+    ///
+    /// Task `dbce028f`: only a verifier's evidence verdict is a delivery
+    /// block. The fixture's marker is the lobster's generic QA-gate prompt,
+    /// so the verdict shape is staged by re-authoring that one comment —
+    /// the payload, the tag and the timestamps stay identical.
+    #[test]
+    fn current_blocked_marker_selects_the_delivery_assignee() {
+        let mut task: Task = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/0a803329-stale-qa-block.json"
+        ))
+        .expect("fixture must deserialize");
+
+        // Make the blocked marker genuinely newer than the attestation.
+        for comment in task.comments.iter_mut() {
+            let text = comment.text.as_deref().unwrap_or_default();
+            if text.starts_with("[qa-agent-blocked]") {
+                comment.created_at = Some("2026-10-28T06:00:00.000Z".to_string());
+                comment.author = Some("Ash".to_string());
+            }
+        }
+
+        assert_eq!(
+            workflow_attention_owner(&task),
+            Some("Rowan".to_string()),
+            "a blocked marker newer than the attestation must still route to the delivery assignee"
+        );
+        assert!(reconciled_attention_owners(&task)
+            .iter()
+            .any(|owner| owner.eq_ignore_ascii_case("Rowan")));
+    }
+
+    /// AC1/AC4: the same payload with the marker left as the lobster's
+    /// generic QA-gate prompt must not select the delivery assignee.
+    #[test]
+    fn a_current_qa_gate_prompt_does_not_select_the_delivery_assignee() {
+        let mut task: Task = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/0a803329-stale-qa-block.json"
+        ))
+        .expect("fixture must deserialize");
+
+        for comment in task.comments.iter_mut() {
+            let text = comment.text.as_deref().unwrap_or_default();
+            if text.starts_with("[qa-agent-blocked]") {
+                comment.created_at = Some("2026-10-28T06:00:00.000Z".to_string());
+            }
+        }
+
+        assert_ne!(
+            workflow_attention_owner(&task),
+            Some("Rowan".to_string()),
+            "the lobster's generic QA-gate prompt must not route to the delivery assignee"
+        );
+        assert!(
+            !reconciled_attention_owners(&task)
+                .iter()
+                .any(|owner| owner.eq_ignore_ascii_case("Rowan")),
+            "the sweep must not re-add the delivery assignee"
+        );
+    }
+
+    // ---- task dbce028f: QA-gate prompt vs evidence verdict ----
+
+    /// AC1: a generic QA-gate prompt on a delivery-complete task routes to
+    /// the QA gate owner, never to the delivery assignee.
+    #[test]
+    fn qa_gate_prompt_routes_to_the_qa_gate_owner() {
+        let task: Task = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/2c782afb-qa-gate-prompt.json"
+        ))
+        .expect("fixture must deserialize");
+
+        assert_eq!(
+            workflow_attention_owner(&task),
+            Some("Ash".to_string()),
+            "a generic QA-gate prompt must route to the QA gate owner"
+        );
+        let stack = reconciled_attention_owners(&task);
+        assert!(
+            !stack.iter().any(|owner| owner.eq_ignore_ascii_case("Rowan")),
+            "the sweep must not re-add the delivery assignee: {stack:?}"
+        );
+    }
+
+    /// AC2: a verifier's per-AC verdict on the same payload still routes to
+    /// the delivery assignee, so a real evidence failure keeps its owner.
+    #[test]
+    fn evidence_verdict_selects_the_delivery_assignee() {
+        let task: Task = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/2c782afb-evidence-verdict.json"
+        ))
+        .expect("fixture must deserialize");
+
+        assert_eq!(
+            workflow_attention_owner(&task),
+            Some("Rowan".to_string()),
+            "an evidence verdict must route to the delivery assignee"
+        );
+        assert!(reconciled_attention_owners(&task)
+            .iter()
+            .any(|owner| owner.eq_ignore_ascii_case("Rowan")));
+    }
+
+    /// AC4: the two fixtures differ only in the blocked marker comment, so
+    /// the routing difference is caused by the marker kind alone.
+    #[test]
+    fn both_marker_kinds_share_the_fixture_corpus() {
+        let mut prompt: serde_json::Value = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/2c782afb-qa-gate-prompt.json"
+        ))
+        .expect("prompt fixture must parse");
+        let mut verdict: serde_json::Value = serde_json::from_str(include_str!(
+            "../fixtures/qa_routing/2c782afb-evidence-verdict.json"
+        ))
+        .expect("verdict fixture must parse");
+
+        for value in [&mut prompt, &mut verdict] {
+            let object = value.as_object_mut().expect("fixtures must be objects");
+            object.remove("_source");
+            object.remove("id");
+            object.remove("title");
+            let comments = object
+                .get_mut("comments")
+                .and_then(|comments| comments.as_array_mut())
+                .expect("fixtures must carry comments");
+            comments.retain(|comment| {
+                !comment
+                    .get("text")
+                    .and_then(|text| text.as_str())
+                    .is_some_and(|text| text.contains("[qa-agent-blocked]"))
+            });
+        }
+
+        assert_eq!(
+            prompt, verdict,
+            "the paired fixtures must differ only in the blocked marker comment"
+        );
     }
 
     #[test]

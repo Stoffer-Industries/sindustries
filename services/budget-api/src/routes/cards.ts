@@ -156,7 +156,12 @@ cardsRouter.get(
     const to = new Date(Date.UTC(y, m, 1, 0, 0, 0));
 
     const txns = await prisma.transaction.findMany({
-      where: { cardId, occurredAt: { gte: from, lt: to }, direction: 'debit' },
+      where: {
+        cardId,
+        userId: req.session!.userId,
+        occurredAt: { gte: from, lt: to },
+        direction: 'debit'
+      },
       select: { amountCents: true }
     });
 

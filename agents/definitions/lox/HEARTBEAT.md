@@ -94,7 +94,7 @@ On every heartbeat:
 5. For each unresolved item:
    - If state is `resolved`, skip it.
    - If state is `repair_attempted` or `blocked` and `nextRetryAt` is still in the future, skip it.
-   - Otherwise, look up the runbook in `~/.openclaw/workspace/docs/infra/runbooks/` (operational runbooks no longer live in this repo — `codebases/sindustries/` is the Edge-managed canonical checkout, see PR #583). Workspace-local runbooks are indexed in `~/.openclaw/workspace/infra/RUNBOOKS.md`.
+   - Otherwise, look up the runbook in the **workspace repo** (`Stoffer-Industries/workspace`) under `infra/runbooks/` (operational runbooks do not live in this repo — `codebases/sindustries/` is the Edge-managed canonical checkout, see PR #583). The canonical index is `infra/RUNBOOKS.md` in that same repo. The older `docs/infra/runbooks/` path in the workspace repo is legacy — check the index before assuming a runbook is missing.
 6. For each unresolved item that maps to a safe automatic runbook, run that runbook's status command.
 7. If the status is healthy, write/update state as `resolved` and stay quiet unless another item needs action.
 8. If the status is unhealthy and the runbook says repair is safe, run the repair command once.
@@ -192,8 +192,8 @@ cd ~/.openclaw/workspace && python3 infra/lox_incident_state.py compact
 It preserves every incident key and every machine-readable field, archives the
 original free text to `brain/state/archive/`, backs up the full original, and
 writes atomically. Runbook:
-`~/.openclaw/workspace/infra/runbooks/incident-state-file-context-bloat.md`
-(workspace repo — indexed in `~/.openclaw/workspace/infra/RUNBOOKS.md`).
+`infra/runbooks/incident-state-file-context-bloat.md`
+(workspace repo `Stoffer-Industries/workspace` — indexed in that repo's `infra/RUNBOOKS.md`).
 
 ## State Shape
 
@@ -268,7 +268,7 @@ This check is the **same diagnostic that caught Ivy's stall on 2026-06-05** (her
 
 **Known false-positive history (2026-06-07):** Lox incorrectly flagged Ivy's main session as stale because (a) the staleness check was reading the wrong session type for isolatedSession agents, and (b) the expected cadence was listed as 10 min when the actual config is 4h. Both bugs are fixed in this update.
 
-The full diagnostic + recovery procedure (formerly `infra/runbooks/agent-main-session-stale-no-heartbeat.md`, removed in PR #583) is now documented in Lox's `MEMORY.md` under the agent-main-session-stale-no-heartbeat note; any follow-up runbook should land in `~/.openclaw/workspace/docs/infra/runbooks/`.
+The full diagnostic + recovery procedure (formerly `infra/runbooks/agent-main-session-stale-no-heartbeat.md`, removed in PR #583) is now documented in Lox's `MEMORY.md` under the agent-main-session-stale-no-heartbeat note; any follow-up runbook should land in the **workspace repo** (`Stoffer-Industries/workspace`) under `infra/runbooks/`, with a row in that repo's `infra/RUNBOOKS.md` index.
 
 ## Common false-positive patterns
 
@@ -282,13 +282,13 @@ When a heartbeat/turn needs to check "does this file/dir exist?" across multiple
 # BAD — exit 2 on first missing dir, exit 1 on first unmatched glob.
 # OpenClaw flags the whole chain as a failure even though each line's
 # output is what we wanted.
-ls -la ~/.openclaw/workspace/docs/infra/runbooks/ && \
+ls -la ~/.openclaw/workspace/infra/runbooks/ && \
 ls -la .../brain/state/lox-incident-state.json
 
 # GOOD — `|| true` flattens each probe's exit to 0, so the chain stays
 # green when "not found" is the answer. Read each line's output to
 # classify the result.
-ls -la ~/.openclaw/workspace/docs/infra/runbooks/ || true
+ls -la ~/.openclaw/workspace/infra/runbooks/ || true
 ls -la .../brain/state/lox-incident-state.json || true
 ```
 
@@ -312,6 +312,27 @@ brctl status brain/  # may return error 30 even when brain is fully readable
 Tom confirmed brain operational on 2026-07-25 (Telegram msg #3897) while `brctl status` was still returning error 30. The `icloud-client-zone-dead-2026-07-22` incident was reclassified `false_positive` on that basis. Only re-open an iCloud brain incident if the direct read probe itself fails.
 
 ---
+
+## Inter-session message payloads (an empty body is a no-op)
+
+An inter-session message can arrive with **no body** — routing metadata only
+(`sourceSession`, `sourceTool`) — and still wake a heartbeat turn.
+
+- **Treat an empty payload as a no-op.** Do not infer an instruction from the fact that a turn
+  fired, do not re-derive context, and do not re-log it as new evidence.
+- **Before assuming loss, read the source transcript.** `sessions_history` on the source session
+  key holds the authoritative body. A `pendingInputs` row with `state: "queued"` is an
+  accepted-but-unbound input (late binding), not data loss.
+- **A duplicate empty copy of a message you already received is noise, not news** — nothing was
+  missed; check whether that source already delivered a body earlier in the session.
+- **Do not reply to an empty payload.** Replying to noise produces more noise.
+- Work already in flight continues; this rule only governs what an *empty* payload can start.
+
+Runbook: `infra/runbooks/inter-session-relay-empty-payload-redelivery.md` in the **workspace
+repo** (`Stoffer-Industries/workspace`) — landed on that repo's `main` in workspace PR #86,
+and indexed in `infra/RUNBOOKS.md`.
+Tracked as incident `inter-session-relay-empty-payload-redelivery-2026-10-26` — Lox-owned,
+no Tom page (noise, not loss).
 
 ## Retro notes scan
 

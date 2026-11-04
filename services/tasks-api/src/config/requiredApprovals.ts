@@ -59,6 +59,14 @@ export interface RequiredApprovalsConfig {
 }
 
 /**
+ * The shape `parseRequiredApprovalsYaml` actually produces: everything in
+ * `RequiredApprovalsConfig` except `path` and `hash`, which only exist once
+ * `loadRequiredApprovalsConfig` has merged the parsed file over the
+ * built-in default and fingerprinted the result.
+ */
+export type ParsedRequiredApprovals = Omit<RequiredApprovalsConfig, 'path' | 'hash'>;
+
+/**
  * Built-in default owner per approval type. Used both as the fallback when
  * the loaded config does not override a type and as the seed for the
  * `DEFAULT_REQUIRED_APPROVALS.owners` snapshot. Approval-type → owner
@@ -135,7 +143,7 @@ function resolveDefaultConfigPath(): string {
  * `owners:` block are silently dropped — a typo there should not take the
  * loader down, and the merge layer falls back to the default owner.
  */
-export function parseRequiredApprovalsYaml(content: string): RequiredApprovalsConfig {
+export function parseRequiredApprovalsYaml(content: string): ParsedRequiredApprovals {
   const lines = content.split(/\r?\n/);
   let version: number | null = null;
   const mappings: Record<string, string[]> = {};

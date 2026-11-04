@@ -12,7 +12,8 @@ const prismaMock: any = {
   task: {
     findFirst: vi.fn()
   },
-  $transaction: vi.fn()
+  $transaction: vi.fn(),
+  $queryRaw: vi.fn()
 };
 
 vi.mock('../src/lib/prisma.ts', () => ({
@@ -31,6 +32,7 @@ beforeEach(() => {
     return Promise.resolve(input);
   });
   prismaMock.task.findFirst.mockResolvedValue({ id: VALID_UUID });
+  prismaMock.$queryRaw.mockResolvedValue([]);
 });
 
 describe('POST /api/v1/feature-task-analytics/events', () => {
@@ -345,9 +347,16 @@ describe('GET /api/v1/feature-task-analytics/tasks/:taskId/events', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data).toHaveLength(1);
+    expect(response.body.pagination).toEqual({
+      limit: 500,
+      returned: 1,
+      hasMore: false,
+      nextCursor: null
+    });
     expect(prismaMock.featureTaskAnalyticsEvent.findMany).toHaveBeenCalledWith({
       where: { taskId: VALID_UUID },
-      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }]
+      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      take: 501
     });
   });
 
@@ -367,6 +376,128 @@ describe('GET /api/v1/feature-task-analytics/tasks/:taskId/events', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('INVALID_TASK_ID');
+  });
+  it('paginates with an opaque cursor without skipping the first omitted event', async () => {
+    const occurredAt = new Date('2026-07-25T08:00:00.000Z');
+    const first = {
+      id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      taskId: VALID_UUID,
+      eventKey: 'k1',
+      eventType: 'gate_failure',
+      occurredAt,
+      createdAt: occurredAt
+    };
+    const second = {
+      ...first,
+      id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      eventKey: 'k2'
+    };
+    prismaMock.featureTaskAnalyticsEvent.findMany
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValueOnce([second]);
+
+    const app = createApp();
+    const firstPage = await authedRequest(app)
+      .get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`)
+      .query({ limit: 1 });
+
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.data.map((event) => event.id)).toEqual([first.id]);
+    expect(firstPage.body.pagination).toMatchObject({
+      limit: 1,
+      returned: 1,
+      hasMore: true
+    });
+    expect(firstPage.body.pagination.nextCursor).toEqual(expect.any(String));
+
+    const secondPage = await authedRequest(app)
+      .get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`)
+      .query({ limit: 1, cursor: firstPage.body.pagination.nextCursor });
+
+    expect(secondPage.status).toBe(200);
+    expect(secondPage.body.data.map((event) => event.id)).toEqual([second.id]);
+    expect(secondPage.body.pagination.hasMore).toBe(false);
+    expect(prismaMock.featureTaskAnalyticsEvent.findMany).toHaveBeenLastCalledWith({
+      where: {
+        taskId: VALID_UUID,
+        OR: [
+          { occurredAt: { gt: occurredAt } },
+          { occurredAt, createdAt: { gt: occurredAt } },
+          { occurredAt, createdAt: occurredAt, id: { gte: second.id } }
+        ]
+      },
+      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      take: 2
+    });
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])('rejects invalid limit %s', async (limit) => {
+    const app = createApp();
+    const response = await authedRequest(app)
+      .get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`)
+      .query({ limit });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_LIMIT');
+  });
+
+  it('clamps the event limit to 2,000', async () => {
+    prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue([]);
+
+    const app = createApp();
+    const response = await authedRequest(app)
+      .get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`)
+      .query({ limit: 9999 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.pagination.limit).toBe(2000);
+    expect(prismaMock.featureTaskAnalyticsEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 2001 })
+    );
+  });
+
+  it('rejects a malformed cursor', async () => {
+    const app = createApp();
+    const response = await authedRequest(app)
+      .get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`)
+      .query({ cursor: 'not-a-valid-cursor' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_CURSOR');
+  });
+
+  it('trims a page to the 1 MiB response budget and preserves a resume cursor', async () => {
+    const occurredAt = new Date('2026-07-25T08:00:00.000Z');
+    const makeEvent = (id, eventKey) => ({
+      id,
+      taskId: VALID_UUID,
+      eventKey,
+      eventType: 'gate_failure',
+      gate: 'ready_checks',
+      cause: 'quality',
+      message: 'x'.repeat(600_000),
+      occurredAt,
+      createdAt: occurredAt
+    });
+    prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue([
+      makeEvent('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'k1'),
+      makeEvent('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'k2')
+    ]);
+
+    const app = createApp();
+    const response = await authedRequest(app)
+      .get(`/api/v1/feature-task-analytics/tasks/${VALID_UUID}/events`)
+      .query({ limit: 2 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.pagination).toMatchObject({
+      limit: 2,
+      returned: 1,
+      hasMore: true
+    });
+    expect(response.body.pagination.nextCursor).toEqual(expect.any(String));
+    expect(Buffer.byteLength(response.text, 'utf8')).toBeLessThanOrEqual(1024 * 1024);
   });
 });
 
@@ -414,6 +545,14 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     const weekStart = bucketStart(0);
     const inWeek = new Date(weekStart);
     inWeek.setUTCDate(inWeek.getUTCDate() + 1);
+    prismaMock.$queryRaw.mockResolvedValue([{
+      bucketIndex: 7,
+      terminalTaskCount: 2n,
+      taskWithFailureCount: 2n,
+      gateFailureCount: 3n,
+      capacityFailureCount: 1n,
+      qualityFailureCount: 2n
+    }]);
     prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue([
       {
         taskId: 'task-1',
@@ -430,30 +569,6 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
         occurredAt: inWeek,
         prCycleTimeSeconds: 3600,
         evidenceTypeDistribution: { unit: 1, e2e: 1 }
-      },
-      {
-        taskId: 'task-1',
-        eventType: 'gate_failure',
-        cause: 'quality',
-        occurredAt: inWeek,
-        prCycleTimeSeconds: null,
-        evidenceTypeDistribution: null
-      },
-      {
-        taskId: 'task-1',
-        eventType: 'gate_failure',
-        cause: 'capacity',
-        occurredAt: inWeek,
-        prCycleTimeSeconds: null,
-        evidenceTypeDistribution: null
-      },
-      {
-        taskId: 'task-2',
-        eventType: 'gate_failure',
-        cause: 'quality',
-        occurredAt: inWeek,
-        prCycleTimeSeconds: null,
-        evidenceTypeDistribution: null
       }
     ]);
 
@@ -477,16 +592,15 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     const weekStart = bucketStart(0);
     const inWeek = new Date(weekStart);
     inWeek.setUTCDate(inWeek.getUTCDate() + 1);
-    prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue([
-      {
-        taskId: 'task-1',
-        eventType: 'gate_failure',
-        cause: 'quality',
-        occurredAt: inWeek,
-        prCycleTimeSeconds: null,
-        evidenceTypeDistribution: null
-      }
-    ]);
+    prismaMock.$queryRaw.mockResolvedValue([{
+      bucketIndex: 7,
+      terminalTaskCount: 0n,
+      taskWithFailureCount: 1n,
+      gateFailureCount: 1n,
+      capacityFailureCount: 0n,
+      qualityFailureCount: 1n
+    }]);
+    prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue([]);
 
     const app = createApp();
     const response = await authedRequest(app).get('/api/v1/feature-task-analytics/weekly');
@@ -523,6 +637,14 @@ describe('GET /api/v1/feature-task-analytics/weekly', () => {
     const inWeek = new Date(weekStart);
     inWeek.setUTCDate(inWeek.getUTCDate() + 1);
     const cycleTimes = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
+    prismaMock.$queryRaw.mockResolvedValue([{
+      bucketIndex: 7,
+      terminalTaskCount: 10n,
+      taskWithFailureCount: 0n,
+      gateFailureCount: 0n,
+      capacityFailureCount: 0n,
+      qualityFailureCount: 0n
+    }]);
     prismaMock.featureTaskAnalyticsEvent.findMany.mockResolvedValue(
       cycleTimes.map((seconds, idx) => ({
         taskId: `task-${idx}`,

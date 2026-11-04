@@ -8,11 +8,13 @@ export default defineConfig({
     include: [
       'test/db-integration.test.ts',
       'test/taskAttentionOwnersPositionMove.test.ts',
-      'test/dedupeAttentionOwnersScript.test.ts'
+      'test/dedupeAttentionOwnersScript.test.ts',
+      'test/featureTaskAnalyticsBudget.integration.test.ts'
     ],
     env: {
       DATABASE_URL: process.env.DATABASE_URL || defaultDevDatabaseUrl
     },
+    execArgv: ['--expose-gc'],
     // Load the same setup.ts as the unit-test config so the
     // TASKS_API_APPROVAL_SERVICE_CREDENTIALS seeded for authedRequest()
     // (task 0719a8e3) is available to integration tests too.

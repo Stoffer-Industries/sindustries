@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Prisma, TaskPriority } from '../../generated/prisma/index.js';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound, sendError } from '../lib/http.ts';
 
@@ -23,6 +24,7 @@ import {
 } from './tasks/_validation.ts';
 import { decodeCursor, encodeCursor } from './tasks/_pagination.ts';
 import { formatTaskTitle, mapTask, mapTaskComment } from './tasks/_mapper.ts';
+import { deliveryEvidenceCommentWhere } from './tasks/_deliveryEvidence.ts';
 import { descriptionHasSpecDrift, specChecksumForDescription } from './tasks/_spec.ts';
 import {
   buildWorkflowGateOwnerWhere,
@@ -38,6 +40,94 @@ import {
 } from '../config/requiredApprovals.ts';
 
 export const tasksRouter = Router();
+
+/**
+ * Upper bound on the number of candidate batches the `?workflowGateOwner`
+ * narrowing may scan for one page. The SQL pre-filter over-approximates the
+ * gate set, so the route may need several batches to fill a page; the bound
+ * keeps a pathological data set from holding the request open.
+ */
+const MAX_FILTER_BATCHES = 10;
+
+/**
+ * Sort a fetched page of task rows. The list route always fetches by
+ * `(createdAt desc, id desc)` and applies the requested sort in memory, so
+ * cursor pagination stays approximate for the non-default sorts (unchanged
+ * behaviour, extracted here so the batched gate-narrowing path sorts exactly
+ * like the single-batch path).
+ */
+function sortTaskRows(rows, sort) {
+  if (sort === 'priority') {
+    return [...rows].sort((a, b) => {
+      const p = priorityOrder[a.priority] - priorityOrder[b.priority];
+      if (p !== 0) return p;
+      if (a.createdAt > b.createdAt) return -1;
+      if (a.createdAt < b.createdAt) return 1;
+      return b.id.localeCompare(a.id);
+    });
+  }
+  if (sort === 'dueAt') {
+    return [...rows].sort((a, b) => {
+      if (!a.dueAt && !b.dueAt) return b.createdAt - a.createdAt;
+      if (!a.dueAt) return 1;
+      if (!b.dueAt) return -1;
+      if (a.dueAt > b.dueAt) return 1;
+      if (a.dueAt < b.dueAt) return -1;
+      return b.createdAt - a.createdAt;
+    });
+  }
+  return [...rows].sort((a, b) => {
+    if (a[sort] > b[sort]) return -1;
+    if (a[sort] < b[sort]) return 1;
+    return b.createdAt - a.createdAt;
+  });
+}
+
+/**
+ * Cursor clause for the `(createdAt desc, id desc)` list ordering.
+ */
+function cursorWhere(cursor) {
+  return {
+    OR: [
+      { createdAt: { lt: cursor.createdAt } },
+      {
+        createdAt: cursor.createdAt,
+        id: { lt: cursor.id }
+      }
+    ]
+  };
+}
+
+/**
+ * Narrowed form of an Express query value.
+ *
+ * `value` is the string form of the parameter, or `undefined` when the
+ * parameter was absent. `malformed` is true when the parameter was present
+ * but was not a plain string — a repeated parameter arrives as an array.
+ */
+type NarrowedQueryValue = {
+  value: string | undefined;
+  malformed: boolean;
+};
+
+/**
+ * Narrow an Express query value to a plain string. Express types a query
+ * parameter as `string | ParsedQs | (string | ParsedQs)[]`, and only the
+ * string form is a usable filter value. Narrowing once at the boundary
+ * keeps the filter values type-safe instead of handing Prisma the wider
+ * union.
+ *
+ * "Absent" and "present in a shape we do not accept" stay distinct. A
+ * repeated parameter (an array) is reported as `malformed` rather than
+ * collapsed to `undefined`, because collapsing it would drop the filter
+ * *and* skip its validation — turning the documented `400` for an invalid
+ * filter into a silently unfiltered `200`.
+ */
+function queryString(value: unknown): NarrowedQueryValue {
+  if (value === undefined) return { value: undefined, malformed: false };
+  if (typeof value === 'string') return { value, malformed: false };
+  return { value: undefined, malformed: true };
+}
 
 tasksRouter.get('/tasks', async (req, res, next) => {
   try {
@@ -68,15 +158,76 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       }
     }
 
-    if (priority && !validPriorities.has(priority)) {
+    // Narrow the query parameters to plain strings before they are used as
+    // filter values. Express types a query parameter as
+    // `string | ParsedQs | (string | ParsedQs)[]`; only the string form is a
+    // usable filter, so the wider union never reaches Prisma.
+    const priorityParam = queryString(priority);
+    const assigneeParam = queryString(assignee);
+    const taskTypeParam = queryString(taskType);
+    const tagParam = queryString(tag);
+    const qParam = queryString(q);
+    const sortParam = queryString(sort);
+    const workflowGateOwnerParam = queryString(workflowGateOwner);
+    const attentionOwnerParam = queryString(attentionOwner);
+
+    // A filter parameter that is present but not a plain string (a repeated
+    // parameter arrives as an array) is rejected rather than dropped. Dropping
+    // it would skip the filter's validation and return an unfiltered `200`
+    // where the API contract documents a `400` — the same failure class this
+    // change exists to fix. `priority`, `taskType` and `sort` keep the codes
+    // `main` already returned for a repeated parameter; the remaining filters
+    // previously failed as a `500` or were silently ignored.
+    if (priorityParam.malformed) {
       return badRequest(res, 'INVALID_PRIORITY_FILTER', 'Invalid priority filter');
     }
 
-    if (taskType && !validTaskTypes.has(String(taskType))) {
+    if (taskTypeParam.malformed) {
       return badRequest(res, 'INVALID_TASK_TYPE_FILTER', 'Invalid taskType filter');
     }
 
-    if (sort && !validSorts.has(sort)) {
+    if (sortParam.malformed) {
+      return badRequest(res, 'INVALID_SORT_VALUE', 'Invalid sort value');
+    }
+
+    if (assigneeParam.malformed) {
+      return badRequest(res, 'INVALID_ASSIGNEE_FILTER', 'Invalid assignee filter');
+    }
+
+    if (tagParam.malformed) {
+      return badRequest(res, 'INVALID_TAG_FILTER', 'Invalid tag filter');
+    }
+
+    if (qParam.malformed) {
+      return badRequest(res, 'INVALID_Q_FILTER', 'Invalid q filter');
+    }
+
+    if (workflowGateOwnerParam.malformed) {
+      return badRequest(res, 'INVALID_WORKFLOW_GATE_OWNER_FILTER', 'Invalid workflowGateOwner filter');
+    }
+
+    if (attentionOwnerParam.malformed) {
+      return badRequest(res, 'INVALID_ATTENTION_OWNER_FILTER', 'Invalid attentionOwner filter');
+    }
+
+    const priorityValue = priorityParam.value;
+    const assigneeValue = assigneeParam.value;
+    const taskTypeValue = taskTypeParam.value;
+    const tagValue = tagParam.value;
+    const qValue = qParam.value;
+    const sortValue = sortParam.value ?? 'priority';
+    const workflowGateOwnerValue = workflowGateOwnerParam.value?.trim() ?? '';
+    const attentionOwnerValue = attentionOwnerParam.value?.trim() ?? '';
+
+    if (priorityValue && !validPriorities.has(priorityValue)) {
+      return badRequest(res, 'INVALID_PRIORITY_FILTER', 'Invalid priority filter');
+    }
+
+    if (taskTypeValue && !validTaskTypes.has(taskTypeValue)) {
+      return badRequest(res, 'INVALID_TASK_TYPE_FILTER', 'Invalid taskType filter');
+    }
+
+    if (!validSorts.has(sortValue)) {
       return badRequest(res, 'INVALID_SORT_VALUE', 'Invalid sort value');
     }
 
@@ -111,47 +262,46 @@ tasksRouter.get('/tasks', async (req, res, next) => {
     // `attentionOwner` scopes to explicit attention rows. Combining them via
     // AND lets a user view both normal gate work and exceptional attention
     // requests without conflating the two planes.
-    const workflowGateOwnerRequested =
-      typeof workflowGateOwner === 'string' && workflowGateOwner.trim().length > 0;
+    const workflowGateOwnerRequested = workflowGateOwnerValue.length > 0;
     const workflowGateOwnerFilter = workflowGateOwnerRequested
-      ? buildWorkflowGateOwnerWhere(workflowGateOwner.trim())
+      ? buildWorkflowGateOwnerWhere(workflowGateOwnerValue)
       : [];
     const attentionOwnerFilter =
-      typeof attentionOwner === 'string' && attentionOwner.trim().length > 0
+      attentionOwnerValue.length > 0
         ? {
             attentionOwners: {
               some: {
-                owner: { equals: attentionOwner.trim(), mode: 'insensitive' as const },
+                owner: { equals: attentionOwnerValue, mode: 'insensitive' as const },
                 position: 0
               }
             }
           }
         : {};
 
-    const where = {
+    const where: Prisma.TaskWhereInput = {
       ...(includeArchived === 'true' ? {} : { archivedAt: null }),
       ...statusFilter,
-      ...(priority ? { priority } : {}),
-      ...(taskType ? { taskType: String(taskType) } : {}),
-      ...(assignee
-        ? assignee === 'unassigned'
+      ...(priorityValue ? { priority: priorityValue as TaskPriority } : {}),
+      ...(taskTypeValue ? { taskType: taskTypeValue } : {}),
+      ...(assigneeValue
+        ? assigneeValue === 'unassigned'
           ? { OR: [{ assignee: null }, { assignee: '' }] }
-          : { assignee: { equals: assignee, mode: 'insensitive' } }
+          : { assignee: { equals: assigneeValue, mode: 'insensitive' as const } }
         : {}),
-      ...(q
+      ...(qValue
         ? {
             OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { description: { contains: q, mode: 'insensitive' } }
+              { title: { contains: qValue, mode: 'insensitive' as const } },
+              { description: { contains: qValue, mode: 'insensitive' as const } }
             ]
           }
         : {}),
-      ...(tag
+      ...(tagValue
         ? {
             tags: {
               some: {
                 tag: {
-                  name: { equals: tag, mode: 'insensitive' }
+                  name: { equals: tagValue, mode: 'insensitive' as const }
                 }
               }
             }
@@ -176,72 +326,146 @@ tasksRouter.get('/tasks', async (req, res, next) => {
       ? {
           AND: [
             where,
-            {
-              OR: [
-                { createdAt: { lt: decodedCursor.createdAt } },
-                {
-                  createdAt: decodedCursor.createdAt,
-                  id: { lt: decodedCursor.id }
-                }
-              ]
-            }
+            cursorWhere(decodedCursor)
           ]
         }
       : where;
 
-    const tasks = await prisma.task.findMany({
-      where: queryWhere,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: {
-        tags: {
-          include: {
-            tag: true
-          }
-        },
-        approvals: true,
-        attentionOwners: { orderBy: { position: 'asc' } },
-        ...dependencyInclude
+    // The list projection has to derive the same `qa_agent` gate state as the
+    // detail projection, so it loads the comments the delivery-evidence rule
+    // reads — and only those (AC4). The full comment history of every listed
+    // task is never loaded.
+    const taskListInclude: Prisma.TaskInclude = {
+      tags: {
+        include: {
+          tag: true
+        }
       },
-      take: limit + 1
-    });
+      comments: {
+        where: deliveryEvidenceCommentWhere(),
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+      },
+      approvals: true,
+      attentionOwners: { orderBy: { position: 'asc' } },
+      ...dependencyInclude
+    };
 
-    let sortedTasks = tasks;
-    if (sort === 'priority') {
-      sortedTasks = [...tasks].sort((a, b) => {
-        const p = priorityOrder[a.priority] - priorityOrder[b.priority];
-        if (p !== 0) return p;
-        if (a.createdAt > b.createdAt) return -1;
-        if (a.createdAt < b.createdAt) return 1;
-        return b.id.localeCompare(a.id);
+    // The list response contract keeps `comments` empty for every task. The
+    // route loads marker comments only so the delivery-evidence rule reads
+    // the same evidence the detail route reads; those comments must not leak
+    // into the list payload.
+    const mapListTask = (task) => {
+      const mapped = mapTask(task, mapTaskOptionsFor(task));
+      // Restore the list contract — do not drop. The list payload carries
+      // `comments: []` for every task; without this the marker comments the
+      // delivery-evidence rule loads would leak into list responses.
+      return { ...mapped, comments: [] };
+    };
+
+    // `?workflowGateOwner` is narrowed on the *derived* gates, not on the SQL
+    // pre-filter alone. `buildWorkflowGateOwnerWhere` runs in the database
+    // and cannot see comments, so it over-approximates: it matches tasks
+    // whose `qa_agent` gate is dormant because Lobster's latest
+    // delivery-evidence state still carries a failure fingerprint. Narrowing
+    // after mapping keeps the filter and the payload it filters in agreement
+    // (AC2).
+    const gateOwnerKey = workflowGateOwnerRequested
+      ? workflowGateOwnerValue.toLowerCase()
+      : null;
+    const hasOutstandingGateForOwner = (mapped) => !gateOwnerKey
+      || (mapped.workflowGates ?? []).some((gate) =>
+        gate?.state === 'outstanding'
+        && typeof gate.owner === 'string'
+        && gate.owner.trim().toLowerCase() === gateOwnerKey
+      );
+
+    let pagePayloads = [];
+    let hasNextPage = false;
+    let nextCursorSource = null;
+
+    if (!gateOwnerKey) {
+      const tasks = await prisma.task.findMany({
+        where: queryWhere,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: taskListInclude,
+        take: limit + 1
       });
-    } else if (sort === 'dueAt') {
-      sortedTasks = [...tasks].sort((a, b) => {
-        if (!a.dueAt && !b.dueAt) return b.createdAt - a.createdAt;
-        if (!a.dueAt) return 1;
-        if (!b.dueAt) return -1;
-        if (a.dueAt > b.dueAt) return 1;
-        if (a.dueAt < b.dueAt) return -1;
-        return b.createdAt - a.createdAt;
-      });
+
+      const sortedTasks = sortTaskRows(tasks, sortValue);
+      hasNextPage = sortedTasks.length > limit;
+      const pageTasks = sortedTasks.slice(0, limit);
+      pagePayloads = pageTasks.map(mapListTask);
+      nextCursorSource = pageTasks.at(-1) ?? null;
     } else {
-      sortedTasks = [...tasks].sort((a, b) => {
-        if (a[sort] > b[sort]) return -1;
-        if (a[sort] < b[sort]) return 1;
-        return b.createdAt - a.createdAt;
-      });
+      // The SQL pre-filter over-approximates, so a single page can hold fewer
+      // than `limit` surviving tasks. Keep fetching bounded batches until the
+      // page is full or the candidate source is exhausted.
+      const emitted = [];
+      let batchCursor = decodedCursor;
+      let lastScanned = null;
+      let batches = 0;
+
+      while (emitted.length < limit && batches < MAX_FILTER_BATCHES) {
+        batches += 1;
+        const rows = await prisma.task.findMany({
+          where: batchCursor ? { AND: [where, cursorWhere(batchCursor)] } : where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          include: taskListInclude,
+          take: limit + 1
+        });
+        if (rows.length === 0) {
+          hasNextPage = false;
+          break;
+        }
+
+        const candidates = sortTaskRows(rows, sortValue)
+          .map((row) => ({ row, payload: mapListTask(row) }))
+          .filter((candidate) => hasOutstandingGateForOwner(candidate.payload));
+
+        const remaining = limit - emitted.length;
+        const taken = candidates.slice(0, remaining);
+        emitted.push(...taken);
+        lastScanned = rows[rows.length - 1];
+
+        if (candidates.length > taken.length) {
+          // More surviving tasks exist in this batch than fit on the page.
+          hasNextPage = true;
+          break;
+        }
+        if (rows.length <= limit) {
+          // The candidate source is exhausted.
+          hasNextPage = false;
+          break;
+        }
+        // The batch was fully consumed: continue past its oldest row. The
+        // narrowing only removes rows from the ordering, so no wanted task
+        // is skipped.
+        hasNextPage = true;
+        batchCursor = { createdAt: lastScanned.createdAt, id: lastScanned.id };
+      }
+
+      if (batches >= MAX_FILTER_BATCHES && emitted.length < limit) {
+        console.warn('[tasks] workflowGateOwner narrowing reached the batch bound', {
+          owner: workflowGateOwnerValue,
+          limit,
+          batches: MAX_FILTER_BATCHES
+        });
+      }
+
+      pagePayloads = emitted.map((entry) => entry.payload);
+      // The cursor is the last emitted task. When nothing survived on this
+      // page it is the last row scanned, so the client advances past the
+      // filtered-out candidates instead of re-reading them.
+      nextCursorSource = emitted.at(-1)?.row ?? lastScanned;
     }
 
-    const hasNextPage = sortedTasks.length > limit;
-    const pageTasks = sortedTasks.slice(0, limit);
-    const lastTask = pageTasks.at(-1);
-
     return res.status(200).json({
-      data: pageTasks.map((task) => {
-        return mapTask(task, mapTaskOptionsFor(task));
-      }),
+      data: pagePayloads,
       page: {
         limit,
-        nextCursor: hasNextPage && lastTask ? encodeCursor(lastTask.createdAt, lastTask.id) : null,
+        nextCursor: hasNextPage && nextCursorSource
+          ? encodeCursor(nextCursorSource.createdAt, nextCursorSource.id)
+          : null,
         hasNextPage
       }
     });

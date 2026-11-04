@@ -8,40 +8,64 @@ import {
   encryptToken
 } from '../src/lib/secretBox';
 
-const mocks = vi.hoisted(() => ({
-  prisma: {
-    user: { findUnique: vi.fn() },
-    session: { findUnique: vi.fn() },
-    akahuConnection: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
-    linkedCard: { upsert: vi.fn(), findMany: vi.fn() },
-    transaction: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-      update: vi.fn(),
-      create: vi.fn(),
-      deleteMany: vi.fn()
+const mocks = vi.hoisted(() => {
+  class MockAkahuTimeoutError extends Error {
+    readonly code = 'AKAHU_TIMEOUT';
+  }
+  class MockAkahuCancelledError extends Error {
+    readonly code = 'AKAHU_CANCELLED';
+  }
+  class MockAkahuNetworkError extends Error {
+    readonly code = 'AKAHU_NETWORK';
+  }
+  class MockAkahuTraversalError extends Error {
+    readonly code = 'AKAHU_TRAVERSAL_FAILED';
+  }
+
+  return {
+    prisma: {
+      user: { findUnique: vi.fn() },
+      session: { findUnique: vi.fn() },
+      akahuConnection: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+      linkedCard: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
+      transaction: {
+        findMany: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        create: vi.fn(),
+        deleteMany: vi.fn()
+      },
+      accountBalanceSnapshot: { create: vi.fn(), findMany: vi.fn() },
+      cardMonthlyBudget: { findUnique: vi.fn() },
+      notificationEvent: { create: vi.fn() },
+      categorizationFeedback: { findFirst: vi.fn() }
     },
-    accountBalanceSnapshot: { create: vi.fn(), findMany: vi.fn() },
-    cardMonthlyBudget: { findUnique: vi.fn() },
-    notificationEvent: { create: vi.fn() },
-    categorizationFeedback: { findFirst: vi.fn() }
-  },
-  akahuGetAccounts: vi.fn(),
-  akahuGetTransactions: vi.fn(),
-  akahuGetPendingTransactions: vi.fn(),
-  akahuRefreshAllAccounts: vi.fn(),
-  exchangeAuthorizationCode: vi.fn(),
-  evaluateAlertsForUser: vi.fn(),
-  categorizeTransaction: vi.fn()
-}));
+    akahuGetAccounts: vi.fn(),
+    paginateAkahuTransactions: vi.fn(),
+    akahuGetPendingTransactions: vi.fn(),
+    akahuRefreshAllAccounts: vi.fn(),
+    exchangeAuthorizationCode: vi.fn(),
+    evaluateAlertsForUser: vi.fn(),
+    categorizeTransaction: vi.fn(),
+    MockAkahuTimeoutError,
+    MockAkahuCancelledError,
+    MockAkahuNetworkError,
+    MockAkahuTraversalError
+  };
+});
 
 vi.mock('../src/lib/prisma.ts', () => ({ prisma: mocks.prisma }));
 vi.mock('../src/services/akahuClient.ts', () => ({
   akahuGetAccounts: mocks.akahuGetAccounts,
-  akahuGetTransactions: mocks.akahuGetTransactions,
+  paginateAkahuTransactions: mocks.paginateAkahuTransactions,
   akahuGetPendingTransactions: mocks.akahuGetPendingTransactions,
   akahuRefreshAllAccounts: mocks.akahuRefreshAllAccounts,
-  exchangeAuthorizationCode: mocks.exchangeAuthorizationCode
+  exchangeAuthorizationCode: mocks.exchangeAuthorizationCode,
+  createAkahuBudget: (ms: number) => ({ deadlineAt: Date.now() + ms }),
+  AkahuTimeoutError: mocks.MockAkahuTimeoutError,
+  AkahuCancelledError: mocks.MockAkahuCancelledError,
+  AkahuNetworkError: mocks.MockAkahuNetworkError,
+  AkahuTraversalError: mocks.MockAkahuTraversalError
 }));
 vi.mock('../src/services/alerts.ts', () => ({
   evaluateAlertsForUser: mocks.evaluateAlertsForUser
@@ -80,6 +104,7 @@ describe('POST /api/v1/akahu/sync', () => {
       lastSyncedAt: new Date('2026-05-10T00:00:00.000Z')
     });
     mocks.prisma.akahuConnection.update.mockResolvedValue({});
+    mocks.prisma.linkedCard.findUnique.mockResolvedValue(null);
     mocks.prisma.linkedCard.upsert.mockResolvedValue({ id: 'card_1' });
     mocks.prisma.transaction.findUnique.mockResolvedValue(null);
     mocks.prisma.transaction.update.mockResolvedValue({});
@@ -89,16 +114,20 @@ describe('POST /api/v1/akahu/sync', () => {
     mocks.prisma.accountBalanceSnapshot.findMany.mockResolvedValue([]);
 
     mocks.akahuGetAccounts.mockResolvedValue([{ _id: 'acc_1', name: 'Credit card' }]);
-    mocks.akahuGetTransactions.mockResolvedValue([
-      {
-        _id: 'trans_1',
-        _account: 'acc_1',
-        date: '2026-05-11T00:00:00.000Z',
-        description: 'SETTLED PURCHASE',
-        amount: -20,
-        merchant: { name: 'Settled Merchant' }
-      }
-    ]);
+    mocks.paginateAkahuTransactions.mockResolvedValue({
+      items: [
+        {
+          _id: 'trans_1',
+          _account: 'acc_1',
+          date: '2026-05-11T00:00:00.000Z',
+          description: 'SETTLED PURCHASE',
+          amount: -20,
+          merchant: { name: 'Settled Merchant' }
+        }
+      ],
+      complete: true,
+      pagesFetched: 1
+    });
     mocks.akahuGetPendingTransactions.mockResolvedValue([
       {
         _account: 'acc_1',
@@ -128,13 +157,24 @@ describe('POST /api/v1/akahu/sync', () => {
       .send({ force: true })
       .expect(200);
 
-    expect(mocks.akahuRefreshAllAccounts).toHaveBeenCalledWith({ accessToken: 'user_token' });
-    expect(mocks.akahuGetTransactions).toHaveBeenCalledWith({
+    expect(mocks.akahuRefreshAllAccounts).toHaveBeenCalledWith({
+      accessToken: 'user_token',
+      budget: expect.anything(),
+      signal: expect.anything()
+    });
+    expect(mocks.paginateAkahuTransactions).toHaveBeenCalledWith({
       accessToken: 'user_token',
       startMs: new Date('2026-02-11T00:00:00.000Z').getTime(),
-      endMs: new Date('2026-05-12T00:00:00.000Z').getTime()
+      endMs: new Date('2026-05-12T00:00:00.000Z').getTime(),
+      budget: expect.anything(),
+      pageCap: 5,
+      signal: expect.anything()
     });
-    expect(mocks.akahuGetPendingTransactions).toHaveBeenCalledWith({ accessToken: 'user_token' });
+    expect(mocks.akahuGetPendingTransactions).toHaveBeenCalledWith({
+      accessToken: 'user_token',
+      budget: expect.anything(),
+      signal: expect.anything()
+    });
     expect(mocks.prisma.transaction.deleteMany).toHaveBeenCalledWith({
       where: {
         userId: 'user_1',
@@ -180,10 +220,29 @@ describe('POST /api/v1/akahu/sync', () => {
       .expect(200);
 
     expect(mocks.akahuRefreshAllAccounts).not.toHaveBeenCalled();
-    expect(mocks.akahuGetTransactions).toHaveBeenCalledWith({
+    expect(mocks.paginateAkahuTransactions).toHaveBeenCalledWith({
       accessToken: 'user_token',
       startMs: new Date('2026-05-03T00:00:00.000Z').getTime(),
-      endMs: new Date('2026-05-12T00:00:00.000Z').getTime()
+      endMs: new Date('2026-05-12T00:00:00.000Z').getTime(),
+      budget: expect.anything(),
+      pageCap: 5,
+      signal: expect.anything()
+    });
+  });
+
+  it('maps exhausted Akahu transport failures to the typed 502 contract', async () => {
+    mocks.akahuGetAccounts.mockRejectedValueOnce(
+      new mocks.MockAkahuNetworkError('Akahu request failed')
+    );
+
+    const res = await request(createApp())
+      .post('/api/v1/akahu/sync')
+      .set('Authorization', 'Bearer test-token-1')
+      .send({})
+      .expect(502);
+
+    expect(res.body).toEqual({
+      error: { code: 'AKAHU_NETWORK', message: 'Akahu request failed' }
     });
   });
 

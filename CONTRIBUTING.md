@@ -101,29 +101,65 @@ scheduler, GymTrack, MCP, and agent verification run from their own
 workspaces or under CI (listed below).
 
 CI currently covers:
-- `services/tasks-api` unit + DB integration tests
-- `services/budget-api` unit tests (`budget-api-unit` job also runs `packages/budget-domain` test + typecheck and `apps/budget-mobile` typecheck) plus DB integration tests (`budget-api-db-integration` job runs the ownership-contract suite against real Postgres; previously ran with mocked Prisma — see W38 audit F4 for the historical gap)
-- `services/content-scheduler-api` vitest (unit) plus `content-scheduler-api-db-integration` (real Postgres; proves the thread-publish claim/journal atomicity the unit suite could not exercise while Prisma was mocked — see W42 audit F2)
-- `services/gymtrack-mcp` tests
-- `apps/tasks` unit/component tests + Playwright e2e (UI + API + DB)
-- `apps/website` unit tests + build
-- `apps/mission-control` tests
-- `apps/gymtrack` tests
-- Python workflow tests (`agents/workflows/` Python packages) + `cto-craft-tweet-drafts` tests
-- Rust workflow tests + clippy (`agents/workflows/feature-task`)
-- Ash verifier tests
-- OpenTelemetry Node package unit tests
-- Design system sync
-- `no-absolute-paths` lint
-- `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests
+- `services/tasks-api` unit + DB integration tests (`tasks-api-tests`), plus a ratcheting TypeScript compiler gate (`typecheck:gate`, see below)
+- `services/budget-api` unit tests (`budget-api-unit` job also runs `packages/budget-domain` test + typecheck and `apps/budget-mobile` typecheck), a ratcheting TypeScript compiler gate (`typecheck:gate`, see below), plus DB integration tests (`budget-api-db-integration` job runs the ownership-contract suite against real Postgres; previously ran with mocked Prisma — see W38 audit F4 for the historical gap)
+- `services/content-scheduler-api` vitest (unit) (`content-scheduler-api-tests`), a ratcheting TypeScript compiler gate (`typecheck:gate`, see below), plus `content-scheduler-api-db-integration` (real Postgres; proves the thread-publish claim/journal atomicity the unit suite could not exercise while Prisma was mocked — see W42 audit F2)
+- `services/gymtrack-mcp` tests (`gymtrack-mcp-tests`)
+- `apps/tasks` unit/component tests + Playwright e2e (UI + API + DB) (`tasks-app-tests`, `tasks-app-e2e`)
+- `apps/website` unit tests + build (`website-app-tests`)
+- `apps/mission-control` tests (`mission-control-tests`)
+- `apps/gymtrack` tests (`gymtrack-tests`)
+- Python workflow tests (`python-workflow-tests`; `agents/workflows/` Python packages) + `cto-craft-tweet-drafts-tests`
+- Rust workflow tests + clippy (`feature-task-workflow-tests`, `feature-task-clippy`; `agents/workflows/feature-task`)
+- Ash verifier tests (`ash-tests`)
+- OpenTelemetry Node package unit tests (`otel-node-tests`)
+- Design system sync (`design-system-sync`)
+- `frontend-design-system-lint` (the frontend `@shadcn/lint` design-system lint wiring and its unit tests)
+- `no-absolute-paths-lint` (the repo lint that fails on hard-coded absolute paths such as `~/` or `/Users/<name>/` under `apps/`, `services/`, `packages/`, `agents/workflows/` and `agents/lib/`)
+- `typecheck-gate-tests` (self-test for `scripts/typecheck-gate.mjs`, the tool the three service gates above run)
+- `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests (`infra-cloud-bootstrap-staging-tests`)
+- `health-probe-tests` (health-probe unit tests plus the observability provisioning / bootstrap / evidence / failure-inject contract tests)
+- `gh-with-agent-token-tests` (per-agent GitHub identity shim, `infra/cloud/bin` deploy/status/rollback contracts, cloud staging workflow and failure-drill harnesses, stable-hostname verification harness)
+- `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
-- `eas-update-on-main` (mobile OTA publishing)
+- `changes` (detect deployment changes — computes which deployable surfaces a PR touches; a required input to the `merge-gate` job)
+- `eas-update-production` (mobile OTA publishing; the job's display name is `EAS update on main`)
+
+Every job listed above except `eas-update-production` is an input to the
+`merge-gate` job in `.github/workflows/ci.yml`, which gates the deployment
+jobs. `eas-update-production` is itself a deployment job: it runs *after* the
+gate passes (`needs: [changes, merge-gate]`).
+
+Each entry above names its job id so the inventory can be checked against
+`merge-gate.needs` mechanically. `infra/cloud/scripts/tests/ci-deployment-gates.test.sh`
+asserts that every merge-gate input is listed here and that no listed id is
+missing from `ci.yml`, so a new or renamed required job has to be documented
+in the same change that adds or renames it. The same test asserts the
+converse as well: a job id named here that the gate does not require is
+reported too — `merge-gate` itself and `eas-update-production` (the one
+deployment job that runs after the gate) are the only exceptions — so the
+sentence above cannot drift away from the executable gate.
+
+Those exception ids are the only ones the check exempts, and the test
+asserts that this paragraph and the check exempt exactly the same ids, so
+neither can drift away from the other.
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
 - `apps/budget-mobile` typecheck (`apps/budget-mobile/package.json`)
 
 Closed: see `docs/repo-audits/2026-W38.md` F4 and PR #673.
+
+### Backend TypeScript compiler gate
+
+`services/{tasks-api,budget-api,content-scheduler-api}` each carry a committed `typecheck-baseline.json` that CI compares the current `tsc --noEmit` output against (`npm run typecheck:gate --workspace services/<name>`). The gate can only shrink debt or stay flat — it fails on either a rising diagnostic count or a new/grown diagnostic that the baseline doesn't already cover, even when the total stays the same. See `docs/specs/backend-typecheck-gate-tech-design.md` for the full rationale.
+
+- **Check locally before pushing:** `npm run typecheck:gate --workspace services/<name>` (needs `npm run prisma:generate --workspace services/<name>` first).
+- **Pay down debt:** fix diagnostics, then regenerate that service's baseline deliberately — `npm run typecheck:baseline --workspace services/<name>` — and commit the diff. Never hand-edit `typecheck-baseline.json`; the regenerate command is the only way it should change, so the PR diff is always a real measurement.
+- **Never suppress to pass:** `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, or enabling `strict` wholesale are all out of scope for this gate — see Decision 6 of the tech design. If a diagnostic can't be fixed yet, it stays in the baseline as counted, visible debt.
+- A TypeScript version bump can shift diagnostics; the gate hard-fails on a `tscVersion` mismatch between the baseline and the `tsc` actually run, forcing a deliberate baseline regenerate in the same PR as the bump.
+- The gate validates that `totalDiagnostics` equals the sum of the committed fingerprint counts and that the service's `typecheck` script still invokes `tsc --noEmit`; malformed metadata cannot silently weaken it.
+- Exit codes: `0` = within baseline/baseline written, `1` = ratchet or baseline violation, `2` = invocation/toolchain/environment failure (including missing generated Prisma clients or a TypeScript version mismatch).
 
 ## System spec maintenance
 

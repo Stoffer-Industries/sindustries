@@ -15,6 +15,9 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:validate": "prisma validate",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:gate": "node ../../scripts/typecheck-gate.mjs --service content-scheduler-api",
+    "typecheck:baseline": "node ../../scripts/typecheck-gate.mjs --service content-scheduler-api --write-baseline",
     "content-scheduler:worker": "tsx --require @sindustries/otel-node/register src/workers/autoPostWorkerMain.ts",
     "content-scheduler:worker:dev": "tsx watch --require @sindustries/otel-node/register src/workers/autoPostWorkerMain.ts"
   },

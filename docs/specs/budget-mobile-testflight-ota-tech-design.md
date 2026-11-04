@@ -58,7 +58,7 @@ Quinn's `[openclaw-done]` confirmation is required before Rowan can move the tas
 - `apps/budget-mobile/App.tsx` (edit): add an `UpdateBanner` mount point above the `Stack.Navigator` so it is visible on every screen. Wrap the navigator in `<UpdatesProvider>` from `expo-updates` so the banner can read update state.
 - `apps/budget-mobile/package.json` (edit): add `eas-cli` as a devDependency (`^latest`), so `eas update` runs in CI without a global install.
 - `apps/budget-mobile/src/screens/SettingsScreen.tsx` (new, optional but covered by AC4): a Settings tab on the dashboard with the build/update identifier, runtime version, and a "Check for updates" button. **Decision:** keep this as the primary AC4 surface (instead of relying only on `UpdateBanner`) because a Settings screen is a more permanent home for build metadata and Tom already expects it for on-device feedback. The `UpdateBanner` is a "you got a new update" indicator only.
-- `.github/workflows/ci.yml` (edit): add a new `eas-update-on-main` job:
+- `.github/workflows/ci.yml` (edit): add a new `eas-update-on-main` job (historical proposal name; the job shipped as `eas-update-production`, display name "EAS update on main" — `eas-update-on-main` does not exist in `.github/workflows/ci.yml`):
   - `on: push: branches: [main]` (CI already triggers on `main` push)
   - `if: github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com'` (avoid loops when the bot pushes)
   - `runs-on: ubuntu-latest`, `concurrency: { group: eas-update-main, cancel-in-progress: false }`
@@ -73,7 +73,7 @@ None. No new backend routes, no new tables, no new event payloads. EAS Update is
 
 ### Workflow, cron, and skill changes
 
-- New GitHub Actions job (`eas-update-on-main`) — covered above.
+- New GitHub Actions job (`eas-update-on-main`, proposal name — shipped as `eas-update-production`) — covered above.
 - No cron changes (EAS Update is push-triggered, not scheduled).
 - No skill changes. The heartbeat still drives task state; the new CI job runs independently.
 
@@ -83,7 +83,7 @@ None. No new backend routes, no new tables, no new event payloads. EAS Update is
 | --- | ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | AC1 | manual (EAS dashboard)   | Screenshot of `eas build --platform ios --profile testflight --auto-submit` finishing + TestFlight build row    |
 | AC2 | file + unit              | `eas.json` profile `production` includes `channel: "main"`; `app.json` `updates.url` points at `u.expo.dev`     |
-| AC3 | ci (GitHub Actions)      | `eas-update-on-main` job definition in `.github/workflows/ci.yml`; first successful run attached to PR         |
+| AC3 | ci (GitHub Actions)      | `eas-update-on-main` (proposal name; shipped as `eas-update-production`) job definition in `.github/workflows/ci.yml`; first successful run attached to PR |
 | AC4 | file + unit              | `SettingsScreen.test.tsx` renders `updateId`, `runtimeVersion`, and timestamp; `UpdateBanner` unit test         |
 | AC5 | docs + manual            | `README.md` in `apps/budget-mobile/` section "EAS Build + Update" documents setup steps; fresh-clone dry run   |
 

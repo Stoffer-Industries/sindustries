@@ -105,6 +105,23 @@ It must not become the default backend for Mission Control or other apps. New pr
 
 The API validates the `taskType` filter against the same accepted task type set used by create and update validation, then applies an exact Prisma `taskType` filter in the list query. This keeps UI filtering and automation discovery aligned with persisted task metadata. Invalid filters return `400 INVALID_TASK_TYPE_FILTER`.
 
+### List filter parameter shapes
+
+`GET /tasks` accepts one value per filter parameter. A parameter that is **absent** and a parameter that is **present in a shape the API does not accept** are different things, and the API keeps them different: an absent parameter means "no filter", while a malformed one is a client error. A repeated parameter (`?priority=high&priority=low`) arrives as an array and is rejected with `400` rather than dropped — dropping it would skip the filter's validation and return an unfiltered `200`, which is the same failure class as an over-reporting discovery filter.
+
+| Parameter | Error code for a repeated (array-valued) parameter |
+| --- | --- |
+| `priority` | `400 INVALID_PRIORITY_FILTER` |
+| `taskType` | `400 INVALID_TASK_TYPE_FILTER` |
+| `sort` | `400 INVALID_SORT_VALUE` |
+| `assignee` | `400 INVALID_ASSIGNEE_FILTER` |
+| `tag` | `400 INVALID_TAG_FILTER` |
+| `q` | `400 INVALID_Q_FILTER` |
+| `workflowGateOwner` | `400 INVALID_WORKFLOW_GATE_OWNER_FILTER` |
+| `attentionOwner` | `400 INVALID_ATTENTION_OWNER_FILTER` |
+
+An empty `?sort=` value is also rejected with `400 INVALID_SORT_VALUE`; an empty value for the other filters means "no filter", matching the long-standing behaviour of those parameters.
+
 New task type values must be added consistently across API validation, app shared options, and workflow consumers before use. Automation that needs feature-task routing should prefer first-class `taskType: feature` over tag-only conventions.
 
 ### TaskComment
@@ -192,7 +209,9 @@ Task responses include:
 markers as a distinct routing protocol:
 
 - `[qa-agent-blocked]` means delivery or evidence failed and routes directly
-  back to the task's delivery assignee (normally Rowan).
+  back to the task's delivery assignee (normally Rowan) — but only when it is
+  a verifier's **evidence verdict**. The lobster's generic **QA-gate prompt**
+  is not a delivery failure; it routes to the QA gate owner (see below).
 - `[qa-agent-deferred]` means Ash could not verify because a genuine external
   capability was unavailable and routes the active handoff to Quinn (or the
   capability owner).
@@ -200,9 +219,60 @@ markers as a distinct routing protocol:
   and routes the task to Ash for fresh re-verification. It does not grant the
   `qa_agent` approval. Existing tasks may use `[quinn-resolved]` as a legacy
   alias for the same transition.
-- `[qa-agent-verified]` plus the structured `qa_agent` approval closes QA and
-  returns delivery to the task assignee; acceptance later routes to Tom when
-  human acceptance is the next real action.
+- `[qa-agent-verified]` plus the structured `qa_agent` approval closes QA. The
+  task then holds no explicit attention row: what remains is ordinary
+  delivery work for the assignee, which the assignee queue already surfaces.
+
+**QA marker currency follows the attestation (2026-10-28, task `1e8a430a`).**
+A QA marker speaks only for the pass that follows the latest approved
+`qa_agent` attestation. A `[qa-agent-blocked]` marker that predates the
+current attestation is stale for routing — Ash's fresh approval closes the
+stale blocked history, and the sweep must not route the delivery assignee
+again on every tick. A blocked marker that is newer than both the latest
+`[implementer-prs]`/`[rowan-prs]` delivery marker and the attestation is
+still current and still routes to the delivery assignee. With no approved
+attestation the blocked marker keeps the currency it had before. One ordering
+rule backs this: the verdict reader and the blocked-arm predicate compare
+marker timestamps against the same attestation, so the two cannot drift apart
+into divergent stale-comment logic. A QA-verified `doing` task holds no
+explicit attention row at all, because explicit rows are reserved for genuine
+blockers and cross-role handoffs.
+
+**A QA-gate marker is a gate prompt, not a delivery-evidence block (2026-10-29,
+task `dbce028f`).** `[qa-agent-blocked]` carries two different statements, and
+the routing rule has to tell them apart. The lobster's own generic marker —
+its service account authoring the comment, and the body being the `qa_agent`
+gate fingerprint ("Structured `qa_agent` approval is missing or not approved;
+Ash must run mechanical verification …") — is a **prompt to the QA gate
+owner**. It names Ash and says nothing about the delivery. A verifier's per-AC
+blocked verdict is an **evidence failure**: it names the ACs that the delivered
+evidence does not support, and it keeps the delivery owner as its actor.
+
+A delivery task whose evidence passes but whose `qa_agent` approval is still
+pending is therefore owned by the **QA gate owner (Ash)**, not by the delivery
+assignee. Routing it to the assignee re-pages the delivery owner on every
+sweep with a note ("The delivery owner must address the outstanding workflow
+evidence before QA can act.") that misdescribes the outstanding item — the
+outstanding item is Ash's QA, not a delivery gap.
+
+The distinction is derived from data the task payload already carries: the
+marker's **author** (a known verifier is always an evidence verdict; a known
+lobster service account is always a gate prompt) and, only as the fallback for
+an unrecognised author, the structured `qa_agent` row state (an open QA gate
+means a gate prompt). The structured row state never overrides a known
+verifier author: a blocked task has no approved attestation, so a row-state
+override would reclassify Ash's own verdict as a gate prompt and strand the
+delivery owner. There is **no new comment tag, no new approval type and no
+second source of truth** — the `qa_agent` row remains the sole attestation of
+record, and the Tasks API contract is unchanged.
+
+The classifier fails closed. An unrecognised author combined with an approved
+attestation, or a `qa_agent` row in a state other than pending/approved, is
+treated as an evidence verdict, so today's routing is preserved for every
+shape not explicitly classified; the change can only remove a false routing,
+never introduce one. The rule lives in the crate that owns attention routing
+(`agents/workflows/feature-task/src/task_approvals.rs` — `classify_qa_block`,
+`qa_agent_blocked_after_latest_delivery`), not in the API or the UI.
 
 These QA markers are parsed by the feature-task router as workflow state; they
 are not generic audit comments. A capability-resolution marker must therefore
@@ -299,12 +369,12 @@ Task ownership is split into five **independent** planes. No plane silently deri
 The API surfaces each plane independently:
 
 - `assignee` (delivery), `dependsOn` / `dependsOnIds` / `dependencyBlocked` (dependencies), `blocked` (existing indicator).
-- `approvals` (raw rows) and `workflowGates` (read-only metadata for the one exact current-stage gate, with its configured owner and outstanding state). This is a derived view for normal gate discovery and card rendering; it is not an attention-owner stack and does not replace explicit attention rows.
+- `approvals` (raw rows) and `workflowGates` (read-only metadata for the one exact current-stage gate, with its configured owner and outstanding state). This is a derived view for normal gate discovery and card rendering; it is not an attention-owner stack and does not replace explicit attention rows. The list and detail projections derive `workflowGates` from the **same** delivery-evidence rule and the same evidence (the latest Lobster state plus the delivery-checklist markers), so the two always agree; the list projection loads only the marker-bearing comments the rule reads, never the full comment history. A `qa_agent` gate stays dormant while Lobster's latest delivery-evidence state carries an unresolved failure, and no projection or filter reports it as outstanding.
 - `attentionOwners` / `topAttentionOwner` / `attentionOwnerDetails` (ordered action/escalation).
 
 Discovery filters on `GET /tasks`:
 
-- `?workflowGateOwner=<name>` — tasks whose exact current-stage outstanding gate is owned by `<name>`; this covers `spec`, `tech_design`, `qa_agent`, and `accepted` according to status and task-type policy.
+- `?workflowGateOwner=<name>` — tasks whose exact current-stage outstanding gate is owned by `<name>`; this covers `spec`, `tech_design`, `qa_agent`, and `accepted` according to status and task-type policy. The filter selects on the **derived** gates, not on a database-side approximation of them: a SQL pre-filter narrows the candidates (status, task type, no satisfied approval), and the result is then narrowed again to the tasks whose derived `workflowGates` actually contain an outstanding gate for `<name>`. A task whose gate is dormant — for example while Lobster's latest delivery-evidence state still carries a failure fingerprint — is therefore absent from the result, and the filter agrees with the payload it filters by construction.
 - `?attentionOwner=<name>` — tasks whose position-0 `TaskAttentionOwner` matches (case-insensitive).
 
 The two filters combine via AND: a UI can show "Quinn's outstanding gates AND the attention requests Quinn raised" without conflating the two planes. `?workflowGateOwner` and `?attentionOwner` never create or remove `TaskAttentionOwner` rows; they are pure read filters.
@@ -502,13 +572,20 @@ feature-task workflow is a thin client.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/v1/feature-task-analytics/events` | Idempotent upsert by `eventKey`. Accepts a single event or a batch (max 500). Validates UUIDs and `eventType` / `cause` enums. |
-| `GET  /api/v1/feature-task-analytics/tasks/:taskId/events` | Raw events in `(occurredAt, createdAt)` order for per-task replay. |
+| `GET  /api/v1/feature-task-analytics/tasks/:taskId/events` | Raw events for per-task replay in `(occurredAt, createdAt, id)` order. Optional `limit` (default 500, hard maximum 2,000) and `cursor` query parameters return at most 2,000 events and 1 MiB per response. The response is `{"data": [...], "pagination": {"limit", "returned", "hasMore", "nextCursor"}}`; clients follow `nextCursor` until `hasMore` is false to retrieve the complete history. |
 | `GET  /api/v1/feature-task-analytics/weekly?weeks=N` | Monday-start buckets with `terminalTaskCount`, `gateFailureCount` split into `capacityFailureCount` and `qualityFailureCount`, `gateFailureRate` (null when the denominator is zero), `medianPrCycleTimeSeconds`, `p90PrCycleTimeSeconds`, and `evidenceTypeDistribution`. Reuses the `flowMetrics.isoMonday()` convention from Mission Control. |
 
 Backed by a new Prisma model `FeatureTaskAnalyticsEvent` with
 `eventKey @unique` for idempotent writes, an index on `(taskId,
 occurredAt)` for replay, and a `(weekStart, terminalStatus)` index for
 the weekly aggregation.
+
+The weekly aggregation computes bucket counts in Postgres but keeps every
+`terminal_summary` row in the requested window as a percentile input; percentile
+inputs are never sampled or truncated. Bucket boundaries are computed in the
+Tasks API using the same local Monday convention as Mission Control and passed
+to Postgres as parameters, so the response remains identical to the previous
+JavaScript aggregation for the same fixture data.
 
 ##### CLI replay
 

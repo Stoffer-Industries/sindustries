@@ -20,6 +20,11 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.ts';
 import { badRequest, notFound } from '../lib/http.ts';
+import {
+  fetchTaskAnalyticsEvents,
+  fetchWeeklyAnalyticsCounts,
+  fetchWeeklyTerminalSummaries
+} from '../lib/featureTaskAnalyticsQuery.ts';
 import { uuidPattern } from './tasks/_constants.ts';
 
 export const featureTaskAnalyticsRouter = Router();
@@ -34,6 +39,9 @@ const VALID_GATES = new Set([
 ]);
 const VALID_CAUSES = new Set(['capacity', 'quality']);
 const VALID_TERMINAL_STATUSES = new Set(['done', 'accepted']);
+const DEFAULT_EVENTS_LIMIT = 500;
+const MAX_EVENTS_LIMIT = 2_000;
+const MAX_RESPONSE_BYTES = 1024 * 1024;
 const TERMINAL_SUMMARY_VALID_NUMERIC = (value) =>
   value === null || value === undefined || (Number.isInteger(value) && value >= 0);
 
@@ -166,6 +174,86 @@ function eventResponse(event) {
   };
 }
 
+function parseEventsLimit(rawLimit) {
+  if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
+    return DEFAULT_EVENTS_LIMIT;
+  }
+  if (typeof rawLimit !== 'string' || !/^\d+$/.test(rawLimit)) return null;
+  const parsed = Number(rawLimit);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return null;
+  return Math.min(parsed, MAX_EVENTS_LIMIT);
+}
+
+function encodeEventsCursor(event) {
+  return Buffer.from(JSON.stringify({
+    occurredAt: event.occurredAt instanceof Date ? event.occurredAt.toISOString() : event.occurredAt,
+    createdAt: event.createdAt instanceof Date ? event.createdAt.toISOString() : event.createdAt,
+    id: event.id
+  }), 'utf8').toString('base64url');
+}
+
+function decodeEventsCursor(rawCursor) {
+  if (rawCursor === undefined || rawCursor === null || rawCursor === '') return undefined;
+  if (typeof rawCursor !== 'string' || !/^[A-Za-z0-9_-]+$/.test(rawCursor)) return null;
+
+  try {
+    const decoded = Buffer.from(rawCursor, 'base64url');
+    if (decoded.toString('base64url') !== rawCursor) return null;
+    const value = JSON.parse(decoded.toString('utf8'));
+    if (!value || typeof value !== 'object'
+        || typeof value.occurredAt !== 'string'
+        || typeof value.createdAt !== 'string'
+        || typeof value.id !== 'string'
+        || !uuidPattern.test(value.id)) {
+      return null;
+    }
+    const occurredAt = new Date(value.occurredAt);
+    const createdAt = new Date(value.createdAt);
+    if (Number.isNaN(occurredAt.getTime()) || Number.isNaN(createdAt.getTime())) return null;
+    return { occurredAt, createdAt, id: value.id };
+  } catch {
+    return null;
+  }
+}
+
+function paginatedEventsEnvelope(events, limit, hasMore, firstOmittedEvent) {
+  return {
+    data: events,
+    pagination: {
+      limit,
+      returned: events.length,
+      hasMore,
+      nextCursor: hasMore ? encodeEventsCursor(firstOmittedEvent) : null
+    }
+  };
+}
+
+function fitEventsToResponseBudget(events, limit, firstEventAfterLimit) {
+  const fits = (returned) => {
+    const firstOmitted = returned < events.length ? events[returned] : firstEventAfterLimit;
+    const hasMore = Boolean(firstOmitted);
+    const envelope = paginatedEventsEnvelope(events.slice(0, returned), limit, hasMore, firstOmitted);
+    return Buffer.byteLength(JSON.stringify(envelope), 'utf8') <= MAX_RESPONSE_BYTES;
+  };
+
+  let low = 0;
+  let high = events.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fits(middle)) low = middle;
+    else high = middle - 1;
+  }
+
+  if (low === 0 && events.length > 0) {
+    throw new Error('analytics event exceeds the response byte budget');
+  }
+
+  const firstOmitted = low < events.length ? events[low] : firstEventAfterLimit;
+  const hasMore = Boolean(firstOmitted);
+  return paginatedEventsEnvelope(events.slice(0, low), limit, hasMore, firstOmitted);
+}
+
+
 featureTaskAnalyticsRouter.post('/feature-task-analytics/events', async (req, res, next) => {
   try {
     // Accept either a single event or { events: [...] } for batching.
@@ -222,12 +310,21 @@ featureTaskAnalyticsRouter.get('/feature-task-analytics/tasks/:taskId/events', a
     const task = await prisma.task.findFirst({ where: { id: taskId, archivedAt: null }, select: { id: true } });
     if (!task) return notFound(res, 'TASK_NOT_FOUND', 'Task not found');
 
-    const events = await prisma.featureTaskAnalyticsEvent.findMany({
-      where: { taskId },
-      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }]
-    });
+    const limit = parseEventsLimit(req.query?.limit);
+    if (limit === null) {
+      return badRequest(res, 'INVALID_LIMIT', 'limit must be a positive integer');
+    }
+    const cursor = decodeEventsCursor(req.query?.cursor);
+    if (cursor === null) {
+      return badRequest(res, 'INVALID_CURSOR', 'cursor must be a valid analytics event cursor');
+    }
 
-    return res.status(200).json({ data: events.map(eventResponse) });
+    const rows = await fetchTaskAnalyticsEvents(prisma, taskId, limit, cursor);
+    const events = rows.slice(0, limit).map(eventResponse);
+    const firstEventAfterLimit = rows.length > limit ? eventResponse(rows[limit]) : null;
+    const envelope = fitEventsToResponseBudget(events, limit, firstEventAfterLimit);
+
+    return res.status(200).json(envelope);
   } catch (error) {
     return next(error);
   }
@@ -305,19 +402,11 @@ featureTaskAnalyticsRouter.get('/feature-task-analytics/weekly', async (req, res
     }
 
     const earliest = buckets[0].start;
-    const events = await prisma.featureTaskAnalyticsEvent.findMany({
-      where: {
-        occurredAt: { gte: earliest, lt: buckets[buckets.length - 1].end }
-      },
-      select: {
-        taskId: true,
-        eventType: true,
-        cause: true,
-        occurredAt: true,
-        prCycleTimeSeconds: true,
-        evidenceTypeDistribution: true
-      }
-    });
+    const latest = buckets[buckets.length - 1].end;
+    const [countRows, terminalSummaries] = await Promise.all([
+      fetchWeeklyAnalyticsCounts(prisma, buckets),
+      fetchWeeklyTerminalSummaries(prisma, earliest, latest)
+    ]);
 
     const bucketsByWeek = buckets.map((bucket) => ({
       weekStart: isoDateOnly(bucket.start),
@@ -330,38 +419,37 @@ featureTaskAnalyticsRouter.get('/feature-task-analytics/weekly', async (req, res
       medianPrCycleTimeSeconds: null,
       p90PrCycleTimeSeconds: null,
       evidenceTypeDistribution: {},
-      _terminalTasks: new Set(),
-      _failureTasks: new Set(),
       _prCycleTimes: []
     }));
 
-    for (const event of events) {
+    for (const counts of countRows) {
+      const stats = bucketsByWeek[counts.bucketIndex];
+      if (!stats) continue;
+      stats.terminalTaskCount = counts.terminalTaskCount;
+      stats.taskWithFailureCount = counts.taskWithFailureCount;
+      stats.gateFailureCount = counts.gateFailureCount;
+      stats.capacityFailureCount = counts.capacityFailureCount;
+      stats.qualityFailureCount = counts.qualityFailureCount;
+    }
+
+    for (const event of terminalSummaries) {
       const occurred = event.occurredAt;
       const bucketIndex = buckets.findIndex((b) => occurred >= b.start && occurred < b.end);
       if (bucketIndex === -1) continue;
       const stats = bucketsByWeek[bucketIndex];
 
-      if (event.eventType === 'terminal_summary') {
-        stats.terminalTaskCount += 1;
-        stats._terminalTasks.add(event.taskId);
-        if (typeof event.prCycleTimeSeconds === 'number') {
-          stats._prCycleTimes.push(event.prCycleTimeSeconds);
+      if (typeof event.prCycleTimeSeconds === 'number') {
+        stats._prCycleTimes.push(event.prCycleTimeSeconds);
+      }
+      if (event.evidenceTypeDistribution && typeof event.evidenceTypeDistribution === 'object') {
+        for (const [key, count] of Object.entries(event.evidenceTypeDistribution)) {
+          stats.evidenceTypeDistribution[key] = (stats.evidenceTypeDistribution[key] || 0) + Number(count);
         }
-        if (event.evidenceTypeDistribution && typeof event.evidenceTypeDistribution === 'object') {
-          for (const [key, count] of Object.entries(event.evidenceTypeDistribution)) {
-            stats.evidenceTypeDistribution[key] = (stats.evidenceTypeDistribution[key] || 0) + Number(count);
-          }
-        }
-      } else if (event.eventType === 'gate_failure') {
-        stats.gateFailureCount += 1;
-        if (event.cause === 'capacity') stats.capacityFailureCount += 1;
-        else if (event.cause === 'quality') stats.qualityFailureCount += 1;
-        stats._failureTasks.add(event.taskId);
       }
     }
 
     const response = bucketsByWeek.map((stats) => {
-      const taskWithFailureCount = stats._failureTasks.size;
+      const taskWithFailureCount = stats.taskWithFailureCount;
       const denominator = stats.terminalTaskCount;
       const gateFailureRate = denominator === 0 ? null : Number((taskWithFailureCount / denominator).toFixed(4));
       return {

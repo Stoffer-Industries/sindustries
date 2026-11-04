@@ -521,4 +521,46 @@ describe('StackedAvatarGroup', () => {
     render(<StackedAvatarGroup task={task} />);
     expect(screen.getByLabelText('workflow-gate owner someone-unknown')).toBeInTheDocument();
   });
+
+  it('renders no workflow-gate layer for a delivery-evidence-blocked task (AC5)', () => {
+    // The board consumes the list payload. A task whose delivery evidence
+    // still blocks QA carries no outstanding `qa_agent` gate in that
+    // payload, so the card must not render an Ash / qa_agent layer for a
+    // gate that is dormant (task 7db08a30).
+    const listPayload = {
+      id: '11111111-1111-1111-1111-111111111111',
+      status: 'doing',
+      taskType: 'code',
+      assignee: 'Rowan',
+      comments: [],
+      workflowGates: [],
+      attentionOwners: []
+    };
+
+    const { entries } = buildStackedOwnerLayers(listPayload);
+    expect(entries.map((entry) => entry.role)).toEqual(['delivery']);
+
+    const { container } = render(<StackedAvatarGroup task={listPayload} />);
+    expect(container.querySelector('[data-role="workflow-gate"]')).toBeNull();
+    expect(screen.queryByLabelText('workflow-gate owner Ash')).toBeNull();
+    expect(screen.getByLabelText('delivery assignee Rowan')).toBeInTheDocument();
+  });
+
+  it('renders the workflow-gate layer when the gate is genuinely outstanding', () => {
+    // The counter-case for AC5: the same board card, but with a live
+    // `qa_agent` gate in the list payload, still shows the Ash layer.
+    const listPayload = {
+      id: '11111111-1111-1111-1111-111111111111',
+      status: 'doing',
+      taskType: 'code',
+      assignee: 'Rowan',
+      comments: [],
+      workflowGates: [{ gate: 'qa_agent', owner: 'Ash', state: 'outstanding' }],
+      attentionOwners: []
+    };
+
+    const { container } = render(<StackedAvatarGroup task={listPayload} />);
+    expect(container.querySelector('[data-role="workflow-gate"]')).not.toBeNull();
+    expect(screen.getByLabelText('workflow-gate owner Ash')).toBeInTheDocument();
+  });
 });

@@ -27,8 +27,9 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 
-use crate::{StageArgs, Task};
+use crate::{api_client::handle_api_result, StageArgs, Task};
 
 /// Capacity vs quality classification for a single gate failure string.
 ///
@@ -243,23 +244,123 @@ impl EvidenceDistribution {
 /// Query the analytics endpoint for the task's raw events. Returns an
 /// empty Vec if the task has no events yet (e.g., first run) or if the
 /// GET fails (we do not want to block task close on analytics lookup).
+///
+/// The endpoint is bounded (one page per response), so the query follows
+/// `pagination.nextCursor` to the end and returns the task's complete
+/// event history in server order. A failure at any point discards the
+/// partial history and yields an empty Vec, so a broken read never
+/// records half-counted gate failures in the terminal summary.
 fn fetch_task_events(args: &StageArgs, task_id: &str) -> Vec<Value> {
-    let url = format!(
-        "{}/feature-task-analytics/tasks/{task_id}/events",
-        args.base_url.trim_end_matches('/')
-    );
-    let response = ureq::get(&url).call();
-    match response {
-        Ok(resp) => match resp.into_json::<Value>() {
-            Ok(value) => value
-                .get("data")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
+    let base_url = args.base_url.trim_end_matches('/');
+    let result = collect_paged_events(|cursor| {
+        let url = analytics_events_url(base_url, task_id, cursor);
+        let body: Value = handle_api_result(ureq::get(&url).call())?;
+        Ok(body)
+    });
+    match result {
+        Ok(events) => events,
+        Err(err) => {
+            eprintln!("warning: analytics event lookup failed for task {task_id}: {err}");
+            Vec::new()
+        }
     }
+}
+
+/// Upper bound on the number of analytics pages fetched for one task.
+/// The endpoint's own page cap keeps real histories well inside this; the
+/// bound only stops a misbehaving server that keeps handing out fresh
+/// cursors from spinning forever.
+pub(crate) const MAX_ANALYTICS_EVENT_PAGES: usize = 1_000;
+
+/// Build the per-task analytics events URL, adding the pagination cursor
+/// when one is supplied.
+pub(crate) fn analytics_events_url(base_url: &str, task_id: &str, cursor: Option<&str>) -> String {
+    let base = base_url.trim_end_matches('/');
+    match cursor {
+        Some(cursor) => format!(
+            "{base}/feature-task-analytics/tasks/{task_id}/events?cursor={}",
+            encode_query_component(cursor)
+        ),
+        None => format!("{base}/feature-task-analytics/tasks/{task_id}/events"),
+    }
+}
+
+/// Percent-encode a query-string component (RFC 3986 unreserved set).
+/// The analytics cursor is base64url, which is URL-safe apart from the
+/// optional `=` padding, so this keeps the request valid without pulling
+/// in a URL-encoding dependency.
+fn encode_query_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        let c = *byte as char;
+        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
+            out.push(c);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Follow the bounded analytics pagination contract and return the task's
+/// complete event history in server order.
+///
+/// `fetch_page` is called with `None` for the first page and with the
+/// `pagination.nextCursor` value for each subsequent page. The closure
+/// receives the raw response envelope (`{"data": [...], "pagination":
+/// {...}}`) and returns it as a `Value`.
+///
+/// A response without a `pagination` object is treated as a single-page
+/// response (pre-pagination server behaviour). A repeated cursor, a
+/// missing cursor on a `hasMore` response, or an unbounded number of
+/// pages is an error rather than a silently truncated history.
+pub(crate) fn collect_paged_events<F>(mut fetch_page: F) -> Result<Vec<Value>>
+where
+    F: FnMut(Option<&str>) -> Result<Value>,
+{
+    let mut events: Vec<Value> = Vec::new();
+    let mut seen_cursors: HashSet<String> = HashSet::new();
+    let mut cursor: Option<String> = None;
+
+    for _ in 0..MAX_ANALYTICS_EVENT_PAGES {
+        let body = fetch_page(cursor.as_deref())?;
+        if let Some(page) = body.get("data").and_then(Value::as_array) {
+            events.extend(page.iter().cloned());
+        }
+
+        let pagination = match body.get("pagination") {
+            Some(pagination) => pagination,
+            // Pre-pagination server: the whole history came in one response.
+            None => return Ok(events),
+        };
+        let has_more = pagination
+            .get("hasMore")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !has_more {
+            return Ok(events);
+        }
+
+        let next_cursor = pagination
+            .get("nextCursor")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|cursor| !cursor.is_empty())
+            .map(str::to_string);
+        let next_cursor = next_cursor.ok_or_else(|| {
+            anyhow!("analytics pagination reports more pages but no nextCursor")
+        })?;
+        if !seen_cursors.insert(next_cursor.clone()) {
+            return Err(anyhow!(
+                "analytics pagination repeated cursor `{next_cursor}`"
+            ));
+        }
+        cursor = Some(next_cursor);
+    }
+
+    Err(anyhow!(
+        "analytics pagination exceeded {MAX_ANALYTICS_EVENT_PAGES} pages"
+    ))
 }
 
 fn count_gate_failures(events: &[Value]) -> GateFailureCounts {
@@ -483,6 +584,76 @@ fn unix_to_civil(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
     (y, m, d, hour, minute, second)
 }
 
+/// Minimal HTTP server used by the analytics pagination tests. Serves a
+/// canned sequence of JSON bodies and reports the request paths (with
+/// query string) it saw, so a test can assert the cursor was actually
+/// requested.
+#[cfg(test)]
+pub(crate) mod test_http {
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+    use std::time::{Duration, Instant};
+
+    /// Spawn a sequential HTTP server on 127.0.0.1.
+    ///
+    /// Each accepted request is answered with the next body in
+    /// `responses` (the last body is repeated if the client asks for
+    /// more). The returned handle resolves to the list of request paths
+    /// the server observed.
+    pub(crate) fn spawn_sequential_server(
+        responses: Vec<String>,
+    ) -> (String, JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        listener
+            .set_nonblocking(true)
+            .expect("set non-blocking listener");
+        let port = listener.local_addr().expect("local addr").port();
+
+        let handle = std::thread::spawn(move || {
+            let mut paths: Vec<String> = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline && paths.len() < responses.len() {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let mut stream = stream;
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        let mut buffer = [0u8; 4096];
+                        let read = stream.read(&mut buffer).unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                        let path = request
+                            .lines()
+                            .next()
+                            .and_then(|line| line.split_whitespace().nth(1))
+                            .unwrap_or("")
+                            .to_string();
+                        paths.push(path);
+                        let body = responses
+                            .get(paths.len() - 1)
+                            .cloned()
+                            .unwrap_or_else(|| "{}".to_string());
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.flush();
+                    }
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+            paths
+        });
+
+        (format!("http://127.0.0.1:{port}"), handle)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -689,6 +860,163 @@ mod tests {
                 "https://github.com/foo/bar/pull/1".to_string(),
                 "https://github.com/foo/bar/pull/2".to_string(),
             ]
+        );
+    }
+
+    // ---- bounded analytics pagination (task 75032fad) ----
+
+    const TEST_TASK_ID: &str = "11111111-2222-3333-4444-555555555555";
+
+    fn page(events: Vec<Value>, has_more: bool, next_cursor: Option<&str>) -> Value {
+        json!({
+            "data": events,
+            "pagination": {
+                "limit": 500,
+                "returned": events.len(),
+                "hasMore": has_more,
+                "nextCursor": next_cursor,
+            }
+        })
+    }
+
+    #[test]
+    fn collect_paged_events_follows_every_page_in_order() {
+        let mut seen_cursors: Vec<Option<String>> = Vec::new();
+        let events = collect_paged_events(|cursor| {
+            seen_cursors.push(cursor.map(str::to_string));
+            Ok(match cursor {
+                None => page(
+                    vec![json!({"eventType": "gate_failure", "occurredAt": "2026-10-01T00:00:00Z"})],
+                    true,
+                    Some("cursor-1"),
+                ),
+                Some("cursor-1") => page(
+                    vec![json!({"eventType": "gate_failure", "occurredAt": "2026-10-02T00:00:00Z"})],
+                    true,
+                    Some("cursor-2"),
+                ),
+                _ => page(
+                    vec![json!({"eventType": "terminal_summary", "occurredAt": "2026-10-03T00:00:00Z"})],
+                    false,
+                    None,
+                ),
+            })
+        })
+        .expect("collect pages");
+
+        assert_eq!(
+            seen_cursors,
+            vec![None, Some("cursor-1".to_string()), Some("cursor-2".to_string())]
+        );
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0]["occurredAt"], "2026-10-01T00:00:00Z");
+        assert_eq!(events[1]["occurredAt"], "2026-10-02T00:00:00Z");
+        assert_eq!(events[2]["occurredAt"], "2026-10-03T00:00:00Z");
+    }
+
+    #[test]
+    fn collect_paged_events_accepts_legacy_single_page_response() {
+        // Pre-pagination server: no `pagination` object at all.
+        let mut calls = 0;
+        let events = collect_paged_events(|_cursor| {
+            calls += 1;
+            Ok(json!({"data": [{"eventType": "gate_failure"}]}))
+        })
+        .expect("collect pages");
+
+        assert_eq!(calls, 1);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["eventType"], "gate_failure");
+    }
+
+    #[test]
+    fn collect_paged_events_rejects_repeated_cursor() {
+        let err = collect_paged_events(|_cursor| {
+            Ok(page(vec![json!({"eventType": "gate_failure"})], true, Some("cursor-1")))
+        })
+        .expect_err("repeated cursor must fail");
+
+        assert!(err.to_string().contains("repeated cursor"));
+    }
+
+    #[test]
+    fn collect_paged_events_rejects_missing_next_cursor() {
+        let err = collect_paged_events(|_cursor| {
+            Ok(page(vec![json!({"eventType": "gate_failure"})], true, None))
+        })
+        .expect_err("missing cursor must fail");
+
+        assert!(err.to_string().contains("nextCursor"));
+    }
+
+    #[test]
+    fn collect_paged_events_bounds_the_page_count() {
+        let mut counter = 0usize;
+        let err = collect_paged_events(|_cursor| {
+            counter += 1;
+            Ok(page(
+                vec![json!({"eventType": "gate_failure"})],
+                true,
+                Some(&format!("cursor-{counter}")),
+            ))
+        })
+        .expect_err("unbounded pages must fail");
+
+        assert!(err.to_string().contains("exceeded"));
+        assert_eq!(counter, MAX_ANALYTICS_EVENT_PAGES);
+    }
+
+    #[test]
+    fn analytics_events_url_appends_encoded_cursor() {
+        assert_eq!(
+            analytics_events_url("http://localhost:4001/api/v1/", TEST_TASK_ID, None),
+            format!("http://localhost:4001/api/v1/feature-task-analytics/tasks/{TEST_TASK_ID}/events")
+        );
+        assert_eq!(
+            analytics_events_url("http://localhost:4001/api/v1", TEST_TASK_ID, Some("ab=cd")),
+            format!(
+                "http://localhost:4001/api/v1/feature-task-analytics/tasks/{TEST_TASK_ID}/events?cursor=ab%3Dcd"
+            )
+        );
+    }
+
+    #[test]
+    fn fetch_task_events_follows_pagination_over_http() {
+        let page_one = page(
+            vec![json!({"eventType": "gate_failure", "cause": "quality"})],
+            true,
+            Some("cursor-1"),
+        )
+        .to_string();
+        let page_two = page(
+            vec![json!({"eventType": "gate_failure", "cause": "capacity"})],
+            false,
+            None,
+        )
+        .to_string();
+        let (base_url, server) = test_http::spawn_sequential_server(vec![page_one, page_two]);
+
+        let args = StageArgs {
+            base_url: base_url.clone(),
+            dry_run: false,
+            repo: std::path::PathBuf::from("."),
+            workspace_root: None,
+        };
+        let events = fetch_task_events(&args, TEST_TASK_ID);
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["cause"], "quality");
+        assert_eq!(events[1]["cause"], "capacity");
+
+        let paths = server.join().expect("test server thread");
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            paths[0],
+            format!("/feature-task-analytics/tasks/{TEST_TASK_ID}/events")
+        );
+        assert_eq!(
+            paths[1],
+            format!("/feature-task-analytics/tasks/{TEST_TASK_ID}/events?cursor=cursor-1")
         );
     }
 }

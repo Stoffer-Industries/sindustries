@@ -183,6 +183,10 @@ new planes is scoped separately.
      `state: "outstanding"` are included. Approved gates are excluded
      so the stack never re-shows a gate that has already been
      satisfied. Gate order matches the mapper's policy-defined order.
+     The board renders this layer straight from the payload it
+     receives: a gate the API reports as dormant (delivery evidence
+     still outstanding) is not in the payload, so no gate layer is
+     drawn for it.
    * **Layer 3 — delivery assignee** (the `task.assignee` field). The
      delivery avatar remains visible as context but never obscures the current
      attention owner. Empty `assignee` is allowed.
@@ -248,6 +252,6 @@ The list of reserved assignees and their display metadata (id → display name, 
 | tags | String[] | Ad-hoc, case-insensitive unique |
 | blockedBy | UUID[] | Dependency references |
 | approvals | TaskApproval[] | Native approvals owned by the tasks-api (see `services/tasks-api/SPEC.md` for the authoritative schema). The Tasks UI mutates this collection only through the structured authenticated approval endpoints and then refreshes the task. |
-| workflowGates | `{ type, owner, state }[]` | Derived view of the one exact current-stage required approval for the task's `taskType` (`open → spec`, `ready → tech_design`, `doing → qa_agent`, `acceptance → accepted`) while it is outstanding. Used for normal gate discovery and card rendering; never persisted into `attentionOwners`. |
+| workflowGates | `{ type, owner, state }[]` | Derived view of the one exact current-stage required approval for the task's `taskType` (`open → spec`, `ready → tech_design`, `doing → qa_agent`, `acceptance → accepted`) while it is outstanding. Used for normal gate discovery and card rendering; never persisted into `attentionOwners`. The API derives this field identically for the list and detail payloads, so a `qa_agent` gate that is dormant (delivery evidence still outstanding) is absent from both — the board therefore renders no gate layer for a task whose gate is not actionable, and the "My outstanding gates" filter returns the same set the board shows. |
 | attentionOwners | `string[]` | Ordered explicit attention/escalation role slots. Index 0 wins when present; later entries are dormant escalation targets and repeated names are intentional. Quinn is the exceptional runtime/unblocker escalation. Empty means the queue/card derives the current workflow-gate owner, then falls back to the delivery assignee. |
 | attentionOwnerDetails | `{ id, owner, position, addedBy, note, createdAt }[]` | Full audit rows for `attentionOwners`. Preserves order and per-row context for detail UI. |

@@ -19,7 +19,7 @@ for extraction.
 |---|---|---|
 | Headline weekly numbers (terminal count, gate-failure rate, quality/capacity split, PR cycle time, evidence mix) | `scripts/weekly_summary.py` | `GET /feature-task-analytics/weekly?weeks=N` |
 | List of tasks that reached `done`/`accepted` in the last N days (titles, for reports) | `scripts/get_terminal_tasks.py` | `GET /tasks?status=done`, `GET /tasks?status=accepted` |
-| Per-gate / per-cause / per-message breakdown of `gate_failure` events, for "top N suggestions" style reports | `scripts/tally_events.py` | `GET /feature-task-analytics/tasks/:taskId/events` (looped) |
+| Per-gate / per-cause / per-message breakdown of `gate_failure` events, for "top N suggestions" style reports | `scripts/tally_events.py` | `GET /feature-task-analytics/tasks/:taskId/events` (cursor-paged loop) |
 
 ## Usage
 
@@ -78,7 +78,10 @@ python3 tally_events.py [--days N]
 Default `--days 7`. Builds the in-window candidate task set, fetches each task's analytics
 events, and tallies `gate_failure` events by `gate`, `cause`, and `message` (verbatim message
 text — grouping/bucketing into known patterns is a report-authoring concern, not this
-script's job). Prints:
+script's job). The per-task endpoint is bounded, so the script follows
+`pagination.nextCursor` until `pagination.hasMore` is false and concatenates the pages in
+server order. A malformed or repeated cursor fails the script rather than silently
+reporting a partial tally. Prints:
 
 ```json
 {

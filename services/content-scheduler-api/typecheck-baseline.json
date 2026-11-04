@@ -1,0 +1,17 @@
+{
+  "service": "content-scheduler-api",
+  "generatedAt": "2026-10-26",
+  "generatedBy": "npm run typecheck:baseline --workspace services/content-scheduler-api",
+  "tscVersion": "5.9.3",
+  "totalDiagnostics": 19,
+  "fingerprints": {
+    "src/routes/autoPostReconciliation.ts:TS2339:Property 'message' does not exist on type 'PublishServiceResult'.": 1,
+    "src/routes/contentSchedulerPublishService.ts:TS2339:Property 'code' does not exist on type 'PublishGuardResult'.": 2,
+    "test/contentScheduler.test.ts:TS2345:Argument of type '{…}' is not assignable to parameter of type 'Pick<{…}, \"status\" | ... more ... | \"kind\">'.": 6,
+    "test/contentSchedulerAutoPost.test.ts:TS2339:Property 'message' does not exist on type 'PublishServiceResult'.": 1,
+    "test/contentSchedulerItems.test.ts:TS2345:Argument of type '{…}' is not assignable to parameter of type 'Pick<{…}, \"status\" | ... more ... | \"kind\">'.": 2,
+    "test/contentSchedulerThreadPublish.test.ts:TS2339:Property 'failedAtPosition' does not exist on type 'ThreadPublishResult'.": 1,
+    "test/contentSchedulerThreadPublish.test.ts:TS2339:Property 'message' does not exist on type 'ThreadPublishResult'.": 3,
+    "test/contentSchedulerThreadPublish.test.ts:TS2339:Property 'undeletedTweets' does not exist on type 'ThreadPublishResult'.": 3
+  }
+}

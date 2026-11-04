@@ -34,6 +34,7 @@ model User {
   feedback  CategorizationFeedback[]
   alerts    NotificationEvent[]
   balanceAlertConfigs BalanceAlertConfig[]
+  akahuBackfillRuns AkahuBackfillRun[]
 }
 
 model AkahuConnection {
@@ -48,6 +49,33 @@ model AkahuConnection {
   updatedAt   DateTime @updatedAt
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Audit record for a bounded Akahu backfill (task a37b31c9, AC6).
+//
+// A backfill is a data-repair operation over financial records, so it leaves
+// a durable record of the window it covered and what it did. The run record
+// is written by the same code path that performs the backfill
+// (src/services/akahuBackfill.ts) — there is no second source of truth.
+//
+// `mode` is "apply" only: a dry run writes nothing, not even a run record.
+// `status` is "completed" | "partial" | "failed".
+model AkahuBackfillRun {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  windowStartMs BigInt
+  windowEndMs   BigInt
+  mode          String
+  status        String
+  pagesFetched  Int      @default(0)
+  rowsSeen      Int      @default(0)
+  rowsUpserted  Int      @default(0)
+  startedAt     DateTime @default(now())
+  finishedAt    DateTime?
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, windowStartMs])
 }
 
 model Session {
