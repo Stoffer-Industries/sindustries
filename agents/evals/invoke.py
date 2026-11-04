@@ -90,6 +90,13 @@ def invoke_model(
                 "use the agent transport, or point the eval at a smaller fixture"
             )
         cmd = ["openclaw", "infer", "model", "run", "--model", model, "--json"]
+        # Use the agent's own credentials. Without this the call falls back to
+        # the state directory's default provider key, which can be a different
+        # account — and can be out of credit while the agent's own key is
+        # healthy, which reads as "the model is broken" rather than "the key
+        # is empty".
+        if agent:
+            cmd += ["--agent", agent]
         if thinking:
             cmd += ["--thinking", thinking]
         cmd += extra_args or []
