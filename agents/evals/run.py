@@ -38,9 +38,17 @@ def _print_case_header(case) -> None:
     print(f"\n=== {case.id}: {case.title} ===")
 
 
-def run_case(case, model: str, *, transport: str, agent: str, thinking: str | None) -> dict:
+def run_case(
+    case,
+    model: str,
+    *,
+    transport: str | None,
+    agent: str,
+    thinking: str | None,
+) -> dict:
     """Run one model against one case and return its result record."""
     _print_case_header(case)
+    effective_transport = transport or case.transport
 
     validation = validate_controls(case)
     if not validation.ok:
@@ -59,7 +67,11 @@ def run_case(case, model: str, *, transport: str, agent: str, thinking: str | No
     started = time.time()
     try:
         response, _raw = invoke_model(
-            model, prompt, transport=transport, agent=agent, thinking=thinking
+            model,
+            prompt,
+            transport=effective_transport,
+            agent=agent,
+            thinking=thinking,
         )
     except ModelInvocationError as exc:
         print(f"model invocation failed: {exc}")
@@ -141,7 +153,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="check every grader against its controls and exit (calls no model)",
     )
-    parser.add_argument("--transport", default="infer", choices=("infer", "agent"))
+    parser.add_argument(
+        "--transport",
+        choices=("infer", "agent"),
+        help="override the transport declared by each case",
+    )
     parser.add_argument("--agent", default="quinn", help="agent id for the agent transport")
     parser.add_argument(
         "--thinking",
@@ -183,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     records = []
     for case in selected:
         record = run_case(
-            case, args.model, transport=args.transport, agent=args.agent, thinking=thinking
+            case,
+            args.model,
+            transport=args.transport,
+            agent=args.agent,
+            thinking=thinking,
         )
         records.append(record)
         if args.out:

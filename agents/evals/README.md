@@ -54,6 +54,12 @@ Two transports, deliberately separated:
   agent's own `AGENTS.md` context and tools. Use it when the whole agent
   loop is what is under test.
 
+Each case declares its default transport in `case.json`; `--transport`
+overrides it for a run. The large `pr-contract-review` fixture uses the agent
+transport because its frozen 180 KiB prompt exceeds Linux's 128 KiB
+single-argument limit on the raw infer transport. The agent transport writes
+the prompt to a file and therefore has no argv-size limit.
+
 ## The cases
 
 | Case | What it measures | Grader |

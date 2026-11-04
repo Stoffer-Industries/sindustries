@@ -33,11 +33,12 @@ from subprocess_safe import safe_run  # noqa: E402  (path set above)
 
 DEFAULT_TIMEOUT_SECONDS = 900.0
 
-# A single argv entry cannot exceed the platform's MAX_ARG_STRLEN
-# (256 KiB on macOS). Prompts are passed as one argument on the `infer`
+# A single argv entry cannot exceed the platform's MAX_ARG_STRLEN. Linux
+# caps one argument at 128 KiB (32 pages), so stay below that even though
+# macOS allows 256 KiB. Prompts are passed as one argument on the `infer`
 # transport, so refuse rather than fail deep inside exec with an opaque
-# E2BIG.
-MAX_PROMPT_BYTES = 200_000
+# E2BIG on a Linux runner.
+MAX_PROMPT_BYTES = 120_000
 
 
 class ModelInvocationError(RuntimeError):
@@ -46,6 +47,17 @@ class ModelInvocationError(RuntimeError):
 
 def _extract_text(payload: dict) -> str:
     """Pull the reply text out of whichever envelope the transport returned."""
+    final = payload.get("final")
+    if isinstance(final, str) and final.strip():
+        return final.strip()
+    payloads = payload.get("payloads")
+    if isinstance(payloads, list):
+        for item in payloads:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
     outputs = payload.get("outputs")
     if isinstance(outputs, list) and outputs:
         first = outputs[0]

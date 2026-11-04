@@ -79,6 +79,11 @@ python3 agents/evals/run.py --model <provider/model> --all
 
 Results land in `agents/evals/results/<model>/<case>.json`.
 
+Each case declares its default transport. `--transport` overrides that
+choice. The large `pr-contract-review` case uses the agent transport because
+its frozen prompt exceeds Linux's single-argument limit for a raw infer
+call; the agent transport passes the prompt by file instead.
+
 ## In CI
 
 CI runs the model-free half: the harness self-tests, and a control validation

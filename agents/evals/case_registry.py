@@ -40,6 +40,8 @@ REQUIRED_CASE_FIELDS = (
     "controls",
 )
 
+VALID_TRANSPORTS = ("infer", "agent")
+
 
 class CaseError(RuntimeError):
     """A case file is missing, malformed, or internally inconsistent."""
@@ -57,6 +59,7 @@ class Case:
     grader: str
     grader_config: dict
     controls: dict
+    transport: str
     directory: pathlib.Path
 
     @property
@@ -101,6 +104,12 @@ def load_case(directory: pathlib.Path) -> Case:
     for rel in raw.get("prompt_files", []):
         if not (directory / rel).exists():
             raise CaseError(f"{case_file}: prompt fixture missing: {rel}")
+    transport = raw.get("transport", "infer")
+    if transport not in VALID_TRANSPORTS:
+        raise CaseError(
+            f"{case_file}: transport must be one of {', '.join(VALID_TRANSPORTS)}, "
+            f"not {transport!r}"
+        )
 
     return Case(
         id=raw["id"],
@@ -111,6 +120,7 @@ def load_case(directory: pathlib.Path) -> Case:
         grader=raw["grader"],
         grader_config=grader_config,
         controls=raw["controls"],
+        transport=transport,
         directory=directory,
     )
 
