@@ -191,15 +191,18 @@ class ParseFileTests(unittest.TestCase):
 
         Skipping it discarded a record that may be the critical one and still
         produced a verified zero, so the whole registry is now a read failure.
+        The valid siblings are still kept: one bad record must not hide the
+        incidents that did parse.
         """
         payload = {"incidents": {"good": {"owner": "quinn", "status": "watching"}, "bad": "not a dict"}}
         path = self.tmpdir / "quinn-ops-state.json"
         path.write_text(json.dumps(payload))
-        out = ist.parse_file(path)
-        self.assertEqual(out, [])
         read = ist.read_state_file(path, owner="quinn")
         self.assertTrue(read.failed)
         self.assertIn("`bad`", read.error)
+        self.assertEqual([r["_slug"] for r in read.records], ["good"])
+        out = ist.parse_file(path)
+        self.assertEqual([r["_slug"] for r in out], ["good"])
 
 
 class LoadAllIncidentsTests(unittest.TestCase):
@@ -405,6 +408,58 @@ class ReadStateFileTests(unittest.TestCase):
         self.assertTrue(read.failed)
         self.assertIn("`a`", read.error)
         self.assertIn("`b`", read.error)
+
+    def test_malformed_entry_keeps_the_valid_siblings(self):
+        """One bad record must not hide the actionable incidents next to it.
+
+        The file is still a read failure — the snapshot is not verified — but
+        the records that did parse are retained so UNVERIFIED augments the
+        summary instead of replacing known data.
+        """
+        target = self._write(
+            "quinn-ops-state.json",
+            json.dumps(
+                {
+                    "incidents": {
+                        "critical-one": {
+                            "owner": "quinn",
+                            "status": "escalated",
+                            "severity": "critical",
+                            "needsTom": True,
+                        },
+                        "broken": "not-an-object",
+                    }
+                }
+            ),
+        )
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertTrue(read.failed)
+        self.assertIn("`broken`", read.error)
+        self.assertEqual([r["_slug"] for r in read.records], ["critical-one"])
+
+    def test_absent_registry_directory_is_a_failure_not_a_missing_file(self):
+        """An unreachable registry location is not an empty registry.
+
+        `brain/` is an iCloud-backed symlink; when it is not mounted — or the
+        workspace path is wrong — both state files are "missing" while the
+        registry is in fact unreachable. Reporting that as a verified clean
+        zero is the unmounted variant of the same false zero.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "brain" / "state" / "quinn-ops-state.json"
+            read = ist.read_state_file(target, owner="quinn")
+            self.assertTrue(read.failed)
+            self.assertFalse(read.missing)
+            self.assertIn("registry directory not found", read.error)
+            self.assertIn("brain/state", str(read.error))
+
+    def test_a_missing_file_in_an_existing_registry_directory_is_still_missing(self):
+        """The directory check must not turn a genuinely empty registry into a failure."""
+        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
+        read = ist.read_state_file(target, owner="quinn")
+        self.assertTrue(read.missing)
+        self.assertFalse(read.failed)
+        self.assertEqual(read.records, [])
 
     def test_registry_with_a_malformed_entry_is_not_verified(self):
         """A malformed entry anywhere makes the whole registry unverified."""

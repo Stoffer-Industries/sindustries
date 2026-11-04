@@ -111,6 +111,27 @@ def _describe(inc: dict) -> str:
     return " — ".join(parts)
 
 
+def _merge_failures(
+    primary: list[dict] | None, extra: list[dict] | None
+) -> list[dict]:
+    """Union two failure lists, de-duplicated on (path, error).
+
+    A caller-supplied failure must never be dropped: silently ignoring one
+    would turn a known-unreadable registry back into a verified clean zero.
+    """
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+    for failure in list(primary or []) + list(extra or []):
+        if not isinstance(failure, dict):
+            continue
+        key = (failure.get("path"), failure.get("error"))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(dict(failure))
+    return merged
+
+
 def build_queue(
     incidents: list[dict] | None = None,
     *,
@@ -135,13 +156,20 @@ def build_queue(
     The records and the failures come from a single pass over the filesystem
     (``read_registry``), so the counts can never disagree with the failure list
     — iCloud can materialise a file between two separate reads.
+
+    ``read_failures`` supplied by a caller is always merged into the result,
+    whether or not ``incidents`` is also supplied. It is never discarded: a
+    caller that already knows a file could not be read must not be able to
+    produce a verified clean zero by omitting ``incidents``. When the caller
+    passes both, the supplied failures are taken verbatim; when it passes only
+    failures, the registry's own failures are merged with them.
     """
     if incidents is not None:
         failures = list(read_failures or [])
         records = incidents
     else:
         registry = read_registry(Path(workspace) if workspace else None)
-        failures = registry.failures
+        failures = _merge_failures(registry.failures, read_failures)
         records = registry.records
     records = reportable_incidents(records, now=now)
     actionable = sorted(needs_tom(records, now=now), key=_sort_key)

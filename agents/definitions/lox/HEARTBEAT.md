@@ -78,7 +78,12 @@ On every heartbeat:
    can be evicted to a dataless placeholder that fails to read with
    `OSError [Errno 11] Resource deadlock avoided`. A file that is valid JSON
    but the wrong shape (a JSON array, or an object with no `incidents`/`ops`
-   object) counts as malformed too. In that case the queue renders
+   object) counts as malformed too. A missing file inside an existing
+   `brain/state/` directory is genuinely empty, but a missing *registry
+   directory* is not: if `brain/state/` itself is absent (unmounted `brain`
+   symlink, wrong `--workspace`), the read fails with
+   `registry directory not found: …` and the queue is UNVERIFIED. In that case
+   the queue renders
    `Incident queue: N actionable, M monitored — UNVERIFIED.` and lists the
    offending path. **UNVERIFIED is an addition to the summary, not a
    replacement for it**: the counts and the `🔴 Top unblock:` line for the
