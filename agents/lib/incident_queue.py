@@ -16,6 +16,17 @@ The text output is exactly what workspace ``HEARTBEAT.md`` asks for:
     Incident queue: 16 actionable, 12 monitored.
     16 incident(s) waiting on you.
     🔴 Top unblock: <what it is and what Tom has to do>
+
+If a state file exists but cannot be read or parsed, the queue is not a verified
+snapshot. ``parse_file`` returns an empty list for an unreadable file exactly as
+it does for a file with no incidents, so a read failure would otherwise render
+as a clean zero. When that happens the queue says so explicitly, marks itself
+UNVERIFIED, and the CLI exits non-zero:
+
+    Incident queue: 0 actionable, 0 monitored — UNVERIFIED.
+    ⚠️ 1 state file(s) could not be read, so these counts exclude whatever is in them:
+       brain/state/quinn-ops-state.json — OSError: [Errno 11] Resource deadlock avoided
+       Materialise the file and re-run (macOS/iCloud): brctl download <path>
 """
 
 from __future__ import annotations
@@ -33,9 +44,15 @@ if __package__ in (None, ""):  # pragma: no cover - direct `python3 incident_que
         load_all_incidents,
         needs_tom,
         reportable_incidents,
+        state_file_read_failures,
     )
 else:
-    from .incident_state import load_all_incidents, needs_tom, reportable_incidents
+    from .incident_state import (
+        load_all_incidents,
+        needs_tom,
+        reportable_incidents,
+        state_file_read_failures,
+    )
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}
@@ -100,6 +117,7 @@ def build_queue(
     *,
     workspace: Path | str | None = None,
     now: datetime | None = None,
+    read_failures: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Build the reportable queue split into actionable vs monitored findings.
 
@@ -108,12 +126,20 @@ def build_queue(
     ``reportable_incidents()`` already drops resolved, false-positive, archived,
     task-scoped, and stale (>72h since lastCheckedAt) records, so both counts
     read straight from the registry instead of a hand-maintained tally.
+
+    ``readFailures`` lists the state files that exist but could not be read or
+    parsed, and ``verified`` is False whenever that list is non-empty. A file
+    that could not be read is not a file with no incidents, so a zero produced
+    alongside a read failure is a false zero and must never be reported as a
+    clean queue.
     """
-    records = (
-        incidents
-        if incidents is not None
-        else load_all_incidents(Path(workspace) if workspace else None)
-    )
+    if incidents is not None:
+        failures = list(read_failures or [])
+        records = incidents
+    else:
+        ws = Path(workspace) if workspace else None
+        failures = state_file_read_failures(ws)
+        records = load_all_incidents(ws)
     records = reportable_incidents(records, now=now)
     actionable = sorted(needs_tom(records, now=now), key=_sort_key)
     actionable_ids = {id(inc) for inc in actionable}
@@ -124,6 +150,8 @@ def build_queue(
         owners[owner] = owners.get(owner, 0) + 1
     return {
         "generatedAt": (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
+        "verified": not failures,
+        "readFailures": failures,
         "counts": {
             "reportable": len(records),
             "actionable": len(actionable),
@@ -161,6 +189,19 @@ def render_text(queue: dict[str, Any], *, verbose: bool = False) -> str:
     counts = queue["counts"]
     actionable = counts["actionable"]
     monitored = counts["monitored"]
+    failures = queue.get("readFailures") or []
+    if failures:
+        lines = [
+            f"Incident queue: {actionable} actionable, {monitored} monitored — UNVERIFIED.",
+            f"⚠️ {len(failures)} state file(s) could not be read, so these counts exclude "
+            "whatever is in them:",
+        ]
+        for failure in failures:
+            lines.append(f"   {failure.get('path')} — {failure.get('error')}")
+        lines.append(
+            "   Materialise the file and re-run (macOS/iCloud): brctl download <path>"
+        )
+        return "\n".join(lines)
     if counts["reportable"] == 0:
         return "No active incident findings."
     lines = [f"Incident queue: {actionable} actionable, {monitored} monitored."]
@@ -190,6 +231,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(queue, indent=2))
     else:
         print(render_text(queue, verbose=args.verbose))
+    if queue.get("readFailures"):
+        print(
+            "incident_queue: one or more state files could not be read; the queue is "
+            "not a verified snapshot.",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 
