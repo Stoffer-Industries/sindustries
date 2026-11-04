@@ -639,6 +639,28 @@ pub(crate) fn managed_owner_reason_satisfied(task: &Task, owner: &str) -> bool {
 /// next action. A non-empty stack still gets Tom inserted/advanced
 /// normally -- that case means a stale or unrelated owner is sitting at
 /// acceptance and genuinely needs correcting to Tom.
+///
+/// The baseline suppression covers *both* ways a stack can be non-empty:
+///
+/// * An empty stack (the insert branch) was already suppressed -- the
+///   baseline row is simply never written.
+/// * A stack headed by a managed owner -- `Ash`, `Quinn`, or the delivery
+///   assignee -- used to take the replace branch, which rewrote the head as
+///   `Tom`. That reintroduced exactly the duplicate row the empty-stack
+///   suppression exists to prevent, and it fired on nearly every real
+///   `doing -> acceptance` transition, because the head at that point is
+///   normally still the QA owner or the delivery assignee. The managed owner
+///   is now *removed* instead, matching the empty-stack outcome.
+///
+/// The two remaining cases are deliberately untouched:
+///
+/// * A head the workflow does not manage (a stale unrelated name) is still
+///   corrected to Tom -- that is a genuine stale-owner correction.
+/// * A head that already *is* Tom is left alone. It is either a genuine
+///   reason-bearing escalation or a row this workflow wrote before the
+///   replace branch was fixed; both need the note on the row to tell them
+///   apart, and destroying a genuine escalation would strand a task whose
+///   pending-approval row cannot surface it.
 pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
     let mut owners = task.attention_owners.clone();
     if let Some(desired) = workflow_attention_owner(task) {
@@ -649,13 +671,19 @@ pub(crate) fn reconciled_attention_owners(task: &Task) -> Vec<String> {
             enforce_tom_acceptance_only(task, &mut owners);
             return owners;
         }
-        if owners.first().is_some_and(|owner| {
-            task.assignee
-                .as_deref()
-                .is_some_and(|assignee| owner.eq_ignore_ascii_case(assignee))
-                || matches!(owner.as_str(), "Quinn" | "Ash")
-        }) {
-            owners[0] = desired.to_string();
+        if owners
+            .first()
+            .is_some_and(|owner| is_managed_attention_owner(task, owner))
+        {
+            if is_baseline_tom_acceptance_gate(task, &desired) {
+                // Remove the managed owner rather than rewriting it as "Tom":
+                // at the baseline acceptance gate the explicit row is the
+                // duplicate, and the derived `workflowGates` fallback already
+                // routes Tom.
+                owners.remove(0);
+            } else {
+                owners[0] = desired.to_string();
+            }
         } else if !owners.is_empty() || !is_baseline_tom_acceptance_gate(task, &desired) {
             owners.insert(0, desired.to_string());
         }
@@ -700,6 +728,21 @@ fn automated_delivery_checklist_slot(task: &Task, owner: &str) -> bool {
 /// task whose stack is already non-empty, is unaffected.
 fn is_baseline_tom_acceptance_gate(task: &Task, desired: &str) -> bool {
     task.status == "acceptance" && desired.eq_ignore_ascii_case("Tom")
+}
+
+/// True when the head of the attention stack is a slot the workflow itself
+/// manages: the delivery assignee, or one of the named agent roles (`Quinn`,
+/// `Ash`). The workflow may replace such a head with the owner it wants to
+/// route to -- or, at the baseline acceptance gate, remove it rather than
+/// promote it to Tom.
+///
+/// A head that is *not* managed here is an unrelated owner (or Tom himself):
+/// it is never overwritten, only preceded.
+fn is_managed_attention_owner(task: &Task, owner: &str) -> bool {
+    task.assignee
+        .as_deref()
+        .is_some_and(|assignee| owner.eq_ignore_ascii_case(assignee))
+        || matches!(owner, "Quinn" | "Ash")
 }
 
 /// Explain why the workflow is changing the actionable attention slot. This
@@ -1828,12 +1871,15 @@ mod tests {
             vec!["Ash"]
         );
     }
+    /// A stack headed by the delivery assignee at the baseline acceptance gate
+    /// is no longer rewritten as "Tom" (task `91a6a3ea`). The managed head is
+    /// removed instead, and the tail is copied byte-for-byte.
     #[test]
-    fn routing_advances_stale_implementer_to_tom_at_acceptance() {
+    fn routing_removes_stale_implementer_head_at_baseline_acceptance() {
         let task = routing_task("acceptance", &["Rowan", "Ash", "Rowan", "Tom"]);
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Tom", "Ash", "Rowan", "Tom"]
+            vec!["Ash", "Rowan", "Tom"]
         );
     }
     #[test]
@@ -1940,16 +1986,66 @@ mod tests {
         );
     }
 
-    /// A non-empty stack at acceptance headed by the delivery assignee is a
-    /// genuine stale-owner correction (the previous QA/doing-stage managed
-    /// owner left its reconciled slot at the head) -- the baseline-case
-    /// suppression must not block that replacement.
+    /// A non-empty stack at acceptance headed by the delivery assignee used to
+    /// be rewritten as "Tom" -- which is exactly the duplicate row this task
+    /// exists to remove (task `91a6a3ea`). The managed head is now removed
+    /// instead, so the baseline case yields the same empty stack as an
+    /// empty-stack acceptance does.
     #[test]
-    fn routing_still_advances_stale_assignee_head_to_tom_at_acceptance() {
+    fn routing_removes_stale_assignee_head_at_baseline_acceptance() {
         let task = routing_task("acceptance", &["Rowan"]);
         assert_eq!(
             crate::spec_check_ready::reconciled_attention_owners(&task),
-            vec!["Tom"]
+            Vec::<String>::new()
+        );
+    }
+
+    /// AC4 (task `91a6a3ea`): the regression this fix exists for. A task that
+    /// reached `acceptance` with the QA owner still at the head of the stack
+    /// took the *replace* branch, which rewrote that head as "Tom" and
+    /// reintroduced the duplicate row the empty-stack suppression was written
+    /// to prevent. The replace branch now removes the managed owner instead,
+    /// so the resulting stack is empty -- the same outcome the already-covered
+    /// insert-branch (empty stack) case produces.
+    #[test]
+    fn routing_does_not_promote_ash_head_to_tom_at_baseline_acceptance() {
+        let task = routing_task("acceptance", &["Ash"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            Vec::<String>::new()
+        );
+    }
+
+    /// AC4 (task `91a6a3ea`): the same regression for the other managed head
+    /// the workflow owns at acceptance -- Quinn's slot.
+    #[test]
+    fn routing_does_not_promote_quinn_head_to_tom_at_baseline_acceptance() {
+        let task = routing_task("acceptance", &["Quinn"]);
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            Vec::<String>::new()
+        );
+    }
+
+    /// AC3 (task `91a6a3ea`): the removal is scoped to the baseline
+    /// `acceptance -> accepted` gate. Everywhere else a managed head is still
+    /// *replaced* by the owner the workflow wants to route to, so the
+    /// `doing`-stage QA handoff is untouched.
+    #[test]
+    fn routing_still_replaces_managed_head_outside_the_baseline_gate() {
+        let mut task = routing_task("doing", &["Quinn"]);
+        task.comments.push(TaskComment {
+            author: Some("Rowan".to_string()),
+            text: Some(
+                "[implementer-prs] https://github.com/Stoffer-Industries/sindustries/pull/999"
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+        assert_eq!(workflow_attention_owner(&task), Some("Ash".to_string()));
+        assert_eq!(
+            crate::spec_check_ready::reconciled_attention_owners(&task),
+            vec!["Ash"]
         );
     }
 
