@@ -83,9 +83,10 @@ On every heartbeat:
    offending path. **UNVERIFIED is an addition to the summary, not a
    replacement for it**: the counts and the `🔴 Top unblock:` line for the
    records that did load are still printed and must still be reported. Do
-   **not** report the counts from an UNVERIFIED run as a complete queue —
-   materialise the file (`brctl download <path>`) and re-run before reporting
-   any count. Never fall back to reading the raw state file to make the
+   **not** present the counts from an UNVERIFIED run as a complete or
+   verified queue — report them alongside the UNVERIFIED banner, and
+   materialise the file (`brctl download <path>`) so the next run is
+   verified. Never fall back to reading the raw state file to make the
    failure go away: that fallback is what caused the 2026-10-24 timeout
    cluster.
 
