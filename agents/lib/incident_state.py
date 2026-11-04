@@ -6,7 +6,9 @@ single superset so heartbeat can roll up across both with a single parser.
 Public API:
     load_all_incidents(workspace=None) -> list[dict]
         Read both state files in the workspace and return a flat list of unified
-        incident records. Malformed JSON is logged and treated as empty.
+        incident records. A file that could not be read or parsed contributes no
+        records — use read_registry() to tell "no incidents" apart from
+        "the file never loaded".
 
     parse_file(path, owner=None) -> list[dict]
         Read one file, apply the legacy normalizer for that file's known shape,
@@ -292,6 +294,12 @@ def read_state_file(path: Path, owner: str | None = None) -> "StateFileRead":
     object. Anything else (a JSON array, a JSON scalar, an object with no
     incidents container) is malformed rather than empty, and is reported as a
     read failure so the queue renders UNVERIFIED instead of a false zero.
+
+    A non-object *entry* inside the incidents container is malformed for the
+    same reason: per the schema every value under `incidents` is an incident
+    object, so skipping one silently discards a record that may be the
+    critical one and still reports a verified zero. The whole file is
+    therefore reported as a read failure naming the offending slug.
     """
     path = Path(path)
     try:
@@ -356,18 +364,33 @@ def read_state_file(path: Path, owner: str | None = None) -> "StateFileRead":
         )
 
     default_owner = owner or _owner_from_filename(path) or "quinn"
+    malformed: list[str] = []
     out: list[dict] = []
     for slug, raw in entries.items():
         if not isinstance(raw, dict):
-            log.warning(
-                "incident_state.read_state_file: skipping non-dict entry %s in %s",
-                slug,
-                path,
-            )
+            malformed.append(f"`{slug}` (got {type(raw).__name__})")
             continue
         normalized = _normalize_for_owner(raw, default_owner)
         normalized.setdefault("_slug", slug)
         out.append(normalized)
+
+    if malformed:
+        log.warning(
+            "incident_state.read_state_file: %s has malformed incident entries: %s",
+            path,
+            ", ".join(malformed),
+        )
+        return StateFileRead(
+            path,
+            default_owner,
+            READ_FAILED,
+            error=(
+                "malformed incident entr"
+                + ("y" if len(malformed) == 1 else "ies")
+                + f": {', '.join(malformed)}"
+            ),
+        )
+
     return StateFileRead(path, default_owner, READ_OK, records=out)
 
 
@@ -439,7 +462,10 @@ def state_file_read_failures(workspace: Path | None = None) -> list[dict]:
     but not a valid registry shape (a JSON array, or an object with no
     `incidents`/`ops` object): per the schema the top level must be an object
     with an `incidents` object, so a shape-invalid file is malformed, not
-    empty.
+    empty. It also includes an entry inside the incidents container that is
+    not an incident object: per the schema every value under `incidents` is an
+    incident object, so a malformed record makes the whole registry
+    unverifiable rather than safely skippable.
 
     Returns one record per unreadable file:
     ``{"path": str, "owner": str, "error": str}``.

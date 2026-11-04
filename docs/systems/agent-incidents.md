@@ -1,7 +1,7 @@
 ---
 title: Agent Incidents
 type: System reference
-last_updated: 2026-10-23
+last_updated: 2026-11-05
 owner: Rowan
 repos: Stoffer-Industries/sindustries
 related_pr: 214
@@ -11,7 +11,7 @@ shipped_date: 2026-07-11
 # Agent Incidents
 
 **Type:** System reference (keep updated as the unified schema evolves)
-**Last updated:** 2026-10-23
+**Last updated:** 2026-11-05
 **Owner:** Rowan
 **Repos:** `Stoffer-Industries/sindustries` (parser, schema, migration script)
 **Related PR:** https://github.com/Stoffer-Industries/sindustries/pull/214 — task 75ec1c8c
@@ -81,7 +81,7 @@ The top-level object **must** have an `incidents` key (object). An optional `_me
 
 - `load_all_incidents(workspace: Path | None = None) -> list[dict]` — read both state files, return a flat list. `workspace` defaults to the `OPENCLAW_WORKSPACE` env var, falling back to `/Users/quinnstoffer/.openclaw/workspace`. **This helper discards read failures**: it returns only `registry.records`, so a state file that could not be read comes back as an empty list. Do not use it to produce a health or queue verdict — use `read_registry()` and check `verified`, or use the `incident_queue` CLI.
 - `parse_file(path: Path, owner: str | None = None) -> list[dict]` — read one file with the legacy normalizer for that file's known shape.
-- `read_state_file(path: Path, owner: str | None = None) -> StateFileRead` — read one file **exactly once** and return both its records and the reason it could not be read (`ok` / `missing` / `failed`). The records and the failure reason come from the same read, so they cannot disagree. A file is `failed` when it exists but cannot be read (iCloud dataless placeholder → `OSError [Errno 11] Resource deadlock avoided`), cannot be decoded (malformed JSON, invalid UTF-8), or is valid JSON in the wrong shape (not an object, or an object with no `incidents`/`ops` object — per the schema the top level must be an object with an `incidents` object). A **missing** file is genuinely empty, not a failure.
+- `read_state_file(path: Path, owner: str | None = None) -> StateFileRead` — read one file **exactly once** and return both its records and the reason it could not be read (`ok` / `missing` / `failed`). The records and the failure reason come from the same read, so they cannot disagree. A file is `failed` when it exists but cannot be read (iCloud dataless placeholder → `OSError [Errno 11] Resource deadlock avoided`), cannot be decoded (malformed JSON, invalid UTF-8), is valid JSON in the wrong shape (not an object, or an object with no `incidents`/`ops` object — per the schema the top level must be an object with an `incidents` object), or holds a **malformed entry** inside the incidents container (a value under `incidents` that is not an incident object — per the schema every value there must be one). A malformed entry is not skippable: silently dropping it would discard the record that may be the critical one and still report a verified zero. A **missing** file is genuinely empty, not a failure.
 - `read_registry(workspace: Path | None = None) -> RegistryRead` — read both state files exactly once and return every record plus every read failure. This is the single source of truth for the operator queue: reading each file twice (once for the failure check, once for the records) opens a window where iCloud materialises the file between the two reads and the counts disagree with the queue's own failure list.
 - `state_file_read_failures(workspace: Path | None = None) -> list[dict]` — return the state files that exist but could not be read or parsed. A file that could not be read is not a file with no incidents: `parse_file` returns `[]` for both, so without this signal a read failure renders as a clean zero. `brain/` is an iCloud-backed symlink and a state file that is only read (never written) can be evicted to a dataless placeholder that fails with `OSError [Errno 11] Resource deadlock avoided`.
 - `active_incidents(incidents: list[dict]) -> list[dict]` — exclude resolved, false-positive, and archived records.
@@ -177,7 +177,7 @@ may create a fresh system incident if the condition is observed again.
 **`recurrenceCount`:** the number of times the same slug has re-appeared after resolution. Use it to drive runbook improvements — a recurring slug with a runbook that keeps failing means the runbook is wrong, not the agent.
 
 **Common failure modes:**
-- *Malformed JSON, invalid UTF-8, a dataless placeholder, or valid JSON in the wrong shape:* the file could not be read, so it is a **read failure, not an empty file**. The parser records the reason, the queue renders `Incident queue: N actionable, M monitored — UNVERIFIED.` with the offending path, and the CLI exits `3`. Materialise the file (`brctl download <path>`) and re-run rather than treating the failure as an empty registry.
+- *Malformed JSON, invalid UTF-8, a dataless placeholder, valid JSON in the wrong shape, or a malformed entry inside the incidents container:* the file could not be read, so it is a **read failure, not an empty file**. The parser records the reason (including the offending slug for a malformed entry), the queue renders `Incident queue: N actionable, M monitored — UNVERIFIED.` with the offending path, and the CLI exits `3`. Materialise the file (`brctl download <path>`) and re-run rather than treating the failure as an empty registry.
 - *Missing owner field on a legacy entry:* defaults to the filename-derived owner (`quinn-ops-state.json → "quinn"`, `lox-incident-state.json → "lox"`).
 - *Legacy status `"repair_attempted"` (Lox):* mapped to `"watching"` so the entry stays open and visible.
 - *Legacy status `"blocked"` (Lox):* mapped to `"escalated"` so it auto-surfaces to Tom.
