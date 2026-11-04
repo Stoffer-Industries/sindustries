@@ -93,5 +93,40 @@ class UnifiedQueuePathContractTest(unittest.TestCase):
         )
 
 
+class UnverifiedRegistryContractTest(unittest.TestCase):
+    """Every definition that runs the incident-queue CLI must honour exit 3.
+
+    The CLI exits `3` when a state file could not be read or parsed, because
+    an unreadable registry is not an empty one. A definition that does not
+    know about exit 3 has no guidance for what to do with an UNVERIFIED run,
+    and the counts it printed may silently exclude a CRITICAL incident.
+    """
+
+    def test_every_definition_running_the_incident_queue_knows_about_unverified(self):
+        offenders = []
+        for heartbeat in sorted(DEFINITIONS.glob("*/HEARTBEAT.md")):
+            text = heartbeat.read_text()
+            if "incident_queue" not in text:
+                continue
+            if "UNVERIFIED" not in text:
+                offenders.append(f"{heartbeat.relative_to(DEFINITIONS)}: no UNVERIFIED guidance")
+        self.assertEqual(
+            [],
+            offenders,
+            "definitions running the incident-queue CLI must document the "
+            "UNVERIFIED / exit-3 path:\n" + "\n".join(offenders),
+        )
+
+    def test_lox_heartbeat_documents_the_unverified_path(self):
+        lox = (DEFINITIONS / "lox" / "HEARTBEAT.md").read_text()
+        for phrase in (
+            "UNVERIFIED",
+            "exits `3`",
+            "Top unblock",
+            "brctl download",
+        ):
+            self.assertIn(phrase, lox)
+
+
 if __name__ == "__main__":
     unittest.main()
