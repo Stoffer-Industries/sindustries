@@ -1,0 +1,210 @@
+---
+title: Agent Incidents
+type: System reference
+last_updated: 2026-10-23
+owner: Rowan
+repos: Stoffer-Industries/sindustries
+related_pr: 214
+shipped_date: 2026-07-11
+---
+
+# Agent Incidents
+
+**Type:** System reference (keep updated as the unified schema evolves)
+**Last updated:** 2026-10-23
+**Owner:** Rowan
+**Repos:** `Stoffer-Industries/sindustries` (parser, schema, migration script)
+**Related PR:** https://github.com/Stoffer-Industries/sindustries/pull/214 — task 75ec1c8c
+**Shipped date:** 2026-07-11
+
+## Purpose
+
+Quinn (agent/runtime and pipeline-operation anomalies) and Lox (infra/host reliability) both maintain operational incident state files in the workspace. Before task 75ec1c8c, the two files used divergent shapes — Quinn's `brain/state/quinn-ops-state.json` used an `ops` key and lacked `recurrenceCount`/`nextRetryAt`/`details`; Lox's `brain/state/lox-incident-state.json` already used an `incidents` key but lacked `firstSeen`/`attempts`/`needsTom`/`severity`. Quinn's heartbeat had to branch on the two formats to roll up cross-agent incidents. This system doc is the durable record of the unified schema, the shared parser, and the incident/task boundary.
+
+Task-level gates, blockers, and handoffs are deliberately outside this system. They belong to the Tasks API and its ordered `attentionOwners` stack; an ordinary task waiting for a spec, tech design, QA/acceptance approval, dependency, or implementer is not an agent incident.
+
+Related systems: `docs/systems/agent-orchestration.md` (agent map), `docs/systems/tasks.md` (feature-task gates; unrelated but co-located).
+
+## Architecture and ownership
+
+- **Quinn writes** `brain/state/quinn-ops-state.json` (top-level key `incidents`).
+- **Lox writes** `brain/state/lox-incident-state.json` (top-level key `incidents`).
+- Each agent owns its own file. There is no shared network state file and no IPC. The two files are read-only from the perspective of the *other* agent.
+- The unified schema (`agents/schemas/agent-incident-state.schema.json`, JSON Schema 2020-12) is the superset both files must conform to. The schema marks only `owner` and `status` as required; the rest default to safe values on read so legacy entries still validate.
+- The shared parser (`agents/lib/incident_state.py`) reads both files, normalizes legacy shapes on the fly, and returns a flat list of unified incident records. Quinn's heartbeat calls this on every tick.
+
+## Runtime behaviour
+
+1. When an agent detects an operational incident (failed cron, lobster/runtime failure, host problem, or pipeline execution fault), it upserts a stable slug-keyed entry in its `incidents` map. Task-level gate state is written to the Tasks API instead. Repeated operational observations increment `attempts` and refresh `lastCheckedAt` rather than creating a new dated key.
+2. Each entry carries enough context (`lastAction`, `details`, `linkedPr`, `linkedRunbook`) for Tom to triage without opening the agent's logs.
+3. On every heartbeat tick, Quinn runs `python3 -m agents.lib.incident_queue` (see `agents/lib/incident_queue.py`), which calls `agents.lib.incident_state.load_all_incidents()` and then `reportable_incidents()`. The reportable queue contains only fresh system records: resolved, false-positive, archived, task-scoped, and stale entries are excluded. Quinn reports separate actionable and monitored counts and surfaces anything matching `needs_tom()` (entries where `needsTom` is True OR `severity` is `high`/`critical`). Counts come from the CLI, never from hand-tallying a state file: a hand-count over Quinn's file alone hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
+4. Lox's daily-review script is the source of most Lox entries; Lox's heartbeat updates existing entries (increments `attempts`, refreshes `lastCheckedAt`, sets `nextRetryAt`, marks resolved) but does not create new entries outside of the daily review.
+5. Quinn's heartbeat updates existing Quinn entries in place and never mutates Lox entries (read-only on Lox's file).
+6. Quinn escalates to Tom via Telegram the first time a `needsTom` entry has `escalatedAt == null`, then sets `escalatedAt`. Quinn does not re-escalate already-escalated items unless they are updated.
+
+## Data contract
+
+The unified entry shape (top-level `incidents` map, slug keys → entry dict):
+
+| Field | Type | Required | Default on read | Description |
+|---|---|---|---|---|
+| `owner` | `"lox"` \| `"quinn"` | yes | (filename-derived) | Which agent owns this entry. |
+| `status` | `"watching"` \| `"escalated"` \| `"resolved"` \| `"false_positive"` \| `"archived"` | yes | `"watching"` | Current state. `archived` retains history without claiming the underlying condition was fixed. Legacy Lox `"repair_attempted"` → `"watching"`; legacy `"blocked"` → `"escalated"`. |
+| `scope` | `"system"` \| `"task"` | no | legacy entries are treated as `system` | Task-scoped records are retained only for historical migration/audit and are excluded from the incident queue. New task workflow findings use the Tasks API instead. |
+| `severity` | `"low"` \| `"medium"` \| `"high"` \| `"critical"` | no | `"medium"` | `high` and `critical` are auto-surfaced to Tom. |
+| `firstSeen` | ISO-8601 UTC | no | `now()` | When first observed. |
+| `lastCheckedAt` | ISO-8601 UTC | no | `now()` | Most recent check. |
+| `attempts` | int ≥ 0 | no | `0` | Recovery attempts. |
+| `recurrenceCount` | int ≥ 0 | no | `0` | Times re-appeared after resolution. |
+| `needsTom` | bool | no | `false` | Set true once escalated or severity is high/critical. |
+| `escalatedAt` | ISO-8601 UTC \| null | no | `null` | First escalation time. |
+| `resolvedAt` | ISO-8601 UTC \| null | no | `null` | Resolution time. |
+| `nextRetryAt` | ISO-8601 UTC \| null | no | `null` | Earliest allowed next retry. |
+| `lastAction` | string | no | `""` | Most recent action description. |
+| `details` | object | no | `{}` | Operator-defined structured context. Open shape. |
+| `linkedPr` | string | no | — | Shortcut for primary remediation PR. Mirrors `details.linkedPr`. |
+| `linkedRunbook` | string | no | — | Shortcut for runbook path. |
+| `followUp` | string[] | no | — | Follow-up items (tasks, PRs, notes). |
+| `impactTaskIds` | string[] | no | — | Task IDs affected by a shared root cause (see "Multi-task root-cause incidents" below). Evidence of impact only, never the incident's sole identity. |
+| `dailyReviewDate` | `"YYYY-MM-DD"` | no | — | Lox-specific: the daily review date that produced the entry. |
+
+The top-level object **must** have an `incidents` key (object). An optional `_meta` key holds operator-only bookkeeping (e.g. `lastHeartbeatAt`); it is not part of the incident contract and never required.
+
+**Legacy normalization (safety net):**
+- Quinn's pre-migration files used an `ops` key and lacked `owner`, `recurrenceCount`, `nextRetryAt`, `details`. The parser reads either key and applies `_normalize_quinn_entry`.
+- Lox's pre-migration files lacked `firstSeen`, `attempts`, `needsTom`, `severity`. The parser applies `_normalize_lox_entry`. If a Lox entry has `dailyReviewDate` but no `firstSeen`, `firstSeen` is derived from the daily review date at midnight UTC.
+- These normalizers exist so agents can roll forward without breaking each other; they are not an excuse to leave files in legacy shape forever. The migration script (see below) brings both files to the canonical shape in one shot.
+
+## API surface
+
+`agents/lib/incident_state.py` exposes:
+
+- `load_all_incidents(workspace: Path | None = None) -> list[dict]` — read both state files, return a flat list. `workspace` defaults to the `OPENCLAW_WORKSPACE` env var, falling back to `/Users/quinnstoffer/.openclaw/workspace`.
+- `parse_file(path: Path, owner: str | None = None) -> list[dict]` — read one file with the legacy normalizer for that file's known shape.
+- `read_state_file(path: Path, owner: str | None = None) -> StateFileRead` — read one file **exactly once** and return both its records and the reason it could not be read (`ok` / `missing` / `failed`). The records and the failure reason come from the same read, so they cannot disagree. A file is `failed` when it exists but cannot be read (iCloud dataless placeholder → `OSError [Errno 11] Resource deadlock avoided`), cannot be decoded (malformed JSON, invalid UTF-8), or is valid JSON in the wrong shape (not an object, or an object with no `incidents`/`ops` object — per the schema the top level must be an object with an `incidents` object). A **missing** file is genuinely empty, not a failure.
+- `read_registry(workspace: Path | None = None) -> RegistryRead` — read both state files exactly once and return every record plus every read failure. This is the single source of truth for the operator queue: reading each file twice (once for the failure check, once for the records) opens a window where iCloud materialises the file between the two reads and the counts disagree with the queue's own failure list.
+- `state_file_read_failures(workspace: Path | None = None) -> list[dict]` — return the state files that exist but could not be read or parsed. A file that could not be read is not a file with no incidents: `parse_file` returns `[]` for both, so without this signal a read failure renders as a clean zero. `brain/` is an iCloud-backed symlink and a state file that is only read (never written) can be evicted to a dataless placeholder that fails with `OSError [Errno 11] Resource deadlock avoided`.
+- `active_incidents(incidents: list[dict]) -> list[dict]` — exclude resolved, false-positive, and archived records.
+- `reportable_incidents(incidents: list[dict]) -> list[dict]` — retain fresh system records only; the default freshness window is 72 hours.
+- `agents.lib.incident_queue.build_queue(...)` / `render_text(...)` — the operator-queue roll-up used by heartbeat: splits the reportable set into actionable (`needs_tom()`) vs monitored, orders actionable by severity then age, and renders the exact heartbeat summary lines. CLI: `python3 -m agents.lib.incident_queue [--json] [--verbose]`. The queue carries `verified` and `readFailures`: when a state file could not be read or parsed, the summary is rendered as `UNVERIFIED` with the offending path instead of a clean zero, and the CLI exits `3`. Materialise the file and re-run (`brctl download <path>` on macOS/iCloud) before trusting the counts. **UNVERIFIED is an addition to the summary, not a replacement for it** — the counts, the `N incident(s) waiting on you.` line and the `🔴 Top unblock:` line for the records that *did* load are still rendered, because a partially-readable registry must never hide the top unblock behind a banner. Every agent definition that runs this CLI must document the exit-`3` path (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`).
+- `needs_tom(incidents: list[dict]) -> list[dict]` — filter reportable entries where `needsTom is True` or `severity in {"high", "critical"}`.
+- `validate_with_schema(state, schema_path: Path | None = None) -> None` — validate a state dict against the JSON Schema. Raises `jsonschema.ValidationError`. The `jsonschema` package is imported lazily so the hot `parse_file()` path does not need it installed.
+
+The live state was migrated separately before this PR was opened. State files
+remain outside the repository and are not committed; the parser's legacy
+normalizer remains as the compatibility path for any older shape encountered
+at read time. The one-off `scripts/ops/archive_incident_state.py` utility
+archives task-derived and stale records with timestamped backups; it never
+deletes state.
+
+## Multi-task root-cause incidents
+
+A task's own pending spec, approval, dependency, or assignee gate is never an
+incident, as already established above. The reverse case also needs a home:
+when the **same underlying condition** is observed on **two or more tasks at
+once** — the workflow engine stops re-evaluating completed-evidence work, a
+reconciliation pass keeps reapplying the same correction to a task without
+its underlying state changing, two independent reads of the same operational
+state disagree with each other, or evidence tracking misses later deliveries
+on a multi-part task — that shared root cause is a genuine system incident,
+not a backlog of per-task waits.
+
+**One incident per root cause, never per task.** Key the incident by a
+stable root-cause slug (e.g. `lobster-orchestration-stale`,
+`attention-owner-reconcile-loop`), and list every affected task under
+`impactTaskIds`. Task IDs there are evidence of impact, never the incident's
+identity or sole content.
+
+**Invariant:** an incident entry whose only real content is a single task ID
+— no distinct root-cause slug, no other affected tasks, nothing beyond that
+one task's gate state — is invalid. It is an ordinary task-level wait and
+belongs only in the Tasks API `attentionOwners` plane. If one is found
+(including a pre-existing entry), archive it immediately with `scope: "task"`
+and a short `archiveReason`, the same correction applied on 2026-10-16 to
+`d37681e1` and `bb09eaed`.
+
+This invariant holds even when the Tasks API itself is unavailable or its
+last-known data is stale. In that condition, raise exactly one incident for
+the unavailability (e.g. `tasks-api-unavailable`), carrying the affected task
+IDs as impact evidence if known — never a separate per-task entry built from
+cached data, and never a task mutation based on that stale snapshot.
+
+A single task showing this shape alone, with no other task sharing the same
+cause, is not yet a system incident — it is still an ordinary task-level wait
+and should route through the normal attention-owner path.
+
+### Resolution semantics
+
+An incident carrying `impactTaskIds` resolves when its **shared root cause is
+fixed**, not when every impacted task independently reaches a terminal state.
+Those are different gates, and only the first one belongs here: holding the
+incident open until the last listed task lands would reintroduce exactly the
+per-task coupling this model exists to remove. A task still mid-flight after
+the root cause is gone is progressing normally — the engine is doing its job,
+and it stays in the Tasks API plane where its own gates are tracked.
+
+Do not wait for each task's lifecycle, and do not clear `impactTaskIds` to
+make an entry look tidy. On resolution, set `status: "resolved"` and
+`resolvedAt: <now>` with `impactTaskIds` left as recorded — the list is the
+evidence of what the root cause actually hit, and it is what makes a
+recurrence legible later. Resolve when the cause is gone; revisit the task
+list only when a fresh detection pass adds newly affected IDs under the same
+slug.
+
+If the root cause is fixed but some impacted tasks remain stuck anyway, that
+residual is a separate task-level wait, not a continuation of this incident:
+route each through the normal `attentionOwners` path rather than reopening the
+resolved incident.
+
+## Runbook notes and common failure modes
+
+**Adding a new incident slug:** choose a stable kebab-case identifier derived from the system failure pattern (e.g. `tasks-api-prod-down`, `firewall`, `bookmark-acpx-openai-401-no-scopes`). Slugs must be stable — they are how cross-recurrence is detected. Do not append observation dates to incident keys. Do not create slugs for task workflow findings; use the task's status, approvals, comments, and ordered `attentionOwners` stack instead.
+
+There should be one active entry per logical system failure. Repeated
+observations update that entry's `attempts`, `lastCheckedAt`, and `lastAction`.
+Use `recurrenceCount` only when a previously resolved incident reappears.
+
+**Marking an incident resolved:** set `status: "resolved"` and `resolvedAt: <now>`. Do not delete the entry — keep it for `recurrenceCount` trending. If the same failure reappears, increment `recurrenceCount` rather than creating a new entry. For an entry carrying `impactTaskIds`, the resolution gate is the root cause being fixed, not every impacted task reaching a terminal state — see "Resolution semantics" above. Preserve `impactTaskIds` on resolution as impact evidence.
+
+**Archiving historical noise:** set `status: "archived"`, preserve the
+original record, and record `archiveReason`/`archivedAt`. Archiving is for
+task-derived or stale records that should not remain in the operational queue;
+it does not assert that the underlying condition was fixed. A later live check
+may create a fresh system incident if the condition is observed again.
+
+**Escalation policy:** Quinn auto-escalates the first time a `needs_tom` entry has `escalatedAt == null`. Quinn does not re-escalate already-escalated items unless they are updated with new evidence.
+
+**`recurrenceCount`:** the number of times the same slug has re-appeared after resolution. Use it to drive runbook improvements — a recurring slug with a runbook that keeps failing means the runbook is wrong, not the agent.
+
+**Common failure modes:**
+- *Malformed JSON:* the parser logs a warning and treats the file as empty (so heartbeat does not crash).
+- *Missing owner field on a legacy entry:* defaults to the filename-derived owner (`quinn-ops-state.json → "quinn"`, `lox-incident-state.json → "lox"`).
+- *Legacy status `"repair_attempted"` (Lox):* mapped to `"watching"` so the entry stays open and visible.
+- *Legacy status `"blocked"` (Lox):* mapped to `"escalated"` so it auto-surfaces to Tom.
+- *Schema drift:* if either agent writes a shape that doesn't normalize, the parser logs a warning and emits a best-effort entry. The schema validator catches drift at write-time when `jsonschema` is installed.
+- *Cross-agent correlation:* out of scope for this task. A future task can join entries by slug to detect incidents affecting both agents at once.
+
+## State and `.openclaw` boundary
+
+The state files live in `brain/state/` in the workspace, NOT in this repo. The
+PR does not commit them. The live files were migrated separately with backups
+and schema validation before this PR was opened; rollback remains an
+operator-level restore of those backups if ever required.
+
+The HEARTBEAT.md files (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`) are doc/instruction files in this repo and ARE modified by this PR. They are agent instruction files, not runtime state.
+
+## Related specs, tasks, and PRs
+
+- **Task:** 75ec1c8c — Unify agent incident schema across Quinn and Lox
+- **Tech design:** `docs/specs/unify-agent-incident-schema-tech-design.md`
+- **Idea doc:** `brain/ideas/unified-agent-incident-schema.md`
+- **JSON Schema:** `agents/schemas/agent-incident-state.schema.json`
+- **Parser:** `agents/lib/incident_state.py` + `agents/lib/test_incident_state.py`
+- **Live migration:** completed separately before this PR with `scripts/ops/archive_incident_state.py`; state remains outside the repository.
+- **Heartbeat docs:** `agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`
+
+## Lifecycle / update rules
+
+- When an agent adds a new top-level field to an incident entry, update this doc first, then update the JSON Schema, then update the normalizer in `incident_state.py`, then update the tests, then update the agent's HEARTBEAT.md so it writes the new field.
+- When an agent adds a new top-level file (e.g. Ivy starts tracking incidents), add the file path to `load_all_incidents()`, update the parser, update this doc.
+- Schema changes that break backwards compat (dropping a required field, renaming a key) require bumping the JSON Schema `$id` and adding a `v2` normalizer. Out of scope for now.

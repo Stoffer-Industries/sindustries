@@ -56,6 +56,13 @@ const SKIP_PATH_PREFIXES = [
   // separate effort; until then, opt out of this directory so the
   // guardrail can still land for everything else in agents/workflows/.
   'agents/workflows/feature-task/src',
+  // The model-eval cases under `agents/evals/cases/` hold frozen copies of
+  // real repo files (agent definitions, the incident lib, the docs) taken at a
+  // specific commit. Those originals legitimately contain absolute paths in
+  // places, and the copies must stay byte-identical or the eval stops
+  // testing what it was written to test — so the guardrail skips the copies
+  // rather than the originals.
+  'agents/evals/cases',
 ];
 
 // File extensions we treat as binary and skip without reading. Image and

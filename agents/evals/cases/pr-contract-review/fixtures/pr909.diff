@@ -1,0 +1,1057 @@
+diff --git a/agents/definitions/lox/HEARTBEAT.md b/agents/definitions/lox/HEARTBEAT.md
+index 7df24f0d..e7925245 100644
+--- a/agents/definitions/lox/HEARTBEAT.md
++++ b/agents/definitions/lox/HEARTBEAT.md
+@@ -73,6 +73,22 @@ On every heartbeat:
+    cd ~/.openclaw/workspace/codebases/sindustries && python3 -m agents.lib.incident_queue
+    ```
+ 
++   **If that command exits `3`, the registry was not read.** `brain/` is an
++   iCloud-backed symlink, and a state file that is only read (never written)
++   can be evicted to a dataless placeholder that fails to read with
++   `OSError [Errno 11] Resource deadlock avoided`. A file that is valid JSON
++   but the wrong shape (a JSON array, or an object with no `incidents`/`ops`
++   object) counts as malformed too. In that case the queue renders
++   `Incident queue: N actionable, M monitored — UNVERIFIED.` and lists the
++   offending path. **UNVERIFIED is an addition to the summary, not a
++   replacement for it**: the counts and the `🔴 Top unblock:` line for the
++   records that did load are still printed and must still be reported. Do
++   **not** report the counts from an UNVERIFIED run as a complete queue —
++   materialise the file (`brctl download <path>`) and re-run before reporting
++   any count. Never fall back to reading the raw state file to make the
++   failure go away: that fallback is what caused the 2026-10-24 timeout
++   cluster.
++
+    **Anchor these commands to `~/.openclaw/workspace`.** Lox's shell cwd is
+    `~/.openclaw/workspace/agents/lox` (per `openclaw.json`), not the workspace
+    root, so relative paths (`infra/...`, `codebases/sindustries`) fail there.
+@@ -223,6 +239,9 @@ writes atomically. Runbook:
+   Raw reads cost ~120k tokens per tick.
+ - Never fall back to the raw state file when a bounded read fails. Report the
+   error and stop — that fallback is what caused the 2026-10-24 timeout cluster.
++- An incident-queue CLI run that exits `3` is an unverified snapshot, not a
++  clean queue. Report the counts and the top unblock it did print alongside
++  the UNVERIFIED banner, and never present them as a complete queue.
+ - Never append to `lastAction` / `notes` without truncating first. Unbounded
+   growth in the state file is what caused the 2026-10-24 heartbeat timeout
+   cluster. See "Bounded state writes".
+diff --git a/agents/definitions/quinn/HEARTBEAT.md b/agents/definitions/quinn/HEARTBEAT.md
+index 033179b7..10d8fb14 100644
+--- a/agents/definitions/quinn/HEARTBEAT.md
++++ b/agents/definitions/quinn/HEARTBEAT.md
+@@ -312,6 +312,8 @@ After completing all sections, check both `quinn-ops-state.json` and `brain/stat
+    ```
+ 
+    It calls `reportable_incidents()` (drops resolved, false-positive, archived, task-scoped, stale >72h) over **both** state files, then splits with `needs_tom()`. Entries where `needsTom` is true OR `severity` is `high`/`critical` are **actionable incidents**; the rest are **monitored findings**. Do not describe the monitored count as incidents waiting on Tom. Do not hand-count the queue or carry counts in `_meta` — that shortcut once hid every Lox-owned incident, including a CRITICAL, for 12+ beats.
++
++   **If the queue reports `UNVERIFIED`, the registry was not read.** `brain/` is an iCloud-backed symlink, and a state file that is only read (never written) can be evicted to a dataless placeholder that fails to read with `OSError [Errno 11] Resource deadlock avoided`. The queue renders that case explicitly (`Incident queue: 0 actionable, 0 monitored — UNVERIFIED.`), exits `3`, and lists the offending path. Do **not** report a zero from an UNVERIFIED run as a clean queue — materialise the file (`brctl download <path>`) and re-run before reporting any count.
+ 2. For any entry where `needsTom: true` AND `escalatedAt` is null: set `escalatedAt: <now>`.
+ 3. **Always report the queue when active findings exist** (the CLI renders these lines verbatim):
+    - Output: `Incident queue: <actionable count> actionable, <monitored count> monitored.`
+diff --git a/agents/definitions/test_definitions.py b/agents/definitions/test_definitions.py
+index e5f4b8e4..baa8a7a7 100644
+--- a/agents/definitions/test_definitions.py
++++ b/agents/definitions/test_definitions.py
+@@ -93,5 +93,40 @@ def test_queue_invocations_in_definitions_are_anchored(self):
+         )
+ 
+ 
++class UnverifiedRegistryContractTest(unittest.TestCase):
++    """Every definition that runs the incident-queue CLI must honour exit 3.
++
++    The CLI exits `3` when a state file could not be read or parsed, because
++    an unreadable registry is not an empty one. A definition that does not
++    know about exit 3 has no guidance for what to do with an UNVERIFIED run,
++    and the counts it printed may silently exclude a CRITICAL incident.
++    """
++
++    def test_every_definition_running_the_incident_queue_knows_about_unverified(self):
++        offenders = []
++        for heartbeat in sorted(DEFINITIONS.glob("*/HEARTBEAT.md")):
++            text = heartbeat.read_text()
++            if "incident_queue" not in text:
++                continue
++            if "UNVERIFIED" not in text:
++                offenders.append(f"{heartbeat.relative_to(DEFINITIONS)}: no UNVERIFIED guidance")
++        self.assertEqual(
++            [],
++            offenders,
++            "definitions running the incident-queue CLI must document the "
++            "UNVERIFIED / exit-3 path:\n" + "\n".join(offenders),
++        )
++
++    def test_lox_heartbeat_documents_the_unverified_path(self):
++        lox = (DEFINITIONS / "lox" / "HEARTBEAT.md").read_text()
++        for phrase in (
++            "UNVERIFIED",
++            "exits `3`",
++            "Top unblock",
++            "brctl download",
++        ):
++            self.assertIn(phrase, lox)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/agents/lib/incident_queue.py b/agents/lib/incident_queue.py
+index 3a49b744..b5ef3939 100644
+--- a/agents/lib/incident_queue.py
++++ b/agents/lib/incident_queue.py
+@@ -16,6 +16,22 @@
+     Incident queue: 16 actionable, 12 monitored.
+     16 incident(s) waiting on you.
+     🔴 Top unblock: <what it is and what Tom has to do>
++
++If a state file exists but cannot be read or parsed, the queue is not a verified
++snapshot. A registry that fails to load yields no records exactly as a registry
++with no incidents does, so a read failure would otherwise render as a clean
++zero. When that happens the queue says so explicitly and marks itself
++UNVERIFIED, while still reporting the counts it did compute and the top
++unblock it did find:
++
++    Incident queue: 1 actionable, 0 monitored — UNVERIFIED.
++    1 incident(s) waiting on you.
++    🔴 Top unblock: disk-critical (lox) — Disk usage 97 percent
++    ⚠️ 1 state file(s) could not be read, so these counts exclude whatever is in them:
++       brain/state/quinn-ops-state.json — OSError: [Errno 11] Resource deadlock avoided
++       Materialise the file and re-run (macOS/iCloud): brctl download <path>
++
++The CLI exits non-zero (3) on an unverified snapshot.
+ """
+ 
+ from __future__ import annotations
+@@ -30,12 +46,12 @@
+ if __package__ in (None, ""):  # pragma: no cover - direct `python3 incident_queue.py`
+     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+     from agents.lib.incident_state import (  # type: ignore[no-redef]
+-        load_all_incidents,
+         needs_tom,
++        read_registry,
+         reportable_incidents,
+     )
+ else:
+-    from .incident_state import load_all_incidents, needs_tom, reportable_incidents
++    from .incident_state import needs_tom, read_registry, reportable_incidents
+ 
+ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+ SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}
+@@ -100,6 +116,7 @@ def build_queue(
+     *,
+     workspace: Path | str | None = None,
+     now: datetime | None = None,
++    read_failures: list[dict] | None = None,
+ ) -> dict[str, Any]:
+     """Build the reportable queue split into actionable vs monitored findings.
+ 
+@@ -108,12 +125,24 @@ def build_queue(
+     ``reportable_incidents()`` already drops resolved, false-positive, archived,
+     task-scoped, and stale (>72h since lastCheckedAt) records, so both counts
+     read straight from the registry instead of a hand-maintained tally.
++
++    ``readFailures`` lists the state files that exist but could not be read or
++    parsed, and ``verified`` is False whenever that list is non-empty. A file
++    that could not be read is not a file with no incidents, so a zero produced
++    alongside a read failure is a false zero and must never be reported as a
++    clean queue.
++
++    The records and the failures come from a single pass over the filesystem
++    (``read_registry``), so the counts can never disagree with the failure list
++    — iCloud can materialise a file between two separate reads.
+     """
+-    records = (
+-        incidents
+-        if incidents is not None
+-        else load_all_incidents(Path(workspace) if workspace else None)
+-    )
++    if incidents is not None:
++        failures = list(read_failures or [])
++        records = incidents
++    else:
++        registry = read_registry(Path(workspace) if workspace else None)
++        failures = registry.failures
++        records = registry.records
+     records = reportable_incidents(records, now=now)
+     actionable = sorted(needs_tom(records, now=now), key=_sort_key)
+     actionable_ids = {id(inc) for inc in actionable}
+@@ -124,6 +153,8 @@ def build_queue(
+         owners[owner] = owners.get(owner, 0) + 1
+     return {
+         "generatedAt": (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
++        "verified": not failures,
++        "readFailures": failures,
+         "counts": {
+             "reportable": len(records),
+             "actionable": len(actionable),
+@@ -157,13 +188,31 @@ def build_queue(
+ 
+ 
+ def render_text(queue: dict[str, Any], *, verbose: bool = False) -> str:
+-    """Render the heartbeat queue summary lines."""
++    """Render the heartbeat queue summary lines.
++
++    An unverified registry is an *addition* to the summary, not a replacement
++    for it: the records that did load still get their counts, their
++    "waiting on you" line and their top unblock. Dropping those lines when one
++    file failed to read would hide the very incident the queue exists to
++    surface — a partially-readable registry must never silently swallow the
++    top unblock.
++    """
+     counts = queue["counts"]
+     actionable = counts["actionable"]
+     monitored = counts["monitored"]
+-    if counts["reportable"] == 0:
++    failures = queue.get("readFailures") or []
++    unverified = bool(failures)
++
++    if not unverified and counts["reportable"] == 0:
+         return "No active incident findings."
+-    lines = [f"Incident queue: {actionable} actionable, {monitored} monitored."]
++
++    if unverified:
++        lines = [
++            f"Incident queue: {actionable} actionable, {monitored} monitored — UNVERIFIED."
++        ]
++    else:
++        lines = [f"Incident queue: {actionable} actionable, {monitored} monitored."]
++
+     if actionable:
+         lines.append(f"{actionable} incident(s) waiting on you.")
+         top = queue["actionable"][0]
+@@ -175,6 +224,16 @@ def render_text(queue: dict[str, Any], *, verbose: bool = False) -> str:
+                 f"  [{entry.get('severity')}] {entry['identity']}"
+                 f" — escalatedAt={entry.get('escalatedAt') or 'never'}"
+             )
++    if unverified:
++        lines.append(
++            f"⚠️ {len(failures)} state file(s) could not be read, so these counts exclude "
++            "whatever is in them:"
++        )
++        for failure in failures:
++            lines.append(f"   {failure.get('path')} — {failure.get('error')}")
++        lines.append(
++            "   Materialise the file and re-run (macOS/iCloud): brctl download <path>"
++        )
+     return "\n".join(lines)
+ 
+ 
+@@ -190,6 +249,13 @@ def main(argv: list[str] | None = None) -> int:
+         print(json.dumps(queue, indent=2))
+     else:
+         print(render_text(queue, verbose=args.verbose))
++    if queue.get("readFailures"):
++        print(
++            "incident_queue: one or more state files could not be read; the queue is "
++            "not a verified snapshot.",
++            file=sys.stderr,
++        )
++        return 3
+     return 0
+ 
+ 
+diff --git a/agents/lib/incident_state.py b/agents/lib/incident_state.py
+index 8accbf87..11556c52 100644
+--- a/agents/lib/incident_state.py
++++ b/agents/lib/incident_state.py
+@@ -12,6 +12,20 @@
+         Read one file, apply the legacy normalizer for that file's known shape,
+         return the unified list.
+ 
++    state_file_read_failures(workspace=None) -> list[dict]
++        Return the state files that exist but could not be read or parsed.
++        An unreadable file is not an empty one — use this to avoid reporting
++        an unverified zero for a registry that was never actually loaded.
++
++    read_state_file(path, owner=None) -> StateFileRead
++        Read one state file exactly once and return its records together with
++        the reason it could not be read. The records and the read status come
++        from the same read, so they cannot disagree.
++
++    read_registry(workspace=None) -> RegistryRead
++        Read both state files exactly once and return every record plus every
++        read failure. This is the source of truth for the operator queue.
++
+     active_incidents(incidents) -> list[dict]
+         Filter out resolved, false-positive, and archived records.
+ 
+@@ -178,8 +192,93 @@ def _normalize_lox_entry(raw: dict) -> dict:
+ # Public parsing API
+ # ---------------------------------------------------------------------------
+ 
+-def parse_file(path: Path, owner: str | None = None) -> list[dict]:
+-    """Read one state file and return a list of unified incident dicts.
++READ_OK = "ok"
++READ_MISSING = "missing"
++READ_FAILED = "failed"
++
++
++class StateFileRead:
++    """One state file read: its records, and the reason it could not be read.
++
++    A state file that failed to read is not a state file with no incidents.
++    ``parse_file`` returns an empty list for both, so a caller that renders a
++    health result from it can report a clean zero it never verified. This
++    object keeps the records and the failure reason together, derived from the
++    same read, so the two cannot disagree.
++    """
++
++    __slots__ = ("path", "owner", "status", "error", "records")
++
++    def __init__(
++        self,
++        path: Path | str,
++        owner: str,
++        status: str,
++        error: str | None = None,
++        records: list[dict] | None = None,
++    ) -> None:
++        self.path = str(path)
++        self.owner = owner
++        self.status = status
++        self.error = error
++        self.records = records or []
++
++    @property
++    def failed(self) -> bool:
++        """True when the file existed but could not be read or parsed."""
++        return self.status == READ_FAILED
++
++    @property
++    def missing(self) -> bool:
++        """True when there was no file — which genuinely means no incidents."""
++        return self.status == READ_MISSING
++
++    def failure_record(self) -> dict:
++        """The ``{"path", "owner", "error"}`` shape used by the queue."""
++        return {"path": self.path, "owner": self.owner, "error": self.error}
++
++    def __repr__(self) -> str:  # pragma: no cover - debugging aid
++        return (
++            f"StateFileRead(path={self.path!r}, owner={self.owner!r}, "
++            f"status={self.status!r}, records={len(self.records)}, error={self.error!r})"
++        )
++
++
++class RegistryRead:
++    """Both state files read once: every record, and every read failure."""
++
++    __slots__ = ("records", "failures", "files")
++
++    def __init__(
++        self,
++        records: list[dict],
++        failures: list[dict],
++        files: list[StateFileRead],
++    ) -> None:
++        self.records = records
++        self.failures = failures
++        self.files = files
++
++    @property
++    def verified(self) -> bool:
++        """True when every existing state file was read and parsed."""
++        return not self.failures
++
++    def __repr__(self) -> str:  # pragma: no cover - debugging aid
++        return (
++            f"RegistryRead(records={len(self.records)}, "
++            f"failures={len(self.failures)}, files={len(self.files)})"
++        )
++
++
++def read_state_file(path: Path, owner: str | None = None) -> "StateFileRead":
++    """Read one state file exactly once and return its records + read status.
++
++    A state file that could not be read or parsed is not a state file with no
++    incidents. ``parse_file`` returns an empty list for both cases, so a caller
++    that renders a health result from it can report a clean zero it never
++    verified. This function derives the records *and* the failure reason from
++    the same read, so the two can never disagree.
+ 
+     `owner` is used to pick the legacy normalizer when the file's content
+     doesn't expose an unambiguous owner on each entry (e.g. Quinn's legacy
+@@ -187,57 +286,81 @@ def parse_file(path: Path, owner: str | None = None) -> list[dict]:
+         * quinn-ops-state.json -> "quinn"
+         * lox-incident-state.json -> "lox"
+         * anything else -> falls back to "quinn" (Quinn is the dominant writer)
++
++    The accepted shapes are exactly the ones the legacy normalizers support:
++    a JSON object holding either an `incidents` object or a legacy `ops`
++    object. Anything else (a JSON array, a JSON scalar, an object with no
++    incidents container) is malformed rather than empty, and is reported as a
++    read failure so the queue renders UNVERIFIED instead of a false zero.
+     """
+     path = Path(path)
+-    if not path.exists():
+-        log.info("incident_state.parse_file: file does not exist: %s", path)
+-        return []
+     try:
+         raw_text = path.read_text()
+-        state = json.loads(raw_text)
+-    except json.JSONDecodeError as exc:
++    except FileNotFoundError:
++        log.info("incident_state.read_state_file: file does not exist: %s", path)
++        return StateFileRead(path, owner or "", READ_MISSING)
++    except UnicodeDecodeError as exc:
+         log.warning(
+-            "incident_state.parse_file: malformed JSON in %s (%s); treating as empty",
+-            path,
+-            exc,
++            "incident_state.read_state_file: %s is not valid UTF-8 (%s)", path, exc
++        )
++        return StateFileRead(
++            path, owner or "", READ_FAILED, error=f"UnicodeDecodeError: {exc}"
+         )
+-        return []
+     except OSError as exc:
+         log.warning(
+-            "incident_state.parse_file: cannot read %s (%s); treating as empty",
+-            path,
+-            exc,
++            "incident_state.read_state_file: cannot read %s (%s)", path, exc
++        )
++        return StateFileRead(
++            path, owner or "", READ_FAILED, error=f"{type(exc).__name__}: {exc}"
++        )
++
++    try:
++        state = json.loads(raw_text)
++    except json.JSONDecodeError as exc:
++        log.warning(
++            "incident_state.read_state_file: malformed JSON in %s (%s)", path, exc
++        )
++        return StateFileRead(
++            path, owner or "", READ_FAILED, error=f"JSONDecodeError: {exc}"
+         )
+-        return []
+ 
+     if not isinstance(state, dict):
+         log.warning(
+-            "incident_state.parse_file: %s is not an object (got %s); treating as empty",
++            "incident_state.read_state_file: %s is not an object (got %s)",
+             path,
+             type(state).__name__,
+         )
+-        return []
++        return StateFileRead(
++            path,
++            owner or "",
++            READ_FAILED,
++            error=f"not a JSON object (got {type(state).__name__})",
++        )
+ 
+     # Detect which container key holds the incidents. Quinn legacy uses `ops`;
+     # everything else (including Lox and post-migration Quinn) uses `incidents`.
+     if "incidents" in state and isinstance(state["incidents"], dict):
+         entries = state["incidents"]
+-        default_owner = owner or _owner_from_filename(path) or "quinn"
+     elif "ops" in state and isinstance(state["ops"], dict):
+         entries = state["ops"]
+-        default_owner = owner or _owner_from_filename(path) or "quinn"
+     else:
+         log.warning(
+-            "incident_state.parse_file: %s has no `incidents` or `ops` key; treating as empty",
++            "incident_state.read_state_file: %s has no `incidents` or `ops` object",
++            path,
++        )
++        return StateFileRead(
+             path,
++            owner or "",
++            READ_FAILED,
++            error="no `incidents` or `ops` object (malformed registry shape)",
+         )
+-        return []
+ 
++    default_owner = owner or _owner_from_filename(path) or "quinn"
+     out: list[dict] = []
+     for slug, raw in entries.items():
+         if not isinstance(raw, dict):
+             log.warning(
+-                "incident_state.parse_file: skipping non-dict entry %s in %s",
++                "incident_state.read_state_file: skipping non-dict entry %s in %s",
+                 slug,
+                 path,
+             )
+@@ -245,7 +368,18 @@ def parse_file(path: Path, owner: str | None = None) -> list[dict]:
+         normalized = _normalize_for_owner(raw, default_owner)
+         normalized.setdefault("_slug", slug)
+         out.append(normalized)
+-    return out
++    return StateFileRead(path, default_owner, READ_OK, records=out)
++
++
++def parse_file(path: Path, owner: str | None = None) -> list[dict]:
++    """Read one state file and return a list of unified incident dicts.
++
++    Thin wrapper over :func:`read_state_file` kept for existing callers. A
++    file that could not be read or parsed yields an empty list here — use
++    :func:`read_state_file` (or :func:`read_registry`) when you need to know
++    whether an empty list means "no incidents" or "the file never loaded".
++    """
++    return read_state_file(path, owner=owner).records
+ 
+ 
+ def _normalize_for_owner(raw: dict, default_owner: str) -> dict:
+@@ -265,10 +399,52 @@ def _owner_from_filename(path: Path) -> str | None:
+ 
+ def load_all_incidents(workspace: Path | None = None) -> list[dict]:
+     """Read both Quinn and Lox state files and return the unified flat list."""
++    return read_registry(workspace).records
++
++
++def read_registry(workspace: Path | None = None) -> RegistryRead:
++    """Read both state files exactly once and return records + read failures.
++
++    The records and the failures come from the same pass over the filesystem,
++    so the queue can never report a count that disagrees with the failure list
++    (iCloud can materialise a file between two separate reads).
++    """
+     ws = Path(workspace) if workspace else WORKSPACE_DEFAULT
+-    quinn = parse_file(ws / QUINN_STATE_RELATIVE, owner="quinn")
+-    lox = parse_file(ws / LOX_STATE_RELATIVE, owner="lox")
+-    return quinn + lox
++    reads = [
++        read_state_file(ws / QUINN_STATE_RELATIVE, owner="quinn"),
++        read_state_file(ws / LOX_STATE_RELATIVE, owner="lox"),
++    ]
++    records: list[dict] = []
++    failures: list[dict] = []
++    for read in reads:
++        records.extend(read.records)
++        if read.failed:
++            failures.append(read.failure_record())
++    return RegistryRead(records, failures, reads)
++
++
++def state_file_read_failures(workspace: Path | None = None) -> list[dict]:
++    """Return the state files that exist but could not be read or parsed.
++
++    An unreadable state file is not an empty one. ``parse_file`` returns an
++    empty list for both cases, so a caller that renders a health result from
++    it can report a clean zero it never verified. ``brain/`` is an
++    iCloud-backed symlink, and a state file that is only read (never written)
++    can be evicted to a dataless placeholder that fails to read with
++    ``OSError [Errno 11] Resource deadlock avoided``.
++
++    A missing file is *not* a failure — no state file means genuinely no
++    incidents. Only files that exist and could not be parsed or read are
++    reported here. "Could not be parsed" includes a file that is valid JSON
++    but not a valid registry shape (a JSON array, or an object with no
++    `incidents`/`ops` object): per the schema the top level must be an object
++    with an `incidents` object, so a shape-invalid file is malformed, not
++    empty.
++
++    Returns one record per unreadable file:
++    ``{"path": str, "owner": str, "error": str}``.
++    """
++    return read_registry(workspace).failures
+ 
+ 
+ def active_incidents(incidents: list[dict]) -> list[dict]:
+@@ -385,8 +561,16 @@ def validate_with_schema(state: Any, schema_path: Path | None = None) -> None:
+     "INACTIVE_STATUSES",
+     "REPORTABLE_MAX_AGE_HOURS",
+     "IncidentStateError",
++    "READ_OK",
++    "READ_MISSING",
++    "READ_FAILED",
++    "StateFileRead",
++    "RegistryRead",
+     "parse_file",
++    "read_state_file",
++    "read_registry",
+     "load_all_incidents",
++    "state_file_read_failures",
+     "active_incidents",
+     "reportable_incidents",
+     "needs_tom",
+diff --git a/agents/lib/test_incident_queue.py b/agents/lib/test_incident_queue.py
+index 7c68f96a..a5602e8a 100644
+--- a/agents/lib/test_incident_queue.py
++++ b/agents/lib/test_incident_queue.py
+@@ -14,10 +14,12 @@
+ 
+ import json
+ import sys
++import tempfile
+ import unittest
+ from datetime import datetime, timedelta, timezone
+ from pathlib import Path
+ from textwrap import dedent
++from unittest import mock
+ 
+ # Make the `agents` package importable when run directly from repo root.
+ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+@@ -186,6 +188,269 @@ def test_verbose_lists_every_actionable_entry(self):
+         self.assertIn("escalatedAt=never", text)
+ 
+ 
++class ReadFailureTests(unittest.TestCase):
++    """A queue built from an unreadable registry is not a verified snapshot.
++
++    The heartbeat renders "No active incident findings." for a zero queue. When
++    the state files could not be read at all, that line is a false zero, so the
++    queue must say so rather than look clean.
++    """
++
++    def _failure(self, path: str = "brain/state/quinn-ops-state.json") -> dict:
++        return {
++            "path": path,
++            "owner": "quinn",
++            "error": "OSError: [Errno 11] Resource deadlock avoided",
++        }
++
++    def test_queue_is_marked_unverified_when_a_state_file_could_not_be_read(self):
++        queue = iq.build_queue([], now=NOW, read_failures=[self._failure()])
++        self.assertFalse(queue["verified"])
++        self.assertEqual(len(queue["readFailures"]), 1)
++
++    def test_queue_is_verified_when_nothing_failed(self):
++        queue = iq.build_queue([], now=NOW)
++        self.assertTrue(queue["verified"])
++        self.assertEqual(queue["readFailures"], [])
++
++    def test_unreadable_registry_never_renders_as_a_clean_zero(self):
++        queue = iq.build_queue([], now=NOW, read_failures=[self._failure()])
++        text = iq.render_text(queue)
++        self.assertNotEqual(text, "No active incident findings.")
++        self.assertIn("UNVERIFIED", text)
++        self.assertIn("quinn-ops-state.json", text)
++        self.assertIn("Resource deadlock avoided", text)
++
++    def test_unreadable_registry_still_reports_the_counts_it_did_compute(self):
++        records = [_incident("a", severity="critical", needsTom=True)]
++        queue = iq.build_queue(records, now=NOW, read_failures=[self._failure()])
++        text = iq.render_text(queue)
++        self.assertIn("1 actionable, 0 monitored", text)
++        self.assertIn("UNVERIFIED", text)
++
++    def test_unreadable_registry_still_surfaces_the_top_unblock(self):
++        """UNVERIFIED must add to the summary, not replace it.
++
++        A partially-readable registry still holds real incidents. Rendering
++        only the counts would hide the top unblock behind a banner — the
++        exact blind spot this whole change exists to close.
++        """
++        records = [
++            _incident("disk-critical", owner="lox", severity="critical", needsTom=True,
++                      title="Disk usage 97 percent"),
++        ]
++        queue = iq.build_queue(records, now=NOW, read_failures=[self._failure()])
++        text = iq.render_text(queue)
++        self.assertIn("1 incident(s) waiting on you.", text)
++        self.assertIn("Top unblock:", text)
++        self.assertIn("disk-critical (lox)", text)
++        self.assertIn("Disk usage 97 percent", text)
++        self.assertIn("UNVERIFIED", text)
++        # The banner must not swallow the escalation lines.
++        self.assertLess(
++            text.index("waiting on you"),
++            text.index("could not be read"),
++        )
++
++    def test_unreadable_registry_with_no_actionable_records_has_no_top_unblock(self):
++        """No actionable records means no top unblock line — that is correct."""
++        records = [_incident("a", severity="low")]
++        queue = iq.build_queue(records, now=NOW, read_failures=[self._failure()])
++        text = iq.render_text(queue)
++        self.assertNotIn("waiting on you", text)
++        self.assertNotIn("Top unblock", text)
++        self.assertIn("UNVERIFIED", text)
++
++    def test_unreadable_registry_never_renders_as_no_active_findings(self):
++        """The clean-zero line is reserved for a verified, empty registry."""
++        queue = iq.build_queue([], now=NOW, read_failures=[self._failure()])
++        self.assertNotEqual(iq.render_text(queue), "No active incident findings.")
++
++    def test_cli_exits_non_zero_when_a_state_file_could_not_be_read(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            workspace = Path(tmp)
++            (workspace / "brain" / "state").mkdir(parents=True)
++            # Both state files present but malformed, so both reads fail.
++            (workspace / "brain" / "state" / "quinn-ops-state.json").write_text("{not json")
++            (workspace / "brain" / "state" / "lox-incident-state.json").write_text("{not json")
++            code = iq.main(["--workspace", str(workspace)])
++        self.assertEqual(code, 3)
++
++    def test_cli_exits_zero_when_state_files_are_readable(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            workspace = Path(tmp)
++            (workspace / "brain" / "state").mkdir(parents=True)
++            (workspace / "brain" / "state" / "quinn-ops-state.json").write_text(
++                json.dumps({"incidents": {}})
++            )
++            (workspace / "brain" / "state" / "lox-incident-state.json").write_text(
++                json.dumps({"incidents": {}})
++            )
++            code = iq.main(["--workspace", str(workspace)])
++        self.assertEqual(code, 0)
++
++
++class MalformedShapeTests(unittest.TestCase):
++    """A registry that parses as JSON but is the wrong shape is malformed.
++
++    Per `agents/schemas/agent-incident-state.schema.json` the top level must
++    be an object with an `incidents` object. A file that is valid JSON but
++    does not have that shape used to yield an empty list — the same empty
++    list a genuinely empty registry yields — so the false zero this PR
++    closes was still reachable.
++    """
++
++    def _workspace(self, tmp: str, quinn_body: str, lox_body: str) -> Path:
++        workspace = Path(tmp)
++        state_dir = workspace / "brain" / "state"
++        state_dir.mkdir(parents=True)
++        (state_dir / "quinn-ops-state.json").write_text(quinn_body)
++        (state_dir / "lox-incident-state.json").write_text(lox_body)
++        return workspace
++
++    def _cases(self):
++        return {
++            "empty_object": "{}",
++            "incidents_not_an_object": json.dumps({"incidents": []}),
++            "top_level_array": "[]",
++            "top_level_scalar": '"just a string"',
++            "no_incidents_container": json.dumps({"meta": {"beat": 7}}),
++            "incidents_is_a_string": json.dumps({"incidents": "nope"}),
++        }
++
++    def test_shape_invalid_registry_is_reported_as_a_read_failure(self):
++        for name, body in self._cases().items():
++            with self.subTest(shape=name):
++                with tempfile.TemporaryDirectory() as tmp:
++                    workspace = self._workspace(tmp, body, body)
++                    failures = ist.state_file_read_failures(workspace)
++                    self.assertEqual(
++                        len(failures), 2, f"{name} should fail to load"
++                    )
++                    for failure in failures:
++                        self.assertTrue(failure["error"])
++
++    def test_shape_invalid_registry_never_renders_as_a_clean_zero(self):
++        for name, body in self._cases().items():
++            with self.subTest(shape=name):
++                with tempfile.TemporaryDirectory() as tmp:
++                    workspace = self._workspace(tmp, body, body)
++                    code = iq.main(["--workspace", str(workspace)])
++                    self.assertEqual(code, 3, f"{name} must not exit clean")
++                    queue = iq.build_queue(workspace=workspace, now=NOW)
++                    self.assertFalse(queue["verified"])
++                    text = iq.render_text(queue)
++                    self.assertIn("UNVERIFIED", text)
++                    self.assertNotEqual(text, "No active incident findings.")
++
++    def test_shape_invalid_file_does_not_hide_the_other_files_records(self):
++        """One bad file must not blank out the good file's incidents."""
++        with tempfile.TemporaryDirectory() as tmp:
++            workspace = Path(tmp)
++            state_dir = workspace / "brain" / "state"
++            state_dir.mkdir(parents=True)
++            (state_dir / "quinn-ops-state.json").write_text("{}")
++            (state_dir / "lox-incident-state.json").write_text(
++                json.dumps(
++                    {
++                        "incidents": {
++                            "lox-critical": {
++                                "key": "lox-critical",
++                                "owner": "lox",
++                                "status": "escalated",
++                                "severity": "critical",
++                                "needsTom": True,
++                                "firstSeen": "2026-10-19T08:33:39+00:00",
++                                "lastCheckedAt": NOW.isoformat(),
++                                "lastAction": "df reported 97%",
++                            }
++                        }
++                    }
++                )
++            )
++            queue = iq.build_queue(workspace=workspace, now=NOW)
++            self.assertFalse(queue["verified"])
++            self.assertEqual(queue["counts"]["actionable"], 1)
++            text = iq.render_text(queue)
++            self.assertIn("1 incident(s) waiting on you.", text)
++            self.assertIn("Top unblock:", text)
++            self.assertIn("lox-critical (lox)", text)
++            self.assertIn("UNVERIFIED", text)
++
++    def test_legacy_ops_shape_is_still_a_valid_registry(self):
++        """The legacy `ops` container must not be mistaken for a malformed file."""
++        with tempfile.TemporaryDirectory() as tmp:
++            workspace = Path(tmp)
++            state_dir = workspace / "brain" / "state"
++            state_dir.mkdir(parents=True)
++            legacy = json.dumps({"ops": {"legacy-one": {"owner": "quinn", "status": "watching"}}})
++            (state_dir / "quinn-ops-state.json").write_text(legacy)
++            (state_dir / "lox-incident-state.json").write_text(
++                json.dumps({"incidents": {}})
++            )
++            failures = ist.state_file_read_failures(workspace)
++            self.assertEqual(failures, [])
++            queue = iq.build_queue(workspace=workspace, now=NOW)
++            self.assertTrue(queue["verified"])
++            self.assertEqual(queue["counts"]["reportable"], 1)
++
++
++class SingleReadTests(unittest.TestCase):
++    """The records and the read failures must come from the same read.
++
++    Reading each state file twice (once for the failure check, once for the
++    records) opens a window where iCloud materialises the file between the
++    two reads and the queue's counts disagree with its own failure list.
++    """
++
++    def test_each_state_file_is_read_exactly_once_per_queue_build(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            workspace = Path(tmp)
++            state_dir = workspace / "brain" / "state"
++            state_dir.mkdir(parents=True)
++            (state_dir / "quinn-ops-state.json").write_text(
++                json.dumps({"incidents": {}})
++            )
++            (state_dir / "lox-incident-state.json").write_text(
++                json.dumps({"incidents": {}})
++            )
++            reads: list[str] = []
++            original = Path.read_text
++
++            def counting_read_text(self, *args, **kwargs):
++                reads.append(self.name)
++                return original(self, *args, **kwargs)
++
++            with mock.patch.object(Path, "read_text", counting_read_text):
++                iq.build_queue(workspace=workspace, now=NOW)
++
++            state_reads = [
++                name
++                for name in reads
++                if name in ("quinn-ops-state.json", "lox-incident-state.json")
++            ]
++            self.assertEqual(
++                sorted(state_reads),
++                ["lox-incident-state.json", "quinn-ops-state.json"],
++                "each state file must be read exactly once per queue build",
++            )
++
++    def test_records_and_failures_come_from_the_same_registry_pass(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            workspace = Path(tmp)
++            state_dir = workspace / "brain" / "state"
++            state_dir.mkdir(parents=True)
++            (state_dir / "quinn-ops-state.json").write_text("{not json")
++            (state_dir / "lox-incident-state.json").write_text(
++                json.dumps({"incidents": {}})
++            )
++            registry = ist.read_registry(workspace)
++            self.assertEqual(len(registry.records), 0)
++            self.assertEqual(len(registry.failures), 1)
++            self.assertFalse(registry.verified)
++            self.assertEqual(len(registry.files), 2)
++
++
+ class ParityTests(unittest.TestCase):
+     def test_actionable_split_matches_shared_needs_tom(self):
+         records = [
+diff --git a/agents/lib/test_incident_state.py b/agents/lib/test_incident_state.py
+index 165e3399..6e454c7b 100644
+--- a/agents/lib/test_incident_state.py
++++ b/agents/lib/test_incident_state.py
+@@ -224,6 +224,181 @@ def test_load_all_missing_files_returns_just_what_exists(self):
+         self.assertTrue(all(e["owner"] == "quinn" for e in out))
+ 
+ 
++class StateFileReadFailuresTests(unittest.TestCase):
++    """An unreadable state file is not an empty one.
++
++    `parse_file` returns `[]` for both, so without a separate signal a
++    read failure renders as a clean zero — the exact false negative that let
++    the incident queue report "no active findings" for six days while iCloud
++    had evicted both state files to dataless placeholders.
++    """
++
++    def setUp(self) -> None:
++        self.tmp = tempfile.TemporaryDirectory()
++        self.tmpdir = Path(self.tmp.name)
++        (self.tmpdir / "brain" / "state").mkdir(parents=True)
++        (self.tmpdir / "brain" / "state" / "quinn-ops-state.json").write_text(
++            json.dumps(LEGACY_QUINN_OPS)
++        )
++        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").write_text(
++            json.dumps(LEGACY_LOX_INCIDENTS)
++        )
++
++    def tearDown(self) -> None:
++        self.tmp.cleanup()
++
++    def test_readable_files_report_no_failures(self):
++        self.assertEqual(ist.state_file_read_failures(workspace=self.tmpdir), [])
++
++    def test_missing_files_are_not_failures(self):
++        """No state file means genuinely no incidents — not a read failure."""
++        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").unlink()
++        (self.tmpdir / "brain" / "state" / "quinn-ops-state.json").unlink()
++        self.assertEqual(ist.state_file_read_failures(workspace=self.tmpdir), [])
++
++    def test_unreadable_file_is_reported_as_a_failure(self):
++        """The iCloud dataless-placeholder case: the read raises OSError."""
++        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
++        real_read_text = Path.read_text
++
++        def fake_read_text(self, *args, **kwargs):
++            if self == target:
++                raise OSError(11, "Resource deadlock avoided")
++            return real_read_text(self, *args, **kwargs)
++
++        with mock.patch.object(Path, "read_text", fake_read_text):
++            failures = ist.state_file_read_failures(workspace=self.tmpdir)
++
++        self.assertEqual(len(failures), 1)
++        self.assertEqual(failures[0]["owner"], "quinn")
++        self.assertIn("Resource deadlock avoided", failures[0]["error"])
++        self.assertIn("quinn-ops-state.json", failures[0]["path"])
++
++    def test_malformed_json_is_reported_as_a_failure(self):
++        """Malformed JSON is the same class of silent-empty as an unreadable file."""
++        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").write_text("{not json")
++        failures = ist.state_file_read_failures(workspace=self.tmpdir)
++        self.assertEqual(len(failures), 1)
++        self.assertEqual(failures[0]["owner"], "lox")
++        self.assertIn("JSONDecodeError", failures[0]["error"])
++
++    def test_both_files_failing_are_both_reported(self):
++        (self.tmpdir / "brain" / "state" / "quinn-ops-state.json").write_text("{not json")
++        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").write_text("{not json")
++        failures = ist.state_file_read_failures(workspace=self.tmpdir)
++        self.assertEqual({f["owner"] for f in failures}, {"quinn", "lox"})
++
++    def test_shape_invalid_json_is_reported_as_a_failure(self):
++        """Valid JSON in the wrong shape is malformed, not empty.
++
++        The schema requires a top-level object with an `incidents` object.
++        Anything else used to take a silent-empty path in `parse_file`, which
++        is the same false zero this signal exists to close.
++        """
++        shapes = {
++            "empty object": "{}",
++            "incidents is a list": json.dumps({"incidents": []}),
++            "top-level array": "[]",
++            "top-level scalar": '"a string"',
++            "no incidents container": json.dumps({"meta": {"beat": 7}}),
++            "incidents is a string": json.dumps({"incidents": "nope"}),
++        }
++        for label, body in shapes.items():
++            with self.subTest(shape=label):
++                target = self.tmpdir / "brain" / "state" / "lox-incident-state.json"
++                target.write_text(body)
++                failures = ist.state_file_read_failures(workspace=self.tmpdir)
++                self.assertEqual(len(failures), 1, f"{label} should be a failure")
++                self.assertEqual(failures[0]["owner"], "lox")
++                self.assertTrue(failures[0]["error"])
++
++    def test_legacy_ops_container_is_a_valid_registry_shape(self):
++        """The legacy `ops` container must not be reported as malformed."""
++        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
++        target.write_text(json.dumps({"ops": {"one": {"owner": "quinn", "status": "watching"}}}))
++        failures = ist.state_file_read_failures(workspace=self.tmpdir)
++        self.assertEqual(failures, [])
++
++    def test_missing_file_is_missing_not_failed(self):
++        """A missing file is genuinely empty — not a read failure."""
++        (self.tmpdir / "brain" / "state" / "lox-incident-state.json").unlink()
++        read = ist.read_state_file(
++            self.tmpdir / "brain" / "state" / "lox-incident-state.json", owner="lox"
++        )
++        self.assertTrue(read.missing)
++        self.assertFalse(read.failed)
++        self.assertEqual(read.records, [])
++
++
++class ReadStateFileTests(unittest.TestCase):
++    """One read produces both the records and the failure reason."""
++
++    def setUp(self) -> None:
++        self.tmp = tempfile.TemporaryDirectory()
++        self.tmpdir = Path(self.tmp.name)
++        (self.tmpdir / "brain" / "state").mkdir(parents=True)
++
++    def tearDown(self) -> None:
++        self.tmp.cleanup()
++
++    def _write(self, name: str, body: str) -> Path:
++        target = self.tmpdir / "brain" / "state" / name
++        target.write_text(body)
++        return target
++
++    def test_valid_registry_reports_ok_with_its_records(self):
++        target = self._write(
++            "quinn-ops-state.json",
++            json.dumps({"incidents": {"one": {"owner": "quinn", "status": "watching"}}}),
++        )
++        read = ist.read_state_file(target, owner="quinn")
++        self.assertEqual(read.status, ist.READ_OK)
++        self.assertFalse(read.failed)
++        self.assertEqual(len(read.records), 1)
++
++    def test_malformed_json_reports_failed_with_no_records(self):
++        target = self._write("quinn-ops-state.json", "{not json")
++        read = ist.read_state_file(target, owner="quinn")
++        self.assertTrue(read.failed)
++        self.assertEqual(read.records, [])
++        self.assertIn("JSONDecodeError", read.error)
++
++    def test_non_utf8_file_reports_failed_rather_than_raising(self):
++        """Invalid UTF-8 used to escape `parse_file` as an uncaught decode error."""
++        target = self.tmpdir / "brain" / "state" / "quinn-ops-state.json"
++        target.write_bytes(b"\xff\xfe\x00binary")
++        read = ist.read_state_file(target, owner="quinn")
++        self.assertTrue(read.failed)
++        self.assertEqual(read.records, [])
++        self.assertIn("UnicodeDecodeError", read.error)
++
++    def test_read_registry_reads_each_file_once(self):
++        self._write("quinn-ops-state.json", json.dumps({"incidents": {}}))
++        self._write("lox-incident-state.json", json.dumps({"incidents": {}}))
++        reads: list[str] = []
++        original = Path.read_text
++
++        def counting_read_text(self, *args, **kwargs):
++            reads.append(self.name)
++            return original(self, *args, **kwargs)
++
++        with mock.patch.object(Path, "read_text", counting_read_text):
++            registry = ist.read_registry(self.tmpdir)
++
++        state_reads = [
++            name
++            for name in reads
++            if name in ("quinn-ops-state.json", "lox-incident-state.json")
++        ]
++        self.assertEqual(
++            sorted(state_reads),
++            ["lox-incident-state.json", "quinn-ops-state.json"],
++            "each state file must be read exactly once per registry pass",
++        )
++        self.assertTrue(registry.verified)
++        self.assertEqual(registry.failures, [])
++
++
+ class WorkspaceDefaultTests(unittest.TestCase):
+     """W29 audit [Low]: WORKSPACE_DEFAULT must not hard-code a laptop path."""
+ 
+diff --git a/docs/systems/agent-incidents.md b/docs/systems/agent-incidents.md
+index a9bfd17e..097c8e2e 100644
+--- a/docs/systems/agent-incidents.md
++++ b/docs/systems/agent-incidents.md
+@@ -81,9 +81,12 @@ The top-level object **must** have an `incidents` key (object). An optional `_me
+ 
+ - `load_all_incidents(workspace: Path | None = None) -> list[dict]` — read both state files, return a flat list. `workspace` defaults to the `OPENCLAW_WORKSPACE` env var, falling back to `/Users/quinnstoffer/.openclaw/workspace`.
+ - `parse_file(path: Path, owner: str | None = None) -> list[dict]` — read one file with the legacy normalizer for that file's known shape.
++- `read_state_file(path: Path, owner: str | None = None) -> StateFileRead` — read one file **exactly once** and return both its records and the reason it could not be read (`ok` / `missing` / `failed`). The records and the failure reason come from the same read, so they cannot disagree. A file is `failed` when it exists but cannot be read (iCloud dataless placeholder → `OSError [Errno 11] Resource deadlock avoided`), cannot be decoded (malformed JSON, invalid UTF-8), or is valid JSON in the wrong shape (not an object, or an object with no `incidents`/`ops` object — per the schema the top level must be an object with an `incidents` object). A **missing** file is genuinely empty, not a failure.
++- `read_registry(workspace: Path | None = None) -> RegistryRead` — read both state files exactly once and return every record plus every read failure. This is the single source of truth for the operator queue: reading each file twice (once for the failure check, once for the records) opens a window where iCloud materialises the file between the two reads and the counts disagree with the queue's own failure list.
++- `state_file_read_failures(workspace: Path | None = None) -> list[dict]` — return the state files that exist but could not be read or parsed. A file that could not be read is not a file with no incidents: `parse_file` returns `[]` for both, so without this signal a read failure renders as a clean zero. `brain/` is an iCloud-backed symlink and a state file that is only read (never written) can be evicted to a dataless placeholder that fails with `OSError [Errno 11] Resource deadlock avoided`.
+ - `active_incidents(incidents: list[dict]) -> list[dict]` — exclude resolved, false-positive, and archived records.
+ - `reportable_incidents(incidents: list[dict]) -> list[dict]` — retain fresh system records only; the default freshness window is 72 hours.
+-- `agents.lib.incident_queue.build_queue(...)` / `render_text(...)` — the operator-queue roll-up used by heartbeat: splits the reportable set into actionable (`needs_tom()`) vs monitored, orders actionable by severity then age, and renders the exact heartbeat summary lines. CLI: `python3 -m agents.lib.incident_queue [--json] [--verbose]`.
++- `agents.lib.incident_queue.build_queue(...)` / `render_text(...)` — the operator-queue roll-up used by heartbeat: splits the reportable set into actionable (`needs_tom()`) vs monitored, orders actionable by severity then age, and renders the exact heartbeat summary lines. CLI: `python3 -m agents.lib.incident_queue [--json] [--verbose]`. The queue carries `verified` and `readFailures`: when a state file could not be read or parsed, the summary is rendered as `UNVERIFIED` with the offending path instead of a clean zero, and the CLI exits `3`. Materialise the file and re-run (`brctl download <path>` on macOS/iCloud) before trusting the counts. **UNVERIFIED is an addition to the summary, not a replacement for it** — the counts, the `N incident(s) waiting on you.` line and the `🔴 Top unblock:` line for the records that *did* load are still rendered, because a partially-readable registry must never hide the top unblock behind a banner. Every agent definition that runs this CLI must document the exit-`3` path (`agents/definitions/quinn/HEARTBEAT.md`, `agents/definitions/lox/HEARTBEAT.md`).
+ - `needs_tom(incidents: list[dict]) -> list[dict]` — filter reportable entries where `needsTom is True` or `severity in {"high", "critical"}`.
+ - `validate_with_schema(state, schema_path: Path | None = None) -> None` — validate a state dict against the JSON Schema. Raises `jsonschema.ValidationError`. The `jsonschema` package is imported lazily so the hot `parse_file()` path does not need it installed.
+ 
