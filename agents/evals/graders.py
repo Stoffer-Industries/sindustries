@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import pathlib
 import shutil
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -61,17 +60,20 @@ class GraderError(RuntimeError):
     """The grader could not run at all."""
 
 
-def _feature_task_binary() -> pathlib.Path | None:
-    """Return a built `feature-task` binary if one exists.
+def _feature_task_binary(crate: pathlib.Path | None = None) -> pathlib.Path | None:
+    """Return a `feature-task` binary that is current with the source tree.
 
-    Release is preferred; debug is accepted too, because CI's existing
-    `cargo test` step leaves a debug binary behind and the eval self-test
-    should not need a second, slower release build to run.
+    A binary left over from an older commit is exactly the grader/parser
+    drift this harness exists to prevent. Prefer the current debug build
+    that CI creates from the checked-out tree; if no candidate is newer than
+    the parser sources, return `None` so the caller rebuilds with Cargo.
     """
-    crate = FEATURE_TASK_MANIFEST.parent
-    for profile in ("release", "debug"):
+    crate = crate or FEATURE_TASK_MANIFEST.parent
+    sources = list((crate / "src").rglob("*.rs"))
+    newest_source = max((path.stat().st_mtime for path in sources), default=0)
+    for profile in ("debug", "release"):
         candidate = crate / "target" / profile / "feature-task"
-        if candidate.exists():
+        if candidate.exists() and candidate.stat().st_mtime >= newest_source:
             return candidate
     return None
 
@@ -80,6 +82,7 @@ def _run_ac_check(
     task_description: pathlib.Path,
     pr_body: pathlib.Path,
     pr_files: pathlib.Path | None,
+    task_id: str,
 ) -> dict:
     """Grade a PR body with the production lobster parser.
 
@@ -96,7 +99,6 @@ def _run_ac_check(
             "cargo",
             "run",
             "--quiet",
-            "--release",
             "--manifest-path",
             str(FEATURE_TASK_MANIFEST),
             "--",
@@ -108,7 +110,7 @@ def _run_ac_check(
         "--pr-body",
         str(pr_body),
         "--task-id",
-        "eval",
+        task_id,
         "--pr-url",
         "https://github.com/Stoffer-Industries/sindustries/pull/0",
     ]
@@ -139,13 +141,18 @@ def grade_lobster_ac_check(response: str, case_dir: pathlib.Path, config: dict) 
     """Grade a candidate PR body with the production lobster parser."""
     task_description = case_dir / config["task_description"]
     pr_files = case_dir / config["pr_files"] if config.get("pr_files") else None
+    task_id = str(config.get("task_id") or "").strip()
+    if not task_id:
+        raise GraderError("lobster_ac_check requires grader_config.task_id")
     handle = tempfile.NamedTemporaryFile(
         "w", suffix=".md", delete=False, encoding="utf-8"
     )
     try:
         handle.write(response)
         handle.close()
-        report = _run_ac_check(task_description, pathlib.Path(handle.name), pr_files)
+        report = _run_ac_check(
+            task_description, pathlib.Path(handle.name), pr_files, task_id
+        )
     finally:
         pathlib.Path(handle.name).unlink(missing_ok=True)
 

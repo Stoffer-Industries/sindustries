@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import tempfile
 import unittest
 
 EVALS_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -29,7 +30,13 @@ from case_registry import (  # noqa: E402  (path set above)
     load_case,
     validate_controls,
 )
-from graders import GradeResult, GraderError, grade  # noqa: E402  (path set above)
+from graders import (  # noqa: E402  (path set above)
+    GradeResult,
+    GraderError,
+    _feature_task_binary,
+    grade,
+)
+from invoke import _extract_text  # noqa: E402  (path set above)
 
 
 class CaseLoadingTests(unittest.TestCase):
@@ -59,6 +66,90 @@ class CaseLoadingTests(unittest.TestCase):
     def test_missing_case_file_is_reported_not_ignored(self):
         with self.assertRaises(CaseError):
             load_case(EVALS_ROOT / "cases" / "no-such-case")
+
+    def test_case_transport_is_loaded(self):
+        for case in load_all_cases():
+            with self.subTest(case=case.id):
+                self.assertIn(case.transport, ("infer", "agent"))
+
+    def test_invalid_transport_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            case_dir = pathlib.Path(temp_dir) / "bad-case"
+            case_dir.mkdir()
+            (case_dir / "case.json").write_text(
+                """{
+  "id": "bad-case",
+  "title": "Bad case",
+  "description": "Bad case",
+  "prompt": "prompt",
+  "prompt_files": [],
+  "grader": "expected_findings",
+  "grader_config": {},
+  "controls": {"must_pass": [], "must_fail": []},
+  "transport": "carrier-pigeon"
+}
+"""
+            )
+            with self.assertRaises(CaseError):
+                load_case(case_dir)
+
+    def test_large_case_uses_a_transport_that_accepts_its_prompt(self):
+        from invoke import MAX_PROMPT_BYTES
+
+        for case in load_all_cases():
+            with self.subTest(case=case.id):
+                prompt_size = len(compose_prompt(case).encode("utf-8"))
+                if prompt_size <= MAX_PROMPT_BYTES:
+                    continue
+                self.assertEqual(
+                    case.transport,
+                    "agent",
+                    f"{case.id} is {prompt_size} bytes, too large for infer",
+                )
+
+
+class ModelEnvelopeTests(unittest.TestCase):
+    def test_agent_transport_envelope_final_is_read(self):
+        payload = {
+            "ok": True,
+            "status": "ok",
+            "final": "The focused tests pass.",
+            "payloads": [{"text": "The focused tests pass."}],
+        }
+        self.assertEqual(_extract_text(payload), "The focused tests pass.")
+
+    def test_agent_transport_envelope_payload_is_read_without_final(self):
+        payload = {"ok": True, "status": "ok", "payloads": [{"text": "Ready."}]}
+        self.assertEqual(_extract_text(payload), "Ready.")
+
+
+class FeatureTaskBinaryTests(unittest.TestCase):
+    def test_stale_binary_is_not_selected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            crate = pathlib.Path(temp_dir)
+            source = crate / "src" / "ac_parsing.rs"
+            source.parent.mkdir()
+            source.write_text("fn main() {}\n")
+            stale = crate / "target" / "debug" / "feature-task"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("old")
+            source_mtime = source.stat().st_mtime
+            stale.touch()
+            import os
+
+            os.utime(stale, (source_mtime - 10, source_mtime - 10))
+            self.assertIsNone(_feature_task_binary(crate))
+
+    def test_current_binary_is_selected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            crate = pathlib.Path(temp_dir)
+            source = crate / "src" / "ac_parsing.rs"
+            source.parent.mkdir()
+            source.write_text("fn main() {}\n")
+            current = crate / "target" / "debug" / "feature-task"
+            current.parent.mkdir(parents=True)
+            current.write_text("current")
+            self.assertEqual(_feature_task_binary(crate), current)
 
 
 class ControlValidationTests(unittest.TestCase):
@@ -122,6 +213,22 @@ class GraderContractTests(unittest.TestCase):
     def test_unknown_grader_is_an_error_not_a_pass(self):
         with self.assertRaises(GraderError):
             grade("anything", EVALS_ROOT, {"grader": "no-such-grader"})
+
+    def test_task_scoped_lobster_control_passes(self):
+        case = load_case(EVALS_ROOT / "cases" / "lobster-ac-compliance")
+        response = """## Acceptance Criteria
+
+### Task a384d6ac — Prospect scoring
+
+- [x] AC1: Prospect list is ordered by fit score descending, and the top N can be selected without re-running the pipeline. (🧪 testID: test_validate_prospect_artifact - ordering)
+- [x] AC2: Each retained prospect cites the public source URL it was extracted from, and the shortlist names the signal that justified including it. (🧪 testID: test_validate_prospect_artifact - source citation)
+- [x] AC3: Each prospect carries a fit, a timing, and a reachability score, and each score has a one-line reason. (🧪 testID: test_validate_prospect_artifact - score reasons)
+- [x] AC4: When public-signal coverage for a category is thin, the shortlist says so explicitly rather than presenting a confident-looking list. (🧪 testID: test_validate_prospect_artifact - coverage warning)
+- [x] AC5: The durable shortlist artifact format is documented in `docs/systems/prospect-finder-artifact.md`. (📄 not code: documented in docs/systems/prospect-finder-artifact.md)
+"""
+        result = grade(response, case.directory, case.grader_config)
+        self.assertTrue(result.passed, result.detail)
+        self.assertEqual(result.detail["failures"], [])
 
 
 class PromptCompositionTests(unittest.TestCase):
