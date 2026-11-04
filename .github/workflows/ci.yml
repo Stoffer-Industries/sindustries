@@ -861,10 +861,14 @@ jobs:
 
       - name: Run no-absolute-paths lint
         # W28 audit M0.2: Theme 4 guardrail. Fails CI if any tracked source
-        # file under apps/, services/, packages/, or agents/workflows/
-        # contains a hard-coded `/Users/<name>/`, `~/workspaces|repos|
-        # code|dev|projects|src/`, or `/home/<name>/` path. Operates on the
-        # checked-out working tree; no `npm ci` required.
+        # file under the lint's configured roots contains a hard-coded
+        # `/Users/<name>/`, `~/workspaces|repos|code|dev|projects|src/`, or
+        # `/home/<name>/` path. The roots and the one opt-out are defined in
+        # the script and documented in CONTRIBUTING.md, and the two are
+        # asserted to agree by
+        # infra/cloud/scripts/tests/no-absolute-paths-scope.test.sh, so the
+        # scope is stated in one place instead of copied here.
+        # Operates on the checked-out working tree; no `npm ci` required.
         run: node scripts/check-no-absolute-paths.mjs
 
       - name: Run no-absolute-paths lint unit tests
@@ -946,6 +950,15 @@ jobs:
         # block omitted `make test-website` while the prose claimed
         # `make test-all` ran the website tests.
         run: bash infra/cloud/scripts/tests/local-test-commands.test.sh
+
+      - name: Run path-lint scope documentation parity test
+        # Keeps CONTRIBUTING.md's documented path-lint scope in step with the
+        # lint's own DEFAULT_ROOTS and SKIP_PATH_PREFIXES, in both directions.
+        # Closes the W44 code-garden follow-up where the documented scope
+        # named `agents/workflows/` without the
+        # `agents/workflows/feature-task/src` opt-out, so a contributor
+        # believed a directory was linted when it was not.
+        run: bash infra/cloud/scripts/tests/no-absolute-paths-scope.test.sh
 
       - name: Run Budget mobile OTA input paths test (task 74503fe7, W39 F3)
         # AC1 + AC2 regression guard for the `budget_mobile` change filter —
