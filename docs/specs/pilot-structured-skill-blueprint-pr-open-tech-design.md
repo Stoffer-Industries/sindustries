@@ -1,14 +1,14 @@
 ---
-status: draft
+status: shipped
 task_id: 43a9ac7b-7d1a-4ff3-9d0e-fb4ecc823f1e
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 725
+shipped_date: 2026-09-22
 ---
 
 # Tech design — Pilot structured skill blueprint on `pr-open` (task `43a9ac7b`)
 
-> **Status:** Draft. Quinn review requested.
+> **Status:** Shipped in PR #725 on 2026-09-22. The AC2 premise was corrected by PR #912; see the dated supersession note below.
 > **Date:** 2026-09-21
 > **Author:** Rowan (Staff Engineer)
 > **Source of truth:** task `43a9ac7b-7d1a-4ff3-9d0e-fb4ecc823f1e` on the Tasks API.
@@ -45,6 +45,25 @@ The blueprint conversion restructures; it does not summarise or rewrite. If a fa
 
 ## AC2 — the nested-parentheses failure mode (must be explicit in RULES)
 
+> **SUPERSEDED 2026-11-04 — read this before implementing AC2.** The premise below
+> was wrong when it was written. `parse_evidence` has allowed **one level** of nested
+> parentheses since `d9a9b254` (2026-09-14), and this spec was written on
+> 2026-09-22 — eight days *after* that fix. The parser anchors the annotation at
+> the **end** of the line, not at the first top-level `(`, so a single nested
+> parenthetical is accepted and matched exactly. The real failure modes are
+> **two** levels of nesting (the annotation is not recognised at all), and a
+> parenthetical in the AC *sentence* (which is compared as text, so dropping it
+> is a `text altered`).
+>
+> The flat form this AC prescribed is actively harmful: it rewrites a real test
+> title such as `real client header set (no Bearer, no cookie)` into
+> `real client header set - no Bearer - no cookie`, a string that matches no
+> test the CI run actually executed. The corrected rule and its contract tests
+> are in `agents/skills/dev/pr-open/SKILL.md` (branch
+> `fix-pr-open-nested-paren`) and
+> `agents/workflows/feature-task/src/ac_parsing.rs` (`pr_open_skill_*` tests).
+> The original AC text is kept below as the historical record.
+
 The feature-task lobster parses `- [x] AC<n>: <text> (<annotation>)` lines by matching the first top-level `(` after the AC text. Nested parentheses break the parser:
 
 - **Breaks:** `AC1: ... (🧪 testID: cal-render (desktop))` — the trailing `)` closes the annotation, leaving `desktop))` outside; subsequent ACs are misaligned.
@@ -76,7 +95,7 @@ This is a **skill / doc / workspace boundary** change at the repo level — no n
      - "Never retry `gh pr create` with another agent's token to work around a scope error. Fix the opener's token or escalate."
      - "Never treat PR-open as complete until the `requested_reviewers` REST check returns non-zero — applies at both `gh pr create` time and at draft→ready conversion."
      - "Never use `gh pr view --json reviewRequests` for the postcondition check — requires scopes the agent token intentionally does not have; use the REST endpoint instead."
-     - "Never nest parentheses inside AC evidence annotations. The feature-task lobster matches the first top-level `(`; nested `)` truncates the annotation and misaligns subsequent ACs. Use `-` or `:` separators in test names instead: `(🧪 testID: cal-render - desktop)` not `(🧪 testID: cal-render (desktop))`."
+     - **SUPERSEDED 2026-11-04 — see the AC2 note above.** The original bullet said never to nest parentheses inside AC evidence annotations and prescribed flattened test ids. The shipped rule instead allows one nested level, requires two levels to fail, and forbids rewriting real test titles into flat forms.
      - "Never omit AC checkboxes from a feature-task PR body. Use `- [x]` not bullet, not `- [ ]`, not `✅` emoji. The lobster parses `- [x]` only."
      - "Never drop the AC sentence text before the evidence annotation. The lobster rejects paraphrased or shortened AC text."
      - "Always include `## System Spec` (or a one-line no-change reason) and the `apps/<app>/SPEC.md` check before opening — neither has an automated gate, so the agent must verify by hand."
@@ -111,7 +130,7 @@ The AC verification matrix belongs in this doc only (per `agents/skills/dev/tech
 | AC | Verification | Test layer | Notes |
 |---|---|---|---|
 | **AC1** — `pr-open` SKILL.md follows the canonical 5+1 blueprint (RULES, PROCESS, OUTPUT FORMAT, KNOWLEDGE FILES, ONBOARDING + minimal IDENTITY pointer) | Restructured file has six `## RULES / ## PROCESS / ## OUTPUT FORMAT / ## KNOWLEDGE FILES / ## ONBOARDING / ## IDENTITY` (or equivalent) headings, in that order, each non-empty; IDENTITY block is ≤ 2 lines and contains an explicit pointer to the agent's `AGENTS.md` (no inlined role prose). Existing operational content (reviewer postcondition, PR body template, AC annotations table, reviewer routing warning, `--assignee` opener rule, Rust gates pointer, system-vs-app spec distinction) is present and unchanged in substance. | Manual review (no automated assertion for skill restructuring yet — see OQ1). | The repo's existing skill validation runs on every PR touching `agents/skills/**`; this AC is the design-level definition of "passes validation," not an assertion in it. |
-| **AC2** — Skill warns authors that nested parentheses in PR evidence annotations break the feature-task lobster parser, and gives a valid flat-parentheses example. | RULES block contains a "never nest parentheses inside AC evidence annotations" rule with an explicit `Breaks:` and `Flat form (correct):` pair. The flat example uses `-` or `:` as the in-test separator (e.g. `(🧪 testID: cal-render - desktop)`), not nested parens. | Manual review. | OQ2 below asks whether this should become a machine-checked rule. |
+| **AC2** — Skill warns authors that nested parentheses in PR evidence annotations break the feature-task lobster parser, and gives a valid flat-parentheses example. | RULES block contains a "never nest parentheses inside AC evidence annotations" rule with an explicit `Breaks:` and `Flat form (correct):` pair. The flat example uses `-` or `:` as the in-test separator (e.g. `(🧪 testID: cal-render - desktop)`), not nested parens. | Manual review. | **SUPERSEDED 2026-11-04** — see the note on AC2 above. The AC as written encodes a false premise: one level of nested parens is supported, and the flat form it prescribes produces citations that match no real test. The delivered rule instead documents the two-level boundary and forbids rewriting real test titles, and it is machine-checked by the `pr_open_skill_*` contract tests. |
 | **AC3** — Updated skill passes the repository skill validation/checks and does not alter unrelated skills. | The PR diff contains exactly one file under `agents/skills/**` (`pr-open/SKILL.md`). CI's existing skill check (whatever the repo runs on `agents/skills/**` files) passes. No other `agents/skills/**` file is touched. | Automated: CI skill check + `git diff --stat agents/skills/` showing only `pr-open/SKILL.md` changed. | The skill check is whatever runs today; if no skill check exists yet, AC3 is satisfied by the single-file diff and absence of unrelated changes. |
 
 ### Test approach summary

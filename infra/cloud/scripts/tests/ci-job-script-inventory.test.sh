@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
-# Static contract: the contract tests CONTRIBUTING.md documents for the
-# `infra-cloud-bootstrap-staging-tests` CI job must match the job's own run
-# steps.
+# Static contract: the contract tests CONTRIBUTING.md documents for the CI
+# jobs that run them must match those jobs' own run steps, and every contract
+# test on disk must actually be run by some CI job.
 #
-# Finding (W44 code-garden follow-up, T5 continued): CONTRIBUTING.md's CI
-# inventory described that job as "infra/cloud bootstrap, fly.toml, and
-# no-pnpm-pin tests", but the job runs nine contract-test scripts. Three of
-# them - `mission-control-deploy-fixtures.test.sh`,
-# `fly-deploy-trigger-paths.test.sh` and `budget-mobile-ota-inputs.test.sh` -
-# were named nowhere in the documentation at all. The documented list and the
-# executable list were two sources of truth for one fact, and nothing
-# compared them - the same prose-versus-executable drift that PRs #905-#907
-# closed for the CI job inventory and that PRs #911 and #914 closed for the
-# local test commands and the path-lint scope.
+# Finding (W44 code-garden follow-up, T5 continued): PR #915 closed the gap
+# for one job — CONTRIBUTING.md's inventory described the
+# `infra-cloud-bootstrap-staging-tests` job as "infra/cloud bootstrap,
+# fly.toml, and no-pnpm-pin tests", while the job runs ten contract-test
+# scripts, three of which were named nowhere in the documentation. The same
+# class was still open one surface over:
 #
-# The consequence was concrete: a contributor who edited (or assumed dead)
-# one of the three undocumented contract tests had no signal that CI executes
-# it, and a contributor reading the inventory could not tell which contracts
-# actually gate a merge.
+#   1. The parity check was hard-coded to a single job. The second CI job
+#      that runs contract tests from the same directory,
+#      `health-probe-tests`, had no parity check at all, and its two
+#      contract tests were documented only in prose ("the observability
+#      provisioning / bootstrap / evidence / failure-inject contract
+#      tests"), so a contributor could not tell which file to edit for
+#      "failure-inject".
+#   2. Nothing required a contract test to be wired into CI at all. The
+#      directory `infra/cloud/scripts/tests/` is the shared home of the
+#      contract-test suite, but a new `*.test.sh` file added there and not
+#      referenced by any job would never run — and every gate would stay
+#      green. A contract test that no CI job executes is a test that
+#      asserts nothing.
 #
-# This test makes the documented list and the job's run steps one
-# mechanically comparable pair, in both directions, and carries sentinel
-# self-tests proving each assertion can go red.
+# This test makes the documented lists and the executable run steps one
+# mechanically comparable pair in both directions, for every job that runs
+# contract tests, adds the orphan guard in both directions, and carries
+# sentinel self-tests proving each assertion can go red.
 
 set -euo pipefail
 
@@ -35,45 +41,53 @@ import sys
 root = pathlib.Path(sys.argv[1])
 failures = []
 
-JOB_ID = 'infra-cloud-bootstrap-staging-tests'
 CONTRIBUTING = 'CONTRIBUTING.md'
 CI_WORKFLOW = '.github/workflows/ci.yml'
 SCRIPT_DIR = 'infra/cloud/scripts/tests/'
 
 TEST_SCRIPT_RE = re.compile(rf'^{re.escape(SCRIPT_DIR)}[A-Za-z0-9._-]+\.test\.sh$')
 BACKTICKED_RE = re.compile(r'`([^`]+)`')
+JOB_ID_RE = re.compile(r'^  ([A-Za-z0-9_-]+):\s*$')
+RUN_SCRIPT_RE = re.compile(
+    rf'run:\s*(?:bash\s+)?({re.escape(SCRIPT_DIR)}[A-Za-z0-9._-]+\.test\.sh)'
+)
 
 
 def fail(message):
     failures.append(message)
 
 
-def ci_job_scripts(ci_text):
-    """The contract-test scripts the named CI job runs, in job order."""
+def ci_jobs(ci_text):
+    """Map every CI job id to the contract-test scripts it runs, in job order."""
     lines = ci_text.splitlines()
     start = None
     for index, line in enumerate(lines):
-        if re.match(rf'^  {re.escape(JOB_ID)}:\s*$', line):
-            start = index
+        if line.rstrip() == 'jobs:':
+            start = index + 1
             break
     if start is None:
         return None
-    scripts = []
-    for line in lines[start + 1:]:
-        if re.match(r'^  [A-Za-z0-9_-]+:\s*$', line):
-            break
-        match = re.search(rf'run:\s*(?:bash\s+)?({re.escape(SCRIPT_DIR)}[A-Za-z0-9._-]+\.test\.sh)', line)
-        if match:
-            scripts.append(match.group(1))
-    return scripts
+    jobs = {}
+    job = None
+    for line in lines[start:]:
+        job_match = JOB_ID_RE.match(line)
+        if job_match:
+            job = job_match.group(1)
+            continue
+        if job is None:
+            continue
+        script_match = RUN_SCRIPT_RE.search(line)
+        if script_match:
+            jobs.setdefault(job, []).append(script_match.group(1))
+    return jobs
 
 
-def documented_scripts(contributing_text):
-    """The contract-test scripts the CONTRIBUTING.md inventory names for the job."""
+def documented_scripts(contributing_text, job_id):
+    """The contract-test scripts the CONTRIBUTING.md inventory names for a job."""
     lines = contributing_text.splitlines()
     bullet = None
     for index, line in enumerate(lines):
-        if line.startswith('- ') and f'`{JOB_ID}`' in line:
+        if line.startswith('- ') and f'`{job_id}`' in line:
             bullet = index
             break
     if bullet is None:
@@ -91,49 +105,84 @@ def documented_scripts(contributing_text):
     return names
 
 
-def check(ci_text, contributing_text):
+def on_disk_scripts():
+    """Every contract test that exists in the shared contract-test directory."""
+    directory = root / SCRIPT_DIR
+    if not directory.is_dir():
+        return None
+    return sorted(
+        f'{SCRIPT_DIR}{path.name}'
+        for path in directory.iterdir()
+        if path.is_file() and path.name.endswith('.test.sh')
+    )
+
+
+def check(ci_text, contributing_text, disk_scripts):
     """Every drift this contract guards against, as a list of messages."""
     problems = []
 
-    ci_scripts = ci_job_scripts(ci_text)
-    if ci_scripts is None:
-        problems.append(f'{CI_WORKFLOW}: no `{JOB_ID}` job found')
+    jobs = ci_jobs(ci_text)
+    if jobs is None:
+        problems.append(f'{CI_WORKFLOW}: no `jobs:` section found')
         return problems
 
-    doc_scripts = documented_scripts(contributing_text)
-    if doc_scripts is None:
-        problems.append(f'{CONTRIBUTING}: no inventory bullet for `{JOB_ID}` found')
+    if not jobs:
+        problems.append(
+            f'{CI_WORKFLOW}: no CI job runs a contract test from `{SCRIPT_DIR}`'
+        )
         return problems
 
-    if not ci_scripts:
-        problems.append(f'{CI_WORKFLOW}: the `{JOB_ID}` job runs no contract-test script')
-    if not doc_scripts:
-        problems.append(f'{CONTRIBUTING}: the `{JOB_ID}` inventory bullet names no contract-test script')
+    run_scripts = set()
+    for job_id, scripts in jobs.items():
+        run_scripts.update(scripts)
 
-    for script in sorted(set(ci_scripts) - set(doc_scripts)):
+        doc_scripts = documented_scripts(contributing_text, job_id)
+        if doc_scripts is None:
+            problems.append(f'{CONTRIBUTING}: no inventory bullet for `{job_id}` found')
+            continue
+        if not doc_scripts:
+            problems.append(
+                f'{CONTRIBUTING}: the `{job_id}` inventory bullet names no contract-test script'
+            )
+
+        for script in sorted(set(scripts) - set(doc_scripts)):
+            problems.append(
+                f'{CI_WORKFLOW}: `{job_id}` runs `{script}`, which is not documented'
+            )
+        for script in sorted(set(doc_scripts) - set(scripts)):
+            problems.append(
+                f'{CONTRIBUTING}: documents `{script}` as a `{job_id}` contract test, '
+                'but the job does not run it'
+            )
+
+        duplicates = sorted({s for s in doc_scripts if doc_scripts.count(s) > 1})
+        for script in duplicates:
+            problems.append(
+                f'{CONTRIBUTING}: documents `{script}` more than once for `{job_id}`'
+            )
+
+    # Orphan guard: a contract test that no CI job runs asserts nothing.
+    for script in sorted(set(disk_scripts) - run_scripts):
         problems.append(
-            f'{CI_WORKFLOW}: `{JOB_ID}` runs `{script}`, which is not documented'
-        )
-    for script in sorted(set(doc_scripts) - set(ci_scripts)):
-        problems.append(
-            f'{CONTRIBUTING}: documents `{script}` as a `{JOB_ID}` contract test, '
-            'but the job does not run it'
+            f'{SCRIPT_DIR}: `{script}` is not run by any CI job in `{CI_WORKFLOW}`'
         )
 
-    duplicates = sorted({s for s in doc_scripts if doc_scripts.count(s) > 1})
-    for script in duplicates:
-        problems.append(
-            f'{CONTRIBUTING}: documents `{script}` more than once for `{JOB_ID}`'
-        )
+    # Reverse guard: a CI job cannot run a contract test that does not exist.
+    for script in sorted(run_scripts - set(disk_scripts)):
+        problems.append(f'{CI_WORKFLOW}: runs `{script}`, which does not exist')
 
     return problems
 
 
 ci_text = (root / CI_WORKFLOW).read_text()
 contributing_text = (root / CONTRIBUTING).read_text()
+disk_scripts = on_disk_scripts()
 
-for problem in check(ci_text, contributing_text):
-    fail(problem)
+if disk_scripts is None:
+    fail(f'{SCRIPT_DIR}: contract-test directory not found')
+else:
+    for problem in check(ci_text, contributing_text, disk_scripts):
+        fail(problem)
 
 
 # Sentinel self-tests: each drift shape below must be detected, so a green
@@ -156,6 +205,7 @@ sentinels = [
             'undocumented contract test',
         ),
         contributing_text,
+        disk_scripts,
     ),
     (
         'the job stops running a documented contract test',
@@ -166,6 +216,7 @@ sentinels = [
             'renamed contract test',
         ),
         contributing_text,
+        disk_scripts,
     ),
     (
         'CONTRIBUTING.md documents a contract test the job does not run',
@@ -176,6 +227,7 @@ sentinels = [
             '`not-run-contract.test.sh`',
             'documented contract test removed',
         ),
+        disk_scripts,
     ),
     (
         'CONTRIBUTING.md drops a contract test the job runs',
@@ -186,6 +238,7 @@ sentinels = [
             '',
             'documented contract test dropped',
         ),
+        disk_scripts,
     ),
     (
         'CONTRIBUTING.md documents the same contract test twice',
@@ -196,11 +249,51 @@ sentinels = [
             '`budget-mobile-ota-inputs.test.sh`, `budget-mobile-ota-inputs.test.sh`',
             'duplicated contract test',
         ),
+        disk_scripts,
+    ),
+    (
+        'a second CI job runs a contract test its inventory bullet does not name',
+        ci_text,
+        mutate(
+            contributing_text,
+            r'`observability-provisioning\.test\.sh`',
+            '',
+            'health-probe contract test dropped',
+        ),
+        disk_scripts,
+    ),
+    (
+        'a CI job that runs contract tests has no inventory bullet',
+        ci_text,
+        mutate(
+            contributing_text,
+            r'`health-probe-tests`',
+            '`health-probe-tests-renamed`',
+            'health-probe job id renamed',
+        ),
+        disk_scripts,
+    ),
+    (
+        'a CI job runs a contract test that does not exist on disk',
+        mutate(
+            ci_text,
+            r'run: bash infra/cloud/scripts/tests/observability-bootstrap\.test\.sh',
+            'run: bash infra/cloud/scripts/tests/ghost-contract.test.sh',
+            'ghost contract test',
+        ),
+        contributing_text,
+        disk_scripts,
+    ),
+    (
+        'a contract test exists on disk that no CI job runs',
+        ci_text,
+        contributing_text,
+        sorted(set(disk_scripts) | {f'{SCRIPT_DIR}orphan-contract.test.sh'}),
     ),
 ]
 
-for label, mutated_ci, mutated_contributing in sentinels:
-    if not check(mutated_ci, mutated_contributing):
+for label, mutated_ci, mutated_contributing, mutated_disk in sentinels:
+    if not check(mutated_ci, mutated_contributing, mutated_disk):
         fail(f'sentinel self-test did not detect: {label}')
 
 if failures:
