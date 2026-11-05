@@ -981,6 +981,13 @@ jobs:
         # believed a directory was linted when it was not.
         run: bash infra/cloud/scripts/tests/no-absolute-paths-scope.test.sh
 
+      - name: Run CI job contract-test inventory parity test
+        # Keeps CONTRIBUTING.md's inventory of the contract tests this job runs
+        # in step with the job's own run steps, in both directions. Closes the
+        # W44 code-garden follow-up where the inventory named three of the
+        # job's contract tests, so the rest were documented nowhere.
+        run: bash infra/cloud/scripts/tests/ci-job-script-inventory.test.sh
+
       - name: Run Budget mobile OTA input paths test (task 74503fe7, W39 F3)
         # AC1 + AC2 regression guard for the `budget_mobile` change filter —
         # closes the W39 audit finding where the filter omitted
