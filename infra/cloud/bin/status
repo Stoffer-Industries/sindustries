@@ -41,6 +41,7 @@ declare -A FLY_APP_FOR=(
   [budget-api]="sindustries-budget-api-staging"
   [content-scheduler-api]="sindustries-content-scheduler-api-staging"
   [auto-post-worker]="sindustries-auto-post-worker-staging"
+  [platform]="sindustries-platform-staging"
 )
 
 # Expected process types come from the matching fly.toml. We hardcode them
@@ -52,6 +53,9 @@ declare -A EXPECTED_PROCESS_TYPES=(
   [budget-api]="budget-api"
   [content-scheduler-api]="content-scheduler-api"
   [auto-post-worker]="auto-post-worker"
+  # The consolidated platform runs every service in ONE Fly process group
+  # (the supervisor), so the platform app exposes exactly one process type.
+  [platform]="platform"
 )
 
 # ---------- argument parsing ------------------------------------------------
@@ -71,7 +75,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  for s in tasks-api budget-api content-scheduler-api auto-post-worker; do TARGETS+=("$s"); done
+  for s in tasks-api budget-api content-scheduler-api auto-post-worker platform; do TARGETS+=("$s"); done
 fi
 
 for s in "${TARGETS[@]}"; do

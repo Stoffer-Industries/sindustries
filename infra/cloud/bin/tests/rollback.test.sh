@@ -73,7 +73,7 @@ exit "${FLY_CURL_EXIT:-0}"
 STUB
 chmod +x "$TMP/bin/curl"
 
-export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"}]'
+export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"},{"Name":"sindustries-platform-staging"}]'
 
 reset_log() { : >"$TMP/fly.log"; }
 assert_eq() {
@@ -174,6 +174,19 @@ assert_eq "worker rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: releases rollback --app sindustries-auto-post-worker-staging"
 assert_log_contains "INVOKED: logs --app sindustries-auto-post-worker-staging --no-tail"
 assert_log_absent "INVOKED: curl"
+
+echo "test: platform rolls the consolidated app back and smoke-checks all three services"
+reset_log
+FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --yes
+assert_eq "platform rollback exit code" "0" "$?"
+assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
+assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 
 echo
 echo "OK — all bin/rollback tests passed"

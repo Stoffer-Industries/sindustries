@@ -19,6 +19,7 @@ jobs:
       budget_api: ${{ steps.filter.outputs.budget_api }}
       content_scheduler_api: ${{ steps.filter.outputs.content_scheduler_api }}
       auto_post_worker: ${{ steps.filter.outputs.auto_post_worker }}
+      platform: ${{ steps.filter.outputs.platform }}
       gymtrack: ${{ steps.filter.outputs.gymtrack }}
       gymtrack_mcp: ${{ steps.filter.outputs.gymtrack_mcp }}
       budget_mobile: ${{ steps.filter.outputs.budget_mobile }}
@@ -70,6 +71,21 @@ jobs:
               - 'package-lock.json'
               - 'infra/cloud/**'
               - '.github/workflows/deploy-staging-auto-post-worker.yml'
+            # Task 219fb673 — the consolidated staging platform. The four
+            # per-service filters above are KEPT until the cutover lands,
+            # because a filter change on `main` redeploys. At cutover they
+            # are removed and this one takes over (see
+            # docs/runbooks/platform-consolidation-rollback.md §5).
+            platform:
+              - 'services/tasks-api/**'
+              - 'services/budget-api/**'
+              - 'services/content-scheduler-api/**'
+              - 'packages/otel-node/**'
+              - 'packages/budget-domain/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'infra/cloud/**'
+              - '.github/workflows/deploy-staging-platform.yml'
             gymtrack:
               - 'apps/gymtrack/**'
               - 'package.json'
@@ -996,6 +1012,14 @@ jobs:
         # at source.
         run: bash infra/cloud/scripts/tests/budget-mobile-ota-inputs.test.sh
 
+      # Task 219fb673 — the consolidated platform's supervisor owns the
+      # real failure modes: a child that crashes on boot, a secret that was
+      # never registered, a deploy that sends SIGTERM and expects a clean
+      # drain. All three are covered against a fake child process — no real
+      # service is started and no port is bound.
+      - name: Run consolidated platform supervisor unit tests
+        run: node --test infra/cloud/platform/tests/
+
   gh-with-agent-token-tests:
     # Task b0d1b42e (Fix Ambient GITHUB_TOKEN Overriding Per-Agent GH Config
     # Precedence). AC1 + AC2 regression guard for the agents/lib
@@ -1283,6 +1307,18 @@ jobs:
       needs.merge-gate.result == 'success' &&
       needs.changes.outputs.auto_post_worker == 'true'
     uses: ./.github/workflows/deploy-staging-auto-post-worker.yml
+    secrets: inherit
+
+  deploy-platform-staging:
+    name: platform staging
+    needs: [changes, merge-gate]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.merge-gate.result == 'success' &&
+      needs.changes.outputs.platform == 'true'
+    uses: ./.github/workflows/deploy-staging-platform.yml
     secrets: inherit
 
   deploy-gymtrack-production:

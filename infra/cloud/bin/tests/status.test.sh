@@ -208,9 +208,10 @@ expected = sorted([
     "sindustries-budget-api-staging",
     "sindustries-content-scheduler-api-staging",
     "sindustries-auto-post-worker-staging",
+    "sindustries-platform-staging",
 ])
 assert apps == expected, f"got {apps}"
-assert all(not d["degraded"] for d in data), "all four should be healthy"
+assert all(not d["degraded"] for d in data), "all five should be healthy"
 '
 
 echo
