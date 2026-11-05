@@ -102,6 +102,59 @@ Current staging cost (4 services, near-idle):
 
 Production cost projection (when traffic is real): dominated by Neon compute-hours + Upstash request volume. Re-estimate when the production cutover task (`020f423e`) starts.
 
+### Consolidated platform (task `219fb673`)
+
+The staging cost model above assumes four always-on Fly Machines. The
+consolidated platform replaces them with ONE 2 GB `shared-cpu-1x` Machine
+carrying all four services, so the Fly line becomes a single machine
+instead of four.
+
+**Do not quote the task spec's figures.** The spec's "4 × $6.70 = $26.80/mo
+→ 1 × $6.70 = $6.70/mo" arithmetic assumed four 1 GB machines' worth of
+headroom fits inside one 1 GB Machine. It does not: the consolidated Machine
+runs four Node runtimes plus nginx plus the supervisor, so it is sized at
+2 GB. The real before/after figures are re-derived from Fly's live billing
+API at implementation time and attached to the task — the supervisor's
+`/__status` endpoint reports per-child RSS so the size can be re-measured
+after the first staging boot.
+
+The production cutover decision (`020f423e`) inherits the same per-service-
+Fly-app pattern unless it carries this decision forward deliberately.
+
+---
+
+## Shared-fate topology (staging)
+
+The consolidated platform (task `219fb673`) trades isolation for cost.
+**One Machine means one crash domain.** Read this before deploying.
+
+| Fact | Consequence for an operator |
+| --- | --- |
+| One Machine carries all four services | A crash, an OOM kill, or a deploy restart takes down tasks-api, budget-api, content-scheduler-api and the auto-post worker together. |
+| One image, one release | A deploy redeploys all four services even if the change only touched one service's source. |
+| One process group | Per-service scaling is impossible. The only scaling axis is "more platform machines", which would run all four services again — so it is not a scaling lever. |
+| Rollback is app-wide | `fly releases rollback` restores the whole platform to a prior image. It cannot roll one service back. |
+| DNS is separate from the app | Moving the CNAMEs back is the backout path for "the platform itself must go" — see `docs/runbooks/platform-consolidation-rollback.md`. |
+
+Mitigations, in the order they apply:
+
+1. **Canary strategy.** `strategy = 'canary'` means a new Machine comes up
+   beside the old release and Fly promotes it only once it is healthy, so a
+   bad image does not replace a working one immediately.
+2. **`fly releases rollback`** restores the previous image inside the
+   platform app.
+3. **The old apps stay deployable.** The four per-service apps are scaled to
+   zero, not deleted, for the duration of the soak, so the fastest backout
+   is a CNAME move plus `fly scale count 1`.
+
+Where an operator should look:
+
+- This section — the topology and its consequences.
+- `infra/cloud/README.md` — the service table.
+- `docs/runbooks/platform-consolidation-rollback.md` — the cutover
+  sequence, the backout sequence, and the checklist of transitional guards
+  to remove once the cutover has happened.
+
 ---
 
 ## Account / ownership / billing

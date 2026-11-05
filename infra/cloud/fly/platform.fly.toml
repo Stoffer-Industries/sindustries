@@ -1,0 +1,130 @@
+# fly.toml — consolidated staging platform (task 219fb673).
+#
+# ONE Fly app, ONE Machine, FOUR processes. This file replaces the four
+# per-service staging apps as their target topology:
+#
+#   sindustries-tasks-api-staging             -> 127.0.0.1:4001 (child)
+#   sindustries-budget-api-staging            -> 127.0.0.1:4002 (child)
+#   sindustries-content-scheduler-api-staging -> 127.0.0.1:4003 (child)
+#   sindustries-auto-post-worker-staging      -> queue-bound child (no listener)
+#
+# All four now live in `sindustries-platform-staging`.
+#
+# Stable hostnames (source of truth: infra/cloud/hostname-matrix.json —
+# currently still records the four per-service apps, because the cutover has
+# not happened yet):
+#   tasks-api.staging.sindustries.co.nz
+#   budget-api.staging.sindustries.co.nz
+#   content-scheduler-api.staging.sindustries.co.nz
+#
+# WHY ONE [[services]] BLOCK AND NOT THREE
+# ---------------------------------------
+# Fly serves one HTTP service per external port. Port 443 can only be
+# claimed once per app, and all three surfaces are consumed over plain
+# https://<host>/... on 443. So this app exposes ONE service — 443 -> 8080 —
+# and the in-container nginx router dispatches on the Host header to the
+# three loopback listeners (infra/cloud/platform/nginx.conf).
+#
+# WHY ONE PROCESS GROUP
+# ---------------------
+# Fly gives each process group its own Machine. The cost saving only exists
+# if all four children share ONE Machine, so the app declares a single
+# process group whose entrypoint is the supervisor. The supervisor spawns
+# the four children plus the router and stays in the foreground.
+#
+# The build context is the repo root (`../../..`) so the Dockerfile's
+# `COPY services/…` references resolve from the repo root, matching the
+# per-service fly.toml files.
+#
+# MIGRATIONS
+# ----------
+# The app has one release_command, but three schemas. `prisma:migrate:platform`
+# chains the three per-service migrations, each with its own DATABASE_URL
+# sourced from the app-level PLATFORM_* secret. Fly runs release_command
+# directly (not through a shell), so the chain must live in an npm script —
+# which npm does run through a shell.
+#
+# SHARED FATE — read docs/systems/cloud-platform.md §"Shared-fate topology
+# (staging)" and docs/runbooks/platform-consolidation-rollback.md before
+# deploying. One Machine means one crash domain: a deploy restarts all four
+# services, per-service scaling is impossible, and rollback is app-wide.
+
+app = 'sindustries-platform-staging'
+primary_region = 'syd'
+# SIGTERM (Fly's default) — the supervisor forwards it to every child and
+# drains them before exiting.
+kill_signal = 'SIGTERM'
+# The supervisor drains four Node children on shutdown; 30s is generous
+# enough for a clean drain and short enough to stay inside Fly's window.
+kill_timeout = '30s'
+
+[build]
+  # `context` is resolved relative to this fly.toml at `infra/cloud/fly/`,
+  # so `../../..` is the repo root. Matches the per-service fly.toml files.
+  context = '../../..'
+  dockerfile = '../docker/platform.Dockerfile'
+
+[env]
+  NODE_ENV = 'production'
+  # The router listens here; Fly's 443 maps to it.
+  PLATFORM_ROUTER_PORT = '8080'
+  # The supervisor's status endpoint. Loopback-only inside the Machine and
+  # exposed publicly (read-only) by the router at /__status.
+  PLATFORM_STATUS_PORT = '8081'
+  # CORS allow-lists, moved here from the per-service fly.toml [env] blocks.
+  # The values are unchanged from the apps they replace; the source of truth
+  # for the hostnames is infra/cloud/hostname-matrix.json.
+  # tasks-api is consumed by the tasks app and mission-control.
+  PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS = 'https://tasks.staging.sindustries.co.nz,https://mission-control.staging.sindustries.co.nz'
+  # budget-api is consumed by mission-control (budget-mobile is a native
+  # client with its own auth path and is not in the CORS scope).
+  PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.staging.sindustries.co.nz'
+  # content-scheduler-api is consumed by mission-control
+  # (ContentSchedulerTab in apps/mission-control/src/tabs/).
+  PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS = 'https://mission-control.staging.sindustries.co.nz'
+
+[processes]
+  # One process group, so Fly schedules ONE Machine for the whole platform.
+  platform = 'node infra/cloud/platform/platform-supervisor.mjs'
+
+[http_service]
+  # 8080 is the in-container nginx router. The children's ports (4001,
+  # 4002, 4003) and the supervisor's status port (8081) are never exposed.
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['platform']
+
+[[vm]]
+  # 2GB, not 1GB: the consolidated Machine runs four Node runtimes plus
+  # nginx plus the supervisor. The task spec's $6.70/mo figure assumed four
+  # 1GB machines' worth of headroom fits in one; it does not. The per-child
+  # RSS is reported by /__status so the size can be re-measured after the
+  # first staging boot. Quinn accepted 2GB shared-cpu-1x as the starting
+  # point (task 219fb673).
+  memory = '2gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 2048
+
+[[http_service.checks]]
+  interval = '15s'
+  timeout = '2s'
+  grace_period = '30s'
+  method = 'GET'
+  # The platform's liveness is "the router is up and the supervisor can
+  # report on its children" — not "any one service happens to be
+  # listening". The router proxies /__status to the supervisor's loopback
+  # status endpoint.
+  path = '/__status'
+  protocol = 'http'
+  tls_skip_verify = false
+
+[deploy]
+  strategy = 'canary'
+  # Fly executes release_command directly, not through a shell. The npm
+  # script it points at chains the three per-service migrations, each with
+  # its own DATABASE_URL (see infra/cloud/platform/platform-migrate.mjs).
+  release_command = 'npm run prisma:migrate:platform'

@@ -140,7 +140,7 @@ assert_log_absent() {
 }
 
 reset_log() { : >"$TMP/fly.log"; }
-export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"}]'
+export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"},{"Name":"sindustries-platform-staging"}]'
 
 # ---------- tests ----------------------------------------------------------
 
@@ -221,6 +221,26 @@ FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.
 assert_eq "deploy worker exit code" "0" "$?"
 assert_log_contains "INVOKED: logs --app sindustries-auto-post-worker-staging --no-tail"
 assert_log_contains "INVOKED: deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=def4567abc8901 --image registry/repo:def4567abc8901"
+
+echo "test: platform deploys the consolidated app and smoke-checks all three services"
+reset_log
+FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --image registry/repo:aaaabbbbccccdddd 2>&1
+assert_eq "deploy platform exit code" "0" "$?"
+assert_log_contains "INVOKED: config validate --config infra/cloud/fly/platform.fly.toml"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=aaaabbbbccccdddd --image registry/repo:aaaabbbbccccdddd"
+assert_log_contains "INVOKED: releases --app sindustries-platform-staging --json"
+assert_log_contains "INVOKED: machines list --app sindustries-platform-staging --json"
+# All three service health routes are checked through the router's
+# path-prefix routes on the provider hostname.
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
+# And the auto-post worker, which has no HTTP route, is checked via its
+# startup log line inside the consolidated Machine.
+assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 
 echo "test: --env GIT_COMMIT_SHA uses local HEAD when no --image is given"
 reset_log

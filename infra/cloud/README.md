@@ -12,16 +12,25 @@ infra/cloud/
 ├── fly/                        # Fly.io app specs (one per Fly app)
 │   ├── tasks-api.fly.toml
 │   ├── budget-api.fly.toml
-│   └── auto-post-worker.fly.toml
+│   ├── auto-post-worker.fly.toml
+│   └── platform.fly.toml       # consolidated staging app (task 219fb673)
 ├── docker/                     # Service Dockerfiles (referenced by the fly.toml files)
 │   ├── tasks-api.Dockerfile
 │   ├── budget-api.Dockerfile
-│   └── auto-post-worker.Dockerfile
+│   ├── auto-post-worker.Dockerfile
+│   └── platform.Dockerfile     # combined image for all four processes
+├── platform/                   # Consolidated platform code (task 219fb673)
+│   ├── platform-services.mjs   # service registry + env mapping (single source of truth)
+│   ├── platform-supervisor.mjs # entrypoint: spawns the children + the router
+│   ├── platform-migrate.mjs    # release_command: the three per-service migrations
+│   ├── nginx.conf              # in-container Host router
+│   └── tests/                  # supervisor unit tests
 ├── env/                        # Env-var contracts (no live values — owner-supplied)
 │   ├── .env.example            # cross-service env contract + per-service reference index
 │   ├── tasks-api.env.example
 │   ├── budget-api.env.example
-│   └── auto-post-worker.env.example
+│   ├── auto-post-worker.env.example
+│   └── platform.env.example    # consolidated app's PLATFORM_* secrets
 ├── bin/                        # Operator-facing deploy/status/rollback wrappers (task 2850c5ac)
 │   ├── deploy                  # Pin-and-deploy a single service
 │   ├── status                  # Check process types + machines across services
@@ -31,7 +40,7 @@ infra/cloud/
     └── bootstrap-staging.sh
 ```
 
-CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this subtree): `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml`, `deploy-staging-auto-post-worker.yml`.
+CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this subtree): `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml`, `deploy-staging-auto-post-worker.yml`, `deploy-staging-platform.yml`.
 
 Mission Control and the Tasks app are static Vite SPAs and deploy as separate
 Vercel projects using their co-located `apps/<app>/vercel.json` files. They
@@ -46,6 +55,15 @@ runtime for APIs and workers.
 | `sindustries-budget-api-staging`       | `services/budget-api/`       | Budget + Akahu integration. Health at `/health`. Port 4002.                            |
 | `sindustries-content-scheduler-api-staging` | `services/content-scheduler-api/` | Content Scheduler HTTP owner. Health at `/health`. Port 4003.                         |
 | `sindustries-auto-post-worker-staging` | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` | Long-running BullMQ consumer. **Not** HTTP-exposed. Same Fly machine isolation rationale as the `gymtrack-mcp` precedent. |
+| `sindustries-platform-staging`    | `services/tasks-api/` + `services/budget-api/` + `services/content-scheduler-api/` | **Consolidated platform (task 219fb673).** One Machine, one image, four processes: tasks-api (4001), budget-api (4002), content-scheduler-api (4003), auto-post-worker (no listener). An in-container nginx router maps the three hostnames to those ports. No service code changes. |
+
+The consolidated platform is the *target* topology. The four per-service
+apps above still serve traffic until the cutover lands — the cutover is
+blocked on a Cloudflare `Zone:DNS:Edit` token that only Tom holds (task
+`5cb4a8fe`). The cutover and backout procedures are in
+`docs/runbooks/platform-consolidation-rollback.md`; the shared-fate
+consequences are in `docs/systems/cloud-platform.md` §"Shared-fate topology
+(staging)".
 
 The auto-post-worker source lives in `services/content-scheduler-api/` after the 94d5e4fc extraction — the design predates that move but Quinn's APPROVED review on PR #508 stated "implementation PRs can stack on top", so the worker Fly app builds from content-scheduler-api's source tree.
 
