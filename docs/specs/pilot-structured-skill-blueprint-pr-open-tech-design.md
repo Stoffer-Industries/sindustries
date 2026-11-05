@@ -1,14 +1,14 @@
 ---
-status: draft
+status: shipped
 task_id: 43a9ac7b-7d1a-4ff3-9d0e-fb4ecc823f1e
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 725
+shipped_date: 2026-09-22
 ---
 
 # Tech design — Pilot structured skill blueprint on `pr-open` (task `43a9ac7b`)
 
-> **Status:** Draft. Quinn review requested.
+> **Status:** Shipped in PR #725 on 2026-09-22. The AC2 premise was corrected by PR #912; see the dated supersession note below.
 > **Date:** 2026-09-21
 > **Author:** Rowan (Staff Engineer)
 > **Source of truth:** task `43a9ac7b-7d1a-4ff3-9d0e-fb4ecc823f1e` on the Tasks API.
@@ -95,7 +95,7 @@ This is a **skill / doc / workspace boundary** change at the repo level — no n
      - "Never retry `gh pr create` with another agent's token to work around a scope error. Fix the opener's token or escalate."
      - "Never treat PR-open as complete until the `requested_reviewers` REST check returns non-zero — applies at both `gh pr create` time and at draft→ready conversion."
      - "Never use `gh pr view --json reviewRequests` for the postcondition check — requires scopes the agent token intentionally does not have; use the REST endpoint instead."
-     - "Never nest parentheses inside AC evidence annotations. The feature-task lobster matches the first top-level `(`; nested `)` truncates the annotation and misaligns subsequent ACs. Use `-` or `:` separators in test names instead: `(🧪 testID: cal-render - desktop)` not `(🧪 testID: cal-render (desktop))`."
+     - **SUPERSEDED 2026-11-04 — see the AC2 note above.** The original bullet said never to nest parentheses inside AC evidence annotations and prescribed flattened test ids. The shipped rule instead allows one nested level, requires two levels to fail, and forbids rewriting real test titles into flat forms.
      - "Never omit AC checkboxes from a feature-task PR body. Use `- [x]` not bullet, not `- [ ]`, not `✅` emoji. The lobster parses `- [x]` only."
      - "Never drop the AC sentence text before the evidence annotation. The lobster rejects paraphrased or shortened AC text."
      - "Always include `## System Spec` (or a one-line no-change reason) and the `apps/<app>/SPEC.md` check before opening — neither has an automated gate, so the agent must verify by hand."
