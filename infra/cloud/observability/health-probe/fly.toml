@@ -34,11 +34,18 @@ kill_timeout = '5s'
   # DB checks hold a live Postgres connection on every pass, which keeps
   # the Neon staging branch's compute endpoint from scaling to zero.
   # Staging's DB is a dev artifact (no real traffic to protect), so a
-  # daily liveness check is plenty; Fly app + Redis checks above keep
-  # their fast 30s cadence since those don't cost Neon compute-hours.
+  # daily liveness check is plenty; Redis checks above keep their fast
+  # 30s cadence since that doesn't cost Neon compute-hours.
   # Bump this back down (or to an hourly value) once this probe is
   # pointed at a production database.
   DB_PROBE_INTERVAL_SECONDS = '86400'
+  # Fly app health checks hit each target app's public URL, which can
+  # wake a Fly machine that would otherwise auto-stop — same shape of
+  # cost as the DB probe above (see PR #849). Staging's Fly apps are dev
+  # artifacts, so a daily liveness check is plenty for now. Tom: once
+  # this probe is pointed at production, drop this to 120 (2 minutes)
+  # for a tighter liveness signal — do not leave it at daily for prod.
+  FLY_APP_PROBE_INTERVAL_SECONDS = '86400'
 
 [http_service]
   internal_port = 9090
