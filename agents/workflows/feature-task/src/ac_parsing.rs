@@ -2055,8 +2055,8 @@ Lead-in.
 
     /// The `pr-open` skill documents the AC evidence formats an agent may
     /// write. Those examples are only correct if the parser accepts them, so
-    /// this test holds the documented examples to the parser rather than
-    /// trusting the prose.
+    /// this test reads the skill itself and holds its examples to the parser
+    /// rather than trusting either the prose or a copy in this test.
     ///
     /// The rule this pins is the one that cost us real bounces: the skill
     /// used to forbid *all* nested parentheses in an annotation and to
@@ -2069,40 +2069,39 @@ Lead-in.
     /// matches no test CI actually ran.
     #[test]
     fn pr_open_skill_examples_parse_as_documented() {
-        // Every example the skill presents as valid must produce a
-        // recognised annotation.
-        for (label, ac_text, expected) in [
-            (
-                "plain testID",
-                "The calendar renders ten columns labelled by date. (🧪 testID: cal-render)",
-                "cal-render",
-            ),
-            (
-                "one level of nested parentheses is accepted",
-                "The calendar renders ten columns labelled by date. (🧪 testID: cal-render (desktop))",
-                "cal-render (desktop)",
-            ),
-            (
-                "not tested with a reason",
-                "The calendar renders ten columns labelled by date. (not tested: manual visual QA only)",
-                "manual visual QA only",
-            ),
-            (
-                "not code with a reason",
-                "The calendar renders ten columns labelled by date. (📄 not code: documented in docs/systems/x.md)",
-                "documented in docs/systems/x.md",
-            ),
-        ] {
-            match parse_evidence(ac_text) {
-                Some(Evidence::TestId(id)) => assert_eq!(id, expected, "{label}: testID mismatch"),
-                Some(Evidence::NotTested { reason }) => {
-                    assert_eq!(reason, expected, "{label}: reason mismatch")
+        fn examples_labelled(text: &str, label: &str) -> Vec<String> {
+            let mut examples = Vec::new();
+            for line in text.lines() {
+                if !line.trim().contains(label) {
+                    continue;
                 }
-                Some(Evidence::NotCode { reason }) => {
-                    assert_eq!(reason, expected, "{label}: reason mismatch")
+                let mut rest = line;
+                while let Some(open) = rest.find('`') {
+                    rest = &rest[open + 1..];
+                    let Some(close) = rest.find('`') else {
+                        break;
+                    };
+                    let candidate = &rest[..close];
+                    if candidate.starts_with("AC1:") && candidate.contains("testID:") {
+                        examples.push(candidate.to_string());
+                    }
+                    rest = &rest[close + 1..];
                 }
-                other => panic!("{label}: expected a recognised annotation, got {other:?}"),
             }
+            examples
+        }
+
+        let skill = include_str!("../../../skills/dev/pr-open/SKILL.md");
+        let valid = examples_labelled(skill, "**Correct:**");
+        assert!(
+            !valid.is_empty(),
+            "no valid pr-open examples found — the contract would pass vacuously"
+        );
+        for ac_text in valid {
+            assert!(
+                parse_evidence(&ac_text).is_some(),
+                "the pr-open skill presents this example as valid, but the parser rejects it: {ac_text}"
+            );
         }
     }
 
@@ -2110,12 +2109,29 @@ Lead-in.
     /// so. Pin the failure so the documented boundary is the real one.
     #[test]
     fn pr_open_skill_two_level_nesting_is_rejected_as_documented() {
-        let ac_text =
-            "The calendar renders ten columns labelled by date. (🧪 testID: cal-render (desktop (wide)))";
+        let skill = include_str!("../../../skills/dev/pr-open/SKILL.md");
+        let invalid: Vec<_> = skill
+            .lines()
+            .filter(|line| line.trim().contains("**Breaks:**"))
+            .filter_map(|line| {
+                let start = line.find('`')?;
+                let after = &line[start + 1..];
+                let end = after.find('`')?;
+                let candidate = &after[..end];
+                (candidate.starts_with("AC1:") && candidate.contains("testID:"))
+                    .then(|| candidate.to_string())
+            })
+            .collect();
         assert!(
-            parse_evidence(ac_text).is_none(),
-            "two levels of nested parentheses must not parse as an annotation"
+            !invalid.is_empty(),
+            "no invalid pr-open examples found — the contract would pass vacuously"
         );
+        for ac_text in invalid {
+            assert!(
+                parse_evidence(&ac_text).is_none(),
+                "the pr-open skill presents this example as broken, but the parser accepts it: {ac_text}"
+            );
+        }
     }
 
     /// A parenthetical in the AC *sentence* is fine, provided the PR copies
