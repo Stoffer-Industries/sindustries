@@ -12,6 +12,7 @@ something that looks like a working eval suite:
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 import tempfile
@@ -37,6 +38,14 @@ from graders import (  # noqa: E402  (path set above)
     grade,
 )
 from invoke import _extract_text  # noqa: E402  (path set above)
+
+# The runner is a script, so load it by path under a distinct name rather than
+# `import run`, which would be ambiguous.
+import importlib.util  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("eval_runner", EVALS_ROOT / "run.py")
+harness = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(harness)
 
 
 class CaseLoadingTests(unittest.TestCase):
@@ -248,3 +257,88 @@ class PromptCompositionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResultPersistenceTests(unittest.TestCase):
+    """Every attempt is recorded, not only the ones that scored.
+
+    A run that failed to reach the model is still the latest truth about that
+    model and case. Persisting only the successes leaves the previous score
+    sitting in the scorecard, so it claims a pass that did not happen — a
+    green that does not mean anything, which is the failure this harness
+    exists to prevent.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._original_root = harness.RESULTS_ROOT
+        harness.RESULTS_ROOT = pathlib.Path(self._tmp.name)
+        self.addCleanup(setattr, harness, "RESULTS_ROOT", self._original_root)
+
+    def test_a_failed_run_is_persisted(self):
+        harness.persist_record(
+            {
+                "case": "lobster-ac-compliance",
+                "model": "minimax-portal__MiniMax-M3.1-Flash",
+                "status": "model_error",
+                "error": "Connection error",
+            }
+        )
+        path = (
+            pathlib.Path(self._tmp.name)
+            / "minimax-portal__MiniMax-M3.1-Flash"
+            / "lobster-ac-compliance.json"
+        )
+        self.assertTrue(path.exists(), "a failed run left no record")
+        record = json.loads(path.read_text())
+        self.assertEqual(record["status"], "model_error")
+
+    def test_a_later_failure_replaces_an_earlier_pass(self):
+        harness.persist_record(
+            {
+                "case": "lobster-ac-compliance",
+                "model": "minimax-portal__MiniMax-M3.1-Flash",
+                "status": "ok",
+                "passed": True,
+                "score": 1.0,
+            }
+        )
+        harness.persist_record(
+            {
+                "case": "lobster-ac-compliance",
+                "model": "minimax-portal__MiniMax-M3.1-Flash",
+                "status": "model_error",
+                "error": "Connection error",
+            }
+        )
+        path = (
+            pathlib.Path(self._tmp.name)
+            / "minimax-portal__MiniMax-M3.1-Flash"
+            / "lobster-ac-compliance.json"
+        )
+        record = json.loads(path.read_text())
+        self.assertEqual(
+            record["status"],
+            "model_error",
+            "the scorecard still shows the earlier pass after a later failure",
+        )
+
+    def test_every_record_carries_a_timestamp(self):
+        harness.persist_record(
+            {
+                "case": "lobster-ac-compliance",
+                "model": "anthropic__claude-sonnet-5",
+                "status": "ok",
+                "passed": True,
+                "score": 1.0,
+                "recordedAt": harness._now(),
+            }
+        )
+        path = (
+            pathlib.Path(self._tmp.name)
+            / "anthropic__claude-sonnet-5"
+            / "lobster-ac-compliance.json"
+        )
+        record = json.loads(path.read_text())
+        self.assertIn("recordedAt", record)

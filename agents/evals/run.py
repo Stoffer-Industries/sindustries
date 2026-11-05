@@ -19,6 +19,7 @@ import json
 import pathlib
 import sys
 import time
+from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -32,6 +33,11 @@ from graders import GraderError, grade  # noqa: E402
 from invoke import ModelInvocationError, invoke_model  # noqa: E402
 
 RESULTS_ROOT = pathlib.Path(__file__).resolve().parent / "results"
+
+
+def _now() -> str:
+    """Timestamp for a run record, so "latest attempt wins" is checkable."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _print_case_header(case) -> None:
@@ -48,6 +54,7 @@ def run_case(
 ) -> dict:
     """Run one model against one case and return its result record."""
     _print_case_header(case)
+    started = time.time()
     effective_transport = transport or case.transport
 
     validation = validate_controls(case)
@@ -60,11 +67,11 @@ def run_case(
             "model": model,
             "status": "grader_broken",
             "problems": validation.problems,
+            "recordedAt": _now(),
         }
     print("controls: known-good passes, known-bad fails — grader discriminates")
 
     prompt = compose_prompt(case)
-    started = time.time()
     try:
         response, _raw = invoke_model(
             model,
@@ -80,6 +87,7 @@ def run_case(
             "model": model,
             "status": "model_error",
             "error": str(exc),
+            "recordedAt": _now(),
         }
     elapsed = time.time() - started
 
@@ -87,7 +95,13 @@ def run_case(
         result = grade(response, case.directory, case.grader_config)
     except GraderError as exc:
         print(f"grader failed: {exc}")
-        return {"case": case.id, "model": model, "status": "grader_error", "error": str(exc)}
+        return {
+            "case": case.id,
+            "model": model,
+            "status": "grader_error",
+            "error": str(exc),
+            "recordedAt": _now(),
+        }
 
     print(f"score: {result.score:.2f} — {'PASS' if result.passed else 'FAIL'}")
     print(f"detail: {json.dumps(result.detail, indent=2, sort_keys=True)[:1200]}")
@@ -100,15 +114,27 @@ def run_case(
         "detail": result.detail,
         "elapsedSeconds": round(elapsed, 1),
         "responseChars": len(response),
+        "recordedAt": _now(),
     }
 
 
-def write_result(record: dict) -> pathlib.Path:
-    """Write a result record under `results/<model>/<case>.json`."""
-    model_slug = record["model"].replace("/", "__")
-    directory = RESULTS_ROOT / model_slug
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{record['case']}.json"
+def persist_record(record: dict, out: str | None = None) -> pathlib.Path:
+    """Write a run record. Every attempt is recorded, not only the ones that scored.
+
+    A run that failed to reach the model, or that a broken grader refused to
+    score, is still the latest truth about that model and case. Writing only
+    the successes leaves the previous score sitting in the scorecard, so it
+    claims a pass that did not happen — a green that does not mean anything,
+    which is the failure this harness exists to prevent.
+    """
+    if out:
+        path = pathlib.Path(out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        model_slug = record["model"].replace("/", "__")
+        directory = RESULTS_ROOT / model_slug
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{record['case']}.json"
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return path
 
@@ -206,11 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             thinking=thinking,
         )
         records.append(record)
-        if args.out:
-            pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-            pathlib.Path(args.out).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-        elif record["status"] == "ok":
-            print(f"wrote {write_result(record)}")
+        print(f"wrote {persist_record(record, args.out)}")
 
     failed = [r for r in records if r.get("status") != "ok" or not r.get("passed")]
     print(f"\n{len(records) - len(failed)}/{len(records)} passed")
