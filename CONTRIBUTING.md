@@ -125,7 +125,7 @@ CI currently covers:
 - `frontend-design-system-lint` (the frontend `@shadcn/lint` design-system lint wiring and its unit tests)
 - `no-absolute-paths-lint` (the repo lint that fails on hard-coded absolute paths such as `~/` or `/Users/<name>/`; its scanned roots and opt-outs are documented under *Path-lint scope* below)
 - `typecheck-gate-tests` (self-test for `scripts/typecheck-gate.mjs`, the tool the three service gates above run)
-- `infra/cloud` bootstrap, `fly.toml`, and `no-pnpm-pin` tests (`infra-cloud-bootstrap-staging-tests`)
+- `infra-cloud-bootstrap-staging-tests` (the `infra/cloud` contract-test suite, all under `infra/cloud/scripts/tests/`: `bootstrap-staging.test.sh`, `fly-toml-context.test.sh`, `package-json-no-pnpm-pin.test.sh`, `mission-control-deploy-fixtures.test.sh`, `fly-deploy-trigger-paths.test.sh`, `ci-deployment-gates.test.sh`, `local-test-commands.test.sh`, `no-absolute-paths-scope.test.sh`, `budget-mobile-ota-inputs.test.sh` and `ci-job-script-inventory.test.sh`)
 - `health-probe-tests` (health-probe unit tests plus the observability provisioning / bootstrap / evidence / failure-inject contract tests)
 - `gh-with-agent-token-tests` (per-agent GitHub identity shim, `infra/cloud/bin` deploy/status/rollback contracts, cloud staging workflow and failure-drill harnesses, stable-hostname verification harness)
 - `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
@@ -151,6 +151,12 @@ sentence above cannot drift away from the executable gate.
 Those exception ids are the only ones the check exempts, and the test
 asserts that this paragraph and the check exempt exactly the same ids, so
 neither can drift away from the other.
+
+The contract tests the `infra-cloud-bootstrap-staging-tests` job runs are listed
+by file name in the inventory above. `infra/cloud/scripts/tests/ci-job-script-inventory.test.sh` asserts that list against
+the job's own run steps, in both directions, so a contract test added to the
+job has to be documented in the same change, and a documented contract test
+that the job does not run is reported rather than assumed.
 
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
