@@ -257,7 +257,7 @@ if [[ -n "$LOG_CHECK" ]]; then
   SAW_STARTUP=0
   while [[ $SECONDS -lt $DEADLINE ]]; do
     if flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null \
-        | grep -q "$LOG_CHECK"; then
+        | grep -qF "$LOG_CHECK"; then
       SAW_STARTUP=1
       break
     fi
