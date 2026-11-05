@@ -101,6 +101,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
         queue = read_queue_file(args.queue_file) if args.queue_file else fetch_queue(agent, args.tasks_api_base)
     except Exception as exc:  # noqa: BLE001 — a preflight error must fail open
         decision = rc.unknown_decision(args.category, agent, reason=f"preflight-error: {exc}")
+        print(UNKNOWN_TOKEN, file=sys.stderr)
         print(json.dumps(decision.to_dict(), sort_keys=True), file=sys.stderr)
         if args.mode == "heartbeat":
             # The agent is expected to fall back to the plain queue command.

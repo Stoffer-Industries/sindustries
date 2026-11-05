@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -203,6 +204,28 @@ class CounterStateTest(unittest.TestCase):
         self.assertIn("routine", rendered)
 
 
+class ContractDocTest(unittest.TestCase):
+    """The written contract and the code must not drift apart."""
+
+    DOC = _REPO_ROOT / "docs" / "systems" / "model-routing-contract.md"
+
+    def test_doc_category_table_matches_the_code(self):
+        text = self.DOC.read_text()
+        rows = re.findall(r"^\|\s*`([a-z0-9-]+)`\s*\|\s*([a-z]+)\s*\|$", text, flags=re.MULTILINE)
+        self.assertTrue(rows, "no category table rows found in the contract doc")
+        documented = {category: tier for category, tier in rows}
+        self.assertEqual(
+            documented,
+            rc.CATEGORY_TIERS,
+            "the contract doc's category table differs from CATEGORY_TIERS",
+        )
+
+    def test_doc_names_every_tier(self):
+        text = self.DOC.read_text()
+        for tier in rc.TIERS:
+            self.assertIn(f"`{tier}`", text, f"tier {tier} is missing from the contract doc")
+
+
 class EventLogTest(unittest.TestCase):
     def test_events_are_appended_as_json_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -212,6 +235,20 @@ class EventLogTest(unittest.TestCase):
             lines = [line for line in path.read_text().splitlines() if line.strip()]
             self.assertEqual(2, len(lines))
             self.assertEqual("skip", json.loads(lines[0])["decision"])
+
+
+class DeclarationRecordTest(unittest.TestCase):
+    """AC7 — the declaration is recorded alongside the invocation."""
+
+    def test_recorded_decision_keeps_the_declared_tier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = rc.load_state(pathlib.Path(tmp) / "counters.json")
+            decision = rc.preflight({"queue": [{"actionable": True}]}, "approved-coding")
+            rc.record_decision(state, decision, day="2026-11-06")
+            counters = rc.daily_counts(state, "2026-11-06")["approved-coding"]
+            self.assertEqual(1, counters["mid"])
+            self.assertEqual(0, counters["routine"])
+            self.assertEqual(0, counters["frontier"])
 
 
 class CliTest(unittest.TestCase):
