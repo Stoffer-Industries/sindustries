@@ -41,6 +41,18 @@ const DB_INTERVAL_SECONDS = Number.parseInt(
   process.env.DB_PROBE_INTERVAL_SECONDS ?? String(INTERVAL_SECONDS),
   10,
 );
+// Fly app health checks hit each target app's public URL, which can wake a
+// Fly machine that would otherwise auto-stop (see PR #849, which made the
+// same move for the Neon DB probe after a free-tier compute-hour incident —
+// the "Fly/Redis checks are free" assumption from that write-up turned out
+// not to hold for Fly app checks either). Fly app probe cadence is
+// decoupled from the Redis cadence above so staging can run it daily
+// without losing the fast Redis liveness signal. Defaults to
+// PROBE_INTERVAL_SECONDS when unset, preserving prior behaviour.
+const FLY_APP_INTERVAL_SECONDS = Number.parseInt(
+  process.env.FLY_APP_PROBE_INTERVAL_SECONDS ?? String(INTERVAL_SECONDS),
+  10,
+);
 
 const registry = new Registry();
 registry.setDefaultLabels({
@@ -146,24 +158,39 @@ function applyResult(result: ProbeResult): void {
   }
 }
 
-// Fly app + Redis checks run on the fast (INTERVAL_SECONDS) cadence —
-// they're free, so there's no reason to slow them down.
-async function runNonDbOnce(): Promise<void> {
+// Redis checks run on the fast (INTERVAL_SECONDS) cadence — they're
+// free, so there's no reason to slow them down.
+async function runRedisOnce(): Promise<void> {
   const config = configFromEnv();
   const timeoutMs = config.timeoutMs ?? 5000;
   try {
-    const [fly, redis] = await Promise.all([
-      probeFlyTargets(config.flyApps, timeoutMs),
-      probeRedisTargets(config.redis, timeoutMs),
-    ]);
-    applyResult({ timestamp: Date.now(), db: [], fly, redis });
+    const redis = await probeRedisTargets(config.redis, timeoutMs);
+    applyResult({ timestamp: Date.now(), db: [], fly: [], redis });
     probeRuns.inc();
     probeRunsValue += 1;
   } catch (err) {
     probeErrors.inc();
     probeErrorsValue += 1;
     // eslint-disable-next-line no-console
-    console.error('probe pass failed (fly/redis)', err);
+    console.error('probe pass failed (redis)', err);
+  }
+}
+
+// Fly app checks run on their own (potentially much slower) cadence — see
+// the FLY_APP_INTERVAL_SECONDS comment above for why.
+async function runFlyOnce(): Promise<void> {
+  const config = configFromEnv();
+  const timeoutMs = config.timeoutMs ?? 5000;
+  try {
+    const fly = await probeFlyTargets(config.flyApps, timeoutMs);
+    applyResult({ timestamp: Date.now(), db: [], fly, redis: [] });
+    probeRuns.inc();
+    probeRunsValue += 1;
+  } catch (err) {
+    probeErrors.inc();
+    probeErrorsValue += 1;
+    // eslint-disable-next-line no-console
+    console.error('probe pass failed (fly)', err);
   }
 }
 
@@ -197,11 +224,15 @@ app.get('/metrics', async (_req: Request, res: Response) => {
 });
 
 async function main(): Promise<void> {
-  await runNonDbOnce();
+  await runRedisOnce();
+  await runFlyOnce();
   await runDbOnce();
   setInterval(() => {
-    void runNonDbOnce();
+    void runRedisOnce();
   }, INTERVAL_SECONDS * 1000).unref();
+  setInterval(() => {
+    void runFlyOnce();
+  }, FLY_APP_INTERVAL_SECONDS * 1000).unref();
   setInterval(() => {
     void runDbOnce();
   }, DB_INTERVAL_SECONDS * 1000).unref();
@@ -209,7 +240,7 @@ async function main(): Promise<void> {
   app.listen(PORT, () => {
     // eslint-disable-next-line no-console
     console.log(
-      `health-probe listening on :${PORT} (interval=${INTERVAL_SECONDS}s, db-interval=${DB_INTERVAL_SECONDS}s)`,
+      `health-probe listening on :${PORT} (interval=${INTERVAL_SECONDS}s, fly-interval=${FLY_APP_INTERVAL_SECONDS}s, db-interval=${DB_INTERVAL_SECONDS}s)`,
     );
   });
 }
