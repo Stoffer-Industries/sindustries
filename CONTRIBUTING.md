@@ -166,11 +166,36 @@ directory must exist. A contract test that no job executes asserts nothing,
 so adding one without wiring it into CI fails the gate instead of silently
 never running.
 
+The same test now holds that rule across the other contract-test
+directories — `infra/cloud/bin/tests/`, `agents/lib/tests/`,
+`tests/cloud/tests/` and `scripts/test/` — so a contract test added to any
+of them and wired to no CI job fails the gate too. The contract tests in
+those directories that no job runs are recorded under *Contract tests not run
+by CI* below; the test asserts that record against the files on disk and
+against the recorded list in both directions, so it cannot grow silently and
+cannot go stale.
+
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
 - `apps/budget-mobile` typecheck (`apps/budget-mobile/package.json`)
 
 Closed: see `docs/repo-audits/2026-W38.md` F4 and PR #673.
+
+### Contract tests not run by CI
+
+These contract tests exist on disk but no CI job executes them, so they
+assert nothing in the merge gate. They are listed here so the gap stays
+visible, and so a new contract test that no job runs fails the gate instead
+of joining them silently.
+
+- `scripts/test/build-tailwind-theme.test.mjs` — the Tailwind theme build check; no CI job runs it
+- `scripts/test/check-no-legacy-approval-marker.test.mjs` — the legacy approval-marker check; no CI job runs it
+- `tests/cloud/tests/check-cors-origin-matrix.test.mjs` — the stable-hostname CORS matrix check (task 5cb4a8fe slice 2); no CI job runs it
+- `tests/cloud/tests/check-deploy-workflow-stable-hostname.test.mjs` — the deploy-workflow hostname check (task 5cb4a8fe slice 3); no CI job runs it
+- `tests/cloud/tests/check-stable-hostname-matrix.test.mjs` — the stable-hostname matrix check (task 5cb4a8fe slice 1); no CI job runs it
+- `tests/cloud/tests/check-stable-url-fallbacks.test.mjs` — the provider-URL fallback check (task 5cb4a8fe slice 4); no CI job runs it
+- `tests/cloud/tests/check-vercel-env-matrix.test.mjs` — the Vercel environment matrix check (task 5cb4a8fe slice 5); no CI job runs it
+- `tests/cloud/tests/staging-db-migration-failure-drill.test.sh` — the staging database migration failure drill; it needs a live database, so it runs from the root `test:cloud-db` script rather than from CI
 
 ### Backend TypeScript compiler gate
 
