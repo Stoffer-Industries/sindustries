@@ -77,7 +77,16 @@ python3 agents/evals/run.py --model <provider/model> --case <case-id>
 python3 agents/evals/run.py --model <provider/model> --all
 ```
 
-Results land in `agents/evals/results/<model>/<case>.json`.
+Results land in `agents/evals/results/<model>/<case>.json`. Every attempt is
+persisted, not only attempts that scored, and each record carries a
+`recordedAt` timestamp. The latest attempt for a model/case wins: if a
+provider error or broken grader follows an earlier pass, the scorecard says
+so instead of continuing to claim the stale pass.
+
+The measured seed scores are recorded in
+[`agents/evals/BASELINE.md`](../../agents/evals/BASELINE.md). They are the
+comparison point for a later model swap; `elapsedSeconds` measures model
+invocation only, not grader-control validation or prompt setup.
 
 Each case declares its default transport. `--transport` overrides that
 choice. The large `pr-contract-review` case uses the agent transport because

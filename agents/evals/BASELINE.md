@@ -24,7 +24,7 @@ the `infer` transport, both graded by the harness's own graders.
 
 ## Reading these numbers
 
-Two of the four scored cells are passes by a model that had to satisfy the real
+Two of the three scored cells are passes by a model that had to satisfy the real
 lobster parser — that is the load-bearing result, because it means the
 harness can tell a real pass from a real fail rather than grading prose.
 
