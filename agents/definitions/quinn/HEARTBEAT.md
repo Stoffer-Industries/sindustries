@@ -6,9 +6,16 @@
 
 ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 
-Before any specialised section or silent-success decision, fetch the unified read-only queue once:
+Before any specialised section or silent-success decision, fetch the unified read-only queue once, through the model-routing preflight:
 
-`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
+`python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/cron/routing_preflight.py --agent Quinn --category heartbeat-scan --mode heartbeat`
+
+The preflight performs that same queue read and adds one extra key, `routingDecision`, to the payload. Per `docs/systems/model-routing-contract.md`, this pass is declared on the `routine` tier before any model work starts, and the declaration is recorded in the routing counters.
+
+Read `routingDecision`:
+- `decision: "skip"` — the queue holds no actionable work. Still run the QUINN OPS TASKS query below (open untyped ops tasks sit outside this queue), then end the pass with no message if that query is empty too.
+- `decision: "proceed"` — there is work. Continue with the sections below as usual.
+- `PREFLIGHT-UNKNOWN` on stdout — the preflight itself could not run. Fall back to the plain queue command (`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`) and continue. An unknown result is never a skip.
 
 The queue combines assigned active tasks, Quinn's **global** tech-design approval scan across all feature/code tasks regardless of assignee, review requests, authored-PR feedback, and role-safe merge candidates. It returns one deterministic `topCandidate`. Action that candidate through the matching specialised section and existing workflow/PR skill; the queue itself never mutates tasks or GitHub.
 
