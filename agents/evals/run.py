@@ -54,7 +54,6 @@ def run_case(
 ) -> dict:
     """Run one model against one case and return its result record."""
     _print_case_header(case)
-    started = time.time()
     effective_transport = transport or case.transport
 
     validation = validate_controls(case)
@@ -72,6 +71,11 @@ def run_case(
     print("controls: known-good passes, known-bad fails — grader discriminates")
 
     prompt = compose_prompt(case)
+    # `elapsedSeconds` is model latency, not harness setup time. Control
+    # validation can compile the production lobster parser on a cold checkout;
+    # folding that into this number makes a slow build look like slow model
+    # reasoning and makes the baseline incomparable across machines.
+    started = time.time()
     try:
         response, _raw = invoke_model(
             model,

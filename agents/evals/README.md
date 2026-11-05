@@ -41,7 +41,15 @@ python3 agents/evals/run.py --model anthropic/claude-sonnet-5 --case lobster-ac-
 python3 agents/evals/run.py --model minimax-portal/MiniMax-M3.1-Flash --all
 ```
 
-Results land in `agents/evals/results/<model>/<case>.json`.
+Results land in `agents/evals/results/<model>/<case>.json`. **Every attempt is
+persisted**, not only attempts that scored: a provider error or broken grader
+is the latest truth about that model and case, so leaving the previous score
+in place would claim a pass the latest attempt did not produce. Each record
+has a `recordedAt` timestamp and the latest attempt for a model/case wins.
+
+The measured seed scores live in
+[`agents/evals/BASELINE.md`](BASELINE.md); use that table as the comparison
+point for a later model swap.
 
 Two transports, deliberately separated:
 

@@ -17,6 +17,8 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 EVALS_ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO_ROOT = EVALS_ROOT.parents[1]
@@ -255,10 +257,6 @@ class PromptCompositionTests(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ResultPersistenceTests(unittest.TestCase):
     """Every attempt is recorded, not only the ones that scored.
 
@@ -276,47 +274,52 @@ class ResultPersistenceTests(unittest.TestCase):
         harness.RESULTS_ROOT = pathlib.Path(self._tmp.name)
         self.addCleanup(setattr, harness, "RESULTS_ROOT", self._original_root)
 
-    def test_a_failed_run_is_persisted(self):
-        harness.persist_record(
-            {
-                "case": "lobster-ac-compliance",
-                "model": "minimax-portal__MiniMax-M3.1-Flash",
-                "status": "model_error",
-                "error": "Connection error",
-            }
-        )
-        path = (
-            pathlib.Path(self._tmp.name)
-            / "minimax-portal__MiniMax-M3.1-Flash"
-            / "lobster-ac-compliance.json"
-        )
+    def _run_main(self, model="provider/model", case="planted-defect-review"):
+        """Drive main() with a deterministic model response or failure."""
+        validation = SimpleNamespace(ok=True, problems=[])
+        with (
+            patch.object(harness, "validate_controls", return_value=validation),
+            patch.object(harness, "compose_prompt", return_value="prompt"),
+        ):
+            return harness.main(["--model", model, "--case", case])
+
+    def _result_path(self, model="provider__model", case="planted-defect-review"):
+        return pathlib.Path(self._tmp.name) / model / f"{case}.json"
+
+    def test_main_persists_a_failed_run(self):
+        """Regression guard: the old main() persisted only scored runs."""
+        with patch.object(
+            harness,
+            "invoke_model",
+            side_effect=harness.ModelInvocationError("Connection error"),
+        ):
+            rc = self._run_main()
+
+        self.assertEqual(rc, 1)
+        path = self._result_path()
         self.assertTrue(path.exists(), "a failed run left no record")
         record = json.loads(path.read_text())
         self.assertEqual(record["status"], "model_error")
+        self.assertIn("recordedAt", record)
 
     def test_a_later_failure_replaces_an_earlier_pass(self):
-        harness.persist_record(
-            {
-                "case": "lobster-ac-compliance",
-                "model": "minimax-portal__MiniMax-M3.1-Flash",
-                "status": "ok",
-                "passed": True,
-                "score": 1.0,
-            }
-        )
-        harness.persist_record(
-            {
-                "case": "lobster-ac-compliance",
-                "model": "minimax-portal__MiniMax-M3.1-Flash",
-                "status": "model_error",
-                "error": "Connection error",
-            }
-        )
-        path = (
-            pathlib.Path(self._tmp.name)
-            / "minimax-portal__MiniMax-M3.1-Flash"
-            / "lobster-ac-compliance.json"
-        )
+        passed = SimpleNamespace(score=1.0, passed=True, detail={})
+        with (
+            patch.object(harness, "invoke_model", return_value=("response", {})),
+            patch.object(harness, "grade", return_value=passed),
+        ):
+            rc = self._run_main()
+        self.assertEqual(rc, 0)
+
+        with patch.object(
+            harness,
+            "invoke_model",
+            side_effect=harness.ModelInvocationError("Connection error"),
+        ):
+            rc = self._run_main()
+        self.assertEqual(rc, 1)
+
+        path = self._result_path()
         record = json.loads(path.read_text())
         self.assertEqual(
             record["status"],
@@ -324,21 +327,66 @@ class ResultPersistenceTests(unittest.TestCase):
             "the scorecard still shows the earlier pass after a later failure",
         )
 
-    def test_every_record_carries_a_timestamp(self):
-        harness.persist_record(
-            {
-                "case": "lobster-ac-compliance",
-                "model": "anthropic__claude-sonnet-5",
-                "status": "ok",
-                "passed": True,
-                "score": 1.0,
-                "recordedAt": harness._now(),
-            }
-        )
-        path = (
-            pathlib.Path(self._tmp.name)
-            / "anthropic__claude-sonnet-5"
-            / "lobster-ac-compliance.json"
-        )
-        record = json.loads(path.read_text())
+    def test_run_case_stamps_recorded_at(self):
+        """The timestamp must come from the runner, not from test input."""
+        case = load_case(EVALS_ROOT / "cases" / "planted-defect-review")
+        validation = SimpleNamespace(ok=True, problems=[])
+        with (
+            patch.object(harness, "validate_controls", return_value=validation),
+            patch.object(harness, "compose_prompt", return_value="prompt"),
+            patch.object(
+                harness,
+                "invoke_model",
+                side_effect=harness.ModelInvocationError("Connection error"),
+            ),
+        ):
+            record = harness.run_case(
+                case,
+                "provider/model",
+                transport="infer",
+                agent="quinn",
+                thinking="low",
+            )
+
+        self.assertEqual(record["status"], "model_error")
         self.assertIn("recordedAt", record)
+
+    def test_elapsed_seconds_measure_model_invocation_only(self):
+        """Control validation and prompt setup are not model latency."""
+        case = load_case(EVALS_ROOT / "cases" / "planted-defect-review")
+        validation = SimpleNamespace(ok=True, problems=[])
+        passed = SimpleNamespace(score=1.0, passed=True, detail={})
+
+        # The control-validation side effect consumes one clock reading. The
+        # runner should start timing only after that setup, then measure the
+        # model invocation: 13 - 11 = 2 seconds, not 13 - 10 = 3 seconds.
+        clock = Mock(side_effect=[10.0, 11.0, 13.0])
+
+        def validate_and_advance_clock(_case):
+            harness.time.time()
+            return validation
+
+        with (
+            patch.object(harness, "time", SimpleNamespace(time=clock)),
+            patch.object(
+                harness,
+                "validate_controls",
+                side_effect=validate_and_advance_clock,
+            ),
+            patch.object(harness, "compose_prompt", return_value="prompt"),
+            patch.object(harness, "invoke_model", return_value=("response", {})),
+            patch.object(harness, "grade", return_value=passed),
+        ):
+            record = harness.run_case(
+                case,
+                "provider/model",
+                transport="infer",
+                agent="quinn",
+                thinking="low",
+            )
+
+        self.assertEqual(record["elapsedSeconds"], 2.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
