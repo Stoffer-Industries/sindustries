@@ -166,11 +166,57 @@ directory must exist. A contract test that no job executes asserts nothing,
 so adding one without wiring it into CI fails the gate instead of silently
 never running.
 
+The same test now holds that rule across every contract test in the
+repository, not across a list of directories. A contract test here is a shell
+test (`*.test.sh` or `test_*.sh`) or an mjs test (`*.test.mjs`); the test
+derives the set from the working tree, so a contract test added to a
+directory it has never seen is covered the moment it lands. TypeScript and
+Python tests are unit tests with their own CI suites, and are out of scope
+for this guard.
+
+A contract test counts as run by CI only when a workflow step actually runs
+it: as a `bash <file>` or `node --test <file>` argument, as a glob one of
+those runners expands (`node --test scripts/*.test.mjs`), or through an npm
+script whose command runs one — `npm test --workspace @sindustries/design-tokens`
+runs `packages/design-tokens/scripts/pen-document.test.mjs` and
+`packages/design-tokens/scripts/pen-refs.test.mjs` without either path
+appearing in a run step. A file a workflow only mentions — a shellcheck
+target, for example — is linted, not run, and does not count.
+
+The contract tests that no workflow runs are recorded under *Contract tests
+not run by CI* below. The test asserts that record against the files on
+disk, against the workflows' run steps, and against the recorded list in
+both directions, so it cannot grow silently, and so a contract test that
+later gets wired into CI is reported as a stale record rather than left
+behind.
+
 Cross-package / domain checks (now invoked by `budget-api-unit`):
 - `packages/budget-domain` test + typecheck scripts (`packages/budget-domain/package.json`)
 - `apps/budget-mobile` typecheck (`apps/budget-mobile/package.json`)
 
 Closed: see `docs/repo-audits/2026-W38.md` F4 and PR #673.
+
+### Contract tests not run by CI
+
+These contract tests exist on disk but no CI workflow executes them, so they
+assert nothing in the merge gate. They are listed here so the gap stays
+visible, and so a new contract test that no job runs fails the gate instead
+of joining them silently.
+
+- `agents/skills/dev/pr-open/tests/test_assert_opener_identity.sh` — the PR opener identity guard; no CI workflow runs it
+- `scripts/cloud/database/tests/common.test.sh` — the cloud database shared-helper checks; no CI workflow runs it
+- `scripts/cloud/database/tests/manifest-constraints.test.sh` — the cloud database manifest-constraints check; no CI workflow runs it
+- `scripts/cloud/database/tests/restore-result-dir.test.sh` — the cloud database restore-result-directory check; no CI workflow runs it
+- `scripts/cloud/database/tests/schema-presence.test.sh` — the cloud database schema-presence check; no CI workflow runs it
+- `scripts/ops/tests/sync-agent-definitions.test.sh` — the agent-definition sync check; no CI workflow runs it
+- `scripts/test/build-tailwind-theme.test.mjs` — the Tailwind theme build check; no CI job runs it
+- `scripts/test/check-no-legacy-approval-marker.test.mjs` — the legacy approval-marker check; no CI job runs it
+- `tests/cloud/tests/check-cors-origin-matrix.test.mjs` — the stable-hostname CORS matrix check (task 5cb4a8fe slice 2); no CI job runs it
+- `tests/cloud/tests/check-deploy-workflow-stable-hostname.test.mjs` — the deploy-workflow hostname check (task 5cb4a8fe slice 3); no CI job runs it
+- `tests/cloud/tests/check-stable-hostname-matrix.test.mjs` — the stable-hostname matrix check (task 5cb4a8fe slice 1); no CI job runs it
+- `tests/cloud/tests/check-stable-url-fallbacks.test.mjs` — the provider-URL fallback check (task 5cb4a8fe slice 4); no CI job runs it
+- `tests/cloud/tests/check-vercel-env-matrix.test.mjs` — the Vercel environment matrix check (task 5cb4a8fe slice 5); no CI job runs it
+- `tests/cloud/tests/staging-db-migration-failure-drill.test.sh` — the staging database migration failure drill; it needs a live database, so it runs from the root `test:cloud-db` script rather than from CI
 
 ### Backend TypeScript compiler gate
 
