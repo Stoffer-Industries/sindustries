@@ -180,13 +180,28 @@ deploy.
 
 | Platform secret | Staging environment secret | Note |
 | --- | --- | --- |
-| `PLATFORM_TASKS_API_DATABASE_URL` | `TASKS_API_SOURCE_DSN` | schema forced to `tasks_api` |
-| `PLATFORM_BUDGET_API_DATABASE_URL` | `STAGING_BUDGET_API_DATABASE_URL` (fallback `BUDGET_API_SOURCE_DSN`) | schema forced to `budget_api` |
-| `PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL` | derived from the tasks-api DSN | one Neon database, three schemas; schema forced to `content_scheduler` |
+| `PLATFORM_TASKS_API_DATABASE_URL` | `STAGING_TASKS_API_DATABASE_URL` | write-capable; schema forced to `tasks_api` |
+| `PLATFORM_BUDGET_API_DATABASE_URL` | `STAGING_BUDGET_API_DATABASE_URL` | write-capable; schema forced to `budget_api` |
+| `PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL` | `STAGING_CONTENT_SCHEDULER_API_DATABASE_URL`, or derived from the tasks-api DSN | one Neon database, three schemas; schema forced to `content_scheduler` |
 | `PLATFORM_*_REDIS_URL` (6 names) | `HEALTH_PROBE_REDIS` | one live Redis instance — every live per-service Redis secret has the same Fly digest, so all six names take the same value |
 | `PLATFORM_CONTENT_SCHEDULER_API_BASE_URL` | — | public URL, registered as a plain value |
 | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, token wrapped in the `[{token, actor, approvalTypes}]` JSON the services parse |
 | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, same wrapping |
+
+**Every database source is write-capable, and the script fails closed
+without one.** The platform runs `prisma migrate deploy` in its
+`release_command` and the services write normally, so a read-only role
+cannot satisfy the contract: the first deploy would fail in the
+release/migration phase, and even with migrations skipped the service
+could not perform a normal write. The database drill's `TASKS_API_SOURCE_DSN`
+and `BUDGET_API_SOURCE_DSN` are read-only BY CONTRACT — they exist so the
+drill can dump a source database
+(`.github/workflows/cloud-staging-db-drill.yml`,
+`docs/runbooks/staging-database-migration-restore.md` §1) — so they are
+never mapped onto the live platform. The provisioning script has no
+read-only fallback: when a write-capable source is absent it stops with an
+error naming the missing environment secret, so the read-only role is never
+discovered on the first live deploy.
 
 **Why the staging environment and not a local file.** Fly exposes a digest
 per secret, never a value, so a value can only be read where it was
@@ -208,8 +223,11 @@ at any time — no Machine runs until a deploy. The deploy itself is gated
 on the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED=true`,
 because the platform's auto-post worker starts consuming the BullMQ queue
 as soon as the platform is deployed, while the old
-`sindustries-auto-post-worker-staging` app is still running. The cutover
-order is in `docs/runbooks/platform-consolidation-rollback.md` §3.
+`sindustries-auto-post-worker-staging` app is still running. The operator
+path (`infra/cloud/bin/deploy platform`) is gated by the same variable, so
+the opt-in cannot be bypassed. The cutover order is in
+`docs/runbooks/platform-consolidation-rollback.md` §3: the old auto-post
+worker is scaled to zero BEFORE the platform is deployed.
 
 ## Account / ownership / billing
 

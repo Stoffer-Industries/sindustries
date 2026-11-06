@@ -224,7 +224,7 @@ assert_log_contains "INVOKED: deploy --config infra/cloud/fly/auto-post-worker.f
 
 echo "test: platform deploys the consolidated app and smoke-checks all three services"
 reset_log
-FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --image registry/repo:aaaabbbbccccdddd 2>&1
+FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --image registry/repo:aaaabbbbccccdddd 2>&1
 assert_eq "deploy platform exit code" "0" "$?"
 assert_log_contains "INVOKED: config validate --config infra/cloud/fly/platform.fly.toml"
 assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=aaaabbbbccccdddd --image registry/repo:aaaabbbbccccdddd"
@@ -241,6 +241,19 @@ assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 ht
 # And the auto-post worker, which has no HTTP route, is checked via its
 # startup log line inside the consolidated Machine.
 assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
+
+echo "test: the platform deploy is opt-in — refused without STAGING_PLATFORM_DEPLOY_ENABLED"
+# The platform's auto-post worker is a second consumer of the same
+# BullMQ queue as the old worker app, so the operator path is gated the
+# same way the CI path is (task 219fb673). Without the opt-in the deploy
+# must not run at all.
+reset_log
+set +e
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --image registry/repo:aaaabbbbccccdddd 2>&1
+rc=$?
+set -e
+assert_eq "platform deploy without opt-in exit code" "2" "$rc"
+assert_log_absent "INVOKED: deploy"
 
 echo "test: --env GIT_COMMIT_SHA uses local HEAD when no --image is given"
 reset_log

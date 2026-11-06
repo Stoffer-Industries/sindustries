@@ -1034,6 +1034,20 @@ jobs:
       - name: Run consolidated platform provisioning unit tests
         run: node --test infra/cloud/platform/tests/platform-provision-secrets.test.mjs
 
+      # Task 219fb673 — the provisioning CLI is what actually runs in CI,
+      # so the CLI path is tested with a stubbed flyctl: the app-create
+      # argv must be executable by the pinned flyctl 0.4.102 (which has no
+      # `--region` flag on `apps create`), `secrets set --stage` must be
+      # passed, and no source or derived secret value may reach
+      # stdout/stderr. The cutover ordering invariant and the deploy gate
+      # are checked as static contracts over the runbook, the operator
+      # deploy path and the deploy workflow.
+      - name: Run consolidated platform provisioning CLI tests
+        run: node --test infra/cloud/platform/tests/platform-provision-secrets-cli.test.mjs
+
+      - name: Run platform cutover order and deploy gate tests
+        run: node --test infra/cloud/platform/tests/platform-cutover-order.test.mjs
+
   gh-with-agent-token-tests:
     # Task b0d1b42e (Fix Ambient GITHUB_TOKEN Overriding Per-Agent GH Config
     # Precedence). AC1 + AC2 regression guard for the agents/lib

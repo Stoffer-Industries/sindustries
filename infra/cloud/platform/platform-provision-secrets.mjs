@@ -59,45 +59,81 @@
  * `{token, actor, approvalTypes}` (see the per-service env examples), so
  * the token is wrapped into that shape here.
  *
- * THE DATABASE MAPPING
- * --------------------
+ * THE DATABASE MAPPING — WRITE-CAPABLE SOURCES ONLY
+ * --------------------------------------------------
  * The three staging databases are ONE Neon database with THREE schemas
  * (`tasks_api`, `budget_api`, `content_scheduler`), confirmed by Quinn on
- * task 219fb673. The staging environment exposes no dedicated
- * content-scheduler DSN, so its URL is derived from the tasks-api DSN by
- * setting the `schema` query parameter to `content_scheduler` — same
- * database, different schema. The schema parameter is set explicitly for
- * every service, because Prisma picks the schema from the URL and a DSN
- * without one silently resolves to `public`.
+ * task 219fb673.
+ *
+ * Every database source below MUST be a write-capable DSN. The platform
+ * runs `prisma migrate deploy` in its `release_command` and the services
+ * write normally, so a read-only role cannot satisfy the contract: the
+ * first deploy would fail in the release/migration phase, and even with
+ * migrations skipped the service could not perform a normal write.
+ *
+ * That rules out the database drill's `TASKS_API_SOURCE_DSN` and
+ * `BUDGET_API_SOURCE_DSN`: those are the drill's READ-ONLY source DSNs
+ * (.github/workflows/cloud-staging-db-drill.yml and
+ * docs/runbooks/staging-database-migration-restore.md §1), and using them
+ * here would discover the read-only role only on the first live deploy.
+ * The sources are therefore the dedicated, write-capable staging DSNs —
+ * `STAGING_TASKS_API_DATABASE_URL` and `STAGING_BUDGET_API_DATABASE_URL` —
+ * and the script FAILS CLOSED when either is absent rather than falling
+ * back to a read-only DSN.
+ *
+ * The staging environment exposes no dedicated content-scheduler DSN, so
+ * that schema's URL is derived from the tasks-api DSN by setting the
+ * `schema` query parameter to `content_scheduler` — same database,
+ * different schema. The schema parameter is set explicitly for every
+ * service, because Prisma picks the schema from the URL and a DSN without
+ * one silently resolves to `public`.
  *
  * The credential-bearing part of a DSN is never re-encoded: the schema
  * parameter is rewritten textually, so a password containing reserved
  * characters survives the round trip untouched.
+ *
+ * THE CLI SEAM
+ * ------------
+ * Every process spawn and every log line goes through the IO object built
+ * by `createIo()`. The CLI-level test drives the REAL code path with a
+ * stubbed `flyctl` and asserts on exactly what the script would print —
+ * which is what makes "no secret value reaches stdout/stderr" a checked
+ * property rather than a hope.
  */
 
 import { spawnSync } from 'node:child_process';
 
 export const PLATFORM_APP = 'sindustries-platform-staging';
 export const DEFAULT_ORG = 'personal';
-export const DEFAULT_REGION = 'syd';
 
 /**
  * The staging GitHub environment secrets that carry the live values.
  *
- * `budgetDatabaseUrl` prefers the DSN that is already proven Prisma-ready
- * against the live budget database (cloud-staging-validate.yml drives
- * `prisma:migrate` with it); `budgetDatabaseUrlFallback` is the database
- * drill's source DSN for the same database.
+ * The two database sources are write-capable on purpose — see the header
+ * block. `contentSchedulerDatabaseUrl` is optional: when it is absent the
+ * content-scheduler schema is derived from the tasks-api DSN (one Neon
+ * database, three schemas).
  */
 export const SOURCE_NAMES = {
-  tasksDatabaseUrl: 'TASKS_API_SOURCE_DSN',
+  tasksDatabaseUrl: 'STAGING_TASKS_API_DATABASE_URL',
   budgetDatabaseUrl: 'STAGING_BUDGET_API_DATABASE_URL',
-  budgetDatabaseUrlFallback: 'BUDGET_API_SOURCE_DSN',
-  contentSchedulerDatabaseUrl: 'CONTENT_SCHEDULER_API_DATABASE_URL',
+  contentSchedulerDatabaseUrl: 'STAGING_CONTENT_SCHEDULER_API_DATABASE_URL',
   redisUrl: 'HEALTH_PROBE_REDIS',
   tasksApprovalToken: 'TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
   schedulerApprovalToken: 'CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN',
 };
+
+/**
+ * The database sources that must be present and write-capable.
+ *
+ * The script fails closed when one of them is missing: there is no
+ * read-only fallback, because a read-only role cannot run the platform's
+ * migrations and would be discovered only on the first live deploy.
+ */
+export const REQUIRED_DATABASE_SOURCES = [
+  SOURCE_NAMES.tasksDatabaseUrl,
+  SOURCE_NAMES.budgetDatabaseUrl,
+];
 
 /**
  * The public base URL tasks-api and the auto-post worker use to reach
@@ -111,6 +147,28 @@ export const DEFAULT_CONTENT_SCHEDULER_API_BASE_URL =
 /** The actors the staging service credentials act as. */
 export const TASKS_APPROVAL_ACTOR = 'staging-cloud-validate';
 export const SCHEDULER_APPROVAL_ACTOR = 'staging-cloud-validate';
+
+/**
+ * Build the IO seam: the process spawner and the log sinks.
+ *
+ * Defaults are the real process; the CLI-level test overrides them with a
+ * stubbed `flyctl` and in-memory log sinks.
+ *
+ * @param {object} [overrides]
+ * @param {Record<string, string|undefined>} [overrides.env]
+ * @param {Function} [overrides.spawn]
+ * @param {(message: string) => void} [overrides.log]
+ * @param {(message: string) => void} [overrides.errorLog]
+ * @returns {{env: Record<string, string|undefined>, spawn: Function, log: Function, errorLog: Function}}
+ */
+export function createIo(overrides = {}) {
+  return {
+    env: overrides.env ?? process.env,
+    spawn: overrides.spawn ?? spawnSync,
+    log: overrides.log ?? ((message) => console.log(message)),
+    errorLog: overrides.errorLog ?? ((message) => console.error(message)),
+  };
+}
 
 /**
  * Parse a `label=value,label=value` list into its entries.
@@ -212,6 +270,28 @@ export function buildServiceCredentials(token, actor, approvalTypes = []) {
 }
 
 /**
+ * Mask anything that could be a credential before it is written to a log.
+ *
+ * The staging GitHub environment masks its OWN secret values in the CI log,
+ * but not the values this script DERIVES: a schema-rewritten DSN, a
+ * JSON-wrapped approval token. So anything the script echoes back from the
+ * `flyctl` child process goes through here first.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function redactOutput(text) {
+  if (typeof text !== 'string' || text === '') return '';
+  return text
+    // URL credentials: postgres://user:password@host -> postgres://[redacted]@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1[redacted]@')
+    // JSON credential fields: {"token":"..."} -> {"token":"[redacted]"}
+    .replace(/("(?:token|password|secret|dsn|value)"\s*:\s*")[^"]*(")/gi, '$1[redacted]$2')
+    // Secret assignments: NAME=value -> NAME=[redacted]
+    .replace(/\b([A-Z][A-Z0-9_]{2,})=[^\s]+/g, '$1=[redacted]');
+}
+
+/**
  * Build the platform app's secret payload from the staging environment.
  *
  * @param {Record<string, string|undefined>} env  the staging environment
@@ -230,26 +310,21 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
   const notes = [];
 
   const tasksDsn = env[SOURCE_NAMES.tasksDatabaseUrl];
-  const budgetDsn = env[SOURCE_NAMES.budgetDatabaseUrl] || env[SOURCE_NAMES.budgetDatabaseUrlFallback];
-  const budgetSource = env[SOURCE_NAMES.budgetDatabaseUrl]
-    ? SOURCE_NAMES.budgetDatabaseUrl
-    : env[SOURCE_NAMES.budgetDatabaseUrlFallback]
-      ? SOURCE_NAMES.budgetDatabaseUrlFallback
-      : null;
+  const budgetDsn = env[SOURCE_NAMES.budgetDatabaseUrl];
   const schedulerDsn = env[SOURCE_NAMES.contentSchedulerDatabaseUrl];
   const redisRaw = env[SOURCE_NAMES.redisUrl];
   const tasksToken = env[SOURCE_NAMES.tasksApprovalToken];
   const schedulerToken = env[SOURCE_NAMES.schedulerApprovalToken];
 
   // --- database URLs -------------------------------------------------
+  // Write-capable sources only. A missing source is a hard stop: there is
+  // deliberately no read-only fallback, because a read-only role cannot
+  // run the platform's migrations or a normal service write.
   if (!tasksDsn) missing.push(SOURCE_NAMES.tasksDatabaseUrl);
-  if (!budgetDsn) {
-    missing.push(SOURCE_NAMES.budgetDatabaseUrl);
-    missing.push(SOURCE_NAMES.budgetDatabaseUrlFallback);
-  }
+  if (!budgetDsn) missing.push(SOURCE_NAMES.budgetDatabaseUrl);
   // The content-scheduler database has no dedicated staging DSN today; it
   // is derived from the tasks-api DSN (one database, three schemas). It
-  // is only missing when neither source exists.
+  // is only missing when the tasks-api source itself is missing.
   if (!schedulerDsn && !tasksDsn) missing.push(SOURCE_NAMES.contentSchedulerDatabaseUrl);
 
   if (tasksDsn) {
@@ -263,7 +338,7 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
     secrets.push({
       name: 'PLATFORM_BUDGET_API_DATABASE_URL',
       value: deriveDatabaseUrl(budgetDsn, 'budget_api'),
-      source: budgetSource ?? SOURCE_NAMES.budgetDatabaseUrl,
+      source: SOURCE_NAMES.budgetDatabaseUrl,
     });
   }
   if (schedulerDsn) {
@@ -344,38 +419,52 @@ export function buildPlatformSecretPayload(env = {}, options = {}) {
 }
 
 /**
- * Run a command without a shell and without echoing its arguments.
+ * Run `flyctl` and capture its output.
  *
- * @param {string} command
+ * The child's output is captured rather than inherited so that nothing the
+ * child prints can be echoed by this script: a derived secret value
+ * (a schema-rewritten DSN, a JSON-wrapped approval token) is not masked
+ * by GitHub, so the script never re-emits anything it did not construct
+ * itself.
+ *
  * @param {string[]} args
- * @param {object} [options]
- * @returns {number} the exit code
+ * @param {object} io
+ * @returns {{status: number, stdout: string, stderr: string}}
  */
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { stdio: 'inherit', ...options });
+function flyctl(args, io) {
+  const result = io.spawn('flyctl', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   if (result.error) {
-    console.error(`::error::${command} could not be run: ${result.error.message}`);
-    return 1;
+    io.errorLog(`::error::flyctl could not be run: ${result.error.message}`);
+    return { status: 1, stdout: '', stderr: '' };
   }
-  return result.status ?? 1;
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
 }
 
 /**
  * Does the Fly app exist?
  *
  * @param {string} app
+ * @param {object} [io]
  * @returns {boolean}
  */
-export function appExists(app) {
-  const result = spawnSync('flyctl', ['apps', 'list', '--json'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  if (result.status !== 0 || !result.stdout) return false;
+export function appExists(app, io = createIo()) {
+  const { status, stdout } = flyctl(['apps', 'list', '--json'], io);
+  if (status !== 0 || !stdout) {
+    io.log(`Could not read the Fly app list (exit ${status}) — assuming ${app} is absent`);
+    return false;
+  }
   try {
-    const apps = JSON.parse(result.stdout);
+    const apps = JSON.parse(stdout);
     return apps.some((entry) => entry?.Name === app);
   } catch {
+    io.log(`Could not parse the Fly app list — assuming ${app} is absent`);
     return false;
   }
 }
@@ -383,18 +472,34 @@ export function appExists(app) {
 /**
  * Create the Fly app when it does not exist yet.
  *
+ * The app name is passed POSITIONALLY: `flyctl apps create <name>`. The
+ * pinned flyctl 0.4.102 accepts `--name`, `--generate-name`, `--network`,
+ * `--machines`, `--yes`, `--save`, `--org` and `--json` — and no
+ * `--region`, so a `--region` flag fails on the unknown flag before the
+ * app is created. The region belongs to `platform.fly.toml`'s
+ * `primary_region`, not to the create command.
+ *
  * @param {string} app
  * @param {string} org
- * @param {string} region
+ * @param {object} [io]
  * @returns {number} exit code
  */
-export function ensureApp(app, org, region) {
-  if (appExists(app)) {
-    console.log(`Fly app ${app} already exists`);
+export function ensureApp(app, org, io = createIo()) {
+  if (appExists(app, io)) {
+    io.log(`Fly app ${app} already exists`);
     return 0;
   }
-  console.log(`Fly app ${app} does not exist — creating it in ${org}/${region}`);
-  return run('flyctl', ['apps', 'create', '--org', org, '--region', region, app]);
+  io.log(`Fly app ${app} does not exist — creating it in org ${org}`);
+  const { status, stderr } = flyctl(['apps', 'create', app, '--org', org, '--yes'], io);
+  if (status !== 0) {
+    io.errorLog(
+      `::error::flyctl apps create ${app} failed with exit code ${status}` +
+        (stderr ? `\n${redactOutput(stderr)}` : '')
+    );
+    return status;
+  }
+  io.log(`Fly app ${app} created`);
+  return 0;
 }
 
 /**
@@ -407,77 +512,90 @@ export function ensureApp(app, org, region) {
  *
  * @param {string} app
  * @param {{name: string, value: string}[]} secrets
+ * @param {object} [io]
  * @returns {number} exit code
  */
-export function applySecrets(app, secrets) {
+export function applySecrets(app, secrets, io = createIo()) {
   const args = ['secrets', 'set', '--app', app, '--stage'];
   for (const secret of secrets) args.push(`${secret.name}=${secret.value}`);
-  console.log(`Registering ${secrets.length} secrets on ${app}`);
-  return run('flyctl', args);
+  io.log(`Registering ${secrets.length} secrets on ${app}`);
+  const { status, stderr } = flyctl(args, io);
+  if (status !== 0) {
+    io.errorLog(
+      `::error::flyctl secrets set on ${app} failed with exit code ${status}` +
+        (stderr ? `\n${redactOutput(stderr)}` : '')
+    );
+    return status;
+  }
+  return 0;
 }
 
 /**
  * CLI entry point.
  *
- * @param {string[]} argv
+ * @param {string[]} [argv]
+ * @param {object} [overrides] the IO overrides (env, spawn, log, errorLog)
  * @returns {number} exit code
  */
-export function main(argv = process.argv.slice(2)) {
+export function main(argv = process.argv.slice(2), overrides = {}) {
+  const io = createIo(overrides);
+
   let app = PLATFORM_APP;
   let org = DEFAULT_ORG;
-  let region = DEFAULT_REGION;
   let dryRun = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--app') app = argv[++index];
     else if (arg === '--org') org = argv[++index];
-    else if (arg === '--region') region = argv[++index];
     else if (arg === '--dry-run') dryRun = true;
     else if (arg === '--help' || arg === '-h') {
-      console.log(
-        'Usage: node infra/cloud/platform/platform-provision-secrets.mjs [--app NAME] [--org ORG] [--region REGION] [--dry-run]'
+      io.log(
+        'Usage: node infra/cloud/platform/platform-provision-secrets.mjs [--app NAME] [--org ORG] [--dry-run]'
       );
       return 0;
     } else {
-      console.error(`::error::Unknown argument ${arg}`);
+      io.errorLog(`::error::Unknown argument ${arg}`);
       return 2;
     }
   }
 
   let payload;
   try {
-    payload = buildPlatformSecretPayload(process.env);
+    payload = buildPlatformSecretPayload(io.env);
   } catch (error) {
-    console.error(`::error::${error.message}`);
+    io.errorLog(`::error::${error.message}`);
     return 1;
   }
 
   if (payload.missing.length > 0) {
-    console.error(
+    io.errorLog(
       `::error::Missing staging environment secret(s): ${payload.missing.join(', ')}. ` +
-        'Register them on the staging GitHub environment (Settings > Environments > staging > Environment secrets).'
+        'Register them on the staging GitHub environment (Settings > Environments > staging > Environment secrets). ' +
+        `The database sources (${REQUIRED_DATABASE_SOURCES.join(', ')}) must be WRITE-CAPABLE: the platform runs ` +
+        'prisma migrate deploy in its release command and the services write normally. The database drill\'s ' +
+        'read-only source DSNs (TASKS_API_SOURCE_DSN, BUDGET_API_SOURCE_DSN) are not valid sources for this app.'
     );
     return 1;
   }
 
-  for (const note of payload.notes) console.log(`note: ${note}`);
+  for (const note of payload.notes) io.log(`note: ${note}`);
 
   if (dryRun) {
     for (const secret of payload.secrets) {
-      console.log(`${secret.name} <- ${secret.source}`);
+      io.log(`${secret.name} <- ${secret.source}`);
     }
-    console.log(`${payload.secrets.length} secrets would be registered on ${app}`);
+    io.log(`${payload.secrets.length} secrets would be registered on ${app}`);
     return 0;
   }
 
-  const created = ensureApp(app, org, region);
+  const created = ensureApp(app, org, io);
   if (created !== 0) {
-    console.error(`::error::Could not create Fly app ${app}; secrets were not registered`);
+    io.errorLog(`::error::Could not create Fly app ${app}; secrets were not registered`);
     return created;
   }
 
-  return applySecrets(app, payload.secrets);
+  return applySecrets(app, payload.secrets, io);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

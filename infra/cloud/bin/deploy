@@ -126,6 +126,19 @@ info() { printf '\033[36m[deploy]\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m[deploy]\033[0m %s\n' "$*" >&2; }
 fail() { printf '\033[31m[deploy]\033[0m %s\n' "$*" >&2; exit "${2:-1}"; }
 
+# The consolidated platform's deploy is OPT-IN (task 219fb673). Its
+# auto-post worker is a SECOND consumer of the same BullMQ queue as the
+# old worker app, so a deploy while both run processes every scheduled
+# post twice. The CI path (.github/workflows/deploy-staging-platform.yml)
+# gates the deploy on the staging environment variable of the same name;
+# this operator path gates on the same variable so it cannot be used to
+# bypass the cutover order in
+# docs/runbooks/platform-consolidation-rollback.md §3 — the old worker is
+# scaled to zero BEFORE the platform is deployed.
+if [[ "$SERVICE" == "platform" && "${STAGING_PLATFORM_DEPLOY_ENABLED:-}" != "true" ]]; then
+  fail "the platform deploy is opt-in: set STAGING_PLATFORM_DEPLOY_ENABLED=true (the staging GitHub environment variable of the same name) and follow docs/runbooks/platform-consolidation-rollback.md §3 — scale sindustries-auto-post-worker-staging to zero BEFORE the platform is deployed." 2
+fi
+
 command -v flyctl >/dev/null 2>&1 || fail "flyctl not on PATH; install via https://fly.io/docs/hands-on/install-flyctl/" 2
 
 # FLY_API_TOKEN must be present in the caller env (Quinn-owned). We never
