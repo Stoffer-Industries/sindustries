@@ -162,7 +162,11 @@ jobs:
           set -euo pipefail
           DEADLINE=$((SECONDS + 60))
           while [ $SECONDS -lt $DEADLINE ]; do
-            if flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null | grep -q '\[content-scheduler-worker\] starting'; then
+            # Capture first, then grep. `flyctl logs | grep -q` closes the
+            # pipe at the first match, flyctl dies with SIGPIPE (141), and
+            # `pipefail` turns a FOUND pattern into a false no-match.
+            logs="$(flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null || true)"
+            if grep -qF '[content-scheduler-worker] starting' <<<"$logs"; then
               echo "Worker startup log observed"
               exit 0
             fi

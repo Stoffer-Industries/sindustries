@@ -225,8 +225,11 @@ if [[ -n "$LOG_CHECK" ]]; then
   DEADLINE=$((SECONDS + 60))
   SAW_STARTUP=0
   while [[ $SECONDS -lt $DEADLINE ]]; do
-    if flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null \
-        | grep -qF "$LOG_CHECK"; then
+    # Capture first, then grep. `flyctl logs | grep -q` closes the pipe at
+    # the first match, flyctl dies with SIGPIPE (141), and `pipefail` turns
+    # a FOUND pattern into a false no-match.
+    logs="$(flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null || true)"
+    if grep -qF "$LOG_CHECK" <<<"$logs"; then
       SAW_STARTUP=1
       break
     fi

@@ -46,6 +46,13 @@ import {
   missingRequiredSources,
 } from './platform-services.mjs';
 
+/**
+ * How long the supervisor waits for its children to exit before it exits
+ * anyway. Fly's `kill_timeout` for the platform app is 30s, so the
+ * supervisor gives up first and never relies on Fly to kill it.
+ */
+const DRAIN_TIMEOUT_MS = 20000;
+
 const HELP = `platform-supervisor — supervisor for the consolidated Fly staging platform
 
 Usage:
@@ -131,7 +138,13 @@ class Child {
     this.state = 'running';
     this.startedAt = this.deps.now();
     this.lastOutputAt = this.startedAt;
+    this.heartbeatAt = this.startedAt;
     this.exitCode = null;
+    // Resolves when THIS spawn exits. A restart creates a new promise, so
+    // the supervisor can wait for the process it actually signalled.
+    this.exitPromise = new Promise((resolve) => {
+      this.resolveExit = resolve;
+    });
 
     this.attachStream(child.stdout, 'out');
     this.attachStream(child.stderr, 'err');
@@ -146,6 +159,10 @@ class Child {
       this.exitCode = code;
       this.lastExitAt = this.deps.now();
       this.deps.logger(`[${this.name}] exited (code=${code} signal=${signal})`);
+      if (this.resolveExit) {
+        this.resolveExit();
+        this.resolveExit = null;
+      }
       if (this.deps.shuttingDown) {
         this.state = 'stopped';
         return;
@@ -166,12 +183,14 @@ class Child {
       buffer = lines.pop() ?? '';
       for (const line of lines) {
         this.lastOutputAt = this.deps.now();
+        this.heartbeatAt = this.lastOutputAt;
         if (line.trim()) this.deps.logger(`[${this.name}] ${line}`);
       }
     });
     stream.on('end', () => {
       if (buffer.trim()) {
         this.lastOutputAt = this.deps.now();
+        this.heartbeatAt = this.lastOutputAt;
         this.deps.logger(`[${this.name}] ${buffer}`);
       }
       void kind;
@@ -226,6 +245,18 @@ class Child {
         /* already gone */
       }
     }
+  }
+
+  /**
+   * Resolve when this child has actually exited.
+   *
+   * Sending SIGTERM is not draining. The supervisor is PID 1, so it has to
+   * wait for the children to be gone before it exits itself.
+   *
+   * @returns {Promise<void>}
+   */
+  exited() {
+    return this.exitPromise ?? Promise.resolve();
   }
 }
 
@@ -315,9 +346,17 @@ export function createSupervisor(options = {}) {
     listen(port = Number(env.PLATFORM_STATUS_PORT ?? STATUS_PORT)) {
       supervisor.statusServer = createServer((req, res) => {
         if (req.url === STATUS_PATH || req.url === `${STATUS_PATH}/`) {
-          const payload = JSON.stringify(supervisor.status(), null, 2);
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(payload);
+          const payload = supervisor.status();
+          // Fly's http_check reads the status code, not the body. A 200 here
+          // would report a healthy platform while a child is stuck in a
+          // crash loop, so an unready platform answers 503 and the check
+          // gates on the children. That is the shared-fate trade, taken
+          // deliberately: one dead service fails the whole platform's
+          // health, and Fly restarts the Machine.
+          res.writeHead(payload.ready ? 200 : 503, {
+            'content-type': 'application/json',
+          });
+          res.end(JSON.stringify(payload, null, 2));
           return;
         }
         res.writeHead(404, { 'content-type': 'application/json' });
@@ -332,11 +371,30 @@ export function createSupervisor(options = {}) {
     /** Stop every child and the router, then resolve once they are down. */
     async stop(signal = 'SIGTERM') {
       deps.shuttingDown = true;
-      for (const child of children) child.stop(signal);
+      const exits = [];
+      for (const child of children) {
+        child.stop(signal);
+        exits.push(child.exited());
+      }
       router.stop(signal);
+      exits.push(router.exited());
       if (supervisor.statusServer) {
+        // A keep-alive connection (Fly's health check, the router's proxy)
+        // would otherwise keep `close()` pending and stall the drain.
+        supervisor.statusServer.closeAllConnections?.();
         await new Promise((resolve) => supervisor.statusServer.close(resolve));
       }
+      // The children have been signalled; now wait for them to be gone.
+      // Bounded by the deploy window: a child that ignores SIGTERM must
+      // not keep the Machine alive past Fly's kill_timeout.
+      const drainTimeout = Number(env.PLATFORM_DRAIN_TIMEOUT_MS ?? DRAIN_TIMEOUT_MS);
+      let timer = null;
+      const timedOut = new Promise((resolve) => {
+        timer = deps.setTimeout(resolve, drainTimeout);
+        if (timer && typeof timer.unref === 'function') timer.unref();
+      });
+      await Promise.race([Promise.all(exits), timedOut]);
+      if (timer) deps.clearTimeout(timer);
     },
   };
 
@@ -356,8 +414,9 @@ async function main() {
   }
 
   const supervisor = createSupervisor();
-  supervisor.listen();
 
+  // Validate before listening: the status endpoint must not answer during
+  // the pre-validation window, when the platform is not actually up.
   const missing = supervisor.validate();
   if (missing.length) {
     process.stderr.write(
@@ -368,6 +427,7 @@ async function main() {
     process.exit(1);
   }
 
+  supervisor.listen();
   supervisor.start();
 
   let shuttingDown = false;

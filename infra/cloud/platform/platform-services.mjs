@@ -70,7 +70,10 @@ export const ROUTER_STATUS_PATH = '/__status';
  * an unset optional secret does not become an empty string.
  * `requiredSources` are app-level variables that MUST be present — the
  * supervisor refuses to boot without them rather than starting a service
- * that will crash on a missing database URL.
+ * that will crash on a missing database or Redis URL. Every source a child
+ * genuinely needs is listed here, including the Redis ones: a missing
+ * Redis URL otherwise fails at the first queue operation, long after the
+ * boot that should have caught it.
  */
 export const CHILDREN = [
   {
@@ -99,6 +102,9 @@ export const CHILDREN = [
     requiredSources: [
       'PLATFORM_TASKS_API_DATABASE_URL',
       'PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS',
+      // The staging tasks-api app carries REDIS_URL today; without it the
+      // service fails on its first Redis operation instead of at boot.
+      'PLATFORM_TASKS_API_REDIS_URL',
     ],
   },
   {
@@ -142,6 +148,7 @@ export const CHILDREN = [
     requiredSources: [
       'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
       'PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS',
+      'PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL',
     ],
   },
   {
@@ -164,7 +171,11 @@ export const CHILDREN = [
       CONTENT_SCHEDULER_REDIS_URL: 'PLATFORM_AUTO_POST_WORKER_CONTENT_SCHEDULER_REDIS_URL',
       CONTENT_SCHEDULER_API_BASE_URL: 'PLATFORM_CONTENT_SCHEDULER_API_BASE_URL',
     },
-    requiredSources: ['PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL'],
+    requiredSources: [
+      'PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL',
+      // The worker is a BullMQ consumer: no Redis, no queue.
+      'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
+    ],
   },
 ];
 
@@ -196,12 +207,32 @@ export const MIGRATION_STEPS = [
 ];
 
 /**
+ * Variable names that belong to a child service and are therefore never
+ * inherited from the app environment.
+ *
+ * The mapping targets are the names the services read today
+ * (`DATABASE_URL`, `REDIS_URL`, `CONTENT_SCHEDULER_REDIS_URL`,
+ * `CONTENT_SCHEDULER_API_BASE_URL`, `CORS_ALLOWED_ORIGINS`), plus `PORT`.
+ * The per-service apps each carry a plain `REDIS_URL` secret, so it is
+ * easy to register a bare `REDIS_URL` on the platform app; if it were
+ * inherited, a missing `PLATFORM_*_REDIS_URL` would silently point three
+ * of the four children at the wrong instance, with no error anywhere.
+ * Stripping these names means "unset" always means absent, and a child
+ * only ever sees the value its own `PLATFORM_*` source maps onto it.
+ */
+export const RESERVED_CHILD_VARIABLES = new Set([
+  'PORT',
+  ...new Set(CHILDREN.flatMap((child) => Object.keys(child.envMap ?? {}))),
+]);
+
+/**
  * Build the environment for one child.
  *
  * Rules:
  *   1. The parent (app) environment is inherited, minus every `PLATFORM_*`
- *      variable — those are the platform's own indirection layer and must
- *      not leak into a service that has no business seeing them.
+ *      variable and minus every variable a child's own mapping owns — those
+ *      are the platform's indirection layer and the services' own contract,
+ *      and neither may leak into a child that has no business seeing them.
  *   2. The child's `defaults` are applied.
  *   3. The child's `envMap` is applied for every source that is present.
  *
@@ -213,6 +244,7 @@ export function buildChildEnv(child, parentEnv) {
   const env = {};
   for (const [key, value] of Object.entries(parentEnv ?? {})) {
     if (key.startsWith('PLATFORM_')) continue;
+    if (RESERVED_CHILD_VARIABLES.has(key)) continue;
     if (value === undefined) continue;
     env[key] = value;
   }

@@ -52,7 +52,8 @@
 app = 'sindustries-platform-staging'
 primary_region = 'syd'
 # SIGTERM (Fly's default) — the supervisor forwards it to every child and
-# drains them before exiting.
+# waits for them to exit before exiting itself (bounded by 20s, inside
+# Fly's 30s kill_timeout below).
 kill_signal = 'SIGTERM'
 # The supervisor drains four Node children on shutdown; 30s is generous
 # enough for a clean drain and short enough to stay inside Fly's window.
@@ -94,7 +95,18 @@ kill_timeout = '30s'
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
+  # NOT 0. The auto-post worker is queue-bound: it has no HTTP listener and
+  # no route, so nothing generates traffic for it at 3am. With
+  # min_machines_running = 0 the whole platform — worker included — scales to
+  # zero when the three HTTP surfaces are idle, and queued auto-posts sit
+  # unprocessed until some unrelated request auto-starts the Machine. The
+  # old per-service worker app had no [http_service] at all, so Fly never
+  # auto-stopped it and the consumer ran around the clock. One Machine
+  # running keeps that guarantee; the cost model in
+  # docs/systems/cloud-platform.md records the trade.
+  # Precedent: infra/cloud/observability/health-probe/fly.toml uses the same
+  # value for the same reason.
+  min_machines_running = 1
   processes = ['platform']
 
 [[vm]]
@@ -114,10 +126,14 @@ kill_timeout = '30s'
   timeout = '2s'
   grace_period = '30s'
   method = 'GET'
-  # The platform's liveness is "the router is up and the supervisor can
-  # report on its children" — not "any one service happens to be
-  # listening". The router proxies /__status to the supervisor's loopback
-  # status endpoint.
+  # The platform's liveness is "the router is up AND every child is
+  # running" — the supervisor answers 503 when any child is not, because
+  # Fly's check reads the status code and not the body. A child stuck in a
+  # permanent crash loop therefore fails the check and Fly restarts the
+  # Machine. This is the shared-fate trade: one bad service takes the whole
+  # platform's health with it (see docs/systems/cloud-platform.md).
+  # The router proxies /__status to the supervisor's loopback status
+  # endpoint.
   path = '/__status'
   protocol = 'http'
   tls_skip_verify = false
