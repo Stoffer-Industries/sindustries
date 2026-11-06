@@ -172,6 +172,26 @@ MCP service (`services/gymtrack-mcp`):
 4. Re-run the three legacy REST curl examples from `apps/gymtrack/README.md` with an existing static key.
 5. In a fresh Safari/WebKit context, verify both a password-enabled account and an account without a password reach the correct code/session state without `strategy_for_user_invalid`.
 
+### Lockfile-fidelity gate (CI)
+
+The `gymtrack-mcp production` deploy job builds the production Dockerfile and asserts that the dependency graph installed inside the resulting image matches the root `package-lock.json` exactly, for every direct production dependency `services/gymtrack-mcp/package.json` declares. The expected versions come from the lockfile; the observed graph comes from `npm ls --omit=dev --depth=0 --json` inside the image.
+
+The observed graph is piped into `services/gymtrack-mcp/scripts/verify-lockfile-fidelity.mjs` over **stdin**. It is never placed in an argv element or an environment variable. The image's hoisted workspace install makes that document large — npm ls enumerates every extraneous package — and passing it as a command-line argument exceeded the runner's per-argument exec limit, so node never started and the fidelity assertions never ran at all. The failure looked identical for a healthy image and a drifted one.
+
+The verifier's exit codes are the diagnostic:
+
+| Exit | Meaning |
+|---|---|
+| `0` | The installed graph matches the lockfile exactly. |
+| `1` | `npm ls` reported an invalid dependency graph (root or a nested node). |
+| `2` | A direct dependency is missing from the installed graph. |
+| `3` | An installed version differs from the lockfile version. |
+| `4` | The input was unusable (unreadable lockfile, malformed or empty JSON). |
+
+On failure every diagnostic line — the summary and the supporting detail — is written to stderr, so the CI log shows the whole explanation next to the failed step.
+
+The gate runs in the `gymtrack-mcp production` job only. It does not block a staging deploy, and it does not depend on the `FLY_API_TOKEN` production secret — but the job as a whole does, so the gate cannot report a verdict on a production run until that secret is registered.
+
 ---
 
 ## Future extraction: generic MCP OAuth server
@@ -184,11 +204,12 @@ This is a deliberate one-consumer build, consistent with `docs/ARCHITECTURE.md`'
 
 ## Related specs, tasks, and PRs
 
-- Tasks: `18256740`, `f520c396`, `72d7cc3b`, `1474d515`, `bb09eaed`
+- Tasks: `18256740`, `f520c396`, `72d7cc3b`, `1474d515`, `bb09eaed`, `83edc146`
 - Tech designs:
   - `docs/specs/gymtrack-mvp-tech-design.md`
   - `docs/specs/gymtrack-agent-powered-workouts-tech-design.md`
   - `docs/specs/gymtrack-public-signup-social-login-tech-design.md`
   - `docs/specs/gymtrack-mcp-server-oauth-auth-tech-design.md`
   - `docs/specs/migrate-gymtrack-identity-supabase-auth-to-clerk-tech-design.md`
+  - `docs/specs/fix-gymtrack-lockfile-verification-argv-overflow-tech-design.md`
 - Agent connection rollout runbook: `~/.openclaw/workspace/docs/infra/runbooks/gymtrack-agent-connect.md` (was at `docs/runbooks/gymtrack-agent-connect.md`; retired in PR #583 — re-create in workspace when onboarding a new MCP connector provider)
