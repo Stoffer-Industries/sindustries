@@ -1102,6 +1102,9 @@ jobs:
       #
       # The checker parses every run block in every workflow and asks bash to
       # parse it too, so the failure lands on the PR that introduced it.
+      - name: Check every workflow run block parses as bash
+        run: node tests/cloud/scripts/check-workflow-shell-syntax.mjs .
+
       # Run by explicit path so the repository-wide contract-test orphan
       # guard sees it as executed.
       - name: Run workflow shell-syntax contract test
