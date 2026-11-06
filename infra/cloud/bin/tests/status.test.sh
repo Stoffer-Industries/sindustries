@@ -72,6 +72,10 @@ emit_status_json scheduler-api-healthy '{"Name":"sindustries-content-scheduler-a
 
 emit_status_json worker-healthy '{"Name":"sindustries-auto-post-worker-staging","Status":"running","Deployed":true,"Release":{"Version":11},"ProcessTypes":[{"Type":"auto-post-worker"}],"Machines":[{"ID":"m3","Region":"syd","State":"started","Name":"auto-post-worker"}],"Services":[{"Protocol":"TCP","Port":0,"Ports":[{"Type":"auto-post-worker"}]}]}'
 
+# The consolidated platform runs every service in ONE Fly process group
+# (the supervisor), so the app reports exactly one process type.
+emit_status_json platform-healthy '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":5},"ProcessTypes":[{"Type":"platform"}],"Machines":[{"ID":"m5","Region":"syd","State":"started","Name":"platform"}],"Services":[{"Protocol":"TCP","Port":8080,"Ports":[{"Type":"platform"}]}]}'
+
 emit_status_json tasks-api-no-machines '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":43},"ProcessTypes":[{"Type":"tasks-api"}],"Machines":[],"Services":[{"Protocol":"TCP","Port":4001,"Ports":[{"Type":"tasks-api"}]}]}'
 
 emit_status_json tasks-api-wrong-pt '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":44},"ProcessTypes":[{"Type":"unrelated"}],"Machines":[{"ID":"m4","Region":"syd","State":"started","Name":"unrelated"}],"Services":[]}'
@@ -196,9 +200,13 @@ reset_log
     FLY_STATUS_JSON="$(cat "$TMP/worker-healthy.json")" \
       FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
       "$SCRIPT" --json auto-post-worker | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
+    printf ','
+    FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" \
+      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
+      "$SCRIPT" --json platform | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
     printf ']'
   } >"$TMP/out.json"
-assert_eq "four-service exits" "0" "$?"
+assert_eq "five-service exits" "0" "$?"
 python3 -c '
 import json, pathlib
 data = json.loads(pathlib.Path("'$TMP'/out.json").read_text())
@@ -208,9 +216,10 @@ expected = sorted([
     "sindustries-budget-api-staging",
     "sindustries-content-scheduler-api-staging",
     "sindustries-auto-post-worker-staging",
+    "sindustries-platform-staging",
 ])
 assert apps == expected, f"got {apps}"
-assert all(not d["degraded"] for d in data), "all four should be healthy"
+assert all(not d["degraded"] for d in data), "all five should be healthy"
 '
 
 echo

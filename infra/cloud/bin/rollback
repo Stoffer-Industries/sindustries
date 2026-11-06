@@ -40,18 +40,35 @@ declare -A FLY_APP_FOR=(
   [budget-api]="sindustries-budget-api-staging"
   [content-scheduler-api]="sindustries-content-scheduler-api-staging"
   [auto-post-worker]="sindustries-auto-post-worker-staging"
+  [platform]="sindustries-platform-staging"
 )
 declare -A FLY_CONFIG_FOR=(
   [tasks-api]="infra/cloud/fly/tasks-api.fly.toml"
   [budget-api]="infra/cloud/fly/budget-api.fly.toml"
   [content-scheduler-api]="infra/cloud/fly/content-scheduler-api.fly.toml"
   [auto-post-worker]="infra/cloud/fly/auto-post-worker.fly.toml"
+  [platform]="infra/cloud/fly/platform.fly.toml"
 )
+# Space-separated list of health URLs to smoke check after the rollback.
+# The consolidated platform answers on ONE app, so its three services are
+# reached through the router's path-prefix routes on the provider hostname
+# until the stable hostnames resolve (task 5cb4a8fe).
 declare -A FLY_HEALTH_URL_FOR=(
   [tasks-api]="https://sindustries-tasks-api-staging.fly.dev/health"
   [budget-api]="https://sindustries-budget-api-staging.fly.dev/health"
   [content-scheduler-api]="https://sindustries-content-scheduler-api-staging.fly.dev/health"
   [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
+  [platform]="https://sindustries-platform-staging.fly.dev/tasks-api/health https://sindustries-platform-staging.fly.dev/budget-api/health https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
+)
+# Log-line patterns to grep for after the rollback — the auto-post worker
+# has no HTTP surface, and the consolidated platform carries that same
+# worker as one of its children.
+declare -A FLY_LOG_CHECK_FOR=(
+  [tasks-api]=""
+  [budget-api]=""
+  [content-scheduler-api]=""
+  [auto-post-worker]="[content-scheduler-worker] starting"
+  [platform]="[content-scheduler-worker] starting"
 )
 
 # ---------- argument parsing ------------------------------------------------
@@ -94,7 +111,8 @@ fi
 
 FLY_APP="${FLY_APP_FOR[$SERVICE]}"
 FLY_CONFIG="${FLY_CONFIG_FOR[$SERVICE]}"
-HEALTH_URL="${FLY_HEALTH_URL_FOR[$SERVICE]}"
+HEALTH_URLS="${FLY_HEALTH_URL_FOR[$SERVICE]}"
+LOG_CHECK="${FLY_LOG_CHECK_FOR[$SERVICE]:-}"
 
 # ---------- preflight -------------------------------------------------------
 
@@ -161,7 +179,7 @@ fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   printf "DRY-RUN flyctl"; printf ' %q' "${ROLLBACK_ARGS[@]}"; printf '\n'
-  printf "DRY-RUN would tail %s after rollback\n" "${HEALTH_URL:-flyctl logs --app $FLY_APP}"
+  printf "DRY-RUN would tail %s after rollback\n" "${HEALTH_URLS:-flyctl logs --app $FLY_APP}"
   exit 0
 fi
 
@@ -186,21 +204,32 @@ machines: ${MACHINES:-none}
 EOF
 
 # ---------- post-rollback smoke check --------------------------------------
+#
+# Two independent checks, both optional per service:
+#   - HTTP health routes (one or more URLs);
+#   - a worker startup log line, for surfaces with no HTTP route.
+# The consolidated platform needs BOTH: its three services answer on the
+# router's path-prefix routes, and its auto-post worker has no route at all.
 
-if [[ -n "$HEALTH_URL" ]]; then
+for HEALTH_URL in $HEALTH_URLS; do
   info "smoke check: GET $HEALTH_URL"
   if curl --fail --silent --show-error --max-time 10 "$HEALTH_URL" >/dev/null; then
     info "smoke OK"
   else
     fail "smoke check failed for $HEALTH_URL after rollback — investigate manually" 4
   fi
-else
+done
+
+if [[ -n "$LOG_CHECK" ]]; then
   info "smoke check: fly logs --app $FLY_APP (worker startup line)"
   DEADLINE=$((SECONDS + 60))
   SAW_STARTUP=0
   while [[ $SECONDS -lt $DEADLINE ]]; do
-    if flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null \
-        | grep -q '\[content-scheduler-worker\] starting'; then
+    # Capture first, then grep. `flyctl logs | grep -q` closes the pipe at
+    # the first match, flyctl dies with SIGPIPE (141), and `pipefail` turns
+    # a FOUND pattern into a false no-match.
+    logs="$(flyctl logs --app "$FLY_APP" --no-tail 2>/dev/null || true)"
+    if grep -qF "$LOG_CHECK" <<<"$logs"; then
       SAW_STARTUP=1
       break
     fi
