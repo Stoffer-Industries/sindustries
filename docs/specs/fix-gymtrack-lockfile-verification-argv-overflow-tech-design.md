@@ -17,7 +17,7 @@ Restore the GymTrack MCP production deployment gate without weakening lockfile-f
 - Task: `83edc146-4144-445b-9f5c-f865ef2ec750` — Fix gymtrack-mcp production lockfile verification argv overflow
 - Repository: `Stoffer-Industries/sindustries`
 - Branch: `task-83edc146-gymtrack-argv`
-- Worktree: `/Volumes/WD1/worktrees/quinn/task-83edc146-gymtrack-argv`
+- Worktree: a local git worktree of the implementation branch (operator-specific path, intentionally not recorded here)
 - Product spec: n/a; the task description is the accepted behavioural contract
 
 ## Ownership boundary
