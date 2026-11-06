@@ -1026,6 +1026,14 @@ jobs:
       - name: Run consolidated platform supervisor unit tests
         run: node --test infra/cloud/platform/tests/platform-supervisor.test.mjs
 
+      # Task 219fb673 — the platform's twelve app-level secrets are mapped
+      # from the staging GitHub environment secrets, and a wrong mapping
+      # would point a child at the wrong database or the wrong Redis
+      # instance. The mapping is covered here against fake values; no
+      # secret value appears in the fixtures.
+      - name: Run consolidated platform provisioning unit tests
+        run: node --test infra/cloud/platform/tests/platform-provision-secrets.test.mjs
+
   gh-with-agent-token-tests:
     # Task b0d1b42e (Fix Ambient GITHUB_TOKEN Overriding Per-Agent GH Config
     # Precedence). AC1 + AC2 regression guard for the agents/lib

@@ -7,14 +7,35 @@
 # and auto-post-worker (see infra/cloud/fly/platform.fly.toml and
 # docs/specs/fly-staging-service-consolidation-tech-design.md).
 #
-# Two transitional guards, both removed at cutover:
+# PROVISIONING
+# -------------
+# The platform app and its twelve app-level secrets are provisioned HERE,
+# from the staging GitHub environment secrets, by
+# infra/cloud/platform/platform-provision-secrets.mjs. That mapping is the
+# source of record: the live staging values are not readable from a
+# developer machine (Fly exposes digests, not values, and
+# infra/cloud/.env.local does not reproduce the live apps), but they ARE
+# readable in the staging GitHub environment, because that is where they
+# were written.
 #
-#   1. APP_NOT_PROVISIONED — the Fly app and its PLATFORM_* secrets are
-#      created by Quinn out of band (task 219fb673 §8 prerequisite 1).
-#      Until that happens the deploy job skips with a loud notice instead of
-#      failing the merge, because the platform cannot be deployed before it
-#      exists. REMOVE THIS GUARD AT CUTOVER — see
-#      docs/runbooks/platform-consolidation-rollback.md.
+# Before this, the app was created out of band by hand and the CI guard
+# checked only that the app EXISTED — so an app created without its
+# secrets was deployable, and the supervisor refused to start with
+# "refusing to start: missing app-level secrets". Provisioning now happens
+# in one step: the app is created if it is absent and the secrets are
+# registered with it, so the app is never deployable without them.
+#
+# Two transitional guards remain, both removed at cutover:
+#
+#   1. DEPLOY_OPT_IN — the deploy itself is off until the staging
+#      environment variable STAGING_PLATFORM_DEPLOY_ENABLED is "true".
+#      Merging this workflow must not silently cut staging over: the
+#      platform's auto-post worker starts consuming the BullMQ queue as
+#      soon as the platform is deployed, while
+#      sindustries-auto-post-worker-staging is still running. The cutover
+#      order is in docs/runbooks/platform-consolidation-rollback.md §3
+#      Step 2 — scale the old worker app to zero BEFORE the platform
+#      deploy, not after.
 #
 #   2. STABLE DNS — the three stable staging hostnames do not resolve until
 #      the CNAMEs move (task 5cb4a8fe, blocked on a Cloudflare
@@ -75,31 +96,61 @@ jobs:
         with:
           version: 0.4.102
 
-      # Guard 1 — remove at cutover. The consolidated app is provisioned by
-      # Quinn out of band; until it exists there is nothing to deploy.
-      - name: Check that the platform app is provisioned
-        id: app
+      # Provisioning — creates the app when it is absent and registers the
+      # twelve app-level secrets from the staging environment. The values
+      # are mapped in the script and handed to flyctl without being
+      # printed; nothing here echoes a secret value.
+      - name: Provision the platform app and its secrets
+        working-directory: .
         run: |
           set -euo pipefail
-          if flyctl apps list --json 2>/dev/null | grep -Eq "\"Name\":[[:space:]]*\"$FLY_APP\""; then
-            echo "provisioned=true" >> "$GITHUB_OUTPUT"
-            echo "Fly app $FLY_APP exists"
-          else
-            echo "provisioned=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Platform app not provisioned::Fly app '$FLY_APP' does not exist yet, so the consolidated platform deploy is SKIPPED. Quinn creates the app and registers the PLATFORM_* secrets (task 219fb673). Remove this guard at cutover — see docs/runbooks/platform-consolidation-rollback.md."
-          fi
+          node infra/cloud/platform/platform-provision-secrets.mjs \
+            --app "$FLY_APP" \
+            --org "$FLY_ORG" \
+            --region "$FLY_REGION"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_ORG: ${{ vars.STAGING_FLY_ORG }}
+          FLY_REGION: syd
+          # The staging environment secrets that carry the live values.
+          TASKS_API_SOURCE_DSN: ${{ secrets.TASKS_API_SOURCE_DSN }}
+          STAGING_BUDGET_API_DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
+          BUDGET_API_SOURCE_DSN: ${{ secrets.BUDGET_API_SOURCE_DSN }}
+          # Optional: a dedicated content-scheduler DSN. Not registered
+          # today; without it the content-scheduler schema is derived from
+          # the tasks-api DSN (one database, three schemas).
+          CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.CONTENT_SCHEDULER_API_DATABASE_URL }}
+          HEALTH_PROBE_REDIS: ${{ secrets.HEALTH_PROBE_REDIS }}
+          TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+          CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
+
+      # Guard 1 — remove at cutover. The deploy stays off until the
+      # cutover sequence has been run (docs/runbooks/platform-consolidation-
+      # rollback.md §3): the platform's auto-post worker would otherwise
+      # consume the same BullMQ queue as the still-running old worker app.
+      - name: Check whether the platform deploy is enabled
+        id: deploy
+        run: |
+          set -euo pipefail
+          if [ "${STAGING_PLATFORM_DEPLOY_ENABLED:-}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Platform deploy enabled"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Platform deploy not enabled::The platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the staging environment variable STAGING_PLATFORM_DEPLOY_ENABLED=true to enable it, after the cutover sequence in docs/runbooks/platform-consolidation-rollback.md §3."
+          fi
+        env:
+          STAGING_PLATFORM_DEPLOY_ENABLED: ${{ vars.STAGING_PLATFORM_DEPLOY_ENABLED }}
 
       - name: Validate fly.toml
-        if: steps.app.outputs.provisioned == 'true'
+        if: steps.deploy.outputs.enabled == 'true'
         working-directory: .
         run: flyctl config validate --config ${{ env.FLY_CONFIG }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: Deploy (canary)
-        if: steps.app.outputs.provisioned == 'true'
+        if: steps.deploy.outputs.enabled == 'true'
         working-directory: .
         run: flyctl deploy --config ${{ env.FLY_CONFIG }} --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=${{ github.sha }}
         env:
@@ -109,7 +160,7 @@ jobs:
       # path-prefix routes on the provider hostname. These work today,
       # without DNS, and prove that the router dispatched to each child.
       - name: Smoke check (provider hostname path routes)
-        if: steps.app.outputs.provisioned == 'true'
+        if: steps.deploy.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           failed=0
@@ -140,7 +191,7 @@ jobs:
       # CNAMEs move (task 5cb4a8fe), so an unresolvable hostname is
       # reported and not treated as a failure.
       - name: Smoke check (stable staging hostnames)
-        if: steps.app.outputs.provisioned == 'true'
+        if: steps.deploy.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           for host in tasks-api budget-api content-scheduler-api; do
@@ -157,7 +208,7 @@ jobs:
       # startup line in the logs is the evidence that the queue consumer
       # came up inside the consolidated Machine.
       - name: Smoke check (auto-post worker startup)
-        if: steps.app.outputs.provisioned == 'true'
+        if: steps.deploy.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           DEADLINE=$((SECONDS + 60))
