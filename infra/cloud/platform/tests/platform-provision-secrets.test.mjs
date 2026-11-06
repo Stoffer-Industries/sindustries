@@ -198,14 +198,34 @@ describe('buildPlatformSecretPayload', () => {
     assert.equal(notes.length, 0);
   });
 
-  it('falls back to the drill source DSN for the budget database', () => {
+  it('never falls back to the read-only drill source DSNs', () => {
+    // The drill's *_SOURCE_DSN secrets are read-only by contract: the
+    // platform runs `prisma migrate deploy` and the services write, so a
+    // read-only role must fail closed rather than be discovered on the
+    // first live deploy.
     const env = stagingEnv();
+    delete env[SOURCE_NAMES.tasksDatabaseUrl];
     delete env[SOURCE_NAMES.budgetDatabaseUrl];
-    env[SOURCE_NAMES.budgetDatabaseUrlFallback] = 'postgresql://u:p@fallback.test/db';
+    env.TASKS_API_SOURCE_DSN = 'postgresql://u:readonly@source.test/db';
+    env.BUDGET_API_SOURCE_DSN = 'postgresql://u:readonly@source.test/db';
     const { secrets, missing } = buildPlatformSecretPayload(env);
-    assert.deepEqual(missing, []);
+    assert.ok(missing.includes(SOURCE_NAMES.tasksDatabaseUrl));
+    assert.ok(missing.includes(SOURCE_NAMES.budgetDatabaseUrl));
     const byName = Object.fromEntries(secrets.map((secret) => [secret.name, secret.value]));
-    assert.match(byName.PLATFORM_BUDGET_API_DATABASE_URL, /fallback\.test/);
+    assert.equal(byName.PLATFORM_TASKS_API_DATABASE_URL, undefined);
+    assert.equal(byName.PLATFORM_BUDGET_API_DATABASE_URL, undefined);
+  });
+
+  it('maps only write-capable staging DSNs as the database sources', () => {
+    // The source names are the contract with the staging GitHub
+    // environment: they must never be the drill's read-only source DSNs.
+    assert.equal(SOURCE_NAMES.tasksDatabaseUrl, 'STAGING_TASKS_API_DATABASE_URL');
+    assert.equal(SOURCE_NAMES.budgetDatabaseUrl, 'STAGING_BUDGET_API_DATABASE_URL');
+    assert.equal(
+      SOURCE_NAMES.contentSchedulerDatabaseUrl,
+      'STAGING_CONTENT_SCHEDULER_API_DATABASE_URL'
+    );
+    assert.ok(!Object.values(SOURCE_NAMES).some((name) => name.endsWith('_SOURCE_DSN')));
   });
 
   it('gives every Redis name the single live Redis value', () => {

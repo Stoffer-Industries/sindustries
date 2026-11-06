@@ -34,8 +34,10 @@
 #      soon as the platform is deployed, while
 #      sindustries-auto-post-worker-staging is still running. The cutover
 #      order is in docs/runbooks/platform-consolidation-rollback.md §3
-#      Step 2 — scale the old worker app to zero BEFORE the platform
-#      deploy, not after.
+#      Step 1 — scale the old worker app to zero BEFORE the platform
+#      deploy, not after. The operator path (infra/cloud/bin/deploy
+#      platform) is gated by the same variable, so the opt-in cannot be
+#      bypassed.
 #
 #   2. STABLE DNS — the three stable staging hostnames do not resolve until
 #      the CNAMEs move (task 5cb4a8fe, blocked on a Cloudflare
@@ -100,26 +102,31 @@ jobs:
       # twelve app-level secrets from the staging environment. The values
       # are mapped in the script and handed to flyctl without being
       # printed; nothing here echoes a secret value.
+      # The database sources are the WRITE-CAPABLE staging DSNs. The
+      # database drill's *_SOURCE_DSN secrets are read-only by contract
+      # (they exist so the drill can dump a source database) and are NOT
+      # used here: the platform runs `prisma migrate deploy` in its
+      # release command and the services write normally, so a read-only
+      # role would fail the first deploy — or serve a read-only service.
+      # The provisioning script fails closed when a source is missing
+      # rather than falling back to a read-only DSN.
       - name: Provision the platform app and its secrets
         working-directory: .
         run: |
           set -euo pipefail
           node infra/cloud/platform/platform-provision-secrets.mjs \
             --app "$FLY_APP" \
-            --org "$FLY_ORG" \
-            --region "$FLY_REGION"
+            --org "$FLY_ORG"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           FLY_ORG: ${{ vars.STAGING_FLY_ORG }}
-          FLY_REGION: syd
           # The staging environment secrets that carry the live values.
-          TASKS_API_SOURCE_DSN: ${{ secrets.TASKS_API_SOURCE_DSN }}
+          STAGING_TASKS_API_DATABASE_URL: ${{ secrets.STAGING_TASKS_API_DATABASE_URL }}
           STAGING_BUDGET_API_DATABASE_URL: ${{ secrets.STAGING_BUDGET_API_DATABASE_URL }}
-          BUDGET_API_SOURCE_DSN: ${{ secrets.BUDGET_API_SOURCE_DSN }}
           # Optional: a dedicated content-scheduler DSN. Not registered
           # today; without it the content-scheduler schema is derived from
           # the tasks-api DSN (one database, three schemas).
-          CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.CONTENT_SCHEDULER_API_DATABASE_URL }}
+          STAGING_CONTENT_SCHEDULER_API_DATABASE_URL: ${{ secrets.STAGING_CONTENT_SCHEDULER_API_DATABASE_URL }}
           HEALTH_PROBE_REDIS: ${{ secrets.HEALTH_PROBE_REDIS }}
           TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
           CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN: ${{ secrets.CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN }}
@@ -137,7 +144,7 @@ jobs:
             echo "Platform deploy enabled"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Platform deploy not enabled::The platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the staging environment variable STAGING_PLATFORM_DEPLOY_ENABLED=true to enable it, after the cutover sequence in docs/runbooks/platform-consolidation-rollback.md §3."
+            echo "::notice title=Platform deploy not enabled::The platform app is provisioned and its secrets are registered, but the deploy is SKIPPED. Set the staging environment variable STAGING_PLATFORM_DEPLOY_ENABLED=true to enable it, after step 1 of the cutover sequence in docs/runbooks/platform-consolidation-rollback.md §3 (the old auto-post worker is scaled to zero BEFORE the platform is deployed)."
           fi
         env:
           STAGING_PLATFORM_DEPLOY_ENABLED: ${{ vars.STAGING_PLATFORM_DEPLOY_ENABLED }}

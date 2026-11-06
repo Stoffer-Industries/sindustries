@@ -44,7 +44,8 @@ staging footprint is replaced by one.
    `STAGING_PLATFORM_DEPLOY_ENABLED=true` to enable it. It is off by
    default because the platform's auto-post worker would otherwise start
    consuming the BullMQ queue while the old worker app is still running —
-   step 2 below is the order that avoids that.
+   step 1 below is the order that avoids that: the old worker is scaled to
+   zero BEFORE the platform is deployed.
 
 2. **Remaining per-service secrets.** Every other per-service secret
    (`TASKS_API_*`, `BUDGET_API_*`, `AKAHU_*`, `X_*`, `CONTENT_SCHEDULER_API_*`,
@@ -84,11 +85,40 @@ staging footprint is replaced by one.
 
 Run in this order. Each step is verifiable before the next one starts.
 
-### Step 1 — deploy the platform app (no traffic yet)
+**The invariant: the old auto-post worker is scaled to zero BEFORE the
+platform is deployed.** The platform's auto-post worker is a SECOND
+consumer of the same BullMQ queue as `sindustries-auto-post-worker-staging`,
+and two consumers process every scheduled post twice. Step 1 stops the old
+consumer; step 2 starts the new one. The deploy itself is opt-in
+(`STAGING_PLATFORM_DEPLOY_ENABLED`), and the opt-in is flipped only after
+step 1 is done and verified — so the order cannot be inverted by accident.
+
+### Step 1 — stop the old queue consumer (scale to zero, NOT down)
 
 ```
-infra/cloud/bin/deploy platform
+fly scale count 0 --app sindustries-auto-post-worker-staging
 ```
+
+Verify that no Machine is left running:
+
+```
+fly machine list --app sindustries-auto-post-worker-staging
+```
+
+**Scale to zero; do not delete the app.** It is the fast backout path.
+
+### Step 2 — deploy the platform app through the gated CI path
+
+The platform is deployed by `.github/workflows/deploy-staging-platform.yml`:
+the workflow provisions the app and its twelve secrets, and deploys only
+when the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED` is
+`true`. That variable is the single opt-in for the cutover — flip it in the
+staging GitHub environment, then re-run the deploy workflow.
+
+The operator path `infra/cloud/bin/deploy platform` is gated by the same
+variable, so it cannot be used to bypass this order, but it is not the
+documented route: the CI path is the one that provisions the app's secrets
+before the deploy.
 
 The app comes up on its provider hostname; the three stable hostnames still
 point at the old apps, so nothing user-visible changes. Verify:
@@ -102,22 +132,6 @@ curl -fsS https://sindustries-platform-staging.fly.dev/__status
 
 `/__status` returns the supervisor's view: each child's pid, state,
 restart count, last exit code, RSS and heartbeat.
-
-### Step 2 — scale the old apps to zero (NOT down)
-
-```
-fly scale count 0 --app sindustries-auto-post-worker-staging
-fly scale count 0 --app sindustries-content-scheduler-api-staging
-fly scale count 0 --app sindustries-budget-api-staging
-fly scale count 0 --app sindustries-tasks-api-staging
-```
-
-**Scale to zero; do not delete the apps.** They are the fast backout path.
-
-**Order matters:** the auto-post worker must be stopped before the
-consolidated app starts consuming the queue. Scaling all four to zero at
-the same time creates a brief window where neither the old worker nor the
-new one is running — acceptable for staging, but do it deliberately.
 
 ### Step 3 — move the CNAMEs
 
@@ -133,14 +147,7 @@ curl -fsS https://budget-api.staging.sindustries.co.nz/health
 curl -fsS https://content-scheduler-api.staging.sindustries.co.nz/health
 ```
 
-### Step 5 — re-point the health probe
-
-The probe's metric labels stay `tasks-api`, `budget-api`,
-`content-scheduler-api` — they are operator-supplied strings, not Fly app
-names, so the metric contract does not change. Only the probe's **target
-URLs** move to the stable hostnames. Quinn owns the probe's secrets.
-
-### Step 6 — record the cost evidence (AC4)
+### Step 5 — record the cost evidence (AC4)
 
 Before scaling the old apps down, capture the baseline:
 
@@ -161,6 +168,27 @@ Attach both to the task. Re-derive the monthly figure from Fly's live
 billing API — **do not quote the task spec's $26.80 → $6.70 figures**;
 those assumed four 1GB machines' worth of headroom fits in one 1GB
 Machine, and the consolidated Machine is sized at 2GB.
+
+### Step 6 — scale the remaining old apps to zero (NOT down)
+
+```
+fly scale count 0 --app sindustries-content-scheduler-api-staging
+fly scale count 0 --app sindustries-budget-api-staging
+fly scale count 0 --app sindustries-tasks-api-staging
+```
+
+These three still serve the stable hostnames until the CNAMEs move, so
+they are scaled AFTER step 3 — the traffic has already moved by then. The
+auto-post worker was scaled in step 1, before the platform was deployed.
+
+**Scale to zero; do not delete the apps.** They are the fast backout path.
+
+### Step 7 — re-point the health probe
+
+The probe's metric labels stay `tasks-api`, `budget-api`,
+`content-scheduler-api` — they are operator-supplied strings, not Fly app
+names, so the metric contract does not change. Only the probe's **target
+URLs** move to the stable hostnames. Quinn owns the probe's secrets.
 
 ---
 
