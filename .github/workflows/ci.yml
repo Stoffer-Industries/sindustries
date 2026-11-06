@@ -1061,6 +1061,14 @@ jobs:
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
 
+      # Task 37622d4f AC4 static check: the website deploy workflow must
+      # resolve one Vercel target and use it for pull, build, and deploy,
+      # so the prebuilt output's target and the deploy target cannot drift.
+      # Run by explicit path so the repository-wide contract-test orphan
+      # guard sees it as executed.
+      - name: Run Vercel deploy target contract test
+        run: node --test tests/cloud/tests/check-vercel-deploy-target.test.mjs
+
       # Task 5cb4a8fe AC5 static check: dry-run the stable-hostname
       # verification harness so every CI run proves the harness emits
       # schema-valid JSON for the committed matrix, even when DNS is

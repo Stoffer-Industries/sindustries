@@ -45,6 +45,11 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # One Vercel target decision for the whole job (task 37622d4f).
+      # `vercel pull`, `vercel build`, and `vercel deploy --prebuilt` all
+      # consume this value, so the target recorded in the prebuilt output
+      # and the target the CLI deploys with cannot drift apart.
+      VERCEL_TARGET: ${{ inputs.production-candidate && 'production' || 'preview' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,26 +83,31 @@ jobs:
       - name: Pull Vercel environment
         if: inputs.target == 'staging'
         run: |
-          if [ "${{ inputs.production-candidate }}" = "true" ]; then
-            vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          else
-            vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
-          fi
+          set -euo pipefail
+          vercel pull --yes --environment="$VERCEL_TARGET" --token="$VERCEL_TOKEN"
 
       - name: Build Vercel output
         if: inputs.target == 'staging'
         run: |
-          if [ "${{ inputs.production-candidate }}" = "true" ]; then
-            vercel build --prod --token="$VERCEL_TOKEN"
-          else
-            vercel build --token="$VERCEL_TOKEN"
-          fi
+          set -euo pipefail
+          vercel build --target="$VERCEL_TARGET" --token="$VERCEL_TOKEN"
 
       - name: Deploy candidate to staging
         if: inputs.target == 'staging'
         id: staging_deploy
         run: |
-          DEPLOY_URL=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          set -euo pipefail
+          # The deploy target is the same value the build used, so the
+          # prebuilt output's recorded target and the deploy target agree.
+          # `--skip-domain` keeps a production-configured candidate off the
+          # production custom domains until it is explicitly promoted; it is
+          # valid only for a production target, so it rides the already
+          # resolved VERCEL_TARGET rather than making a second decision.
+          deploy_args=(--prebuilt --target="$VERCEL_TARGET")
+          if [ "$VERCEL_TARGET" = production ]; then
+            deploy_args+=(--skip-domain)
+          fi
+          DEPLOY_URL=$(vercel deploy "${deploy_args[@]}" --token="$VERCEL_TOKEN")
           vercel alias set "$DEPLOY_URL" "$STAGING_DOMAIN" --token="$VERCEL_TOKEN"
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           {
