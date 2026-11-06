@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 83edc146-4144-445b-9f5c-f865ef2ec750
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 924
+shipped_date: 2026-11-07
 ---
 
 # Fix GymTrack MCP lockfile verification argv overflow
