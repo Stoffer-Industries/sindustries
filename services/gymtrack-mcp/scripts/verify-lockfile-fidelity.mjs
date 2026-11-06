@@ -17,7 +17,7 @@
  * packages) to exceed the runner's exec argv limit, so node never started
  * and the fidelity assertions never ran:
  *
- *     /home/runner/work/_temp/<uuid>.sh: line 27: node: Argument list too long
+ *     runner-temp-script: line 27: node: Argument list too long
  *
  * The failure was silent in the worst way: the step died before it could
  * report a verdict, so a genuinely drifted image would have produced the
