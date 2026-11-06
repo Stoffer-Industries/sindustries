@@ -17,7 +17,7 @@ Restore the website staging deployment path so a production-configured candidate
 - Task: `37622d4f-f62c-4000-b65f-1dfb2f15bdf2` — Fix Vercel prebuilt target mismatch in website staging deploy
 - Repository: `Stoffer-Industries/sindustries`
 - Branch: `task-37622d4f-vercel-target`
-- Worktree: `/Volumes/WD1/worktrees/quinn/task-37622d4f-vercel-target`
+- Worktree: a local git worktree of the implementation branch (operator-specific path, intentionally not recorded here)
 - Product spec: n/a; the task description is the accepted behavioural contract
 
 ## Service boundary and data ownership
