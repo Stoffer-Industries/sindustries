@@ -190,7 +190,26 @@ The verifier's exit codes are the diagnostic:
 
 On failure every diagnostic line — the summary and the supporting detail — is written to stderr, so the CI log shows the whole explanation next to the failed step.
 
-The gate runs in the `gymtrack-mcp production` job only. It does not block a staging deploy, and it does not depend on the `FLY_API_TOKEN` production secret — but the job as a whole does, so the gate cannot report a verdict on a production run until that secret is registered.
+The gate runs in the `gymtrack-mcp production` job only. It does not block a staging deploy, and it does not depend on the `FLY_API_TOKEN` production secret — but the job as a whole does. `FLY_API_TOKEN` is now registered on the production GitHub environment, so the job authenticates there; the repo-level copy remains as the fallback the job has always used.
+
+### OAuth discovery smoke check and workflow shell-syntax guard (CI)
+
+After the deploy, the same job asserts that the running app advertises the expected OAuth discovery document: it fetches `/.well-known/oauth-authorization-server` and greps for the `registration_endpoint` the MCP clients use to register dynamically.
+
+That step failed on `main` with a shell syntax error rather than a verdict, while the deployment it was checking was healthy. The cause was a `stable-fallback` annotation comment placed between the two halves of a backslash-continued pipeline:
+
+```bash
+curl --fail ... --max-time 15 \
+  "https://${FLY_APP}.fly.dev/.well-known/oauth-authorization-server" \
+  # stable-fallback: ...
+  | grep -F '"registration_endpoint":"..."'
+```
+
+Bash removes the backslash-newline, so the comment swallowed the rest of the logical line — including the `| grep` — and the next physical line began with a bare `|`. The machine had already been updated when the step died, so a healthy deployment read as a failed one and the job exited non-zero with no explanation of what had actually been deployed.
+
+The annotation now sits after the command, clear of the continuation.
+
+Because a `run:` block is not parsed by the workflow engine, a shell syntax error inside one stays invisible until the job runs it — and then it fails during a production deploy, after the machine has already been updated. `tests/cloud/scripts/check-workflow-shell-syntax.mjs` now parses every `run:` block in every workflow with bash, and `tests/cloud/tests/check-workflow-shell-syntax.test.mjs` covers it. The failure lands on the PR that introduced it. The check is deliberately syntax-only: it asserts that the script parses, not that the service it calls is healthy.
 
 ---
 
