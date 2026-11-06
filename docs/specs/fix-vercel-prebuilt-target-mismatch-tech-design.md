@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 37622d4f-f62c-4000-b65f-1dfb2f15bdf2
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 925
+shipped_date: 2026-11-07
 ---
 
 # Fix Vercel prebuilt target mismatch
