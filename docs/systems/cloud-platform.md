@@ -168,6 +168,49 @@ Where an operator should look:
 
 ---
 
+## Platform secret provisioning (task `219fb673`)
+
+The consolidated platform app (`sindustries-platform-staging`) needs twelve
+app-level secrets before it can boot: three database URLs, six Redis URLs
+and two approval-service credentials. They are provisioned from the
+**staging GitHub environment** by
+`infra/cloud/platform/platform-provision-secrets.mjs`, which the
+`.github/workflows/deploy-staging-platform.yml` workflow runs before the
+deploy.
+
+| Platform secret | Staging environment secret | Note |
+| --- | --- | --- |
+| `PLATFORM_TASKS_API_DATABASE_URL` | `TASKS_API_SOURCE_DSN` | schema forced to `tasks_api` |
+| `PLATFORM_BUDGET_API_DATABASE_URL` | `STAGING_BUDGET_API_DATABASE_URL` (fallback `BUDGET_API_SOURCE_DSN`) | schema forced to `budget_api` |
+| `PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL` | derived from the tasks-api DSN | one Neon database, three schemas; schema forced to `content_scheduler` |
+| `PLATFORM_*_REDIS_URL` (6 names) | `HEALTH_PROBE_REDIS` | one live Redis instance — every live per-service Redis secret has the same Fly digest, so all six names take the same value |
+| `PLATFORM_CONTENT_SCHEDULER_API_BASE_URL` | — | public URL, registered as a plain value |
+| `TASKS_API_APPROVAL_SERVICE_CREDENTIALS` | `TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, token wrapped in the `[{token, actor, approvalTypes}]` JSON the services parse |
+| `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS` | `CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN` | inherited name, same wrapping |
+
+**Why the staging environment and not a local file.** Fly exposes a digest
+per secret, never a value, so a value can only be read where it was
+written. The live staging values are not reproducible from
+`infra/cloud/.env.local`: that file still carries two Redis instances
+while every live app carries one. The staging GitHub environment is where
+the live values are readable, so it is the source of record. No value is
+ever printed, logged or committed — the mapping runs inside the workflow
+and hands the payload to `flyctl secrets set` directly.
+
+**The schema parameter is set explicitly.** Prisma picks the schema from
+the URL, and a DSN without `?schema=` silently resolves to `public`, so
+every database URL is rewritten to name its schema. The rewrite is
+textual: `new URL(...).toString()` re-encodes the password, which would
+change it for DSNs whose password contains reserved characters.
+
+**The deploy stays opt-in.** Provisioning the app and its secrets is safe
+at any time — no Machine runs until a deploy. The deploy itself is gated
+on the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED=true`,
+because the platform's auto-post worker starts consuming the BullMQ queue
+as soon as the platform is deployed, while the old
+`sindustries-auto-post-worker-staging` app is still running. The cutover
+order is in `docs/runbooks/platform-consolidation-rollback.md` §3.
+
 ## Account / ownership / billing
 
 | Asset                                | Owner  | How it's paid                                |

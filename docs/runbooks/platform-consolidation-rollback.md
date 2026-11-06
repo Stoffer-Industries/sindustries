@@ -30,12 +30,30 @@ staging footprint is replaced by one.
 
 ## 2. Prerequisites (all external to this repo)
 
-1. **Fly app.** Quinn creates `sindustries-platform-staging` in region `syd`.
-2. **Secrets.** Quinn registers the app-level `PLATFORM_*` secrets listed in
-   `infra/cloud/env/platform.env.example`. Every other per-service secret
+1. **Fly app + secrets — provisioned by CI.** The consolidated app
+   `sindustries-platform-staging` and its twelve app-level `PLATFORM_*`
+   secrets are created by `.github/workflows/deploy-staging-platform.yml`,
+   which maps the staging GitHub environment secrets onto the platform
+   names (`infra/cloud/platform/platform-provision-secrets.mjs`). The app
+   is created if it does not exist, and the secrets are registered with it,
+   so the app is never deployable without them. The mapping table and the
+   source of record are documented in `docs/systems/cloud-platform.md`
+   §"Platform secret provisioning".
+
+   The deploy itself is **opt-in**: set the staging environment variable
+   `STAGING_PLATFORM_DEPLOY_ENABLED=true` to enable it. It is off by
+   default because the platform's auto-post worker would otherwise start
+   consuming the BullMQ queue while the old worker app is still running —
+   step 2 below is the order that avoids that.
+
+2. **Remaining per-service secrets.** Every other per-service secret
    (`TASKS_API_*`, `BUDGET_API_*`, `AKAHU_*`, `X_*`, `CONTENT_SCHEDULER_API_*`,
-   `DEV_SESSION_SECRET`, …) is registered on the platform app **unchanged** —
-   the supervisor passes the app environment through to each child.
+   `DEV_SESSION_SECRET`, …) is inherited by every child through the app
+   environment. The live staging apps carry only two of them — the two
+   approval-service credentials — and the rest are unset, so staging runs
+   on the code defaults today. The provisioning step registers exactly
+   those two and nothing else, so the platform matches the live apps
+   rather than the wider env-example contract.
 3. **DNS.** The three stable hostnames must resolve to the platform app's
    `*.fly.dev` name, and each needs a certificate:
 
