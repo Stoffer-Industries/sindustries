@@ -11,7 +11,6 @@ import {
   probeFlyTargets,
   probeRedis,
   probeRedisTargets,
-  runProbe,
 } from '../src/probe.js';
 
 afterEach(() => {
@@ -185,45 +184,6 @@ describe('probeRedis', () => {
     );
     expect(result.up).toBe(0);
     expect(result.error).toBeDefined();
-  });
-});
-
-describe('runProbe', () => {
-  it('returns a ProbeResult with empty arrays when no targets are configured', async () => {
-    const result = await runProbe({
-      dbs: [],
-      flyApps: [],
-      redis: [],
-      timeoutMs: 100,
-    });
-    expect(result).toEqual({
-      timestamp: expect.any(Number),
-      db: [],
-      fly: [],
-      redis: [],
-    });
-  });
-
-  it('continues probing other targets when one fails', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('ok', { status: 200 })),
-    );
-    const result = await runProbe({
-      dbs: [
-        { app: 'broken', connectionString: 'postgres://no:no@127.0.0.1:1/no' },
-      ],
-      flyApps: [
-        { app: 'tasks-api', url: 'https://example.test/health' },
-      ],
-      redis: [
-        { app: 'broken-redis', url: 'rediss://127.0.0.1:1' },
-      ],
-      timeoutMs: 100,
-    });
-    expect(result.db[0]?.up).toBe(0);
-    expect(result.fly[0]).toEqual({ app: 'tasks-api', up: 1 });
-    expect(result.redis[0]?.up).toBe(0);
   });
 });
 

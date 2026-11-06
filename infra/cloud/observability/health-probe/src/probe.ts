@@ -27,7 +27,6 @@ import IORedis, { type Redis } from 'ioredis';
 export type DbTarget = { app: string; connectionString: string };
 export type HttpTarget = { app: string; url: string };
 export type RedisTarget = { app: string; url: string };
-export type QueueTarget = { queue: string; /** Returns current queue depth, or null if unknown. */ readDepth: () => Promise<number | null> };
 
 export type ProbeConfig = {
   dbs: DbTarget[];
@@ -154,21 +153,6 @@ export async function probeRedisTargets(
   timeoutMs: number,
 ): Promise<ProbeResult['redis']> {
   return Promise.all(redis.map((t) => probeRedis(t, timeoutMs)));
-}
-
-/**
- * Run a single probe pass against all configured targets. Failures on
- * one target do not abort the rest — partial results are still useful
- * for diagnosis.
- */
-export async function runProbe(config: ProbeConfig): Promise<ProbeResult> {
-  const timeoutMs = config.timeoutMs ?? 5000;
-  const [db, fly, redis] = await Promise.all([
-    probeDbTargets(config.dbs, timeoutMs),
-    probeFlyTargets(config.flyApps, timeoutMs),
-    probeRedisTargets(config.redis, timeoutMs),
-  ]);
-  return { timestamp: Date.now(), db, fly, redis };
 }
 
 /**
