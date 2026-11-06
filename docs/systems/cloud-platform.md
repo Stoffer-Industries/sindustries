@@ -258,6 +258,7 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 
 - Pull-request website staging starts only after the merge gate succeeds.
 - A website change on `main` deploys a production-configured candidate to staging, smoke-checks that exact deployment URL, then promotes the same deployment to production.
+- The website deploy workflow resolves **one** Vercel target at job scope (`VERCEL_TARGET`, derived from the `production-candidate` input), and the `vercel pull`, `vercel build`, and `vercel deploy --prebuilt` phases all consume it. Vercel refuses to publish prebuilt output whose recorded target differs from the deploy target, so a single shared value is what keeps the staging candidate publishable. A production-configured candidate is deployed with `--skip-domain`, so it stays off the production custom domains until it is explicitly promoted. The static check `tests/cloud/scripts/check-vercel-deploy-target.mjs` enforces the contract on every CI run.
 - Fly staging services, GymTrack, GymTrack MCP, and the budget-mobile EAS update start only from a successful `main` merge gate when their central changed-path filter matches.
 - The `production` GitHub environment accepts protected-branch deployments only. Staging remains available to pull-request branches.
 - Staging cancels superseded runs for the same target/ref. Production serializes runs and never cancels an in-progress deployment.
