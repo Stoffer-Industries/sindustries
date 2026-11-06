@@ -36,7 +36,7 @@ as the tier table changes.
 
 | Tier | Model class | Models in use | Work that belongs here |
 | --- | --- | --- | --- |
-| `routine` | cheap-fast | `minimax-portal/MiniMax-M3`, `minimax-portal/MiniMax-M3.1-Flash`, `ollama/<local>` | Scanning, summaries, low-risk review, background cognition, heartbeat passes |
+| `routine` | cheap-fast | `minimax-portal/MiniMax-M3`, `minimax-portal/MiniMax-M3.1-Flash`, `ollama/<local>`, `anthropic/claude-haiku-*` | Scanning, summaries, low-risk review, background cognition, heartbeat passes |
 | `mid` | coding-standard | `anthropic/claude-sonnet-5` | Approved coding work, code review, spec drafting, test/verify passes, ops documentation |
 | `frontier` | high-judgment | `openai/gpt-5.4`, `openai/gpt-5.6-sol`, `anthropic/claude-opus-*` | Planning, escalation, product decisions, high-judgment review, final acceptance support |
 
@@ -83,7 +83,7 @@ Every scheduled pass that could cost a model call starts with the preflight:
 2. **Classify the queue.** Actionable entries mean there is work; a queue with
    only blocked entries counts as empty.
 3. **Decide.**
-   - Empty queue → decision `skip`, tier `preflight`, `modelInvoked: false`.
+   - Empty queue → decision `skip`, tier `preflight`, `modelDeclared: false`.
      The pass ends here. No model, no tokens.
    - Queued work → decision `proceed`, tier from the work category, and the
      declared tier is recorded before the model runs.
@@ -114,6 +114,33 @@ python3 agents/cron/routing_preflight.py --agent Quinn --category heartbeat-scan
 The payload is the usual queue JSON with one extra key, `routingDecision`, so
 the agent's discovery step is unchanged.
 
+### Making an empty scheduled pass genuinely free
+
+`--mode probe` is a shell process, so the *preflight* never costs a model call
+— but a heartbeat wake is itself a model turn, so running the preflight inside
+a heartbeat still costs that turn. The only construction where an empty
+scheduled pass costs **nothing at all** is the Gateway automation's
+condition-watcher trigger: `fire:false` saves state and runs no model.
+
+`--mode trigger` emits exactly that contract on stdout —
+`json({fire, message?, state?})`:
+
+```bash
+python3 agents/cron/routing_preflight.py --agent Quinn --category heartbeat-scan --mode trigger
+```
+
+- Empty queue → `{"fire": false, "state": {...}}` — the scheduler saves the
+  state and starts no agent turn.
+- Queued work → `{"fire": true, "message": "...", "state": {...}}` — the
+  message is that run's entire context, so it stands alone.
+- Queue unreadable → `{"fire": true, ...}` — the trigger **fails open**. A
+  broken queue read must never mute a pass.
+
+Wiring a job to consume this contract is a scheduler deployment step, not part
+of the script: the job needs a `trigger: {script}` on an `every`/`cron`
+schedule whose payload is the agent turn. Until that job exists, the honest
+statement is that the preflight is free and an *empty heartbeat turn* is not.
+
 ### Declaration before invocation
 
 The tier is declared **before** the model runs, and the declaration is stored
@@ -126,10 +153,18 @@ python3 agents/cron/routing_preflight.py --record-actual \
   --declared-tier routine --actual-model minimax-portal/MiniMax-M3
 ```
 
-- Matching tier → `routing: match`.
+- Matching tier → `routing: match`, and the observed tier is counted.
 - Different tier → a **routing violation** is counted and listed. A routine
   category that landed on the frontier tier is recorded, not absorbed.
 - No observable model → recorded as `unmeasured`, so it cannot hide either.
+- No `--category` → the run is recorded in the global bucket, not silently
+  filed under a category it did not belong to.
+
+The `--record-actual` call is made by the pass itself, at the end of the pass
+(Quinn's heartbeat does this in its "Record what actually ran" step). A
+declaration on its own proves nothing: the declared tier is what the pass
+*said* it would run on, and the observed tier is what actually ran. Both are
+counted.
 
 ### Operator surface
 
@@ -141,16 +176,28 @@ python3 agents/cron/routing_preflight.py --stats
 
 ```
 model routing counters — 2026-11-06
-category                    routine     mid  frontier  preflight  violation
+declared tiers — what the pass said it would run on
+category                    routine     mid  frontier  preflight  violation  unclassified
 ------------------------------------------------------------------------
-heartbeat-scan                  12      0         0         14          0
-approved-coding                  0      3         0          0          0
+heartbeat-scan                  12      0         0         14          0            1
+approved-coding                  0      3         0          0          0            0
 ------------------------------------------------------------------------
-TOTAL                           12      3         0         14          0
+TOTAL                           12      3         0         14          0            1
+
+observed tiers — what actually ran
+category                    routine     mid  frontier
+--------------------------------------------------------
+heartbeat-scan                  12      0         0
+approved-coding                  0      3         0
+--------------------------------------------------------
+TOTAL                           12      3         0
 ```
 
 `frontier` per category per day is the number that makes a cost collapse
-observable: routine cron-style work should show a frontier count of zero.
+observable: routine cron-style work should show a frontier count of zero. The
+observed block is what makes a *silent* tier drift visible — a category that
+declared `routine` and ran on the frontier shows `1` in the observed
+`frontier` column even if the violation count was missed.
 
 ### Rolling out to other agents
 
@@ -189,7 +236,8 @@ queue the preflight reads.
       "categories": {
         "heartbeat-scan": {
           "routine": 12, "mid": 0, "frontier": 0,
-          "preflight": 14, "violation": 0, "unmeasured": 0
+          "observedRoutine": 12, "observedMid": 0, "observedFrontier": 0,
+          "preflight": 14, "violation": 0, "unmeasured": 0, "unclassified": 1
         }
       }
     }
@@ -198,16 +246,22 @@ queue the preflight reads.
 }
 ```
 
-Buckets: `routine`, `mid`, `frontier` count invocations per tier;
-`preflight` counts skipped passes (no model invoked); `violation` and
-`unmeasured` count runs that did not match their declaration. The `violations`
-list keeps the 50 most recent entries.
+Buckets: `routine`, `mid`, `frontier` count the tier each pass **declared**;
+`observedRoutine`, `observedMid`, `observedFrontier` count the tier that
+**actually ran**; `preflight` counts skipped passes (no model invoked);
+`violation` and `unmeasured` count runs that did not match their declaration;
+`unclassified` counts passes whose work category is missing from the contract
+table. The `violations` list keeps the 50 most recent entries.
 
 ### Event log
 
 `$OPENCLAW_STATE_DIR/model-routing-events.jsonl` — one JSON object per line,
 one line per decision. Fields: `at`, `decision`, `tier`, `modelClass`,
-`category`, `workCount`, `reason`, `agent`, `modelInvoked`, `unclassified`.
+`category`, `workCount`, `reason`, `agent`, `modelDeclared`, `unclassified`.
+
+An invocation record carries `decision` (`match`, `violation`, `unmeasured`),
+`declaredTier`, `actualTier`, `actualModel`, `category`, `agent`, and
+`modelInvoked` — the declaration and the observation in the same record.
 
 ### Task comments
 
@@ -229,9 +283,24 @@ Check the counter state and the event log; do not re-run the pass hoping for
 different output.
 
 **Unknown categories are loud.** An `unclassified` flag on a decision means the
-work category is missing from the contract table. Add the category to
+work category is missing from the contract table, and the `unclassified` column
+of the operator surface counts those passes. Add the category to
 `CATEGORY_TIERS` in `agents/lib/routing_contract.py` (and to the table above)
 rather than letting it sit on `frontier` and quietly burn budget.
+
+**The counters are safe to share between agents.** Every write goes through
+`mutate_state`, which holds an exclusive lock across the whole
+load → mutate → save, and each write lands through a unique temp file. Two
+agents writing the same counters at the same moment cannot drop each other's
+counts, and cannot publish a truncated file that resets the history to zero. A
+state file that cannot be parsed is archived as
+`<name>.corrupt-<timestamp>` rather than silently replaced — the loss stays
+visible, and the operator surface says so.
+
+**A declared tier is not an observed tier.** The declared counters say what a
+pass intended; only `--record-actual` says what ran. If a category shows a
+frontier count in the observed block but not in the declared block, something
+ran on the expensive tier without declaring it.
 
 **Counters are local runtime state.** They are not in the repository and are
 not durable memory. Losing them loses history, not function.

@@ -6,11 +6,20 @@
 
 ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 
-Before any specialised section or silent-success decision, fetch the unified read-only queue once, through the model-routing preflight:
+**Declare this pass's work category first.** The declaration is a per-pass
+decision, not a constant. Pick the category from the contract table in
+`docs/systems/model-routing-contract.md` that matches the work this pass is
+actually doing:
 
-`python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/cron/routing_preflight.py --agent Quinn --category heartbeat-scan --mode heartbeat`
+- `heartbeat-scan` (routine tier) — the default for a discovery-and-routing pass.
+- `code-review` or `approved-coding` (mid tier) — the pass's dominant work is reviewing or writing code.
+- `escalation`, `planning`, or `acceptance` (frontier tier) — the pass's dominant work is a product decision, an escalation to Tom, or an acceptance call.
 
-The preflight performs that same queue read and adds one extra key, `routingDecision`, to the payload. Per `docs/systems/model-routing-contract.md`, this pass is declared on the `routine` tier before any model work starts, and the declaration is recorded in the routing counters.
+Then fetch the unified read-only queue once, through the model-routing preflight, with that category:
+
+`python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/cron/routing_preflight.py --agent Quinn --category <declared category> --mode heartbeat`
+
+The preflight performs that same queue read and adds one extra key, `routingDecision`, to the payload. Per `docs/systems/model-routing-contract.md`, this pass is declared on the tier the category belongs to before any model work starts, and the declaration is recorded in the routing counters.
 
 Read `routingDecision`:
 - `decision: "skip"` — the queue holds no actionable work. Still run the QUINN OPS TASKS query below (open untyped ops tasks sit outside this queue), then end the pass with no message if that query is empty too.
@@ -424,6 +433,16 @@ been migrated separately; do not recreate date-suffixed keys.
 **Migration note:** The live state migration was run separately from this PR
 with backups and schema validation. State files remain outside the repository;
 the parser's legacy normalizer remains as a safety net for any older shape.
+
+---
+
+## Record what actually ran
+
+At the end of every pass — including a quiet one — record the model that actually ran next to the declaration made at the start of the pass:
+
+`python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/cron/routing_preflight.py --record-actual --agent Quinn --category <declared category> --declared-tier <tier for that category> --actual-model <model id from this pass's runtime context>`
+
+The declared tier is the tier the contract gives that category (`routine`, `mid`, or `frontier`). The actual model id is the model named in this pass's runtime context line. A run that lands on a different tier than it declared is recorded as a routing violation instead of being absorbed; a run with no observable model is recorded as `unmeasured`. An invocation nobody records is an invocation the contract cannot see, so this step runs even when the pass produced no output.
 
 ---
 
