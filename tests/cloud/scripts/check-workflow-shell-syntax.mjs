@@ -35,11 +35,11 @@
 // Usage:
 //   node scripts/check-workflow-shell-syntax.mjs [<repo-root>]
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { exit, stderr, stdout } from 'node:process';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WORKFLOW_DIR = '.github/workflows';
 
@@ -121,7 +121,11 @@ export function extractRunScripts(text) {
     if (!step) continue;
 
     // A step property: `shell:` or `run:`.
-    const shellMatch = /^\s*shell:\s*(\S+)\s*$/.exec(line);
+    // GitHub custom-shell values may contain arguments, for example
+    // `python {0}` or `pwsh -command ". '{0}'"`. The executable is the
+    // first token; the remaining tokens are template arguments, not part
+    // of the shell name.
+    const shellMatch = /^\s*shell:\s*['"]?([^\s'"]+)/.exec(line);
     if (shellMatch) {
       step.shell = shellMatch[1].replace(/^['"]|['"]$/g, '');
       continue;
@@ -253,6 +257,15 @@ function main(argv) {
   exit(1);
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   main(process.argv.slice(2));
 }

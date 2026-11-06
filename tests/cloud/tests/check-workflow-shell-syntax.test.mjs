@@ -17,7 +17,14 @@
 // Run with: node --test tests/cloud/tests/check-workflow-shell-syntax.test.mjs
 
 import { execFile } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -109,9 +116,15 @@ const NON_BASH_WORKFLOW = [
   '    runs-on: ubuntu-latest',
   '    steps:',
   '      - name: Python step',
-  '        shell: python',
+  '        shell: python {0}',
   '        run: |',
   '          def broken(:',
+  '          print("not bash")',
+  '',
+  '      - name: PowerShell step',
+  "        shell: pwsh -command \". '{0}'\"",
+  '        run: |',
+  '          function broken {',
   '          print("not bash")',
   '',
 ].join('\n');
@@ -125,9 +138,9 @@ function makeRepo(files) {
   return dir;
 }
 
-async function runChecker(repoRoot) {
+async function runChecker(repoRoot, scriptPath = SCRIPT) {
   try {
-    const { stdout, stderr } = await exec('node', [SCRIPT, repoRoot]);
+    const { stdout, stderr } = await exec('node', [scriptPath, repoRoot]);
     return { code: 0, stdout, stderr };
   } catch (error) {
     return {
@@ -181,6 +194,36 @@ test('a non-bash shell is not checked', async () => {
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /0 workflow run block\(s\) parse as bash/);
   } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('an absolute script path containing spaces still runs the checker', async () => {
+  const repo = makeRepo({ 'good.yml': GOOD_WORKFLOW });
+  const scriptDir = mkdtempSync(join(tmpdir(), 'workflow shell syntax '));
+  const scriptPath = join(scriptDir, 'check workflow shell syntax.mjs');
+  copyFileSync(SCRIPT, scriptPath);
+  try {
+    const result = await runChecker(repo, scriptPath);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /2 workflow run block\(s\) parse as bash/);
+  } finally {
+    rmSync(scriptDir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('a symlinked script path still runs the checker', async () => {
+  const repo = makeRepo({ 'good.yml': GOOD_WORKFLOW });
+  const scriptDir = mkdtempSync(join(tmpdir(), 'workflow-shell-syntax-link-'));
+  const scriptPath = join(scriptDir, 'check-workflow-shell-syntax.mjs');
+  symlinkSync(SCRIPT, scriptPath);
+  try {
+    const result = await runChecker(repo, scriptPath);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /2 workflow run block\(s\) parse as bash/);
+  } finally {
+    rmSync(scriptDir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
 });
