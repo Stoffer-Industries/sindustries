@@ -31,15 +31,24 @@ import { createSupervisor } from '../platform-supervisor.mjs';
  * uses (pid, stdout, stderr, kill).
  */
 class FakeChild extends EventEmitter {
-  constructor(command) {
+  constructor(command, options = {}) {
     super();
     this.command = command;
     this.pid = 4242;
     this.stdout = new PassThrough();
     this.stderr = new PassThrough();
     this.killedWith = [];
+    this.exited = false;
+    // A real process exits after SIGTERM; the fake can be told not to, so
+    // the drain timeout is testable.
+    this.exitOnKill = options.exitOnKill ?? true;
+    this.exitDelayMs = options.exitDelayMs ?? 0;
     this.kill = (signal) => {
       this.killedWith.push(signal);
+      if (this.exitOnKill && !this.exited) {
+        this.exited = true;
+        setTimeout(() => this.emit('exit', 0, signal), this.exitDelayMs);
+      }
       return true;
     };
   }
@@ -48,11 +57,11 @@ class FakeChild extends EventEmitter {
 /**
  * Build a spawn stub that records every launch.
  */
-function fakeSpawner() {
+function fakeSpawner(options = {}) {
   const launched = [];
-  const spawn = (command, options) => {
-    const child = new FakeChild(command);
-    launched.push({ command, options, child });
+  const spawn = (command, spawnOptions) => {
+    const child = new FakeChild(command, options);
+    launched.push({ command, options: spawnOptions, child });
     return child;
   };
   return { spawn, launched };
@@ -72,6 +81,9 @@ function fullParentEnv() {
     PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS: 'https://tasks.staging.sindustries.co.nz',
     PLATFORM_BUDGET_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.staging.sindustries.co.nz',
     PLATFORM_CONTENT_SCHEDULER_API_CORS_ALLOWED_ORIGINS: 'https://mission-control.staging.sindustries.co.nz',
+    PLATFORM_TASKS_API_REDIS_URL: 'redis://tasks:6379',
+    PLATFORM_CONTENT_SCHEDULER_API_REDIS_URL: 'redis://scheduler:6379',
+    PLATFORM_AUTO_POST_WORKER_REDIS_URL: 'redis://worker:6379',
   };
   return env;
 }
@@ -124,7 +136,38 @@ describe('buildChildEnv', () => {
 
   it('leaves an optional source unset rather than setting an empty string', () => {
     const env = buildChildEnv(CHILDREN[0], fullParentEnv());
-    assert.equal('REDIS_URL' in env, false);
+    // CONTENT_SCHEDULER_API_BASE_URL is optional for tasks-api.
+    assert.equal('CONTENT_SCHEDULER_API_BASE_URL' in env, false);
+
+    const withEmpty = buildChildEnv(CHILDREN[0], {
+      ...fullParentEnv(),
+      PLATFORM_CONTENT_SCHEDULER_API_BASE_URL: '',
+    });
+    assert.equal('CONTENT_SCHEDULER_API_BASE_URL' in withEmpty, false);
+  });
+
+  it('never inherits a bare app-level secret that a child mapping owns', () => {
+    // The per-service apps each carry a plain REDIS_URL secret, so it is
+    // easy to register one on the platform app. If it were inherited, a
+    // missing PLATFORM_*_REDIS_URL would silently point the children at
+    // the wrong instance.
+    const env = {
+      ...fullParentEnv(),
+      REDIS_URL: 'redis://someone-elses-instance:6379',
+      DATABASE_URL: 'postgres://someone-elses-instance/db',
+    };
+    const byName = Object.fromEntries(
+      CHILDREN.map((c) => [c.name, buildChildEnv(c, env)]),
+    );
+
+    assert.equal(byName['tasks-api'].REDIS_URL, 'redis://tasks:6379');
+    assert.equal(
+      byName['auto-post-worker'].REDIS_URL,
+      'redis://worker:6379',
+    );
+    // budget-api maps no Redis and no database secret of its own beyond
+    // its mapping, so the bare app value must not leak into it.
+    assert.equal('REDIS_URL' in byName['budget-api'], false);
   });
 });
 
@@ -140,6 +183,15 @@ describe('missingRequiredSources', () => {
     delete env.PLATFORM_TASKS_API_DATABASE_URL;
     const missing = missingRequiredSources(CHILDREN[0], env);
     assert.deepEqual(missing, ['PLATFORM_TASKS_API_DATABASE_URL']);
+  });
+
+  it('reports a missing Redis source, so the platform fails at boot rather than at the first queue operation', () => {
+    const env = fullParentEnv();
+    delete env.PLATFORM_AUTO_POST_WORKER_REDIS_URL;
+    const worker = CHILDREN.find((c) => c.name === 'auto-post-worker');
+    assert.deepEqual(missingRequiredSources(worker, env), [
+      'PLATFORM_AUTO_POST_WORKER_REDIS_URL',
+    ]);
   });
 
   it('treats an empty value as missing', () => {
@@ -296,6 +348,78 @@ describe('createSupervisor', () => {
     }
   });
 
+  it('waits for the children to exit before the supervisor exits', async () => {
+    const { spawn, launched } = fakeSpawner({ exitDelayMs: 30 });
+    const supervisor = createSupervisor({
+      env: fullParentEnv(),
+      spawn,
+      logger: () => {},
+    });
+    supervisor.start();
+
+    const startedAt = Date.now();
+    await supervisor.stop('SIGTERM');
+    const elapsed = Date.now() - startedAt;
+
+    assert.ok(
+      elapsed >= 25,
+      `stop() returned after ${elapsed}ms — it signalled the children but did not wait for them`,
+    );
+    for (const { child } of launched) {
+      assert.equal(child.exited, true, 'every child had exited when stop() resolved');
+    }
+  });
+
+  it('gives up on a child that ignores SIGTERM instead of hanging the deploy', async () => {
+    const { spawn } = fakeSpawner({ exitOnKill: false });
+    const supervisor = createSupervisor({
+      env: fullParentEnv(),
+      spawn,
+      logger: () => {},
+      // The drain timeout fires immediately.
+      setTimeout: (fn) => {
+        fn();
+        return 0;
+      },
+      clearTimeout: () => {},
+    });
+    supervisor.start();
+
+    await supervisor.stop('SIGTERM');
+    assert.equal(supervisor.deps.shuttingDown, true);
+  });
+
+  it('answers 503 while a child is not running, so the Fly check gates on the children', async () => {
+    const { spawn, launched } = fakeSpawner();
+    const supervisor = createSupervisor({
+      env: fullParentEnv(),
+      spawn,
+      logger: () => {},
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    });
+    supervisor.start();
+    supervisor.listen(0);
+    await new Promise((resolve) => supervisor.statusServer.once('listening', resolve));
+    const { port } = supervisor.statusServer.address();
+
+    const ready = await fetch(`http://127.0.0.1:${port}/status`);
+    assert.equal(ready.status, 200);
+
+    // A child crashes: the platform is no longer ready.
+    const tasksApi = launched.find((l) =>
+      l.command.join(' ').includes('services/tasks-api'),
+    );
+    tasksApi.child.emit('exit', 1, null);
+
+    const notReady = await fetch(`http://127.0.0.1:${port}/status`);
+    assert.equal(notReady.status, 503);
+    const payload = await notReady.json();
+    assert.equal(payload.ready, false);
+
+    await supervisor.stop('SIGTERM');
+  });
+
   it('records a child’s output timestamp as its heartbeat', () => {
     const { spawn, launched } = fakeSpawner();
     const supervisor = createSupervisor({
@@ -311,5 +435,7 @@ describe('createSupervisor', () => {
     const status = supervisor.status();
     const child = status.children.find((c) => c.name === 'tasks-api');
     assert.ok(child.lastOutputAt, 'the child reports when it last spoke');
+    assert.ok(child.heartbeatAt, 'the child reports its heartbeat');
+    assert.equal(child.heartbeatAt, child.lastOutputAt);
   });
 });

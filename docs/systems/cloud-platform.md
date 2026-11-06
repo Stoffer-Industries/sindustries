@@ -135,6 +135,9 @@ The consolidated platform (task `219fb673`) trades isolation for cost.
 | One process group | Per-service scaling is impossible. The only scaling axis is "more platform machines", which would run all four services again — so it is not a scaling lever. |
 | Rollback is app-wide | `fly releases rollback` restores the whole platform to a prior image. It cannot roll one service back. |
 | DNS is separate from the app | Moving the CNAMEs back is the backout path for "the platform itself must go" — see `docs/runbooks/platform-consolidation-rollback.md`. |
+| Health is shared | The platform's `/__status` answers **503** when any child is not running, because Fly's `http_check` reads the status code and not the body. One child stuck in a permanent crash loop therefore fails the whole platform's health and Fly restarts the Machine. That is the shared-fate trade taken deliberately: one bad service takes the platform's health down with it, rather than the platform reporting healthy while nginx proxies to a dead upstream. |
+| The platform never scales to zero | `min_machines_running = 1` keeps the Machine running. The auto-post worker is queue-bound — no HTTP listener, no route, no traffic at 3am — so a platform allowed to stop would leave queued auto-posts unprocessed until an unrelated request auto-started it. The old per-service worker app had no `[http_service]` at all and therefore never auto-stopped. The cost consequence: the platform is billed for one always-on Machine, not an idle one, and the before/after comparison in the cutover runbook compares **one always-on 2GB Machine** against the four always-on per-service apps it replaces. |
+| Secret visibility is shared | Every child inherits the app-level environment, so `TASKS_API_*`, `BUDGET_API_*` and `X_*` secrets on the platform app are readable by every child, not only the service that owns them. The variables that a child's own mapping owns (`DATABASE_URL`, `REDIS_URL`, `CONTENT_SCHEDULER_REDIS_URL`, `CONTENT_SCHEDULER_API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `PORT`) are **not** inherited — each child gets only the value its own `PLATFORM_*` source maps onto it, so "unset" means absent rather than another service's value. |
 
 Mitigations, in the order they apply:
 
@@ -146,6 +149,14 @@ Mitigations, in the order they apply:
 3. **The old apps stay deployable.** The four per-service apps are scaled to
    zero, not deleted, for the duration of the soak, so the fastest backout
    is a CNAME move plus `fly scale count 1`.
+
+One naming caveat for the dashboards: the health-probe metric
+`sindustries_fly_app_health` keeps an operator-supplied `app` label, so the
+gauge can stay named `tasks-api` / `budget-api` / `content-scheduler-api`
+and the metric contract is preserved literally. After the consolidation that
+label no longer names a Fly app — it names a path on the platform app — so
+the gauge means "this path on the platform app is healthy", not "this Fly
+app is healthy".
 
 Where an operator should look:
 
