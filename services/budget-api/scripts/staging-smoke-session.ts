@@ -55,13 +55,20 @@ const STAGING_ENV_VALUE = 'staging';
 // intentionally narrow — we only refuse to operate against databases whose
 // Fly app name or schema name makes their role obvious.
 //
-// IMPORTANT: the staging Fly app for budget-api is `sindustries-budget-api-staging`
-// and the production app is `sindustries-budget-api`. Their Fly internal
-// DNS hostnames are `sindustries-budget-api-staging.internal` and
+// IMPORTANT: the staging Fly app for budget-api was
+// `sindustries-budget-api-staging` and the production app is
+// `sindustries-budget-api`. Their Fly internal DNS hostnames are
+// `sindustries-budget-api-staging.internal` and
 // `sindustries-budget-api.internal` respectively. Using `sindustries-budget-api`
 // as a bare substring incorrectly matched the staging URL (Stoff81 review
 // 2026-09-15); the deny list below uses the production-only internal-DNS
 // host (`...budget-api.internal`) so staging URLs are accepted.
+//
+// The staging app named above was destroyed by the 2026-11-07 staging
+// consolidation (task 219fb673); budget-api now runs as a supervisor child
+// inside the consolidated platform app. The deny list is unchanged — it
+// rejects production-only identifiers, and the internal-DNS host it keys
+// on is still the production one.
 const PRODUCTION_DENY_SUBSTRINGS = [
   'sindustries-budget-api.internal', // production Fly internal DNS host
   'budget-api-prod',

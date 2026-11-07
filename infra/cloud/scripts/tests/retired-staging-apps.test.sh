@@ -38,12 +38,18 @@ RETIRED_APPS=(
   sindustries-auto-post-worker-staging
 )
 
-# The executable surfaces that used to target the retired apps.
+# The executable surfaces that used to target the retired apps, plus the
+# two surfaces that still reference them after the cutover: the guided
+# failure drill (its scenarios scaled the per-service apps) and the
+# staging validation workflow (it woke a per-service Machine and read its
+# targets from staging environment variables).
 OPERATOR_SURFACES=(
   infra/cloud/bin/deploy
   infra/cloud/bin/status
   infra/cloud/bin/rollback
   infra/cloud/scripts/bootstrap-staging.sh
+  infra/cloud/observability/failure-inject.sh
+  .github/workflows/cloud-staging-validate.yml
 )
 
 failures=0
@@ -112,6 +118,41 @@ for surface in "${DEPLOYING_SURFACES[@]}"; do
   fi
   echo "FAIL: $surface does not reference infra/cloud/fly/platform.fly.toml" >&2
   failures=$((failures + 1))
+done
+
+if [[ "$failures" -gt 0 ]]; then
+  echo "retired-staging-apps: $failures failure(s)" >&2
+  exit 1
+fi
+
+# The service-scoped outage scenarios must REFUSE the consolidated
+# platform app. Scaling it to 0 machines takes down ALL FOUR services, so
+# a "tasks-api-down" drill that scaled the platform would be a
+# full-platform outage wearing a service-scoped label — the exact silent
+# hazard this guard exists to prevent. Assert the behaviour, not a
+# comment: the refusal must be called from the scenario body.
+FAILURE_INJECT="infra/cloud/observability/failure-inject.sh"
+
+scenario_body() {
+  # Print the body of a shell function up to its closing brace.
+  awk -v fn="$1" '
+    $0 ~ "^"fn"\\(\\) \\{" { inside=1; next }
+    inside && /^}/ { exit }
+    inside { print }
+  ' "$2"
+}
+
+for scenario in scenario_tasks_api_down scenario_budget_api_down; do
+  body="$(scenario_body "${scenario}" "${REPO_ROOT}/${FAILURE_INJECT}")"
+  if [[ -z "${body}" ]]; then
+    echo "FAIL: ${FAILURE_INJECT} has no ${scenario} function" >&2
+    failures=$((failures + 1))
+    continue
+  fi
+  if ! grep -q "refuse_platform_scale" <<<"${body}"; then
+    echo "FAIL: ${FAILURE_INJECT} ${scenario} does not refuse a scale of the consolidated platform app" >&2
+    failures=$((failures + 1))
+  fi
 done
 
 if [[ "$failures" -gt 0 ]]; then

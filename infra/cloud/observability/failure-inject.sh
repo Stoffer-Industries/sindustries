@@ -20,12 +20,23 @@
 #   redis-down           Repoint the health-probe at an unreachable Redis
 #                        endpoint. Use --app only for a Fly Redis app.
 #                        Expected alert: sindustries-redis-down (for=1m).
-#   tasks-api-down       Scale the tasks-api Fly app to 0 machines.
-#                        Expected alert: sindustries-tasks-api-down (for=2m).
-#   tasks-api-up         Restore tasks-api to 1 machine.
-#   budget-api-down      Scale the budget-api Fly app to 0 machines.
-#                        Expected alert: sindustries-budget-api-down (for=2m).
-#   budget-api-up        Restore budget-api to 1 machine.
+#   tasks-api-down       Take the tasks-api service down. Expected alert:
+#                        sindustries-tasks-api-down (for=2m).
+#   tasks-api-up         Restore tasks-api.
+#   budget-api-down      Take the budget-api service down. Expected alert:
+#                        sindustries-budget-api-down (for=2m).
+#   budget-api-up        Restore budget-api.
+#
+#   STAGING NOTE (consolidation, task 219fb673): the per-service staging
+#   Fly apps were destroyed on 2026-11-07. Staging is ONE app now
+#   (sindustries-platform-staging) and every service is a supervisor child
+#   inside it. The service-scoped scenarios are therefore REFUSED for
+#   staging: there is no per-service app left to scale, and scaling the
+#   platform app to 0 machines would take down ALL FOUR services at once —
+#   a full-platform outage wearing a service-scoped label. A service-scoped
+#   outage needs a child-level mechanism inside the platform Machine, which
+#   does not exist yet. The refusal says so instead of scaling the
+#   platform by accident.
 #   db-down              Repoint the health-probe at a non-existent DB
 #                        host via a Fly secrets update. Expected alerts:
 #                        sindustries-tasks-api-db-down + budget-api-db-down.
@@ -49,6 +60,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 ENV_LOCAL="${SCRIPT_DIR}/.env.local"
 DRY_RUN=false
 APP_OVERRIDE=""
+
+# After the 2026-11-07 staging consolidation (task 219fb673) this is the
+# ONLY staging Fly app: the four per-service staging apps were destroyed
+# and every service now runs as a supervisor child inside it.
+CONSOLIDATED_STAGING_APP="sindustries-platform-staging"
 
 print_help() {
   cat <<'HELP'
@@ -134,6 +150,35 @@ require_dry_run_or_token() {
     exit 1
   fi
   export FLY_API_TOKEN
+}
+
+# A service-scoped outage can no longer be produced by scaling a Fly app.
+# `scale count 0` against the consolidated platform app would take ALL FOUR
+# services down — a full-platform outage wearing a service-scoped label —
+# so it is refused rather than executed.
+refuse_platform_scale() {
+  local app="$1" scenario="$2" service="$3"
+  if [[ "$app" != "$CONSOLIDATED_STAGING_APP" ]]; then
+    return 0
+  fi
+  echo "::error::scenario '${scenario}' would scale ${CONSOLIDATED_STAGING_APP} to 0 machines." >&2
+  echo "::error::that app hosts ALL FOUR consolidated services as supervisor children, so this is a full-platform outage, not a '${service}'-scoped one." >&2
+  echo "::error::refusing. A service-scoped outage must be produced by stopping the '${service}' child process inside the platform Machine; that mechanism is not implemented yet." >&2
+  exit 1
+}
+
+# The per-service staging app for a service was destroyed at the
+# consolidation, so a service-scoped scenario has no app to target unless
+# the operator names one explicitly.
+require_service_target() {
+  local app="$1" scenario="$2" service="$3"
+  if [[ -n "$app" ]]; then
+    return 0
+  fi
+  echo "::error::scenario '${scenario}' has no target app." >&2
+  echo "::error::the per-service staging app for '${service}' was destroyed at the staging consolidation (2026-11-07, task 219fb673); staging is one app now (${CONSOLIDATED_STAGING_APP})." >&2
+  echo "::error::a service-scoped outage must be produced by stopping the '${service}' child process inside the platform Machine; that mechanism is not implemented yet." >&2
+  exit 1
 }
 
 print_scenario_header() {
@@ -250,8 +295,10 @@ NOTE
 
 scenario_tasks_api_down() {
   print_scenario_header "tasks-api-down" "sindustries-tasks-api-down" "2m"
+  local app="${APP_OVERRIDE:-}"
+  require_service_target "${app}" "tasks-api-down" "tasks-api"
+  refuse_platform_scale "${app}" "tasks-api-down" "tasks-api"
   require_dry_run_or_token
-  local app="${APP_OVERRIDE:-sindustries-tasks-api-staging}"
   run_flyctl scale count 0 --app "${app}" || stop_app_machines "${app}"
   cat <<NOTE
 
@@ -264,8 +311,9 @@ NOTE
 
 scenario_tasks_api_up() {
   print_scenario_header "tasks-api-up (recover)" "sindustries-tasks-api-down" "(should resolve)"
+  local app="${APP_OVERRIDE:-}"
+  require_service_target "${app}" "tasks-api-up" "tasks-api"
   require_dry_run_or_token
-  local app="${APP_OVERRIDE:-sindustries-tasks-api-staging}"
   run_flyctl scale count 1 --app "${app}" || start_app_machines "${app}"
   cat <<NOTE
 
@@ -276,8 +324,10 @@ NOTE
 
 scenario_budget_api_down() {
   print_scenario_header "budget-api-down" "sindustries-budget-api-down" "2m"
+  local app="${APP_OVERRIDE:-}"
+  require_service_target "${app}" "budget-api-down" "budget-api"
+  refuse_platform_scale "${app}" "budget-api-down" "budget-api"
   require_dry_run_or_token
-  local app="${APP_OVERRIDE:-sindustries-budget-api-staging}"
   run_flyctl scale count 0 --app "${app}" || stop_app_machines "${app}"
   cat <<NOTE
 
@@ -288,8 +338,9 @@ NOTE
 
 scenario_budget_api_up() {
   print_scenario_header "budget-api-up (recover)" "sindustries-budget-api-down" "(should resolve)"
+  local app="${APP_OVERRIDE:-}"
+  require_service_target "${app}" "budget-api-up" "budget-api"
   require_dry_run_or_token
-  local app="${APP_OVERRIDE:-sindustries-budget-api-staging}"
   run_flyctl scale count 1 --app "${app}" || start_app_machines "${app}"
   cat <<NOTE
 

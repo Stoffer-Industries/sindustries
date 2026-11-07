@@ -486,20 +486,18 @@ Every operator path in `infra/cloud/` resolves to the consolidated app:
 | `infra/cloud/bin/status [service]` | `sindustries-platform-staging` | Also reads the supervisor's `/__status` payload, so a service alias reports the state of its CHILD inside the app. An unreadable payload is reported as unknown, not as healthy. |
 | `infra/cloud/bin/rollback <service>` | `sindustries-platform-staging` | A rollback is shared-fate: every service rolls back together. |
 | `infra/cloud/scripts/bootstrap-staging.sh` | `sindustries-platform-staging` | Refuses the retired per-service names with the reason. |
+| `infra/cloud/observability/failure-inject.sh` | refuses service-scoped drills | The `tasks-api-down` / `budget-api-down` scenarios can no longer be produced by scaling a Fly app. They refuse a target of `sindustries-platform-staging` (scaling it to zero takes down ALL FOUR services, so a service-scoped drill against it is a full-platform outage wearing a service-scoped label) and refuse an empty target (the per-service app was destroyed). Producing a service-scoped outage needs a child-level mechanism inside the platform Machine, which does not exist yet. |
+| `.github/workflows/cloud-staging-validate.yml` | `sindustries-platform-staging` | Its "wake the content-scheduler machines" step targets the platform app (the Machine that can be cold), not the destroyed per-service app. Its preflight rejects staging target variables whose host is not the platform host or a stable staging hostname from `infra/cloud/hostname-matrix.json`, so a variable still pointing at a destroyed app fails as a configuration error instead of a harness timeout. |
 
 The retired per-service app names must not reappear in an executable
 position. `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the
 build if one does: the platform's auto-post worker and a resurrected worker
 app would be TWO consumers on the same BullMQ queue, and every scheduled
-post would be processed twice — silently, with no error anywhere.
-
-One surface is deliberately NOT changed yet: `infra/cloud/observability/failure-inject.sh`
-still defaults to the retired per-service apps. Its scenarios are per-service
-(`tasks-api-down` scales one app to zero), and after the consolidation a
-scale-to-zero on the platform app is a full-platform outage, so the drill's
-mechanism has to change (kill the child inside the Machine) before its
-default can move. The drill therefore fails loudly at the Fly step instead
-of taking staging down under a service-scoped label.
+post would be processed twice — silently, with no error anywhere. The guard
+covers six surfaces (the three `bin/` wrappers, the bootstrap script, the
+failure drill and the staging validation workflow) and additionally asserts
+that the failure drill's service-scoped scenarios actually CALL the
+platform-scale refusal — a behavioural assertion, not a comment check.
 
 ---
 
