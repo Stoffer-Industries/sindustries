@@ -73,10 +73,13 @@ function stubFlyctl(options = {}) {
     existingApps = [],
     failCreate = false,
     failSecrets = false,
+    failList = false,
+    listOutput = null,
     childOutput = 'flyctl: something went wrong',
   } = options;
 
   const calls = [];
+  const registered = [];
   const spawn = (command, args) => {
     calls.push({ command, args });
     if (args[0] === 'apps' && args[1] === 'list') {
@@ -92,9 +95,21 @@ function stubFlyctl(options = {}) {
         : { status: 0, stdout: 'New app created', stderr: '' };
     }
     if (args[0] === 'secrets' && args[1] === 'set') {
-      return failSecrets
-        ? { status: 1, stdout: '', stderr: childOutput }
-        : { status: 0, stdout: 'Secrets were updated', stderr: '' };
+      if (failSecrets) return { status: 1, stdout: '', stderr: childOutput };
+      for (const arg of args) {
+        const eq = arg.indexOf('=');
+        if (eq > 0) registered.push(arg.slice(0, eq));
+      }
+      return { status: 0, stdout: 'Secrets were updated', stderr: '' };
+    }
+    if (args[0] === 'secrets' && args[1] === 'list') {
+      if (failList) return { status: 1, stdout: '', stderr: childOutput };
+      const names = listOutput ?? registered;
+      return {
+        status: 0,
+        stdout: JSON.stringify(names.map((name) => ({ name, digest: 'x', status: 'Deployed' }))),
+        stderr: '',
+      };
     }
     return { status: 1, stdout: '', stderr: `unexpected flyctl call: ${args.join(' ')}` };
   };
@@ -148,13 +163,17 @@ describe('platform provisioning CLI', () => {
     assert.ok(!create.includes('--name'));
   });
 
-  it('registers the secrets with --stage so no deploy is triggered', () => {
+  it('registers the secrets directly, without --stage', () => {
     const { code, calls } = runCli();
     assert.equal(code, 0);
     const secrets = callStartingWith(calls, ['secrets', 'set']);
     assert.ok(secrets, 'the secrets should be registered');
-    assert.deepEqual(secrets.slice(0, 5), ['secrets', 'set', '--app', PLATFORM_APP, '--stage']);
-    const names = secrets.slice(5).map((entry) => entry.split('=')[0]);
+    assert.deepEqual(secrets.slice(0, 4), ['secrets', 'set', '--app', PLATFORM_APP]);
+    assert.ok(
+      !secrets.includes('--stage'),
+      '--stage holds the values for the next release; on the live deploy the canary Machine still ran with the placeholder that had been registered out of band',
+    );
+    const names = secrets.slice(4).map((entry) => entry.split('=')[0]);
     assert.equal(names.length, 12);
     for (const name of [
       'PLATFORM_TASKS_API_DATABASE_URL',
@@ -252,6 +271,38 @@ describe('platform provisioning CLI', () => {
     const output = lines.join('\n');
     assert.match(output, /PLATFORM_TASKS_API_DATABASE_URL <- STAGING_TASKS_API_DATABASE_URL/);
     assert.ok(!output.includes(TASKS_DSN));
+  });
+});
+
+describe('secret application', () => {
+  it('sets the secrets directly, so the Machine the deploy creates gets them', () => {
+    const { code, calls } = runCli();
+    assert.equal(code, 0);
+
+    const setCall = calls.find((entry) => entry.args[0] === 'secrets' && entry.args[1] === 'set');
+    assert.ok(setCall, 'the secrets must be set');
+    assert.ok(
+      !setCall.args.includes('--stage'),
+      'staged secrets never reached the canary Machine on the live deploy; set them directly',
+    );
+  });
+
+  it('reads the secret list back and confirms every name landed', () => {
+    const { code, output } = runCli();
+    assert.equal(code, 0);
+    assert.match(output, /Verified \d+ secret\(s\) registered/);
+  });
+
+  it('fails loudly when a secret did not register', () => {
+    const { code, output } = runCli({ listOutput: ['PLATFORM_TASKS_API_DATABASE_URL'] });
+    assert.equal(code, 1);
+    assert.match(output, /did not register/);
+  });
+
+  it('fails loudly when the secret list cannot be read back', () => {
+    const { code, output } = runCli({ failList: true });
+    assert.equal(code, 1);
+    assert.match(output, /could not read the secret list back/);
   });
 });
 
