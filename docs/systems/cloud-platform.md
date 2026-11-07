@@ -218,6 +218,37 @@ every database URL is rewritten to name its schema. The rewrite is
 textual: `new URL(...).toString()` re-encodes the password, which would
 change it for DSNs whose password contains reserved characters.
 
+**The secrets are set directly, not staged, and they are read back.**
+`flyctl secrets set --stage` holds the values for the next release. On the
+first live platform deploy that never reached the Machine: the deploy
+created the canary Machine, and that Machine still carried the placeholder
+(`REPLACE_ME_SEE_QUINN_NOTES`) that had been registered on the app out of
+band. The platform booted with a placeholder Redis URL, tasks-api rejected
+it as an invalid URL and crash-looped, while `fly secrets list` showed the
+staged values sitting on the app. The values are therefore set directly,
+so they are the app's live values and every Machine — including the one a
+deploy creates — starts with them. After setting them, the script reads
+`fly secrets list --json` back and fails when a name did not land: a
+`flyctl secrets set` exit code says the command was accepted, not that
+every secret is on the app.
+
+**The supervisor refuses to start on an unusable secret.** A required
+source that is present but holds a placeholder passes a presence check and
+then breaks the child at boot with an opaque error (a zod "Invalid url"
+from tasks-api, a crash loop with no obvious cause). The supervisor
+therefore checks the shape of the sources it requires — a `*_REDIS_URL`
+must be a `redis://`/`rediss://` URL and a `*_DATABASE_URL` must be a
+`postgres://` DSN — and refuses to start with one message naming the
+offending source, instead of starting four children that cannot boot.
+
+**The router's config path is absolute.** `nginx -c <path>` resolves a
+relative path against nginx's own compile-time prefix
+(`/var/lib/nginx` on alpine), not against the child's working directory,
+so the relative form failed with `nginx: [emerg] open()
+"/var/lib/nginx/infra/cloud/platform/nginx.conf" failed`. The image holds
+the file at `/app/infra/cloud/platform/nginx.conf`, so that is the path the
+router is given.
+
 **The deploy stays opt-in.** Provisioning the app and its secrets is safe
 at any time — no Machine runs until a deploy. The deploy itself is gated
 on the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED=true`,
