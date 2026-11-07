@@ -206,7 +206,11 @@ FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true FLY_CURL_COUNT_FILE="$TM
   SMOKE_RETRY_DELAY_SECONDS=0 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
   "$SCRIPT" tasks-api 2>&1
 assert_eq "deploy tasks-api retry exit code" "0" "$?"
-assert_eq "curl retry count" "2" "$(cat "$TMP/curl.count")"
+# The smoke set is app-scoped (shared fate), so a tasks-api deploy probes
+# all THREE health routes. The stub fails the first curl call only, so the
+# total is: 1 failed attempt + 1 successful retry (the tasks-api route) +
+# 1 each for the budget-api and content-scheduler routes = 4.
+assert_eq "curl call count (3 routes + 1 retry)" "4" "$(cat "$TMP/curl.count")"
 
 echo "test: content-scheduler-api maps to the consolidated platform app"
 reset_log
