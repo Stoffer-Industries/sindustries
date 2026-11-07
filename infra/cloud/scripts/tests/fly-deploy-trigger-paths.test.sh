@@ -20,7 +20,7 @@ steps = ci['jobs']['changes']['steps']
 filter_step = next(step for step in steps if step.get('id') == 'filter')
 filters = yaml.safe_load(filter_step['with']['filters'])
 
-names = ('tasks_api', 'budget_api', 'auto_post_worker', 'gymtrack_mcp')
+names = ('platform', 'gymtrack_mcp')
 failures = []
 for name in names:
     paths = filters.get(name)
@@ -47,6 +47,7 @@ expected_all = set(names)
 cases = (
     ('package-lock.json', expected_all),
     ('package.json', expected_all),
+    ('services/content-scheduler-api/src/server.ts', {'platform'}),
     ('docs/specs/foo.md', set()),
     ('apps/website/src/App.jsx', set()),
 )
@@ -56,6 +57,10 @@ for changed, expected in cases:
         failures.append(
             f'synthetic commit {changed!r}: expected {sorted(expected)}, got {sorted(actual)}'
         )
+
+for retired in ('tasks_api', 'budget_api', 'content_scheduler_api', 'auto_post_worker'):
+    if retired in filters:
+        failures.append(f'ci.yml: retired changes filter {retired!r} is still present')
 
 if failures:
     for failure in failures:
