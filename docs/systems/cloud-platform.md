@@ -489,6 +489,21 @@ Every operator path in `infra/cloud/` resolves to the consolidated app:
 | `infra/cloud/observability/failure-inject.sh` | refuses service-scoped drills | The `tasks-api-down` / `budget-api-down` scenarios can no longer be produced by scaling a Fly app. They refuse any staging target, and refuse the consolidated platform in particular: scaling it to zero takes down ALL FOUR services, so a service-scoped drill against it is a full-platform outage wearing a service-scoped label. Producing a service-scoped outage needs a child-level mechanism inside the platform Machine, which does not exist yet. The refusal is mode-aware: `--dry-run` exits 0 and prints REFUSED (the task-31233a0a contract is "a preview has no side effects and needs no credentials", and a refusal has neither), while a real run exits 1 without touching Fly. |
 | `.github/workflows/cloud-staging-validate.yml` | `sindustries-platform-staging` | Its "wake the content-scheduler machines" step targets the platform app (the Machine that can be cold), not the destroyed per-service app. Its preflight validates each staging target variable against its OWN surface's (host, path-prefix) routes from `infra/cloud/hostname-matrix.json` (`stagingRoutes`), so a variable still pointing at a destroyed app — or at a DIFFERENT surface — fails as a configuration error instead of a harness timeout. The routes are per target, not one shared allow-list: every service exposes `/health`, so a host-only allow-list let `STAGING_TASKS_API_URL` point at the budget-api hostname, probe the wrong service and report `tasks.health: pass`. The check never resolves DNS (the stable hostnames do not resolve yet — the CNAME gap on task 5cb4a8fe). |
 
+`bin/status` reads `flyctl status --json`, and that envelope's shape has
+changed between flyctl releases: some versions nest the release version
+under `Release`, some carry a flat `Version`; some publish the process
+types under `Services[].Ports[].Type`, some under `ProcessTypes`, and
+the 0.4.111 envelope carries neither — the running process group is
+readable only from each machine's own `FLY_PROCESS_GROUP` env. The
+operator script accepts all of those shapes and names the source it
+used (`processTypeSource`), so a process type that cannot be detected is
+distinguishable from one that is genuinely absent. Machine identity
+fields are read in either casing. Only `FLY_PROCESS_GROUP` is read out of
+the machine env; no other env value reaches the report. When flyctl
+itself fails, its stderr is shown to the operator (with anything
+credential-shaped redacted) instead of a bare "status failed", because a
+TLS or auth failure and a missing app look identical otherwise.
+
 The retired per-service app names must not reappear in an executable
 position. `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the
 build if one does: the platform's auto-post worker and a resurrected worker
