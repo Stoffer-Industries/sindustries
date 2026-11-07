@@ -365,9 +365,19 @@ If a Fly deployment reports that `FLY_API_TOKEN` is unavailable, repair it only 
 - Pull-request website staging starts only after the merge gate succeeds.
 - A website change on `main` deploys a production-configured candidate to staging, smoke-checks that exact deployment URL, then promotes the same deployment to production.
 - The website deploy workflow resolves **one** Vercel target at job scope (`VERCEL_TARGET`, derived from the `production-candidate` input), and the `vercel pull`, `vercel build`, and `vercel deploy --prebuilt` phases all consume it. Vercel refuses to publish prebuilt output whose recorded target differs from the deploy target, so a single shared value is what keeps the staging candidate publishable. A production-configured candidate is deployed with `--skip-domain`, so it stays off the production custom domains until it is explicitly promoted. The static check `tests/cloud/scripts/check-vercel-deploy-target.mjs` enforces the contract on every CI run.
+- The production promotion resolves the candidate in the Vercel team that created it, from one explicit source: the job-scope `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` repository secrets. The staging job writes the project link with `vercel pull`, but the production job runs on a clean runner with no link, so an unscoped CLI request carries no team context and Vercel refuses the promotion with `Deployment belongs to a different team` (main run `42239656677`, job `127968156801`). The production path now links the project (`vercel link --project "$VERCEL_PROJECT_ID" --scope "$VERCEL_ORG_ID"`) and every mutating call — `vercel promote` and `vercel alias set` — carries `--scope "$VERCEL_ORG_ID"`. The static check `tests/cloud/scripts/check-vercel-production-promotion-scope.mjs` enforces the contract on every CI run.
 - Fly staging services, GymTrack, GymTrack MCP, and the budget-mobile EAS update start only from a successful `main` merge gate when their central changed-path filter matches.
 - The `production` GitHub environment accepts protected-branch deployments only. Staging remains available to pull-request branches.
 - Staging cancels superseded runs for the same target/ref. Production serializes runs and never cancels an in-progress deployment.
+
+### Vercel credential topology
+
+`VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `VERCEL_TOKEN` are **repository-level** secrets. Neither the `staging` nor the `production` GitHub environment defines Vercel secrets of its own, so both website deploy jobs authenticate with the same token against the same team — the environment a job runs in does not select a team.
+
+That makes the team scope something the workflow has to state, not something it can infer: the token's own default scope is the personal account that owns the team, not the team itself, and an unscoped request resolves the deployment under that default. Two consequences for anyone touching these jobs:
+
+- A job that must act on a deployment created by another job needs the project context and the team scope explicitly (`vercel link --project "$VERCEL_PROJECT_ID" --scope "$VERCEL_ORG_ID"`, or `--scope "$VERCEL_ORG_ID"` on the mutating call itself). The production promotion job is the case in point.
+- The scope must stay bound to the job-scope secret. A literal team id or slug in a workflow is a second source of truth, and it is the one that drifts when the team changes.
 
 Fly reusable workflows run a credential preflight, install a commit-pinned setup action and version-pinned `flyctl`, run `flyctl deploy --strategy canary`, then smoke-check:
 
