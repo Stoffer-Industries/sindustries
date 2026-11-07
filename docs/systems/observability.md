@@ -41,7 +41,7 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | Dashboard definitions (cloud, new) | `cloud-overview.json`, `db-health.json`, `migration-alerts.json` | Rowan | `infra/cloud/observability/grafana/dashboards/`   |
 | Bootstrap                        | Idempotent local script with subcommand dispatch (validate \| app \| secrets \| dashboards \| alerts \| deploy \| smoke \| evidence \| all)        | Quinn  | `infra/cloud/observability/bootstrap-observability.sh` |
 | Evidence pack                    | Closing-PR evidence template (md \| sh \| json) for AC1-AC3 of task 31233a0a | Quinn  | `infra/cloud/observability/evidence-capture.sh`   |
-| Failure injection                | 10 scenarios with --dry-run (redis-down/up, tasks-api-down/up, budget-api-down/up, db-down/up, deploy-failed/restored) | Quinn  | `infra/cloud/observability/failure-inject.sh`    |
+| Failure injection                | 10 scenario names with --dry-run; 6 usable, 4 refused (redis-down/up, db-down/up usable; tasks-api-down/up, budget-api-down/up refuse — service-scoped child drills are unavailable since staging is one app) | Quinn  | `infra/cloud/observability/failure-inject.sh`    |
 | CI deploy                        | GitHub Actions, path-filtered, canary (`deploy-staging-health-probe.yml`)                    | Rowan  | `.github/workflows/deploy-staging-health-probe.yml` |
 | Secrets                          | Fly app secrets + GH repo secrets                        | Quinn  | `fly secrets set …` (operator CLI); `secrets.FLY_API_TOKEN`   |
 | Alert response runbook           | One section per alert; on-call, severity, mitigation      | Quinn  | Retired with PR #583 (was `docs/runbooks/cloud-alerts-response.md`). Re-create at `~/.openclaw/workspace/docs/infra/runbooks/cloud-alerts-response.md` when an alert fires for the first time and needs its own step list; for now the "Alert ownership" table below + the AC4 section of `docs/specs/hosted-observability-migration-alerts-tech-design.md` carry the same expectation. |
@@ -153,6 +153,8 @@ The hosted stack owns datasource URLs and UIDs. Bootstrap discovers the default 
 | `deploy-failed`                | warn     | Quinn  | **removed 2026-Q4 (task 2c782afb AC3)** — see [Deploy-failure telemetry](#deploy-failure-telemetry) |
 Severity is either `page` (immediate, P1 urgent) or `warn` (next-business-day, P2 informational). Quinn is the canonical owner for every alert in the v1 list; the runbook documents how to reassign individual alerts to Tom or another on-call. The two disabled/removed entries are documented below; both will return in a follow-up task with their durable producer, not by re-enabling the dead alert.
 
+**The synthetic drill is gone; the `tasks-api-down` and `budget-api-down` alerts are not.** `sindustries-tasks-api-down` and `sindustries-budget-api-down` are still committed rules (`infra/cloud/observability/grafana/alerts/tasks-api-down.json`, `budget-api-down.json`) and must still fire on a real outage. What no longer exists is the *drill* that used to produce a service-scoped outage on demand: since staging is one app, `failure-inject.sh tasks-api-down` / `tasks-api-up` and `budget-api-down` / `budget-api-up` refuse (see the handover checklist below). An operator reading "the drill refuses" must not conclude the alert is dead.
+
 ### Provisioning contract and common failures
 
 - `GRAFANA_CLOUD_INSTANCE_URL` is the Grafana stack base URL used for dashboard, folder, datasource, and alert-rule APIs. It is not a Prometheus query endpoint.
@@ -239,7 +241,28 @@ A future operator should be able to:
 2. Run `bash infra/cloud/observability/bootstrap-observability.sh all` to provision everything (idempotent), and get a green smoke-check report back.
 3. Open the five hosted dashboards from the URLs the bootstrap script prints, and see real data for the staging environment within 5 minutes.
 4. Open the ten alert rules from the Grafana Cloud alerting UI/API, and see severity + owner populated for each.
-5. Trigger a synthetic failure via `bash infra/cloud/observability/failure-inject.sh tasks-api-down` (10 scenarios available), observe the corresponding alert fires within 2 minutes, then `failure-inject.sh tasks-api-up` and watch the alert resolve.
+5. Trigger a synthetic failure via `bash infra/cloud/observability/failure-inject.sh redis-down` (6 of the 10 scenarios are usable; the 4 service-scoped ones refuse — see below), observe the corresponding alert `sindustries-redis-down` fires within 2 minutes, then `failure-inject.sh redis-up` and watch the alert resolve.
+
+   **Service-scoped child drills are unavailable.** Staging is one app
+   (`sindustries-platform-staging`, cutover 2026-11-07, task 219fb673),
+   so there is no per-service app left to scale. `tasks-api-down` /
+   `tasks-api-up` and `budget-api-down` / `budget-api-up` **refuse**: a
+   real run exits 1 without touching Fly, and `--dry-run` exits 0
+   printing `REFUSED`. Scaling the consolidated platform instead would be
+   a full-platform outage wearing a service-scoped label, so it is refused
+   too. Producing a service-scoped outage needs a child-level stop
+   mechanism inside the platform Machine, which is **not implemented yet**.
+
+   The supported replacements are `redis-down` / `redis-up` (alert
+   `sindustries-redis-down`) and `db-down` / `db-up` (alerts
+   `sindustries-tasks-api-db-down` + `sindustries-budget-api-db-down`).
+   The `deploy-failed` / `deploy-restored` pair is not a usable
+   replacement: its `deploy-failed` alert file was removed, so no live
+   alert matches it.
+
+   The `sindustries-tasks-api-down` and `sindustries-budget-api-down`
+   **alerts are still live** and must still fire on a real outage — only
+   the synthetic drill that used to produce one is gone.
 6. Capture the AC1-AC3 evidence pack via `bash infra/cloud/observability/evidence-capture.sh --format md > evidence.md` and paste it into PR #724 body to flip AC1-AC3 + complete AC4 of task `31233a0a`.
 7. Read the "Alert ownership" table below for the on-call response expectation of each alert (the prior `docs/runbooks/cloud-alerts-response.md` was retired in PR #583).
 

@@ -182,41 +182,23 @@ jobs:
           # the harness as a confusing timeout instead of here as a
           # configuration error.
           #
-          # The allow-list is derived from the repo's own source of truth
-          # (infra/cloud/hostname-matrix.json) plus the consolidated
-          # platform host. Hosts are checked, NOT endpoints: a stable
-          # hostname that does not resolve yet (the CNAME gap on task
-          # 5cb4a8fe) is still a valid target and must not fail this check.
-          matrix="infra/cloud/hostname-matrix.json"
-          if [[ ! -f "${matrix}" ]]; then
-            echo "::error::${matrix} is missing from the checkout; cannot validate the staging targets." >&2
-            exit 1
-          fi
-          allowed_hosts="$(jq -r '.surfaces[] | select(.staging != null) | .staging' "${matrix}")"
-          # <!-- stable-fallback --> https://sindustries-platform-staging.fly.dev
-          allowed_hosts="${allowed_hosts}"$'\n'"sindustries-platform-staging.fly.dev"
-          bad_targets=()
-          check_staging_target() {
-            local label="$1" url="$2" host
-            host="$(printf '%s' "${url}" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s#:[0-9]+$##')"
-            if [[ -z "${host}" ]]; then
-              bad_targets+=("${label} (${url}) -> no host")
-              return 0
-            fi
-            if ! grep -qxF "${host}" <<<"${allowed_hosts}"; then
-              bad_targets+=("${label} (${url}) -> host ${host}")
-            fi
-          }
-          check_staging_target "STAGING_TASKS_API_URL" "${TASKS_API_URL}"
-          check_staging_target "STAGING_BUDGET_API_URL" "${BUDGET_API_URL}"
-          check_staging_target "STAGING_SCHEDULER_API_URL" "${SCHEDULER_API_URL}"
-          if [[ ${#bad_targets[@]} -gt 0 ]]; then
-            echo "::error::staging targets are not surfaces that exist: ${bad_targets[*]}" >&2
-            echo "::error::allowed staging hosts: $(grep -v '^$' <<<"${allowed_hosts}" | tr '\n' ' ')" >&2
-            # <!-- stable-fallback --> https://sindustries-platform-staging.fly.dev
-            echo "::error::the per-service staging apps were destroyed at the 2026-11-07 consolidation (task 219fb673). Point these variables at the consolidated platform (the platform host plus a /<service> path prefix) or at the stable staging hostnames." >&2
-            exit 1
-          fi
+          # The check is PER TARGET, not one shared allow-list. Each target
+          # is validated against its OWN surface's (host, path-prefix)
+          # routes from infra/cloud/hostname-matrix.json. A shared
+          # host-only allow-list let STAGING_TASKS_API_URL point at the
+          # budget-api hostname and PASS, because every service exposes
+          # /health — the harness then probed the wrong service, got 200,
+          # and reported `tasks.health: pass`. A wrong-service validation
+          # reported as a success is worse than a timeout.
+          #
+          # Hosts are checked, NOT endpoints: a stable hostname that does
+          # not resolve yet (the CNAME gap on task 5cb4a8fe) is still a
+          # valid target and must not fail this check. The checker never
+          # resolves DNS.
+          node tests/cloud/scripts/check-staging-target-preflight.mjs \
+            --target STAGING_TASKS_API_URL tasks-api "${TASKS_API_URL}" \
+            --target STAGING_BUDGET_API_URL budget-api "${BUDGET_API_URL}" \
+            --target STAGING_SCHEDULER_API_URL content-scheduler-api "${SCHEDULER_API_URL}"
 
       - name: Install Fly CLI
         uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1

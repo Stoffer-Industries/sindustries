@@ -30,7 +30,8 @@ infra/cloud/
 │   ├── tasks-api.env.example
 │   ├── budget-api.env.example
 │   ├── auto-post-worker.env.example
-│   └── platform.env.example    # consolidated app's PLATFORM_* secrets
+│   ├── platform.env.example    # consolidated app's PLATFORM_* secrets (destination names)
+│   └── bootstrap-staging.env.example  # source names read by scripts/bootstrap-staging.sh
 ├── bin/                        # Operator-facing deploy/status/rollback wrappers (task 2850c5ac)
 │   ├── deploy                  # Pin-and-deploy a single service
 │   ├── status                  # Check process types + machines across services

@@ -89,12 +89,20 @@ Scenarios (all have a matching <scenario>-up or <scenario>-recover counterpart):
                        endpoint. Use --app only for a Fly Redis app.
                        Expected alert: sindustries-redis-down (for=1m).
   redis-up             Resume the content-scheduler Redis.
-  tasks-api-down       Scale the tasks-api Fly app to 0 machines.
-                       Expected alert: sindustries-tasks-api-down (for=2m).
-  tasks-api-up         Restore tasks-api to 1 machine.
-  budget-api-down      Scale the budget-api Fly app to 0 machines.
-                       Expected alert: sindustries-budget-api-down (for=2m).
-  budget-api-up        Restore budget-api to 1 machine.
+  tasks-api-down       REFUSED — service-scoped child drill unavailable.
+                       Staging is one app (sindustries-platform-staging,
+                       task 219fb673), so there is no per-service app to
+                       scale. A real run exits 1 without touching Fly;
+                       --dry-run exits 0 and prints REFUSED. The ALERT
+                       sindustries-tasks-api-down (for=2m) is still live
+                       and still fires on a real outage — only this drill
+                       is gone. Use redis-down / db-down instead.
+  tasks-api-up         REFUSED — same reason as tasks-api-down.
+  budget-api-down      REFUSED — service-scoped child drill unavailable.
+                       Same reason as tasks-api-down. The ALERT
+                       sindustries-budget-api-down (for=2m) is still live
+                       and still fires on a real outage.
+  budget-api-up        REFUSED — same reason as budget-api-down.
   db-down              Repoint the health-probe at a non-existent DB
                        host via a Fly secrets update. Expected alerts:
                        sindustries-tasks-api-db-down + budget-api-db-down.
@@ -102,6 +110,8 @@ Scenarios (all have a matching <scenario>-up or <scenario>-recover counterpart):
   deploy-failed        Trigger a Fly deploy with a non-existent image
                        tag (the workflow can also be invoked with a
                        broken SHA). Expected alert: sindustries-deploy-failed.
+                       NOTE: that alert file was removed (task 2c782afb
+                       AC3), so this scenario has no live alert to fire.
   deploy-restored      Redeploy with the correct image tag.
 
 Flags:

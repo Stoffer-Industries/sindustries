@@ -128,12 +128,32 @@ token lands, and is re-run after any alert-rule edit.
    duration for each scenario:
 
    ```bash
-   bash infra/cloud/observability/failure-inject.sh tasks-api-down
+   bash infra/cloud/observability/failure-inject.sh redis-down
    ```
 
    The header of each scenario names the alert it should fire
-   (e.g. `sindustries-tasks-api-down`, `for: 2m`). Available
+   (e.g. `sindustries-redis-down`, `for: 1m`). Available
    scenarios are listed by `failure-inject.sh` with no argument.
+
+   > **Service-scoped child drills are unavailable.** Staging is one app
+   > (`sindustries-platform-staging`, cutover 2026-11-07, task 219fb673),
+   > so there is no per-service app left to scale. The
+   > `tasks-api-down` / `tasks-api-up` and `budget-api-down` /
+   > `budget-api-up` scenarios therefore **refuse**: a real run exits 1
+   > without touching Fly, and `--dry-run` exits 0 printing `REFUSED`.
+   > Scaling the consolidated platform instead would be a full-platform
+   > outage wearing a service-scoped label, so it is refused too.
+   > Producing a service-scoped outage needs a child-level stop
+   > mechanism inside the platform Machine, which is **not implemented
+   > yet**.
+   >
+   > The supported replacements are `redis-down` / `redis-up` (alert
+   > `sindustries-redis-down`) and `db-down` / `db-up` (alerts
+   > `sindustries-tasks-api-db-down` + `sindustries-budget-api-db-down`).
+   >
+   > The `sindustries-tasks-api-down` and `sindustries-budget-api-down`
+   > **alerts are still live** and must still fire on a real outage — only
+   > the synthetic drill that used to produce one is gone.
 
 4. Wait one evaluation interval plus the rule's `for` duration (most
    committed rules use `interval: "1m"`; check the `for` value in the
@@ -141,7 +161,7 @@ token lands, and is re-run after any alert-rule edit.
 
    ```bash
    curl -fsS -H "Authorization: $GRAFANA_CLOUD_READER_AUTH" \
-     "$GRAFANA_CLOUD_INSTANCE_URL/api/v1/provisioning/alert-rules/sindustries-tasks-api-down" \
+     "$GRAFANA_CLOUD_INSTANCE_URL/api/v1/provisioning/alert-rules/sindustries-redis-down" \
      | jq '{uid, title, state, noDataState, isPaused, updated}'
    ```
 
@@ -150,7 +170,7 @@ token lands, and is re-run after any alert-rule edit.
 5. Resolve the failure condition:
 
    ```bash
-   bash infra/cloud/observability/failure-inject.sh tasks-api-up
+   bash infra/cloud/observability/failure-inject.sh redis-up
    ```
 
 6. Re-query after one evaluation interval; expect the rule to leave
@@ -354,6 +374,7 @@ is the only verification log for this runbook.
 | --- | --- | --- | --- |
 | 2026-10-12 | AC4 | Doc published, read token provisioning path documented | pending first live verification |
 | 2026-10-23 | AC4/AC5 | Runbook corrected against `origin/main` per Rowan review on PR #801 — script/env/path names, alert-rules envelope shape, UID provenance, #756/#797 provenance, secret-store convention | doc corrected; live verification still pending |
+| 2026-11-08 | AC4 | Steps 3–5 re-pointed from the refused `tasks-api-down`/`tasks-api-up` pair to the supported `redis-down`/`redis-up` pair, and the step-4 example UID from the tasks-api-down alert to `sindustries-redis-down` — the service-scoped scenarios refuse after the staging consolidation (task 219fb673) | doc corrected; live verification still pending |
 
 ---
 

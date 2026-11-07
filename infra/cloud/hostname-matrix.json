@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Stable hostname matrix for the six public surfaces and the auto-post worker (task 5cb4a8fe). Authoritative source of truth: tests/cloud/scripts/check-stable-hostname-matrix.mjs validates the shape; tests/cloud/scripts/check-stable-url-fallbacks.mjs reads the providerFallback entries to assert every *.fly.dev / *.vercel.app reference in scope is annotated. Do not edit the surface rows without updating docs/systems/cloud-platform.md and the comment blocks at the top of each infra/cloud/fly/<service>.fly.toml; the static checks will fail otherwise.",
+  "description": "Stable hostname matrix for the six public surfaces and the auto-post worker (task 5cb4a8fe). Authoritative source of truth: tests/cloud/scripts/check-stable-hostname-matrix.mjs validates the shape; tests/cloud/scripts/check-stable-url-fallbacks.mjs reads the providerFallback entries to assert every *.fly.dev / *.vercel.app reference in scope is annotated. Each consolidated API surface also records `stagingRoutes`: the (host, pathPrefix) pairs that surface may be reached at in staging — the stable hostname at the root, and the consolidated platform host at that surface's path prefix. The staging-target preflight (tests/cloud/scripts/check-staging-target-preflight.mjs) validates a configured target against exactly its own surface's routes, so a target pointing at another surface fails as a configuration error instead of validating the wrong service. Do not edit the surface rows without updating docs/systems/cloud-platform.md and the comment blocks at the top of each infra/cloud/fly/<service>.fly.toml; the static checks will fail otherwise.",
   "taskId": "5cb4a8fe-6069-4b3c-b2ef-0b8dc61cdb3c",
   "designDoc": "docs/specs/add-stable-app-name-hostnames-tech-design.md",
   "apexDomain": "sindustries.co.nz",
@@ -33,7 +33,11 @@
       "flyApp": "sindustries-tasks-api",
       "staging": "tasks-api.staging.sindustries.co.nz",
       "production": "tasks-api.sindustries.co.nz",
-      "providerFallback": "sindustries-tasks-api.fly.dev"
+      "providerFallback": "sindustries-tasks-api.fly.dev",
+      "stagingRoutes": [
+        { "host": "tasks-api.staging.sindustries.co.nz", "pathPrefix": "" },
+        { "host": "sindustries-platform-staging.fly.dev", "pathPrefix": "/tasks-api" }
+      ]
     },
     {
       "id": "budget-api",
@@ -41,7 +45,11 @@
       "flyApp": "sindustries-budget-api",
       "staging": "budget-api.staging.sindustries.co.nz",
       "production": "budget-api.sindustries.co.nz",
-      "providerFallback": "sindustries-budget-api.fly.dev"
+      "providerFallback": "sindustries-budget-api.fly.dev",
+      "stagingRoutes": [
+        { "host": "budget-api.staging.sindustries.co.nz", "pathPrefix": "" },
+        { "host": "sindustries-platform-staging.fly.dev", "pathPrefix": "/budget-api" }
+      ]
     },
     {
       "id": "content-scheduler-api",
@@ -49,7 +57,11 @@
       "flyApp": "sindustries-content-scheduler-api",
       "staging": "content-scheduler-api.staging.sindustries.co.nz",
       "production": "content-scheduler-api.sindustries.co.nz",
-      "providerFallback": "sindustries-content-scheduler-api.fly.dev"
+      "providerFallback": "sindustries-content-scheduler-api.fly.dev",
+      "stagingRoutes": [
+        { "host": "content-scheduler-api.staging.sindustries.co.nz", "pathPrefix": "" },
+        { "host": "sindustries-platform-staging.fly.dev", "pathPrefix": "/content-scheduler-api" }
+      ]
     },
     {
       "id": "health-probe",

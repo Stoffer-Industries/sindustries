@@ -68,24 +68,21 @@ declare -A FLY_CONFIG_FOR=(
 # platform answers on ONE app, so its three services are reached through
 # the router's path-prefix routes on the provider hostname until the stable
 # hostnames resolve (task 5cb4a8fe).
-declare -A FLY_HEALTH_URL_FOR=(
-  [tasks-api]="https://sindustries-platform-staging.fly.dev/tasks-api/health"
-  [budget-api]="https://sindustries-platform-staging.fly.dev/budget-api/health"
-  [content-scheduler-api]="https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
-  [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
-  [platform]="https://sindustries-platform-staging.fly.dev/tasks-api/health https://sindustries-platform-staging.fly.dev/budget-api/health https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
-)
+#
+# SHARED FATE: every service alias deploys the SAME app, so the smoke set
+# is the SAME for every alias. It used to be narrowed per alias (a
+# `budget-api` deploy checked only /budget-api/health), which meant a
+# broken tasks-api child was reported as a successful deploy — and, worse,
+# `bin/rollback budget-api` rolled the whole platform back while only
+# checking one of the three children. The smoke set is therefore
+# app-scoped, not alias-scoped: all three health routes plus the worker
+# startup line, for every alias.
+PLATFORM_HEALTH_URLS="https://sindustries-platform-staging.fly.dev/tasks-api/health https://sindustries-platform-staging.fly.dev/budget-api/health https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 # Log-line patterns to grep for after the deploy. The auto-post worker has
 # no HTTP surface, so its startup line is the only evidence it came up; the
 # consolidated platform carries the same worker as one of its children, so
-# it gets the same check IN ADDITION to its three health routes.
-declare -A FLY_LOG_CHECK_FOR=(
-  [tasks-api]=""
-  [budget-api]=""
-  [content-scheduler-api]=""
-  [auto-post-worker]="[content-scheduler-worker] starting"
-  [platform]="[content-scheduler-worker] starting"
-)
+# EVERY alias gets this check IN ADDITION to the three health routes.
+PLATFORM_LOG_CHECK="[content-scheduler-worker] starting"
 
 # ---------- argument parsing ------------------------------------------------
 
@@ -124,8 +121,12 @@ fi
 
 FLY_APP="${FLY_APP_FOR[$SERVICE]}"
 FLY_CONFIG="${FLY_CONFIG_FOR[$SERVICE]}"
-HEALTH_URLS="${FLY_HEALTH_URL_FOR[$SERVICE]}"
-LOG_CHECK="${FLY_LOG_CHECK_FOR[$SERVICE]:-}"
+# Every alias deploys one shared app, so every alias gets the FULL smoke
+# set. The requested alias is still reported (see the final report) so the
+# operator knows which name they invoked — but the validation is never
+# narrowed to that one child.
+HEALTH_URLS="$PLATFORM_HEALTH_URLS"
+LOG_CHECK="$PLATFORM_LOG_CHECK"
 
 # Usage validation runs BEFORE any environment preflight: a moving tag is
 # a caller mistake, and it should be reported as one (exit 1) rather than
@@ -254,6 +255,7 @@ cat <<EOF
 app:    $FLY_APP
 version: $VERSION
 machines: ${MACHINES:-none}
+requested: $SERVICE (alias of $FLY_APP; the smoke set covers every child)
 EOF
 
 # ---------- post-deploy smoke check ----------------------------------------
@@ -286,7 +288,11 @@ if [[ -n "$LOG_CHECK" ]]; then
   # The auto-post worker has no HTTP route. The smoke check is the worker's
   # structured startup log line ("[content-scheduler-worker] starting
   # (adapter=bullmq)"). We tail logs for up to 60 seconds.
-  DEADLINE=$((SECONDS + 60))
+  #
+  # EVERY alias runs this check, because every alias deploys the one
+  # shared app: a service-scoped deploy that left the worker child dead
+  # would otherwise be reported as a success.
+  DEADLINE=$((SECONDS + ${SMOKE_LOG_TIMEOUT_SECONDS:-60}))
   SAW_STARTUP=0
   while [[ $SECONDS -lt $DEADLINE ]]; do
     # Capture first, then grep. `flyctl logs | grep -q` closes the pipe at
