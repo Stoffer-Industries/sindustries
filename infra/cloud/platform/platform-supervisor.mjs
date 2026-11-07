@@ -43,6 +43,7 @@ import {
   STATUS_PORT,
   backoffDelay,
   buildChildEnv,
+  invalidRequiredSources,
   missingRequiredSources,
 } from './platform-services.mjs';
 
@@ -309,12 +310,20 @@ export function createSupervisor(options = {}) {
     deps,
     statusServer: null,
 
-    /** Validate that every child has the app-level secrets it needs. */
+    /**
+     * Validate that every child has the app-level secrets it needs, and
+     * that each one carries a usable value.
+     */
     validate() {
       const missing = [];
       for (const child of children) {
         for (const source of missingRequiredSources(child.spec, env)) {
           missing.push(`${child.name} requires ${source}`);
+        }
+        for (const source of invalidRequiredSources(child.spec, env)) {
+          missing.push(
+            `${child.name} requires ${source} to carry a usable value (it holds a placeholder or a malformed URL)`,
+          );
         }
       }
       return missing;
@@ -325,7 +334,7 @@ export function createSupervisor(options = {}) {
       const missing = supervisor.validate();
       if (missing.length) {
         deps.logger(
-          `[platform] refusing to start: missing app-level secrets:\n  - ${missing.join('\n  - ')}`,
+          `[platform] refusing to start: missing or invalid app-level secrets:\n  - ${missing.join('\n  - ')}`,
         );
         return false;
       }
@@ -424,7 +433,7 @@ async function main() {
   const missing = supervisor.validate();
   if (missing.length) {
     process.stderr.write(
-      `[platform] refusing to start: missing app-level secrets:\n  - ${missing.join('\n  - ')}\n` +
+      `[platform] refusing to start: missing or invalid app-level secrets:\n  - ${missing.join('\n  - ')}\n` +
         '[platform] see infra/cloud/env/platform.env.example and the runbook ' +
         'docs/runbooks/platform-consolidation-rollback.md\n',
     );

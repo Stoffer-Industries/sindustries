@@ -96,8 +96,14 @@ step 1 is done and verified — so the order cannot be inverted by accident.
 ### Step 1 — stop the old queue consumer (scale to zero, NOT down)
 
 ```
-fly scale count 0 --app sindustries-auto-post-worker-staging
+fly scale count worker=0 --app sindustries-auto-post-worker-staging --yes
 ```
+
+The process group is named, because `fly scale count 0 --app <app>` without
+one defaults to a group called `app` and fails on an app whose group is
+named differently ("Attempting to scale unknown process groups [app] but
+valid names are [worker]"). `--yes` is required outside an interactive
+terminal.
 
 Verify that no Machine is left running:
 
@@ -172,9 +178,9 @@ Machine, and the consolidated Machine is sized at 2GB.
 ### Step 6 — scale the remaining old apps to zero (NOT down)
 
 ```
-fly scale count 0 --app sindustries-content-scheduler-api-staging
-fly scale count 0 --app sindustries-budget-api-staging
-fly scale count 0 --app sindustries-tasks-api-staging
+fly scale count content-scheduler-api=0 --app sindustries-content-scheduler-api-staging --yes
+fly scale count app=0 --app sindustries-budget-api-staging --yes
+fly scale count app=0 --app sindustries-tasks-api-staging --yes
 ```
 
 These three still serve the stable hostnames until the CNAMEs move, so
@@ -217,16 +223,16 @@ This rolls the platform app back one release. It does **not** move traffic
 2. Scale the old apps back up:
 
    ```
-   fly scale count 1 --app sindustries-tasks-api-staging
-   fly scale count 1 --app sindustries-budget-api-staging
-   fly scale count 1 --app sindustries-content-scheduler-api-staging
-   fly scale count 1 --app sindustries-auto-post-worker-staging
+   fly scale count app=1 --app sindustries-tasks-api-staging --yes
+   fly scale count app=1 --app sindustries-budget-api-staging --yes
+   fly scale count content-scheduler-api=1 --app sindustries-content-scheduler-api-staging --yes
+   fly scale count worker=1 --app sindustries-auto-post-worker-staging --yes
    ```
 
 3. Scale the platform app to zero:
 
    ```
-   fly scale count 0 --app sindustries-platform-staging
+   fly scale count platform=0 --app sindustries-platform-staging --yes
    ```
 
 **Keep the old apps deployable for the duration of the soak.** They are the

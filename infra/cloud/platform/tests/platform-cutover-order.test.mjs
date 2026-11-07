@@ -57,8 +57,11 @@ function cutoverSection() {
 describe('platform cutover order', () => {
   it('scales the old auto-post worker to zero BEFORE the platform is deployed', () => {
     const section = cutoverSection();
-    const workerStop = section.indexOf(
-      'fly scale count 0 --app sindustries-auto-post-worker-staging'
+    // The process group is named in the command because an app whose
+    // group is not called `app` fails without it, so the assertion
+    // matches either form and checks the ORDER, not the exact flags.
+    const workerStop = section.search(
+      /fly scale count (?:\S+=)?0 --app sindustries-auto-post-worker-staging/
     );
     const deployStep = section.indexOf('### Step 2 — deploy the platform app');
     assert.notEqual(workerStop, -1, 'the cutover must scale the old auto-post worker to zero');

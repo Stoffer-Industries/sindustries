@@ -505,10 +505,17 @@ export function ensureApp(app, org, io = createIo()) {
 /**
  * Register the payload on the Fly app.
  *
- * `--stage` sets the secrets without deploying, so the app is never left
- * running with a partial secret set: the deploy that follows is what
- * starts the Machine, and the supervisor refuses to boot without its
- * required sources.
+ * The values are set DIRECTLY, not with `--stage`.
+ *
+ * `--stage` holds the values for the next release, and on the live
+ * platform Machine that never happened: the deploy created the canary
+ * Machine, and that Machine still carried the placeholder
+ * (`REPLACE_ME_SEE_QUINN_NOTES`) that had been registered out of band.
+ * The platform booted with a placeholder Redis URL, tasks-api rejected it
+ * as an invalid URL and crash-looped, while `fly secrets list` showed the
+ * staged values sitting on the app. Setting the values directly makes
+ * them the app's live values, so every Machine -- including the one the
+ * deploy creates -- starts with them.
  *
  * @param {string} app
  * @param {{name: string, value: string}[]} secrets
@@ -516,7 +523,7 @@ export function ensureApp(app, org, io = createIo()) {
  * @returns {number} exit code
  */
 export function applySecrets(app, secrets, io = createIo()) {
-  const args = ['secrets', 'set', '--app', app, '--stage'];
+  const args = ['secrets', 'set', '--app', app];
   for (const secret of secrets) args.push(`${secret.name}=${secret.value}`);
   io.log(`Registering ${secrets.length} secrets on ${app}`);
   const { status, stderr } = flyctl(args, io);
@@ -527,6 +534,49 @@ export function applySecrets(app, secrets, io = createIo()) {
     );
     return status;
   }
+  return verifySecretsRegistered(app, secrets, io);
+}
+
+/**
+ * Read the app's registered secret names back and confirm every one of
+ * them landed.
+ *
+ * `flyctl secrets set` exiting 0 says the command was accepted, not that
+ * every name landed -- and a name that silently did not land is exactly
+ * the failure this script exists to prevent.
+ *
+ * @param {string} app
+ * @param {{name: string, value: string}[]} secrets
+ * @param {object} [io]
+ * @returns {number} exit code
+ */
+export function verifySecretsRegistered(app, secrets, io = createIo()) {
+  const { status, stdout, stderr } = flyctl(['secrets', 'list', '--app', app, '--json'], io);
+  if (status !== 0) {
+    io.errorLog(
+      `::error::could not read the secret list back from ${app} (exit ${status})` +
+        (stderr ? `\n${redactOutput(stderr)}` : '')
+    );
+    return 1;
+  }
+  let registered = [];
+  try {
+    const parsed = JSON.parse(stdout);
+    registered = (Array.isArray(parsed) ? parsed : [])
+      .map((entry) => entry?.Name ?? entry?.name)
+      .filter(Boolean);
+  } catch {
+    io.errorLog(`::error::could not parse the secret list read back from ${app}`);
+    return 1;
+  }
+  const absent = secrets.map((secret) => secret.name).filter((name) => !registered.includes(name));
+  if (absent.length > 0) {
+    io.errorLog(
+      `::error::${absent.length} secret(s) did not register on ${app}: ${absent.join(', ')}`,
+    );
+    return 1;
+  }
+  io.log(`Verified ${secrets.length} secret(s) registered on ${app}`);
   return 0;
 }
 
