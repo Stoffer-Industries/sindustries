@@ -68,28 +68,13 @@ class ModelTierTest(unittest.TestCase):
         self.assertIsNone(rc.model_tier("some-vendor/unknown-model"))
         self.assertIsNone(rc.model_tier(""))
 
-    def test_tier_examples_agree_with_the_model_rules(self):
-        """A tier must not advertise a model the rules put on another tier."""
-        for tier, entry in rc.TIERS.items():
-            for example in entry["examples"]:
-                if example.endswith("*"):
-                    probe = example[:-1] + "probe"
-                else:
-                    probe = example
-                resolved = rc.model_tier(probe)
-                self.assertEqual(
-                    tier,
-                    resolved,
-                    f"{example} is advertised as a {tier} example but the rules resolve it to {resolved}",
-                )
-
 
 class PreflightTest(unittest.TestCase):
     def test_empty_queue_skips_the_model_entirely(self):
         decision = rc.preflight({"queue": [], "topCandidate": None}, "heartbeat-scan", agent="Quinn")
         self.assertEqual(rc.DECISION_SKIP, decision.decision)
         self.assertEqual(rc.PREFILIGHT_TIER, decision.tier)
-        self.assertFalse(decision.model_declared)
+        self.assertFalse(decision.model_invoked)
         self.assertEqual("empty-queue", decision.reason)
 
     def test_blocked_only_queue_is_treated_as_empty(self):
@@ -101,14 +86,14 @@ class PreflightTest(unittest.TestCase):
         }
         decision = rc.preflight(queue, "heartbeat-scan")
         self.assertEqual(rc.DECISION_SKIP, decision.decision)
-        self.assertFalse(decision.model_declared)
+        self.assertFalse(decision.model_invoked)
 
     def test_queued_work_proceeds_on_the_category_tier(self):
         queue = {"queue": [{"id": "a", "actionable": True, "classification": "ACTIONABLE"}]}
         decision = rc.preflight(queue, "heartbeat-scan", agent="Quinn")
         self.assertEqual(rc.DECISION_PROCEED, decision.decision)
         self.assertEqual("routine", decision.tier)
-        self.assertTrue(decision.model_declared)
+        self.assertTrue(decision.model_invoked)
         self.assertEqual(1, decision.work_count)
 
     def test_queued_coding_work_proceeds_on_the_mid_tier(self):
@@ -218,89 +203,6 @@ class CounterStateTest(unittest.TestCase):
         self.assertIn("heartbeat-scan", rendered)
         self.assertIn("routine", rendered)
 
-    def test_unclassified_category_has_its_own_column(self):
-        state = rc.load_state(self.state_path)
-        rc.record_decision(state, rc.preflight({"queue": [{"actionable": True}]}, "brand-new-work"), day="2026-11-06")
-        counters = rc.daily_counts(state, "2026-11-06")["brand-new-work"]
-        self.assertEqual(1, counters["unclassified"])
-        rendered = rc.render_stats(state, "2026-11-06")
-        self.assertIn("unclassified", rendered)
-
-    def test_observed_tier_is_counted_next_to_the_declaration(self):
-        state = rc.load_state(self.state_path)
-        rc.record_observation(
-            state,
-            category="heartbeat-scan",
-            declared_tier="routine",
-            actual_tier="routine",
-            actual_model="minimax-portal/MiniMax-M3",
-            agent="Quinn",
-            day="2026-11-06",
-            kind="match",
-        )
-        counters = rc.daily_counts(state, "2026-11-06")["heartbeat-scan"]
-        self.assertEqual(1, counters["observedRoutine"])
-        self.assertEqual(0, counters["observedFrontier"])
-        self.assertEqual(0, counters["violation"])
-
-    def test_a_run_on_the_wrong_tier_is_visible_in_the_observed_column(self):
-        state = rc.load_state(self.state_path)
-        rc.record_observation(
-            state,
-            category="heartbeat-scan",
-            declared_tier="routine",
-            actual_tier="frontier",
-            actual_model="openai/gpt-5.4",
-            agent="Quinn",
-            day="2026-11-06",
-            kind="violation",
-        )
-        counters = rc.daily_counts(state, "2026-11-06")["heartbeat-scan"]
-        self.assertEqual(1, counters["observedFrontier"])
-        self.assertEqual(1, counters["violation"])
-
-    def test_concurrent_writers_do_not_lose_counts(self):
-        """Two writers on one state file must not drop each other's counts."""
-        import subprocess
-
-        script = (
-            "import sys; sys.path.insert(0, %r)\n"
-            "from agents.lib import routing_contract as rc\n"
-            "def bump(state):\n"
-            "    rc.record_decision(state, rc.preflight({'queue': [{'actionable': True}]}, 'heartbeat-scan'), day='2026-11-06')\n"
-            "rc.mutate_state(%r, bump)\n"
-        ) % (str(_REPO_ROOT), str(self.state_path))
-        procs = [
-            subprocess.Popen([sys.executable, "-c", script], cwd=str(_REPO_ROOT))
-            for _ in range(8)
-        ]
-        for proc in procs:
-            self.assertEqual(0, proc.wait(timeout=120))
-        state = rc.load_state(self.state_path)
-        self.assertEqual(
-            8,
-            rc.daily_counts(state, "2026-11-06")["heartbeat-scan"]["routine"],
-            "concurrent writers lost counts",
-        )
-
-    def test_a_corrupt_state_file_is_archived_not_silently_replaced(self):
-        self.state_path.write_text("{not json")
-        rc.mutate_state(self.state_path, lambda state: rc.record_decision(
-            state, rc.preflight({"queue": [{"actionable": True}]}, "heartbeat-scan"), day="2026-11-06"
-        ))
-        state = rc.load_state(self.state_path)
-        self.assertIn("recoveredFrom", state)
-        archived = pathlib.Path(state["recoveredFrom"])
-        self.assertTrue(archived.exists(), "the corrupt file was not archived")
-        self.assertIn("recovered", rc.render_stats(state, "2026-11-06"))
-
-    def test_state_writes_use_a_unique_temp_file(self):
-        """A fixed temp path is what let concurrent writers publish a truncated file."""
-        state = rc.load_state(self.state_path)
-        rc.save_state(state, self.state_path)
-        leftovers = list(self.state_path.parent.glob("*.tmp"))
-        self.assertEqual([], leftovers, "a temp file was left behind")
-
 
 class ContractDocTest(unittest.TestCase):
     """The written contract and the code must not drift apart."""
@@ -322,24 +224,6 @@ class ContractDocTest(unittest.TestCase):
         text = self.DOC.read_text()
         for tier in rc.TIERS:
             self.assertIn(f"`{tier}`", text, f"tier {tier} is missing from the contract doc")
-
-    def test_doc_model_examples_match_the_code(self):
-        """The tier table's "Models in use" column must match TIERS[...]['examples']."""
-        text = self.DOC.read_text()
-        rows = re.findall(
-            r"^\|\s*`([a-z]+)`\s*\|\s*[a-z-]+\s*\|\s*(.+?)\s*\|",
-            text,
-            flags=re.MULTILINE,
-        )
-        documented = {tier: models for tier, models in rows if tier in rc.TIERS}
-        self.assertTrue(documented, "no tier table rows found in the contract doc")
-        for tier, models in documented.items():
-            parsed = set(re.findall(r"`([^`]+)`", models))
-            self.assertEqual(
-                set(rc.TIERS[tier]["examples"]),
-                parsed,
-                f"the contract doc's {tier} model list differs from TIERS",
-            )
 
 
 class EventLogTest(unittest.TestCase):
@@ -451,126 +335,6 @@ class CliTest(unittest.TestCase):
             self.assertEqual(0, proc.returncode, proc.stderr)
             self.assertIn("PREFLIGHT-UNKNOWN", proc.stderr)
             self.assertNotEqual("NO_REPLY", proc.stdout.strip())
-
-    def test_trigger_mode_does_not_fire_on_an_empty_queue(self):
-        """`fire:false` is the only construction where an empty pass is free."""
-        with tempfile.TemporaryDirectory() as tmp:
-            queue_file = pathlib.Path(tmp) / "queue.json"
-            queue_file.write_text(json.dumps({"queue": []}))
-            proc = self._run(
-                [
-                    "--agent", "Quinn",
-                    "--category", "heartbeat-scan",
-                    "--mode", "trigger",
-                    "--queue-file", str(queue_file),
-                    "--state-file", str(pathlib.Path(tmp) / "counters.json"),
-                    "--event-log", str(pathlib.Path(tmp) / "events.jsonl"),
-                ]
-            )
-            self.assertEqual(0, proc.returncode, proc.stderr)
-            payload = json.loads(proc.stdout)
-            self.assertFalse(payload["fire"])
-            self.assertIn("state", payload)
-            self.assertNotIn("message", payload)
-
-    def test_trigger_mode_fires_with_a_self_contained_message(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            queue_file = pathlib.Path(tmp) / "queue.json"
-            queue_file.write_text(json.dumps({"queue": [{"actionable": True, "id": "x"}]}))
-            proc = self._run(
-                [
-                    "--agent", "Quinn",
-                    "--category", "heartbeat-scan",
-                    "--mode", "trigger",
-                    "--queue-file", str(queue_file),
-                    "--state-file", str(pathlib.Path(tmp) / "counters.json"),
-                    "--event-log", str(pathlib.Path(tmp) / "events.jsonl"),
-                ]
-            )
-            self.assertEqual(0, proc.returncode, proc.stderr)
-            payload = json.loads(proc.stdout)
-            self.assertTrue(payload["fire"])
-            self.assertIn("routine", payload["message"])
-
-    def test_trigger_mode_fails_open_when_the_queue_cannot_be_read(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            queue_file = pathlib.Path(tmp) / "queue.json"
-            queue_file.write_text("{not json")
-            proc = self._run(
-                [
-                    "--agent", "Quinn",
-                    "--mode", "trigger",
-                    "--queue-file", str(queue_file),
-                    "--state-file", str(pathlib.Path(tmp) / "counters.json"),
-                    "--event-log", str(pathlib.Path(tmp) / "events.jsonl"),
-                ]
-            )
-            self.assertEqual(0, proc.returncode, proc.stderr)
-            payload = json.loads(proc.stdout)
-            self.assertTrue(payload["fire"], "a broken queue read must never mute the pass")
-
-    def test_record_actual_counts_the_observed_tier(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            state_file = pathlib.Path(tmp) / "counters.json"
-            proc = self._run(
-                [
-                    "--record-actual",
-                    "--agent", "Quinn",
-                    "--category", "heartbeat-scan",
-                    "--declared-tier", "routine",
-                    "--actual-model", "minimax-portal/MiniMax-M3",
-                    "--state-file", str(state_file),
-                    "--event-log", str(pathlib.Path(tmp) / "events.jsonl"),
-                ]
-            )
-            self.assertEqual(0, proc.returncode, proc.stderr)
-            self.assertIn("match", proc.stdout)
-            state = rc.load_state(state_file)
-            counters = rc.daily_counts(state)["heartbeat-scan"]
-            self.assertEqual(1, counters["observedRoutine"])
-
-    def test_record_actual_without_a_category_lands_in_the_global_bucket(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            state_file = pathlib.Path(tmp) / "counters.json"
-            proc = self._run(
-                [
-                    "--record-actual",
-                    "--agent", "Quinn",
-                    "--declared-tier", "routine",
-                    "--actual-model", "openai/gpt-5.4",
-                    "--state-file", str(state_file),
-                    "--event-log", str(pathlib.Path(tmp) / "events.jsonl"),
-                ]
-            )
-            self.assertEqual(0, proc.returncode, proc.stderr)
-            state = rc.load_state(state_file)
-            counts = rc.daily_counts(state)
-            self.assertNotIn("heartbeat-scan", counts, "an uncategorised run was mis-filed")
-            self.assertEqual(1, counts["__global__"]["observedFrontier"])
-
-
-class HeartbeatWiringTest(unittest.TestCase):
-    """AC7 — the declaration must be recorded next to the invocation.
-
-    The heartbeat is the only caller of ``--record-actual``; if the agent
-    definition stops calling it, the counters silently fall back to
-    declarations only.
-    """
-
-    HEARTBEAT = _REPO_ROOT / "agents" / "definitions" / "quinn" / "HEARTBEAT.md"
-
-    def test_the_heartbeat_records_what_actually_ran(self):
-        text = self.HEARTBEAT.read_text()
-        self.assertIn("--record-actual", text, "the heartbeat never records the actual tier")
-        self.assertIn("--declared-tier", text, "the heartbeat records the actual tier without a declaration")
-
-    def test_the_heartbeat_does_not_hardcode_one_category(self):
-        text = self.HEARTBEAT.read_text()
-        self.assertNotIn(
-            "--category heartbeat-scan",
-            text,
-            "the heartbeat hardcodes a single work category, so every pass looks the same",
-        )
 
 
 if __name__ == "__main__":

@@ -30,13 +30,10 @@ the failure mode this contract exists to prevent.
 
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import json
 import os
 import pathlib
 import re
-import tempfile
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
@@ -56,8 +53,7 @@ TIERS: dict[str, dict[str, Any]] = {
         "examples": [
             "minimax-portal/MiniMax-M3",
             "minimax-portal/MiniMax-M3.1-Flash",
-            "ollama/<local>",
-            "anthropic/claude-haiku-*",
+            "ollama/<local model>",
         ],
     },
     "mid": {
@@ -65,6 +61,7 @@ TIERS: dict[str, dict[str, Any]] = {
         "summary": "Approved coding work and code review.",
         "examples": [
             "anthropic/claude-sonnet-5",
+            "anthropic/claude-haiku-*",
         ],
     },
     "frontier": {
@@ -181,7 +178,7 @@ class RoutingDecision:
     category: str
     work_count: int
     reason: str
-    model_declared: bool = False
+    model_invoked: bool = False
     agent: str | None = None
     unclassified: bool = False
 
@@ -255,7 +252,7 @@ def preflight(
             category=category,
             work_count=0,
             reason="empty-queue",
-            model_declared=False,
+            model_invoked=False,
             agent=agent,
             unclassified=unclassified,
         )
@@ -267,7 +264,7 @@ def preflight(
         category=category,
         work_count=len(items),
         reason="work-queued",
-        model_declared=True,
+        model_invoked=True,
         agent=agent,
         unclassified=unclassified,
     )
@@ -287,7 +284,7 @@ def unknown_decision(category: str, agent: str | None = None, reason: str = "pre
         category=category,
         work_count=0,
         reason=reason,
-        model_declared=False,
+        model_invoked=False,
         agent=agent,
         unclassified=not is_known_category(category),
     )
@@ -336,39 +333,10 @@ def check_declaration(
 
 STATE_VERSION = 1
 
-#: Counter buckets per category. ``routine``/``mid``/``frontier`` count the
-#: tier a pass *declared* before it ran; ``observedRoutine``/``observedMid``/
-#: ``observedFrontier`` count the tier that *actually* ran. A declaration alone
-#: cannot prove which model was invoked, so both are needed to make a tier
-#: drift — or a cost collapse — observable. ``preflight`` counts skipped
-#: passes (no model invoked); ``violation`` and ``unmeasured`` count runs that
-#: did not match their declaration; ``unclassified`` counts passes whose work
-#: category is missing from the contract table.
-COUNTER_BUCKETS = (
-    "routine",
-    "mid",
-    "frontier",
-    "observedRoutine",
-    "observedMid",
-    "observedFrontier",
-    "preflight",
-    "violation",
-    "unmeasured",
-    "unclassified",
-)
-
-#: Declared-tier buckets, in the order the operator table renders them.
-DECLARED_BUCKETS = ("routine", "mid", "frontier")
-
-#: Observed-tier buckets, in the order the operator table renders them.
-OBSERVED_BUCKETS = ("observedRoutine", "observedMid", "observedFrontier")
-
-#: Maps a tier name to its observed-tier counter bucket.
-OBSERVED_BUCKET_FOR_TIER = {
-    "routine": "observedRoutine",
-    "mid": "observedMid",
-    "frontier": "observedFrontier",
-}
+#: Counter buckets per category. ``preflight`` counts skipped passes (no
+#: model invoked); the three model tiers count invocations; ``violation``
+#: counts runs that landed on an unexpected tier.
+COUNTER_BUCKETS = ("routine", "mid", "frontier", "preflight", "violation", "unmeasured")
 
 
 def default_state_path() -> pathlib.Path:
@@ -389,25 +357,16 @@ def _empty_state() -> dict[str, Any]:
     return {"version": STATE_VERSION, "updatedAt": None, "days": {}, "violations": []}
 
 
-def _read_state_file(target: pathlib.Path) -> tuple[dict[str, Any], pathlib.Path | None]:
-    """Read the counter state file.
-
-    Returns ``(state, corrupt_path)``. ``corrupt_path`` is set when the file
-    exists but could not be parsed — the caller decides whether to archive it.
-    Reading never mutates the file, so a read-only surface (``--stats``)
-    cannot destroy evidence.
-    """
+def load_state(path: pathlib.Path | str | None = None) -> dict[str, Any]:
+    """Load counter state, tolerating a missing or corrupt file."""
+    target = pathlib.Path(path) if path else default_state_path()
     try:
         with open(target) as handle:
             data = json.load(handle)
-    except FileNotFoundError:
-        return _empty_state(), None
-    except json.JSONDecodeError:
-        return _empty_state(), target
-    except OSError:
-        return _empty_state(), None
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return _empty_state()
     if not isinstance(data, dict):
-        return _empty_state(), target
+        return _empty_state()
     data.setdefault("version", STATE_VERSION)
     data.setdefault("days", {})
     data.setdefault("violations", [])
@@ -415,94 +374,19 @@ def _read_state_file(target: pathlib.Path) -> tuple[dict[str, Any], pathlib.Path
         data["days"] = {}
     if not isinstance(data["violations"], list):
         data["violations"] = []
-    return data, None
-
-
-def load_state(path: pathlib.Path | str | None = None) -> dict[str, Any]:
-    """Load counter state, tolerating a missing or corrupt file."""
-    target = pathlib.Path(path) if path else default_state_path()
-    state, _corrupt = _read_state_file(target)
-    return state
-
-
-@contextlib.contextmanager
-def state_lock(path: pathlib.Path | str | None = None):
-    """Hold an exclusive lock on the counter state.
-
-    The lock lives in a sibling ``.lock`` file so it survives the atomic
-    replace of the state file itself. It is held across the whole
-    read-modify-write, so two agents writing the same counters on one host
-    cannot drop each other's increments.
-    """
-    target = pathlib.Path(path) if path else default_state_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = target.with_name(target.name + ".lock")
-    handle = open(lock_path, "a+")
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        yield target
-    finally:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        finally:
-            handle.close()
-
-
-def _archive_corrupt(path: pathlib.Path) -> pathlib.Path:
-    """Move an unparseable state file aside so the loss stays visible."""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    archived = path.with_name(f"{path.name}.corrupt-{stamp}")
-    try:
-        os.replace(path, archived)
-    except OSError:
-        return path
-    return archived
+    return data
 
 
 def save_state(state: Mapping[str, Any], path: pathlib.Path | str | None = None) -> pathlib.Path:
-    """Write counter state atomically.
-
-    The temp file name is unique per writer (``tempfile.mkstemp``), so two
-    writers on the same host cannot interleave their writes into one
-    truncated file that then gets published by ``os.replace`` — which used to
-    zero the whole counter history without an error.
-    """
+    """Write counter state atomically (temp file + replace)."""
     target = pathlib.Path(path) if path else default_state_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=target.name + ".", suffix=".tmp")
-    tmp = pathlib.Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w") as handle:
-            json.dump(state, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, target)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with open(tmp, "w") as handle:
+        json.dump(state, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp, target)
     return target
-
-
-def mutate_state(path: pathlib.Path | str | None, mutator) -> dict[str, Any]:
-    """Apply ``mutator`` to the counter state under an exclusive lock.
-
-    The lock is held across load → mutate → save, so concurrent writers
-    cannot silently drop each other's counts. A state file that cannot be
-    parsed is archived (``<name>.corrupt-<timestamp>``) rather than silently
-    replaced by an empty one: a lost day must not be indistinguishable from
-    "no frontier calls happened".
-    """
-    target = pathlib.Path(path) if path else default_state_path()
-    with state_lock(target):
-        state, corrupt = _read_state_file(target)
-        if corrupt is not None:
-            archived = _archive_corrupt(corrupt)
-            state = _empty_state()
-            state["recoveredFrom"] = str(archived)
-        mutator(state)
-        save_state(state, target)
-    return state
 
 
 def _day_bucket(state: dict[str, Any], day: str) -> dict[str, Any]:
@@ -533,11 +417,6 @@ def record_decision(
         counters[PREFILIGHT_TIER] += 1
     elif decision.decision == DECISION_PROCEED:
         counters[decision.tier] = counters.get(decision.tier, 0) + 1
-    elif decision.decision == DECISION_UNKNOWN:
-        # An unknown decision means the preflight could not be evaluated. It is
-        # a pass that ran, but with no measured tier — counted so a
-        # systematically failing preflight leaves a trace.
-        counters["unmeasured"] += 1
     if decision.unclassified:
         counters["unclassified"] = counters.get("unclassified", 0) + 1
 
@@ -580,54 +459,6 @@ def record_violation(
     return state
 
 
-def record_observation(
-    state: dict[str, Any],
-    category: str | None,
-    declared_tier: str | None,
-    actual_tier: str | None,
-    actual_model: str | None = None,
-    agent: str | None = None,
-    day: str | None = None,
-    kind: str = "violation",
-) -> dict[str, Any]:
-    """Record what actually ran, next to what was declared.
-
-    The observed tier is counted in its own bucket, so a category that ran on
-    a different tier than it declared stays visible even when the run is not
-    a violation. This is the "recorded alongside the invocation" half of the
-    declaration contract — a declaration alone proves nothing.
-    """
-    day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    bucket = _day_bucket(state, day)
-    categories = bucket["categories"]
-    key = category or "__global__"
-    counters = categories.setdefault(key, {name: 0 for name in COUNTER_BUCKETS})
-    for name in COUNTER_BUCKETS:
-        counters.setdefault(name, 0)
-    observed_key = OBSERVED_BUCKET_FOR_TIER.get(actual_tier or "")
-    if observed_key:
-        counters[observed_key] += 1
-    if kind == "match":
-        # A run that matched its declaration is not a violation and not
-        # unmeasured — it is the healthy case. It is counted as observed and
-        # left out of the violation list.
-        state["updatedAt"] = datetime.now(timezone.utc).isoformat()
-        return state
-    record_violation(
-        state,
-        {
-            "kind": kind,
-            "declaredTier": declared_tier,
-            "actualTier": actual_tier,
-            "actualModel": actual_model,
-            "category": category,
-            "agent": agent,
-        },
-        day=day,
-    )
-    return state
-
-
 def append_event(event: Mapping[str, Any], path: pathlib.Path | str | None = None) -> pathlib.Path:
     """Append one routing event to the JSONL event log."""
     target = pathlib.Path(path) if path else default_event_log_path()
@@ -645,64 +476,28 @@ def daily_counts(state: Mapping[str, Any], day: str | None = None) -> dict[str, 
 
 
 def render_stats(state: Mapping[str, Any], day: str | None = None) -> str:
-    """Render the operator-facing per-category, per-tier counter table.
-
-    Two blocks: the tier each pass *declared* it would run on, and the tier
-    that *actually* ran. A declaration cannot prove which model was invoked,
-    so both are needed to make a tier drift — or a cost collapse — visible.
-    """
+    """Render the operator-facing per-category, per-tier counter table."""
     day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     counts = daily_counts(state, day)
-    lines: list[str] = []
-    recovered = state.get("recoveredFrom")
-    if recovered:
-        lines.append(f"! counter state was recovered from an unreadable file: {recovered}")
     if not counts:
-        lines.append(f"model routing counters — {day}: no recorded invocations")
-        return "\n".join(lines)
-
-    declared_header = (
-        f"{'category':<24} {'routine':>8} {'mid':>6} {'frontier':>9} "
-        f"{'preflight':>10} {'violation':>10} {'unclassified':>13}"
-    )
-    lines.append(f"model routing counters — {day}")
-    lines.append("declared tiers — what the pass said it would run on")
-    lines.append(declared_header)
-    lines.append("-" * len(declared_header))
-    totals = {name: 0 for name in ("routine", "mid", "frontier", "preflight", "violation", "unclassified")}
+        return f"model routing counters — {day}: no recorded invocations"
+    header = f"{'category':<24} {'routine':>8} {'mid':>6} {'frontier':>9} {'preflight':>10} {'violation':>10}"
+    lines = [f"model routing counters — {day}", header, "-" * len(header)]
     for category in sorted(counts):
         counters = counts[category]
         lines.append(
             f"{category:<24} {counters.get('routine', 0):>8} {counters.get('mid', 0):>6} "
             f"{counters.get('frontier', 0):>9} {counters.get('preflight', 0):>10} "
-            f"{counters.get('violation', 0):>10} {counters.get('unclassified', 0):>13}"
+            f"{counters.get('violation', 0):>10}"
         )
+    totals = {"routine": 0, "mid": 0, "frontier": 0, "preflight": 0, "violation": 0}
+    for counters in counts.values():
         for key in totals:
             totals[key] += int(counters.get(key, 0) or 0)
-    lines.append("-" * len(declared_header))
+    lines.append("-" * len(header))
     lines.append(
         f"{'TOTAL':<24} {totals['routine']:>8} {totals['mid']:>6} {totals['frontier']:>9} "
-        f"{totals['preflight']:>10} {totals['violation']:>10} {totals['unclassified']:>13}"
-    )
-
-    observed_header = f"{'category':<24} {'routine':>8} {'mid':>6} {'frontier':>9}"
-    lines.append("")
-    lines.append("observed tiers — what actually ran")
-    lines.append(observed_header)
-    lines.append("-" * len(observed_header))
-    observed_totals = {name: 0 for name in OBSERVED_BUCKETS}
-    for category in sorted(counts):
-        counters = counts[category]
-        lines.append(
-            f"{category:<24} {counters.get('observedRoutine', 0):>8} {counters.get('observedMid', 0):>6} "
-            f"{counters.get('observedFrontier', 0):>9}"
-        )
-        for key in observed_totals:
-            observed_totals[key] += int(counters.get(key, 0) or 0)
-    lines.append("-" * len(observed_header))
-    lines.append(
-        f"{'TOTAL':<24} {observed_totals['observedRoutine']:>8} {observed_totals['observedMid']:>6} "
-        f"{observed_totals['observedFrontier']:>9}"
+        f"{totals['preflight']:>10} {totals['violation']:>10}"
     )
     return "\n".join(lines)
 
@@ -718,13 +513,10 @@ def contract_table() -> str:
 __all__ = [
     "CATEGORY_TIERS",
     "COUNTER_BUCKETS",
-    "DECLARED_BUCKETS",
     "DECISION_PROCEED",
     "DECISION_SKIP",
     "DECISION_UNKNOWN",
     "MODEL_TIER_RULES",
-    "OBSERVED_BUCKETS",
-    "OBSERVED_BUCKET_FOR_TIER",
     "PREFILIGHT_TIER",
     "RoutingDecision",
     "TIERS",
@@ -740,14 +532,11 @@ __all__ = [
     "load_state",
     "model_class",
     "model_tier",
-    "mutate_state",
     "preflight",
     "record_decision",
-    "record_observation",
     "record_violation",
     "render_stats",
     "save_state",
-    "state_lock",
     "tier_examples",
     "unknown_decision",
 ]

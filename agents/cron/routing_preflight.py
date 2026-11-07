@@ -23,12 +23,6 @@ decision)::
 
     routing_preflight.py --agent Quinn --category heartbeat-scan --mode heartbeat
 
-Trigger mode (Gateway automation condition-watcher contract — ``json({fire,
-message?, state?})`` on stdout; ``fire:false`` saves state and runs **no
-model at all**)::
-
-    routing_preflight.py --agent Quinn --category heartbeat-scan --mode trigger
-
 Operator surface (per-category, per-tier counters)::
 
     routing_preflight.py --stats
@@ -68,9 +62,6 @@ DEFAULT_TASKS_API_BASE = "http://localhost:4001/api/v1"
 SILENT_TOKEN = "NO_REPLY"
 UNKNOWN_TOKEN = "PREFLIGHT-UNKNOWN"
 
-#: Category used when a preflight mode is invoked without one.
-DEFAULT_CATEGORY = "heartbeat-scan"
-
 
 def fetch_queue(agent: str, tasks_api_base: str) -> Any:
     """Fetch the agent's work queue using the shared read-only queue script."""
@@ -106,49 +97,28 @@ def _decision_line(decision: rc.RoutingDecision) -> str:
 
 def cmd_probe(args: argparse.Namespace) -> int:
     agent = args.agent
-    category = args.category or DEFAULT_CATEGORY
     try:
         queue = read_queue_file(args.queue_file) if args.queue_file else fetch_queue(agent, args.tasks_api_base)
     except Exception as exc:  # noqa: BLE001 — a preflight error must fail open
-        decision = rc.unknown_decision(category, agent, reason=f"preflight-error: {exc}")
-        _record(decision, args)
+        decision = rc.unknown_decision(args.category, agent, reason=f"preflight-error: {exc}")
         print(UNKNOWN_TOKEN, file=sys.stderr)
         print(json.dumps(decision.to_dict(), sort_keys=True), file=sys.stderr)
         if args.mode == "heartbeat":
             # The agent is expected to fall back to the plain queue command.
             print(f"{UNKNOWN_TOKEN} fallback=agent_task_queue.py")
-        elif args.mode == "trigger":
-            # Fail open: a broken queue read must never mute the pass.
-            print(
-                json.dumps(
-                    {
-                        "fire": True,
-                        "message": (
-                            "Routing preflight could not evaluate the work queue "
-                            f"({exc}). Run the normal heartbeat procedure."
-                        ),
-                        "state": {"lastError": str(exc)[:200]},
-                    },
-                    sort_keys=True,
-                )
-            )
         elif args.json:
             print(json.dumps(decision.to_dict(), sort_keys=True))
         else:
             print(UNKNOWN_TOKEN)
         return 0
 
-    decision = rc.preflight(queue, category, agent=agent)
+    decision = rc.preflight(queue, args.category, agent=agent)
     _record(decision, args)
 
     if args.mode == "heartbeat":
         payload = dict(queue) if isinstance(queue, dict) else {"queue": queue}
         payload["routingDecision"] = decision.to_dict()
         print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
-
-    if args.mode == "trigger":
-        print(json.dumps(_trigger_payload(decision), sort_keys=True))
         return 0
 
     if decision.skipped:
@@ -166,41 +136,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
-def _trigger_payload(decision: rc.RoutingDecision) -> dict[str, Any]:
-    """Build the Gateway automation condition-watcher trigger contract.
-
-    The scheduler's ``trigger: {script}`` expects ``json({fire, message?,
-    state?})`` on stdout. ``fire:false`` saves the state and runs **no model
-    at all** — that is the only construction where an empty scheduled pass is
-    genuinely free. ``fire:true`` runs the job's payload, and ``message`` is
-    that run's entire context, so it has to stand alone.
-    """
-    state = {
-        "lastDecision": decision.decision,
-        "at": _now(),
-        "category": decision.category,
-        "tier": decision.tier,
-        "workCount": decision.work_count,
-    }
-    if decision.skipped:
-        return {"fire": False, "state": state}
-    message = (
-        f"Routing contract: proceed on the {decision.tier} tier "
-        f"(model class {decision.model_class}) for category {decision.category}; "
-        f"{decision.work_count} actionable item(s) in the work queue. "
-        "Run the normal procedure and declare the tier before the work starts."
-    )
-    return {"fire": True, "message": message, "state": state}
-
-
 def _record(decision: rc.RoutingDecision, args: argparse.Namespace) -> None:
     if getattr(args, "no_record", False):
         return
-
-    def mutate(state: dict[str, Any]) -> None:
-        rc.record_decision(state, decision, day=args.day)
-
-    rc.mutate_state(args.state_file, mutate)
+    state = rc.load_state(args.state_file)
+    rc.record_decision(state, decision, day=args.day)
+    rc.save_state(state, args.state_file)
     rc.append_event(
         {
             "at": _now(),
@@ -211,7 +152,7 @@ def _record(decision: rc.RoutingDecision, args: argparse.Namespace) -> None:
             "workCount": decision.work_count,
             "reason": decision.reason,
             "agent": decision.agent,
-            "modelDeclared": decision.model_declared,
+            "modelInvoked": decision.model_invoked,
             "unclassified": decision.unclassified,
         },
         args.event_log,
@@ -225,68 +166,39 @@ def _now() -> str:
 
 
 def cmd_record_actual(args: argparse.Namespace) -> int:
-    actual_model = args.actual_model or os.environ.get("OPENCLAW_ROUTING_ACTUAL_MODEL") or None
     violation = rc.check_declaration(
         args.declared_tier,
-        actual_model=actual_model,
+        actual_model=args.actual_model,
         actual_tier=args.actual_tier,
     )
     if violation is None:
-        if not getattr(args, "no_record", False):
-            _record_observation(args, actual_model=actual_model, kind="match")
-        print(f"routing: match tier={args.declared_tier} model={actual_model or '-'}")
+        print(f"routing: match tier={args.declared_tier} model={args.actual_model or '-'}")
         return 0
     violation = dict(violation)
-    # The category is recorded only when it was given explicitly. An
-    # un-attributed violation must not land in a misleading bucket — it goes
-    # to the global bucket instead.
     violation["category"] = args.category
     violation["agent"] = args.agent
-    kind = violation.get("kind", "violation")
     if not getattr(args, "no_record", False):
-        _record_observation(args, actual_model=actual_model, kind=kind)
+        state = rc.load_state(args.state_file)
+        rc.record_violation(state, violation, day=args.day)
+        rc.save_state(state, args.state_file)
+        rc.append_event(
+            {
+                "at": _now(),
+                "decision": "violation" if violation.get("kind") == "violation" else "unmeasured",
+                "tier": violation.get("declaredTier"),
+                "actualTier": violation.get("actualTier"),
+                "actualModel": violation.get("actualModel"),
+                "category": args.category,
+                "agent": args.agent,
+                "modelInvoked": True,
+            },
+            args.event_log,
+        )
     print(
-        f"routing: {kind} declared={violation.get('declaredTier')} "
-        f"actual={violation.get('actualTier') or '-'} model={actual_model or '-'}"
+        f"routing: {violation.get('kind')} declared={violation.get('declaredTier')} "
+        f"actual={violation.get('actualTier') or '-'} model={violation.get('actualModel') or '-'}"
     )
     return 0
-
-
-def _record_observation(
-    args: argparse.Namespace,
-    actual_model: str | None,
-    kind: str,
-) -> None:
-    """Record the observed tier next to the declared one."""
-    actual_tier = args.actual_tier or rc.model_tier(actual_model or "")
-
-    def mutate(state: dict[str, Any]) -> None:
-        rc.record_observation(
-            state,
-            category=args.category,
-            declared_tier=args.declared_tier,
-            actual_tier=actual_tier,
-            actual_model=actual_model,
-            agent=args.agent,
-            day=args.day,
-            kind=kind,
-        )
-
-    rc.mutate_state(args.state_file, mutate)
-    rc.append_event(
-        {
-            "at": _now(),
-            "decision": kind,
-            "tier": args.declared_tier,
-            "declaredTier": args.declared_tier,
-            "actualTier": actual_tier,
-            "actualModel": actual_model,
-            "category": args.category,
-            "agent": args.agent,
-            "modelInvoked": actual_model is not None,
-        },
-        args.event_log,
-    )
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
@@ -303,21 +215,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent", default="Quinn", help="Agent whose queue is checked")
     parser.add_argument(
         "--category",
-        default=None,
-        help=(
-            "Work category being routed (see agents/lib/routing_contract.py). "
-            f"Defaults to {DEFAULT_CATEGORY} in preflight modes; an omitted "
-            "category in --record-actual is recorded in the global bucket."
-        ),
+        default="heartbeat-scan",
+        help="Work category being routed (see agents/lib/routing_contract.py)",
     )
     parser.add_argument(
         "--mode",
-        choices=("probe", "heartbeat", "trigger"),
+        choices=("probe", "heartbeat"),
         default="probe",
-        help=(
-            "probe: compact decision line; heartbeat: full queue payload + decision; "
-            "trigger: the scheduler's {fire, message?, state?} condition-watcher contract"
-        ),
+        help="probe: compact decision line; heartbeat: full queue payload + decision",
     )
     parser.add_argument("--queue-file", help="Read the queue payload from a file instead of fetching it")
     parser.add_argument(
