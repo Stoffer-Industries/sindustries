@@ -229,11 +229,52 @@ This rolls the platform app back one release. It does **not** move traffic
    fly scale count worker=1 --app sindustries-auto-post-worker-staging --yes
    ```
 
-3. Scale the platform app to zero:
+3. Take the platform app down. **Which command you use depends on whether
+   the app has ever had a successful release**, because `fly scale count`
+   refuses to run on an app with no complete release:
 
    ```
-   fly scale count platform=0 --app sindustries-platform-staging --yes
+   fly releases --app sindustries-platform-staging
    ```
+
+   - **The app HAS a complete release** (the platform deployed successfully
+     and you are backing out a bad image):
+
+     ```
+     fly scale count platform=0 --app sindustries-platform-staging --yes
+     ```
+
+   - **The app has NO complete release** (every release FAILED — this is the
+     state after the first cutover attempt failed, and it is exactly when a
+     backout is most urgent). `fly scale count` exits with
+     `Error: this app has no complete releases. Run 'fly deploy' to create
+     one and rerun this command`, so it cannot be used. Destroy the Machines
+     instead:
+
+     ```
+     fly machine list --app sindustries-platform-staging
+     fly machine destroy <machine-id> --app sindustries-platform-staging --force
+     ```
+
+     Repeat for every Machine the list returns.
+
+   **Do not use `fly machine stop` to take the platform app down.** The
+   platform's deployed `http_service` sets `min_machines_running = 1` and
+   `auto_start_machines = true`, so Fly's autoscaler starts a stopped Machine
+   again within roughly half a minute. A stopped Machine is not a backout;
+   only `fly scale count` (against a released app) or destroying the Machines
+   holds.
+
+   Verify the app is actually down, and verify it again a minute later —
+   a Machine that has just been stopped may still be running when you first
+   look:
+
+   ```
+   fly machine list --app sindustries-platform-staging
+   ```
+
+   The expected result is `No machines are available on this app
+   sindustries-platform-staging`.
 
 **Keep the old apps deployable for the duration of the soak.** They are the
 backout, and they are cheap to keep around for a staging environment.
