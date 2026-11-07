@@ -263,6 +263,30 @@ so the relative form failed with `nginx: [emerg] open()
 the file at `/app/infra/cloud/platform/nginx.conf`, so that is the path the
 router is given.
 
+**The router logs on the inherited fd, not on a device node.** The
+supervisor spawns every child — the router included — with PIPED stdio. In
+that context `error_log /dev/stderr` fails to open with `nginx: [emerg]
+open() "/dev/stderr" failed (6: No such device or address)`, and the router
+exits before it can bind `:8080`, so fly-proxy cannot reach the platform
+and Fly's health check fails the Machine. The config therefore uses
+`error_log stderr` and `access_log stdout`, which log on the inherited fd 2
+and fd 1 directly.
+
+**The server-names hash bucket is sized for the longest server name.** The
+server names are up to 47 characters long
+(`content-scheduler-api.staging.sindustries.co.nz`), and nginx's default
+`server_names_hash_bucket_size` of 64 cannot hold them: the router refuses
+to start with `nginx: [emerg] could not build server_names_hash, you
+should increase server_names_hash_bucket_size: 64`. The config sets
+`server_names_hash_bucket_size 128` — the smallest power of two that holds
+every name in the file.
+
+Both router start-up failures have the same shape: the router never binds
+`:8080`, the platform answers nothing through fly-proxy, and the Machine's
+health check fails, which takes all four consolidated services down at
+once. `infra/cloud/platform/tests/platform-supervisor.test.mjs` asserts both
+invariants against the config file so neither can regress silently.
+
 **The deploy stays opt-in.** Provisioning the app and its secrets is safe
 at any time — no Machine runs until a deploy. The deploy itself is gated
 on the staging environment variable `STAGING_PLATFORM_DEPLOY_ENABLED=true`,
