@@ -6,25 +6,9 @@
 
 ASSIGNED ACTIVE TASK DISCOVERY — RUN FIRST
 
-**Declare this pass's work category first.** The declaration is a per-pass
-decision, not a constant. Pick the category from the contract table in
-`docs/systems/model-routing-contract.md` that matches the work this pass is
-actually doing:
+Before any specialised section or silent-success decision, fetch the unified read-only queue once:
 
-- `heartbeat-scan` (routine tier) — the default for a discovery-and-routing pass.
-- `code-review` or `approved-coding` (mid tier) — the pass's dominant work is reviewing or writing code.
-- `escalation`, `planning`, or `acceptance` (frontier tier) — the pass's dominant work is a product decision, an escalation to Tom, or an acceptance call.
-
-Then fetch the unified read-only queue once, through the model-routing preflight, with that category:
-
-`python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/cron/routing_preflight.py --agent Quinn --category <declared category> --mode heartbeat`
-
-The preflight performs that same queue read and adds one extra key, `routingDecision`, to the payload. Per `docs/systems/model-routing-contract.md`, this pass is declared on the tier the category belongs to before any model work starts, and the declaration is recorded in the routing counters.
-
-Read `routingDecision`:
-- `decision: "skip"` — the queue holds no actionable work. Still run the QUINN OPS TASKS query below (open untyped ops tasks sit outside this queue), then end the pass with no message if that query is empty too.
-- `decision: "proceed"` — there is work. Continue with the sections below as usual.
-- `PREFLIGHT-UNKNOWN` on stdout — the preflight itself could not run. Fall back to the plain queue command (`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`) and continue. An unknown result is never a skip.
+`TASKS_API_BASE_URL=http://localhost:4001/api/v1 python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/skills/ops/tasks-api/scripts/agent_task_queue.py --assignee Quinn --json`
 
 The queue combines assigned active tasks, Quinn's **global** tech-design approval scan across all feature/code tasks regardless of assignee, review requests, authored-PR feedback, and role-safe merge candidates. It returns one deterministic `topCandidate`. Action that candidate through the matching specialised section and existing workflow/PR skill; the queue itself never mutates tasks or GitHub.
 
@@ -433,16 +417,6 @@ been migrated separately; do not recreate date-suffixed keys.
 **Migration note:** The live state migration was run separately from this PR
 with backups and schema validation. State files remain outside the repository;
 the parser's legacy normalizer remains as a safety net for any older shape.
-
----
-
-## Record what actually ran
-
-At the end of every pass — including a quiet one — record the model that actually ran next to the declaration made at the start of the pass:
-
-`python3 /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries/agents/cron/routing_preflight.py --record-actual --agent Quinn --category <declared category> --declared-tier <tier for that category> --actual-model <model id from this pass's runtime context>`
-
-The declared tier is the tier the contract gives that category (`routine`, `mid`, or `frontier`). The actual model id is the model named in this pass's runtime context line. A run that lands on a different tier than it declared is recorded as a routing violation instead of being absorbed; a run with no observable model is recorded as `unmeasured`. An invocation nobody records is an invocation the contract cannot see, so this step runs even when the pass produced no output.
 
 ---
 

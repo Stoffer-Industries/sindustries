@@ -21,8 +21,10 @@ import { describe, it } from 'node:test';
 
 import {
   CHILDREN,
+  ROUTER,
   backoffDelay,
   buildChildEnv,
+  invalidRequiredSources,
   missingRequiredSources,
 } from '../platform-services.mjs';
 import { Child, createSupervisor } from '../platform-supervisor.mjs';
@@ -89,6 +91,59 @@ function fullParentEnv() {
   };
   return env;
 }
+
+describe('invalidRequiredSources', () => {
+  it('flags a required source that holds a placeholder', () => {
+    const child = CHILDREN.find((c) => c.name === 'tasks-api');
+    const env = fullParentEnv();
+    env.PLATFORM_TASKS_API_REDIS_URL = 'REPLACE_ME_SEE_QUINN_NOTES';
+
+    assert.deepEqual(invalidRequiredSources(child, env), [
+      'PLATFORM_TASKS_API_REDIS_URL',
+    ]);
+  });
+
+  it('flags a required database source that is not a Postgres DSN', () => {
+    const child = CHILDREN.find((c) => c.name === 'tasks-api');
+    const env = fullParentEnv();
+    env.PLATFORM_TASKS_API_DATABASE_URL = 'REPLACE_ME_SEE_QUINN_NOTES';
+
+    assert.deepEqual(invalidRequiredSources(child, env), [
+      'PLATFORM_TASKS_API_DATABASE_URL',
+    ]);
+  });
+
+  it('accepts a real Redis URL and a real Postgres DSN', () => {
+    for (const child of CHILDREN) {
+      assert.deepEqual(invalidRequiredSources(child, fullParentEnv()), []);
+    }
+  });
+
+  it('leaves absent sources to missingRequiredSources', () => {
+    const child = CHILDREN.find((c) => c.name === 'tasks-api');
+    const env = fullParentEnv();
+    delete env.PLATFORM_TASKS_API_REDIS_URL;
+
+    assert.deepEqual(invalidRequiredSources(child, env), []);
+    assert.deepEqual(missingRequiredSources(child, env), [
+      'PLATFORM_TASKS_API_REDIS_URL',
+    ]);
+  });
+});
+
+describe('the nginx router', () => {
+  it('is given an ABSOLUTE config path', () => {
+    const configIndex = ROUTER.command.indexOf('-c');
+    assert.ok(configIndex !== -1, 'the router must pass its config path');
+    const configPath = ROUTER.command[configIndex + 1];
+
+    assert.ok(
+      configPath.startsWith('/'),
+      `the nginx config path must be absolute (nginx resolves a relative -c path against /var/lib/nginx), got ${configPath}`,
+    );
+    assert.ok(configPath.endsWith('/nginx.conf'));
+  });
+});
 
 describe('buildChildEnv', () => {
   it('maps the app-level PLATFORM_* secret onto the child’s own variable name', () => {
@@ -252,6 +307,16 @@ describe('createSupervisor', () => {
 
     assert.equal(supervisor.start(), false);
     assert.equal(launched.length, 0, 'no child may start without its secrets');
+  });
+
+  it('refuses to start when a required secret holds a placeholder', () => {
+    const env = fullParentEnv();
+    env.PLATFORM_TASKS_API_REDIS_URL = 'REPLACE_ME_SEE_QUINN_NOTES';
+    const { spawn, launched } = fakeSpawner();
+    const supervisor = createSupervisor({ env, spawn, logger: () => {} });
+
+    assert.equal(supervisor.start(), false);
+    assert.equal(launched.length, 0, 'no child may start with a placeholder secret');
   });
 
   it('starts the router and all four children', () => {

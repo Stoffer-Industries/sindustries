@@ -54,11 +54,28 @@ function cutoverSection() {
   return text.slice(start, end);
 }
 
+/**
+ * The backout section of the runbook — §4 only.
+ *
+ * @returns {string}
+ */
+function backoutSection() {
+  const text = read(RUNBOOK);
+  const start = text.indexOf('## 4. Backout');
+  const end = text.indexOf('## 5. Cutover checklist');
+  assert.notEqual(start, -1, 'the runbook must have a backout section');
+  assert.notEqual(end, -1, 'the runbook must have a cutover checklist section');
+  return text.slice(start, end);
+}
+
 describe('platform cutover order', () => {
   it('scales the old auto-post worker to zero BEFORE the platform is deployed', () => {
     const section = cutoverSection();
-    const workerStop = section.indexOf(
-      'fly scale count 0 --app sindustries-auto-post-worker-staging'
+    // The process group is named in the command because an app whose
+    // group is not called `app` fails without it, so the assertion
+    // matches either form and checks the ORDER, not the exact flags.
+    const workerStop = section.search(
+      /fly scale count (?:\S+=)?0 --app sindustries-auto-post-worker-staging/
     );
     const deployStep = section.indexOf('### Step 2 — deploy the platform app');
     assert.notEqual(workerStop, -1, 'the cutover must scale the old auto-post worker to zero');
@@ -92,6 +109,54 @@ describe('platform cutover order', () => {
     }
     assert.match(section, /deploy-staging-platform\.yml/);
     assert.match(section, /STAGING_PLATFORM_DEPLOY_ENABLED/);
+  });
+});
+
+describe('platform backout', () => {
+  it('documents a backout for an app with NO complete release', () => {
+    // `fly scale count` refuses to run on an app whose releases have all
+    // failed ("this app has no complete releases"), which is exactly the
+    // state of the platform app after a failed first cutover. The backout
+    // must therefore also document destroying the Machines.
+    const section = backoutSection();
+    assert.match(
+      section,
+      /no complete release/i,
+      'the backout must distinguish the no-complete-release case'
+    );
+    assert.match(
+      section,
+      /fly machine destroy[^\n]*--force/,
+      'the backout must document destroying the Machines when scale count is unavailable'
+    );
+  });
+
+  it('does not tell the operator to stop the Machines to take the app down', () => {
+    // The platform's deployed http_service sets min_machines_running = 1
+    // and auto_start_machines = true, so the autoscaler restarts a
+    // stopped Machine. A stopped Machine is not a backout.
+    const section = backoutSection();
+    const commandBlocks = [...section.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((match) => match[1]);
+    for (const block of commandBlocks) {
+      assert.ok(
+        !/fly machine stop/.test(block),
+        'the backout must not instruct the operator to stop the Machines (the autoscaler restarts them)'
+      );
+    }
+    assert.match(
+      section,
+      /min_machines_running/,
+      'the backout must explain why stopping a Machine does not hold'
+    );
+  });
+
+  it('requires the app to be verified down, and verified again', () => {
+    // A backout is only evidence once it has been re-read after the
+    // autoscaler has had time to act.
+    const section = backoutSection();
+    assert.match(section, /fly machine list --app sindustries-platform-staging/);
+    assert.match(section, /No machines are available/);
+    assert.match(section, /again a minute later/i);
   });
 });
 

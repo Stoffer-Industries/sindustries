@@ -187,7 +187,17 @@ export const CHILDREN = [
 export const ROUTER = {
   name: 'nginx',
   role: 'router',
-  command: ['nginx', '-c', 'infra/cloud/platform/nginx.conf', '-g', 'daemon off;'],
+  // The config path is ABSOLUTE on purpose.
+  //
+  // nginx resolves a relative `-c` path against its own compile-time
+  // prefix (`/var/lib/nginx` on alpine), NOT against the child's cwd --
+  // so the relative form failed on the live platform Machine with
+  // `nginx: [emerg] open() "/var/lib/nginx/infra/cloud/platform/nginx.conf"
+  // failed (2: No such file or directory)` and the router crash-looped.
+  // The image puts this file at /app/infra/cloud/platform/nginx.conf
+  // (platform.Dockerfile: WORKDIR /app, then COPY infra/cloud/platform
+  // ./infra/cloud/platform), so the absolute path is the one that exists.
+  command: ['nginx', '-c', '/app/infra/cloud/platform/nginx.conf', '-g', 'daemon off;'],
   port: ROUTER_PORT,
 };
 
@@ -271,6 +281,56 @@ export function missingRequiredSources(child, parentEnv) {
   return (child.requiredSources ?? []).filter((source) => {
     const value = parentEnv?.[source];
     return value === undefined || value === '';
+  });
+}
+
+/**
+ * Does this value look like a Redis URL?
+ *
+ * The check is a protocol prefix, not `new URL()`: a Redis password may
+ * carry characters that make `new URL()` throw, and a false negative here
+ * would refuse to start a platform whose secret is perfectly valid.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+function looksLikeRedisUrl(value) {
+  return /^rediss?:\/\/\S+$/i.test(value);
+}
+
+/**
+ * Does this value look like a Postgres DSN?
+ *
+ * Protocol prefix only, for the same reason as the Redis check.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+function looksLikePostgresUrl(value) {
+  return /^postgres(?:ql)?:\/\/\S+$/i.test(value);
+}
+
+/**
+ * The app-level variables a child needs that are PRESENT but not usable.
+ *
+ * A required source that exists but carries a placeholder passes the
+ * presence check and then breaks the child at boot with an opaque error:
+ * the platform app was seeded out of band with `REPLACE_ME_SEE_QUINN_NOTES`,
+ * so tasks-api received that as REDIS_URL, rejected it as an invalid URL
+ * and crash-looped. The shape is checked here so the platform refuses to
+ * start with one clear message instead.
+ *
+ * @param {object} child        a CHILDREN entry
+ * @param {object} parentEnv    the app-level environment
+ * @returns {string[]} source names whose value has the wrong shape
+ */
+export function invalidRequiredSources(child, parentEnv) {
+  return (child.requiredSources ?? []).filter((source) => {
+    const value = parentEnv?.[source];
+    if (value === undefined || value === '') return false;
+    if (source.endsWith('_REDIS_URL')) return !looksLikeRedisUrl(value);
+    if (source.endsWith('_DATABASE_URL')) return !looksLikePostgresUrl(value);
+    return false;
   });
 }
 
