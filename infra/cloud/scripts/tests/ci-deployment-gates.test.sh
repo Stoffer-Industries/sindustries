@@ -471,15 +471,37 @@ with tempfile.TemporaryDirectory() as tmpdir:
 deploy_jobs = {
     'deploy-website-staging',
     'deploy-website-production',
-    'deploy-tasks-api-staging',
-    'deploy-budget-api-staging',
-    'deploy-content-scheduler-api-staging',
-    'deploy-auto-post-worker-staging',
+    'deploy-platform-staging',
     'deploy-gymtrack-production',
     'deploy-gymtrack-mcp-production',
     'deploy-health-probe-staging',
     'eas-update-production',
 }
+retired_deploy_jobs = {
+    'deploy-tasks-api-staging',
+    'deploy-budget-api-staging',
+    'deploy-content-scheduler-api-staging',
+    'deploy-auto-post-worker-staging',
+}
+for job_name in sorted(retired_deploy_jobs):
+    if job_name in jobs:
+        fail(f'ci.yml: retired deployment job {job_name} is still present')
+
+retired_changes_outputs = {
+    'tasks_api',
+    'budget_api',
+    'content_scheduler_api',
+    'auto_post_worker',
+}
+present_retired_outputs = sorted(
+    retired_changes_outputs & set(jobs.get('changes', {}).get('outputs', {}))
+)
+if present_retired_outputs:
+    fail(
+        'ci.yml: changes job still exports retired deployment outputs: '
+        f'{present_retired_outputs}'
+    )
+
 for job_name in sorted(deploy_jobs):
     job = jobs.get(job_name)
     if not job:
@@ -516,10 +538,7 @@ if 'deploy-website-staging' not in website_production_needs:
 
 called_workflows = {
     'website-deploy.yml',
-    'deploy-staging-tasks-api.yml',
-    'deploy-staging-budget-api.yml',
-    'deploy-staging-content-scheduler-api.yml',
-    'deploy-staging-auto-post-worker.yml',
+    'deploy-staging-platform.yml',
     'gymtrack-deploy.yml',
     'gymtrack-mcp-deploy.yml',
     'deploy-staging-health-probe.yml',
@@ -535,10 +554,7 @@ for name, doc in docs.items():
         fail(f'{name}: independent deployment triggers bypass CI: {sorted(forbidden)}')
 
 fly_names = {
-    'deploy-staging-tasks-api.yml',
-    'deploy-staging-budget-api.yml',
-    'deploy-staging-content-scheduler-api.yml',
-    'deploy-staging-auto-post-worker.yml',
+    'deploy-staging-platform.yml',
     'gymtrack-mcp-deploy.yml',
     'deploy-staging-health-probe.yml',
 }
@@ -571,12 +587,20 @@ for name in sorted(fly_names):
     if not version or version == 'latest':
         fail(f'{name}: flyctl must be pinned to an explicit version')
 
-for name in (
-    'deploy-staging-tasks-api.yml',
-    'deploy-staging-budget-api.yml',
-    'deploy-staging-content-scheduler-api.yml',
-    'deploy-staging-auto-post-worker.yml',
-):
+platform_steps = docs['deploy-staging-platform.yml'].get('jobs', {}).get('deploy', {}).get('steps', [])
+platform_preflight = next(
+    (
+        step for step in platform_steps
+        if step.get('name') == 'Require Fly deployment credential'
+    ),
+    None,
+)
+if not platform_preflight:
+    fail('deploy-staging-platform.yml: missing Fly deployment credential preflight')
+elif platform_preflight.get('env', {}).get('FLY_API_TOKEN') != '${{ secrets.FLY_API_TOKEN }}':
+    fail('deploy-staging-platform.yml: Fly preflight must read the masked FLY_API_TOKEN secret')
+
+for name in ('deploy-staging-platform.yml',):
     deploy_steps = docs[name].get('jobs', {}).get('deploy', {}).get('steps', [])
     deploy_command = '\n'.join(
         str(step.get('run', ''))
@@ -597,7 +621,7 @@ else:
     if not version or version == 'latest':
         fail('gymtrack-deploy.yml: Supabase CLI must be pinned to an explicit version')
 
-for name in ('deploy-staging-tasks-api.yml', 'deploy-staging-budget-api.yml', 'deploy-staging-content-scheduler-api.yml', 'deploy-staging-auto-post-worker.yml', 'deploy-staging-health-probe.yml'):
+for name in ('deploy-staging-platform.yml', 'deploy-staging-health-probe.yml'):
     if docs[name].get('concurrency', {}).get('cancel-in-progress') is not True:
         fail(f'{name}: staging must cancel superseded deployments')
 
@@ -638,17 +662,17 @@ if missing_producers:
         f'{missing_producers}'
     )
 
-# W43 audit F1 (AC3) — self-test: if the scheduler producer is removed, the
+# W43 audit F1 (AC3) — self-test: if the platform producer is removed, the
 # producer/consumer check above must fail. Run the assertion against a
 # mutated copy of the changes outputs and confirm it trips. Skipped only
 # when the suite has nothing to prove (zero consumers), which the check
 # above already guards against.
 mutated_outputs = set(changes_outputs)
-if 'content_scheduler_api' in mutated_outputs:
-    mutated_outputs.discard('content_scheduler_api')
+if 'platform' in mutated_outputs:
+    mutated_outputs.discard('platform')
     if not (consumer_refs - mutated_outputs):
         fail(
-            'ci.yml: producer/consumer check did not fail when content_scheduler_api '
+            'ci.yml: producer/consumer check did not fail when platform '
             'was removed from the changes job outputs — regression test is broken'
         )
 
@@ -691,32 +715,26 @@ else:
 
     scheduler_only_change = ['services/content-scheduler-api/src/server.ts']
     selected_scheduler_only = selected_outputs(scheduler_only_change)
-    if 'content_scheduler_api' not in selected_scheduler_only:
+    if 'platform' not in selected_scheduler_only:
         fail(
-            'ci.yml: scheduler-only change did not select the content_scheduler_api filter: '
+            'ci.yml: scheduler-only change did not select the platform filter: '
             f'changed={scheduler_only_change}, selected={sorted(selected_scheduler_only)}'
         )
-    # The worker shares the same source paths, so the auto_post_worker
-    # filter must also fire — this protects against an accidental
-    # divergence where one filter is updated without the other.
-    if 'auto_post_worker' not in selected_scheduler_only:
-        fail(
-            'ci.yml: scheduler-only change did not select the auto_post_worker filter: '
-            f'changed={scheduler_only_change}, selected={sorted(selected_scheduler_only)}'
-        )
+    for retired_filter in ('content_scheduler_api', 'auto_post_worker'):
+        if retired_filter in selected_scheduler_only:
+            fail(
+                f'ci.yml: scheduler-only change selected retired filter {retired_filter!r}: '
+                f'changed={scheduler_only_change}, selected={sorted(selected_scheduler_only)}'
+            )
 
     unrelated_change = ['apps/website/src/pages/index.tsx']
     selected_unrelated = selected_outputs(unrelated_change)
-    if 'content_scheduler_api' in selected_unrelated:
-        fail(
-            'ci.yml: unrelated website change selected the content_scheduler_api filter: '
-            f'changed={unrelated_change}, selected={sorted(selected_unrelated)}'
-        )
-    if 'auto_post_worker' in selected_unrelated:
-        fail(
-            'ci.yml: unrelated website change selected the auto_post_worker filter: '
-            f'changed={unrelated_change}, selected={sorted(selected_unrelated)}'
-        )
+    for retired_filter in ('content_scheduler_api', 'auto_post_worker'):
+        if retired_filter in selected_unrelated:
+            fail(
+                f'ci.yml: unrelated website change selected retired filter {retired_filter!r}: '
+                f'changed={unrelated_change}, selected={sorted(selected_unrelated)}'
+            )
     if 'website' not in selected_unrelated:
         fail(
             'ci.yml: unrelated website change did not select the website filter: '
