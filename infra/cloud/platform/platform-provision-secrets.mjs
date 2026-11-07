@@ -103,6 +103,8 @@
 
 import { spawnSync } from 'node:child_process';
 
+import { looksLikeRedisUrl } from './platform-services.mjs';
+
 export const PLATFORM_APP = 'sindustries-platform-staging';
 export const DEFAULT_ORG = 'personal';
 
@@ -212,6 +214,11 @@ export function pickRedisUrl(raw) {
     throw new Error('no Redis URL found in the Redis source secret');
   }
   const distinct = [...new Set(entries.map((entry) => entry.value))];
+  if (distinct.some((value) => !looksLikeRedisUrl(value))) {
+    throw new Error(
+      'the Redis source secret does not contain a usable redis:// or rediss:// URL',
+    );
+  }
   if (distinct.length > 1) {
     throw new Error(
       `the Redis source secret holds ${distinct.length} distinct URLs (labels: ${entries
@@ -576,7 +583,7 @@ export function verifySecretsRegistered(app, secrets, io = createIo()) {
     );
     return 1;
   }
-  io.log(`Verified ${secrets.length} secret(s) registered on ${app}`);
+  io.log(`Verified ${secrets.length} secret name(s) registered on ${app}`);
   return 0;
 }
 
