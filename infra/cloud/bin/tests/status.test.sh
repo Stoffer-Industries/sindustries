@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
-# status.test.sh — AC1 regression guard for infra/cloud/bin/status.
+# status.test.sh — regression guard for infra/cloud/bin/status.
 #
-# Stages a stub `flyctl` that emits canned JSON for `status --json` and
+# Stages a stub `flyctl` that emits canned JSON for `status --json` and a
+# stub `curl` that emits the supervisor's canned `/__status` payload, then
 # verifies bin/status:
 #
 #   1. Unknown service fails fast (exit 1).
-#   2. With no target, all four services are reported.
-#   3. With one service name, only that service is reported.
-#   4. Missing FLY_API_TOKEN fails preflight (exit 2).
+#   2. Missing FLY_API_TOKEN fails preflight (exit 2).
+#   3. With no target, the consolidated platform is reported ONCE (staging
+#      is one Fly app after the cutover — task 219fb673).
+#   4. A service name is an alias: it reports the same app, plus the
+#      state of ITS child inside that app, read from the supervisor's
+#      `/__status` payload.
 #   5. JSON output is valid JSON; degraded flag flips to true when the
 #      canned response omits the expected process type or machine list.
 #   6. Process type detection accepts both `app["ProcessTypes"]` and
 #      `app["Services"][i]["Ports"][j]["Type"]` shapes (real flyctl has
 #      shifted between these over time; bin/status must be resilient).
+#   7. An unreadable supervisor payload is reported as unknown, not as
+#      healthy: the report is degraded and says so.
+#   8. A child that is not running degrades the report for that service.
 
 set -euo pipefail
 
@@ -49,10 +56,28 @@ esac
 STUB
 chmod +x "$TMP/bin/flyctl"
 
-# Default canned payload: a healthy tasks-api app with one machine and the
-# expected process type under the modern `ProcessTypes` key.
-FLY_DEFAULT_STATUS_JSON='{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":42,"CreatedAt":"2026-09-15T08:00:00Z","Description":"stub"},"ProcessTypes":[{"Type":"tasks-api"}],"Machines":[{"ID":"m1","Region":"syd","State":"started","Name":"tasks-api"}],"Services":[{"Protocol":"TCP","Port":4001,"Ports":[{"Type":"tasks-api"}]}]}'
+# The supervisor's status endpoint, read through the platform's router.
+# It is the only per-child signal after the consolidation.
+cat >"$TMP/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+printf 'INVOKED: curl %s\n' "$*" >>"$FLY_LOG"
+if [[ "${SUPERVISOR_CURL_EXIT:-0}" != "0" ]]; then
+  exit "$SUPERVISOR_CURL_EXIT"
+fi
+printf '%s' "$SUPERVISOR_DEFAULT_JSON"
+STUB
+chmod +x "$TMP/bin/curl"
+
+# Default canned Fly payload: the consolidated platform app with one
+# machine and the platform process type under the modern `ProcessTypes`
+# key.
+FLY_DEFAULT_STATUS_JSON='{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":42,"CreatedAt":"2026-09-15T08:00:00Z","Description":"stub"},"ProcessTypes":[{"Type":"platform"}],"Machines":[{"ID":"m5","Region":"syd","State":"started","Name":"platform"}],"Services":[{"Protocol":"TCP","Port":8080,"Ports":[{"Type":"platform"}]}]}'
 export FLY_DEFAULT_STATUS_JSON
+
+# Default canned supervisor payload: the router and all four children
+# running.
+SUPERVISOR_DEFAULT_JSON='{"app":"sindustries-platform-staging","ready":true,"router":{"name":"nginx","state":"running","port":8080,"restarts":0},"children":[{"name":"tasks-api","role":"service","state":"running","pid":614,"port":4001,"restarts":0,"exitCode":null,"rssKb":68064},{"name":"budget-api","role":"service","state":"running","pid":615,"port":4002,"restarts":0,"exitCode":null,"rssKb":68696},{"name":"content-scheduler-api","role":"service","state":"running","pid":616,"port":4003,"restarts":0,"exitCode":null,"rssKb":68092},{"name":"auto-post-worker","role":"service","state":"running","pid":617,"port":null,"restarts":0,"exitCode":null,"rssKb":41000}]}'
+export SUPERVISOR_DEFAULT_JSON
 
 # Helper: write the FLY_STATUS_JSON payload that the stub will return for
 # the next invocation. Each invocation consumes a different payload if the
@@ -64,23 +89,16 @@ $json
 JSON
 }
 
-emit_status_json tasks-api-healthy '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":42},"ProcessTypes":[{"Type":"tasks-api"}],"Machines":[{"ID":"m1","Region":"syd","State":"started","Name":"tasks-api"}],"Services":[{"Protocol":"TCP","Port":4001,"Ports":[{"Type":"tasks-api"}]}]}'
-
-emit_status_json budget-api-healthy '{"Name":"sindustries-budget-api-staging","Status":"running","Deployed":true,"Release":{"Version":7},"ProcessTypes":[{"Type":"budget-api"}],"Machines":[{"ID":"m2","Region":"syd","State":"started","Name":"budget-api"}],"Services":[{"Protocol":"TCP","Port":4002,"Ports":[{"Type":"budget-api"}]}]}'
-
-emit_status_json scheduler-api-healthy '{"Name":"sindustries-content-scheduler-api-staging","Status":"running","Deployed":true,"Release":{"Version":3},"ProcessTypes":[{"Type":"content-scheduler-api"}],"Machines":[{"ID":"m4","Region":"syd","State":"started","Name":"content-scheduler-api"}],"Services":[{"Protocol":"TCP","Port":4003,"Ports":[{"Type":"content-scheduler-api"}]}]}'
-
-emit_status_json worker-healthy '{"Name":"sindustries-auto-post-worker-staging","Status":"running","Deployed":true,"Release":{"Version":11},"ProcessTypes":[{"Type":"auto-post-worker"}],"Machines":[{"ID":"m3","Region":"syd","State":"started","Name":"auto-post-worker"}],"Services":[{"Protocol":"TCP","Port":0,"Ports":[{"Type":"auto-post-worker"}]}]}'
-
-# The consolidated platform runs every service in ONE Fly process group
-# (the supervisor), so the app reports exactly one process type.
 emit_status_json platform-healthy '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":5},"ProcessTypes":[{"Type":"platform"}],"Machines":[{"ID":"m5","Region":"syd","State":"started","Name":"platform"}],"Services":[{"Protocol":"TCP","Port":8080,"Ports":[{"Type":"platform"}]}]}'
 
-emit_status_json tasks-api-no-machines '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":43},"ProcessTypes":[{"Type":"tasks-api"}],"Machines":[],"Services":[{"Protocol":"TCP","Port":4001,"Ports":[{"Type":"tasks-api"}]}]}'
+emit_status_json platform-no-machines '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":43},"ProcessTypes":[{"Type":"platform"}],"Machines":[],"Services":[{"Protocol":"TCP","Port":8080,"Ports":[{"Type":"platform"}]}]}'
 
-emit_status_json tasks-api-wrong-pt '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":44},"ProcessTypes":[{"Type":"unrelated"}],"Machines":[{"ID":"m4","Region":"syd","State":"started","Name":"unrelated"}],"Services":[]}'
+emit_status_json platform-wrong-pt '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":44},"ProcessTypes":[{"Type":"unrelated"}],"Machines":[{"ID":"m4","Region":"syd","State":"started","Name":"unrelated"}],"Services":[]}'
 
-emit_status_json tasks-api-legacy-shape '{"Name":"sindustries-tasks-api-staging","Status":"running","Deployed":true,"Release":{"Version":45},"Services":[{"Protocol":"TCP","Port":4001,"Ports":[{"Type":"tasks-api"}]}],"Machines":[{"ID":"m5","Region":"syd","State":"started","Name":"tasks-api"}]}'
+emit_status_json platform-legacy-shape '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":45},"Services":[{"Protocol":"TCP","Port":8080,"Ports":[{"Type":"platform"}]}],"Machines":[{"ID":"m5","Region":"syd","State":"started","Name":"platform"}]}'
+
+# The supervisor payload with one child down.
+SUPERVISOR_DEGRADED_JSON='{"app":"sindustries-platform-staging","ready":false,"router":{"name":"nginx","state":"running","port":8080,"restarts":0},"children":[{"name":"tasks-api","role":"service","state":"running","pid":614,"port":4001,"restarts":0,"exitCode":null,"rssKb":68064},{"name":"budget-api","role":"service","state":"crashed","pid":null,"port":4002,"restarts":4,"exitCode":1,"rssKb":0},{"name":"content-scheduler-api","role":"service","state":"running","pid":616,"port":4003,"restarts":0,"exitCode":null,"rssKb":68092},{"name":"auto-post-worker","role":"service","state":"running","pid":617,"port":null,"restarts":0,"exitCode":null,"rssKb":41000}]}'
 
 # ---------- helpers --------------------------------------------------------
 
@@ -97,7 +115,7 @@ run_status() {
 
 assert_eq() {
   if [[ "$2" != "$3" ]]; then
-    echo "FAIL: $1 — expected [$2], got [$3]" >&2
+    echo "FAIL: $1 — expected [$2], got [$3]]" >&2
     exit 1
   fi
 }
@@ -124,41 +142,73 @@ rc=$?
 set -e
 assert_eq "missing token exit code" "2" "$rc"
 
-echo "test: single service, healthy, json mode"
+echo "test: the default target reports the consolidated platform ONCE"
 reset_log
-FLY_STATUS_JSON="$(cat "$TMP/tasks-api-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
-assert_eq "single service exit code" "0" "$?"
+FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
+assert_eq "default target exit code" "0" "$?"
 python3 - "$TMP/out.json" <<'PY'
 import json, sys, pathlib
 data = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert isinstance(data, list) and len(data) == 1, f"expected one-element list, got {data!r}"
 row = data[0]
-assert row["service"] == "tasks-api"
-assert row["app"] == "sindustries-tasks-api-staging"
-assert row["name"] == "sindustries-tasks-api-staging"
+assert row["service"] == "platform"
+assert row["app"] == "sindustries-platform-staging"
+assert row["name"] == "sindustries-platform-staging"
 assert row["status"] == "running"
 assert row["deployed"] is True
-assert row["version"] == 42
-assert row["expectedProcessType"] == "tasks-api"
+assert row["expectedProcessType"] == "platform"
 assert row["expectedProcessTypePresent"] is True
-assert row["processTypesRunning"] == ["tasks-api"]
+assert row["processTypesRunning"] == ["platform"]
 assert row["machineCount"] == 1
-assert row["machines"][0]["id"] == "m1"
+assert row["machines"][0]["id"] == "m5"
 assert row["machines"][0]["region"] == "syd"
 assert row["machines"][0]["state"] == "started"
+assert row["degraded"] is False
+assert row["supervisorStatusAvailable"] is True
+assert row["platformReady"] is True
+assert [c["name"] for c in row["children"]] == [
+    "tasks-api", "budget-api", "content-scheduler-api", "auto-post-worker"
+]
+assert all(c["state"] == "running" for c in row["children"])
+PY
+
+echo "test: the supervisor status is read from the platform's /__status"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe)
+grep -qF "curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/__status" "$TMP/fly.log" || {
+  echo "FAIL: expected the supervisor status to be read from /__status" >&2
+  cat "$TMP/fly.log" >&2
+  exit 1
+}
+
+echo "test: a service name is an alias for the platform app, with its own child state"
+reset_log
+FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
+assert_eq "alias exit code" "0" "$?"
+python3 - "$TMP/out.json" <<'PY'
+import json, sys, pathlib
+data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert len(data) == 1
+row = data[0]
+assert row["service"] == "tasks-api"
+assert row["app"] == "sindustries-platform-staging"
+assert row["expectedProcessType"] == "platform"
+assert row["child"]["name"] == "tasks-api"
+assert row["child"]["state"] == "running"
+assert row["child"]["port"] == 4001
+assert row["childHealthy"] is True
 assert row["degraded"] is False
 PY
 
 echo "test: json flag emits valid JSON array"
 reset_log
-FLY_STATUS_JSON="$(cat "$TMP/tasks-api-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
+FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
 assert_eq "json exit code" "0" "$?"
-python3 -c 'import json,sys,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert isinstance(data, list); assert len(data)==1; assert data[0]["app"]=="sindustries-tasks-api-staging"'
+python3 -c 'import json,sys,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert isinstance(data, list); assert len(data)==1; assert data[0]["app"]=="sindustries-platform-staging"'
 
 echo "test: empty machine list flips degraded"
 reset_log
 set +e
-FLY_STATUS_JSON="$(cat "$TMP/tasks-api-no-machines.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
+FLY_STATUS_JSON="$(cat "$TMP/platform-no-machines.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
 rc=$?
 set -e
 assert_eq "no-machines exit code" "3" "$rc"
@@ -167,60 +217,35 @@ python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json")
 echo "test: missing process type flips degraded"
 reset_log
 set +e
-FLY_STATUS_JSON="$(cat "$TMP/tasks-api-wrong-pt.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
+FLY_STATUS_JSON="$(cat "$TMP/platform-wrong-pt.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
 rc=$?
 set -e
 assert_eq "wrong-pt exit code" "3" "$rc"
 python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["degraded"]==True; assert data[0]["expectedProcessTypePresent"]==False'
 
-echo "test: legacy shape (no ProcessTypes key, only Services[*].Ports[*].Type) parses"
+echo "test: the legacy flyctl shape is still detected"
 reset_log
-FLY_STATUS_JSON="$(cat "$TMP/tasks-api-legacy-shape.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
-assert_eq "legacy-shape exit code" "0" "$?"
-python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["degraded"]==False; assert "tasks-api" in data[0]["processTypesRunning"]'
+FLY_STATUS_JSON="$(cat "$TMP/platform-legacy-shape.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
+assert_eq "legacy shape exit code" "0" "$?"
+python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["expectedProcessTypePresent"]==True; assert data[0]["degraded"]==False'
 
-echo "test: all-service report includes the standalone content scheduler API"
+echo "test: an unreadable supervisor payload is unknown, not healthy"
 reset_log
-# Drive --json four times with healthy payloads; combine the single-service
-# arrays into one valid JSON document.
-{
-    printf '['
-    FLY_STATUS_JSON="$(cat "$TMP/tasks-api-healthy.json")" \
-      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
-      "$SCRIPT" --json tasks-api | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
-    printf ','
-    FLY_STATUS_JSON="$(cat "$TMP/budget-api-healthy.json")" \
-      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
-      "$SCRIPT" --json budget-api | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
-    printf ','
-    FLY_STATUS_JSON="$(cat "$TMP/scheduler-api-healthy.json")" \
-      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
-      "$SCRIPT" --json content-scheduler-api | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
-    printf ','
-    FLY_STATUS_JSON="$(cat "$TMP/worker-healthy.json")" \
-      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
-      "$SCRIPT" --json auto-post-worker | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
-    printf ','
-    FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" \
-      FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" \
-      "$SCRIPT" --json platform | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d[0]))'
-    printf ']'
-  } >"$TMP/out.json"
-assert_eq "five-service exits" "0" "$?"
-python3 -c '
-import json, pathlib
-data = json.loads(pathlib.Path("'$TMP'/out.json").read_text())
-apps = sorted(d["app"] for d in data)
-expected = sorted([
-    "sindustries-tasks-api-staging",
-    "sindustries-budget-api-staging",
-    "sindustries-content-scheduler-api-staging",
-    "sindustries-auto-post-worker-staging",
-    "sindustries-platform-staging",
-])
-assert apps == expected, f"got {apps}"
-assert all(not d["degraded"] for d in data), "all five should be healthy"
-'
+set +e
+SUPERVISOR_CURL_EXIT=7 FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json tasks-api >"$TMP/out.json"
+rc=$?
+set -e
+assert_eq "unreadable supervisor exit code" "3" "$rc"
+python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["supervisorStatusAvailable"]==False; assert data[0]["childHealthy"] is None; assert data[0]["degraded"]==True'
+
+echo "test: a crashed child degrades the report for that service"
+reset_log
+set +e
+SUPERVISOR_DEFAULT_JSON="$SUPERVISOR_DEGRADED_JSON" FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json budget-api >"$TMP/out.json"
+rc=$?
+set -e
+assert_eq "crashed child exit code" "3" "$rc"
+python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["child"]["state"]=="crashed"; assert data[0]["child"]["restarts"]==4; assert data[0]["childHealthy"] is False; assert data[0]["degraded"]==True'
 
 echo
 echo "OK — all bin/status tests passed"

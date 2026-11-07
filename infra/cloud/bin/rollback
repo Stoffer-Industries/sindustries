@@ -17,6 +17,16 @@
 #   infra/cloud/bin/rollback <service> [--to-version <n>] [--dry-run]
 #   infra/cloud/bin/rollback <service> --yes
 #
+# STAGING IS ONE APP (task 219fb673, cutover 2026-11-07). The four
+# per-service Fly apps were destroyed at the cutover and staging now runs
+# the consolidated platform app, which hosts all four services as
+# supervisor children. The four service names are kept as ALIASES so
+# operator muscle memory and the runbooks keep working, but they all
+# resolve to the same app and the same fly.toml.
+#
+# A rollback is therefore SHARED-FATE: rolling the platform back rolls
+# every service back with it. There is no per-service rollback any more.
+#
 # Required environment:
 #   FLY_API_TOKEN   — Fly.io API token with deploy rights (Quinn-owned).
 #
@@ -36,17 +46,17 @@ if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
 fi
 
 declare -A FLY_APP_FOR=(
-  [tasks-api]="sindustries-tasks-api-staging"
-  [budget-api]="sindustries-budget-api-staging"
-  [content-scheduler-api]="sindustries-content-scheduler-api-staging"
-  [auto-post-worker]="sindustries-auto-post-worker-staging"
+  [tasks-api]="sindustries-platform-staging"
+  [budget-api]="sindustries-platform-staging"
+  [content-scheduler-api]="sindustries-platform-staging"
+  [auto-post-worker]="sindustries-platform-staging"
   [platform]="sindustries-platform-staging"
 )
 declare -A FLY_CONFIG_FOR=(
-  [tasks-api]="infra/cloud/fly/tasks-api.fly.toml"
-  [budget-api]="infra/cloud/fly/budget-api.fly.toml"
-  [content-scheduler-api]="infra/cloud/fly/content-scheduler-api.fly.toml"
-  [auto-post-worker]="infra/cloud/fly/auto-post-worker.fly.toml"
+  [tasks-api]="infra/cloud/fly/platform.fly.toml"
+  [budget-api]="infra/cloud/fly/platform.fly.toml"
+  [content-scheduler-api]="infra/cloud/fly/platform.fly.toml"
+  [auto-post-worker]="infra/cloud/fly/platform.fly.toml"
   [platform]="infra/cloud/fly/platform.fly.toml"
 )
 # Space-separated list of health URLs to smoke check after the rollback.
@@ -54,9 +64,9 @@ declare -A FLY_CONFIG_FOR=(
 # reached through the router's path-prefix routes on the provider hostname
 # until the stable hostnames resolve (task 5cb4a8fe).
 declare -A FLY_HEALTH_URL_FOR=(
-  [tasks-api]="https://sindustries-tasks-api-staging.fly.dev/health"
-  [budget-api]="https://sindustries-budget-api-staging.fly.dev/health"
-  [content-scheduler-api]="https://sindustries-content-scheduler-api-staging.fly.dev/health"
+  [tasks-api]="https://sindustries-platform-staging.fly.dev/tasks-api/health"
+  [budget-api]="https://sindustries-platform-staging.fly.dev/budget-api/health"
+  [content-scheduler-api]="https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
   [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
   [platform]="https://sindustries-platform-staging.fly.dev/tasks-api/health https://sindustries-platform-staging.fly.dev/budget-api/health https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 )

@@ -19,6 +19,7 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_CONTENT_SCHEDULER_API_BASE_URL,
   SOURCE_NAMES,
+  appExists,
   buildPlatformSecretPayload,
   buildServiceCredentials,
   deriveDatabaseUrl,
@@ -281,5 +282,51 @@ describe('buildPlatformSecretPayload', () => {
     const { secrets } = buildPlatformSecretPayload(stagingEnv());
     const byName = Object.fromEntries(secrets.map((secret) => [secret.name, secret.value]));
     assert.equal(byName.PLATFORM_CONTENT_SCHEDULER_API_BASE_URL, DEFAULT_CONTENT_SCHEDULER_API_BASE_URL);
+  });
+});
+
+describe('appExists', () => {
+  /**
+   * A fake IO whose `flyctl apps list --json` returns `stdout`.
+   *
+   * @param {string} stdout
+   * @returns {object}
+   */
+  function ioReturning(stdout) {
+    return {
+      env: {},
+      spawn: () => ({ status: 0, stdout, stderr: '' }),
+      log: () => {},
+      errorLog: () => {},
+    };
+  }
+
+  it('matches the app name exactly', () => {
+    const io = ioReturning(JSON.stringify([{ Name: 'sindustries-platform-staging' }]));
+    assert.equal(appExists('sindustries-platform-staging', io), true);
+  });
+
+  it('tolerates a lowercase name key', () => {
+    // Some sandboxed CLIs emit `name` instead of `Name`. The bootstrap
+    // script already tolerates it; the two checks must agree, or the
+    // provisioner would create an app the bootstrap script believes
+    // already exists.
+    const io = ioReturning(JSON.stringify([{ name: 'sindustries-platform-staging' }]));
+    assert.equal(appExists('sindustries-platform-staging', io), true);
+  });
+
+  it('does not match a same-prefix app', () => {
+    const io = ioReturning(JSON.stringify([{ Name: 'sindustries-platform-staging-extra' }]));
+    assert.equal(appExists('sindustries-platform-staging', io), false);
+  });
+
+  it('treats an unreadable app list as absent', () => {
+    const io = {
+      env: {},
+      spawn: () => ({ status: 1, stdout: '', stderr: 'boom' }),
+      log: () => {},
+      errorLog: () => {},
+    };
+    assert.equal(appExists('sindustries-platform-staging', io), false);
   });
 });

@@ -161,11 +161,17 @@ describe('platform backout', () => {
 });
 
 describe('platform deploy gate', () => {
-  it('refuses the platform deploy in the operator path without the opt-in', () => {
+  it('refuses the staging deploy in the operator path without the opt-in', () => {
     const script = read(DEPLOY_SCRIPT);
-    assert.match(script, /SERVICE" == "platform"/);
     assert.match(script, /STAGING_PLATFORM_DEPLOY_ENABLED:-}" != "true"/);
-    assert.match(script, /the platform deploy is opt-in/);
+    assert.match(script, /the staging platform deploy is opt-in/);
+    // After the cutover every service name resolves to the platform app,
+    // so the gate must not be conditional on the service name: there is
+    // no service name left that reaches the platform app without it.
+    assert.ok(
+      !/SERVICE" == "platform"/.test(script),
+      'the deploy gate must apply to every service alias, not just "platform"'
+    );
   });
 
   it('gates the CI deploy on the same opt-in', () => {

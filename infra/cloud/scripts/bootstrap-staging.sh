@@ -1,32 +1,66 @@
 #!/usr/bin/env bash
-# bootstrap-staging.sh — one-time staging environment creation for Sindustries.
+# bootstrap-staging.sh — one-time staging environment creation for SIndustries.
 #
 # Quinn-owned operational script. Runs LOCALLY only (never in CI). Idempotent:
 # re-running does not destroy existing Fly apps; existing secret values are
 # replaced via `fly secrets set` which is a no-op for unchanged values.
 #
+# STAGING IS ONE APP (task 219fb673; cutover 2026-11-07). The four
+# per-service staging Fly apps — sindustries-tasks-api-staging,
+# sindustries-budget-api-staging, sindustries-content-scheduler-api-staging
+# and sindustries-auto-post-worker-staging — were destroyed at the cutover.
+# Staging now runs the consolidated platform app
+# (sindustries-platform-staging), which hosts all four services as
+# supervisor children in ONE Fly process group.
+#
+# This script therefore bootstraps ONE app, and it must not create the
+# retired per-service apps again: the platform's auto-post worker is a
+# consumer of the same BullMQ queue as the retired worker app, so a
+# resurrected per-service worker would process every scheduled post twice,
+# silently, with no error anywhere.
+#
 # Inputs:
-#   infra/cloud/.env.local  — Quinn-owned file with Fly app names + secret values.
-#                             Never committed; .gitignore'd. Format is the union
-#                             of env/tasks-api.env.example, env/budget-api.env.example,
-#                             env/content-scheduler-api.env.example, and
-#                             env/auto-post-worker.env.example prefixed by the
-#                             service name (TASKS_API_*, BUDGET_API_*, AUTO_POST_WORKER_*).
-#                             Plus top-level FLY_APP_* aliases if Quinn wants to
-#                             override the default staging app names.
+#   infra/cloud/.env.local  — Quinn-owned file with secret values. Never
+#                             committed; .gitignore'd. The keys this script
+#                             reads are listed under "Inputs" in the
+#                             translation table below.
+#                             Plus optional FLY_APP_PLATFORM / FLY_APP_ORG
+#                             overrides.
+#
+# The .env.local keys are TRANSLATED into the source names the platform
+# provisioner reads, and the provisioner owns the mapping from those
+# sources to the app-level `PLATFORM_*` Fly secret names:
+#
+#   .env.local key                                     -> provisioner source
+#   TASKS_API_DATABASE_URL                             -> STAGING_TASKS_API_DATABASE_URL
+#   BUDGET_API_DATABASE_URL                            -> STAGING_BUDGET_API_DATABASE_URL
+#   AUTO_POST_WORKER_DATABASE_URL                      -> STAGING_CONTENT_SCHEDULER_API_DATABASE_URL
+#   HEALTH_PROBE_REDIS (or TASKS_API_CONTENT_SCHEDULER_REDIS_URL) -> HEALTH_PROBE_REDIS
+#   TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN       -> TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
+#   CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN -> CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
+#
+# There is ONE implementation of the `PLATFORM_*` mapping
+# (infra/cloud/platform/platform-provision-secrets.mjs), and the CI path
+# uses the same one, so a local bootstrap and a CI deploy cannot register
+# different secrets on the same app.
+#
+# REDIS CAVEAT: the Redis source must be the LIVE staging instance. A URL
+# pointing at a deleted instance still parses as a redis:// URL, so the
+# provisioner's shape check passes; only the supervisor's first queue
+# operation would fail. Verify the instance answers before bootstrapping.
 #
 # Steps (each guarded by a confirm prompt unless --yes is passed):
 #   1. Pre-flight: `fly` CLI installed + authenticated, .env.local readable.
-#   2. Create missing Fly apps (tasks-api, budget-api, content-scheduler-api,
-#      auto-post-worker).
-#   3. `fly secrets set` per service from .env.local values.
-#   4. Prisma migrations deploy (tasks-api + budget-api + content-scheduler-api).
-#      budget-api DOES have migrations at services/budget-api/prisma (init + 5 follow-ups).
-#      Skipped by default; pass --migrate to enable.
+#   2. Create the platform Fly app if it is missing.
+#   3. Register the app-level `PLATFORM_*` secrets through the platform
+#      provisioner (which fails closed when a source is missing).
+#   4. Prisma migrations for the three schemas. Skipped by default; pass
+#      --migrate to enable. The platform's release_command runs the same
+#      chain on every deploy, so this step is an operator convenience.
 #   5. Smoke deploy (canary). Skipped by default; pass --deploy to enable.
 #
 # Output:
-#   - Final report on stdout with Fly app URLs, deployed versions, smoke-check status.
+#   - Final report on stdout with the platform URL and the service routes.
 #
 # Quinn-owned (per docs/specs/cloud-deployment-foundation-tech-design.md, PR #508 APPROVED):
 #   FLY_API_TOKEN, Neon connection strings (DATABASE_URL per schema), Upstash credentials,
@@ -38,8 +72,8 @@
 #   infra/cloud/scripts/bootstrap-staging.sh --yes          # non-interactive; secrets + create only
 #   infra/cloud/scripts/bootstrap-staging.sh --yes --migrate --deploy
 #                                                          # full bootstrap, no prompts
-#   infra/cloud/scripts/bootstrap-staging.sh --service tasks-api --yes
-#                                                          # one service only
+#   infra/cloud/scripts/bootstrap-staging.sh --service platform --yes
+#                                                          # the only service (default)
 #
 # Exit codes:
 #   0 = success
@@ -55,21 +89,23 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 ENV_LOCAL="${REPO_ROOT}/infra/cloud/.env.local"
 
-# Default staging app names match the fly.toml files in infra/cloud/fly/.
-FLY_APP_TASKS_API_DEFAULT="sindustries-tasks-api-staging"
-FLY_APP_BUDGET_API_DEFAULT="sindustries-budget-api-staging"
-FLY_APP_CONTENT_SCHEDULER_API_DEFAULT="sindustries-content-scheduler-api-staging"
-FLY_APP_AUTO_POST_WORKER_DEFAULT="sindustries-auto-post-worker-staging"
+# The one staging app. Overridable, but it must be the consolidated
+# platform app: the retired per-service apps must not be recreated.
+FLY_APP_PLATFORM_DEFAULT="sindustries-platform-staging"
+FLY_APP_ORG_DEFAULT="personal"
 
-FLY_APP_TASKS_API="${FLY_APP_TASKS_API_DEFAULT}"
-FLY_APP_BUDGET_API="${FLY_APP_BUDGET_API_DEFAULT}"
-FLY_APP_CONTENT_SCHEDULER_API="${FLY_APP_CONTENT_SCHEDULER_API_DEFAULT}"
-FLY_APP_AUTO_POST_WORKER="${FLY_APP_AUTO_POST_WORKER_DEFAULT}"
+FLY_APP_PLATFORM="${FLY_APP_PLATFORM_DEFAULT}"
+FLY_APP_ORG="${FLY_APP_ORG_DEFAULT}"
+
+# The per-service staging apps that were destroyed at the cutover. They are
+# listed so the script can refuse them with an explanation instead of
+# failing with "app not found" half-way through.
+RETIRED_SERVICES=(tasks-api budget-api content-scheduler-api auto-post-worker)
 
 ASSUME_YES=0
 RUN_MIGRATIONS=0
 RUN_DEPLOY=0
-ONLY_SERVICE=""
+ONLY_SERVICE="platform"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,7 +115,7 @@ while [[ $# -gt 0 ]]; do
     --service)         ONLY_SERVICE="${2:-}"; shift 2 ;;
     --env-local)       ENV_LOCAL="${2:-}"; shift 2 ;;
     -h|--help)
-      sed -n '2,40p' "$0"
+      sed -n '2,72p' "$0"
       exit 0 ;;
     *)
       echo "ERROR: unknown argument: $1" >&2
@@ -139,28 +175,66 @@ if ! "$FLY" auth whoami >/dev/null 2>&1; then
 fi
 ok "fly CLI authenticated"
 
+# The retired per-service apps cannot be bootstrapped any more.
+for retired in "${RETIRED_SERVICES[@]}"; do
+  if [[ "$ONLY_SERVICE" == "$retired" ]]; then
+    fail "the per-service staging app for '$retired' was destroyed at the staging cutover (2026-11-07). Staging is one app now: the consolidated platform ($FLY_APP_PLATFORM_DEFAULT). Run without --service, or with --service platform." 1
+  fi
+done
+if [[ -n "$ONLY_SERVICE" && "$ONLY_SERVICE" != "platform" ]]; then
+  fail "unknown service '$ONLY_SERVICE' (the only service is 'platform')" 1
+fi
+
 if [[ ! -f "$ENV_LOCAL" ]]; then
   fail "Quinn-owned env file not found: $ENV_LOCAL
-  Expected format: union of infra/cloud/env/*.env.example values, prefixed by service name
-  (TASKS_API_*, BUDGET_API_*, CONTENT_SCHEDULER_API_*, AUTO_POST_WORKER_*).
-  Copy infra/cloud/env/.env.example as a
-  starting point, fill in Quinn-owned values, re-run." 1
+  Expected keys (see the translation table in this script's header):
+    TASKS_API_DATABASE_URL, BUDGET_API_DATABASE_URL, AUTO_POST_WORKER_DATABASE_URL,
+    HEALTH_PROBE_REDIS, TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN,
+    CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
+  Copy infra/cloud/env/platform.env.example as a starting point, fill in
+  Quinn-owned values, re-run." 1
 fi
 # shellcheck disable=SC1090
 source "$ENV_LOCAL"
 ok ".env.local loaded"
 
-# Override Fly app names if Quinn set them in .env.local.
-[[ -n "${FLY_APP_TASKS_API:-}" ]]      && FLY_APP_TASKS_API="$FLY_APP_TASKS_API"
-[[ -n "${FLY_APP_BUDGET_API:-}" ]]     && FLY_APP_BUDGET_API="$FLY_APP_BUDGET_API"
-[[ -n "${FLY_APP_CONTENT_SCHEDULER_API:-}" ]] && FLY_APP_CONTENT_SCHEDULER_API="$FLY_APP_CONTENT_SCHEDULER_API"
-[[ -n "${FLY_APP_AUTO_POST_WORKER:-}" ]] && FLY_APP_AUTO_POST_WORKER="$FLY_APP_AUTO_POST_WORKER"
+# Override the Fly app / org if Quinn set them in .env.local.
+[[ -n "${FLY_APP_PLATFORM:-}" ]] && FLY_APP_PLATFORM="$FLY_APP_PLATFORM"
+[[ -n "${FLY_APP_ORG:-}" ]]     && FLY_APP_ORG="$FLY_APP_ORG"
 
-info "Target Fly apps:"
-info "  tasks-api:           $FLY_APP_TASKS_API"
-info "  budget-api:          $FLY_APP_BUDGET_API"
-info "  content-scheduler:   $FLY_APP_CONTENT_SCHEDULER_API"
-info "  auto-post-worker:    $FLY_APP_AUTO_POST_WORKER"
+info "Target Fly app:"
+info "  platform:            $FLY_APP_PLATFORM (org $FLY_APP_ORG)"
+
+# ---------- translate .env.local into the provisioner's source names ---------
+
+hdr "2. Provisioning sources"
+
+# The provisioner owns the mapping from source names to the app-level
+# PLATFORM_* secret names, so this script only has to hand it the values
+# under the names it reads. Nothing is printed: only names are echoed.
+export STAGING_TASKS_API_DATABASE_URL="${TASKS_API_DATABASE_URL:-}"
+export STAGING_BUDGET_API_DATABASE_URL="${BUDGET_API_DATABASE_URL:-}"
+export STAGING_CONTENT_SCHEDULER_API_DATABASE_URL="${AUTO_POST_WORKER_DATABASE_URL:-${CONTENT_SCHEDULER_API_DATABASE_URL:-}}"
+# The live staging Redis instance. HEALTH_PROBE_REDIS is the name the
+# provisioner and the health probe both use; TASKS_API_CONTENT_SCHEDULER_REDIS_URL
+# is the older local alias for the same instance.
+export HEALTH_PROBE_REDIS="${HEALTH_PROBE_REDIS:-${TASKS_API_CONTENT_SCHEDULER_REDIS_URL:-}}"
+export TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN="${TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN:-}"
+export CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN="${CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN:-}"
+
+missing_sources=()
+[[ -z "${STAGING_TASKS_API_DATABASE_URL}" ]] && missing_sources+=("TASKS_API_DATABASE_URL")
+[[ -z "${STAGING_BUDGET_API_DATABASE_URL}" ]] && missing_sources+=("BUDGET_API_DATABASE_URL")
+[[ -z "${HEALTH_PROBE_REDIS}" ]] && missing_sources+=("HEALTH_PROBE_REDIS (or TASKS_API_CONTENT_SCHEDULER_REDIS_URL)")
+[[ -z "${TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN}" ]] && missing_sources+=("TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN")
+[[ -z "${CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN}" ]] && missing_sources+=("CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN")
+
+if [[ ${#missing_sources[@]} -gt 0 ]]; then
+  fail "missing source value(s) in $ENV_LOCAL: ${missing_sources[*]}.
+  The platform provisioner fails closed on a missing source, so this script
+  stops before touching Fly. Add the key(s) above to .env.local and re-run." 1
+fi
+ok "all provisioning sources present"
 
 # ---------- Fly app creation ------------------------------------------------
 
@@ -185,177 +259,98 @@ sys.exit(0 if any((a.get("Name") or a.get("name")) == target for a in apps) else
   info "creating app: $app"
   # `fly apps create --app <name>` is rejected by current fly releases; the
   # accepted form is positional. `--yes` is required for non-interactive use.
-  "$FLY" apps create "$app" --org personal --yes >/dev/null
+  "$FLY" apps create "$app" --org "$FLY_APP_ORG" --yes >/dev/null
   ok "created app: $app"
 }
 
-hdr "2. Fly apps"
+hdr "3. Fly app"
 
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "tasks-api" ]]; then
-  create_app_if_missing "$FLY_APP_TASKS_API"
-fi
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
-  create_app_if_missing "$FLY_APP_BUDGET_API"
-fi
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
-  create_app_if_missing "$FLY_APP_CONTENT_SCHEDULER_API"
-fi
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
-  create_app_if_missing "$FLY_APP_AUTO_POST_WORKER"
-fi
+create_app_if_missing "$FLY_APP_PLATFORM"
 
 # ---------- Fly secrets -----------------------------------------------------
 
-# Apply one service's prefixed env values as
-# Fly secrets. Strips the prefix so the secret NAME matches what the service
-# reads (e.g. TASKS_API_DATABASE_URL -> DATABASE_URL).
-apply_secrets_for_service() {
-  local app="$1"
-  local prefix="$2"  # TASKS_API / BUDGET_API / CONTENT_SCHEDULER_API / AUTO_POST_WORKER
+hdr "4. Fly secrets"
 
-  # Discover keys via env (printenv), filter to prefix, strip prefix.
-  local keys=()
-  local key
-  while IFS= read -r key; do
-    keys+=("$key")
-  done < <(printenv | awk -F= -v p="$prefix" '$1 ~ "^"p"_" {print $1}' | sort)
-
-  if [[ ${#keys[@]} -eq 0 ]]; then
-    warn "no ${prefix}_* env vars found in .env.local; skipping $app"
-    return 0
-  fi
-
-  local args=()
-  for key in "${keys[@]}"; do
-    local secret_name="${key#${prefix}_}"
-    local secret_value="${!key:-}"
-    if [[ -z "$secret_value" ]]; then
-      warn "  $secret_name (from $key) is empty in .env.local — skipping"
-      continue
-    fi
-    args+=("$secret_name=$secret_value")
-  done
-
-  if [[ ${#args[@]} -eq 0 ]]; then
-    warn "no non-empty ${prefix}_* secrets to apply for $app"
-    return 0
-  fi
-
-  info "setting ${#args[@]} secrets on $app"
-  # `fly secrets set` reads secrets from the args; values are passed inline
-  # (Quinn-owned values, never logged by Fly in CI logs).
-  # shellcheck disable=SC2086
-  "$FLY" secrets set --app "$app" "${args[@]}" >/dev/null
-  ok "secrets applied: $app (${#args[@]} keys)"
-}
-
-hdr "3. Fly secrets"
-
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "tasks-api" ]]; then
-  apply_secrets_for_service "$FLY_APP_TASKS_API" "TASKS_API"
+info "registering the platform app-level PLATFORM_* secrets via the platform provisioner"
+# The provisioner is the single implementation of the mapping from source
+# names to the app-level PLATFORM_* secret names (and the single
+# implementation of the detached, direct secret write). It never prints a
+# secret value.
+if ! node "${REPO_ROOT}/infra/cloud/platform/platform-provision-secrets.mjs" \
+      --app "$FLY_APP_PLATFORM" --org "$FLY_APP_ORG"; then
+  fail "the platform provisioner failed; secrets were not registered. See the error above for the missing source." 2
 fi
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
-  apply_secrets_for_service "$FLY_APP_BUDGET_API" "BUDGET_API"
-fi
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
-  apply_secrets_for_service "$FLY_APP_CONTENT_SCHEDULER_API" "CONTENT_SCHEDULER_API"
-fi
-if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
-  apply_secrets_for_service "$FLY_APP_AUTO_POST_WORKER" "AUTO_POST_WORKER"
-fi
+ok "platform secrets registered: $FLY_APP_PLATFORM"
 
 # ---------- migrations ------------------------------------------------------
 
-run_migrations_for_app() {
-  local app="$1"
-  local workdir="$2"  # path inside the deployed app where `npx prisma` runs
+hdr "5. Prisma migrations"
 
-  info "running prisma migrate deploy on $app (workdir=$workdir)"
-  # `fly ssh console` runs an interactive shell; for non-interactive use
-  # `-C '...'`. We pipe `set -e` so a failing migrate aborts.
-  "$FLY" ssh console --app "$app" -C "cd $workdir && npx prisma migrate deploy" \
-    || fail "prisma migrate deploy failed on $app" 3
-  ok "migrations applied: $app"
-}
-
-hdr "4. Prisma migrations"
 if [[ "$RUN_MIGRATIONS" -eq 0 ]]; then
   info "skipped (pass --migrate to enable; will prompt before applying)"
 fi
 
 if [[ "$RUN_MIGRATIONS" -eq 1 ]]; then
-  confirm "Apply Prisma migrations on $FLY_APP_TASKS_API + $FLY_APP_BUDGET_API + $FLY_APP_CONTENT_SCHEDULER_API?"
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "tasks-api" ]]; then
-    run_migrations_for_app "$FLY_APP_TASKS_API" "/app/services/tasks-api"
-  fi
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
-    # budget-api has its own Prisma schema at services/budget-api/prisma with
-    # 6 migrations (init_budget_api + add_akahu_* + add_account_balances +
-    # add_balance_alert_config + akahu_access_token_bytes). The runtime
-    # workdir mirrors the Dockerfile layout (/app/services/budget-api).
-    run_migrations_for_app "$FLY_APP_BUDGET_API" "/app/services/budget-api"
-  fi
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
-    run_migrations_for_app "$FLY_APP_CONTENT_SCHEDULER_API" "/app/services/content-scheduler-api"
-  fi
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
-    info "content-scheduler migrations are owned by the HTTP API deploy; worker has no separate migration"
-  fi
+  confirm "Apply the platform Prisma migrations (tasks-api, budget-api, content-scheduler schemas)?"
+  # The platform's release_command runs the same chain on every deploy
+  # (infra/cloud/platform/platform-migrate.mjs), so this step is a
+  # convenience for an operator who wants the schemas applied before the
+  # first deploy. It reads the three PLATFORM_*_DATABASE_URL values.
+  export PLATFORM_TASKS_API_DATABASE_URL="${STAGING_TASKS_API_DATABASE_URL}"
+  export PLATFORM_BUDGET_API_DATABASE_URL="${STAGING_BUDGET_API_DATABASE_URL}"
+  export PLATFORM_CONTENT_SCHEDULER_API_DATABASE_URL="${STAGING_CONTENT_SCHEDULER_API_DATABASE_URL}"
+  cd "$REPO_ROOT"
+  node infra/cloud/platform/platform-migrate.mjs \
+    || fail "platform migrations failed" 3
+  ok "migrations applied"
 fi
 
 # ---------- smoke deploy ----------------------------------------------------
 
-hdr "5. Smoke deploy"
+hdr "6. Smoke deploy"
 if [[ "$RUN_DEPLOY" -eq 0 ]]; then
   info "skipped (pass --deploy to enable; will prompt before deploying)"
 fi
 
 if [[ "$RUN_DEPLOY" -eq 1 ]]; then
+  # The CI path gates the platform deploy on the same variable
+  # (.github/workflows/deploy-staging-platform.yml), so the operator path
+  # and the CI path cannot disagree about whether a staging deploy may run.
+  if [[ "${STAGING_PLATFORM_DEPLOY_ENABLED:-}" != "true" ]]; then
+    fail "the staging platform deploy is opt-in: set STAGING_PLATFORM_DEPLOY_ENABLED=true. Staging runs the consolidated platform app only; see docs/systems/cloud-platform.md." 1
+  fi
   cd "$REPO_ROOT"
-  confirm "Run canary deploy for each service?"
-
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "tasks-api" ]]; then
-    info "deploying $FLY_APP_TASKS_API"
-    "$FLY" deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 \
-      || fail "canary deploy failed: tasks-api" 4
-    ok "deployed: $FLY_APP_TASKS_API"
-  fi
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "budget-api" ]]; then
-    info "deploying $FLY_APP_BUDGET_API"
-    "$FLY" deploy --config infra/cloud/fly/budget-api.fly.toml --strategy canary --wait-timeout 600 \
-      || fail "canary deploy failed: budget-api" 4
-    ok "deployed: $FLY_APP_BUDGET_API"
-  fi
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "content-scheduler-api" ]]; then
-    info "deploying $FLY_APP_CONTENT_SCHEDULER_API"
-    "$FLY" deploy --config infra/cloud/fly/content-scheduler-api.fly.toml --strategy canary --wait-timeout 600 \
-      || fail "canary deploy failed: content-scheduler-api" 4
-    ok "deployed: $FLY_APP_CONTENT_SCHEDULER_API"
-  fi
-  if [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "auto-post-worker" ]]; then
-    info "deploying $FLY_APP_AUTO_POST_WORKER"
-    "$FLY" deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary --wait-timeout 600 \
-      || fail "canary deploy failed: auto-post-worker" 4
-    ok "deployed: $FLY_APP_AUTO_POST_WORKER"
-  fi
+  confirm "Run the canary deploy of the consolidated platform?"
+  info "deploying $FLY_APP_PLATFORM"
+  "$FLY" deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 \
+    || fail "canary deploy failed: platform" 4
+  ok "deployed: $FLY_APP_PLATFORM"
 fi
 
 # ---------- final report ----------------------------------------------------
 
-hdr "6. Done"
+hdr "7. Done"
 cat <<EOF
 SIndustries staging environment bootstrap report.
 
-Apps:
-  tasks-api:           https://${FLY_APP_TASKS_API}.fly.dev
-  budget-api:          https://${FLY_APP_BUDGET_API}.fly.dev
-  content-scheduler:   https://${FLY_APP_CONTENT_SCHEDULER_API}.fly.dev
-  auto-post-worker:    https://${FLY_APP_AUTO_POST_WORKER}.fly.dev (no public HTTP)
+App:
+  platform:            https://${FLY_APP_PLATFORM}.fly.dev
+
+Service routes (path-prefix on the platform host until the stable hostnames
+resolve — task 5cb4a8fe):
+  tasks-api:           https://${FLY_APP_PLATFORM}.fly.dev/tasks-api/health
+  budget-api:          https://${FLY_APP_PLATFORM}.fly.dev/budget-api/health
+  content-scheduler:   https://${FLY_APP_PLATFORM}.fly.dev/content-scheduler-api/health
+  auto-post-worker:    no public HTTP (BullMQ consumer; see the supervisor status)
+
+Supervisor status (per-child state):
+  https://${FLY_APP_PLATFORM}.fly.dev/__status
 
 Next steps:
-  - Verify with the smoke workflow: gh workflow run deploy-staging-tasks-api.yml
-  - Or run a manual deploy: cd $REPO_ROOT && fly deploy --config infra/cloud/fly/tasks-api.fly.toml
-  - See ~/.openclaw/workspace/docs/infra/runbooks/cloud-deployment-rollback.md for rollback procedure (planned in WS3; relocated from docs/runbooks/ in PR #583).
+  - Verify with the smoke workflow: gh workflow run deploy-staging-platform.yml
+  - Or run a manual deploy: cd $REPO_ROOT && fly deploy --config infra/cloud/fly/platform.fly.toml
+  - See docs/runbooks/platform-consolidation-rollback.md for the rollback procedure
+    and docs/systems/cloud-platform.md for the topology and the shared-fate warning.
 
 This script is idempotent — re-run any time with --migrate / --deploy flags to
 re-apply secrets, migrations, or smoke deploys.

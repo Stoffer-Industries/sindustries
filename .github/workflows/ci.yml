@@ -935,6 +935,13 @@ jobs:
         # beyond bash + python3 here.
         run: bash infra/cloud/scripts/tests/bootstrap-staging.test.sh
 
+      - name: Run retired staging apps guard test (task 219fb673)
+        # The four per-service staging Fly apps were destroyed at the
+        # staging cutover. No operator surface may still resolve to them:
+        # the platform's auto-post worker and the retired worker app would
+        # otherwise be two consumers on one BullMQ queue.
+        run: bash infra/cloud/scripts/tests/retired-staging-apps.test.sh
+
       - name: Run fly.toml context path AC2 test
         run: bash infra/cloud/scripts/tests/fly-toml-context.test.sh
 

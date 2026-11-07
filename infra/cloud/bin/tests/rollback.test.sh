@@ -73,7 +73,7 @@ exit "${FLY_CURL_EXIT:-0}"
 STUB
 chmod +x "$TMP/bin/curl"
 
-export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"},{"Name":"sindustries-platform-staging"}]'
+export FLY_LIST_JSON='[{"Name":"sindustries-platform-staging"},{"Name":"sindustries-platform-staging"},{"Name":"sindustries-platform-staging"},{"Name":"sindustries-platform-staging"},{"Name":"sindustries-platform-staging"}]'
 
 reset_log() { : >"$TMP/fly.log"; }
 assert_eq() {
@@ -150,29 +150,29 @@ reset_log
 FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --yes
 assert_eq "tasks-api rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: apps list --json"
-assert_log_contains "INVOKED: releases --app sindustries-tasks-api-staging --json"
-assert_log_contains "INVOKED: releases rollback --app sindustries-tasks-api-staging"
+assert_log_contains "INVOKED: releases --app sindustries-platform-staging --json"
+assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
 assert_log_contains "INVOKED: curl"
 
 echo "test: --to-version is forwarded to releases rollback"
 reset_log
 FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" budget-api --yes --to-version 41
 assert_eq "budget-api rollback exit code" "0" "$?"
-assert_log_contains "INVOKED: releases rollback --app sindustries-budget-api-staging --to-version 41"
+assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging --to-version 41"
 
 echo "test: content-scheduler-api uses the HTTP smoke check"
 reset_log
 FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" content-scheduler-api --yes
 assert_eq "content-scheduler-api rollback exit code" "0" "$?"
-assert_log_contains "INVOKED: releases rollback --app sindustries-content-scheduler-api-staging"
+assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
 assert_log_contains "INVOKED: curl"
 
 echo "test: auto-post-worker uses the log-tail smoke check, not curl"
 reset_log
 FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" auto-post-worker --yes
 assert_eq "worker rollback exit code" "0" "$?"
-assert_log_contains "INVOKED: releases rollback --app sindustries-auto-post-worker-staging"
-assert_log_contains "INVOKED: logs --app sindustries-auto-post-worker-staging --no-tail"
+assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
+assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 assert_log_absent "INVOKED: curl"
 
 echo "test: platform rolls the consolidated app back and smoke-checks all three services"

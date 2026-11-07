@@ -409,7 +409,7 @@ The `.openclaw` boundary Quinn confirmed on the PR #508 review (merged `d6ee2d8`
 - **Quinn owns** the live values: `FLY_API_TOKEN`, Neon `DATABASE_URL` / `DIRECT_URL`, Upstash `REDIS_URL` / `CONTENT_SCHEDULER_REDIS_URL`, DNS provider token. These never enter the repo.
 - **Quinn registers** `FLY_API_TOKEN` through GitHub's masked secret UI under the `staging` and `production` environments as applicable. Workflow YAML references `secrets.FLY_API_TOKEN` by name and performs a fail-fast presence check before installing or invoking Fly tooling.
 - **Rowan ships** only env-var names, Fly app specs, Dockerfiles, and deploy workflows. The workflow templates include `FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}` so the deploy job picks up Quinn's value at job time.
-- **Quinn runs** `infra/cloud/scripts/bootstrap-staging.sh` once. It reads `infra/cloud/.env.local` (gitignored) and applies Quinn's per-service `TASKS_API_*`, `BUDGET_API_*`, `AUTO_POST_WORKER_*` prefixed env vars via `fly secrets set`.
+- **Quinn runs** `infra/cloud/scripts/bootstrap-staging.sh` once. It reads `infra/cloud/.env.local` (gitignored), translates Quinn's per-service prefixed values into the source names the platform provisioner reads, and hands them to `infra/cloud/platform/platform-provision-secrets.mjs`, which registers the app-level `PLATFORM_*` secrets. The provisioner is the single implementation of that mapping, so the local bootstrap and the CI provisioning path cannot register different secrets on the same app.
 - **Quinn rotates** any secret out-of-band. Rotation procedure for tokens with downstream ciphertext rows (e.g. Akahu) was previously `docs/runbooks/rotate-akahu-access-tokens.md` (retired in PR #583; the procedure steps should be regenerated as a new runbook at `~/.openclaw/workspace/docs/infra/runbooks/rotate-akahu-access-tokens.md` if Quinn needs to rotate Akahu tokens); no rotation procedure is needed for non-derived secrets.
 
 A new operator joining Quinn's seat gets the same out-of-band onboarding path: 1Password (or equivalent) handoff for `FLY_API_TOKEN` + Neon + Upstash + DNS, plus the `infra/cloud/.env.local` template.
@@ -450,15 +450,56 @@ If the smoke check fails, the deploy job exits non-zero. Quinn/Lox investigates 
 
 ## First-time environment creation
 
+Staging is ONE Fly app (`sindustries-platform-staging`) since the cutover on
+2026-11-07. The four per-service staging apps were destroyed, so the
+bootstrap script provisions the platform app only.
+
 Quinn runs `infra/cloud/scripts/bootstrap-staging.sh` once. The script:
 
-1. Verifies the `fly`, `neonctl`, and `upstash` CLIs are installed and authenticated.
-2. Creates the missing Fly apps (`fly apps create ...`).
-3. Reads `infra/cloud/.env.local` (gitignored) and applies each service's `TASKS_API_*` / `BUDGET_API_*` / `AUTO_POST_WORKER_*` prefixed env vars to the corresponding Fly app via `fly secrets set`. The prefix is stripped at apply time.
-4. Optionally runs Prisma migrations (`--migrate`) and/or deploys (`--deploy`).
-5. Surfaces a final report with app URLs and the smoke-check result.
+1. Verifies the `fly` CLI is installed and authenticated, and refuses the
+   retired per-service names with the reason (bootstrapping one would
+   recreate an app that must stay destroyed — see "Shared-fate topology
+   (staging)").
+2. Translates the keys in `infra/cloud/.env.local` (gitignored) into the
+   source names the platform provisioner reads, and fails closed if one is
+   missing — before it touches Fly.
+3. Creates the platform Fly app if it is missing (`fly apps create ...`).
+4. Registers the app-level `PLATFORM_*` secrets through
+   `infra/cloud/platform/platform-provision-secrets.mjs` (the single
+   implementation of the source-to-secret mapping, and the same one the CI
+   path uses).
+5. Optionally runs the platform's Prisma migration chain (`--migrate`) and/or
+   deploys the platform (`--deploy`).
+6. Surfaces a final report with the app URL and the service routes.
 
 The script is **idempotent** — re-running it does not destroy existing apps or secrets.
+
+---
+
+## Operator surfaces after the cutover
+
+Every operator path in `infra/cloud/` resolves to the consolidated app:
+
+| Surface | Resolves to | Note |
+| ------- | ----------- | ---- |
+| `infra/cloud/bin/deploy <service>` | `sindustries-platform-staging` + `infra/cloud/fly/platform.fly.toml` | The four service names are aliases; the deploy is opt-in (`STAGING_PLATFORM_DEPLOY_ENABLED=true`), exactly as the CI path is. |
+| `infra/cloud/bin/status [service]` | `sindustries-platform-staging` | Also reads the supervisor's `/__status` payload, so a service alias reports the state of its CHILD inside the app. An unreadable payload is reported as unknown, not as healthy. |
+| `infra/cloud/bin/rollback <service>` | `sindustries-platform-staging` | A rollback is shared-fate: every service rolls back together. |
+| `infra/cloud/scripts/bootstrap-staging.sh` | `sindustries-platform-staging` | Refuses the retired per-service names with the reason. |
+
+The retired per-service app names must not reappear in an executable
+position. `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the
+build if one does: the platform's auto-post worker and a resurrected worker
+app would be TWO consumers on the same BullMQ queue, and every scheduled
+post would be processed twice — silently, with no error anywhere.
+
+One surface is deliberately NOT changed yet: `infra/cloud/observability/failure-inject.sh`
+still defaults to the retired per-service apps. Its scenarios are per-service
+(`tasks-api-down` scales one app to zero), and after the consolidation a
+scale-to-zero on the platform app is a full-platform outage, so the drill's
+mechanism has to change (kill the child inside the Machine) before its
+default can move. The drill therefore fails loudly at the Fly step instead
+of taking staging down under a service-scoped label.
 
 ---
 
