@@ -16,6 +16,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { describe, it } from 'node:test';
 
@@ -142,6 +143,63 @@ describe('the nginx router', () => {
       `the nginx config path must be absolute (nginx resolves a relative -c path against /var/lib/nginx), got ${configPath}`,
     );
     assert.ok(configPath.endsWith('/nginx.conf'));
+  });
+});
+
+describe('the nginx router config', () => {
+  const config = readFileSync(new URL('../nginx.conf', import.meta.url), 'utf8');
+  // Directives only: the comments in this file name the failing forms on
+  // purpose, so a raw text scan would match its own explanation.
+  const directives = config
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
+
+  it('logs on the inherited fd, not on a device node', () => {
+    // The supervisor spawns every child with PIPED stdio. In that context
+    // nginx cannot open /dev/stderr or /dev/stdout:
+    //   nginx: [emerg] open() "/dev/stderr" failed (6: No such device or address)
+    // and the router exits before it binds :8080.
+    assert.ok(
+      /^\s*error_log\s+stderr\s+\w+;/m.test(directives),
+      'error_log must target the inherited stderr, not /dev/stderr',
+    );
+    assert.ok(
+      /^\s*access_log\s+stdout;/m.test(directives),
+      'access_log must target the inherited stdout, not /dev/stdout',
+    );
+    assert.ok(
+      !/\/dev\/(stderr|stdout)/.test(directives),
+      'the router config must not open /dev/stderr or /dev/stdout',
+    );
+  });
+
+  it('sizes the server-names hash bucket for the longest server name', () => {
+    // nginx's default server_names_hash_bucket_size is 64. With the
+    // 47-character "content-scheduler-api.staging.sindustries.co.nz" name
+    // the router refused to start:
+    //   nginx: [emerg] could not build server_names_hash, you should
+    //   increase server_names_hash_bucket_size: 64
+    // The bucket must be a power of two and must hold the longest name
+    // with room to spare (observed live: 64 fails, 128 works).
+    const names = [...directives.matchAll(/^\s*server_name\s+([^;]+);/gm)].flatMap(
+      (match) => match[1].split(/\s+/),
+    );
+    assert.ok(names.length > 0, 'the router config must declare server names');
+
+    const longest = Math.max(...names.map((name) => name.length));
+    const sizeMatch = directives.match(/^\s*server_names_hash_bucket_size\s+(\d+);/m);
+    assert.ok(
+      sizeMatch,
+      'the router config must set server_names_hash_bucket_size',
+    );
+
+    const size = Number(sizeMatch[1]);
+    assert.equal(size & (size - 1), 0, 'the bucket size must be a power of two');
+    assert.ok(
+      size >= longest * 2,
+      `the bucket size must hold the longest server name (${longest} chars) with room to spare, got ${size}`,
+    );
   });
 });
 
