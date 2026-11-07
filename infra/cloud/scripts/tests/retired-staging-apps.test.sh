@@ -38,6 +38,9 @@ RETIRED_APPS=(
   sindustries-auto-post-worker-staging
 )
 
+# The consolidated app every staging surface resolves to now.
+CONSOLIDATED_PLATFORM_APP="sindustries-platform-staging"
+
 # The executable surfaces that used to target the retired apps, plus the
 # two surfaces that still reference them after the cutover: the guided
 # failure drill (its scenarios scaled the per-service apps) and the
@@ -149,8 +152,38 @@ for scenario in scenario_tasks_api_down scenario_budget_api_down; do
     failures=$((failures + 1))
     continue
   fi
-  if ! grep -q "refuse_platform_scale" <<<"${body}"; then
-    echo "FAIL: ${FAILURE_INJECT} ${scenario} does not refuse a scale of the consolidated platform app" >&2
+  if ! grep -q "refuse_service_scoped_target" <<<"${body}"; then
+    echo "FAIL: ${FAILURE_INJECT} ${scenario} does not refuse a service-scoped target" >&2
+    failures=$((failures + 1))
+  fi
+done
+
+# Assert the refusal BEHAVIOURS, not just that a call is present:
+#   --dry-run  must exit 0 and say REFUSED (the task-31233a0a contract is
+#              "a preview has no side effects and needs no credentials"),
+#              and must NOT print the command it refused.
+#   real run   must exit 1 without touching Fly — including when the target
+#              is the consolidated platform, which is the footgun this
+#              guard exists to prevent.
+for scenario in tasks-api-down budget-api-down tasks-api-up budget-api-up; do
+  set +e
+  dry_out="$(bash "${REPO_ROOT}/${FAILURE_INJECT}" "${scenario}" --dry-run 2>&1)"
+  dry_code=$?
+  real_out="$(bash "${REPO_ROOT}/${FAILURE_INJECT}" "${scenario}" --app "${CONSOLIDATED_PLATFORM_APP}" 2>&1)"
+  real_code=$?
+  set -e
+  if [[ "${dry_code}" -ne 0 ]]; then
+    echo "FAIL: ${FAILURE_INJECT} ${scenario} --dry-run exited ${dry_code}; the preview contract is exit 0" >&2
+    failures=$((failures + 1))
+  elif ! grep -q "REFUSED" <<<"${dry_out}"; then
+    echo "FAIL: ${FAILURE_INJECT} ${scenario} --dry-run does not report the refusal" >&2
+    failures=$((failures + 1))
+  elif grep -q "scale count" <<<"${dry_out}"; then
+    echo "FAIL: ${FAILURE_INJECT} ${scenario} --dry-run prints the command it refused" >&2
+    failures=$((failures + 1))
+  fi
+  if [[ "${real_code}" -eq 0 ]]; then
+    echo "FAIL: ${FAILURE_INJECT} ${scenario} against the consolidated platform exited 0; it must refuse" >&2
     failures=$((failures + 1))
   fi
 done
