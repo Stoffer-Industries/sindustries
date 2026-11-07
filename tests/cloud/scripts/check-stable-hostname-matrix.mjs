@@ -156,6 +156,86 @@ function main() {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Staging routes (task 219fb673).
+  //
+  // Staging is ONE consolidated Fly app whose router serves the three
+  // API surfaces at path prefixes, so a surface is reachable in staging
+  // at MORE THAN ONE (host, path-prefix) pair. The matrix records those
+  // pairs as `stagingRoutes`, and the staging-target preflight validates
+  // a configured target against its OWN surface's routes — which is what
+  // stops a target pointing at the budget-api hostname from passing as
+  // the tasks-api target.
+  //
+  // These assertions keep the pairing explicit and honest:
+  //   - the stable hostname is a route at the ROOT (pathPrefix ""),
+  //   - the consolidated platform host is a route at "/<surface-id>",
+  //   - the platform host is the same string for every surface and
+  //     matches the platform app's own fly.toml,
+  //   - the platform path prefixes match the router's location blocks
+  //     in infra/cloud/platform/nginx.conf, so the matrix and the
+  //     router cannot drift apart.
+  // ------------------------------------------------------------------
+  const CONSOLIDATED_API_SURFACES = ['tasks-api', 'budget-api', 'content-scheduler-api'];
+  const platformTomlPath = join(args.flyDir, 'platform.fly.toml');
+  let platformApp = null;
+  try {
+    const platformToml = readFileSync(platformTomlPath, 'utf8');
+    const appMatch = platformToml.match(/^\s*app\s*=\s*['"]([^'"]+)['"]/m);
+    if (appMatch) platformApp = appMatch[1];
+  } catch (err) {
+    fail(`could not read ${platformTomlPath}: ${err.message}`);
+  }
+  const platformHost = platformApp ? `${platformApp}.fly.dev` : null;
+  const matrixPlatformPrefixes = new Set();
+
+  for (const surfaceId of CONSOLIDATED_API_SURFACES) {
+    const surface = matrix.surfaces.find((s) => s.id === surfaceId);
+    if (!surface) continue; // the required-surfaces check above already failed
+    const path = `surfaces (${surfaceId}).stagingRoutes`;
+    expect(Array.isArray(surface.stagingRoutes), `${path} must be an array of {host, pathPrefix} pairs`);
+    if (!Array.isArray(surface.stagingRoutes)) continue;
+    expect(surface.stagingRoutes.length > 0, `${path} must record at least one route`);
+
+    let sawStable = false;
+    let sawPlatform = false;
+    for (const [idx, route] of surface.stagingRoutes.entries()) {
+      const routePath = `${path}[${idx}]`;
+      expect(typeof route.host === 'string' && route.host.length > 0, `${routePath}.host must be a non-empty string`);
+      expect(typeof route.pathPrefix === 'string', `${routePath}.pathPrefix must be a string ("" for the root)`);
+      if (typeof route.host !== 'string' || typeof route.pathPrefix !== 'string') continue;
+
+      if (route.host === surface.staging) {
+        sawStable = true;
+        expect(route.pathPrefix === '', `${routePath}.pathPrefix must be "" for the stable hostname (it is served at the root)`);
+      } else if (platformHost && route.host === platformHost) {
+        sawPlatform = true;
+        expect(route.pathPrefix === `/${surfaceId}`, `${routePath}.pathPrefix must be "/${surfaceId}" for the consolidated platform host`);
+        matrixPlatformPrefixes.add(route.pathPrefix);
+      }
+    }
+    expect(sawStable, `${path} must include the stable hostname "${surface.staging}" as a route`);
+    expect(sawPlatform, `${path} must include the consolidated platform host "${platformHost}" as a route`);
+  }
+
+  // The matrix's platform prefixes and the router's location blocks must
+  // be the same set. The router is what actually decides where a request
+  // goes; a matrix that disagrees with it sends the harness to a 404.
+  const nginxPath = join(args.repoRoot, 'infra/cloud/platform/nginx.conf');
+  try {
+    const nginx = readFileSync(nginxPath, 'utf8');
+    const routerPrefixes = new Set();
+    for (const m of nginx.matchAll(/^\s*location\s+\/([a-z0-9-]+)\/\s*\{/gm)) {
+      routerPrefixes.add(`/${m[1]}`);
+    }
+    const missing = [...matrixPlatformPrefixes].filter((p) => !routerPrefixes.has(p)).sort();
+    const extra = [...routerPrefixes].filter((p) => !matrixPlatformPrefixes.has(p)).sort();
+    expect(missing.length === 0, `nginx.conf has no location block for the matrix platform prefix(es): ${missing.join(', ')}`);
+    expect(extra.length === 0, `the matrix records no platform prefix for the nginx.conf location block(s): ${extra.join(', ')}`);
+  } catch (err) {
+    fail(`could not read ${nginxPath}: ${err.message}`);
+  }
+
   // Now read the fly.toml files and assert the comment block names the same
   // hostnames the matrix records. Worker surface is exempt — it has no
   // hostnames by design — but its comment block must still record the

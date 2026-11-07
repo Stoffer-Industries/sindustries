@@ -27,6 +27,17 @@
 #   6. The platform's app-level secrets are registered through the platform
 #      provisioner (one implementation of the PLATFORM_* mapping).
 #   7. A missing source value fails the script BEFORE it touches Fly.
+#   8. A FLY_APP_PLATFORM override is REFUSED for every retired app (and
+#      for any other name), and nothing is created or written. The
+#      override used to reach `apps create` + `secrets set` on a retired
+#      app — which would resurrect the retired auto-post worker next to
+#      the platform's worker and put two consumers on one BullMQ queue.
+#   9. The REAL example file (infra/cloud/env/bootstrap-staging.env.example)
+#      runs through the translation step unchanged: the documented source
+#      contract is the contract the script consumes. Before this file
+#      existed the error message pointed at platform.env.example, whose
+#      keys are the PLATFORM_* DESTINATION names — so the documented
+#      first-time path failed closed before touching Fly.
 
 set -euo pipefail
 
@@ -115,6 +126,141 @@ ENV
 # A variant with the Redis source missing — the script must fail closed
 # before it touches Fly.
 grep -v '^HEALTH_PROBE_REDIS=' "$TMP/.env.local" >"$TMP/.env.local.noredis"
+
+# ---------- case 8: the FLY_APP_PLATFORM override is refused --------------
+#
+# The retired per-service apps must not be recreated, and the ONLY app
+# staging runs on is the consolidated platform. The override used to be
+# accepted verbatim: it reached `apps create` and the provisioner's
+# `secrets set`, which would have written the platform secrets to a
+# retired app.
+#
+# The override value is substituted per case, so the template keeps a
+# placeholder rather than interpolating an unset positional parameter.
+write_override_env() {
+  local target="$1" out="$2"
+  cat >"$out" <<'ENV'
+TASKS_API_DATABASE_URL=postgres://stub:***@localhost:5432/stub
+BUDGET_API_DATABASE_URL=postgres://stub:***@localhost:5432/stub
+AUTO_POST_WORKER_DATABASE_URL=postgres://stub:***@localhost:5432/stub
+HEALTH_PROBE_REDIS=redis://stub.example.upstash.io:6379
+TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-tasks-token
+CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-scheduler-token
+ENV
+  printf 'FLY_APP_PLATFORM=%s\n' "$target" >>"$out"
+}
+
+# Every retired app name plus one arbitrary other name must be refused.
+for override in \
+  sindustries-tasks-api-staging \
+  sindustries-budget-api-staging \
+  sindustries-content-scheduler-api-staging \
+  sindustries-auto-post-worker-staging \
+  sindustries-some-other-app
+do
+  write_override_env "$override" "$TMP/.env.local.override"
+  rm -f "$TMP/registered.override"
+  FLY_LOG="$TMP/fly.override.log" \
+  FLY_REGISTERED="$TMP/registered.override" \
+  FLY_LIST_JSON='[]' \
+  PATH="$TMP/bin:$PATH" \
+    bash "$SCRIPT" --yes --env-local "$TMP/.env.local.override" \
+      >"$TMP/out.override" 2>"$TMP/err.override" \
+      || true
+
+  if ! grep -qF "refusing to bootstrap Fly app" "$TMP/err.override"; then
+    echo "FAIL: case=override $override — expected the refusal on stderr" >&2
+    sed 's/^/  /' "$TMP/err.override" >&2
+    exit 1
+  fi
+  if grep -qE '^INVOKED: (apps create|secrets set)' "$TMP/fly.override.log" 2>/dev/null; then
+    echo "FAIL: case=override $override — the script must refuse BEFORE it creates an app or writes secrets" >&2
+    sed 's/^/  /' "$TMP/fly.override.log" >&2
+    exit 1
+  fi
+  if grep -qF "$override" "$TMP/fly.override.log" 2>/dev/null; then
+    echo "FAIL: case=override $override — the overridden app was referenced" >&2
+    sed 's/^/  /' "$TMP/fly.override.log" >&2
+    exit 1
+  fi
+done
+
+# The override that NAMES the consolidated platform is accepted — it is
+# the one app staging runs on.
+write_override_env "sindustries-platform-staging" "$TMP/.env.local.override"
+rm -f "$TMP/registered.override-ok"
+FLY_LOG="$TMP/fly.override-ok.log" \
+FLY_REGISTERED="$TMP/registered.override-ok" \
+FLY_LIST_JSON='[{"Name":"sindustries-platform-staging","Status":"running"}]' \
+PATH="$TMP/bin:$PATH" \
+  bash "$SCRIPT" --yes --env-local "$TMP/.env.local.override" \
+    >"$TMP/out.override-ok" 2>"$TMP/err.override-ok" \
+    || true
+if grep -qF "refusing to bootstrap Fly app" "$TMP/err.override-ok"; then
+  echo "FAIL: case=override-ok — the consolidated platform app must be accepted" >&2
+  sed 's/^/  /' "$TMP/err.override-ok" >&2
+  exit 1
+fi
+
+# ---------- case 9: the real example file satisfies the source contract ----
+#
+# The documented first-time path must actually work. This runs the REAL
+# example file (with its values filled in) through the script's
+# translation step.
+EXAMPLE="$REPO_ROOT/infra/cloud/env/bootstrap-staging.env.example"
+if [[ ! -f "$EXAMPLE" ]]; then
+  echo "FAIL: $EXAMPLE is missing — the bootstrap source contract must be published" >&2
+  exit 1
+fi
+
+# Fill every empty assignment in the real example file with a stub value.
+python3 - "$EXAMPLE" "$TMP/.env.local.example" <<'PY'
+import re, sys
+src, dst = sys.argv[1], sys.argv[2]
+out = []
+for line in open(src):
+    m = re.match(r'^([A-Z0-9_]+)=\s*$', line.rstrip('\n'))
+    if m:
+        key = m.group(1)
+        if key.endswith('_DATABASE_URL'):
+            value = 'postgres://stub:***@localhost:5432/stub'
+        elif key.endswith('_REDIS'):
+            value = 'redis://stub.example.upstash.io:6379'
+        else:
+            value = 'stub-token'
+        out.append(f'{key}={value}\n')
+        continue
+    # FLY_APP_ORG is optional and must keep its documented default.
+    if re.match(r'^#\s*FLY_APP_ORG=', line):
+        continue
+    out.append(line)
+open(dst, 'w').writelines(out)
+PY
+
+rm -f "$TMP/registered.example"
+FLY_LOG="$TMP/fly.example.log" \
+FLY_REGISTERED="$TMP/registered.example" \
+FLY_LIST_JSON='[{"Name":"sindustries-platform-staging","Status":"running"}]' \
+PATH="$TMP/bin:$PATH" \
+  bash "$SCRIPT" --yes --env-local "$TMP/.env.local.example" \
+    >"$TMP/out.example" 2>"$TMP/err.example" \
+    || true
+
+if grep -qF "missing source value(s)" "$TMP/err.example"; then
+  echo "FAIL: case=example — the published example file does not satisfy the source contract" >&2
+  sed 's/^/  /' "$TMP/err.example" >&2
+  exit 1
+fi
+if grep -qF "refusing to bootstrap Fly app" "$TMP/err.example"; then
+  echo "FAIL: case=example — the published example file set an unexpected app name" >&2
+  sed 's/^/  /' "$TMP/err.example" >&2
+  exit 1
+fi
+if ! grep -qF 'INVOKED: secrets set --app sindustries-platform-staging --detach' "$TMP/fly.example.log"; then
+  echo "FAIL: case=example — the example file must reach the secrets step" >&2
+  sed 's/^/  /' "$TMP/fly.example.log" >&2
+  exit 1
+fi
 
 # ---------- helpers ---------------------------------------------------------
 

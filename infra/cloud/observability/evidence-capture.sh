@@ -185,6 +185,12 @@ For each scenario below, the operator (Quinn) ran the matching
 \`failure-inject.sh <scenario>\` against staging, captured the
 alert state transitions, and pasted them here.
 
+Only the scenarios that are actually usable can appear here. The
+service-scoped scenarios (\`tasks-api-down\`/\`tasks-api-up\`,
+\`budget-api-down\`/\`budget-api-up\`) REFUSE — staging is one app, so
+there is no per-service app to scale. Use \`redis-down\`/\`redis-up\` or
+\`db-down\`/\`db-up\` instead.
+
 EOF
     while IFS=$'\t' read -r uid title folder sev owner expr; do
       [ -z "${uid}" ] && continue
@@ -205,13 +211,14 @@ ENTRY
     emit <<'EOF'
 ## AC3 — Operator diagnoses a failed workflow without the local dev machine
 
-Walk through one real induced failure (see `failure-inject.sh <scenario>`)
+Walk through one real induced failure (see `failure-inject.sh <scenario>`;
+the service-scoped scenarios refuse — use `redis-down` or `db-down`)
 and paste evidence for each step below:
 
 1. **Operator opens the cloud-overview dashboard** — confirms the broken service is `up=0` (screenshot).
 2. **Operator opens the matching alert detail page** — confirms the alert is `firing` with the expected expression result (screenshot).
 3. **Operator opens Tempo traces for the failing service** — pastes the trace ID + screenshot showing the failing span (no logins to the local dev machine were used).
-4. **Operator restores the service** (matching recover command from `failure-inject.sh`) — pastes the alert-resolved state JSON.
+4. **Operator restores the service** (the recover command from `failure-inject.sh` — e.g. `redis-up` for a `redis-down` induction; the refused service-scoped scenarios have no recover command) — pastes the alert-resolved state JSON.
 
 ## AC4 — Evidence index
 

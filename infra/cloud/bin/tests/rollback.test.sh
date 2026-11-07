@@ -11,9 +11,13 @@
 #   5. Without TTY and without --yes, the script refuses to roll back
 #      (exit 1) — protects against automation that forgot --yes.
 #   6. With FLY_API_TOKEN + --yes, the rollback command runs, releases
-#      are inspected (current + previous shown), the post-rollback
-#      smoke check runs against /health for tasks-api/budget-api, and the
-#      worker startup log is greped for auto-post-worker.
+#      are inspected (current + previous shown), and the post-rollback
+#      smoke check covers EVERY child of the consolidated platform — all
+#      three /health routes plus the worker startup log — for EVERY
+#      service alias. A rollback is shared-fate (it rolls back the one
+#      shared app), so the smoke set is never narrowed to the requested
+#      alias: `bin/rollback budget-api` used to check only
+#      /budget-api/health and exit 0 with a broken tasks-api child.
 
 set -euo pipefail
 
@@ -56,7 +60,12 @@ case "$1" in
     printf '[{"id":"m_stub_1","region":"syd","state":"started","name":"tasks-api"}]'
     ;;
   logs)
-    if [[ "${FLY_WORKER_STARTUP:-0}" == "1" ]]; then
+    # EVERY alias smoke-checks the worker startup line, because every
+    # alias rolls back the one shared app. The stub therefore emits the
+    # line by default (a healthy consolidated platform has the worker
+    # child running); FLY_WORKER_STARTUP=0 suppresses it for the failure
+    # path.
+    if [[ "${FLY_WORKER_STARTUP:-1}" != "0" ]]; then
       printf '[content-scheduler-worker] starting (adapter=bullmq)\n'
     fi
     exit 0 ;;
@@ -147,12 +156,20 @@ assert_log_absent "INVOKED: releases rollback"
 
 echo "test: --yes runs the rollback for tasks-api with smoke check"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --yes
+FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --yes
 assert_eq "tasks-api rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: apps list --json"
 assert_log_contains "INVOKED: releases --app sindustries-platform-staging --json"
 assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
-assert_log_contains "INVOKED: curl"
+# SHARED FATE: a tasks-api rollback rolls the whole platform back, so it
+# must check every child — not just tasks-api.
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
+assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 
 echo "test: --to-version is forwarded to releases rollback"
 reset_log
@@ -167,13 +184,22 @@ assert_eq "content-scheduler-api rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
 assert_log_contains "INVOKED: curl"
 
-echo "test: auto-post-worker uses the log-tail smoke check, not curl"
+echo "test: auto-post-worker rollback checks the worker log AND every health route"
+# SHARED FATE: every alias rolls back the one shared app, so every alias
+# gets the FULL smoke set. The auto-post worker has no HTTP route of its
+# own, but the platform it shares an app with does — checking only the
+# log line would let a dead HTTP child pass.
 reset_log
 FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" auto-post-worker --yes
 assert_eq "worker rollback exit code" "0" "$?"
 assert_log_contains "INVOKED: releases rollback --app sindustries-platform-staging"
 assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
-assert_log_absent "INVOKED: curl"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 
 echo "test: platform rolls the consolidated app back and smoke-checks all three services"
 reset_log

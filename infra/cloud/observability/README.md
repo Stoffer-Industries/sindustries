@@ -13,7 +13,7 @@ infra/cloud/observability/
   README.md                          # this file — operator index
   bootstrap-observability.sh         # idempotent local script with subcommand dispatch (validate | app | secrets | dashboards | alerts | deploy | smoke | evidence | all)
   evidence-capture.sh                # prints the closing-PR evidence pack template (md | sh | json)
-  failure-inject.sh                  # 10 failure-injection scenarios with --dry-run (redis-down/up, tasks-api-down/up, budget-api-down/up, db-down/up, deploy-failed/restored)
+  failure-inject.sh                  # 10 failure-injection scenario names with --dry-run; 6 usable (redis-down/up, db-down/up), 4 refused (tasks-api-down/up, budget-api-down/up — service-scoped child drills are unavailable since staging is one app)
   env/
     .env.example                     # redacted env-var contract
   grafana/
@@ -93,10 +93,31 @@ After Tom hands over the Grafana Cloud + Fly + Neon credentials, the operator (Q
    ```
 6. Exercise the failure-injection surface to verify alerts fire and resolve:
    ```bash
-   bash infra/cloud/observability/failure-inject.sh tasks-api-down     # induce
-   bash infra/cloud/observability/failure-inject.sh tasks-api-up       # recover
+   bash infra/cloud/observability/failure-inject.sh redis-down     # induce
+   bash infra/cloud/observability/failure-inject.sh redis-up       # recover
    ```
    Both commands print the expected alert uid + for-window so Quinn can correlate with the matching Grafana state. `--dry-run` prints the plan without contacting Fly.
+
+   **Service-scoped child drills are unavailable.** Staging is one app
+   (`sindustries-platform-staging`, cutover 2026-11-07, task 219fb673),
+   so there is no per-service app left to scale. `tasks-api-down` /
+   `tasks-api-up` and `budget-api-down` / `budget-api-up` **refuse**: a
+   real run exits 1 without touching Fly, and `--dry-run` exits 0
+   printing `REFUSED`. Scaling the consolidated platform instead would be
+   a full-platform outage wearing a service-scoped label, so it is refused
+   too. Producing a service-scoped outage needs a child-level stop
+   mechanism inside the platform Machine, which is **not implemented yet**.
+
+   The supported replacements are `redis-down` / `redis-up` (alert
+   `sindustries-redis-down`) and `db-down` / `db-up` (alerts
+   `sindustries-tasks-api-db-down` + `sindustries-budget-api-db-down`).
+   The `deploy-failed` / `deploy-restored` pair is not a usable
+   replacement: its `deploy-failed` alert file was removed, so no live
+   alert matches it.
+
+   The `sindustries-tasks-api-down` and `sindustries-budget-api-down`
+   **alerts are still live** and must still fire on a real outage — only
+   the synthetic drill that used to produce one is gone.
 
 ---
 

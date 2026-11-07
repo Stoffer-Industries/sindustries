@@ -12,8 +12,11 @@
 #      any environment preflight).
 #   4. Without --image, no `--image` is appended (uses local source).
 #   5. Missing FLY_API_TOKEN fails preflight (exit 2, no flyctl deploy).
-#   6. The post-deploy smoke check GETs the `/health` URL for tasks-api
-#      and budget-api, and grep-tails logs for auto-post-worker.
+#   6. The post-deploy smoke check GETs EVERY `/health` route of the
+#      consolidated platform — all three, plus the worker startup log —
+#      for EVERY service alias. The aliases are shared-fate: they all
+#      deploy one app, so a narrow smoke set would report a broken
+#      sibling child as a successful deploy.
 #   7. --dry-run prints the deploy command and exits 0 without invoking
 #      `flyctl deploy`.
 #   8. Source deploys refuse a dirty worktree so GIT_COMMIT_SHA cannot
@@ -74,8 +77,11 @@ case "$1" in
     printf '[{"id":"m_stub_1","region":"syd","state":"started","name":"tasks-api"}]'
     ;;
   logs)
-    # Smoke check for auto-post-worker greps for the startup line.
-    if [[ "${FLY_WORKER_STARTUP:-0}" == "1" ]]; then
+    # EVERY alias smoke-checks the worker startup line, because every
+    # alias deploys the one shared app. The stub therefore emits the line
+    # by default (a healthy consolidated platform has the worker child
+    # running); FLY_WORKER_STARTUP=0 suppresses it for the failure path.
+    if [[ "${FLY_WORKER_STARTUP:-1}" != "0" ]]; then
       printf '[content-scheduler-worker] starting (adapter=bullmq)\n'
     fi
     exit 0 ;;
@@ -202,12 +208,29 @@ FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true FLY_CURL_COUNT_FILE="$TM
 assert_eq "deploy tasks-api retry exit code" "0" "$?"
 assert_eq "curl retry count" "2" "$(cat "$TMP/curl.count")"
 
-echo "test: content-scheduler-api maps to its standalone Fly app"
+echo "test: content-scheduler-api maps to the consolidated platform app"
 reset_log
 FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
   "$SCRIPT" content-scheduler-api --image registry/repo:cafe1234 2>&1
 assert_eq "deploy content-scheduler-api exit code" "0" "$?"
 assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=cafe1234 --image registry/repo:cafe1234"
+
+echo "test: every service alias smoke-checks the FULL platform set (shared fate)"
+# Every alias deploys the one shared app, so every alias must validate
+# every child. A narrow set would let a dead sibling child pass.
+for alias in tasks-api budget-api content-scheduler-api auto-post-worker platform; do
+  reset_log
+  FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
+    "$SCRIPT" "$alias" --image registry/repo:aaaabbbbccccdddd 2>&1
+  assert_eq "deploy $alias exit code" "0" "$?"
+  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+  assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/tasks-api/health"
+  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+  assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/budget-api/health"
+  # stable-fallback: provider URL pending the stable-hostname CNAME move (task 219fb673)
+  assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
+  assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
+done
 
 echo "test: missing FLY_API_TOKEN fails preflight"
 reset_log

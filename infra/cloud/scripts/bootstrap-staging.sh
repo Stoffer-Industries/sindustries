@@ -24,8 +24,8 @@
 #                             committed; .gitignore'd. The keys this script
 #                             reads are listed under "Inputs" in the
 #                             translation table below.
-#                             Plus optional FLY_APP_PLATFORM / FLY_APP_ORG
-#                             overrides.
+#                             Plus an optional FLY_APP_ORG override. The app
+#                             name is NOT overridable: staging is one app.
 #
 # The .env.local keys are TRANSLATED into the source names the platform
 # provisioner reads, and the provisioner owns the mapping from those
@@ -89,8 +89,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 ENV_LOCAL="${REPO_ROOT}/infra/cloud/.env.local"
 
-# The one staging app. Overridable, but it must be the consolidated
-# platform app: the retired per-service apps must not be recreated.
+# The one staging app. The ORG is overridable; the APP NAME IS NOT.
+# Staging is ONE app: the four per-service staging apps were destroyed at
+# the cutover and must not be recreated (a resurrected per-service worker
+# would put two consumers on one BullMQ queue). Any resolved app name
+# other than the consolidated platform app is refused before the first
+# Fly call.
 FLY_APP_PLATFORM_DEFAULT="sindustries-platform-staging"
 FLY_APP_ORG_DEFAULT="personal"
 
@@ -160,6 +164,36 @@ confirm() {
 
 hdr "1. Pre-flight"
 
+# The Fly org may be overridden by .env.local; the APP NAME may not.
+# Resolve the target and assert it BEFORE any Fly call, so a bad target
+# can never reach `apps create` or `secrets set`.
+if [[ ! -f "$ENV_LOCAL" ]]; then
+  fail "Quinn-owned env file not found: $ENV_LOCAL
+  Required source keys (this script translates them into the provisioner's
+  source names — see the translation table in this script's header):
+    TASKS_API_DATABASE_URL
+    BUDGET_API_DATABASE_URL
+    AUTO_POST_WORKER_DATABASE_URL
+    HEALTH_PROBE_REDIS            (or TASKS_API_CONTENT_SCHEDULER_REDIS_URL)
+    TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
+    CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
+  Copy infra/cloud/env/bootstrap-staging.env.example as a starting point,
+  fill in Quinn-owned values, re-run." 1
+fi
+# shellcheck disable=SC1090
+source "$ENV_LOCAL"
+ok ".env.local loaded"
+
+[[ -n "${FLY_APP_ORG:-}" ]] && FLY_APP_ORG="$FLY_APP_ORG"
+
+# The target is NOT free-form. Staging is ONE app: the four per-service
+# staging apps were destroyed at the cutover and must not come back (two
+# consumers on one BullMQ queue would double-process every scheduled post,
+# silently). The org may be overridden; the app name may not.
+if [[ "$FLY_APP_PLATFORM" != "$FLY_APP_PLATFORM_DEFAULT" ]]; then
+  fail "refusing to bootstrap Fly app '$FLY_APP_PLATFORM': staging is one app ($FLY_APP_PLATFORM_DEFAULT). The retired per-service staging apps must not be recreated. Remove FLY_APP_PLATFORM from $ENV_LOCAL." 1
+fi
+
 command -v flyctl >/dev/null 2>&1 || command -v fly >/dev/null 2>&1 \
   || fail "fly CLI not found in PATH. Install: https://fly.io/docs/hands-on/install-flyctl/" 1
 
@@ -184,23 +218,6 @@ done
 if [[ -n "$ONLY_SERVICE" && "$ONLY_SERVICE" != "platform" ]]; then
   fail "unknown service '$ONLY_SERVICE' (the only service is 'platform')" 1
 fi
-
-if [[ ! -f "$ENV_LOCAL" ]]; then
-  fail "Quinn-owned env file not found: $ENV_LOCAL
-  Expected keys (see the translation table in this script's header):
-    TASKS_API_DATABASE_URL, BUDGET_API_DATABASE_URL, AUTO_POST_WORKER_DATABASE_URL,
-    HEALTH_PROBE_REDIS, TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN,
-    CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN
-  Copy infra/cloud/env/platform.env.example as a starting point, fill in
-  Quinn-owned values, re-run." 1
-fi
-# shellcheck disable=SC1090
-source "$ENV_LOCAL"
-ok ".env.local loaded"
-
-# Override the Fly app / org if Quinn set them in .env.local.
-[[ -n "${FLY_APP_PLATFORM:-}" ]] && FLY_APP_PLATFORM="$FLY_APP_PLATFORM"
-[[ -n "${FLY_APP_ORG:-}" ]]     && FLY_APP_ORG="$FLY_APP_ORG"
 
 info "Target Fly app:"
 info "  platform:            $FLY_APP_PLATFORM (org $FLY_APP_ORG)"

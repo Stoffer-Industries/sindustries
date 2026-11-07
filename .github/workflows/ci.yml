@@ -236,6 +236,13 @@ jobs:
         # in sync.
         run: bash infra/cloud/scripts/tests/observability-bootstrap.test.sh
 
+      - name: Run observability drill-docs contract test (task 219fb673)
+        # The service-scoped failure drills REFUSE (staging is one app), so
+        # the operator docs must not hand the on-call engineer a command
+        # that exits 1. This derives the refused set from the script itself
+        # and fails if a doc prescribes one without saying it refuses.
+        run: bash infra/cloud/scripts/tests/observability-drill-docs.test.sh
+
   mission-control-tests:
     name: mission-control tests
     runs-on: ubuntu-latest
@@ -1070,6 +1077,25 @@ jobs:
 
       - name: Run cloud staging workflow harness tests
         run: node --test tests/cloud/tests/staging-workflows.test.mjs
+
+      # Task 219fb673: the staging-target preflight used to build ONE
+      # allow-list from every staging hostname and apply it to all three
+      # target variables, so a TASKS_API_URL pointing at the budget-api
+      # hostname PASSED — every service exposes /health, so the harness
+      # probed the wrong service and reported `tasks.health: pass`. The
+      # checker resolves each target against its OWN surface's routes.
+      # Run by explicit path so the repository-wide contract-test orphan
+      # guard sees it as executed.
+      - name: Run staging-target preflight contract test
+        run: node --test tests/cloud/tests/check-staging-target-preflight.test.mjs
+
+      # Task 219fb673: the hostname matrix is the source of truth for the
+      # per-surface staging routes the preflight validates against, and it
+      # must agree with the router that actually serves them. Run the
+      # checker explicitly so a route recorded in the matrix but missing
+      # from nginx.conf (or vice versa) fails on the PR that introduces it.
+      - name: Run stable-hostname matrix shape check
+        run: node tests/cloud/scripts/check-stable-hostname-matrix.mjs
 
       - name: Run cloud staging failure-drill contract tests
         run: bash tests/cloud/tests/staging-failure-drill.test.sh
