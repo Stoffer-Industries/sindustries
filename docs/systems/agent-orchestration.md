@@ -418,8 +418,6 @@ Tom's machine
 
 **Channel routing:** Messages arrive via Telegram and are routed to the correct agent based on chat ID and topic ID. Authorized senders are configured in `openclaw.json` under `channels.telegram.allowFrom`. Only Tom's number is allowlisted.
 
-**Model routing:** which model runs which category of work — and how a scheduled pass with an empty queue costs nothing at all — is specified in `docs/systems/model-routing-contract.md`. The scheduler-side preflight (`agents/cron/routing_preflight.py`) runs as a command payload with no model call, so an empty work queue is recognised without paying for a model turn.
-
 **Brain:** `~/.openclaw/workspace/brain/` is a symlink into iCloud Drive. It holds private data (product specs, state files, ops notes) that must not live in git. Git worktrees for sindustries branches must not materialise a real `brain/` directory — the path must always remain a symlink.
 
 **`.openclaw/` write boundary:** Only Quinn can write to `~/.openclaw/`. When Rowan or another agent needs a gateway config change, they post `[openclaw-needed]` on the task; Quinn applies it during heartbeat and posts `[openclaw-done]`.
