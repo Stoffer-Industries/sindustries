@@ -20,6 +20,11 @@
 #   7. An unreadable supervisor payload is reported as unknown, not as
 #      healthy: the report is degraded and says so.
 #   8. A child that is not running degrades the report for that service.
+#   9. The LIVE flyctl 0.4.111 envelope (no "Services"/"ProcessTypes"/
+#      "Release" key, lowercase machine fields) is parsed correctly, and a
+#      machine env value never rides out in the report.
+#  10. A failing flyctl surfaces its reason — with anything credential-
+#      shaped redacted — instead of a bare "status failed".
 
 set -euo pipefail
 
@@ -47,7 +52,12 @@ printf 'INVOKED: %s\n' "$*" >>"$FLY_LOG"
 case "$1" in
   status)
     # The stub honours the FLY_STATUS_JSON env to swap the canned payload
-    # per test (degraded / healthy / older-shape variants).
+    # per test (degraded / healthy / older-shape variants), and
+    # FLY_STATUS_EXIT/FLY_STATUS_STDERR to simulate a failing flyctl.
+    if [[ "${FLY_STATUS_EXIT:-0}" != "0" ]]; then
+      printf '%s' "${FLY_STATUS_STDERR:-flyctl: failed}" >&2
+      exit "$FLY_STATUS_EXIT"
+    fi
     printf '%s' "${FLY_STATUS_JSON:-${FLY_DEFAULT_STATUS_JSON:-[]}}"
     ;;
   *)
@@ -96,6 +106,17 @@ emit_status_json platform-no-machines '{"Name":"sindustries-platform-staging","S
 emit_status_json platform-wrong-pt '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":44},"ProcessTypes":[{"Type":"unrelated"}],"Machines":[{"ID":"m4","Region":"syd","State":"started","Name":"unrelated"}],"Services":[]}'
 
 emit_status_json platform-legacy-shape '{"Name":"sindustries-platform-staging","Status":"running","Deployed":true,"Release":{"Version":45},"Services":[{"Protocol":"TCP","Port":8080,"Ports":[{"Type":"platform"}]}],"Machines":[{"ID":"m5","Region":"syd","State":"started","Name":"platform"}]}'
+
+# The LIVE flyctl 0.4.111 envelope, captured 2026-11-07 from
+# `flyctl status --app sindustries-platform-staging --json`.
+#
+# It carries NO "Services", NO "ProcessTypes" and NO "Release" key, and its
+# machine fields are LOWERCASE ("id"/"name"/"state"/"region"). The only
+# process-type signal in this envelope is the machine's own
+# FLY_PROCESS_GROUP env var, which is why the machine env is carried here.
+# The env also carries a fake credential, because the report must never
+# carry an env value out with it.
+emit_status_json platform-live-flyctl-0-4-111 '{"AppURL":"https://2a09:8280:1::1ed:3207:0","Deployed":true,"Hostname":"sindustries-platform-staging.fly.dev","ID":"sindustries-platform-staging","Machines":[{"id":"84eed25a455e48","name":"white-sea-2302","state":"started","region":"syd","instance_id":"01M6V05DVMWC3P5WJ583DHDKHM","version":"01M6V05DVMWC3P5WJ583DHDKHM","private_ip":"fdaa:a8:d25a:7e:23f:4e2:48f:2","created_at":"2026-11-07T08:32:56Z","updated_at":"2026-11-07T12:36:38Z","checks":[],"config":{"env":{"FLY_PROCESS_GROUP":"platform","PLATFORM_TASKS_API_DATABASE_URL":"postgres://staging:hunter2@db.example/staging","PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS":"https://mission-control.staging.sindustries.co.nz"}}}],"Name":"sindustries-platform-staging","Organization":{"id":"org","slug":"personal"},"PlatformVersion":"machines","Status":"deployed","Version":12}'
 
 # The supervisor payload with one child down.
 SUPERVISOR_DEGRADED_JSON='{"app":"sindustries-platform-staging","ready":false,"router":{"name":"nginx","state":"running","port":8080,"restarts":0},"children":[{"name":"tasks-api","role":"service","state":"running","pid":614,"port":4001,"restarts":0,"exitCode":null,"rssKb":68064},{"name":"budget-api","role":"service","state":"crashed","pid":null,"port":4002,"restarts":4,"exitCode":1,"rssKb":0},{"name":"content-scheduler-api","role":"service","state":"running","pid":616,"port":4003,"restarts":0,"exitCode":null,"rssKb":68092},{"name":"auto-post-worker","role":"service","state":"running","pid":617,"port":null,"restarts":0,"exitCode":null,"rssKb":41000}]}'
@@ -246,6 +267,54 @@ rc=$?
 set -e
 assert_eq "crashed child exit code" "3" "$rc"
 python3 -c 'import json,pathlib; data=json.loads(pathlib.Path("'$TMP'/out.json").read_text()); assert data[0]["child"]["state"]=="crashed"; assert data[0]["child"]["restarts"]==4; assert data[0]["childHealthy"] is False; assert data[0]["degraded"]==True'
+
+echo "test: the live flyctl 0.4.111 envelope is parsed"
+reset_log
+FLY_STATUS_JSON="$(cat "$TMP/platform-live-flyctl-0-4-111.json")" FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
+assert_eq "live flyctl envelope exit code" "0" "$?"
+python3 - "$TMP/out.json" <<'PY'
+import json, sys, pathlib
+row = json.loads(pathlib.Path(sys.argv[1]).read_text())[0]
+assert row["degraded"] is False, row
+assert row["expectedProcessTypePresent"] is True, row
+assert row["processTypesRunning"] == ["platform"], row
+assert "machine-env" in row["processTypeSource"], row
+assert row["processTypesDetected"] is True, row
+assert row["version"] == 12, row
+assert row["machineCount"] == 1, row
+m = row["machines"][0]
+assert m["id"] == "84eed25a455e48", m
+assert m["region"] == "syd", m
+assert m["state"] == "started", m
+assert m["name"] == "white-sea-2302", m
+# The machine env must never ride out in the report.
+blob = json.dumps(row)
+assert "hunter2" not in blob, "a machine env value leaked into the report"
+assert "DATABASE_URL" not in blob, "a machine env key leaked into the report"
+PY
+
+echo "test: a failing flyctl surfaces a sanitized reason"
+reset_log
+set +e
+FLY_STATUS_EXIT=1 FLY_STATUS_STDERR='Error: failed to run query: tls: x509: certificate is not trusted (token=fly_abc1234567890xyz)' FLY_API_TOKEN=stub FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" tasks-api >"$TMP/out.txt" 2>&1
+rc=$?
+set -e
+assert_eq "failing flyctl exit code" "2" "$rc"
+grep -q "certificate is not trusted" "$TMP/out.txt" || {
+  echo "FAIL: expected flyctl's reason in the operator output" >&2
+  cat "$TMP/out.txt" >&2
+  exit 1
+}
+if grep -q "fly_abc1234567890xyz" "$TMP/out.txt"; then
+  echo "FAIL: a credential leaked into the operator output" >&2
+  cat "$TMP/out.txt" >&2
+  exit 1
+fi
+grep -q "<redacted>" "$TMP/out.txt" || {
+  echo "FAIL: expected the credential to be redacted" >&2
+  cat "$TMP/out.txt" >&2
+  exit 1
+}
 
 echo
 echo "OK — all bin/status tests passed"
