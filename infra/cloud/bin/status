@@ -116,6 +116,16 @@ info() { [[ "$JSON" -eq 1 ]] || printf '\033[36m[status]\033[0m %s\n' "$*"; }
 warn() { [[ "$JSON" -eq 1 ]] || printf '\033[33m[status]\033[0m %s\n' "$*" >&2; }
 fail() { printf '\033[31m[status]\033[0m %s\n' "$*" >&2; exit "${2:-1}"; }
 
+# Redact anything credential-shaped before flyctl's stderr is shown to an
+# operator. Operator output ends up pasted into task comments on a public
+# repo, so a token must never ride along with the diagnostic.
+sanitize_fly_error() {
+  printf '%s' "$1" \
+    | tr '\n' ' ' \
+    | sed -E 's/fly_[A-Za-z0-9+/_=-]{8,}/<redacted>/g; s/([Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll])([=: ]+)[^ ,;]+/\1\2<redacted>/g' \
+    | cut -c1-400
+}
+
 command -v flyctl >/dev/null 2>&1 || fail "flyctl not on PATH" 2
 command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH (needed for JSON shaping)" 2
 if [[ -z "${FLY_API_TOKEN:-}" ]]; then
@@ -147,11 +157,22 @@ for service in "${TARGETS[@]}"; do
 
   info "checking $FLY_APP"
 
-  # `fly status --json` returns the canonical app status envelope: name,
-  # status, deployed, release, machines, services (process types).
-  if ! APP_JSON="$(flyctl status --app "$FLY_APP" --json 2>/dev/null)"; then
-    fail "flyctl status failed for $FLY_APP" 2
+  # `fly status --json` returns the app status envelope: name, status,
+  # deployed, version, machines, and (on some versions) release and
+  # services. The envelope's shape CHANGED between flyctl releases — the
+  # live 0.4.111 envelope has no "Services", no "ProcessTypes" and no
+  # "Release" key, and its machine fields are lowercase — so the parsing
+  # below accepts every shape the tool has shipped.
+  #
+  # flyctl's stderr is captured rather than discarded: a TLS, credential
+  # or auth failure is otherwise indistinguishable from a missing app.
+  FLY_ERR_FILE="$(mktemp)"
+  if ! APP_JSON="$(flyctl status --app "$FLY_APP" --json 2>"$FLY_ERR_FILE")"; then
+    FLY_ERR="$(sanitize_fly_error "$(cat "$FLY_ERR_FILE")")"
+    rm -f "$FLY_ERR_FILE"
+    fail "flyctl status failed for $FLY_APP${FLY_ERR:+ — $FLY_ERR}" 2
   fi
+  rm -f "$FLY_ERR_FILE"
 
   # Shape into the report we want.
   REPORT="$(APP_JSON="$APP_JSON" EXPECTED_PT="$EXPECTED_PT" SERVICE="$service" FLY_APP="$FLY_APP" SUPERVISOR_JSON="$SUPERVISOR_JSON" \
@@ -163,13 +184,26 @@ service = os.environ["SERVICE"]
 fly_app = os.environ["FLY_APP"]
 
 machines = []
+machine_process_groups = []
 for m in app.get("Machines") or []:
+    # flyctl has shipped both casings: the live 0.4.111 envelope uses
+    # lowercase machine keys ("id", "name", "state", "region").
     machines.append({
         "id": m.get("ID") or m.get("id") or "",
-        "region": m.get("Region") or "",
-        "state": m.get("State") or "",
-        "name": m.get("Name") or "",
+        "region": m.get("Region") or m.get("region") or "",
+        "state": m.get("State") or m.get("state") or "",
+        "name": m.get("Name") or m.get("name") or "",
     })
+    # The process group a machine actually runs. Fly injects it into the
+    # machine env as FLY_PROCESS_GROUP. This is the ONLY process-type
+    # signal in the live envelope (it carries no "Services"/"ProcessTypes"
+    # key), so it is read here. ONLY this one variable is read, so no
+    # other env value can reach the report.
+    config = m.get("config") if isinstance(m.get("config"), dict) else {}
+    env = config.get("env") if isinstance(config.get("env"), dict) else {}
+    group = env.get("FLY_PROCESS_GROUP")
+    if group:
+        machine_process_groups.append(str(group))
 
 services_running = []
 for svc in app.get("Services") or []:
@@ -182,20 +216,40 @@ for svc in app.get("Services") or []:
         ],
     })
 
-# `fly status --json` historically puts process types under
-# `app["Services"][i]["Ports"][j]["Type"]`. Some Fly versions flatten into
-# `app["ProcessTypes"]`. Cover both.
+# `fly status --json` has shipped three process-type shapes:
+#   1. `app["Services"][i]["Ports"][j]["Type"]` (older releases)
+#   2. `app["ProcessTypes"][i]["Type"]` (some releases)
+#   3. neither — the live 0.4.111 envelope carries no process-type key at
+#      all, and the running groups are readable only from the machines'
+#      own FLY_PROCESS_GROUP env.
+# All three are read, so the report does not depend on which flyctl is
+# installed.
 process_types_flat = set()
+process_type_sources = set()
 for svc in services_running:
     for pt in svc["processTypes"]:
         if pt:
             process_types_flat.add(pt)
+            process_type_sources.add("services")
 for pt in app.get("ProcessTypes") or []:
     name = pt.get("Type") or pt.get("type") or pt.get("Name") or pt.get("name") or ""
     if name:
         process_types_flat.add(name)
+        process_type_sources.add("processTypes")
+for group in machine_process_groups:
+    process_types_flat.add(group)
+    process_type_sources.add("machine-env")
 
 expected_present = expected_pt in process_types_flat
+process_types_detected = bool(process_types_flat)
+
+# The release version moved too: some flyctl releases nest it under
+# "Release" -> {"Version": N}, the live one puts a flat "Version": N at
+# the top level of the envelope.
+release = app.get("Release") if isinstance(app.get("Release"), dict) else {}
+version = release.get("Version")
+if version is None:
+    version = app.get("Version")
 
 # The supervisor payload is the only per-child signal after the
 # consolidation. It is optional: when it cannot be read, the child state
@@ -262,9 +316,11 @@ out = {
     "name": app.get("Name") or "",
     "status": app.get("Status") or "",
     "deployed": app.get("Deployed") or False,
-    "version": app.get("Release", {}).get("Version") if isinstance(app.get("Release"), dict) else None,
+    "version": version,
     "expectedProcessType": expected_pt,
     "processTypesRunning": sorted(process_types_flat),
+    "processTypeSource": sorted(process_type_sources),
+    "processTypesDetected": process_types_detected,
     "expectedProcessTypePresent": expected_present,
     "machines": machines,
     "machineCount": len(machines),
