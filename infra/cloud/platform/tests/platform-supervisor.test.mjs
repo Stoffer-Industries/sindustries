@@ -14,6 +14,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, it } from 'node:test';
@@ -24,7 +25,7 @@ import {
   buildChildEnv,
   missingRequiredSources,
 } from '../platform-services.mjs';
-import { createSupervisor } from '../platform-supervisor.mjs';
+import { Child, createSupervisor } from '../platform-supervisor.mjs';
 
 /**
  * A fake child process: an EventEmitter with the surface the supervisor
@@ -59,9 +60,10 @@ class FakeChild extends EventEmitter {
  */
 function fakeSpawner(options = {}) {
   const launched = [];
-  const spawn = (command, spawnOptions) => {
+  const spawn = (file, args, spawnOptions) => {
+    const command = [file, ...args];
     const child = new FakeChild(command, options);
-    launched.push({ command, options: spawnOptions, child });
+    launched.push({ file, args, command, options: spawnOptions, child });
     return child;
   };
   return { spawn, launched };
@@ -216,6 +218,32 @@ describe('backoffDelay', () => {
 });
 
 describe('createSupervisor', () => {
+  it('starts a real child through Node spawn(file, args, options)', async () => {
+    const deps = {
+      env: process.env,
+      cwd: process.cwd(),
+      spawn,
+      now: () => new Date().toISOString(),
+      logger: () => {},
+      setTimeout,
+      clearTimeout,
+      shuttingDown: true,
+    };
+    const child = new Child(
+      {
+        name: 'spawn-contract',
+        command: [process.execPath, '-e', 'process.exit(0)'],
+      },
+      deps,
+    );
+
+    child.start();
+    await child.exited();
+
+    assert.equal(child.exitCode, 0);
+    assert.equal(child.state, 'stopped');
+  });
+
   it('refuses to start when a required secret is missing', () => {
     const env = fullParentEnv();
     delete env.PLATFORM_TASKS_API_DATABASE_URL;
@@ -236,6 +264,11 @@ describe('createSupervisor', () => {
 
     assert.equal(supervisor.start(), true);
     assert.equal(launched.length, 5, 'four children plus the router');
+
+    for (const { file, args } of launched) {
+      assert.equal(typeof file, 'string');
+      assert.ok(Array.isArray(args));
+    }
 
     const names = launched.map((l) => l.command.join(' '));
     assert.ok(names.some((n) => n.includes('services/tasks-api')));

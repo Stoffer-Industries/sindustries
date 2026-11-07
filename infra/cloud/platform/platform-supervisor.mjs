@@ -128,7 +128,11 @@ class Child {
   start() {
     this.clearRestartTimer();
     const env = this.env();
-    const child = this.deps.spawn(this.spec.command, {
+    // Node's child_process.spawn contract is spawn(file, args, options).
+    // Passing the command array as `file` (with the options object in the
+    // `args` position) throws ERR_INVALID_ARG_TYPE before the child starts.
+    const [file, ...args] = this.spec.command;
+    const child = this.deps.spawn(file, args, {
       env,
       cwd: this.deps.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
