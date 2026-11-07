@@ -15,10 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
-      tasks_api: ${{ steps.filter.outputs.tasks_api }}
-      budget_api: ${{ steps.filter.outputs.budget_api }}
-      content_scheduler_api: ${{ steps.filter.outputs.content_scheduler_api }}
-      auto_post_worker: ${{ steps.filter.outputs.auto_post_worker }}
       platform: ${{ steps.filter.outputs.platform }}
       gymtrack: ${{ steps.filter.outputs.gymtrack }}
       gymtrack_mcp: ${{ steps.filter.outputs.gymtrack_mcp }}
@@ -43,39 +39,17 @@ jobs:
               - 'package-lock.json'
               - 'vercel.json'
               - '.github/workflows/website-deploy.yml'
-            tasks_api:
-              - 'services/tasks-api/**'
-              - 'packages/otel-node/**'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'infra/cloud/**'
-              - '.github/workflows/deploy-staging-tasks-api.yml'
-            budget_api:
-              - 'services/budget-api/**'
-              - 'packages/budget-domain/**'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'infra/cloud/**'
-              - '.github/workflows/deploy-staging-budget-api.yml'
-            content_scheduler_api:
-              - 'services/content-scheduler-api/**'
-              - 'packages/otel-node/**'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'infra/cloud/**'
-              - '.github/workflows/deploy-staging-content-scheduler-api.yml'
-            auto_post_worker:
-              - 'services/content-scheduler-api/**'
-              - 'packages/otel-node/**'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'infra/cloud/**'
-              - '.github/workflows/deploy-staging-auto-post-worker.yml'
-            # Task 219fb673 — the consolidated staging platform. The four
-            # per-service filters above are KEPT until the cutover lands,
-            # because a filter change on `main` redeploys. At cutover they
-            # are removed and this one takes over (see
-            # docs/runbooks/platform-consolidation-rollback.md §5).
+            # Task 219fb673 — the four per-app Fly apps
+            # (sindustries-tasks-api-staging, -budget-api-staging,
+            # -auto-post-worker-staging, -content-scheduler-api-staging)
+            # were destroyed on 2026-11-07 at Tom's explicit instruction
+            # ("I don't wanna pay for them anymore ever") ahead of the
+            # cutover landing. Their deploy filters/jobs are removed here
+            # so a future infra/cloud/** push (e.g. PR #929) doesn't try to
+            # `flyctl deploy` onto apps that no longer exist and fail the
+            # merge gate for everyone. `platform` is now the only surface
+            # for these four services; see
+            # docs/runbooks/platform-consolidation-rollback.md §5.
             platform:
               - 'services/tasks-api/**'
               - 'services/budget-api/**'
@@ -1316,53 +1290,11 @@ jobs:
       candidate-url: ${{ needs.deploy-website-staging.outputs.deployment_url }}
     secrets: inherit
 
-  deploy-tasks-api-staging:
-    name: tasks-api staging
-    needs: [changes, merge-gate]
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.merge-gate.result == 'success' &&
-      needs.changes.outputs.tasks_api == 'true'
-    uses: ./.github/workflows/deploy-staging-tasks-api.yml
-    secrets: inherit
-
-  deploy-budget-api-staging:
-    name: budget-api staging
-    needs: [changes, merge-gate]
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.merge-gate.result == 'success' &&
-      needs.changes.outputs.budget_api == 'true'
-    uses: ./.github/workflows/deploy-staging-budget-api.yml
-    secrets: inherit
-
-  deploy-content-scheduler-api-staging:
-    name: content-scheduler-api staging
-    needs: [changes, merge-gate]
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.merge-gate.result == 'success' &&
-      needs.changes.outputs.content_scheduler_api == 'true'
-    uses: ./.github/workflows/deploy-staging-content-scheduler-api.yml
-    secrets: inherit
-
-  deploy-auto-post-worker-staging:
-    name: auto-post-worker staging
-    needs: [changes, merge-gate]
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.merge-gate.result == 'success' &&
-      needs.changes.outputs.auto_post_worker == 'true'
-    uses: ./.github/workflows/deploy-staging-auto-post-worker.yml
-    secrets: inherit
+  # Task 219fb673 — deploy-tasks-api-staging, deploy-budget-api-staging,
+  # deploy-content-scheduler-api-staging and deploy-auto-post-worker-staging
+  # jobs removed 2026-11-07: the four underlying Fly apps were destroyed at
+  # Tom's explicit instruction, ahead of the cutover landing. `platform`
+  # below is now the only deploy surface for these four services.
 
   deploy-platform-staging:
     name: platform staging
