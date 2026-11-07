@@ -110,6 +110,27 @@ jobs:
       # role would fail the first deploy — or serve a read-only service.
       # The provisioning script fails closed when a source is missing
       # rather than falling back to a read-only DSN.
+      #
+      # ORDERING INVARIANT: this step must not be able to fail because
+      # of the state of the image it is about to replace. `flyctl secrets
+      # set` also restarts the app's Machines, and in the pinned flyctl
+      # (0.4.102) that restart is a Machine deployment flyctl follows to
+      # completion. When the running image is unhealthy — exactly the
+      # state a deploy exists to repair — the follow fails, the command
+      # exits non-zero, and the run aborts BEFORE the canary deploy that
+      # carries the fix. Main CI run 42366203146 (merge commit
+      # 27269dbb) failed here for exactly that reason and never reached
+      # "Deploy (canary)".
+      #
+      # The provisioner therefore writes the secrets with `--detach`
+      # (flyctl sets SkipHealthChecks on the restart-only deployment) and
+      # writes them DIRECTLY rather than with `--stage`, so they are the
+      # app's live values and the canary Machine boots with them. The
+      # health gate is the canary deploy and the smoke checks below it.
+      #
+      # Do not inline a raw `flyctl secrets set` here: it would reintroduce
+      # the health-gated write. The contract is asserted by
+      # infra/cloud/platform/tests/platform-provision-order.test.mjs.
       - name: Provision the platform app and its secrets
         working-directory: .
         run: |
