@@ -93,6 +93,20 @@ describe('pickRedisUrl', () => {
   it('fails on an empty secret', () => {
     assert.throws(() => pickRedisUrl(''), /no Redis URL/);
   });
+
+  it('fails when the labelled value is not a Redis URL', () => {
+    assert.throws(
+      () => pickRedisUrl('content-scheduler=REPLACE_ME_SEE_QUINN_NOTES'),
+      /usable redis:\/\/ or rediss:\/\/ URL/,
+    );
+  });
+
+  it('fails when identical labelled values are not Redis URLs', () => {
+    assert.throws(
+      () => pickRedisUrl('tasks-api=placeholder,content-scheduler=placeholder'),
+      /usable redis:\/\/ or rediss:\/\/ URL/,
+    );
+  });
 });
 
 describe('deriveDatabaseUrl', () => {

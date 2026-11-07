@@ -51,6 +51,7 @@ expected_all = set(names)
 cases = (
     ('package-lock.json', expected_all),
     ('package.json', expected_all),
+    ('services/content-scheduler-api/src/server.ts', {'platform'}),
     ('docs/specs/foo.md', set()),
     ('apps/website/src/App.jsx', set()),
 )
@@ -60,6 +61,10 @@ for changed, expected in cases:
         failures.append(
             f'synthetic commit {changed!r}: expected {sorted(expected)}, got {sorted(actual)}'
         )
+
+for retired in ('tasks_api', 'budget_api', 'content_scheduler_api', 'auto_post_worker'):
+    if retired in filters:
+        failures.append(f'ci.yml: retired changes filter {retired!r} is still present')
 
 if failures:
     for failure in failures:

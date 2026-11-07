@@ -215,6 +215,17 @@ describe('platform provisioning CLI', () => {
     assert.deepEqual(calls, []);
   });
 
+  it('fails closed before Fly when the Redis source is not a usable URL', () => {
+    const env = stagingEnv({
+      [SOURCE_NAMES.redisUrl]: 'content-scheduler=REPLACE_ME_SEE_QUINN_NOTES',
+    });
+    const { code, output, calls } = runCli({ env });
+    assert.equal(code, 1);
+    assert.match(output, /HEALTH_PROBE_REDIS/);
+    assert.match(output, /usable redis:\/\/ or rediss:\/\/ URL/);
+    assert.equal(callStartingWith(calls, ['secrets', 'set']), undefined);
+  });
+
   it('never prints a source or derived secret value', () => {
     const { code, output, calls } = runCli();
     assert.equal(code, 0);
@@ -290,7 +301,7 @@ describe('secret application', () => {
   it('reads the secret list back and confirms every name landed', () => {
     const { code, output } = runCli();
     assert.equal(code, 0);
-    assert.match(output, /Verified \d+ secret\(s\) registered/);
+    assert.match(output, /Verified \d+ secret name\(s\) registered/);
   });
 
   it('fails loudly when a secret did not register', () => {

@@ -241,6 +241,20 @@ must be a `redis://`/`rediss://` URL and a `*_DATABASE_URL` must be a
 `postgres://` DSN — and refuses to start with one message naming the
 offending source, instead of starting four children that cannot boot.
 
+**The provisioner rejects an unusable Redis source before Fly sees it.**
+The live failure on 2026-11-07 showed why this check cannot live only in
+the supervisor: the staging `HEALTH_PROBE_REDIS` source still held the
+26-character placeholder `REPLACE_ME_SEE_QUINN_NOTES`, the provisioner
+accepted it as one Redis "URL", registered all six `PLATFORM_*_REDIS_URL`
+names, and the read-back confirmed only the names. The new Machine then
+failed the supervisor's shape gate. The provisioner now uses the same
+Redis-URL predicate as the supervisor and fails closed before
+`flyctl secrets set` when the source is not a `redis://` or `rediss://`
+URL. The read-back log says **secret name(s)** deliberately: Fly exposes
+names and a non-reproducible change hint, not values, so this step cannot
+prove the stored value. The authoritative proof remains a healthy
+Machine plus its supervisor logs.
+
 **The router's config path is absolute.** `nginx -c <path>` resolves a
 relative path against nginx's own compile-time prefix
 (`/var/lib/nginx` on alpine), not against the child's working directory,

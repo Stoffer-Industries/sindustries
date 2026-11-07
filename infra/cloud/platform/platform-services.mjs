@@ -294,7 +294,7 @@ export function missingRequiredSources(child, parentEnv) {
  * @param {string} value
  * @returns {boolean}
  */
-function looksLikeRedisUrl(value) {
+export function looksLikeRedisUrl(value) {
   return /^rediss?:\/\/\S+$/i.test(value);
 }
 
