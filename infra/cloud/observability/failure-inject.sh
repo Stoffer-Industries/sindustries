@@ -153,30 +153,35 @@ require_dry_run_or_token() {
 }
 
 # A service-scoped outage can no longer be produced by scaling a Fly app.
+#
 # `scale count 0` against the consolidated platform app would take ALL FOUR
 # services down — a full-platform outage wearing a service-scoped label —
-# so it is refused rather than executed.
-refuse_platform_scale() {
-  local app="$1" scenario="$2" service="$3"
-  if [[ "$app" != "$CONSOLIDATED_STAGING_APP" ]]; then
-    return 0
+# so it is refused rather than executed. The per-service staging apps it
+# replaced were destroyed at the consolidation, so they are refused too.
+#
+# The refusal is mode-aware, because the two modes answer different
+# questions:
+#   --dry-run  answers "what would this do?". A refusal has no side
+#              effects and needs no credentials, so the preview exits 0 and
+#              says REFUSED. It never prints the command it refused.
+#   real run   answers "did it happen?". No: it exits 1 and touches no Fly
+#              app.
+refuse_service_scoped_target() {
+  local app="$1" scenario="$2" service="$3" reason=""
+  if [[ -z "$app" ]]; then
+    reason="the per-service staging app for '${service}' was destroyed at the staging consolidation (2026-11-07, task 219fb673); staging is one app now (${CONSOLIDATED_STAGING_APP}), so there is no per-service app to scale"
+  elif [[ "$app" == "$CONSOLIDATED_STAGING_APP" ]]; then
+    reason="scaling ${CONSOLIDATED_STAGING_APP} to 0 machines takes down ALL FOUR consolidated services — a full-platform outage, not a '${service}'-scoped one"
+  else
+    reason="'${app}' is not a staging app this scenario may target: the per-service staging apps were destroyed at the staging consolidation (2026-11-07, task 219fb673) and staging is one app now (${CONSOLIDATED_STAGING_APP})"
   fi
-  echo "::error::scenario '${scenario}' would scale ${CONSOLIDATED_STAGING_APP} to 0 machines." >&2
-  echo "::error::that app hosts ALL FOUR consolidated services as supervisor children, so this is a full-platform outage, not a '${service}'-scoped one." >&2
-  echo "::error::refusing. A service-scoped outage must be produced by stopping the '${service}' child process inside the platform Machine; that mechanism is not implemented yet." >&2
-  exit 1
-}
-
-# The per-service staging app for a service was destroyed at the
-# consolidation, so a service-scoped scenario has no app to target unless
-# the operator names one explicitly.
-require_service_target() {
-  local app="$1" scenario="$2" service="$3"
-  if [[ -n "$app" ]]; then
-    return 0
+  if [[ "$DRY_RUN" = true ]]; then
+    echo "    [dry-run] REFUSED: ${reason}."
+    echo "    [dry-run] a service-scoped outage must be produced by stopping the '${service}' child process inside the platform Machine; that mechanism is not implemented yet."
+    echo "    [dry-run] the real run exits 1 without touching Fly."
+    exit 0
   fi
-  echo "::error::scenario '${scenario}' has no target app." >&2
-  echo "::error::the per-service staging app for '${service}' was destroyed at the staging consolidation (2026-11-07, task 219fb673); staging is one app now (${CONSOLIDATED_STAGING_APP})." >&2
+  echo "::error::scenario '${scenario}' is refused: ${reason}." >&2
   echo "::error::a service-scoped outage must be produced by stopping the '${service}' child process inside the platform Machine; that mechanism is not implemented yet." >&2
   exit 1
 }
@@ -296,8 +301,7 @@ NOTE
 scenario_tasks_api_down() {
   print_scenario_header "tasks-api-down" "sindustries-tasks-api-down" "2m"
   local app="${APP_OVERRIDE:-}"
-  require_service_target "${app}" "tasks-api-down" "tasks-api"
-  refuse_platform_scale "${app}" "tasks-api-down" "tasks-api"
+  refuse_service_scoped_target "${app}" "tasks-api-down" "tasks-api"
   require_dry_run_or_token
   run_flyctl scale count 0 --app "${app}" || stop_app_machines "${app}"
   cat <<NOTE
@@ -312,7 +316,7 @@ NOTE
 scenario_tasks_api_up() {
   print_scenario_header "tasks-api-up (recover)" "sindustries-tasks-api-down" "(should resolve)"
   local app="${APP_OVERRIDE:-}"
-  require_service_target "${app}" "tasks-api-up" "tasks-api"
+  refuse_service_scoped_target "${app}" "tasks-api-up" "tasks-api"
   require_dry_run_or_token
   run_flyctl scale count 1 --app "${app}" || start_app_machines "${app}"
   cat <<NOTE
@@ -325,8 +329,7 @@ NOTE
 scenario_budget_api_down() {
   print_scenario_header "budget-api-down" "sindustries-budget-api-down" "2m"
   local app="${APP_OVERRIDE:-}"
-  require_service_target "${app}" "budget-api-down" "budget-api"
-  refuse_platform_scale "${app}" "budget-api-down" "budget-api"
+  refuse_service_scoped_target "${app}" "budget-api-down" "budget-api"
   require_dry_run_or_token
   run_flyctl scale count 0 --app "${app}" || stop_app_machines "${app}"
   cat <<NOTE
@@ -339,7 +342,7 @@ NOTE
 scenario_budget_api_up() {
   print_scenario_header "budget-api-up (recover)" "sindustries-budget-api-down" "(should resolve)"
   local app="${APP_OVERRIDE:-}"
-  require_service_target "${app}" "budget-api-up" "budget-api"
+  refuse_service_scoped_target "${app}" "budget-api-up" "budget-api"
   require_dry_run_or_token
   run_flyctl scale count 1 --app "${app}" || start_app_machines "${app}"
   cat <<NOTE
