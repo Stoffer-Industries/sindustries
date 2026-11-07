@@ -20,7 +20,11 @@ steps = ci['jobs']['changes']['steps']
 filter_step = next(step for step in steps if step.get('id') == 'filter')
 filters = yaml.safe_load(filter_step['with']['filters'])
 
-names = ('tasks_api', 'budget_api', 'auto_post_worker', 'gymtrack_mcp')
+# tasks_api/budget_api/auto_post_worker were removed from ci.yml on
+# 2026-11-07 (task 219fb673): the underlying Fly apps were destroyed, and
+# `platform` is now the sole consolidated deploy surface that replaces
+# them, so it takes their place in this regression guard.
+names = ('platform', 'gymtrack_mcp')
 failures = []
 for name in names:
     paths = filters.get(name)
