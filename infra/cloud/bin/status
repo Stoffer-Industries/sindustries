@@ -14,9 +14,22 @@
 # failure drill evidence record.
 #
 # Usage:
-#   infra/cloud/bin/status                    # all services, human-readable
+#   infra/cloud/bin/status                    # the staging platform, human-readable
 #   infra/cloud/bin/status <service>          # one service
 #   infra/cloud/bin/status --json [service]   # machine-readable
+#
+# STAGING IS ONE APP (task 219fb673, cutover 2026-11-07). The four
+# per-service Fly apps were destroyed at the cutover and staging now runs
+# the consolidated platform app, which hosts all four services as
+# supervisor children. The four service names are kept as ALIASES so
+# operator muscle memory and the runbooks keep working: they all resolve
+# to the same Fly app, and each one additionally reports the state of ITS
+# child inside that app, read from the supervisor's status endpoint.
+#
+# The per-child state is read from the supervisor's own /__status payload
+# (the same payload Fly's http_check targets). Without it the report could
+# only say "the Machine is up", which after the consolidation is NOT the
+# same statement as "tasks-api is serving".
 #
 # Required environment:
 #   FLY_API_TOKEN   — Fly.io API token (Quinn-owned).
@@ -37,24 +50,33 @@ if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
 fi
 
 declare -A FLY_APP_FOR=(
-  [tasks-api]="sindustries-tasks-api-staging"
-  [budget-api]="sindustries-budget-api-staging"
-  [content-scheduler-api]="sindustries-content-scheduler-api-staging"
-  [auto-post-worker]="sindustries-auto-post-worker-staging"
+  [tasks-api]="sindustries-platform-staging"
+  [budget-api]="sindustries-platform-staging"
+  [content-scheduler-api]="sindustries-platform-staging"
+  [auto-post-worker]="sindustries-platform-staging"
   [platform]="sindustries-platform-staging"
 )
+
+# The supervisor's status endpoint, served through the platform's router.
+# It reports the per-child state (pid, state, restarts, exit code, RSS)
+# that the Fly-level status cannot see any more.
+PLATFORM_STATUS_URL="https://sindustries-platform-staging.fly.dev/__status"
 
 # Expected process types come from the matching fly.toml. We hardcode them
 # here so a missing process type is detectable without parsing TOML. If
 # these drift from infra/cloud/fly/*.fly.toml, the relevant test must be
 # updated.
+#
+# After the consolidation there is ONE Fly process group: the supervisor's,
+# named "platform". The four services are children inside that process
+# group, not Fly process types of their own, so every service name
+# expects the platform's process type. A child that is not running is
+# reported through the supervisor payload, not through Fly.
 declare -A EXPECTED_PROCESS_TYPES=(
-  [tasks-api]="tasks-api"
-  [budget-api]="budget-api"
-  [content-scheduler-api]="content-scheduler-api"
-  [auto-post-worker]="auto-post-worker"
-  # The consolidated platform runs every service in ONE Fly process group
-  # (the supervisor), so the platform app exposes exactly one process type.
+  [tasks-api]="platform"
+  [budget-api]="platform"
+  [content-scheduler-api]="platform"
+  [auto-post-worker]="platform"
   [platform]="platform"
 )
 
@@ -75,7 +97,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-  for s in tasks-api budget-api content-scheduler-api auto-post-worker platform; do TARGETS+=("$s"); done
+  # Staging is ONE Fly app now. Reporting it once (rather than five
+  # times, once per alias) keeps the report a statement about the app,
+  # and the per-child state is carried in the payload.
+  TARGETS+=(platform)
 fi
 
 for s in "${TARGETS[@]}"; do
@@ -104,6 +129,18 @@ export FLY_API_TOKEN
 declare -a JSON_OBJECTS=()
 ANY_DEGRADED=0
 
+# The supervisor's status payload, fetched ONCE and shared by every
+# target. It is the only place the per-child state is visible after the
+# consolidation, so a failure to read it is reported rather than hidden:
+# a missing payload means "unknown", not "healthy".
+SUPERVISOR_JSON=""
+if command -v curl >/dev/null 2>&1; then
+  SUPERVISOR_JSON="$(curl --fail --silent --show-error --max-time 10 "$PLATFORM_STATUS_URL" 2>/dev/null || true)"
+fi
+if [[ -z "$SUPERVISOR_JSON" ]]; then
+  warn "could not read the supervisor status from $PLATFORM_STATUS_URL; per-child state will be reported as unknown"
+fi
+
 for service in "${TARGETS[@]}"; do
   FLY_APP="${FLY_APP_FOR[$service]}"
   EXPECTED_PT="${EXPECTED_PROCESS_TYPES[$service]}"
@@ -117,7 +154,7 @@ for service in "${TARGETS[@]}"; do
   fi
 
   # Shape into the report we want.
-  REPORT="$(APP_JSON="$APP_JSON" EXPECTED_PT="$EXPECTED_PT" SERVICE="$service" FLY_APP="$FLY_APP" \
+  REPORT="$(APP_JSON="$APP_JSON" EXPECTED_PT="$EXPECTED_PT" SERVICE="$service" FLY_APP="$FLY_APP" SUPERVISOR_JSON="$SUPERVISOR_JSON" \
     python3 - <<'PY'
 import json, os, sys
 app = json.loads(os.environ["APP_JSON"])
@@ -159,7 +196,65 @@ for pt in app.get("ProcessTypes") or []:
         process_types_flat.add(name)
 
 expected_present = expected_pt in process_types_flat
+
+# The supervisor payload is the only per-child signal after the
+# consolidation. It is optional: when it cannot be read, the child state
+# is reported as "unknown" and the report is marked degraded, because
+# "the Machine is up" is not the same statement as "the service is
+# serving".
+supervisor = {}
+supervisor_raw = os.environ.get("SUPERVISOR_JSON") or ""
+if supervisor_raw:
+    try:
+        supervisor = json.loads(supervisor_raw)
+    except json.JSONDecodeError:
+        supervisor = {}
+
+children = []
+for child in supervisor.get("children") or []:
+    children.append({
+        "name": child.get("name") or "",
+        "role": child.get("role") or "",
+        "state": child.get("state") or "",
+        "pid": child.get("pid"),
+        "port": child.get("port"),
+        "restarts": child.get("restarts"),
+        "exitCode": child.get("exitCode"),
+        "rssKb": child.get("rssKb"),
+    })
+
+supervisor_available = bool(supervisor)
+platform_ready = bool(supervisor.get("ready")) if supervisor_available else False
+
+# The child that backs this target. "platform" is the whole app, so it
+# reports every child.
+child_state = None
+if service != "platform":
+    for child in children:
+        if child["name"] == service:
+            child_state = child
+            break
+else:
+    child_state = {
+        "name": "platform",
+        "state": "running" if platform_ready else "not-ready",
+    }
+
+child_healthy = None
+if child_state is not None:
+    child_healthy = child_state["state"] == "running"
+elif supervisor_available:
+    # A service target with no matching child in the payload is a real
+    # inconsistency, not an unknown.
+    child_healthy = False
+
 degraded = (len(machines) == 0) or (not expected_present)
+if not supervisor_available:
+    # The per-child state is UNKNOWN, and "unknown" is not "healthy": the
+    # report says so instead of claiming a service is serving.
+    degraded = True
+elif child_healthy is False:
+    degraded = True
 
 out = {
     "service": service,
@@ -173,6 +268,11 @@ out = {
     "expectedProcessTypePresent": expected_present,
     "machines": machines,
     "machineCount": len(machines),
+    "supervisorStatusAvailable": supervisor_available,
+    "platformReady": platform_ready,
+    "child": child_state,
+    "childHealthy": child_healthy,
+    "children": children,
     "degraded": degraded,
 }
 print(json.dumps(out))

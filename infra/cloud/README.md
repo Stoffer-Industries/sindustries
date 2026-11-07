@@ -47,20 +47,34 @@ Vercel projects using their co-located `apps/<app>/vercel.json` files. They
 deliberately do not use Fly app specs or frontend containers; Fly remains the
 runtime for APIs and workers.
 
-## Services (planned)
+## Services (staging)
+
+Staging is ONE Fly app after the consolidation (task 219fb673). The cutover
+landed on 2026-11-07: the four per-service staging apps were destroyed and
+the platform app now hosts every service.
 
 | Fly app                       | Source                       | Notes                                                                                  |
 | ----------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `sindustries-tasks-api-staging`        | `services/tasks-api/`        | Tasks/approvals/tags/analytics/feature-task API. Health at `/health`. Port 4001.       |
-| `sindustries-budget-api-staging`       | `services/budget-api/`       | Budget + Akahu integration. Health at `/health`. Port 4002.                            |
-| `sindustries-content-scheduler-api-staging` | `services/content-scheduler-api/` | Content Scheduler HTTP owner. Health at `/health`. Port 4003.                         |
-| `sindustries-auto-post-worker-staging` | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` | Long-running BullMQ consumer. **Not** HTTP-exposed. Same Fly machine isolation rationale as the `gymtrack-mcp` precedent. |
-| `sindustries-platform-staging`    | `services/tasks-api/` + `services/budget-api/` + `services/content-scheduler-api/` | **Consolidated platform (task 219fb673).** One Machine, one image, four processes: tasks-api (4001), budget-api (4002), content-scheduler-api (4003), auto-post-worker (no listener). An in-container nginx router maps the three hostnames to those ports. No service code changes. |
+| `sindustries-platform-staging`    | `services/tasks-api/` + `services/budget-api/` + `services/content-scheduler-api/` | **The staging app.** One Machine, one image, four processes: tasks-api (4001), budget-api (4002), content-scheduler-api (4003), auto-post-worker (no listener). An in-container nginx router maps the three hostnames to those ports, and the supervisor restarts a crashed child. No service code changes. |
+| ~~`sindustries-tasks-api-staging`~~        | `services/tasks-api/`        | Retired 2026-11-07. Now a tasks-api child of the platform. Health at `/health`. Port 4001.       |
+| ~~`sindustries-budget-api-staging`~~       | `services/budget-api/`       | Retired 2026-11-07. Now a budget-api child of the platform. Health at `/health`. Port 4002.                            |
+| ~~`sindustries-content-scheduler-api-staging`~~ | `services/content-scheduler-api/` | Retired 2026-11-07. Now a content-scheduler-api child of the platform. Health at `/health`. Port 4003.                         |
+| ~~`sindustries-auto-post-worker-staging`~~ | `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` | Retired 2026-11-07. The worker still runs — as a child of the platform, on the same BullMQ queue. **Not** HTTP-exposed. |
 
-The consolidated platform is the *target* topology. The four per-service
-apps above still serve traffic until the cutover lands — the cutover is
-blocked on a Cloudflare `Zone:DNS:Edit` token that only Tom holds (task
-`5cb4a8fe`). The cutover and backout procedures are in
+The per-service `fly/*.fly.toml` files are retained as templates for the
+production migration; no operator surface deploys them any more, and
+`infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the build if
+one comes back — a resurrected worker app would be a SECOND consumer on the
+same BullMQ queue, and every scheduled post would be processed twice,
+silently.
+
+The stable hostnames still do not resolve: the cutover's remaining leg is
+the Cloudflare CNAME move, which is blocked on a `Zone:DNS:Edit` token that
+only Tom holds (task `5cb4a8fe`). Until it lands, the services answer on the
+platform's provider hostname via path-prefix routes
+<!-- stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe) -->
+(`https://sindustries-platform-staging.fly.dev/tasks-api/health`). The
+cutover and backout procedures are in
 `docs/runbooks/platform-consolidation-rollback.md`; the shared-fate
 consequences are in `docs/systems/cloud-platform.md` §"Shared-fate topology
 (staging)".
@@ -82,39 +96,29 @@ Workflow YAML references secret names only (`secrets.FLY_API_TOKEN`); no live va
 
 ## Deploying
 
-Per service:
+Staging is one app, so there is one deploy:
 
 ```sh
-# 1. Set up secrets once (Quinn; idempotent — re-running `fly secrets set` is safe)
-fly secrets set --app sindustries-tasks-api-staging \
-  DATABASE_URL=... \
-  REDIS_URL=... \
-  CONTENT_SCHEDULER_REDIS_URL=... \
-  CONTENT_SCHEDULER_API_BASE_URL=https://sindustries-content-scheduler-api-staging.fly.dev/api/v1 \ # stable-fallback: provider URL pending migration to https://content-scheduler-api.staging.sindustries.co.nz/api/v1 (task 5cb4a8fe)
-  ROWAN_TASKS_API_APPROVAL_TOKEN=... \
-  CORS_ALLOWED_ORIGINS=https://mission-control.sindustries.dev
-
-fly secrets set --app sindustries-auto-post-worker-staging \
-  DATABASE_URL=... \
-  REDIS_URL=... \
-  X_API_KEY=... \
-  X_API_SECRET=... \
-  X_ACCESS_TOKEN=... \
-  X_ACCESS_TOKEN_SECRET=...
-
-fly secrets set --app sindustries-content-scheduler-api-staging \
-  DATABASE_URL=... \
-  REDIS_URL=... \
-  CONTENT_SCHEDULER_REDIS_URL=... \
-  CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS=...
+# 1. Set up secrets once (Quinn; idempotent — re-running it is safe).
+#    The platform app takes APP-LEVEL secrets (the PLATFORM_* names the
+#    supervisor maps onto each child), and the platform provisioner owns
+#    that mapping — use it rather than writing secrets by hand:
+node infra/cloud/platform/platform-provision-secrets.mjs \
+  --app sindustries-platform-staging --org personal
 
 # 2. Deploy (CI does this on push to main; manual override via workflow_dispatch)
-fly deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary
-fly deploy --config infra/cloud/fly/content-scheduler-api.fly.toml --strategy canary
-fly deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary
+fly deploy --config infra/cloud/fly/platform.fly.toml --strategy canary
 ```
 
-The CI workflow runs `--strategy canary` for every deploy. For HTTP services (tasks-api, budget-api, content-scheduler-api) the post-deploy smoke check curls `/health`. For the auto-post-worker (no HTTP) the smoke check greps `fly logs` for the worker's structured startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed http_checks automatically remove the machine from the load balancer; rollback uses `fly releases rollback <v>` (see `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section — the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
+The CI workflow runs `--strategy canary` for every deploy. The post-deploy
+smoke check curls the three path-prefix health routes on the platform's
+provider hostname and greps `fly logs` for the auto-post worker's structured
+startup line `[content-scheduler-worker] starting (adapter=bullmq)`. Failed
+http_checks automatically remove the machine from the load balancer; rollback
+uses `fly releases rollback <v>` (see
+`docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section —
+the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583).
+
 
 ## Operator wrappers (task 2850c5ac)
 
@@ -122,16 +126,23 @@ The CI workflow above is the canonical deploy path. The `bin/` wrappers are
 for ad-hoc canaries, rehearsal, and incident-time hotfixes — they target
 the same Fly apps via the local `flyctl` CLI, not via GitHub Actions.
 
-```sh
-# Deploy a single service, pinning an immutable image tag (no :latest).
-# Without --image the deploy builds from local source (no registry push).
-infra/cloud/bin/deploy tasks-api --image registry/repo:abc123
+Staging is one Fly app now, so every service name in these wrappers is an
+ALIAS for the consolidated platform app. `bin/deploy tasks-api` deploys the
+platform (the only app that can serve tasks-api), and `bin/status tasks-api`
+reports the platform app plus the state of the tasks-api CHILD inside it,
+read from the supervisor's `/__status` payload. A rollback is shared-fate:
+it rolls every service back together.
 
-# Inspect the running state of all four staging services.
+```sh
+# Deploy the platform, pinning an immutable image tag (no :latest).
+# Without --image the deploy builds from local source (no registry push).
+STAGING_PLATFORM_DEPLOY_ENABLED=true infra/cloud/bin/deploy tasks-api --image registry/repo:abc123
+
+# Inspect the running state (the platform app + every child's state).
 infra/cloud/bin/status
 infra/cloud/bin/status tasks-api --json
 
-# Roll a service back to the previous release (or to a specific version).
+# Roll the platform back to the previous release (or to a specific version).
 # Non-interactive callers must pass --yes; dry-run prints the command and
 # exits without invoking flyctl.
 infra/cloud/bin/rollback tasks-api --dry-run
@@ -146,18 +157,27 @@ list. The tests under `infra/cloud/bin/tests/` stub `flyctl` and `curl`
 to assert each wrapper's contract (image pinning, smoke checks,
 degraded detection, rollback argv shape).
 
+
 ## First-time environment creation
 
 Quinn runs `infra/cloud/scripts/bootstrap-staging.sh` once. The script:
 
-- Verifies the `fly`, `neonctl`, and `upstash` CLIs are installed and authenticated.
-- Creates the missing Fly apps (`fly apps create ...`).
-- Sets Fly secrets from a local `infra/cloud/.env.local` file (Quinn never commits this).
-- Runs Prisma migrations against the staging Postgres (`fly ssh console -C "npx prisma migrate deploy"`).
-- Performs a smoke deploy (`fly deploy --strategy canary`).
-- Surfaces a final report with app URLs and the smoke-check result.
+- Verifies the `fly` CLI is installed and authenticated.
+- Creates the platform Fly app if it is missing (`fly apps create ...`).
+- Registers the app-level `PLATFORM_*` secrets through the platform
+  provisioner (`infra/cloud/platform/platform-provision-secrets.mjs`), which
+  is the single implementation of the source-to-secret mapping and fails
+  closed when a source is missing. The values come from a local
+  `infra/cloud/.env.local` file (Quinn never commits this).
+- Runs the platform's Prisma migration chain (`--migrate`).
+- Performs a smoke deploy of the platform (`--deploy`).
+- Surfaces a final report with the app URL and the service routes.
+
+The retired per-service names are refused by the script: bootstrapping one
+would recreate an app that must stay destroyed.
 
 The script is idempotent — re-running it does not destroy existing apps.
+
 
 ## PR strategy
 

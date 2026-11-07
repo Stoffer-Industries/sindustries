@@ -21,6 +21,13 @@
 # Where <service> is one of: tasks-api, budget-api, content-scheduler-api,
 # auto-post-worker, platform.
 #
+# STAGING IS ONE APP (task 219fb673, cutover 2026-11-07). The four
+# per-service Fly apps were destroyed at the cutover and staging now runs
+# the consolidated platform app, which hosts all four services as
+# supervisor children. The four service names are kept as ALIASES so
+# operator muscle memory and the runbooks keep working, but they all
+# resolve to the same app, the same fly.toml and the same smoke checks.
+#
 # Required environment:
 #   FLY_API_TOKEN   — Fly.io API token with deploy rights on the staging
 #                     organization. Quinn-owned. Never logged.
@@ -44,17 +51,17 @@ fi
 # ---------- service mapping -------------------------------------------------
 
 declare -A FLY_APP_FOR=(
-  [tasks-api]="sindustries-tasks-api-staging"
-  [budget-api]="sindustries-budget-api-staging"
-  [content-scheduler-api]="sindustries-content-scheduler-api-staging"
-  [auto-post-worker]="sindustries-auto-post-worker-staging"
+  [tasks-api]="sindustries-platform-staging"
+  [budget-api]="sindustries-platform-staging"
+  [content-scheduler-api]="sindustries-platform-staging"
+  [auto-post-worker]="sindustries-platform-staging"
   [platform]="sindustries-platform-staging"
 )
 declare -A FLY_CONFIG_FOR=(
-  [tasks-api]="infra/cloud/fly/tasks-api.fly.toml"
-  [budget-api]="infra/cloud/fly/budget-api.fly.toml"
-  [content-scheduler-api]="infra/cloud/fly/content-scheduler-api.fly.toml"
-  [auto-post-worker]="infra/cloud/fly/auto-post-worker.fly.toml"
+  [tasks-api]="infra/cloud/fly/platform.fly.toml"
+  [budget-api]="infra/cloud/fly/platform.fly.toml"
+  [content-scheduler-api]="infra/cloud/fly/platform.fly.toml"
+  [auto-post-worker]="infra/cloud/fly/platform.fly.toml"
   [platform]="infra/cloud/fly/platform.fly.toml"
 )
 # Space-separated list of health URLs to smoke check. The consolidated
@@ -62,9 +69,9 @@ declare -A FLY_CONFIG_FOR=(
 # the router's path-prefix routes on the provider hostname until the stable
 # hostnames resolve (task 5cb4a8fe).
 declare -A FLY_HEALTH_URL_FOR=(
-  [tasks-api]="https://sindustries-tasks-api-staging.fly.dev/health"
-  [budget-api]="https://sindustries-budget-api-staging.fly.dev/health"
-  [content-scheduler-api]="https://sindustries-content-scheduler-api-staging.fly.dev/health"
+  [tasks-api]="https://sindustries-platform-staging.fly.dev/tasks-api/health"
+  [budget-api]="https://sindustries-platform-staging.fly.dev/budget-api/health"
+  [content-scheduler-api]="https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
   [auto-post-worker]=""  # no HTTP route; smoke check is the worker startup log
   [platform]="https://sindustries-platform-staging.fly.dev/tasks-api/health https://sindustries-platform-staging.fly.dev/budget-api/health https://sindustries-platform-staging.fly.dev/content-scheduler-api/health"
 )
@@ -120,23 +127,40 @@ FLY_CONFIG="${FLY_CONFIG_FOR[$SERVICE]}"
 HEALTH_URLS="${FLY_HEALTH_URL_FOR[$SERVICE]}"
 LOG_CHECK="${FLY_LOG_CHECK_FOR[$SERVICE]:-}"
 
+# Usage validation runs BEFORE any environment preflight: a moving tag is
+# a caller mistake, and it should be reported as one (exit 1) rather than
+# as an environment problem (exit 2).
+if [[ -n "$IMAGE" ]]; then
+  # Pin to the immutable image tag the caller supplied. Refuse anything
+  # that looks like a moving tag (`latest`, empty).
+  case "$IMAGE" in
+    *:latest|"")
+      echo "ERROR: image must be pinned to an immutable tag (got '$IMAGE'); refusing :latest" >&2
+      exit 1 ;;
+  esac
+fi
+
 # ---------- preflight -------------------------------------------------------
 
 info() { printf '\033[36m[deploy]\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m[deploy]\033[0m %s\n' "$*" >&2; }
 fail() { printf '\033[31m[deploy]\033[0m %s\n' "$*" >&2; exit "${2:-1}"; }
 
-# The consolidated platform's deploy is OPT-IN (task 219fb673). Its
-# auto-post worker is a SECOND consumer of the same BullMQ queue as the
-# old worker app, so a deploy while both run processes every scheduled
-# post twice. The CI path (.github/workflows/deploy-staging-platform.yml)
-# gates the deploy on the staging environment variable of the same name;
-# this operator path gates on the same variable so it cannot be used to
-# bypass the cutover order in
-# docs/runbooks/platform-consolidation-rollback.md §3 — the old worker is
-# scaled to zero BEFORE the platform is deployed.
-if [[ "$SERVICE" == "platform" && "${STAGING_PLATFORM_DEPLOY_ENABLED:-}" != "true" ]]; then
-  fail "the platform deploy is opt-in: set STAGING_PLATFORM_DEPLOY_ENABLED=true (the staging GitHub environment variable of the same name) and follow docs/runbooks/platform-consolidation-rollback.md §3 — scale sindustries-auto-post-worker-staging to zero BEFORE the platform is deployed." 2
+# The consolidated platform's deploy is OPT-IN (task 219fb673). The
+# opt-in exists so that merging the platform deploy could not silently cut
+# staging over while the old per-service worker app was still consuming
+# the same BullMQ queue.
+#
+# After the cutover (2026-11-07) that hazard is gone: the four per-service
+# apps were destroyed, so the platform's auto-post worker is the ONLY
+# consumer of the queue. Every service name now resolves to the platform
+# app, so the gate applies to ALL of them — there is no service name that
+# reaches the platform app without it. The CI path
+# (.github/workflows/deploy-staging-platform.yml) gates on the same
+# staging environment variable, so the operator path and the CI path
+# cannot disagree about whether a staging deploy may run.
+if [[ "${STAGING_PLATFORM_DEPLOY_ENABLED:-}" != "true" ]]; then
+  fail "the staging platform deploy is opt-in: set STAGING_PLATFORM_DEPLOY_ENABLED=true (the staging GitHub environment variable of the same name). Staging runs the consolidated platform app only; see docs/systems/cloud-platform.md." 2
 fi
 
 command -v flyctl >/dev/null 2>&1 || fail "flyctl not on PATH; install via https://fly.io/docs/hands-on/install-flyctl/" 2
@@ -196,13 +220,9 @@ if [[ -n "$GIT_COMMIT_SHA" ]]; then
   DEPLOY_ARGS+=(--env "GIT_COMMIT_SHA=$GIT_COMMIT_SHA")
 fi
 if [[ -n "$IMAGE" ]]; then
-  # Pin to the immutable image tag the caller supplied. Refuse anything
-  # that looks like a moving tag (`latest`, empty).
-  case "$IMAGE" in
-    *:latest|"")
-      fail "image must be pinned to an immutable tag (got '$IMAGE'); refusing :latest" 1 ;;
-  esac
   DEPLOY_ARGS+=(--image "$IMAGE")
+fi
+if [[ -n "$IMAGE" ]]; then
   info "deploying $FLY_APP with pinned image $IMAGE"
 else
   info "deploying $FLY_APP from local source (no --image override)"

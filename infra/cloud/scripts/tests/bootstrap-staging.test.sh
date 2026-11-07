@@ -1,21 +1,32 @@
 #!/usr/bin/env bash
-# bootstrap-staging.test.sh — AC1 regression guard.
+# bootstrap-staging.test.sh — regression guard for the staging bootstrap.
+#
+# Staging is ONE app after the cutover (task 219fb673, 2026-11-07): the
+# consolidated platform `sindustries-platform-staging` hosts all four
+# services as supervisor children, and the four per-service staging apps
+# were destroyed.
 #
 # Stage a stub `flyctl` in PATH that records argv to $FLY_LOG and emits
-# canned JSON for `apps list --json`. Run bootstrap-staging.sh with
-# --yes --service tasks-api and assert:
+# canned JSON for `apps list --json`. Run bootstrap-staging.sh and assert:
 #
-#   1. When the app exists in the canned list, NO `apps create` call
-#      is issued (existence check still works after the python3 rewrite).
+#   1. When the platform app exists in the canned list, NO `apps create`
+#      call is issued (existence check still works after the python3
+#      rewrite).
 #   2. When the app is missing, `apps create <name> --org personal --yes`
 #      is invoked with the positional form (NOT `--app <name>`).
-#   3. When a same-prefix app exists (e.g. `sindustries-tasks-api-staging-extra`),
+#   3. When a same-prefix app exists (e.g. `sindustries-platform-staging-extra`),
 #      the check rejects the substring match and still issues `apps create`.
 #      This is the regression that the prior `grep -q "\"Name\":\"$app\""`
 #      form allowed.
-#
-# All three sub-cases share the same test scaffolding; only $FLY_LIST_JSON
-# differs per run.
+#   4. Lowercase `name` keys are tolerated (some sandboxed CLIs emit them).
+#   5. The RETIRED per-service names are refused with the cutover
+#      explanation, and no app is created for them. This is the guard that
+#      keeps the retired auto-post worker app from being resurrected next
+#      to the platform's worker — two consumers on one BullMQ queue would
+#      process every scheduled post twice, silently.
+#   6. The platform's app-level secrets are registered through the platform
+#      provisioner (one implementation of the PLATFORM_* mapping).
+#   7. A missing source value fails the script BEFORE it touches Fly.
 
 set -euo pipefail
 
@@ -34,6 +45,28 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
 cat >"$TMP/bin/flyctl" <<'STUB'
 #!/usr/bin/env bash
+# Record the argv, but never a secret VALUE: the `secrets set` payload is
+# redacted to the secret names so a failing assertion can never print one.
+case "$1 $2" in
+  "secrets set")
+    names=()
+    for arg in "$@"; do
+      case "$arg" in
+        *=*) names+=("${arg%%=*}=<redacted>") ;;
+        *)   names+=("$arg") ;;
+      esac
+    done
+    printf 'INVOKED: %s\n' "${names[*]}" >>"$FLY_LOG"
+    # Record the registered secret names so the read-back can confirm them.
+    for arg in "$@"; do
+      case "$arg" in
+        --detach|--app) continue ;;
+        *=*) printf '%s\n' "${arg%%=*}" >>"$FLY_REGISTERED" ;;
+      esac
+    done
+    exit 0
+    ;;
+esac
 printf 'INVOKED: %s\n' "$*" >>"$FLY_LOG"
 case "$1 $2" in
   "auth whoami")          exit 0 ;;
@@ -45,6 +78,18 @@ case "$1 $2" in
     # proceed to the secrets step (which the stub also no-ops).
     exit 0
     ;;
+  "secrets list")
+    printf '['
+    first=1
+    if [[ -f "${FLY_REGISTERED:-}" ]]; then
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        if [[ "$first" -eq 1 ]]; then first=0; else printf ','; fi
+        printf '{"Name":"%s"}' "$name"
+      done <"$FLY_REGISTERED"
+    fi
+    printf ']'
+    ;;
   *)
     # secrets set, ssh console, deploy — all no-ops under the stub.
     exit 0
@@ -55,12 +100,21 @@ chmod +x "$TMP/bin/flyctl"
 
 # ---------- minimal .env.local ---------------------------------------------
 
-# bootstrap-staging.sh sources this in pre-flight and looks for TASKS_API_*
-# keys to populate `fly secrets set`. A single TASKS_API_DATABASE_URL is
-# enough to satisfy both gates without dragging real Quinn-owned values in.
+# bootstrap-staging.sh sources this in pre-flight and translates its keys
+# into the source names the platform provisioner reads. Every required
+# source is present here; case 7 uses a variant with one removed.
 cat >"$TMP/.env.local" <<'ENV'
-TASKS_API_DATABASE_URL=postgres://stub:stub@localhost:5432/stub
+TASKS_API_DATABASE_URL=postgres://stub:***@localhost:5432/stub
+BUDGET_API_DATABASE_URL=postgres://stub:***@localhost:5432/stub
+AUTO_POST_WORKER_DATABASE_URL=postgres://stub:***@localhost:5432/stub
+HEALTH_PROBE_REDIS=redis://stub.example.upstash.io:6379
+TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-tasks-token
+CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN=stub-scheduler-token
 ENV
+
+# A variant with the Redis source missing — the script must fail closed
+# before it touches Fly.
+grep -v '^HEALTH_PROBE_REDIS=' "$TMP/.env.local" >"$TMP/.env.local.noredis"
 
 # ---------- helpers ---------------------------------------------------------
 
@@ -68,10 +122,12 @@ run_case() {
   local label="$1"
   local list_json="$2"
   local fly_log="$TMP/fly.${label}.log"
+  rm -f "$TMP/registered.${label}"
   FLY_LOG="$fly_log" \
+  FLY_REGISTERED="$TMP/registered.${label}" \
   FLY_LIST_JSON="$list_json" \
   PATH="$TMP/bin:$PATH" \
-    bash "$SCRIPT" --yes --service tasks-api --env-local "$TMP/.env.local" \
+    bash "$SCRIPT" --yes --env-local "$TMP/.env.local" \
       >"$TMP/out.${label}" 2>"$TMP/err.${label}" \
       || true
 }
@@ -101,75 +157,101 @@ assert_create_args() {
   fi
 }
 
-# ---------- case 1: app already exists --------------------------------------
+# ---------- case 1: platform app already exists ----------------------------
 
-run_case "exists" '[{"Name":"sindustries-tasks-api-staging","Status":"running"}]'
+run_case "exists" '[{"Name":"sindustries-platform-staging","Status":"running"}]'
 assert_no_create "$TMP/fly.exists.log" "case=exists"
 
-# ---------- case 2: app missing --------------------------------------------
+# ---------- case 2: platform app missing ----------------------------------
 
 run_case "missing" '[]'
-assert_create_args "$TMP/fly.missing.log" "sindustries-tasks-api-staging --org personal --yes" \
+assert_create_args "$TMP/fly.missing.log" "sindustries-platform-staging --org personal --yes" \
   "case=missing"
 
 # ---------- case 3: substring-match regression ------------------------------
 
 # Prior `grep -q "\"Name\":\"$app\""` form would match this because
-# `"Name":"sindustries-tasks-api-staging-extra"` contains the substring
-# `"Name":"sindustries-tasks-api-staging`. The python3 JSON parse is exact.
-run_case "substring" '[{"Name":"sindustries-tasks-api-staging-extra","Status":"running"}]'
-assert_create_args "$TMP/fly.substring.log" "sindustries-tasks-api-staging --org personal --yes" \
+# `"Name":"sindustries-platform-staging-extra"` contains the substring
+# `"Name":"sindustries-platform-staging`. The python3 JSON parse is exact.
+run_case "substring" '[{"Name":"sindustries-platform-staging-extra","Status":"running"}]'
+assert_create_args "$TMP/fly.substring.log" "sindustries-platform-staging --org personal --yes" \
   "case=substring"
 
 # ---------- case 4: lowercase-name tolerance --------------------------------
 
 # Some sandboxed fly CLIs emit `name` instead of `Name`. Tolerate both.
-run_case "lowercase" '[{"name":"sindustries-tasks-api-staging","status":"running"}]'
+run_case "lowercase" '[{"name":"sindustries-platform-staging","status":"running"}]'
 assert_no_create "$TMP/fly.lowercase.log" "case=lowercase"
 
-# ---------- case 5: budget-api migration is invoked with --migrate ---------
+# ---------- case 5: the retired per-service apps are refused ---------------
 
-# Regression guard for task 2850c5ac AC1 — budget-api has its own Prisma
-# schema (services/budget-api/prisma with 6 migrations), so the bootstrap
-# script must ssh-console into the budget-api Fly app and run
-# `npx prisma migrate deploy` against /app/services/budget-api when
-# `--migrate` is passed. Without this row, the budget-api DB ends up
-# empty and the staging smoke-session mint step fails with
-# `Error: The table 'budget_api.User' does not exist in the current database.`
-cat >"$TMP/.env.local.budget" <<'ENV'
-TASKS_API_DATABASE_URL=postgres://stub:stub@localhost:5432/stub
-BUDGET_API_DATABASE_URL=postgres://stub:stub@localhost:5432/stub
-ENV
+# The retired auto-post worker app must never be recreated next to the
+# platform's worker: two consumers on one BullMQ queue would process every
+# scheduled post twice, silently.
+for retired in tasks-api budget-api content-scheduler-api auto-post-worker; do
+  rm -f "$TMP/registered.retired"
+  FLY_LOG="$TMP/fly.retired.log" \
+  FLY_REGISTERED="$TMP/registered.retired" \
+  FLY_LIST_JSON='[]' \
+  PATH="$TMP/bin:$PATH" \
+    bash "$SCRIPT" --yes --service "$retired" --env-local "$TMP/.env.local" \
+      >"$TMP/out.retired" 2>"$TMP/err.retired" \
+      || true
 
-FLY_LOG="$TMP/fly.budget-migrate.log" \
-FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging","Status":"running"},{"Name":"sindustries-budget-api-staging","Status":"running"}]' \
-PATH="$TMP/bin:$PATH" \
-  bash "$SCRIPT" --yes --migrate --service budget-api --env-local "$TMP/.env.local.budget" \
-    >"$TMP/out.budget-migrate" 2>"$TMP/err.budget-migrate" \
-    || true
+  if ! grep -qF "destroyed at the staging cutover" "$TMP/err.retired"; then
+    echo "FAIL: case=retired --service $retired — expected the cutover explanation on stderr" >&2
+    sed 's/^/  /' "$TMP/err.retired" >&2
+    exit 1
+  fi
+  if grep -qF "sindustries-${retired}-staging" "$TMP/fly.retired.log"; then
+    echo "FAIL: case=retired --service $retired — the retired app was referenced" >&2
+    sed 's/^/  /' "$TMP/fly.retired.log" >&2
+    exit 1
+  fi
+  assert_no_create "$TMP/fly.retired.log" "case=retired --service $retired"
+done
 
-if ! grep -qF 'INVOKED: ssh console --app sindustries-budget-api-staging -C cd /app/services/budget-api && npx prisma migrate deploy' "$TMP/fly.budget-migrate.log"; then
-  echo "FAIL: case=budget-migrate — expected budget-api ssh console + prisma migrate deploy, but it was not invoked" >&2
-  sed 's/^/  /' "$TMP/fly.budget-migrate.log" >&2
+# ---------- case 6: the platform secrets go through the provisioner --------
+
+# The provisioner owns the mapping from source names to the app-level
+# PLATFORM_* secret names; the bootstrap script must not write secrets
+# itself.
+if ! grep -qF 'INVOKED: secrets set --app sindustries-platform-staging --detach' "$TMP/fly.missing.log"; then
+  echo "FAIL: case=secrets — expected the provisioner to write the platform's secrets" >&2
+  sed 's/^/  /' "$TMP/fly.missing.log" >&2
+  exit 1
+fi
+if ! grep -qF 'PLATFORM_TASKS_API_DATABASE_URL=<redacted>' "$TMP/fly.missing.log"; then
+  echo "FAIL: case=secrets — expected the PLATFORM_* secret names to be registered" >&2
+  sed 's/^/  /' "$TMP/fly.missing.log" >&2
+  exit 1
+fi
+if grep -qE 'INVOKED: secrets set --app sindustries-(tasks-api|budget-api|content-scheduler-api|auto-post-worker)-staging' "$TMP/fly.missing.log"; then
+  echo "FAIL: case=secrets — secrets were written to a retired per-service app" >&2
+  sed 's/^/  /' "$TMP/fly.missing.log" >&2
   exit 1
 fi
 
-# ---------- case 6: budget-api migration is NOT invoked without --migrate --
+# ---------- case 7: a missing source fails closed --------------------------
 
-# Sanity counterpart to case 5: omitting --migrate must skip the
-# `prisma migrate deploy` ssh console call entirely. Default behaviour is
-# no migrations; passing --migrate is the opt-in.
-FLY_LOG="$TMP/fly.budget-nomigrate.log" \
-FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging","Status":"running"},{"Name":"sindustries-budget-api-staging","Status":"running"}]' \
+rm -f "$TMP/registered.noredis"
+FLY_LOG="$TMP/fly.noredis.log" \
+FLY_REGISTERED="$TMP/registered.noredis" \
+FLY_LIST_JSON='[]' \
 PATH="$TMP/bin:$PATH" \
-  bash "$SCRIPT" --yes --service budget-api --env-local "$TMP/.env.local.budget" \
-    >"$TMP/out.budget-nomigrate" 2>"$TMP/err.budget-nomigrate" \
+  bash "$SCRIPT" --yes --env-local "$TMP/.env.local.noredis" \
+    >"$TMP/out.noredis" 2>"$TMP/err.noredis" \
     || true
 
-if grep -qF 'INVOKED: ssh console --app sindustries-budget-api-staging' "$TMP/fly.budget-nomigrate.log"; then
-  echo "FAIL: case=budget-nomigrate — ssh console should not be invoked when --migrate is omitted" >&2
-  sed 's/^/  /' "$TMP/fly.budget-nomigrate.log" >&2
+if ! grep -qF 'HEALTH_PROBE_REDIS' "$TMP/err.noredis"; then
+  echo "FAIL: case=noredis — expected the missing source to be named on stderr" >&2
+  sed 's/^/  /' "$TMP/err.noredis" >&2
+  exit 1
+fi
+if grep -qE '^INVOKED: (apps create|secrets set)' "$TMP/fly.noredis.log"; then
+  echo "FAIL: case=noredis — the script must fail BEFORE it creates an app or writes secrets" >&2
+  sed 's/^/  /' "$TMP/fly.noredis.log" >&2
   exit 1
 fi
 
-echo "bootstrap-staging: ok (6 cases)"
+echo "bootstrap-staging: ok (7 cases)"

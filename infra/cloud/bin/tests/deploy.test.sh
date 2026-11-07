@@ -8,7 +8,8 @@
 #   1. Missing service argument fails fast (exit 1, no flyctl invocations).
 #   2. Unknown service argument fails fast (exit 1, no flyctl invocations).
 #   3. --image flag is forwarded to `flyctl deploy --image ...` for the
-#      matched service; :latest is refused.
+#      matched service; :latest is refused (a usage error, reported before
+#      any environment preflight).
 #   4. Without --image, no `--image` is appended (uses local source).
 #   5. Missing FLY_API_TOKEN fails preflight (exit 2, no flyctl deploy).
 #   6. The post-deploy smoke check GETs the `/health` URL for tasks-api
@@ -17,6 +18,9 @@
 #      `flyctl deploy`.
 #   8. Source deploys refuse a dirty worktree so GIT_COMMIT_SHA cannot
 #      misrepresent the image contents.
+#   9. Every service name resolves to the consolidated platform app (the
+#      per-service staging apps were destroyed at the cutover), and the
+#      deploy is opt-in for ALL of them, not just "platform".
 
 set -euo pipefail
 
@@ -140,7 +144,7 @@ assert_log_absent() {
 }
 
 reset_log() { : >"$TMP/fly.log"; }
-export FLY_LIST_JSON='[{"Name":"sindustries-tasks-api-staging"},{"Name":"sindustries-budget-api-staging"},{"Name":"sindustries-content-scheduler-api-staging"},{"Name":"sindustries-auto-post-worker-staging"},{"Name":"sindustries-platform-staging"}]'
+export FLY_LIST_JSON='[{"Name":"sindustries-platform-staging"}]'
 
 # ---------- tests ----------------------------------------------------------
 
@@ -162,7 +166,7 @@ assert_log_absent "INVOKED: deploy"
 echo "test: --image latest is refused"
 reset_log
 set +e
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:latest 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:latest 2>&1
 rc=$?
 set -e
 assert_eq ":latest exit code" "1" "$rc"
@@ -170,29 +174,29 @@ assert_log_absent "INVOKED: deploy"
 
 echo "test: --image pinned tag is forwarded"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:abc1234def5678 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:abc1234def5678 2>&1
 assert_eq "deploy tasks-api exit code" "0" "$?"
-assert_log_contains "INVOKED: config validate --config infra/cloud/fly/tasks-api.fly.toml"
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=abc1234def5678 --image registry/repo:abc1234def5678"
-assert_log_contains "INVOKED: releases --app sindustries-tasks-api-staging --json"
-assert_log_contains "INVOKED: machines list --app sindustries-tasks-api-staging --json"
+assert_log_contains "INVOKED: config validate --config infra/cloud/fly/platform.fly.toml"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=abc1234def5678 --image registry/repo:abc1234def5678"
+assert_log_contains "INVOKED: releases --app sindustries-platform-staging --json"
+assert_log_contains "INVOKED: machines list --app sindustries-platform-staging --json"
 assert_log_contains "INVOKED: curl"
 
 echo "test: no --image means no --image flag in deploy argv"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" budget-api 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" budget-api 2>&1
 assert_eq "deploy budget-api exit code" "0" "$?"
 # The deploy argv for budget-api should NOT contain "--image"
-if grep -E "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml .*--image" "$TMP/fly.log"; then
+if grep -E "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml .*--image" "$TMP/fly.log"; then
   echo "FAIL: budget-api deploy should not pass --image when caller didn't pass one" >&2
   exit 1
 fi
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/budget-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA="
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA="
 
 echo "test: API smoke check retries while the promoted machine finishes starting"
 reset_log
 : >"$TMP/curl.count"
-FLY_API_TOKEN=stub FLY_CURL_COUNT_FILE="$TMP/curl.count" FLY_CURL_FAIL_COUNT=1 \
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true FLY_CURL_COUNT_FILE="$TMP/curl.count" FLY_CURL_FAIL_COUNT=1 \
   SMOKE_RETRY_DELAY_SECONDS=0 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
   "$SCRIPT" tasks-api 2>&1
 assert_eq "deploy tasks-api retry exit code" "0" "$?"
@@ -200,10 +204,10 @@ assert_eq "curl retry count" "2" "$(cat "$TMP/curl.count")"
 
 echo "test: content-scheduler-api maps to its standalone Fly app"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" \
   "$SCRIPT" content-scheduler-api --image registry/repo:cafe1234 2>&1
 assert_eq "deploy content-scheduler-api exit code" "0" "$?"
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/content-scheduler-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=cafe1234 --image registry/repo:cafe1234"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=cafe1234 --image registry/repo:cafe1234"
 
 echo "test: missing FLY_API_TOKEN fails preflight"
 reset_log
@@ -217,10 +221,10 @@ assert_log_absent "INVOKED: deploy"
 
 echo "test: auto-post-worker smoke check tails logs"
 reset_log
-FLY_API_TOKEN=stub FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" auto-post-worker --image registry/repo:def4567abc8901 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true FLY_WORKER_STARTUP=1 PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" auto-post-worker --image registry/repo:def4567abc8901 2>&1
 assert_eq "deploy worker exit code" "0" "$?"
-assert_log_contains "INVOKED: logs --app sindustries-auto-post-worker-staging --no-tail"
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/auto-post-worker.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=def4567abc8901 --image registry/repo:def4567abc8901"
+assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=def4567abc8901 --image registry/repo:def4567abc8901"
 
 echo "test: platform deploys the consolidated app and smoke-checks all three services"
 reset_log
@@ -243,10 +247,9 @@ assert_log_contains "INVOKED: curl --fail --silent --show-error --max-time 10 ht
 assert_log_contains "INVOKED: logs --app sindustries-platform-staging --no-tail"
 
 echo "test: the platform deploy is opt-in — refused without STAGING_PLATFORM_DEPLOY_ENABLED"
-# The platform's auto-post worker is a second consumer of the same
-# BullMQ queue as the old worker app, so the operator path is gated the
-# same way the CI path is (task 219fb673). Without the opt-in the deploy
-# must not run at all.
+# Every service name resolves to the consolidated platform app, so the
+# opt-in applies to ALL of them: there is no service name that reaches
+# the platform app without it (task 219fb673).
 reset_log
 set +e
 FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" platform --image registry/repo:aaaabbbbccccdddd 2>&1
@@ -255,18 +258,27 @@ set -e
 assert_eq "platform deploy without opt-in exit code" "2" "$rc"
 assert_log_absent "INVOKED: deploy"
 
+echo "test: the opt-in also applies to a service alias"
+reset_log
+set +e
+FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --image registry/repo:aaaabbbbccccdddd 2>&1
+rc=$?
+set -e
+assert_eq "tasks-api deploy without opt-in exit code" "2" "$rc"
+assert_log_absent "INVOKED: deploy"
+
 echo "test: --env GIT_COMMIT_SHA uses local HEAD when no --image is given"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api 2>&1
 assert_eq "deploy tasks-api (no image) exit code" "0" "$?"
 HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-assert_log_contains "INVOKED: deploy --config infra/cloud/fly/tasks-api.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=$HEAD_SHA"
+assert_log_contains "INVOKED: deploy --config infra/cloud/fly/platform.fly.toml --strategy canary --wait-timeout 600 --env GIT_COMMIT_SHA=$HEAD_SHA"
 
 echo "test: local-source deploy refuses a dirty worktree"
 reset_log
 touch "$DIRTY_SENTINEL"
 set +e
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run 2>&1
 rc=$?
 set -e
 rm -f "$DIRTY_SENTINEL"
@@ -275,7 +287,7 @@ assert_log_absent "INVOKED: deploy"
 
 echo "test: --dry-run prints deploy command and exits 0"
 reset_log
-FLY_API_TOKEN=stub PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run --image registry/repo:abc1234def5678 2>&1
+FLY_API_TOKEN=stub STAGING_PLATFORM_DEPLOY_ENABLED=true PATH="$TMP/bin:$PATH" FLY_LOG="$TMP/fly.log" "$SCRIPT" tasks-api --dry-run --image registry/repo:abc1234def5678 2>&1
 assert_eq "dry-run exit code" "0" "$?"
 assert_log_absent "INVOKED: deploy"
 

@@ -469,7 +469,10 @@ export function appExists(app, io = createIo()) {
   }
   try {
     const apps = JSON.parse(stdout);
-    return apps.some((entry) => entry?.Name === app);
+    // Fly's `apps list --json` schema uses `Name`; some sandboxed CLIs
+    // return `name`. Tolerate both, and match EXACTLY: a same-prefix app
+    // (`<app>-extra`) is not this app.
+    return apps.some((entry) => (entry?.Name ?? entry?.name) === app);
   } catch {
     io.log(`Could not parse the Fly app list — assuming ${app} is absent`);
     return false;
