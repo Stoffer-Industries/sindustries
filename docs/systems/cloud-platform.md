@@ -232,6 +232,42 @@ deploy creates — starts with them. After setting them, the script reads
 `flyctl secrets set` exit code says the command was accepted, not that
 every secret is on the app.
 
+**The secret write is detached, so it is not health-gated on the image it
+replaces.** `flyctl secrets set` does not only write values: it also
+restarts the app's Machines, and in the flyctl the deploy workflow pins
+(0.4.102) that restart is a Machine deployment whose progress flyctl
+follows to completion. When the running image is unhealthy — exactly the
+state a deploy exists to repair — the follow fails, `flyctl secrets set`
+exits non-zero, and the workflow aborts BEFORE the canary deploy that
+carries the fix. This is not hypothetical: main CI run `42366203146` on
+merge commit `27269dbb` failed in the "Provision the platform app and its
+secrets" step for exactly this reason. The Machine was listening on the
+supervisor's `8081` and the children's `4001`/`4002`/`4003` but not on
+`0.0.0.0:8080` (the router did not bind), so the health-gated restart
+could not pass and the run never reached "Deploy (canary)" — the step that
+would have installed the fixed image.
+
+The provisioner therefore writes with `--detach`. Upstream flyctl 0.4.102
+(`internal/command/secrets/secrets.go`, `DeploySecrets`) passes
+`SkipHealthChecks: args.Detach` and `SkipDNSChecks: args.Detach ||
+!args.CheckDNS` to the restart-only Machine deployment, so the command
+returns once the restart is issued instead of waiting for the running
+image to become healthy. The health gate belongs to the deploy step that
+follows: it installs the new image, and the workflow's smoke checks decide
+whether the platform serves. The write still fails closed on a real
+failure — a non-zero flyctl exit (rejected value, auth error, API error)
+is still an error, and the read-back still fails when a secret NAME did
+not land.
+
+The invariant is asserted in two places, so it cannot be lost silently:
+`infra/cloud/platform/tests/platform-provision-secrets-cli.test.mjs`
+asserts the flyctl argv (`--detach` present, `--stage` absent), and
+`infra/cloud/platform/tests/platform-provision-order.test.mjs` asserts the
+workflow-level contract — the secrets are registered before the canary
+deploy, the workflow never writes secrets directly (a raw `flyctl secrets
+set` would reintroduce the health-gated write), and the provisioner owns
+the single implementation of the write.
+
 **The supervisor refuses to start on an unusable secret.** A required
 source that is present but holds a placeholder passes a presence check and
 then breaks the child at boot with an opaque error (a zod "Invalid url"

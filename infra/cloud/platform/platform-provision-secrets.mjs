@@ -524,13 +524,44 @@ export function ensureApp(app, org, io = createIo()) {
  * them the app's live values, so every Machine -- including the one the
  * deploy creates -- starts with them.
  *
+ * The write is DETACHED, so it is not health-gated on the image that is
+ * currently running.
+ *
+ * `flyctl secrets set` does not just write the values: it also restarts
+ * the app's Machines, and in the flyctl the deploy workflow pins (0.4.102)
+ * that restart is a full Machine deployment whose progress flyctl follows.
+ * When the running image is unhealthy -- exactly the state a deploy is
+ * meant to repair -- the follow fails, `flyctl secrets set` exits
+ * non-zero, and the workflow aborts BEFORE the canary deploy that carries
+ * the fix. That is not a hypothetical: main CI run 42366203146 on merge
+ * commit 27269dbb failed in the "Provision the platform app and its
+ * secrets" step for exactly this reason. The Machine was listening on the
+ * supervisor's 8081 and the children's 4001/4002/4003 but not on
+ * 0.0.0.0:8080 (the router did not bind), so the health-gated restart
+ * could not pass and the run never reached "Deploy (canary)" -- the step
+ * that would have installed the fixed image.
+ *
+ * `--detach` removes that coupling. Upstream flyctl 0.4.102
+ * (`internal/command/secrets/secrets.go`, `DeploySecrets`) passes
+ * `SkipHealthChecks: args.Detach` and `SkipDNSChecks: args.Detach ||
+ * !args.CheckDNS` to the restart-only Machine deployment, so the command
+ * returns once the restart is issued instead of waiting for the running
+ * image to become healthy. The health gate belongs to the deploy step
+ * that follows: it installs the new image and the workflow's smoke checks
+ * are what decide whether the platform serves.
+ *
+ * The write still fails closed on a real failure: a non-zero exit from
+ * flyctl (a rejected value, an auth error, an API error) is still an
+ * error, and the read-back below still fails when a secret NAME did not
+ * land on the app.
+ *
  * @param {string} app
  * @param {{name: string, value: string}[]} secrets
  * @param {object} [io]
  * @returns {number} exit code
  */
 export function applySecrets(app, secrets, io = createIo()) {
-  const args = ['secrets', 'set', '--app', app];
+  const args = ['secrets', 'set', '--app', app, '--detach'];
   for (const secret of secrets) args.push(`${secret.name}=${secret.value}`);
   io.log(`Registering ${secrets.length} secrets on ${app}`);
   const { status, stderr } = flyctl(args, io);

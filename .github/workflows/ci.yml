@@ -1011,16 +1011,26 @@ jobs:
       # Task 219fb673 — the provisioning CLI is what actually runs in CI,
       # so the CLI path is tested with a stubbed flyctl: the app-create
       # argv must be executable by the pinned flyctl 0.4.102 (which has no
-      # `--region` flag on `apps create`), `secrets set --stage` must be
-      # passed, and no source or derived secret value may reach
-      # stdout/stderr. The cutover ordering invariant and the deploy gate
-      # are checked as static contracts over the runbook, the operator
+      # `--region` flag on `apps create`), the secret write must be
+      # DIRECT (not `--stage`, which never reached the Machine a deploy
+      # created) and DETACHED (so a health-gated restart cannot abort the
+      # deploy that repairs it), and no source or derived secret value may
+      # reach stdout/stderr. The cutover ordering invariant and the deploy
+      # gate are checked as static contracts over the runbook, the operator
       # deploy path and the deploy workflow.
       - name: Run consolidated platform provisioning CLI tests
         run: node --test infra/cloud/platform/tests/platform-provision-secrets-cli.test.mjs
 
       - name: Run platform cutover order and deploy gate tests
         run: node --test infra/cloud/platform/tests/platform-cutover-order.test.mjs
+
+      # Task 219fb673 — the provisioning step must not be able to fail
+      # because of the state of the image it is about to replace: the
+      # secret write is detached, the workflow never writes secrets
+      # directly, and the secrets are registered before the canary deploy
+      # creates the Machine that boots with them.
+      - name: Run platform provisioning order tests
+        run: node --test infra/cloud/platform/tests/platform-provision-order.test.mjs
 
   gh-with-agent-token-tests:
     # Task b0d1b42e (Fix Ambient GITHUB_TOKEN Overriding Per-Agent GH Config

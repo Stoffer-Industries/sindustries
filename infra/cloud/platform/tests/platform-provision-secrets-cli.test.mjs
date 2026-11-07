@@ -173,7 +173,7 @@ describe('platform provisioning CLI', () => {
       !secrets.includes('--stage'),
       '--stage holds the values for the next release; on the live deploy the canary Machine still ran with the placeholder that had been registered out of band',
     );
-    const names = secrets.slice(4).map((entry) => entry.split('=')[0]);
+    const names = secrets.slice(4).filter((entry) => entry.includes('=')).map((entry) => entry.split('=')[0]);
     assert.equal(names.length, 12);
     for (const name of [
       'PLATFORM_TASKS_API_DATABASE_URL',
@@ -188,6 +188,34 @@ describe('platform provisioning CLI', () => {
     ]) {
       assert.ok(names.includes(name), `${name} should be registered`);
     }
+  });
+
+  it('writes the secrets detached, so the write is not health-gated on the running image', () => {
+    const { code, calls } = runCli();
+    assert.equal(code, 0);
+    const secrets = callStartingWith(calls, ['secrets', 'set']);
+    assert.ok(secrets, 'the secrets should be registered');
+    // `flyctl secrets set` also restarts the app's Machines, and in the
+    // pinned flyctl (0.4.102) that restart is a Machine deployment whose
+    // progress flyctl follows. When the running image is unhealthy --
+    // exactly the state a deploy is meant to repair -- the follow fails,
+    // the command exits non-zero, and the workflow aborts BEFORE the
+    // canary deploy that carries the fix (main CI run 42366203146 on
+    // merge commit 27269dbb). `--detach` sets SkipHealthChecks in the
+    // restart-only deployment, so the write cannot be failed by the
+    // health of the image it is about to be replaced by.
+    assert.ok(
+      secrets.includes('--detach'),
+      'the secret write must be detached so a health-gated restart cannot abort the deploy that fixes it',
+    );
+    // The payload is NAME=VALUE pairs; the flags come first so a value
+    // that contains an '=' is still one argument.
+    const firstPayloadIndex = secrets.findIndex((entry) => entry.includes('='));
+    assert.ok(firstPayloadIndex > 0, 'the payload follows the flags');
+    assert.ok(
+      secrets.slice(0, firstPayloadIndex).every((entry) => entry.startsWith('--') || !entry.includes('=')),
+      'every flag must precede the payload',
+    );
   });
 
   it('does not create the app when it already exists', () => {
