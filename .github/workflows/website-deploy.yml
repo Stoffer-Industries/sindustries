@@ -144,14 +144,31 @@ jobs:
             exit 1
           fi
 
+      - name: Link Vercel project and team scope
+        if: inputs.target == 'production'
+        run: |
+          set -euo pipefail
+          # The staging job creates the candidate under the project and team
+          # recorded in VERCEL_PROJECT_ID / VERCEL_ORG_ID. This job runs on a
+          # clean runner with no .vercel/project.json, so without an explicit
+          # scope the CLI resolves the deployment under the token's default
+          # scope and the promotion is refused with "Deployment belongs to a
+          # different team". Linking the project binds this job to the same
+          # project and team the candidate was created in.
+          vercel link --yes --project "$VERCEL_PROJECT_ID" --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
+
       - name: Promote smoke-tested candidate
         if: inputs.target == 'production'
         id: production_promote
         env:
           CANDIDATE_URL: ${{ inputs.candidate-url }}
         run: |
-          vercel promote "$CANDIDATE_URL" --yes --token="$VERCEL_TOKEN"
-          vercel alias set "$CANDIDATE_URL" "$PRODUCTION_DOMAIN" --token="$VERCEL_TOKEN"
+          set -euo pipefail
+          # Every mutating call carries the same explicit scope the candidate
+          # was created in, so the promotion can never fall back to the
+          # token's default scope.
+          vercel promote "$CANDIDATE_URL" --yes --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
+          vercel alias set "$CANDIDATE_URL" "$PRODUCTION_DOMAIN" --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
           echo "url=$CANDIDATE_URL" >> "$GITHUB_OUTPUT"
           {
             echo "### Vercel production promotion"
