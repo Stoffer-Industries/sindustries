@@ -222,7 +222,7 @@ The cutover was a four-PR sequence shipped in order. Each PR was independently r
 | WS0 | `tasks-api-native-approvals` (separate task) | various | Landed the structured `TaskApproval` table and endpoints; reconciled one-time via a migration bridge that mirrored task-description markers into `TaskApproval` rows. |
 | WS1 | `e2aba106` WS1 (Tasks API description-handling freeze) | #420 | Removed `uncheckApprovalMarker` and friends from `_spec.ts`. PATCH `/tasks/:id` passes the description through verbatim; the marker is no longer auto-unchecked on drift. New `tasksSpecChecksum.test.ts` pins the simplified `descriptionHasSpecDrift`. |
 | WS2 | `e2aba106` WS2 (Lobster-side cleanup) | #422 | Renamed `product_spec_approved_by_tom` → `brain_spec_approved_by_tom`. Removed the `ApprovalMarker` enum, `approval_marker_state`, and the AC-line marker filter. Five marker-based lobster tests rewritten to assert on the structured approval rows. 410 lines deleted, 232 lines added. |
-| WS3 | `e2aba106` WS3 (Test sweep + lint + docs) | #TBD | This PR. Adds `scripts/check-no-legacy-approval-marker.mjs` (the regression guard), converts remaining lobster tests to assert on `TaskApproval`, lands this doc, adds an AC4 structural assertion that the bookmark workflow has no description-marker dependencies. |
+| WS3 | `e2aba106` WS3 (Test sweep + lint + docs) | #423 | Adds `scripts/check-no-legacy-approval-marker.mjs` (the regression guard), converts remaining lobster tests to assert on `TaskApproval`, lands this doc, adds an AC4 structural assertion that the bookmark workflow has no description-marker dependencies. |
 
 The sequence is intentionally additive: WS0 ships the structured surface, WS1 removes the description-handling surface in the API, WS2 removes it in the lobster, and WS3 ships the guardrails that catch a regression in either layer.
 
@@ -331,7 +331,7 @@ Feature-task approval state is now exclusively structured. The legacy `- [x]` ch
 1. **WS0** — `tasks-api-native-approvals` (foundation): introduced structured `TaskApproval` rows and migration bridge.
 2. **WS1** — PR #420 (e2aba106): froze the Tasks API description-handling surface; description is now passed through verbatim.
 3. **WS2** — PR #422 (e2aba106): removed the lobster's task-description reads/writes; `product_spec_approved_by_tom` renamed to `brain_spec_approved_by_tom`.
-4. **WS3** — PR #TBD (e2aba106, this PR): added the regression guard lint, the AC4 structural assertion, and the system docs at `docs/systems/approvals.md`.
+4. **WS3** — PR #423 (e2aba106): added the regression guard lint, the AC4 structural assertion, and the system docs at `docs/systems/approvals.md`.
 
 Operators do not need to take action. Existing tasks are unaffected — their structured `TaskApproval` rows already drive the lifecycle. If you have a task whose description still contains the legacy marker (pre-cutover content), it is silently ignored; no marker rewrite is performed.
 
@@ -377,7 +377,7 @@ Tasks API unit tests. The legacy-marker-suppression invariants in [`legacyApprov
 - Task `e2aba106-e1f6-4faf-ad81-3e5bec1b4574` — Remove legacy task-description approval marker
 - PR #420 — WS1: Tasks API description-handling freeze
 - PR #422 — WS2: Lobster-side cleanup
-- PR #TBD — WS3: Test sweep + lint script + this doc (this PR)
+- PR #423 — WS3: Test sweep + lint script + this doc
 - Task `tasks-api-native-approvals` (WS0, separate task) — initial structured `TaskApproval` table and migration bridge
 - Task `ad8346ee-46fc-4bc7-a9b0-a8c31acfb04f` — Gate Ash's `qa_agent` approval on live AC-evidence + SHA-pinned invalidation
 - Task `39667e62` — the incident that motivated the gate (PR #803 body blanked post-approval)
