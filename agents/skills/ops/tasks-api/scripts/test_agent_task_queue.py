@@ -523,6 +523,8 @@ class AgentTaskQueueTest(unittest.TestCase):
 
         self.assertEqual(
             [{
+                "id": "acme/repo#42",
+                "repo": "acme/repo",
                 "number": 42,
                 "title": "feat: example",
                 "url": "https://github.com/acme/repo/pull/42",
@@ -556,7 +558,12 @@ class AgentTaskQueueTest(unittest.TestCase):
             ) as gh_api,
             patch.object(agent_task_queue.time, "sleep") as sleep,
         ):
-            detail = agent_task_queue._fetch_github_pr_detail("~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN", 42)
+            detail = agent_task_queue._fetch_github_pr_detail(
+                "~/.config/gh-rowan",
+                "ROWAN_GITHUB_TOKEN",
+                "Stoffer-Industries/sindustries",
+                42,
+            )
 
         self.assertTrue(detail["mergeable"])
         self.assertEqual(2, gh_api.call_count)
@@ -568,7 +575,12 @@ class AgentTaskQueueTest(unittest.TestCase):
             "_gh_api",
             return_value={"number": 42, "mergeable": True},
         ) as gh_api, patch.object(agent_task_queue.time, "sleep") as sleep:
-            detail = agent_task_queue._fetch_github_pr_detail("~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN", 42)
+            detail = agent_task_queue._fetch_github_pr_detail(
+                "~/.config/gh-rowan",
+                "ROWAN_GITHUB_TOKEN",
+                "Stoffer-Industries/sindustries",
+                42,
+            )
 
         self.assertTrue(detail["mergeable"])
         gh_api.assert_called_once()
@@ -1071,7 +1083,7 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
         url_count = 8
         tasks = [_deliverable_task(100 + i) for i in range(url_count)]
 
-        def slow_detail(_config_dir, _token_env, _pr_number):
+        def slow_detail(_config_dir, _token_env, _repo, _pr_number):
             time.sleep(per_call_delay)
             return {
                 "number": _pr_number,
@@ -1081,11 +1093,11 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
                 "mergeable": True,
             }
 
-        def slow_reviews(_config_dir, _token_env, _pr_number):
+        def slow_reviews(_config_dir, _token_env, _repo, _pr_number):
             time.sleep(per_call_delay)
             return []
 
-        def slow_checks(_config_dir, _token_env, _endpoint):
+        def slow_checks(_config_dir, _token_env, _repo, _sha):
             time.sleep(per_call_delay)
             return {"check_runs": []}
 
@@ -1094,7 +1106,7 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
         ), patch.object(
             agent_task_queue, "_fetch_reviews_tolerant", side_effect=slow_reviews
         ), patch.object(
-            agent_task_queue, "_gh_api", side_effect=slow_checks
+            agent_task_queue, "_fetch_check_runs", side_effect=slow_checks
         ):
             started = time.monotonic()
             agent_task_queue.fetch_linked_delivery_prs("Rowan", tasks, [])
@@ -1113,7 +1125,7 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
         tasks = [_deliverable_task(200 + i) for i in range(3)]
         call_count = {"n": 0}
 
-        def flaky_detail(_config_dir, _token_env, pr_number):
+        def flaky_detail(_config_dir, _token_env, _repo, pr_number):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise agent_task_queue._GhApiTimeout("simulated 10s timeout")
@@ -1130,7 +1142,7 @@ class FetchLinkedDeliveryPrsParallelTest(unittest.TestCase):
         ), patch.object(
             agent_task_queue, "_fetch_reviews_tolerant", return_value=[]
         ), patch.object(
-            agent_task_queue, "_gh_api", return_value={"check_runs": []}
+            agent_task_queue, "_fetch_check_runs", return_value={"check_runs": []}
         ):
             out = agent_task_queue.fetch_linked_delivery_prs("Rowan", tasks, [])
 
@@ -1176,7 +1188,7 @@ class IdentityDegradeTest(unittest.TestCase):
             )
         if fetch_github_prs_side_effect is None:
 
-            def _no_degrade(_agent):
+            def _no_degrade(_agent, _repos=None):
                 agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
                 return []
 
@@ -1195,7 +1207,11 @@ class IdentityDegradeTest(unittest.TestCase):
             )
         parser = stack.enter_context(patch.object(agent_task_queue, "build_parser"))
         parser.return_value.parse_args.return_value = argparse.Namespace(
-            assignee="Rowan", json=True, verbose=False, attention_owner=None
+            assignee="Rowan",
+            json=True,
+            verbose=False,
+            attention_owner=None,
+            repos=None,
         )
         stack.enter_context(patch.object(agent_task_queue, "print"))
         return stack
@@ -1291,9 +1307,10 @@ class IdentityDegradeTest(unittest.TestCase):
             side_effect=subprocess.CalledProcessError(4, "gh"),
         ):
             self.assertEqual(agent_task_queue.fetch_github_prs("Rowan"), [])
-        self.assertEqual(
-            agent_task_queue._PR_HYDRATION_DEGRADE_REASON, "gh-api-failure: exit 4"
-        )
+        reason = agent_task_queue._PR_HYDRATION_DEGRADE_REASON
+        self.assertTrue(reason.startswith("gh-api-failure"), reason)
+        self.assertIn("exit 4", reason)
+        self.assertIn("Stoffer-Industries/sindustries", reason)
 
     def test_fetch_github_prs_leaves_degrade_reason_unset_on_success(self):
         """Happy path stays unmarked so callers keep the real 'no open PRs' signal."""
@@ -1306,7 +1323,7 @@ class IdentityDegradeTest(unittest.TestCase):
 
     def test_main_emits_pr_hydration_degraded_with_reason(self):
         """The reason must survive into the JSON envelope callers actually read."""
-        def _degraded(_agent):
+        def _degraded(_agent, _repos=None):
             agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "gh-api-failure: exit 4"
             return []
 
@@ -1316,7 +1333,7 @@ class IdentityDegradeTest(unittest.TestCase):
             self.assertEqual(queue["prHydrationDegraded"], "gh-api-failure: exit 4")
 
     def test_main_emits_pr_hydration_degraded_when_unprovisioned(self):
-        def _unprovisioned(_agent):
+        def _unprovisioned(_agent, _repos=None):
             agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "unprovisioned"
             return []
 
@@ -1339,7 +1356,7 @@ class IdentityDegradeTest(unittest.TestCase):
         """Module global must not leak a stale degrade into a later clean run."""
         agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "gh-api-failure: exit 1"
 
-        def _degraded(_agent):
+        def _degraded(_agent, _repos=None):
             agent_task_queue._PR_HYDRATION_DEGRADE_REASON = "unprovisioned"
             return []
 
@@ -1373,3 +1390,290 @@ class VerboseFlagTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiRepoScanTest(unittest.TestCase):
+    """Task 7fba23bf: the queue projects every configured repo, and every
+    emitted PR identifies its own repository.
+
+    The failure these tests exist to prevent: a hardcoded single repo made
+    `Stoffer-Industries/workspace` structurally unreachable, so four open
+    workspace PRs requesting Rowan reported as `reviewRequests: []` — the
+    "empty list means no coverage" false-clean shape, three times.
+    """
+
+    SINDUSTRIES = "Stoffer-Industries/sindustries"
+    WORKSPACE = "Stoffer-Industries/workspace"
+
+    def setUp(self) -> None:
+        agent_task_queue._VERBOSE = False
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        agent_task_queue._REPO_COVERAGE = {}
+
+    def tearDown(self) -> None:
+        agent_task_queue._PR_HYDRATION_DEGRADE_REASON = None
+        agent_task_queue._REPO_COVERAGE = {}
+
+    @staticmethod
+    def _summary(number, repo, author="quinnstoffer", requested=("rowanstoffer",)):
+        return {
+            "number": number,
+            "title": f"pr {number}",
+            "html_url": f"https://github.com/{repo}/pull/{number}",
+            "user": {"login": author},
+            "requested_reviewers": [{"login": login} for login in requested],
+        }
+
+    @staticmethod
+    def _fake_gh_api(calls, list_payloads):
+        """Record every endpoint and answer the queue's endpoint shapes."""
+
+        def _api(_config_dir, _token_env, endpoint):
+            calls.append(endpoint)
+            if endpoint.endswith("/pulls?state=open&per_page=100"):
+                repo = endpoint.split("/")[1] + "/" + endpoint.split("/")[2]
+                payload = list_payloads.get(repo, [])
+                if isinstance(payload, Exception):
+                    raise payload
+                return payload
+            if "/pulls/" in endpoint and endpoint.endswith("/reviews?per_page=100"):
+                return []
+            if "/check-runs?per_page=100" in endpoint:
+                return {"check_runs": []}
+            if "/pulls/" in endpoint:
+                number = int(endpoint.rsplit("/", 1)[1])
+                repo = endpoint.split("/")[1] + "/" + endpoint.split("/")[2]
+                return {
+                    "number": number,
+                    "title": f"pr {number}",
+                    "html_url": f"https://github.com/{repo}/pull/{number}",
+                    "user": {"login": "quinnstoffer"},
+                    "requested_reviewers": [{"login": "rowanstoffer"}],
+                    "reviews": [],
+                    "head": {"sha": f"sha-{number}"},
+                    "mergeable": True,
+                    "state": "open",
+                    "draft": False,
+                }
+            raise AssertionError(f"unexpected endpoint: {endpoint}")
+
+        return _api
+
+    def test_scan_covers_every_configured_repo(self):
+        calls = []
+        payloads = {
+            self.SINDUSTRIES: [self._summary(1, self.SINDUSTRIES)],
+            self.WORKSPACE: [self._summary(2, self.WORKSPACE)],
+        }
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue, "_gh_api", side_effect=self._fake_gh_api(calls, payloads)
+        ):
+            agent_task_queue.fetch_github_prs("Rowan")
+
+        listed = {
+            endpoint.split("/")[1] + "/" + endpoint.split("/")[2]
+            for endpoint in calls
+            if endpoint.endswith("/pulls?state=open&per_page=100")
+        }
+        self.assertEqual({self.SINDUSTRIES, self.WORKSPACE}, listed)
+
+    def test_every_github_endpoint_targets_a_configured_repo(self):
+        """No call site may target a repo outside the configured set."""
+        calls = []
+        payloads = {
+            self.SINDUSTRIES: [self._summary(1, self.SINDUSTRIES)],
+            self.WORKSPACE: [self._summary(2, self.WORKSPACE)],
+        }
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue, "_gh_api", side_effect=self._fake_gh_api(calls, payloads)
+        ):
+            agent_task_queue.fetch_github_prs("Rowan")
+
+        configured = {self.SINDUSTRIES, self.WORKSPACE}
+        for endpoint in calls:
+            self.assertTrue(endpoint.startswith("repos/"), endpoint)
+            owner, name = endpoint.split("/")[1:3]
+            self.assertIn(f"{owner}/{name}", configured, endpoint)
+
+    def test_repo_qualified_ids_coexist_across_repos(self):
+        """`workspace#83` and `sindustries#83` must not overwrite each other."""
+        first = pull_request(
+            number=83,
+            html_url=f"https://github.com/{self.SINDUSTRIES}/pull/83",
+            repo=self.SINDUSTRIES,
+            user={"login": "quinnstoffer"},
+            requested_reviewers=[{"login": "rowanstoffer"}],
+        )
+        second = pull_request(
+            number=83,
+            html_url=f"https://github.com/{self.WORKSPACE}/pull/83",
+            repo=self.WORKSPACE,
+            user={"login": "quinnstoffer"},
+            requested_reviewers=[{"login": "rowanstoffer"}],
+        )
+        queue = agent_task_queue.classify_github_prs("Rowan", [first, second])
+        ids = [item["id"] for item in queue["reviewRequests"]]
+        self.assertEqual([f"{self.SINDUSTRIES}#83", f"{self.WORKSPACE}#83"], sorted(ids))
+        repos = {item["repo"] for item in queue["reviewRequests"]}
+        self.assertEqual({self.SINDUSTRIES, self.WORKSPACE}, repos)
+
+    def test_linked_delivery_pr_is_fetched_from_its_own_repo(self):
+        """A delivery link into the workspace repo is hydrated from that repo."""
+        calls = []
+        task = {
+            "id": "00000000-0000-0000-0000-0000000000aa",
+            "title": "linked",
+            "taskType": "code",
+            "status": "doing",
+            "priority": "high",
+            "assignee": "Rowan",
+            "comments": [
+                {
+                    "text": "[implementer-prs] "
+                    f"https://github.com/{self.WORKSPACE}/pull/88"
+                }
+            ],
+            "approvals": [],
+        }
+        payloads = {}
+        with patch.object(
+            agent_task_queue, "_gh_api", side_effect=self._fake_gh_api(calls, payloads)
+        ):
+            out = agent_task_queue.fetch_linked_delivery_prs(
+                "Rowan", [task], [], repos=[self.SINDUSTRIES, self.WORKSPACE]
+            )
+
+        self.assertTrue(
+            any(
+                endpoint.startswith(f"repos/{self.WORKSPACE}/pulls/")
+                for endpoint in calls
+            ),
+            calls,
+        )
+        self.assertFalse(
+            any(
+                endpoint.startswith(f"repos/{self.SINDUSTRIES}/pulls/")
+                for endpoint in calls
+            ),
+            calls,
+        )
+        self.assertEqual(1, len(out))
+
+    def test_repo_coverage_reports_every_configured_repo(self):
+        calls = []
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue, "_gh_api", side_effect=self._fake_gh_api(calls, {})
+        ):
+            agent_task_queue.fetch_github_prs("Rowan")
+
+        rows = agent_task_queue._repo_coverage_rows(
+            list(agent_task_queue.DEFAULT_SCANNED_REPOS)
+        )
+        self.assertEqual(
+            list(agent_task_queue.DEFAULT_SCANNED_REPOS), [row["repo"] for row in rows]
+        )
+        for row in rows:
+            self.assertEqual("ok", row["status"])
+            self.assertIsNone(row["reason"])
+
+    def test_failed_repo_fetch_is_reported_not_silently_empty(self):
+        """One repo's failure degrades that repo only — and is reported."""
+        calls = []
+        payloads = {
+            self.SINDUSTRIES: subprocess.CalledProcessError(4, ["gh"]),
+            self.WORKSPACE: [self._summary(2, self.WORKSPACE)],
+        }
+        with patch.object(
+            agent_task_queue, "_is_identity_provisioned", return_value=True
+        ), patch.object(
+            agent_task_queue, "_gh_api", side_effect=self._fake_gh_api(calls, payloads)
+        ):
+            prs = agent_task_queue.fetch_github_prs("Rowan")
+
+        rows = {row["repo"]: row for row in agent_task_queue._repo_coverage_rows(
+            list(agent_task_queue.DEFAULT_SCANNED_REPOS)
+        )}
+        self.assertEqual("degraded", rows[self.SINDUSTRIES]["status"])
+        self.assertIn("exit 4", rows[self.SINDUSTRIES]["reason"])
+        self.assertEqual("ok", rows[self.WORKSPACE]["status"])
+        # The healthy repo still projects.
+        self.assertEqual(1, len(prs))
+        self.assertEqual(self.WORKSPACE, prs[0]["repo"])
+
+    def test_every_emitted_pr_item_identifies_its_repo(self):
+        prs = [
+            pull_request(
+                number=83,
+                html_url=f"https://github.com/{self.WORKSPACE}/pull/83",
+                repo=self.WORKSPACE,
+                user={"login": "quinnstoffer"},
+                requested_reviewers=[{"login": "rowanstoffer"}],
+            )
+        ]
+        queue = agent_task_queue.classify_github_prs("Rowan", prs)
+        for collection in (
+            "reviewRequests",
+            "authoredPrConflicts",
+            "authoredPrFeedback",
+            "mergeCandidates",
+        ):
+            for item in queue[collection]:
+                self.assertTrue(item["repo"], item)
+                self.assertEqual(f"{item['repo']}#{item['number']}", item["id"])
+                self.assertIn(item["repo"], item["url"])
+
+    def test_no_hardcoded_single_repo_constant(self):
+        """Tripwire: the single-repo constant is gone, not merely unused."""
+        self.assertIsNone(getattr(agent_task_queue, "REPO", None))
+
+    def test_repo_set_is_validated(self):
+        """A malformed repo name is a hard error, never a silent skip."""
+        with self.assertRaises(ValueError):
+            agent_task_queue._normalize_scanned_repos(["not-a-repo"])
+        with self.assertRaises(ValueError):
+            agent_task_queue._normalize_scanned_repos(["owner/name/extra"])
+        self.assertEqual(
+            ["owner/name"],
+            agent_task_queue._normalize_scanned_repos(["owner/name", "owner/name"]),
+        )
+
+    def test_linked_delivery_outside_configured_repos_is_reported(self):
+        """An unconfigured delivery repo is fetched AND reported, not swallowed."""
+        calls = []
+        task = {
+            "id": "00000000-0000-0000-0000-0000000000ab",
+            "title": "linked",
+            "taskType": "code",
+            "status": "doing",
+            "priority": "high",
+            "assignee": "Rowan",
+            "comments": [
+                {
+                    "text": "[implementer-prs] "
+                    "https://github.com/Other-Org/other-repo/pull/7"
+                }
+            ],
+            "approvals": [],
+        }
+        with patch.object(
+            agent_task_queue, "_gh_api", side_effect=self._fake_gh_api(calls, {})
+        ):
+            agent_task_queue.fetch_linked_delivery_prs(
+                "Rowan", [task], [], repos=[self.SINDUSTRIES]
+            )
+
+        rows = {row["repo"]: row for row in agent_task_queue._repo_coverage_rows(
+            [self.SINDUSTRIES]
+        )}
+        self.assertIn("Other-Org/other-repo", rows)
+        self.assertEqual("degraded", rows["Other-Org/other-repo"]["status"])
+        self.assertEqual(
+            "linked-delivery-repo-not-configured",
+            rows["Other-Org/other-repo"]["reason"],
+        )

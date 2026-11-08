@@ -323,6 +323,59 @@ as `WAITING_EXTERNAL`, with `topAttentionOwner` naming the same person returned
 by the API mapper. Bracketed comments are never consulted for routing when the
 stack is populated.
 
+### Multi-repo scan and repo-qualified PR identity
+
+The unified agent queue (`agents/skills/ops/tasks-api/scripts/agent_task_queue.py`)
+projects open pull requests from **every configured repository**, not one
+hardcoded repo. The default set is `DEFAULT_SCANNED_REPOS`:
+
+- `Stoffer-Industries/sindustries`
+- `Stoffer-Industries/workspace`
+
+`--repos owner/name[,owner/name...]` overrides the set for a run. A malformed
+repo name is a hard error, never a silent skip — a silently skipped repo is the
+same "empty list means no coverage" false-clean shape in miniature.
+
+PR numbers are repo-scoped, so every emitted PR item carries its repository:
+
+```jsonc
+{
+  "id": "Stoffer-Industries/workspace#83",  // collision-free composite
+  "repo": "Stoffer-Industries/workspace",    // owner/name
+  "number": 83,
+  "title": "docs(infra): runbooks for 502-vs-schema-drift…",
+  "url": "https://github.com/Stoffer-Industries/workspace/pull/83"
+}
+```
+
+`id` is `<owner>/<name>#<number>` on all four PR collections
+(`reviewRequests`, `authoredPrConflicts`, `authoredPrFeedback`,
+`mergeCandidates`), so `workspace#83` and `sindustries#83` coexist without
+overwriting each other. A delivery link is fetched from the repo named by its
+own URL, never from a constant.
+
+The JSON envelope reports the projection coverage of each repository, so an
+empty PR collection is never ambiguous:
+
+```jsonc
+{
+  "scannedRepos": ["Stoffer-Industries/sindustries", "Stoffer-Industries/workspace"],
+  "repoCoverage": [
+    {"repo": "Stoffer-Industries/sindustries", "status": "ok",        "openPrCount": 0, "detailPrsHydrated": 0, "reason": null},
+    {"repo": "Stoffer-Industries/workspace",  "status": "degraded", "openPrCount": 4, "detailPrsHydrated": 0, "reason": "gh-api-failure: exit 4"}
+  ]
+}
+```
+
+`status` is `ok`, `degraded` (that repo's fetch failed — the reason says how),
+or `skipped` (not attempted, e.g. an unprovisioned GitHub identity). A repo
+whose fetch fails degrades only that repo; the others still project. A
+delivery link into a repo outside the configured set is still fetched and
+reported as a `degraded` row with reason `linked-delivery-repo-not-configured`.
+
+The whole-envelope `prHydrationDegraded` marker is retained unchanged for
+consumers that only know that key.
+
 ### Required approvals policy
 
 The Tasks API reads `.openclaw/tasks-api/required-approvals.yaml` on startup to resolve which approval types each `taskType` requires and who owns each type. The file format is intentionally narrow:
