@@ -1090,11 +1090,11 @@ TASKS_API_BASE_URL=http://localhost:4001/api/v1 \
   agents/workflows/feature-task/run.py --dry-run
 ```
 
-Run one specific feature-task Lobster pipeline directly. If `lobster` is not on your shell `PATH`, use the OpenClaw-managed binary at `/Users/quinnstoffer/.openclaw/tools/node-v24.15.0/bin/lobster` or temporarily prepend that directory to `PATH`:
+Run one specific feature-task Lobster pipeline directly. The `lobster` CLI is installed globally via npm, so it is normally already on your shell `PATH` (check with `command -v lobster`). If it isn't, prepend your global npm bin directory instead (`export PATH="$(npm prefix -g)/bin:$PATH"` — `/opt/homebrew/bin` on this machine):
 
 ```bash
 cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
-export PATH="/Users/quinnstoffer/.openclaw/tools/node-v24.15.0/bin:$PATH"
+export PATH="$(npm prefix -g)/bin:$PATH"
 lobster run --mode tool agents/workflows/feature-task/feature-task.lobster.yaml \
   --args-json '{"taskId":"TASK_ID_HERE","tasksApiBaseUrl":"http://localhost:4001/api/v1","sindustriesRepo":"/Users/quinnstoffer/.openclaw/workspace/codebases/sindustries","workspaceRoot":"/Users/quinnstoffer/.openclaw/workspace","dryRun":true}'
 ```
@@ -1107,7 +1107,7 @@ For a readable terminal checklist across every active feature/code task, use a t
 
 ```bash
 cd /Users/quinnstoffer/.openclaw/workspace/codebases/sindustries
-export PATH="/Users/quinnstoffer/.openclaw/tools/node-v24.15.0/bin:$PATH"
+export PATH="$(npm prefix -g)/bin:$PATH"
 
 cat > /tmp/feature_factory_format.py <<'PY'
 import json, sys
