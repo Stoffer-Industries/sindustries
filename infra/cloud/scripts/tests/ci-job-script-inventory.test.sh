@@ -259,11 +259,6 @@ def all_contract_tests(base=None):
 # are asserted to name the same files, so a contract test that no workflow
 # executes is visible instead of silent, and a new one fails the gate.
 NOT_RUN_BY_CI = frozenset({
-    'agents/skills/dev/pr-open/tests/test_assert_opener_identity.sh',
-    'scripts/cloud/database/tests/common.test.sh',
-    'scripts/cloud/database/tests/manifest-constraints.test.sh',
-    'scripts/cloud/database/tests/restore-result-dir.test.sh',
-    'scripts/cloud/database/tests/schema-presence.test.sh',
     'scripts/ops/tests/sync-agent-definitions.test.sh',
     'scripts/test/build-tailwind-theme.test.mjs',
     'scripts/test/check-no-legacy-approval-marker.test.mjs',

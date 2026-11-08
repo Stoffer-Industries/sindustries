@@ -617,6 +617,14 @@ Server-side read-back (live `gh api repos/Stoffer-Industries/sindustries/ruleset
 
 `skipped` remains an allowed result, so path-filtered jobs (for example `feature-task-clippy`, which only runs on `feature_task` changes) do not block unrelated pull requests.
 
+### Offline contract tests are now a required gate input (task `d63b1491`)
+
+Five contract tests existed on disk but no CI job executed them, so they asserted nothing in the merge gate: the PR opener identity guard (`agents/skills/dev/pr-open/tests/test_assert_opener_identity.sh`) and the four cloud-database checks under `scripts/cloud/database/tests/`. They were visible only as a ledger in `CONTRIBUTING.md` and in the `NOT_RUN_BY_CI` set of `infra/cloud/scripts/tests/ci-job-script-inventory.test.sh` — a list that records the gap rather than closing it.
+
+The `offline-contract-tests` job now runs all five and is wired into `merge-gate.needs`, so a failure in any of them blocks the merge. The job is deliberately minimal: all five tests are offline by construction (the opener-identity test stages a stub `gh`; the schema-presence test stages stub `psql`/`pg_restore`), so the job needs a checkout, `python3` (the cleanup script shells out to it) and `shasum` (the schema-presence test's `sha256sum` stub delegates to it). The job declares `python3` through `actions/setup-python` and installs the `shasum` provider only when the runner image does not already provide it.
+
+The live-database drill that shares the root `test:cloud-db` npm script (`tests/cloud/tests/staging-db-migration-failure-drill.test.sh`) is **not** part of this job: it needs a real database, so it stays with the root script and the `cloud-staging-db-drill` workflow, and it remains on the not-run-by-CI ledger. Splitting it out is deliberate — it is a live-service prerequisite, not a missing CI wire.
+
 ---
 
 ## Cloud staging validation (task `2850c5ac`)

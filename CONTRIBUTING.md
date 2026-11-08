@@ -129,6 +129,7 @@ CI currently covers:
 - `health-probe-tests` (health-probe unit tests plus the observability contract tests, all under `infra/cloud/scripts/tests/`: `observability-provisioning.test.sh` — the observability provisioning contract — `observability-bootstrap.test.sh` — the bootstrap / evidence / failure-inject contract — and `observability-drill-docs.test.sh` — the failure-drill refusal contract: the service-scoped drills refuse, so the operator docs must not hand the on-call engineer a command that exits 1)
 - `gh-with-agent-token-tests` (per-agent GitHub identity shim, `infra/cloud/bin` deploy/status/rollback contracts, cloud staging workflow and failure-drill harnesses, stable-hostname verification harness, the workflow shell-syntax contract test `tests/cloud/tests/check-workflow-shell-syntax.test.mjs` — every `run:` block in every workflow is parsed by bash, so a shell syntax error in a deploy step fails on the PR that introduced it — and the Vercel production promotion scope contract test `tests/cloud/tests/check-vercel-production-promotion-scope.test.mjs`, which asserts that the production promotion resolves the candidate in the explicit `$VERCEL_ORG_ID` team scope rather than the token's default scope)
 - `gog-cli-tests` (the `agents/lib` gog CLI wrapper shim and its direct-egress behaviour)
+- `offline-contract-tests` (the offline contract tests no other job runs: the PR opener identity guard `agents/skills/dev/pr-open/tests/test_assert_opener_identity.sh`, plus the four cloud-database checks under `scripts/cloud/database/tests/`: `common.test.sh`, `manifest-constraints.test.sh`, `restore-result-dir.test.sh` and `schema-presence.test.sh` — no production credentials, no live database, no network egress)
 - `gitleaks` secret scan (advisory-only — see W38 audit F1 for the unenforced-server-side gap)
 - `changes` (detect deployment changes — computes which deployable surfaces a PR touches; a required input to the `merge-gate` job)
 - `eas-update-production` (mobile OTA publishing; the job's display name is `EAS update on main`)
@@ -203,11 +204,6 @@ assert nothing in the merge gate. They are listed here so the gap stays
 visible, and so a new contract test that no job runs fails the gate instead
 of joining them silently.
 
-- `agents/skills/dev/pr-open/tests/test_assert_opener_identity.sh` — the PR opener identity guard; no CI workflow runs it
-- `scripts/cloud/database/tests/common.test.sh` — the cloud database shared-helper checks; no CI workflow runs it
-- `scripts/cloud/database/tests/manifest-constraints.test.sh` — the cloud database manifest-constraints check; no CI workflow runs it
-- `scripts/cloud/database/tests/restore-result-dir.test.sh` — the cloud database restore-result-directory check; no CI workflow runs it
-- `scripts/cloud/database/tests/schema-presence.test.sh` — the cloud database schema-presence check; no CI workflow runs it
 - `scripts/ops/tests/sync-agent-definitions.test.sh` — the agent-definition sync check; no CI workflow runs it
 - `scripts/test/build-tailwind-theme.test.mjs` — the Tailwind theme build check; no CI job runs it
 - `scripts/test/check-no-legacy-approval-marker.test.mjs` — the legacy approval-marker check; no CI job runs it

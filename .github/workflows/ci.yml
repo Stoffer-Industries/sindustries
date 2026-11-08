@@ -1166,6 +1166,65 @@ jobs:
             tests/cloud/stable-hostname-verification.schema.json
           echo "stable-hostname-verification dry-run: schema-valid JSON, ${GITHUB_SHA::12}"
 
+  offline-contract-tests:
+    # Task d63b1491 (W46 audit F4): five contract tests existed on disk but no
+    # CI job executed them, so they asserted nothing in the merge gate.
+    #
+    #   - the PR opener identity guard (agents/skills/dev/pr-open)
+    #   - the four cloud-database helper / constraint checks
+    #
+    # All five are offline by construction: no production credentials, no live
+    # database, no network egress. The opener-identity test stages a stub `gh`
+    # on PATH, and the schema-presence test stages stub psql/pg_restore
+    # binaries, so the job needs no service at all — only bash, python3 (the
+    # cleanup script shells out to it) and `shasum` (the sha256sum stub's
+    # delegate), both declared below rather than assumed from the image.
+    #
+    # The job is wired into `merge-gate.needs` below, so a failure in any of
+    # the five blocks the merge. The live-database drill that shares the
+    # `test:cloud-db` npm script
+    # (tests/cloud/tests/staging-db-migration-failure-drill.test.sh) is
+    # deliberately NOT run here: it needs a real database, so it stays with
+    # the root `test:cloud-db` script and the cloud-staging-db-drill
+    # workflow. It is documented as such in CONTRIBUTING.md.
+    name: offline contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ensure the sha256 helper is available
+        # `schema-presence.test.sh` stages a `sha256sum` stub that delegates to
+        # `shasum -a 256` (the macOS spelling). `shasum` ships with perl, which
+        # is present on the runner image but is not a base-package guarantee,
+        # so it is installed explicitly rather than assumed. The step is a
+        # no-op when the runner already provides it.
+        run: |
+          if ! command -v shasum >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends perl
+          fi
+
+      - name: Run PR opener identity contract test
+        run: bash agents/skills/dev/pr-open/tests/test_assert_opener_identity.sh
+
+      - name: Run cloud database shared-helper contract test
+        run: bash scripts/cloud/database/tests/common.test.sh
+
+      - name: Run cloud database manifest-constraints contract test
+        run: bash scripts/cloud/database/tests/manifest-constraints.test.sh
+
+      - name: Run cloud database restore-result-directory contract test
+        run: bash scripts/cloud/database/tests/restore-result-dir.test.sh
+
+      - name: Run cloud database schema-presence contract test
+        run: bash scripts/cloud/database/tests/schema-presence.test.sh
+
   gog-cli-tests:
     # PR #886 (fix(agents-lib): bypass ambient proxy for the gog CLI).
     # AC1 + AC2 regression guard for the agents/lib gog-cli.sh wrapper and
@@ -1313,6 +1372,7 @@ jobs:
       - feature-task-clippy
       - frontend-design-system-lint
       - gh-with-agent-token-tests
+      - offline-contract-tests
       - gog-cli-tests
     runs-on: ubuntu-latest
     env:
