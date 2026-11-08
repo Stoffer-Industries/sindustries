@@ -1,6 +1,6 @@
 # Runbook — Ambient `GITHUB_TOKEN` overriding per-agent `GH_CONFIG_DIR` identity
 
-**Status:** in-progress structural fix (PR #TBD per task b0d1b42e).
+**Status:** shipped (PR #718, #726, #727, #728, #729 — task b0d1b42e, closed 2026-09-22).
 **Pattern-slug:** `ambient-gh-token-overrides-profile`
 **Factory-retro score:** 15 (5 occurrences × weight 3) — highest-impact pattern of the 2026-09-14 pass.
 
@@ -30,7 +30,7 @@ The bare `GITHUB_TOKEN` Quinn exports from `~/.openclaw/.env` is a `repo`-scoped
 
 ## How to recover when it bites
 
-Until the structural fix lands, the per-agent manual workaround is:
+If you hit this in a session where the shim is not sourced, the per-agent manual workaround is:
 
 ```sh
 unset GITHUB_TOKEN GH_TOKEN
@@ -40,7 +40,7 @@ GH_CONFIG_DIR=~/.config/gh-rowan GH_TOKEN="$ROWAN_GITHUB_TOKEN" gh api user --jq
 
 Substitute the agent token env var for the agent actually running the command (`ROWAN_GITHUB_TOKEN`, `ASH_GITHUB_TOKEN`, `IVY_GITHUB_TOKEN`). This costs 3–12 minutes per occurrence because the PR or comment usually has to be closed/reopened or amended. Do **not** rely on `gh auth switch` — it does not change the env-var precedence.
 
-## Structural fix (PR #TBD, task b0d1b42e)
+## Structural fix (PR #718, #726, #727, #728, #729; task b0d1b42e)
 
 A bash/zsh-compatible shared shell shim at `agents/lib/gh-with-agent-token.sh` is sourced at every agent's session-init. It resolves the current agent from session-scoped runtime context (`OPENCLAW_AGENT_ID`, then the agent segment in `CODEX_HOME`, with `AGENT_ID` as a legacy fallback) and wraps `gh` so that:
 
