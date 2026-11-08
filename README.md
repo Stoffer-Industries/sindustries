@@ -24,7 +24,7 @@ Sindustries is organized as a monorepo with explicit boundaries between product 
 
 ## Direction
 
-Current repo state is **active product + agent operation**: Tasks, Budget, Content Scheduler, and GymTrack MCP all run as separate domain services with dedicated test matrices and deployment workflows; agent-driven delivery (Rust task workflow + Python content workflows) is wired through cron + heartbeat infrastructure. Runtime targets split across dev / prodlike local stacks and per-service Fly / Vercel staging deployments; production deployment of select services is in progress.
+Current repo state is **active product + agent operation**: Tasks, Budget, Content Scheduler, and GymTrack MCP all run as separate domain services with dedicated test matrices and deployment workflows; agent-driven delivery (Rust task workflow + Python content workflows) is wired through cron + heartbeat infrastructure. Runtime targets split across dev / prodlike local stacks, one consolidated Fly staging platform with shared deployment fate, and Vercel website staging; production deployment of select services is in progress.
 
 Product evolution:
 1. Tasks, Budget, and GymTrack each ship independently behind their own domain API.
@@ -35,6 +35,7 @@ Product evolution:
 
 - `docs/systems/agent-orchestration.md` — high-level map of agent workflows, heartbeat, content, tasks, and incident handling.
 - `docs/systems/bookmark-workflow.md` — detailed bookmark pipeline state machine, scripts, curation, approval, and task creation.
+- `docs/systems/cloud-platform.md` — consolidated staging topology, shared deployment fate, operator handover, and rollback context.
 
 ## Local setup (dev + prodlike)
 
