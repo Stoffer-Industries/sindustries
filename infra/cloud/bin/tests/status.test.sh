@@ -57,10 +57,13 @@ cat >"$TMP/bin/flyctl" <<'STUB'
 #!/usr/bin/env bash
 printf 'INVOKED: %s\n' "$*" >>"$FLY_LOG"
 # The proxy variables are recorded too: the flyctl call must run with
-# direct egress unless the operator asked for the escape hatch.
-printf 'PROXY: HTTP_PROXY=%s HTTPS_PROXY=%s http_proxy=%s https_proxy=%s\n' \
+# direct egress unless the operator asked for the escape hatch. The CA
+# bundle variables are recorded for the same reason — on this host the
+# ambient SSL_CERT_FILE points at the egress proxy's trust bundle.
+printf 'ENV: HTTP_PROXY=%s HTTPS_PROXY=%s http_proxy=%s https_proxy=%s SSL_CERT_FILE=%s SSL_CERT_DIR=%s\n' \
   "${HTTP_PROXY-<unset>}" "${HTTPS_PROXY-<unset>}" \
-  "${http_proxy-<unset>}" "${https_proxy-<unset>}" >>"$FLY_LOG"
+  "${http_proxy-<unset>}" "${https_proxy-<unset>}" \
+  "${SSL_CERT_FILE-<unset>}" "${SSL_CERT_DIR-<unset>}" >>"$FLY_LOG"
 case "$1" in
   status)
     # The stub honours the FLY_STATUS_JSON env to swap the canned payload
@@ -381,23 +384,30 @@ echo "test: the flyctl call runs with direct egress"
 reset_log
 HTTP_PROXY=http://proxy.invalid:3128 HTTPS_PROXY=http://proxy.invalid:3128 \
   http_proxy=http://proxy.invalid:3128 https_proxy=http://proxy.invalid:3128 \
+  SSL_CERT_FILE=/tmp/egress-proxy-bundle.pem SSL_CERT_DIR=/tmp/egress-proxy-certs \
   FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub \
   FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
 assert_eq "direct egress exit code" "0" "$?"
-grep -qF "PROXY: HTTP_PROXY=<unset> HTTPS_PROXY=<unset> http_proxy=<unset> https_proxy=<unset>" "$TMP/fly.log" || {
-  echo "FAIL: expected the flyctl call to run with the proxy variables unset" >&2
+grep -qF "ENV: HTTP_PROXY=<unset> HTTPS_PROXY=<unset> http_proxy=<unset> https_proxy=<unset> SSL_CERT_FILE=<unset> SSL_CERT_DIR=<unset>" "$TMP/fly.log" || {
+  echo "FAIL: expected the flyctl call to run with the proxy and CA-bundle variables unset" >&2
   cat "$TMP/fly.log" >&2
   exit 1
 }
 
-echo "test: the documented escape hatch keeps the operator's proxy variables"
+echo "test: the documented escape hatch keeps the operator's environment"
 reset_log
-HTTP_PROXY=http://proxy.invalid:3128 FLY_STATUS_USE_AMBIENT_PROXY=1 \
+HTTP_PROXY=http://proxy.invalid:3128 SSL_CERT_FILE=/tmp/egress-proxy-bundle.pem \
+  FLY_STATUS_USE_AMBIENT_PROXY=1 \
   FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub \
   FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
 assert_eq "ambient proxy exit code" "0" "$?"
-grep -qF "PROXY: HTTP_PROXY=http://proxy.invalid:3128" "$TMP/fly.log" || {
+grep -qF "ENV: HTTP_PROXY=http://proxy.invalid:3128" "$TMP/fly.log" || {
   echo "FAIL: expected the escape hatch to keep the operator's proxy variables" >&2
+  cat "$TMP/fly.log" >&2
+  exit 1
+}
+grep -qF "SSL_CERT_FILE=/tmp/egress-proxy-bundle.pem" "$TMP/fly.log" || {
+  echo "FAIL: expected the escape hatch to keep the operator's trust bundle" >&2
   cat "$TMP/fly.log" >&2
   exit 1
 }

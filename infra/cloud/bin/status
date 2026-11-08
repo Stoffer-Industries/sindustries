@@ -160,14 +160,21 @@ sanitize_fly_error() {
 # reports on. The proxy policy lives here, in one place, the same way
 # `agents/lib/github-cli.sh` keeps it for `gh`.
 #
-# Escape hatch: on a host whose ONLY egress is a proxy, set
-# FLY_STATUS_USE_AMBIENT_PROXY=1 and the operator's proxy variables are
-# kept for the flyctl call.
+# The CA-bundle variables go with them: on this host the ambient
+# SSL_CERT_FILE points at the egress proxy's trust bundle, so a DIRECT
+# connection would verify Fly's certificate against the proxy's CA and
+# fail the same way. Unsetting them lets Go use the system trust store,
+# which is what a direct connection needs.
+#
+# Escape hatch: on a host whose ONLY egress is a proxy — or whose root CA
+# lives only in the ambient bundle — set FLY_STATUS_USE_AMBIENT_PROXY=1
+# and the operator's environment is passed through untouched.
 run_flyctl() {
   if [[ "${FLY_STATUS_USE_AMBIENT_PROXY:-0}" == "1" ]]; then
     flyctl "$@"
   else
-    env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy flyctl "$@"
+    env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
+        -u SSL_CERT_FILE -u SSL_CERT_DIR flyctl "$@"
   fi
 }
 
@@ -218,10 +225,11 @@ for service in "${TARGETS[@]}"; do
     FLY_ERR="$(sanitize_fly_error "$(cat "$FLY_ERR_FILE")")"
     rm -f "$FLY_ERR_FILE"
     # A certificate failure means the operator's host could not verify
-    # Fly's certificate. The call already ran with direct egress, so the
-    # ambient proxy is not the cause any more — but on a host that has no
-    # direct route at all the operator needs to know that the escape
-    # hatch exists.
+    # Fly's certificate. The call already ran with direct egress and the
+    # system trust store, so the ambient proxy is not the cause any more
+    # — but on a host that has no direct route at all, or whose root CA
+    # lives only in the ambient bundle, the operator needs to know that
+    # the escape hatch exists.
     case "$FLY_ERR" in
       *"certificate is not trusted"*|*"x509:"*)
         FLY_ERR="$FLY_ERR - this host could not verify Fly's certificate; flyctl ran with direct egress (proxy variables unset) — if your host reaches the internet only through a proxy, set FLY_STATUS_USE_AMBIENT_PROXY=1 (see infra/cloud/README.md)"

@@ -515,13 +515,19 @@ closing punctuation outside the mask so a diagnostic does not lose
 characters the operator is reading.
 
 `bin/status` calls `flyctl` with DIRECT egress: `HTTP_PROXY`,
-`HTTPS_PROXY`, `http_proxy` and `https_proxy` are unset for the call,
-the same policy `agents/lib/github-cli.sh` keeps for `gh`. An ambient
-TLS-intercepting proxy otherwise makes flyctl fail with `x509: "api.fly.io"
-certificate is not trusted` while `curl` and `openssl s_client` verify
-the same host cleanly — the cause is the operator's shell, not the
-platform. An operator whose host has no direct route sets
-`FLY_STATUS_USE_AMBIENT_PROXY=1` to keep the ambient proxy.
+`HTTPS_PROXY`, `http_proxy`, `https_proxy`, `SSL_CERT_FILE` and
+`SSL_CERT_DIR` are unset for the call, the same proxy policy
+`agents/lib/github-cli.sh` keeps for `gh` plus the CA-bundle variables.
+An ambient TLS-intercepting proxy otherwise makes flyctl fail with `x509:
+"api.fly.io" certificate is not trusted` while `curl` and `openssl
+s_client` verify the same host cleanly — the cause is the operator's
+shell, not the platform. The CA-bundle variables go with the proxy ones
+because on this host the ambient `SSL_CERT_FILE` points at the egress
+proxy's trust bundle, which a direct connection cannot verify Fly's
+certificate against. An operator whose host has no direct route (or
+whose root CA lives only in that bundle) sets
+`FLY_STATUS_USE_AMBIENT_PROXY=1` to pass the ambient environment through
+untouched.
 
 The retired per-service app names must not reappear in an executable
 position. `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the
