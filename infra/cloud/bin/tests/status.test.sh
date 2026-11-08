@@ -131,6 +131,11 @@ emit_status_json platform-legacy-shape '{"Name":"sindustries-platform-staging","
 # FLY_PROCESS_GROUP env var, which is why the machine env is carried here.
 # The env also carries a fake credential, because the report must never
 # carry an env value out with it.
+#
+# The captured live flyctl 0.4.111 envelope carries the provider hostname as
+# a fixture value; it is a captured artifact, not a route the code depends
+# on, so it is annotated rather than rewritten.
+# stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe)
 emit_status_json platform-live-flyctl-0-4-111 '{"AppURL":"https://2a09:8280:1::1ed:3207:0","Deployed":true,"Hostname":"sindustries-platform-staging.fly.dev","ID":"sindustries-platform-staging","Machines":[{"id":"84eed25a455e48","name":"white-sea-2302","state":"started","region":"syd","instance_id":"01M6V05DVMWC3P5WJ583DHDKHM","version":"01M6V05DVMWC3P5WJ583DHDKHM","private_ip":"fdaa:a8:d25a:7e:23f:4e2:48f:2","created_at":"2026-11-07T08:32:56Z","updated_at":"2026-11-07T12:36:38Z","checks":[],"config":{"env":{"FLY_PROCESS_GROUP":"platform","PLATFORM_TASKS_API_DATABASE_URL":"postgres://staging:***@db.example/staging","PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS":"https://mission-control.staging.sindustries.co.nz"}}}],"Name":"sindustries-platform-staging","Organization":{"id":"org","slug":"personal"},"PlatformVersion":"machines","Status":"deployed","Version":12}'
 
 # The supervisor payload with one child down.
