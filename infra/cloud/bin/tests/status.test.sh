@@ -25,6 +25,13 @@
 #      machine env value never rides out in the report.
 #  10. A failing flyctl surfaces its reason — with anything credential-
 #      shaped redacted — instead of a bare "status failed".
+#  11. EVERY credential shape the review named is redacted in the
+#      operator output: a DSN, a URL credential, a JSON credential field,
+#      an Authorization header, Fly's own FlyV1 header, a NAME=value
+#      assignment, a bare credential keyword and a keyword assignment.
+#  12. The flyctl call runs with DIRECT egress (the operator shell's
+#      proxy variables are unset), and the documented escape hatch keeps
+#      them when the operator asks for it.
 
 set -euo pipefail
 
@@ -49,6 +56,11 @@ mkdir -p "$TMP/bin"
 cat >"$TMP/bin/flyctl" <<'STUB'
 #!/usr/bin/env bash
 printf 'INVOKED: %s\n' "$*" >>"$FLY_LOG"
+# The proxy variables are recorded too: the flyctl call must run with
+# direct egress unless the operator asked for the escape hatch.
+printf 'PROXY: HTTP_PROXY=%s HTTPS_PROXY=%s http_proxy=%s https_proxy=%s\n' \
+  "${HTTP_PROXY-<unset>}" "${HTTPS_PROXY-<unset>}" \
+  "${http_proxy-<unset>}" "${https_proxy-<unset>}" >>"$FLY_LOG"
 case "$1" in
   status)
     # The stub honours the FLY_STATUS_JSON env to swap the canned payload
@@ -116,7 +128,7 @@ emit_status_json platform-legacy-shape '{"Name":"sindustries-platform-staging","
 # FLY_PROCESS_GROUP env var, which is why the machine env is carried here.
 # The env also carries a fake credential, because the report must never
 # carry an env value out with it.
-emit_status_json platform-live-flyctl-0-4-111 '{"AppURL":"https://2a09:8280:1::1ed:3207:0","Deployed":true,"Hostname":"sindustries-platform-staging.fly.dev","ID":"sindustries-platform-staging","Machines":[{"id":"84eed25a455e48","name":"white-sea-2302","state":"started","region":"syd","instance_id":"01M6V05DVMWC3P5WJ583DHDKHM","version":"01M6V05DVMWC3P5WJ583DHDKHM","private_ip":"fdaa:a8:d25a:7e:23f:4e2:48f:2","created_at":"2026-11-07T08:32:56Z","updated_at":"2026-11-07T12:36:38Z","checks":[],"config":{"env":{"FLY_PROCESS_GROUP":"platform","PLATFORM_TASKS_API_DATABASE_URL":"postgres://staging:hunter2@db.example/staging","PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS":"https://mission-control.staging.sindustries.co.nz"}}}],"Name":"sindustries-platform-staging","Organization":{"id":"org","slug":"personal"},"PlatformVersion":"machines","Status":"deployed","Version":12}'
+emit_status_json platform-live-flyctl-0-4-111 '{"AppURL":"https://2a09:8280:1::1ed:3207:0","Deployed":true,"Hostname":"sindustries-platform-staging.fly.dev","ID":"sindustries-platform-staging","Machines":[{"id":"84eed25a455e48","name":"white-sea-2302","state":"started","region":"syd","instance_id":"01M6V05DVMWC3P5WJ583DHDKHM","version":"01M6V05DVMWC3P5WJ583DHDKHM","private_ip":"fdaa:a8:d25a:7e:23f:4e2:48f:2","created_at":"2026-11-07T08:32:56Z","updated_at":"2026-11-07T12:36:38Z","checks":[],"config":{"env":{"FLY_PROCESS_GROUP":"platform","PLATFORM_TASKS_API_DATABASE_URL":"postgres://staging:***@db.example/staging","PLATFORM_TASKS_API_CORS_ALLOWED_ORIGINS":"https://mission-control.staging.sindustries.co.nz"}}}],"Name":"sindustries-platform-staging","Organization":{"id":"org","slug":"personal"},"PlatformVersion":"machines","Status":"deployed","Version":12}'
 
 # The supervisor payload with one child down.
 SUPERVISOR_DEGRADED_JSON='{"app":"sindustries-platform-staging","ready":false,"router":{"name":"nginx","state":"running","port":8080,"restarts":0},"children":[{"name":"tasks-api","role":"service","state":"running","pid":614,"port":4001,"restarts":0,"exitCode":null,"rssKb":68064},{"name":"budget-api","role":"service","state":"crashed","pid":null,"port":4002,"restarts":4,"exitCode":1,"rssKb":0},{"name":"content-scheduler-api","role":"service","state":"running","pid":616,"port":4003,"restarts":0,"exitCode":null,"rssKb":68092},{"name":"auto-post-worker","role":"service","state":"running","pid":617,"port":null,"restarts":0,"exitCode":null,"rssKb":41000}]}'
@@ -142,6 +154,12 @@ assert_eq() {
 }
 
 reset_log() { : >"$TMP/fly.log"; }
+
+# The redaction marker the shared redactor writes, and the credential
+# value the redaction cases assert on. Both are assembled at runtime so
+# this file does not itself carry a credential-shaped literal.
+MARKER='[redacted]'
+SECRET_VALUE="s3cr3t-value-$$"
 
 # ---------- tests ----------------------------------------------------------
 
@@ -310,9 +328,77 @@ if grep -q "fly_abc1234567890xyz" "$TMP/out.txt"; then
   cat "$TMP/out.txt" >&2
   exit 1
 fi
-grep -q "<redacted>" "$TMP/out.txt" || {
+grep -qF "$MARKER" "$TMP/out.txt" || {
   echo "FAIL: expected the credential to be redacted" >&2
   cat "$TMP/out.txt" >&2
+  exit 1
+}
+
+echo "test: every credential shape is redacted in the operator output"
+# One regression case per shape. The shape that leaked before this fix
+# (the DSN) is first, because that is the one the operator's own machine
+# env carried.
+redaction_case() {
+  local label="$1" stderr="$2" secret="$3" expected="$4"
+  reset_log
+  set +e
+  FLY_STATUS_EXIT=1 FLY_STATUS_STDERR="$stderr" FLY_API_TOKEN=stub \
+    FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" tasks-api \
+    >"$TMP/out.txt" 2>&1
+  local rc=$?
+  set -e
+  assert_eq "$label exit code" "2" "$rc"
+  if grep -qF "$secret" "$TMP/out.txt"; then
+    echo "FAIL: $label leaked a credential into the operator output" >&2
+    cat "$TMP/out.txt" >&2
+    exit 1
+  fi
+  grep -qF "$expected" "$TMP/out.txt" || {
+    echo "FAIL: $label — expected [$expected] in the operator output" >&2
+    cat "$TMP/out.txt" >&2
+    exit 1
+  }
+}
+
+redaction_case "dsn" "postgres://staging:${SECRET_VALUE}@db.example.test/staging" \
+  "$SECRET_VALUE" "postgres://${MARKER}@db.example.test/staging"
+redaction_case "url credential" "https://user:${SECRET_VALUE}@api.fly.io/" \
+  "$SECRET_VALUE" "https://${MARKER}@api.fly.io/"
+redaction_case "json credential field" "{\"token\":\"${SECRET_VALUE}\",\"actor\":\"staging\"}" \
+  "$SECRET_VALUE" "\"token\":\"${MARKER}\""
+redaction_case "authorization header" "Authorization: Bearer ${SECRET_VALUE}" \
+  "$SECRET_VALUE" "Authorization: Bearer ${MARKER}"
+redaction_case "flyv1 header" "FlyV1 ${SECRET_VALUE}" \
+  "$SECRET_VALUE" "FlyV1 ${MARKER}"
+redaction_case "name=value assignment" "FLY_API_TOKEN=${SECRET_VALUE}" \
+  "$SECRET_VALUE" "FLY_API_TOKEN=${MARKER}"
+redaction_case "credential keyword" "token ${SECRET_VALUE}" \
+  "$SECRET_VALUE" "token ${MARKER}"
+redaction_case "keyword assignment keeps its punctuation" "Error: failed (token=${SECRET_VALUE})" \
+  "$SECRET_VALUE" "(token=${MARKER})"
+
+echo "test: the flyctl call runs with direct egress"
+reset_log
+HTTP_PROXY=http://proxy.invalid:3128 HTTPS_PROXY=http://proxy.invalid:3128 \
+  http_proxy=http://proxy.invalid:3128 https_proxy=http://proxy.invalid:3128 \
+  FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub \
+  FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
+assert_eq "direct egress exit code" "0" "$?"
+grep -qF "PROXY: HTTP_PROXY=<unset> HTTPS_PROXY=<unset> http_proxy=<unset> https_proxy=<unset>" "$TMP/fly.log" || {
+  echo "FAIL: expected the flyctl call to run with the proxy variables unset" >&2
+  cat "$TMP/fly.log" >&2
+  exit 1
+}
+
+echo "test: the documented escape hatch keeps the operator's proxy variables"
+reset_log
+HTTP_PROXY=http://proxy.invalid:3128 FLY_STATUS_USE_AMBIENT_PROXY=1 \
+  FLY_STATUS_JSON="$(cat "$TMP/platform-healthy.json")" FLY_API_TOKEN=stub \
+  FLY_LOG="$TMP/fly.log" PATH="$TMP/bin:$PATH" "$SCRIPT" --json >"$TMP/out.json"
+assert_eq "ambient proxy exit code" "0" "$?"
+grep -qF "PROXY: HTTP_PROXY=http://proxy.invalid:3128" "$TMP/fly.log" || {
+  echo "FAIL: expected the escape hatch to keep the operator's proxy variables" >&2
+  cat "$TMP/fly.log" >&2
   exit 1
 }
 

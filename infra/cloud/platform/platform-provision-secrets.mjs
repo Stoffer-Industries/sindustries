@@ -104,6 +104,7 @@
 import { spawnSync } from 'node:child_process';
 
 import { looksLikeRedisUrl } from './platform-services.mjs';
+import { redactOutput } from './redact-output.mjs';
 
 export const PLATFORM_APP = 'sindustries-platform-staging';
 export const DEFAULT_ORG = 'personal';
@@ -284,19 +285,21 @@ export function buildServiceCredentials(token, actor, approvalTypes = []) {
  * JSON-wrapped approval token. So anything the script echoes back from the
  * `flyctl` child process goes through here first.
  *
+ * The rules themselves live in `redact-output.mjs`, which the operator
+ * script `infra/cloud/bin/status` also uses: two operator surfaces show
+ * flyctl's output, and they used to carry DIFFERENT masking rules, so a
+ * credential shape one of them did not know about printed in the clear
+ * (a `postgres://` DSN and an `Authorization: Bearer ***` header both
+ * did). One module, one set of rules - see that module for the covered
+ * shapes.
+ *
+ * Re-exported from here so existing importers of this module keep
+ * working.
+ *
  * @param {string} text
  * @returns {string}
  */
-export function redactOutput(text) {
-  if (typeof text !== 'string' || text === '') return '';
-  return text
-    // URL credentials: postgres://user:password@host -> postgres://[redacted]@host
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1[redacted]@')
-    // JSON credential fields: {"token":"..."} -> {"token":"[redacted]"}
-    .replace(/("(?:token|password|secret|dsn|value)"\s*:\s*")[^"]*(")/gi, '$1[redacted]$2')
-    // Secret assignments: NAME=value -> NAME=[redacted]
-    .replace(/\b([A-Z][A-Z0-9_]{2,})=[^\s]+/g, '$1=[redacted]');
-}
+export { redactOutput };
 
 /**
  * Build the platform app's secret payload from the staging environment.

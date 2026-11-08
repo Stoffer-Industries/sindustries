@@ -1046,6 +1046,15 @@ jobs:
       - name: Run platform provisioning order tests
         run: node --test infra/cloud/platform/tests/platform-provision-order.test.mjs
 
+      # Task 219fb673 — the operator surfaces that show flyctl's output
+      # (bin/status and the platform provisioner) share ONE credential
+      # redactor, so a credential shape one surface did not know about
+      # cannot print in the clear. This is the contract for that module:
+      # every covered shape is asserted here, and the shell surface's own
+      # regression cases live in infra/cloud/bin/tests/status.test.sh.
+      - name: Run operator output redaction unit tests
+        run: node --test infra/cloud/platform/tests/redact-output.test.mjs
+
   gh-with-agent-token-tests:
     # Task b0d1b42e (Fix Ambient GITHUB_TOKEN Overriding Per-Agent GH Config
     # Precedence). AC1 + AC2 regression guard for the agents/lib
