@@ -183,15 +183,19 @@ the shell surface's own per-shape regression cases are in
 ### Egress: flyctl runs with direct egress
 
 `bin/status` calls `flyctl` with `HTTP_PROXY`, `HTTPS_PROXY`,
-`http_proxy` and `https_proxy` UNSET — the same policy
-`agents/lib/github-cli.sh` keeps for `gh`. An ambient TLS-intercepting
-proxy makes flyctl fail with `x509: "api.fly.io" certificate is not
-trusted` while `curl` and `openssl s_client` verify the same host
-cleanly: the cause is the operator's shell, not the platform.
+`http_proxy`, `https_proxy`, `SSL_CERT_FILE` and `SSL_CERT_DIR` UNSET —
+the same proxy policy `agents/lib/github-cli.sh` keeps for `gh`, plus
+the CA-bundle variables. An ambient TLS-intercepting proxy makes flyctl
+fail with `x509: "api.fly.io" certificate is not trusted` while `curl`
+and `openssl s_client` verify the same host cleanly: the cause is the
+operator's shell, not the platform. The CA-bundle variables go with the
+proxy ones because on this host the ambient `SSL_CERT_FILE` points at the
+egress proxy's trust bundle, so a DIRECT connection would verify Fly's
+certificate against the proxy's CA and fail the same way.
 
-On a host whose ONLY egress is a proxy, set
-`FLY_STATUS_USE_AMBIENT_PROXY=1` and the operator's proxy variables are
-kept for the flyctl call.
+On a host whose ONLY egress is a proxy (or whose root CA lives only in
+the ambient bundle), set `FLY_STATUS_USE_AMBIENT_PROXY=1` and the
+operator's environment is passed through to the flyctl call untouched.
 
 
 ## First-time environment creation
