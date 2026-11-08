@@ -27,17 +27,29 @@ This document exists so a new operator (or Quinn returning after a break) can an
 | -------------------------------- | -------------------------------------------------------- | ------ | ------------------------------------------------------------- |
 | Compute                          | Fly.io (managed VMs, regional)                           | Quinn  | `infra/cloud/fly/*.fly.toml`                                  |
 | Application packaging            | Dockerfiles, per service                                 | Rowan  | `infra/cloud/docker/*.Dockerfile`                             |
-| HTTP services (tasks-api, budget-api, content-scheduler-api) | Fly `http_service` block + `http_checks` to `/health` | Rowan | `infra/cloud/fly/{tasks-api,budget-api,content-scheduler-api}.fly.toml` |
-| Long-running worker              | Separate Fly app process (no HTTP)                       | Rowan  | `infra/cloud/fly/auto-post-worker.fly.toml`                   |
+| HTTP services (tasks-api, budget-api, content-scheduler-api) | One Fly app, four child processes behind the nginx router's path-prefix routes; `http_checks` on the platform app | Rowan | `infra/cloud/fly/platform.fly.toml` (+ `infra/cloud/platform/nginx.conf`) |
+| Long-running worker              | Child process inside the platform app (no HTTP listener) | Rowan  | `infra/cloud/platform/platform-services.mjs`                 |
 | Primary database                 | Neon managed Postgres (syd region, branch-per-env)       | Quinn  | Neon dashboard (URLs in `infra/cloud/env/*.env.example`)      |
 | Queue + cache                    | Upstash managed Redis (TLS, pay-per-request)             | Quinn  | Upstash dashboard (URLs in `infra/cloud/env/*.env.example`)   |
 | Object storage                   | (not used yet)                                           | —      | —                                                             |
 | Observability                    | OpenTelemetry via `@sindustries/otel-node` → collector   | Shared | `infra/cloud/env/*.env.example` (OTEL_EXPORTER_OTLP_ENDPOINT) |
 | Domain                           | `sindustries.co.nz` (apex for production; `*.staging.sindustries.co.nz` for staging) — supersedes the foundation's `sindustries.dev` reservation per task `5cb4a8fe` | Quinn  | DNS provider + `infra/cloud/hostname-matrix.json` (machine-readable source of truth) |
-| CI deploy                        | GitHub Actions, path-filtered per service, canary deploy | Rowan  | `.github/workflows/deploy-staging-*.yml`                      |
+| CI deploy                        | GitHub Actions, path-filtered deployable surface, canary deploy of the platform app | Rowan  | `.github/workflows/deploy-staging-platform.yml`               |
 | Secrets                          | Fly app secrets + GH repo secrets                        | Quinn  | `fly secrets set …` (operator CLI); `secrets.FLY_API_TOKEN`   |
 | First-time setup                 | Idempotent local bootstrap script                        | Quinn  | `infra/cloud/scripts/bootstrap-staging.sh`                    |
-| Rollback                         | `fly releases rollback <v>` per Fly app                   | Quinn  | `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section (the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583) |
+| Rollback                         | `fly releases rollback <v>` — app-wide on `sindustries-platform-staging` (shared fate) | Quinn  | `docs/specs/cloud-deployment-foundation-tech-design.md` "Rollback" section (the prior `docs/runbooks/cloud-deployment-rollback.md` was retired in PR #583) |
+
+**The staging rows above are the current topology; the foundation decision is
+history.** Since the 2026-11-07 cutover, staging is ONE Fly app
+(`sindustries-platform-staging`, `infra/cloud/fly/platform.fly.toml`) carrying
+all four processes — the four per-service staging apps were destroyed and are
+not recreated. The per-service `fly.toml` files and the per-service
+`deploy-staging-*.yml` workflows still sit in the repo, but they are no longer
+dispatched: those workflows are `workflow_call`-only and `ci.yml` now calls
+`deploy-staging-platform.yml` (and `deploy-staging-health-probe.yml`). Read
+"Consolidated platform (task `219fb673`)", "Shared-fate topology (staging)" and
+"Operator surfaces after the cutover" for the topology an operator actually
+drives.
 
 All env-var **names** referenced by deploy workflows are reviewable in the repo. Only the **values** are operator-owned.
 
