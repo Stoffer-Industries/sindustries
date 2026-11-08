@@ -34,6 +34,16 @@
 # Required environment:
 #   FLY_API_TOKEN   — Fly.io API token (Quinn-owned).
 #
+# Optional environment:
+#   FLY_STATUS_USE_AMBIENT_PROXY=1
+#                    — keep the operator shell's proxy variables for the
+#                      flyctl call. By default the script calls flyctl with
+#                      DIRECT egress (the proxy variables are unset), so a
+#                      TLS-intercepting proxy in the agent shell cannot make
+#                      the report fail for a reason that has nothing to do
+#                      with the platform. Set this on a host whose only
+#                      egress is a proxy.
+#
 # Exit codes:
 #   0  all targeted services report a non-empty machine list and the
 #      expected process types
@@ -48,6 +58,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 if command -v git >/dev/null 2>&1 && [[ -d "$REPO_ROOT/.git" ]]; then
   REPO_ROOT="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
 fi
+
+# The shared credential redactor. Every operator surface that shows flyctl
+# output masks credentials with this ONE module, so the two surfaces
+# cannot drift apart (they used to: this script's own sed rule missed URL
+# and DSN credentials, JSON credential fields and Authorization headers,
+# so a `postgres://` DSN printed in the clear).
+REDACT_OUTPUT="$REPO_ROOT/infra/cloud/platform/redact-output.mjs"
 
 declare -A FLY_APP_FOR=(
   [tasks-api]="sindustries-platform-staging"
@@ -119,15 +136,45 @@ fail() { printf '\033[31m[status]\033[0m %s\n' "$*" >&2; exit "${2:-1}"; }
 # Redact anything credential-shaped before flyctl's stderr is shown to an
 # operator. Operator output ends up pasted into task comments on a public
 # repo, so a token must never ride along with the diagnostic.
+#
+# The rules live in `infra/cloud/platform/redact-output.mjs`, the same
+# module the platform provisioning script uses. That module covers URL and
+# DSN credentials, JSON credential fields, `NAME=value` assignments and
+# the Bearer/Basic/FlyV1 authorization header forms, and it keeps closing
+# punctuation OUTSIDE the masked value so a diagnostic does not lose
+# characters the operator is reading.
 sanitize_fly_error() {
-  printf '%s' "$1" \
-    | tr '\n' ' ' \
-    | sed -E 's/fly_[A-Za-z0-9+/_=-]{8,}/<redacted>/g; s/([Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll])([=: ]+)[^ ,;]+/\1\2<redacted>/g' \
-    | cut -c1-400
+  local out
+  if ! out="$(printf '%s' "$1" | node "$REDACT_OUTPUT" 2>/dev/null)"; then
+    # Fail closed: if the redactor cannot run, show nothing that might
+    # carry a credential rather than the raw stderr.
+    out="(flyctl's error could not be shown safely)"
+  fi
+  printf '%s' "$out"
+}
+
+# The flyctl call runs with DIRECT egress. An ambient TLS-intercepting
+# proxy makes flyctl fail with `x509: "api.fly.io" certificate is not
+# trusted` while curl and openssl verify the same host cleanly: the cause
+# is the operator's shell environment, not the platform this script
+# reports on. The proxy policy lives here, in one place, the same way
+# `agents/lib/github-cli.sh` keeps it for `gh`.
+#
+# Escape hatch: on a host whose ONLY egress is a proxy, set
+# FLY_STATUS_USE_AMBIENT_PROXY=1 and the operator's proxy variables are
+# kept for the flyctl call.
+run_flyctl() {
+  if [[ "${FLY_STATUS_USE_AMBIENT_PROXY:-0}" == "1" ]]; then
+    flyctl "$@"
+  else
+    env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy flyctl "$@"
+  fi
 }
 
 command -v flyctl >/dev/null 2>&1 || fail "flyctl not on PATH" 2
 command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH (needed for JSON shaping)" 2
+command -v node >/dev/null 2>&1 || fail "node not on PATH (needed to redact flyctl's output)" 2
+[[ -f "$REDACT_OUTPUT" ]] || fail "credential redactor not found at $REDACT_OUTPUT" 2
 if [[ -z "${FLY_API_TOKEN:-}" ]]; then
   fail "FLY_API_TOKEN is not set. Source ~/.openclaw/.env (or operator .env.local) and retry." 2
 fi
@@ -167,9 +214,19 @@ for service in "${TARGETS[@]}"; do
   # flyctl's stderr is captured rather than discarded: a TLS, credential
   # or auth failure is otherwise indistinguishable from a missing app.
   FLY_ERR_FILE="$(mktemp)"
-  if ! APP_JSON="$(flyctl status --app "$FLY_APP" --json 2>"$FLY_ERR_FILE")"; then
+  if ! APP_JSON="$(run_flyctl status --app "$FLY_APP" --json 2>"$FLY_ERR_FILE")"; then
     FLY_ERR="$(sanitize_fly_error "$(cat "$FLY_ERR_FILE")")"
     rm -f "$FLY_ERR_FILE"
+    # A certificate failure means the operator's host could not verify
+    # Fly's certificate. The call already ran with direct egress, so the
+    # ambient proxy is not the cause any more — but on a host that has no
+    # direct route at all the operator needs to know that the escape
+    # hatch exists.
+    case "$FLY_ERR" in
+      *"certificate is not trusted"*|*"x509:"*)
+        FLY_ERR="$FLY_ERR - this host could not verify Fly's certificate; flyctl ran with direct egress (proxy variables unset) — if your host reaches the internet only through a proxy, set FLY_STATUS_USE_AMBIENT_PROXY=1 (see infra/cloud/README.md)"
+        ;;
+    esac
     fail "flyctl status failed for $FLY_APP${FLY_ERR:+ — $FLY_ERR}" 2
   fi
   rm -f "$FLY_ERR_FILE"

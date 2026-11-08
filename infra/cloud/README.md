@@ -158,6 +158,41 @@ list. The tests under `infra/cloud/bin/tests/` stub `flyctl` and `curl`
 to assert each wrapper's contract (image pinning, smoke checks,
 degraded detection, rollback argv shape).
 
+### Credential redaction on the operator surfaces
+
+Two operator surfaces show text that `flyctl` produced: `bin/status`
+(when `flyctl status` fails) and the platform provisioner
+(`infra/cloud/platform/platform-provision-secrets.mjs`, which echoes the
+flyctl child's stderr). BOTH redact through ONE module,
+`infra/cloud/platform/redact-output.mjs`, so their rules cannot drift
+apart again — they used to, and a `postgres://` DSN printed in the clear.
+
+The module masks URL/DSN credentials, JSON credential fields, the
+`Authorization: Bearer`/`Basic` and Fly `FlyV1` header forms,
+`NAME=value` assignments, the credential keywords (`token`, `password`,
+`secret`, `credential`, `api_key`) and Fly's own `fly_<token>` form.
+Closing punctuation stays OUTSIDE the mask, so a diagnostic reads
+`Error: failed (token=[redacted])` with its closing bracket intact
+rather than losing a character the operator is reading.
+
+The module's contract is `infra/cloud/platform/tests/redact-output.test.mjs`
+(run by the `infra/cloud bootstrap + fly.toml + no-pnpm-pin tests` CI job);
+the shell surface's own per-shape regression cases are in
+`infra/cloud/bin/tests/status.test.sh`.
+
+### Egress: flyctl runs with direct egress
+
+`bin/status` calls `flyctl` with `HTTP_PROXY`, `HTTPS_PROXY`,
+`http_proxy` and `https_proxy` UNSET — the same policy
+`agents/lib/github-cli.sh` keeps for `gh`. An ambient TLS-intercepting
+proxy makes flyctl fail with `x509: "api.fly.io" certificate is not
+trusted` while `curl` and `openssl s_client` verify the same host
+cleanly: the cause is the operator's shell, not the platform.
+
+On a host whose ONLY egress is a proxy, set
+`FLY_STATUS_USE_AMBIENT_PROXY=1` and the operator's proxy variables are
+kept for the flyctl call.
+
 
 ## First-time environment creation
 

@@ -500,9 +500,28 @@ used (`processTypeSource`), so a process type that cannot be detected is
 distinguishable from one that is genuinely absent. Machine identity
 fields are read in either casing. Only `FLY_PROCESS_GROUP` is read out of
 the machine env; no other env value reaches the report. When flyctl
-itself fails, its stderr is shown to the operator (with anything
-credential-shaped redacted) instead of a bare "status failed", because a
-TLS or auth failure and a missing app look identical otherwise.
+itself fails, its stderr is shown to the operator instead of a bare
+"status failed", because a TLS or auth failure and a missing app look
+identical otherwise.
+
+The credential redaction on those operator surfaces lives in ONE module,
+`infra/cloud/platform/redact-output.mjs`, which `bin/status` and the
+platform provisioner both use — they used to carry separate rules, and a
+`postgres://` DSN printed in the clear through `bin/status`. The module
+masks URL/DSN credentials, JSON credential fields, the `Authorization:
+Bearer`/`Basic` and Fly `FlyV1` header forms, `NAME=value` assignments,
+the credential keywords and Fly's own `fly_<token>` form, and it keeps
+closing punctuation outside the mask so a diagnostic does not lose
+characters the operator is reading.
+
+`bin/status` calls `flyctl` with DIRECT egress: `HTTP_PROXY`,
+`HTTPS_PROXY`, `http_proxy` and `https_proxy` are unset for the call,
+the same policy `agents/lib/github-cli.sh` keeps for `gh`. An ambient
+TLS-intercepting proxy otherwise makes flyctl fail with `x509: "api.fly.io"
+certificate is not trusted` while `curl` and `openssl s_client` verify
+the same host cleanly — the cause is the operator's shell, not the
+platform. An operator whose host has no direct route sets
+`FLY_STATUS_USE_AMBIENT_PROXY=1` to keep the ambient proxy.
 
 The retired per-service app names must not reappear in an executable
 position. `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the
