@@ -60,7 +60,18 @@ DELIVERY_TAGS = ("[implementer-prs]", "[rowan-prs]")
 TECH_DESIGN_TAG = "[tech-design]"
 TECH_DESIGN_WAIVER_TAG = "[tech-design-not-required]"
 PROGRESS_TAGS = ("[feature-task-progress-checklist]", "[code-task-progress-checklist]")
-REPO = "Stoffer-Industries/sindustries"
+# The scanned repository set is DATA, not a module constant. PR numbers are
+# repo-scoped, so `workspace#83` and `sindustries#83` are different PRs; a
+# single hardcoded repo made `Stoffer-Industries/workspace` structurally
+# unreachable — no queue shape could carry its review requests, feedback, or
+# merge candidates (task 7fba23bf). The old `REPO` constant is DELETED, not
+# renamed: the source-level tripwire asserts the name is gone entirely, so a
+# future edit cannot reintroduce a single-repo scanner under another name.
+DEFAULT_SCANNED_REPOS = (
+    "Stoffer-Industries/sindustries",
+    "Stoffer-Industries/workspace",
+)
+REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_IDENTITIES = {
     "rowan": ("rowanstoffer", "~/.config/gh-rowan", "ROWAN_GITHUB_TOKEN"),
     "ivy": ("ivystoffer", "~/.config/gh-ivy", "IVY_GITHUB_TOKEN"),
@@ -115,6 +126,11 @@ _VERBOSE = False
 # flag existed the provisioned-but-failing case propagated out loud; degrading
 # it to a silent `[]` would have traded a loud crash for a blind review queue.
 _PR_HYDRATION_DEGRADE_REASON: str | None = None
+# Per-repository projection coverage for the current run, keyed by repo.
+# A consumer that sees `reviewRequests: []` can consult this to learn WHICH
+# repo failed to project instead of inferring "no PRs anywhere". A silent
+# empty list must not be a reachable state (task 7fba23bf AC3).
+_REPO_COVERAGE: dict[str, dict[str, Any]] = {}
 
 
 class _GhApiTimeout(Exception):
@@ -137,7 +153,12 @@ def _log(msg: str, *, verbose_only: bool = False) -> None:
 # (AC4). Tests reset this in setUp so counts don't leak across cases.
 _GH_API_CALL_COUNT = 0
 URL_RE = re.compile(r"https?://[^\s)>]+")
-GITHUB_PR_URL_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/(\d+)(?:[/?#].*)?$")
+# PR URLs carry the repository, and PR numbers are repo-scoped: a bare number
+# is ambiguous across repos. The parser keeps both halves so every fetched or
+# emitted PR can name the repo it came from.
+GITHUB_PR_URL_RE = re.compile(
+    r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)(?:[/?#].*)?$"
+)
 
 
 def _comment_texts(task: dict[str, Any]) -> list[str]:
@@ -194,11 +215,83 @@ def _checks_failing(checks: list[dict[str, Any]]) -> bool:
     )
 
 
-def _pull_number_from_url(url: str) -> int | None:
-    match = GITHUB_PR_URL_RE.match(url)
+def _parse_pr_url(url: str) -> tuple[str, int] | None:
+    """Return `(owner/name, number)` for a GitHub PR URL, or None.
+
+    The repository is parsed out of the URL rather than taken from a constant,
+    so a delivery link into `Stoffer-Industries/workspace` is fetched FROM the
+    workspace repo. A number-only parser silently fetched the wrong repo's
+    PR — the latent half of the "two #83s collide" trap (task 7fba23bf).
+    """
+    match = GITHUB_PR_URL_RE.match(str(url or ""))
     if not match:
         return None
-    return int(match.group(1))
+    return f"{match.group(1)}/{match.group(2)}", int(match.group(3))
+
+
+def _normalize_scanned_repos(repos: list[str] | tuple[str, ...] | None) -> list[str]:
+    """Validate and de-duplicate a scanned-repo list, preserving order.
+
+    A malformed repo name is a hard error, never a silent drop: a skipped repo
+    is the same false-clean shape in miniature — the queue would claim
+    coverage for a repo it never asked GitHub about.
+    """
+    source = list(repos) if repos is not None else list(DEFAULT_SCANNED_REPOS)
+    if not source:
+        raise ValueError("at least one repository must be scanned")
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for raw in source:
+        repo = str(raw or "").strip()
+        if not REPO_NAME_RE.match(repo):
+            raise ValueError(f"invalid repository {raw!r}; expected 'owner/name'")
+        if repo in seen:
+            continue
+        seen.add(repo)
+        normalized.append(repo)
+    return normalized
+
+
+def _record_repo_coverage(
+    repo: str,
+    status: str,
+    *,
+    open_pr_count: int | None = None,
+    detail_prs_hydrated: int | None = None,
+    reason: str | None = None,
+) -> None:
+    """Record the projection coverage of one repository for this run."""
+    row = _REPO_COVERAGE.setdefault(
+        repo, {"repo": repo, "status": status, "openPrCount": 0, "detailPrsHydrated": 0, "reason": None}
+    )
+    row["status"] = status
+    if open_pr_count is not None:
+        row["openPrCount"] = open_pr_count
+    if detail_prs_hydrated is not None:
+        row["detailPrsHydrated"] = detail_prs_hydrated
+    row["reason"] = reason
+
+
+def _repo_coverage_rows(scanned_repos: list[str]) -> list[dict[str, Any]]:
+    """Coverage rows for every configured repo, then any extra rows."""
+    rows: list[dict[str, Any]] = []
+    for repo in scanned_repos:
+        rows.append(
+            _REPO_COVERAGE.get(
+                repo,
+                {
+                    "repo": repo,
+                    "status": "skipped",
+                    "openPrCount": 0,
+                    "detailPrsHydrated": 0,
+                    "reason": "not-attempted",
+                },
+            )
+        )
+    for repo, row in _REPO_COVERAGE.items():
+        if repo not in scanned_repos:
+            rows.append(row)
+    return rows
 
 
 def _tech_design_approved(task: dict[str, Any]) -> bool:
@@ -642,6 +735,20 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     return json.loads(result.stdout)
 
 
+def _pr_repo(pr: dict[str, Any]) -> str:
+    """Return the repository a hydrated PR belongs to.
+
+    Prefers the repo stamped on by the scanner, and falls back to parsing the
+    PR URL so a PR hydrated from a linked delivery URL still identifies its
+    repository.
+    """
+    stamped = str(pr.get("repo") or "").strip()
+    if stamped:
+        return stamped
+    parsed = _parse_pr_url(str(pr.get("html_url") or ""))
+    return parsed[0] if parsed else ""
+
+
 def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Build read-only review, conflict, feedback, and merge queues from hydrated PR data."""
     login = GITHUB_IDENTITIES[agent.lower()][0].lower()
@@ -656,8 +763,16 @@ def classify_github_prs(agent: str, prs: list[dict[str, Any]]) -> dict[str, list
             str(item.get("login") or "").lower()
             for item in pr.get("requested_reviewers") or []
         }
+        # Repo-qualified identity: PR numbers are repo-scoped, so a bare
+        # number is ambiguous and two same-numbered PRs from different repos
+        # would collide (or silently overwrite each other) in any
+        # number-keyed collection. `id` is the collision-free composite.
+        repo = _pr_repo(pr)
+        number = pr.get("number")
         summary = {
-            "number": pr.get("number"),
+            "id": f"{repo}#{number}" if repo else f"#{number}",
+            "repo": repo,
+            "number": number,
             "title": pr.get("title"),
             "url": pr.get("html_url"),
         }
@@ -744,25 +859,46 @@ def fetch_pending_tech_design_approvals(base_url: str | None = None) -> list[dic
 
 
 def _fetch_github_pr_detail(
-    config_dir: str, token_env: str, number: int, retries: int = 3
+    config_dir: str, token_env: str, repo: str, number: int, retries: int = 3
 ) -> dict[str, Any]:
-    """Fetch PR detail, retrying GitHub's transient null mergeable response.
+    """Fetch PR detail from ``repo``, retrying GitHub's transient null mergeable.
 
     GitHub computes ``mergeable`` asynchronously and may return null while that
     calculation is in progress. A single fetch can therefore silently hide a
     PR that is otherwise ready to merge from the heartbeat queue.
+
+    ``repo`` is an explicit argument, not a constant: the endpoint path is the
+    only thing that changes, never the credential boundary.
     """
-    detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{number}")
+    endpoint = f"repos/{repo}/pulls/{number}"
+    detail = _gh_api(config_dir, token_env, endpoint)
     for _ in range(max(0, retries - 1)):
         if detail.get("mergeable") is not None:
             break
         time.sleep(1)
-        detail = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls/{number}")
+        detail = _gh_api(config_dir, token_env, endpoint)
     return detail
 
 
+def _fetch_check_runs(
+    config_dir: str, token_env: str, repo: str, sha: str
+) -> dict[str, Any]:
+    """Fetch a commit's check runs from ``repo``.
+
+    One helper for both former inline call sites: a threaded repo argument is
+    exactly the shape of bug that already bit this repo twice (the
+    ``/issues/`` vs ``/pulls/`` reviewer-request paths), so the repo cannot be
+    threaded at one call site and forgotten at the other.
+    """
+    return _gh_api(
+        config_dir,
+        token_env,
+        f"repos/{repo}/commits/{sha}/check-runs?per_page=100",
+    )
+
+
 def _fetch_reviews_tolerant(
-    config_dir: str, token_env: str, number: int
+    config_dir: str, token_env: str, repo: str, number: int
 ) -> list[dict[str, Any]]:
     """Fetch a PR's reviews, tolerating GitHub's REST->GraphQL bridge regression.
 
@@ -774,7 +910,7 @@ def _fetch_reviews_tolerant(
     reviews list, and a PR just won't classify as a merge candidate while the
     upstream regression is active.
     """
-    endpoint = f"repos/{REPO}/pulls/{number}/reviews?per_page=100"
+    endpoint = f"repos/{repo}/pulls/{number}/reviews?per_page=100"
     try:
         return _gh_api(config_dir, token_env, endpoint)
     except subprocess.CalledProcessError as exc:
@@ -816,17 +952,91 @@ def _is_identity_provisioned(agent: str) -> bool:
     return profile_exists or token_set
 
 
-def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
-    """Read open PR state with the agent's own GitHub credentials; never mutate.
+def _hydrate_pr_work_list(
+    agent: str,
+    work: list[tuple[str, dict[str, Any]]],
+    config_dir: str,
+    token_env: str,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Hydrate `(repo, PR)` work items in parallel; return PRs and failures.
+
+    The fan-out is bounded by `_MAX_PARALLEL_PR_FETCH_WORKERS` so total wall
+    time stays near `max(per-PR latency)` rather than `sum(...)` — the
+    2026-08-20 cumulative-fetch-hang contract, now extended across repos. A
+    per-PR failure degrades that PR only; the other work items still land.
+    """
+    if not work:
+        return [], {}
+    started = time.monotonic()
+    workers = min(len(work), _MAX_PARALLEL_PR_FETCH_WORKERS)
+    _log(
+        f"fetch_github_prs: hydrating {len(work)} PR(s) across {workers} "
+        f"parallel worker(s)",
+        verbose_only=True,
+    )
+
+    def _hydrate_one(
+        item: tuple[str, dict[str, Any]]
+    ) -> tuple[str, dict[str, Any] | None, str | None]:
+        repo, summary = item
+        number = summary.get("number")
+        try:
+            detail = _fetch_github_pr_detail(config_dir, token_env, repo, number)
+            detail["reviews"] = _fetch_reviews_tolerant(
+                config_dir, token_env, repo, number
+            )
+            checks = _fetch_check_runs(
+                config_dir, token_env, repo, detail["head"]["sha"]
+            )
+        except _GhApiTimeout:
+            return repo, None, f"timed out after {_GH_API_TIMEOUT_SECONDS:.0f}s"
+        except subprocess.CalledProcessError as exc:
+            return repo, None, f"exit {exc.returncode}"
+        detail["check_runs"] = checks.get("check_runs") or []
+        detail["repo"] = repo
+        return repo, detail, None
+
+    hydrated: list[dict[str, Any]] = []
+    failures: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pr-hydrate") as pool:
+        for repo, detail, failure in pool.map(_hydrate_one, work):
+            if failure is not None:
+                failures[repo] = failure
+                _log(
+                    f"gh api failure hydrating a PR from {repo!r} ({failure}); "
+                    f"skipping that PR",
+                    verbose_only=False,
+                )
+                continue
+            if detail is not None:
+                hydrated.append(detail)
+    _log(
+        f"fetch_github_prs: hydrated in {time.monotonic() - started:.2f}s",
+        verbose_only=True,
+    )
+    return hydrated, failures
+
+
+def fetch_github_prs(
+    agent: str,
+    repos: list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Read open PR state across every configured repo; never mutate.
 
     Returns `[]` (with a WARN log) instead of raising when the agent's GitHub
-    identity is not provisioned or the hydration call otherwise fails on auth.
+    identity is not provisioned or a hydration call otherwise fails on auth.
     This is enrichment layered on top of the Tasks API queue, not the queue
     itself — a missing/broken GitHub profile should degrade queue richness,
     never destroy the queue. See
     infra/runbooks/agent-github-identity-profile-unprovisioned.md.
+
+    One repo's failure degrades only that repo: the other configured repos
+    still project, and the failure is reported per repo in `repoCoverage` so
+    an empty collection can never again be read as "no coverage".
     """
-    global _PR_HYDRATION_DEGRADE_REASON
+    global _PR_HYDRATION_DEGRADE_REASON, _REPO_COVERAGE
+    scanned = _normalize_scanned_repos(repos)
+    _REPO_COVERAGE = {}
     if not _is_identity_provisioned(agent):
         _log(
             f"GitHub identity for {agent!r} is not provisioned (no profile dir, "
@@ -835,49 +1045,62 @@ def fetch_github_prs(agent: str) -> list[dict[str, Any]]:
             verbose_only=False,
         )
         _PR_HYDRATION_DEGRADE_REASON = "unprovisioned"
+        for repo in scanned:
+            _record_repo_coverage(repo, "skipped", reason="identity-unprovisioned")
         return []
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
-    try:
-        prs = _gh_api(config_dir, token_env, f"repos/{REPO}/pulls?state=open&per_page=100")
-    except (_GhApiTimeout, subprocess.CalledProcessError) as exc:
-        # `_GhApiTimeout` is a plain Exception, NOT a CalledProcessError
-        # subclass, and `_gh_api` raises it on TimeoutExpired. The two classes
-        # share no attributes, so the reason is built per-branch: reading
-        # `exc.returncode` unconditionally would AttributeError *inside* the
-        # handler and take the whole queue down, which is the exact failure
-        # class this guard exists to prevent.
-        if isinstance(exc, _GhApiTimeout):
-            reason = f"timed out after {_GH_API_TIMEOUT_SECONDS:.0f}s"
-        else:
-            reason = f"exit {exc.returncode}"
-        _log(
-            f"gh api failure hydrating PRs for {agent!r} ({reason}); "
-            f"skipping PR hydration. See "
-            f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
-            verbose_only=False,
-        )
-        _PR_HYDRATION_DEGRADE_REASON = f"gh-api-failure: {reason}"
-        return []
-    hydrated = []
-    for summary in prs:
-        author = str((summary.get("user") or {}).get("login") or "").lower()
-        requested = {
-            str(item.get("login") or "").lower()
-            for item in summary.get("requested_reviewers") or []
-        }
-        login = GITHUB_IDENTITIES[agent.lower()][0].lower()
-        if author != login and login not in requested:
+    login = GITHUB_IDENTITIES[agent.lower()][0].lower()
+    work: list[tuple[str, dict[str, Any]]] = []
+    for repo in scanned:
+        try:
+            prs = _gh_api(
+                config_dir, token_env, f"repos/{repo}/pulls?state=open&per_page=100"
+            )
+        except (_GhApiTimeout, subprocess.CalledProcessError) as exc:
+            # `_GhApiTimeout` is a plain Exception, NOT a CalledProcessError
+            # subclass, and `_gh_api` raises it on TimeoutExpired. The two
+            # classes share no attributes, so the reason is built per-branch:
+            # reading `exc.returncode` unconditionally would AttributeError
+            # *inside* the handler and take the whole queue down, which is the
+            # exact failure class this guard exists to prevent.
+            if isinstance(exc, _GhApiTimeout):
+                reason = f"timed out after {_GH_API_TIMEOUT_SECONDS:.0f}s"
+            else:
+                reason = f"exit {exc.returncode}"
+            _log(
+                f"gh api failure listing PRs for {repo!r} ({reason}); "
+                f"degrading that repo only. See "
+                f"infra/runbooks/agent-github-identity-profile-unprovisioned.md",
+                verbose_only=False,
+            )
+            _record_repo_coverage(repo, "degraded", reason=f"gh-api-failure: {reason}")
+            if _PR_HYDRATION_DEGRADE_REASON is None:
+                _PR_HYDRATION_DEGRADE_REASON = f"gh-api-failure: {repo}: {reason}"
             continue
-        number = summary["number"]
-        detail = _fetch_github_pr_detail(config_dir, token_env, number)
-        detail["reviews"] = _fetch_reviews_tolerant(config_dir, token_env, number)
-        checks = _gh_api(
-            config_dir,
-            token_env,
-            f"repos/{REPO}/commits/{detail['head']['sha']}/check-runs?per_page=100",
-        )
-        detail["check_runs"] = checks.get("check_runs") or []
-        hydrated.append(detail)
+        _record_repo_coverage(repo, "ok", open_pr_count=len(prs))
+        for summary in prs:
+            author = str((summary.get("user") or {}).get("login") or "").lower()
+            requested = {
+                str(item.get("login") or "").lower()
+                for item in summary.get("requested_reviewers") or []
+            }
+            if author != login and login not in requested:
+                continue
+            work.append((repo, summary))
+
+    hydrated, failures = _hydrate_pr_work_list(agent, work, config_dir, token_env)
+    hydrated_by_repo: dict[str, int] = {}
+    for pr in hydrated:
+        repo = _pr_repo(pr)
+        hydrated_by_repo[repo] = hydrated_by_repo.get(repo, 0) + 1
+    for repo in scanned:
+        row = _REPO_COVERAGE.get(repo)
+        if row is None:
+            continue
+        row["detailPrsHydrated"] = hydrated_by_repo.get(repo, 0)
+        if repo in failures:
+            row["status"] = "degraded"
+            row["reason"] = f"pr-hydration-failure: {failures[repo]}"
     return hydrated
 
 
@@ -885,6 +1108,7 @@ def fetch_linked_delivery_prs(
     agent: str,
     tasks: list[dict[str, Any]],
     github_prs: list[dict[str, Any]] | None = None,
+    repos: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, dict[str, Any]]:
     _, config_dir, token_env = GITHUB_IDENTITIES[agent.lower()]
     prs_by_url = {
@@ -896,6 +1120,8 @@ def fetch_linked_delivery_prs(
         for url in _delivery_urls(_comment_texts(task))
     }
 
+    configured = _normalize_scanned_repos(repos) if repos is not None else None
+
     def _hydrate_one_pr(url: str) -> tuple[str, dict[str, Any] | None]:
         """Hydrate one delivery URL's PR (detail + reviews + check-runs).
 
@@ -903,19 +1129,39 @@ def fetch_linked_delivery_prs(
         printed) on per-URL `_GhApiTimeout` or `gh api` auth failure; the
         caller continues hydrating other URLs in the fan-out rather than
         aborting the whole call.
+
+        The PR is fetched from the repo named by the URL, not from a constant
+        and not from "the first configured repo": a delivery link into
+        `Stoffer-Industries/workspace` must be hydrated from the workspace
+        repo or it resolves to the wrong PR (or a 404).
         """
-        pr_number = _pull_number_from_url(url)
-        if pr_number is None:
+        parsed = _parse_pr_url(url)
+        if parsed is None:
             return url, None
+        repo, pr_number = parsed
+        if configured is not None and repo not in configured:
+            # A delivery link into an unconfigured repo is still fetched — the
+            # task linked it deliberately — but it is reported as a degraded
+            # coverage row so the gap is visible instead of swallowed.
+            _record_repo_coverage(
+                repo, "degraded", reason="linked-delivery-repo-not-configured"
+            )
+            _log(
+                f"delivery URL {url} points at {repo!r}, which is not in the "
+                f"configured repo set; fetching it anyway and reporting "
+                f"degraded coverage",
+                verbose_only=False,
+            )
         try:
-            detail = _fetch_github_pr_detail(config_dir, token_env, pr_number)
-            detail["reviews"] = _fetch_reviews_tolerant(config_dir, token_env, pr_number)
-            checks = _gh_api(
-                config_dir,
-                token_env,
-                f"repos/{REPO}/commits/{detail['head']['sha']}/check-runs?per_page=100",
+            detail = _fetch_github_pr_detail(config_dir, token_env, repo, pr_number)
+            detail["reviews"] = _fetch_reviews_tolerant(
+                config_dir, token_env, repo, pr_number
+            )
+            checks = _fetch_check_runs(
+                config_dir, token_env, repo, detail["head"]["sha"]
             )
             detail["check_runs"] = checks.get("check_runs") or []
+            detail["repo"] = repo
         except _GhApiTimeout as exc:
             _log(
                 f"gh api timeout hydrating PR #{pr_number} ({url}); skipping: {exc}",
@@ -1078,6 +1324,14 @@ def build_parser() -> argparse.ArgumentParser:
         "where that identity is attentionOwners[0] are actionable; lower slots are "
         "dormant escalation context.",
     )
+    parser.add_argument(
+        "--repos",
+        default=None,
+        help="Comma-separated owner/name list of repositories to project. "
+        "Defaults to every repo in DEFAULT_SCANNED_REPOS "
+        f"({', '.join(DEFAULT_SCANNED_REPOS)}). A malformed repo name is a "
+        "hard error, never a silent skip.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     parser.add_argument(
         "--verbose",
@@ -1093,8 +1347,17 @@ def main() -> None:
     global _VERBOSE, _GH_API_CALL_COUNT
     _VERBOSE = args.verbose
     _GH_API_CALL_COUNT = 0
-    global _PR_HYDRATION_DEGRADE_REASON
+    global _PR_HYDRATION_DEGRADE_REASON, _REPO_COVERAGE
     _PR_HYDRATION_DEGRADE_REASON = None
+    _REPO_COVERAGE = {}
+    try:
+        scanned_repos = _normalize_scanned_repos(
+            [part for part in str(args.repos or "").split(",") if part.strip()]
+            if args.repos
+            else None
+        )
+    except ValueError as exc:
+        raise SystemExit(f"invalid --repos value: {exc}")
     agent_key = args.assignee.lower()
     if agent_key not in GITHUB_IDENTITIES:
         raise SystemExit(
@@ -1114,8 +1377,10 @@ def main() -> None:
         )
     tasks = fetch_agent_tasks(args.assignee)
     approvals = fetch_pending_tech_design_approvals() if agent_key == "quinn" else []
-    github_prs = fetch_github_prs(args.assignee)
-    delivery_prs = fetch_linked_delivery_prs(args.assignee, tasks, github_prs)
+    github_prs = fetch_github_prs(args.assignee, scanned_repos)
+    delivery_prs = fetch_linked_delivery_prs(
+        args.assignee, tasks, github_prs, repos=scanned_repos
+    )
     attention_owner = args.attention_owner or args.assignee
     attention_owner_tasks = fetch_attention_owner_tasks(attention_owner)
     workflow_gate_owner_tasks = fetch_workflow_gate_owner_tasks(args.assignee)
@@ -1137,6 +1402,12 @@ def main() -> None:
     # PRs" — see infra/runbooks/agent-github-identity-profile-unprovisioned.md.
     if _PR_HYDRATION_DEGRADE_REASON is not None:
         queue["prHydrationDegraded"] = _PR_HYDRATION_DEGRADE_REASON
+    # Report which repositories were projected, and how each one fared. An
+    # empty PR collection is only meaningful next to this: "no PRs" and "that
+    # repo failed to project" are different states, and only one of them is
+    # actionable for the reader (task 7fba23bf AC3).
+    queue["scannedRepos"] = scanned_repos
+    queue["repoCoverage"] = _repo_coverage_rows(scanned_repos)
     if args.json:
         print(json.dumps(queue, indent=2))
     else:
@@ -1149,9 +1420,22 @@ def main() -> None:
         )
         print(f"Tech-design approvals: {len(queue['techDesignApprovals'])}")
         print(f"Review requests: {len(queue['reviewRequests'])}")
+        for item in queue["reviewRequests"]:
+            print(f"  - {item.get('id')} {item.get('title')}")
         print(f"Authored PRs with merge conflicts: {len(queue['authoredPrConflicts'])}")
+        for item in queue["authoredPrConflicts"]:
+            print(f"  - {item.get('id')} {item.get('title')}")
         print(f"Authored PRs with requested changes: {len(queue['authoredPrFeedback'])}")
+        for item in queue["authoredPrFeedback"]:
+            print(f"  - {item.get('id')} {item.get('title')}")
         print(f"Merge candidates: {len(queue['mergeCandidates'])}")
+        for item in queue["mergeCandidates"]:
+            print(f"  - {item.get('id')} {item.get('title')}")
+        print(f"Scanned repos: {', '.join(queue.get('scannedRepos') or [])}")
+        for row in queue.get("repoCoverage") or []:
+            detail = f"open={row.get('openPrCount')} hydrated={row.get('detailPrsHydrated')}"
+            reason = f" reason={row.get('reason')}" if row.get("reason") else ""
+            print(f"  - {row.get('repo')}: {row.get('status')} ({detail}){reason}")
         if args.attention_owner:
             print(f"Attention pages for {args.attention_owner}: {len(queue['attentionPages'])}")
         print(
