@@ -28,6 +28,9 @@ REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 ENTRYPOINT="infra/cloud/scripts/run-secret-scan.sh"
 CONFIG="$REPO_ROOT/.gitleaks.toml"
 CANARY="SINDUSTRIES_SECRET_SCAN_CANARY_0123456789ABCDEF"
+# The canary rule is scoped to this path, so the canary is only ever
+# detected at the path the negative control and this test write it to.
+CANARY_PATH="infra/cloud/secret-scan-canary.txt"
 
 cd "$REPO_ROOT"
 
@@ -166,6 +169,24 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
         problems.append(
             f'{CONFIG}: the test-only canary rule `{CANARY_RULE}` is missing — the '
             'negative control needs a detection it cannot defeat'
+        )
+
+    # The canary rule must be scoped to the canary's path. An unscoped
+    # rule matches the token wherever it is mentioned — including in this
+    # contract test, which holds the token as a literal — and the gate
+    # then fails on the repository's own test source.
+    canary_block = ''
+    for block in re.findall(r'^\[\[rules\]\](.*?)(?=^\[|\Z)', config_text, flags=re.MULTILINE | re.DOTALL):
+        if f'id = "{CANARY_RULE}"' in block:
+            canary_block = block
+            break
+    if canary_block and not re.search(
+        r'^path\s*=.*secret-scan-canary', canary_block, flags=re.MULTILINE
+    ):
+        problems.append(
+            f'{CONFIG}: the canary rule is not scoped to the canary path — an '
+            'unscoped rule matches the token wherever it is mentioned, including '
+            'in the contract test that holds it as a literal'
         )
 
     # The config's `[extend]` table decides whether the bundled default
@@ -372,6 +393,19 @@ sentinels = [
         entrypoint_mode,
     ),
     (
+        'the canary rule loses its path scope',
+        ci_text,
+        contributing_text,
+        mutate(
+            config_text,
+            r"^path = '''infra/cloud/secret-scan-canary\\\.txt\$'''$",
+            '',
+            'canary path scope',
+        ),
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
         'the default ruleset stops being loaded',
         ci_text,
         contributing_text,
@@ -480,8 +514,9 @@ printf 'hello\n' > "$WORK_DIR/canary/README.md"
 git -C "$WORK_DIR/canary" add README.md
 git -C "$WORK_DIR/canary" commit -q -m "add readme"
 CANARY_BASE="$(git -C "$WORK_DIR/canary" rev-parse HEAD)"
-printf '%s\n' "$CANARY" > "$WORK_DIR/canary/infra_cloud_canary.txt"
-git -C "$WORK_DIR/canary" add infra_cloud_canary.txt
+mkdir -p "$WORK_DIR/canary/infra/cloud"
+printf '%s\n' "$CANARY" > "$WORK_DIR/canary/$CANARY_PATH"
+git -C "$WORK_DIR/canary" add "$CANARY_PATH"
 git -C "$WORK_DIR/canary" commit -q -m "add canary"
 
 canary_output="$WORK_DIR/canary.out"
