@@ -41,7 +41,7 @@ infra/cloud/
     └── bootstrap-staging.sh
 ```
 
-CI lives at `.github/workflows/deploy-staging-<service>.yml` (sibling to this subtree): `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml`, `deploy-staging-auto-post-worker.yml`, `deploy-staging-platform.yml`.
+CI's live staging deploy surfaces are `.github/workflows/deploy-staging-platform.yml` (the consolidated platform app) and `.github/workflows/deploy-staging-health-probe.yml` (the separate health-probe app); `.github/workflows/ci.yml` calls only these two. The four per-service reusable workflows — `deploy-staging-tasks-api.yml`, `deploy-staging-budget-api.yml`, `deploy-staging-content-scheduler-api.yml` and `deploy-staging-auto-post-worker.yml` — are retained but orphaned: they are `workflow_call`-only, and nothing calls them since their deploy jobs were removed from `ci.yml` on 2026-11-07, when the four underlying Fly apps were destroyed ahead of the cutover. They stay in the tree until the cutover cleanup in `docs/runbooks/platform-consolidation-rollback.md` §5 deletes them; `tests/cloud/scripts/check-deploy-workflow-stable-hostname.mjs` still requires three of them (tasks-api, budget-api, content-scheduler-api) to exist.
 
 Mission Control and the Tasks app are static Vite SPAs and deploy as separate
 Vercel projects using their co-located `apps/<app>/vercel.json` files. They
