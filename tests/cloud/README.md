@@ -25,9 +25,9 @@ The harness is invoked by the `cloud-staging-validate` workflow
 
 ```sh
 node tests/cloud/staging-workflows.mjs \
-  --tasks-api-url https://sindustries-tasks-api-staging.fly.dev \
-  --budget-api-url https://sindustries-budget-api-staging.fly.dev \
-  --scheduler-api-url https://sindustries-content-scheduler-api-staging.fly.dev \
+  --tasks-api-url https://sindustries-platform-staging.fly.dev/tasks-api \
+  --budget-api-url https://sindustries-platform-staging.fly.dev/budget-api \
+  --scheduler-api-url https://sindustries-platform-staging.fly.dev/content-scheduler-api \
   --tasks-token "$TASKS_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN" \
   --scheduler-token "$CONTENT_SCHEDULER_API_APPROVAL_SERVICE_CREDENTIALS_TOKEN" \
   --budget-token-file /tmp/budget-smoke-bearer \
@@ -37,6 +37,23 @@ node tests/cloud/staging-workflows.mjs \
 
 Each input has an environment-variable equivalent (`STAGING_TASKS_API_URL`,
 etc.) for CI runners.
+
+## Staging targets
+
+Staging is ONE Fly app — `sindustries-platform-staging` — and the three API
+surfaces are supervisor children of it, reached on the platform host at their
+path prefixes (`/tasks-api`, `/budget-api`, `/content-scheduler-api`); nginx
+strips the matched prefix before proxying to the loopback listener. The four
+per-service staging apps (`sindustries-tasks-api-staging`,
+`sindustries-budget-api-staging`, `sindustries-content-scheduler-api-staging`,
+`sindustries-auto-post-worker-staging`) were destroyed in the 2026-11-07
+consolidation cutover, so their `*.fly.dev` hostnames no longer serve these
+APIs. `infra/cloud/hostname-matrix.json` (`stagingRoutes`) and
+`infra/cloud/platform/nginx.conf` are the sources of truth for the routes;
+the stable app-name hostnames (`tasks-api.staging.sindustries.co.nz` and
+siblings) land with task `5cb4a8fe`.
+
+<!-- stable-fallback: provider URL pending the stable-hostname CNAME move (task 5cb4a8fe) -->
 
 ## Bearer token sourcing
 
