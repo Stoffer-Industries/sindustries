@@ -1249,32 +1249,67 @@ jobs:
   gitleaks:
     name: gitleaks secret scan
     runs-on: ubuntu-latest
-    # AC2 of task 206927ed: server-side guard for secrets reaching source
-    # control. Companion to the local pre-commit hook installed by
-    # scripts/install-hooks.sh. Uses the official gitleaks action with
-    # the repo-local .gitleaks.toml allowlist (empty .env.example lines,
-    # test fixtures).
+    # Server-side guard for secrets reaching source control (AC2 of task
+    # 206927ed), and the enforcement fix of task 2b3962b1.
     #
-    # NOTE: gitleaks-action@v2 requires a `GITLEAKS_LICENSE` GitHub
-    # Secret at the org level for organization repos. Until that secret
-    # is provisioned by platform/Tom, this step is marked
-    # `continue-on-error: true` so the scan still runs (and surfaces
-    # findings via the PR comment) without blocking CI. The local
-    # pre-commit hook from scripts/install-hooks.sh covers AC2 in
-    # practice. Follow-up: remove `continue-on-error` once
-    # GITLEAKS_LICENSE is set.
+    # This job runs the gitleaks CLI directly. It does NOT use
+    # gitleaks/gitleaks-action, which refuses to start on an organisation
+    # repo without a paid `GITLEAKS_LICENSE` secret: the action aborted
+    # before scanning anything, and `continue-on-error: true` turned that
+    # abort into a green `success`. This job is a required `merge-gate`
+    # input, so the merge gate had been collecting a green secret-scan
+    # result from a job that had never scanned a commit (W42 F6, W43 F2,
+    # W44, W46 F3).
+    #
+    # The CLI is MIT-licensed and needs no credential, so the gate is
+    # enforceable today with no owner-only provisioning step. The binary is
+    # pinned by version and SHA256, so a tampered or truncated download
+    # fails this job instead of failing open.
+    #
+    # Scope is the change, not the whole history: `base.sha..HEAD` for pull
+    # requests, `before..sha` for pushes to main. A repository-wide sweep
+    # needs its own triage of historic findings and is tracked separately
+    # (the M2 follow-up of task 2b3962b1).
+    #
+    # Every failure mode blocks this job, and therefore the merge gate:
+    # secrets found, a missing binary, a missing config, and a scan scope
+    # that resolves to zero commits — a green check must never mean
+    # "scanned nothing".
+    #
+    # Companion to the local pre-commit hook installed by
+    # scripts/install-hooks.sh; both go through the same entrypoint,
+    # infra/cloud/scripts/run-secret-scan.sh, so the policy cannot drift.
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_ARCHIVE: "gitleaks_8.30.1_linux_x64.tar.gz"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true
+      - name: Install gitleaks CLI (pinned)
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_ARCHIVE}"
+          mkdir -p "$RUNNER_TEMP/gitleaks" "$RUNNER_TEMP/bin"
+          curl --fail --location --silent --show-error --retry 3 \
+            --output "$RUNNER_TEMP/$GITLEAKS_ARCHIVE" "$url"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$GITLEAKS_ARCHIVE" \
+            | sha256sum --check --strict -
+          tar --extract --gzip --file "$RUNNER_TEMP/$GITLEAKS_ARCHIVE" \
+            --directory "$RUNNER_TEMP/gitleaks" gitleaks
+          install -m 0755 "$RUNNER_TEMP/gitleaks/gitleaks" "$RUNNER_TEMP/bin/gitleaks"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Scan for secrets
         env:
-          GITLEAKS_CONFIG: .gitleaks.toml
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash infra/cloud/scripts/run-secret-scan.sh --base "$BASE_SHA"
+
+      - name: Contract test for secret-scan enforcement
+        run: bash infra/cloud/scripts/tests/secret-scan-enforcement.test.sh
 
   feature-task-clippy:
     name: feature-task clippy (-D warnings)
