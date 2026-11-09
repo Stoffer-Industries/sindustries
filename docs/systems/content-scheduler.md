@@ -42,7 +42,7 @@ Manual publish is still available. Auto-publish of approved items whose `schedul
 - `services/content-scheduler-api/src/routes/autoPostReconciliation.ts` — bounded, idempotent queue/database reconciliation.
 - `services/content-scheduler-api/src/routes/contentSchedulerAutoPost.ts` — diagnostics and manual reconciliation endpoints.
 - `services/content-scheduler-api/src/workers/autoPostWorker.ts` — queue job processor.
-- `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` — dedicated Fly worker entrypoint.
+- `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` — worker entrypoint (`content-scheduler:worker`), run as a child process of the consolidated staging platform.
 - `services/content-scheduler-api/prisma/schema.prisma` — Content Scheduler-owned schema.
 - `apps/mission-control/SPEC.md` — Mission Control behavioural contract (Flow 7).
 
@@ -50,7 +50,7 @@ Manual publish is still available. Auto-publish of approved items whose `schedul
 
 The backend was extracted from Tasks API by task `94d5e4fc` and now runs from `services/content-scheduler-api`. It owns its Prisma schema, HTTP routes, authentication boundary, queue adapter, and publishing integration. No Tasks API compatibility proxy exists. Mission Control calls the dedicated service directly; the browser never holds X credentials.
 
-In cloud staging, the HTTP API runs as `sindustries-content-scheduler-api-staging` while `sindustries-auto-post-worker-staging` consumes the shared BullMQ queue. Both use the same Content Scheduler database schema and Redis queue, but deploy and scale independently.
+In cloud staging both run inside the ONE Fly app `sindustries-platform-staging` (task `219fb673`): the HTTP API is a child process on `127.0.0.1:4003` behind the in-container nginx router, and the worker is a queue-bound child process with no HTTP listener (`infra/cloud/platform/platform-services.mjs`). Both read the same Content Scheduler database schema and the same `content-scheduler-auto-post` BullMQ queue — the API enqueues, the worker consumes — but they now share fate with the rest of the platform rather than deploying and scaling independently: one Machine, so a deploy restarts both and `fly releases rollback` is app-wide. The per-service staging apps named in earlier revisions of this document were destroyed in the 2026-11-07 cutover and are not recreated; `infra/cloud/scripts/tests/retired-staging-apps.test.sh` fails the build if an operator surface references one.
 
 ---
 
