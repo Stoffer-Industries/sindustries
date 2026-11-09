@@ -73,11 +73,18 @@ regexes = [
 # control to prove the merge gate actually fails on a finding. It only
 # ever ADDS a detection — it suppresses nothing — and the marker is
 # synthetic, so publishing it on a throwaway branch for the duration of
-# the control leaks nothing. It lives on a path the allowlist above does
-# not cover (infra/cloud/secret-scan-canary.txt), so the control cannot
-# be defeated by an allowlist entry.
+# the control leaks nothing.
+#
+# The rule is scoped to the one path the canary is ever written to
+# (`infra/cloud/secret-scan-canary.txt`), which the allowlist above does
+# not cover, so the control cannot be defeated by an allowlist entry.
+# The path scope also matters in the other direction: an unscoped rule
+# would match the token wherever it is mentioned, including in the
+# contract test that holds the token as a literal, and the gate would
+# then fail on the repository's own test source.
 [[rules]]
 id = "sindustries-secret-scan-canary"
 description = "Test-only detection rule for the secret-scan enforcement canary. Adds a detection; it never suppresses one."
 regex = '''SINDUSTRIES_SECRET_SCAN_CANARY_[A-Z0-9]{16,}'''
+path = '''infra/cloud/secret-scan-canary\.txt$'''
 entropy = 2.0
