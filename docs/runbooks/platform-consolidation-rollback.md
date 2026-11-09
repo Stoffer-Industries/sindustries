@@ -8,8 +8,14 @@ This runbook is the operator-facing half of the consolidation. The design is
 Quinn, 2026-11-05). The system-level description is
 `docs/systems/cloud-platform.md` §"Shared-fate topology (staging)".
 
-> **Status: the cutover was executed on 2026-11-07.** Section 3 records the
-> sequence as it was run. The four per-service staging Fly apps
+> **Status: the app-level cutover was executed on 2026-11-07; the DNS
+> steps did not run.** Section 3 records the sequence as it was run, except
+> for steps 3, 4 and 7 — moving the CNAMEs, verifying on the stable
+> hostnames and re-pointing the health probe — which did not run and remain
+> blocked on task `5cb4a8fe`. Traffic today reaches the platform only via
+> the `*.fly.dev` fallback hostnames; the stable
+> `*.staging.sindustries.co.nz` records do not resolve. The four
+> per-service staging Fly apps
 > (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`,
 > `sindustries-content-scheduler-api-staging`,
 > `sindustries-auto-post-worker-staging`) were **destroyed ahead of the
@@ -93,7 +99,7 @@ staging footprint is replaced by one.
 
 ---
 
-## 3. Cutover sequence (executed 2026-11-07)
+## 3. Cutover sequence (executed 2026-11-07 at the app level; steps 3, 4 and 7 not run)
 
 Run in this order. Each step is verifiable before the next one starts.
 
@@ -197,9 +203,10 @@ fly scale count app=0 --app sindustries-budget-api-staging --yes
 fly scale count app=0 --app sindustries-tasks-api-staging --yes
 ```
 
-These three still serve the stable hostnames until the CNAMEs move, so
-they are scaled AFTER step 3 — the traffic has already moved by then. The
-auto-post worker was scaled in step 1, before the platform was deployed.
+The three apps were destroyed ahead of the cutover rather than scaled to
+zero, and because the CNAMEs never moved there was no traffic to hand
+over. The auto-post worker was scaled in step 1, before the platform was
+deployed.
 
 **Scale to zero; do not delete the apps.** They were the fast backout path —
 the apps were destroyed ahead of the cutover, so that path no longer exists
