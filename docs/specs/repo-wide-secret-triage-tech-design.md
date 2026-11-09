@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 task_id: 46211c26-4a31-45a2-97aa-43e8593d01d4
 product_spec: n/a
-shipped_pr: null
-shipped_date: null
+shipped_pr: 952
+shipped_date: 2026-11-10
 ---
 
 # Repository-wide secret triage and tree-scan enforcement
