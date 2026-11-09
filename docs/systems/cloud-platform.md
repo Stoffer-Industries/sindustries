@@ -379,14 +379,16 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 
 The static checks `tests/cloud/scripts/check-stable-hostname-matrix.mjs` and `tests/cloud/scripts/check-stable-url-fallbacks.mjs` enforce the matrix on every CI run; both pass on the committed tree at the time of writing.
 
-Until the stable CNAMEs land, deploys use the default `*.fly.dev` URLs:
+Until the stable CNAMEs land, staging is reached on the one consolidated platform app, one path prefix per API surface. The four per-service staging Fly apps (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`, `sindustries-content-scheduler-api-staging`, `sindustries-auto-post-worker-staging`) were destroyed by the 2026-11-07 cutover (task `219fb673`); the three API services and the auto-post worker now run as supervisor children of the platform app, and the in-container nginx router strips the matched path prefix before proxying (`infra/cloud/platform/nginx.conf`).
 
-- `https://sindustries-tasks-api-staging.fly.dev/health` <!-- stable-fallback: documented-migration; superseded by https://tasks-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
-- `https://sindustries-budget-api-staging.fly.dev/health` <!-- stable-fallback: documented-migration; superseded by https://budget-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
-- `https://sindustries-content-scheduler-api-staging.fly.dev/health` <!-- stable-fallback: documented-migration; superseded by https://content-scheduler-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
-- `https://sindustries-auto-post-worker-staging.fly.dev` (no HTTP — Fly supervises by PID) <!-- stable-fallback: documented-migration; auto-post worker keeps no public URL on the stable hostname matrix either (task 5cb4a8fe) -->
+- `https://sindustries-platform-staging.fly.dev/tasks-api/health` <!-- stable-fallback: documented-migration; superseded by https://tasks-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- `https://sindustries-platform-staging.fly.dev/budget-api/health` <!-- stable-fallback: documented-migration; superseded by https://budget-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- `https://sindustries-platform-staging.fly.dev/content-scheduler-api/health` <!-- stable-fallback: documented-migration; superseded by https://content-scheduler-api.staging.sindustries.co.nz/health once the stable CNAME + cert land (task 5cb4a8fe) -->
+- auto-post worker — it has no HTTP surface of its own (it is a queue-bound child process with no listener). Its health is observed on the content-scheduler-api surface at `https://sindustries-platform-staging.fly.dev/content-scheduler-api/api/v1/content-scheduler/auto-post/health` <!-- stable-fallback: documented-migration; auto-post worker keeps no public URL on the stable hostname matrix either (task 5cb4a8fe) -->
 
-Once DNS lands, point `<service>.staging.sindustries.dev` CNAMEs at the matching `*.fly.dev` host and update the smoke check URLs in the deploy workflows.
+The same host-and-path-prefix pairs are recorded per surface in `infra/cloud/hostname-matrix.json` (`stagingRoutes`).
+
+Once DNS lands, point each `<service>.staging.sindustries.co.nz` CNAME at the consolidated platform app (the router already serves each stable hostname at the root of its own surface) and update the smoke-check URLs in the live deploy workflow, `.github/workflows/deploy-staging-platform.yml`. The four per-service `deploy-staging-*.yml` workflows are retained-but-orphaned (`workflow_call` only; their deploy jobs were removed at the cutover) and are scheduled for deletion in `docs/runbooks/platform-consolidation-rollback.md` §5.
 
 ## Vercel env var matrix (task `5cb4a8fe`)
 
