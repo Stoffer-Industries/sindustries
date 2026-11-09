@@ -1,9 +1,9 @@
 ---
-status: approved
+status: shipped
 task_id: b0d1b42e-9fc3-40f4-86d1-af9125c6454f
 product_spec: brain/tasks/specs/in-progress/ambient-gh-token-overrides-profile-2026-09-14.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "718, 726, 727, 728, 729"
+shipped_date: 2026-09-22
 ---
 
 # Ambient GITHUB_TOKEN Overriding Per-Agent GH Config — tech design
@@ -13,6 +13,7 @@ shipped_date: null
 - Product spec: `brain/tasks/specs/in-progress/ambient-gh-token-overrides-profile-2026-09-14.md`
 - Runbook (existing operator guidance): `infra/runbooks/github-ambient-token-override.md`
 - Pattern-slug: `ambient-gh-token-overrides-profile` (factory-retro score 15 — highest-impact pattern in the 2026-09-14 pass)
+- Shipped: PR #718, #726, #727, #728 and #729 (all merged 2026-09-22; task `b0d1b42e` closed `done` on 2026-09-22). The runbook `infra/runbooks/github-ambient-token-override.md` records the shipped status and names the same PRs.
 
 ## Product intent summary
 
@@ -138,7 +139,7 @@ AC3 cannot be unit-tested because it is observational (a 7-day window). The slug
 2. Add unit tests at `agents/lib/tests/test_gh_with_agent_token.sh` (or `tests/test_gh_with_agent_token.sh` if a non-`agents/lib` location is preferred — match existing convention).
 3. Update `agents/rowan/HEARTBEAT.md`, `agents/ash/HEARTBEAT.md`, `agents/ivy/HEARTBEAT.md` with the shim usage note (3 lines each).
 4. Update `agents/quinn/HEARTBEAT.md`, `agents/lox/HEARTBEAT.md` with the no-op-for-Quinn/Lox note (2 lines each).
-5. Update the existing runbook `infra/runbooks/github-ambient-token-override.md` to mark the structural fix as in-progress (PR #TBD) with the shim as the interim workaround.
+5. Update the existing runbook `infra/runbooks/github-ambient-token-override.md` to mark the structural fix as in-progress with the shim as the interim workaround. Shipped state: the runbook now records the fix as delivered (PR #718, #726, #727, #728, #729 — merged 2026-09-22), and the shim remains the recovery path for a session where it is not sourced.
 6. Post `[tech-design] <branch blob URL>` on task `b0d1b42e-9fc3-40f4-86d1-af9125c6454f` as the deliverable from this design doc.
 7. Wait for Quinn's structured `tech_design` approval before any code merges.
 
