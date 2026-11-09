@@ -8,6 +8,18 @@ This runbook is the operator-facing half of the consolidation. The design is
 Quinn, 2026-11-05). The system-level description is
 `docs/systems/cloud-platform.md` §"Shared-fate topology (staging)".
 
+> **Status: the cutover was executed on 2026-11-07.** Section 3 records the
+> sequence as it was run. The four per-service staging Fly apps
+> (`sindustries-tasks-api-staging`, `sindustries-budget-api-staging`,
+> `sindustries-content-scheduler-api-staging`,
+> `sindustries-auto-post-worker-staging`) were **destroyed ahead of the
+> cutover**, so the per-app backout that section 3 planned for no longer
+> exists. Verified 2026-11-10: `flyctl apps list` shows only
+> `sindustries-platform-staging` and `sindustries-health-probe-staging`, and
+> the four retired `*.fly.dev` hosts still resolve to Fly's proxy but answer
+> HTTP 502 because no app is behind them. Section 4 states the backout that
+> exists now.
+
 ---
 
 ## 1. What changes
@@ -81,7 +93,7 @@ staging footprint is replaced by one.
 
 ---
 
-## 3. Cutover sequence
+## 3. Cutover sequence (executed 2026-11-07)
 
 Run in this order. Each step is verifiable before the next one starts.
 
@@ -111,7 +123,9 @@ Verify that no Machine is left running:
 fly machine list --app sindustries-auto-post-worker-staging
 ```
 
-**Scale to zero; do not delete the app.** It is the fast backout path.
+**Scale to zero; do not delete the app.** It was the fast backout path — the
+app was destroyed ahead of the cutover, so that path no longer exists (see
+section 4).
 
 ### Step 2 — deploy the platform app through the gated CI path
 
@@ -187,7 +201,9 @@ These three still serve the stable hostnames until the CNAMEs move, so
 they are scaled AFTER step 3 — the traffic has already moved by then. The
 auto-post worker was scaled in step 1, before the platform was deployed.
 
-**Scale to zero; do not delete the apps.** They are the fast backout path.
+**Scale to zero; do not delete the apps.** They were the fast backout path —
+the apps were destroyed ahead of the cutover, so that path no longer exists
+(see section 4).
 
 ### Step 7 — re-point the health probe
 
@@ -202,6 +218,17 @@ URLs** move to the stable hostnames. Quinn owns the probe's secrets.
 
 Two different failures need two different responses.
 
+> **The per-app backout no longer exists.** The four per-service staging apps
+> were destroyed ahead of the 2026-11-07 cutover (verified 2026-11-10:
+> `flyctl apps list` shows only `sindustries-platform-staging` and
+> `sindustries-health-probe-staging`). The "the platform app itself must go"
+> procedure below therefore has **no per-app fallback**: there is nothing to
+> move the DNS back to and nothing to scale back up. Restoring per-service
+> hosting is a forward remediation — re-create the apps and redeploy them —
+> not a backout, and it is not covered by this runbook. The stable staging
+> hostnames are not created either (the operator-owned DNS step in task
+> `5cb4a8fe` is still open), so there is no traffic to move back.
+
 ### The image is bad (inside the platform app)
 
 ```
@@ -213,21 +240,14 @@ This rolls the platform app back one release. It does **not** move traffic
 
 ### The platform app itself must go
 
-1. Point the three CNAMEs back at the old apps:
-   - `tasks-api.staging.sindustries.co.nz` → `sindustries-tasks-api-staging.fly.dev`
-   - `budget-api.staging.sindustries.co.nz` → `sindustries-budget-api-staging.fly.dev`
-   - `content-scheduler-api.staging.sindustries.co.nz` → `sindustries-content-scheduler-api-staging.fly.dev`
+1. ~~Point the three CNAMEs back at the old apps~~ — **not available.** The old
+   apps were destroyed on 2026-11-07, so there is no app to point a CNAME at,
+   and the stable hostnames do not resolve yet either (task `5cb4a8fe`,
+   operator-owned DNS step).
 
-   DNS only; ~minutes of TTL.
-
-2. Scale the old apps back up:
-
-   ```
-   fly scale count app=1 --app sindustries-tasks-api-staging --yes
-   fly scale count app=1 --app sindustries-budget-api-staging --yes
-   fly scale count content-scheduler-api=1 --app sindustries-content-scheduler-api-staging --yes
-   fly scale count worker=1 --app sindustries-auto-post-worker-staging --yes
-   ```
+2. ~~Scale the old apps back up~~ — **not available.** `fly scale count`
+   against a destroyed app fails. Re-creating and redeploying the four
+   per-service apps is a forward change, not a backout.
 
 3. Take the platform app down. **Which command you use depends on whether
    the app has ever had a successful release**, because `fly scale count`
@@ -276,8 +296,9 @@ This rolls the platform app back one release. It does **not** move traffic
    The expected result is `No machines are available on this app
    sindustries-platform-staging`.
 
-**Keep the old apps deployable for the duration of the soak.** They are the
-backout, and they are cheap to keep around for a staging environment.
+**The old apps are gone.** They were destroyed ahead of the 2026-11-07 cutover,
+so there is no per-app backout left to keep alive. The backout inside the
+platform app is `fly releases rollback --app sindustries-platform-staging`.
 
 ---
 
