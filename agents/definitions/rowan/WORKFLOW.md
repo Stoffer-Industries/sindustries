@@ -308,6 +308,14 @@ When all ACs are implemented and the PR is ready for review:
 
 ---
 
+## Repository search hygiene
+- Use `git grep` (tracked files only) for repo-wide searches — never a bare `grep -r` from the repo root. The `agents/workflows/feature-task/target/` Rust build tree is ~1.1 GB of gitignored artifacts; `grep -r` walks it, matches compiled binaries, and either blows the tool output cap or burns the whole command timeout.
+- When `grep` is unavoidable, always scope it: `--exclude-dir=target --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=__pycache__`, plus a bounded path.
+- A `head -N` budget consumed entirely by `Binary file ... matches` lines is a silently-empty answer with exit 0 — treat that shape as no answer and re-run scoped.
+- If a search is killed by a timeout, recover the command and its recorded stdout from the agent DB before re-running: `trajectory_runtime_events` in `~/.openclaw/agents/<agent>/agent/openclaw-agent.sqlite` holds `tool.call` rows (the exact command) and `tool.result` rows (the full stdout) as plain `event_json`. Read it via python `sqlite3` URI `file:...?mode=ro&immutable=1` — the external `sqlite3` binary is blocked from the OpenClaw state dir, and copying the multi-GB DB to /tmp wastes disk.
+
+---
+
 ## Environment Rules
 - Work on the correct implementation environment for the task
 - Do not work directly on protected/review-only environments unless explicitly required
