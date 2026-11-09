@@ -80,7 +80,7 @@ cutover and backout procedures are in
 consequences are in `docs/systems/cloud-platform.md` §"Shared-fate topology
 (staging)".
 
-The auto-post-worker source lives in `services/content-scheduler-api/` after the 94d5e4fc extraction — the design predates that move but Quinn's APPROVED review on PR #508 stated "implementation PRs can stack on top", so the worker Fly app builds from content-scheduler-api's source tree.
+The auto-post-worker source lives in `services/content-scheduler-api/` after the 94d5e4fc content-scheduler extraction (task `94d5e4fc-1b31-4d04-a13b-4f69a7ec297a`) — the design predates that move but Quinn's APPROVED review on PR #508 stated "implementation PRs can stack on top", so the worker builds from content-scheduler-api's source tree inside the platform image.
 
 ## Quinn-owned vs Rowan-implemented boundary
 
