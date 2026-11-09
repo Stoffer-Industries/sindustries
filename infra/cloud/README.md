@@ -221,16 +221,18 @@ The script is idempotent — re-running it does not destroy existing apps.
 
 ## PR strategy
 
-WS1 ships as stacked PRs:
+WS1 shipped as five stacked PRs, all merged in August 2026:
 
 1. **PR #1 ✅:** tasks-api proof-of-concept. Demonstrates the layout, the Fly spec shape, the Dockerfile pattern, and the CI workflow pattern. [PR #514, merged 2026-08-23]
 2. **PR #2 ✅:** budget-api slice (mirrors PR #1). [PR #527, merged 2026-08-24]
-3. **PR #3 (this slice):** auto-post-worker Fly app (separate process; builds from content-scheduler-api source; **no HTTP exposure**). Adds `infra/cloud/fly/auto-post-worker.fly.toml` + `infra/cloud/docker/auto-post-worker.Dockerfile` + `.github/workflows/deploy-staging-auto-post-worker.yml`. No Prisma `release_command` (worker does reconciliation in code, not as part of canary deploy) and no `http_service` block.
-4. PR #4: `bootstrap-staging.sh` + `env/.env.example` + per-service `.env.example` files.
-5. PR #5: `docs/systems/cloud-platform.md` (durable AC4 doc) + `docs/runbooks/cloud-deployment-rollback.md` (note: the rollback runbook was retired in PR #583 along with all `docs/runbooks/` artefacts — the rollback command + verify sequence is preserved in `docs/specs/cloud-deployment-foundation-tech-design.md`).
+3. **PR #3 ✅:** auto-post-worker Fly app (separate process; builds from content-scheduler-api source; **no HTTP exposure**). Added `infra/cloud/fly/auto-post-worker.fly.toml` + `infra/cloud/docker/auto-post-worker.Dockerfile` + `.github/workflows/deploy-staging-auto-post-worker.yml`. No Prisma `release_command` (worker does reconciliation in code, not as part of canary deploy) and no `http_service` block. [PR #528, merged 2026-08-24]
+4. **PR #4 ✅:** `bootstrap-staging.sh` + `env/.env.example` + per-service `.env.example` files. [PR #529, merged 2026-08-25]
+5. **PR #5 ✅:** `docs/systems/cloud-platform.md` (durable AC4 doc) + `docs/runbooks/cloud-deployment-rollback.md` (that runbook was retired in PR #583 along with all `docs/runbooks/` artefacts — the rollback command + verify sequence is preserved in `docs/specs/cloud-deployment-foundation-tech-design.md`). [PR #530, merged 2026-08-25]
+
+**Those slices describe the retired per-service staging topology.** The four per-service Fly apps they deployed were destroyed on 2026-11-07 and replaced by the single consolidated `sindustries-platform-staging` app — one Machine, four supervisor children (`infra/cloud/fly/platform.fly.toml`, `docs/systems/cloud-platform.md`). The per-service `fly.toml` / Dockerfile / deploy-workflow files named above stay in the tree only until the cutover cleanup in `docs/runbooks/platform-consolidation-rollback.md` §5 deletes them; that runbook also holds the rollback procedure for the current topology.
 
 Stacking rationale: each slice is reviewable in isolation (~150 LoC); Quinn can steer on PR #1 before Rowan replicates the pattern to budget-api and the worker.
 
 ### Note on the auto-post-worker source path
 
-PR #3 builds the worker from `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` — Quinn's APPROVED review on PR #508 explicitly approved "implementation PRs can stack on top" of the 94d5e4fc content scheduler extraction. If/when 94d5e4fc lands a standalone `services/auto-post-worker/`, the Dockerfile's `COPY services/...` paths and the workflow's path filter need to be retargeted. Until then, the worker Fly app builds from the content-scheduler-api source tree; nothing in this PR depends on the extraction landing first.
+The worker builds from `services/content-scheduler-api/src/workers/autoPostWorkerMain.ts` — Quinn's APPROVED review on PR #508 explicitly approved "implementation PRs can stack on top" of the content-scheduler extraction, which landed as `services/content-scheduler-api`. There is no standalone `services/auto-post-worker/` workspace, so there is nothing to retarget: the platform image copies the `services/content-scheduler-api` tree (`infra/cloud/docker/platform.Dockerfile`) and the supervisor starts the worker as a queue-bound child with no HTTP listener (`npm run content-scheduler:worker --workspace services/content-scheduler-api`, wired in `infra/cloud/platform/platform-services.mjs`). The per-service worker Dockerfile and Fly spec still in the tree are retired artefacts awaiting the §5 cleanup, not the build path.
