@@ -4,15 +4,17 @@
 # The static and behavioural contract tests prove the entrypoint detects a
 # synthetic secret. They do not prove that the *merge gate* fails, because
 # that is a property of the workflow, not of the script. This control
-# produces that evidence: it publishes a synthetic canary token on a
-# throwaway branch, opens a pull request so the `pull_request` trigger runs,
-# reads the `gitleaks secret scan` and `merge gate` job conclusions, and
-# asserts that both are `failure`.
+# produces that evidence with two throwaway branches. The base branch
+# contains the synthetic canary; the head branch adds one innocuous commit
+# and is opened as a pull request against that base. The pull-request change
+# range therefore does NOT contain the canary, while the committed tree at
+# HEAD does. A failure proves that the tracked-tree scope — not only the
+# change scope — blocks the required CI job and the merge gate.
 #
 # The canary token is a synthetic, non-credential marker detected by the
 # test-only rule `sindustries-secret-scan-canary` in .gitleaks.toml. It
-# cannot leak anything, and the branch and pull request are deleted when
-# the control finishes.
+# cannot leak anything, and both branches and the pull request are deleted
+# when the control finishes.
 #
 # Usage:
 #   secret-scan-negative-control.sh [--base <ref>] [--keep]
@@ -26,7 +28,9 @@
 #                 debugging a failed control); they are closed otherwise.
 #
 # Requirements: `gh` authenticated with push access to the repository, and
-# a clean working tree on the canonical checkout.
+# a clean working tree in the checkout where the control is run. Use a
+# disposable clone or worktree: the script creates and removes two temporary
+# branches in that checkout.
 
 set -euo pipefail
 
@@ -58,7 +62,8 @@ cd "$REPO_ROOT"
 
 CANARY_FILE="infra/cloud/secret-scan-canary.txt"
 CANARY_VALUE="SINDUSTRIES_SECRET_SCAN_CANARY_$(date +%s)0123456789ABCDEF"
-BRANCH="ci/secret-scan-negative-control"
+BASE_BRANCH="ci/secret-scan-negative-control-base"
+HEAD_BRANCH="ci/secret-scan-negative-control-head"
 REPO_SLUG="Stoffer-Industries/sindustries"
 export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$HOME/.config/gh-quinn}"
 
@@ -81,26 +86,39 @@ cleanup() {
     gh pr close "$PR_NUMBER" --repo "$REPO_SLUG" --comment \
       "Secret-scan negative control: synthetic canary, expected to fail." >/dev/null 2>&1 || true
   fi
-  git push origin --delete "$BRANCH" >/dev/null 2>&1 || true
+  git push origin --delete "$HEAD_BRANCH" >/dev/null 2>&1 || true
+  git push origin --delete "$BASE_BRANCH" >/dev/null 2>&1 || true
   git checkout -q "${ORIGINAL_BRANCH:-main}" 2>/dev/null || true
-  git branch -q -D "$BRANCH" >/dev/null 2>&1 || true
+  git branch -q -D "$HEAD_BRANCH" >/dev/null 2>&1 || true
+  git branch -q -D "$BASE_BRANCH" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-echo "negative-control: publishing the synthetic canary on $BRANCH (base $BASE_REF)"
+echo "negative-control: publishing the synthetic canary on $BASE_BRANCH (base $BASE_REF)"
 ORIGINAL_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 git fetch -q origin "$BASE_REF" || git fetch -q origin main
-git checkout -q -B "$BRANCH" "$BASE_REF"
+git checkout -q -B "$BASE_BRANCH" "$BASE_REF"
 mkdir -p "$(dirname "$CANARY_FILE")"
 printf '%s\n' "$CANARY_VALUE" > "$CANARY_FILE"
 git add "$CANARY_FILE"
 git commit -q -m "test(ci): synthetic secret-scan canary for the merge-gate negative control"
-git push -q --force-with-lease origin "$BRANCH"
+git push -q --force-with-lease origin "$BASE_BRANCH"
+
+# The head is a descendant of the canary base and adds only an innocuous
+# tracked file. `base.sha..HEAD` therefore excludes the canary commit while
+# the tree at HEAD still contains it.
+echo "negative-control: publishing the control head on $HEAD_BRANCH"
+git checkout -q -B "$HEAD_BRANCH" "$BASE_BRANCH"
+printf '%s\n' "Synthetic tree-scope negative control; no credential." \
+  > "infra/cloud/secret-scan-negative-control-note.txt"
+git add "infra/cloud/secret-scan-negative-control-note.txt"
+git commit -q -m "test(ci): exercise the tree scan without changing the canary range"
+git push -q --force-with-lease origin "$HEAD_BRANCH"
 
 echo "negative-control: opening the pull request"
-PR_NUMBER="$(gh pr create --repo "$REPO_SLUG" --base main --head "$BRANCH" \
-  --title "test(ci): synthetic secret-scan canary (negative control)" \
-  --body "Synthetic canary token for the merge-gate secret-scan negative control. The \`gitleaks secret scan\` and \`merge gate\` jobs are expected to FAIL. This pull request is closed and its branch deleted when the control finishes." \
+PR_NUMBER="$(gh pr create --repo "$REPO_SLUG" --base "$BASE_BRANCH" --head "$HEAD_BRANCH" \
+  --title "test(ci): synthetic tree-scope secret-scan canary (negative control)" \
+  --body "Synthetic canary token for the tracked-tree merge-gate negative control. The canary is in the PR base commit, outside the change range, but present in the committed tree at HEAD. The \`gitleaks secret scan\` and \`merge gate\` jobs are expected to FAIL. This pull request and both branches are deleted when the control finishes." \
   | grep -oE '[0-9]+$')"
 echo "negative-control: pull request #$PR_NUMBER"
 
@@ -111,7 +129,7 @@ echo "negative-control: waiting for the pull-request run"
 RUN_ID=""
 for _ in $(seq 1 80); do
   sleep 15
-  RUN_ID="$(gh run list --repo "$REPO_SLUG" --branch "$BRANCH" --limit 20 \
+  RUN_ID="$(gh run list --repo "$REPO_SLUG" --branch "$HEAD_BRANCH" --limit 20 \
     --json databaseId,headSha,event,status \
     --jq "[.[] | select(.headSha == \"$HEAD_SHA\" and .event == \"pull_request\")][0].databaseId // empty")"
   if [ -n "$RUN_ID" ]; then
@@ -161,4 +179,4 @@ if [ "$GATE_CONCLUSION" != "failure" ]; then
   exit 1
 fi
 
-echo "negative-control: OK — a synthetic secret fails both the secret scan and the merge gate"
+echo "negative-control: OK — a synthetic secret in the committed tree fails both the secret scan and the merge gate"

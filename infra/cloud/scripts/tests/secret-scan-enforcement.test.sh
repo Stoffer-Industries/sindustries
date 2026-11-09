@@ -48,6 +48,11 @@ CI = '.github/workflows/ci.yml'
 CONTRIBUTING = 'CONTRIBUTING.md'
 CONFIG = '.gitleaks.toml'
 ENTRYPOINT = 'infra/cloud/scripts/run-secret-scan.sh'
+INSTALLER = 'infra/cloud/scripts/install-gitleaks.sh'
+HISTORY_WORKFLOW = '.github/workflows/secret-scan-history.yml'
+RUNBOOK = 'docs/runbooks/secret-scan-triage.md'
+SYSTEM_DOC = 'docs/systems/cloud-platform.md'
+AUDIT_DOC = 'docs/repo-audits/2026-W46.md'
 
 EXPECTED_VERSION = '8.30.1'
 EXPECTED_SHA256 = '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
@@ -109,6 +114,28 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
     """Every drift this contract guards against, as a list of messages."""
     problems = []
 
+    installer_path = root / INSTALLER
+    history_path = root / HISTORY_WORKFLOW
+    runbook_path = root / RUNBOOK
+
+    if not installer_path.exists():
+        problems.append(f'{INSTALLER}: the pinned gitleaks installer is missing')
+        installer_text = ''
+    else:
+        installer_text = installer_path.read_text()
+
+    if not history_path.exists():
+        problems.append(f'{HISTORY_WORKFLOW}: the repository-history scan workflow is missing')
+        history_text = ''
+    else:
+        history_text = history_path.read_text()
+
+    if not runbook_path.exists():
+        problems.append(f'{RUNBOOK}: the secret-scan triage runbook and findings ledger are missing')
+        runbook_text = ''
+    else:
+        runbook_text = runbook_path.read_text()
+
     job = job_block(ci_text, 'gitleaks')
     if job is None:
         problems.append(f'{CI}: no `gitleaks` job found')
@@ -139,14 +166,34 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
             'the CLI path needs no credential'
         )
 
-    if EXPECTED_VERSION not in job_code:
+    if INSTALLER not in job_code:
         problems.append(
-            f'{CI}: the `gitleaks` job does not pin the gitleaks version {EXPECTED_VERSION}'
+            f'{CI}: the `gitleaks` job does not install the CLI through `{INSTALLER}`'
         )
-    if EXPECTED_SHA256 not in job_code:
+    if EXPECTED_VERSION not in installer_text:
         problems.append(
-            f'{CI}: the `gitleaks` job does not pin the gitleaks SHA256 '
-            f'{EXPECTED_SHA256}'
+            f'{INSTALLER}: the gitleaks version is not pinned to {EXPECTED_VERSION}'
+        )
+    if EXPECTED_SHA256 not in installer_text:
+        problems.append(
+            f'{INSTALLER}: the gitleaks SHA256 is not pinned to {EXPECTED_SHA256}'
+        )
+
+    if not re.search(
+        r'run:\s+bash\s+infra/cloud/scripts/run-secret-scan\.sh\s+--base\b',
+        job_code,
+    ):
+        problems.append(
+            f'{CI}: the `gitleaks` job does not run the change scope through the '
+            'shared entrypoint'
+        )
+    if not re.search(
+        r'run:\s+bash\s+infra/cloud/scripts/run-secret-scan\.sh\s+--tree\b',
+        job_code,
+    ):
+        problems.append(
+            f'{CI}: the `gitleaks` job does not run the tracked-tree scope through the '
+            'shared entrypoint'
         )
 
     if 'still runs' in job and 'without blocking CI' in job:
@@ -163,6 +210,185 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
             problems.append(
                 f'{CI}: `merge-gate` no longer requires the `gitleaks` job — the '
                 'secret scan must keep gating the merge'
+            )
+
+    # The history workflow is an alerting surface. It must use the same
+    # installer and the same entrypoint as the merge gate; a second direct
+    # `gitleaks` invocation would be a second detection policy.
+    if history_text:
+        if 'schedule:' not in history_text or 'workflow_dispatch:' not in history_text:
+            problems.append(
+                f'{HISTORY_WORKFLOW}: the workflow must run on a weekly schedule and '
+                'be dispatchable on demand'
+            )
+        if INSTALLER not in history_text:
+            problems.append(
+                f'{HISTORY_WORKFLOW}: the workflow does not install the CLI through '
+                f'`{INSTALLER}`'
+            )
+        if '--history' not in history_text or '--tree' not in history_text:
+            problems.append(
+                f'{HISTORY_WORKFLOW}: the workflow does not scan both the published '
+                'history and the tracked tree'
+            )
+        for direct in re.finditer(
+            r'(?m)^\s*(?:run:\s*)?gitleaks\s+(?:git|dir|protect)\b',
+            history_text,
+        ):
+            problems.append(
+                f'{HISTORY_WORKFLOW}: direct gitleaks invocation bypasses the shared '
+                f'entrypoint: {direct.group(0).strip()}'
+            )
+
+    # Every global path allowlist entry must carry its own reason. A
+    # directory-wide entry is also rejected: the repository-wide triage is
+    # allowed to narrow a finding to one file, not to silence a subtree.
+    paths_block = re.search(r'(?ms)^paths\s*=\s*\[(.*?)^\]', config_text)
+    if paths_block:
+        path_lines = [
+            line.strip()
+            for line in paths_block.group(1).splitlines()
+            if line.strip() and not line.strip().startswith('#')
+        ]
+        for line in path_lines:
+            if '#' not in line:
+                problems.append(
+                    f'{CONFIG}: an allowlist path has no inline reason: {line}'
+                )
+            match = re.search(r"'''(.*?)'''", line)
+            if not match:
+                problems.append(
+                    f'{CONFIG}: an allowlist path could not be parsed: {line}'
+                )
+                continue
+            pattern = match.group(1)
+            if pattern in ('.*', '^.*$', '.+', '^.+'):
+                problems.append(
+                    f'{CONFIG}: the allowlist path `{pattern}` would suppress the '
+                    'whole repository'
+                )
+            parts = pattern.lstrip('^').split('/')
+            if len(parts) == 2 and parts[1] in ('.*', '.+', '[^/]+'):
+                problems.append(
+                    f'{CONFIG}: the allowlist path `{pattern}` covers a whole '
+                    'top-level directory'
+                )
+    else:
+        problems.append(f'{CONFIG}: no global allowlist `paths` block found')
+
+    # The repository-wide triage exceptions are rule-scoped: one rule, one
+    # exact commit and one exact path. A global commit or path exception
+    # would suppress unrelated findings and would violate AC1.
+    global_allowlist_block = re.search(
+        r'(?ms)^\[allowlist\](.*?)(?=^\[|\Z)', config_text
+    )
+    if global_allowlist_block:
+        global_allowlist = global_allowlist_block.group(1)
+        if re.search(r'(?m)^\s*commits\s*=', global_allowlist):
+            problems.append(
+                f'{CONFIG}: a global commit allowlist would skip every finding in the '
+                'commit; repository-history exceptions must be rule-scoped'
+            )
+    for path in (
+        'apps/gymtrack/api/oauth/token\\.js$',
+        'docs/repo-audits/2026-W26\\.md$',
+    ):
+        if path in (paths_block.group(1) if paths_block else ''):
+            problems.append(
+                f'{CONFIG}: the triage path `{path}` is globally allowlisted; use a '
+                'rule-scoped exact-commit/exact-path exception instead'
+            )
+
+    rule_allowlists = re.findall(
+        r'(?ms)^\s*\[\[rules\.allowlists\]\](.*?)(?=^\s*\[\[rules\.allowlists\]\]'
+        r'|^\s*\[\[rules\]\]|^\[|\Z)',
+        config_text,
+    )
+    if len(rule_allowlists) < 3:
+        problems.append(
+            f'{CONFIG}: expected one rule-scoped allowlist for each triaged finding '
+            'class, found fewer than three'
+        )
+    for block in rule_allowlists:
+        if not re.search(r'(?m)^\s*description\s*=\s*".+"', block):
+            problems.append(f'{CONFIG}: a rule-scoped allowlist has no reason')
+        if not re.search(r'(?m)^\s*condition\s*=\s*"AND"', block):
+            problems.append(
+                f'{CONFIG}: a rule-scoped allowlist must require commit AND path, '
+                'not either one alone'
+            )
+        commits = re.search(
+            r'(?ms)^\s*commits\s*=\s*\[(.*?)\]', block
+        )
+        if not commits:
+            problems.append(f'{CONFIG}: a rule-scoped allowlist has no exact commit')
+        else:
+            for commit in re.findall(r'["\']([0-9a-f]+)["\']', commits.group(1)):
+                if len(commit) != 40:
+                    problems.append(
+                        f'{CONFIG}: rule-scoped allowlist commit is not a full SHA: {commit}'
+                    )
+        paths = re.search(r'(?ms)^\s*paths\s*=\s*\[(.*?)\]', block)
+        if not paths:
+            problems.append(f'{CONFIG}: a rule-scoped allowlist has no exact path')
+
+    # AC4 requires a durable, per-finding ledger. Keep the assertion
+    # structural rather than pinning the current finding count: a later
+    # triage may add rows, but every row must retain the same evidence
+    # fields and no secret-bearing fields may appear.
+    if runbook_text:
+        if '## Findings ledger' not in runbook_text:
+            problems.append(f'{RUNBOOK}: no `## Findings ledger` section found')
+        ledger_rows = [
+            line for line in runbook_text.splitlines()
+            if line.startswith('| History |')
+        ]
+        if len(ledger_rows) < 2:
+            problems.append(
+                f'{RUNBOOK}: the findings ledger has fewer than two triaged history findings'
+            )
+        for row in ledger_rows:
+            columns = [cell.strip() for cell in row.strip('|').split('|')]
+            if len(columns) < 8:
+                problems.append(
+                    f'{RUNBOOK}: a findings-ledger row is missing remediation metadata'
+                )
+            if not re.search(r'\b[0-9a-f]{8,40}\b', row):
+                problems.append(
+                    f'{RUNBOOK}: a findings-ledger row has no commit identifier'
+                )
+        for forbidden in ('Secret value', 'Match text', 'Entropy', 'Fingerprint'):
+            if forbidden in runbook_text:
+                problems.append(
+                    f'{RUNBOOK}: the ledger contains a forbidden secret-bearing field: {forbidden}'
+                )
+
+    system_path = root / SYSTEM_DOC
+    if not system_path.exists():
+        problems.append(f'{SYSTEM_DOC}: the cloud-platform system spec is missing')
+    else:
+        system_text = system_path.read_text()
+        if 'run-secret-scan.sh --tree' not in system_text:
+            problems.append(
+                f'{SYSTEM_DOC}: the secret-scan section does not describe the tracked-tree scope'
+            )
+        if 'secret-scan-history.yml' not in system_text:
+            problems.append(
+                f'{SYSTEM_DOC}: the secret-scan section does not describe the scheduled history scan'
+            )
+        if RUNBOOK not in system_text:
+            problems.append(
+                f'{SYSTEM_DOC}: the secret-scan section does not link the triage runbook'
+            )
+
+    audit_path = root / AUDIT_DOC
+    if not audit_path.exists():
+        problems.append(f'{AUDIT_DOC}: the W46 repository audit is missing')
+    else:
+        audit_text = audit_path.read_text()
+        if '46211c26' not in audit_text:
+            problems.append(
+                f'{AUDIT_DOC}: the W46 residual does not point to task 46211c26'
             )
 
     if f'id = "{CANARY_RULE}"' not in config_text:
@@ -297,12 +523,12 @@ sentinels = [
         entrypoint_mode,
     ),
     (
-        'the job unpins the gitleaks binary',
+        'the job stops scanning the tracked tree',
         mutate(
             ci_text,
-            re.escape(EXPECTED_SHA256),
-            '0' * 64,
-            'pinned checksum',
+            r'^(\s*)run: bash infra/cloud/scripts/run-secret-scan\.sh --tree$',
+            r'\1run: echo "tree scan skipped"',
+            'tree invocation',
         ),
         contributing_text,
         config_text,
@@ -402,6 +628,32 @@ sentinels = [
             '',
             'canary path scope',
         ),
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'the allowlist gains a repository-wide path',
+        mutate(
+            config_text,
+            r"^  '''\\\.env\\\.example\$''',.*$",
+            "  '''.*$''', # broad sentinel",
+            'broad allowlist path',
+        ),
+        contributing_text,
+        config_text,
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'an allowlist path loses its reason',
+        mutate(
+            config_text,
+            r"^(  '''\\\.env\\\.example\$'''),.*$",
+            r'\1,',
+            'allowlist reason',
+        ),
+        contributing_text,
+        config_text,
         entrypoint_text,
         entrypoint_mode,
     ),
@@ -507,6 +759,51 @@ if ! grep -q "commit(s)" "$clean_output"; then
   exit 1
 fi
 
+# The tree scope is the merge-gate coverage added by task 46211c26. A
+# passing tree scan must name both the tracked-file count and the finding
+# count, so a green check cannot mean "scanned nothing".
+tree_clean_output="$WORK_DIR/tree-clean.out"
+tree_clean_status=0
+bash "$REPO_ROOT/$ENTRYPOINT" --config "$CONFIG" --tree \
+  "$WORK_DIR/clean" >"$tree_clean_output" 2>&1 || tree_clean_status=$?
+if [ "$tree_clean_status" -ne 0 ]; then
+  echo "FAIL: a clean tracked tree did not pass the scan (exit $tree_clean_status)" >&2
+  cat "$tree_clean_output" >&2
+  exit 1
+fi
+if ! grep -q "tracked file(s)" "$tree_clean_output"; then
+  echo "FAIL: a passing tree scan did not report the tracked-file scope" >&2
+  cat "$tree_clean_output" >&2
+  exit 1
+fi
+if ! grep -q "finding count: 0" "$tree_clean_output"; then
+  echo "FAIL: a passing tree scan did not report its finding count" >&2
+  cat "$tree_clean_output" >&2
+  exit 1
+fi
+
+# The history scope is the scheduled alerting surface. It uses the same
+# entrypoint and must report the commit scope it resolved.
+history_clean_output="$WORK_DIR/history-clean.out"
+history_clean_status=0
+bash "$REPO_ROOT/$ENTRYPOINT" --config "$CONFIG" --history \
+  "$WORK_DIR/clean" >"$history_clean_output" 2>&1 || history_clean_status=$?
+if [ "$history_clean_status" -ne 0 ]; then
+  echo "FAIL: a clean repository history did not pass the scan (exit $history_clean_status)" >&2
+  cat "$history_clean_output" >&2
+  exit 1
+fi
+if ! grep -q "commit(s) across all local and remote refs" "$history_clean_output"; then
+  echo "FAIL: a passing history scan did not report the commit scope" >&2
+  cat "$history_clean_output" >&2
+  exit 1
+fi
+if ! grep -q "finding count: 0" "$history_clean_output"; then
+  echo "FAIL: a passing history scan did not report its finding count" >&2
+  cat "$history_clean_output" >&2
+  exit 1
+fi
+
 # 2. A synthetic secret fails the scan — the detection the whole task exists
 #    to guarantee.
 new_repo "$WORK_DIR/canary"
@@ -531,6 +828,73 @@ fi
 if ! grep -q "::error::secret scan failed" "$canary_output"; then
   echo "FAIL: a failing scan did not emit a visible ::error:: annotation" >&2
   cat "$canary_output" >&2
+  exit 1
+fi
+
+# The tree scope must fail on the same synthetic canary when the canary is
+# committed into a tracked file. This is the always-on half of AC3's live
+# negative control.
+tree_canary_output="$WORK_DIR/tree-canary.out"
+tree_canary_report="$WORK_DIR/tree-canary.json"
+tree_canary_status=0
+bash "$REPO_ROOT/$ENTRYPOINT" --config "$CONFIG" --tree \
+  --report "$tree_canary_report" "$WORK_DIR/canary" \
+  >"$tree_canary_output" 2>&1 || tree_canary_status=$?
+if [ "$tree_canary_status" -eq 0 ]; then
+  echo "FAIL: a tracked tree containing the synthetic canary passed the scan" >&2
+  cat "$tree_canary_output" >&2
+  exit 1
+fi
+if ! grep -q "::error::secret scan failed on the tracked tree" "$tree_canary_output"; then
+  echo "FAIL: a failing tree scan did not emit the documented ::error:: annotation" >&2
+  cat "$tree_canary_output" >&2
+  exit 1
+fi
+if ! grep -q "finding count: 1" "$tree_canary_output"; then
+  echo "FAIL: a failing tree scan did not report the finding count" >&2
+  cat "$tree_canary_output" >&2
+  exit 1
+fi
+
+# The persisted report is an audit artifact. It may carry rule/path/line/
+# commit metadata, never a secret value, match text, entropy or fingerprint.
+python3 - "$tree_canary_report" "$CANARY_PATH" <<'PY'
+import json
+import pathlib
+import sys
+
+report_path = pathlib.Path(sys.argv[1])
+canary_path = sys.argv[2]
+try:
+    findings = json.loads(report_path.read_text())
+except (OSError, json.JSONDecodeError) as error:
+    raise SystemExit(f"FAIL: the redacted tree report was not readable JSON: {error}")
+if not isinstance(findings, list) or len(findings) != 1:
+    raise SystemExit(f"FAIL: expected one redacted finding, got {findings!r}")
+finding = findings[0]
+for forbidden in ('Secret', 'Match', 'Entropy', 'Fingerprint'):
+    if forbidden in finding:
+        raise SystemExit(f"FAIL: the redacted report contains forbidden field {forbidden}")
+if not str(finding.get('File', '')).endswith(canary_path):
+    raise SystemExit(f"FAIL: the redacted report has the wrong path: {finding.get('File')!r}")
+if not finding.get('RuleID') or not finding.get('StartLine'):
+    raise SystemExit(f"FAIL: the redacted report is missing rule/line metadata: {finding!r}")
+PY
+
+# The history scope must fail too. A history-only finding cannot be allowed
+# to turn the scheduled alerting surface green.
+history_canary_output="$WORK_DIR/history-canary.out"
+history_canary_status=0
+bash "$REPO_ROOT/$ENTRYPOINT" --config "$CONFIG" --history \
+  "$WORK_DIR/canary" >"$history_canary_output" 2>&1 || history_canary_status=$?
+if [ "$history_canary_status" -eq 0 ]; then
+  echo "FAIL: a repository history containing the synthetic canary passed the scan" >&2
+  cat "$history_canary_output" >&2
+  exit 1
+fi
+if ! grep -q "::error::secret scan failed on repository history" "$history_canary_output"; then
+  echo "FAIL: a failing history scan did not emit the documented ::error:: annotation" >&2
+  cat "$history_canary_output" >&2
   exit 1
 fi
 
