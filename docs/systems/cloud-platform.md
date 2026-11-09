@@ -626,6 +626,8 @@ The `gitleaks` job is a required `merge-gate` input, and it now blocks the merge
 | Scope | the change: `base.sha..HEAD` for pull requests, `before..sha` for pushes to `main` |
 | Failure modes | secrets found, missing binary (exit 2), missing config (exit 3), empty scan scope (exit 4) — every one of them blocking |
 
+The install is pinned and checksummed, and it is deliberately not a single point of failure. The GitHub release-asset CDN intermittently answers `504` for this asset — reproduced locally for that asset while another asset from the same release downloaded cleanly — so the job caches the verified archive between runs and falls back to the API's asset endpoint (a different CDN route to the same bytes) when the release URL fails. The SHA256 check runs on every path, including the cache hit, so the fallback cannot weaken the guarantee: a truncated, tampered or substituted download fails the job either way. A required merge-gate input must not be able to block a merge for a reason unrelated to the code being merged.
+
 The scope is the change, not the whole history. A history-wide scan on every run would redden `main` on the first historic finding after it lands, and the tempting fix — a broad allowlist — would weaken the gate this exists to make real. A repository-wide sweep is therefore tracked separately (the M2 follow-up of task `2b3962b1`): one triage of the real findings, and only then does the tree scan join the gate with a clean baseline.
 
 Two properties make a green meaningful:
