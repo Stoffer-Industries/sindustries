@@ -1,14 +1,15 @@
 ---
-status: draft
+status: shipped
 task_id: ffa30da7-d019-4413-aeae-ad211b9ea614
 product_spec: brain/tasks/specs/in-progress/tasks-api-native-approvals-2026-07-17.md
-shipped_pr: null
-shipped_date: null
+shipped_pr: "370, 371, 372"
+shipped_date: 2026-08-08
 ---
 
 # Tasks API Native Approvals — Tech Design
 
-**Task:** `ffa30da7-d019-4413-aeae-ad211b9ea614` — 🛠 Tasks API Native Approvals (urgent, `ready`)
+**Task:** `ffa30da7-d019-4413-aeae-ad211b9ea614` — 🛠 Tasks API Native Approvals (urgent, `done` — closed 2026-08-09)
+**Shipped PRs:** #370 (WS1 + WS2 + WS4a + WS4b), #371 (WS3 lobster rewire), #372 (cron follow-up: promote Task Lobsters to `--approval-source=auto`) — all merged 2026-08-08
 **Spec:** `brain/tasks/specs/in-progress/tasks-api-native-approvals-2026-07-17.md` *(see Open question Q1 — spec file is not present in this worktree)*
 **Branch:** `task-ffa30da7-tasks-api-native-approvals`
 **Worktree:** `~/workspaces/rowan/sindustries-task-ffa30da7-tasks-api-native-approvals`
@@ -259,13 +260,15 @@ No `.openclaw/` edits are required from this repo. The WS2 config file lives in 
 
 | Workstream | Branch | PR | Reviewer |
 |---|---|---|---|
-| WS1 (data model + endpoint) | `task-ffa30da7-tasks-api-native-approvals` | PR #TBD | Quinn |
-| WS2 (required-approvals map) | same | same PR | Quinn |
-| WS3 (lobster rewire) | `task-ffa30da7-feature-task-lobster-approval-rewire` | separate PR | Quinn |
-| WS4a (migration script) | `task-ffa30da7-tasks-api-native-approvals` | same PR as WS1+WS2 | Quinn |
-| WS4b (UI) | `task-ffa30da7-tasks-api-native-approvals` | same PR | Quinn |
+| WS1 (data model + endpoint) | `task-ffa30da7-tasks-api-native-approvals` | #370 | Quinn |
+| WS2 (required-approvals map) | same | #370 | Quinn |
+| WS3 (lobster rewire) | `task-ffa30da7-feature-task-lobster-approval-rewire` | #371 | Quinn |
+| WS4a (migration script) | `task-ffa30da7-tasks-api-native-approvals` | #370 | Quinn |
+| WS4b (UI) | `task-ffa30da7-tasks-api-native-approvals` | #370 | Quinn |
 
 WS1+WS2+WS4a+WS4b ship together in a single PR (single migration + UI surface + API change is one coherent review unit). WS3 lands separately because the lobster crate has its own build cycle and a lobster regression blocks the cron — separate PR keeps the blast radius small.
+
+**As shipped:** PR #370 carried WS1 + WS2 + WS4a + WS4b (merged 2026-08-08T07:13:28Z), PR #371 carried WS3 (merged 2026-08-08T07:58:37Z), and PR #372 promoted the Task Lobsters to `--approval-source=auto` (merged 2026-08-08T09:17:03Z). The task `ffa30da7` closed `done` on 2026-08-09; the `[implementer-prs]` comments on it name all three PRs.
 
 Quinn merges after Quinn approval + green CI per the standard merge rule.
 
