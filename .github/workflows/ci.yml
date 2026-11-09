@@ -1263,92 +1263,65 @@ jobs:
     #
     # The CLI is MIT-licensed and needs no credential, so the gate is
     # enforceable today with no owner-only provisioning step. The binary is
-    # pinned by version and SHA256, so a tampered or truncated download
-    # fails this job instead of failing open.
+    # pinned by version and SHA256 in
+    # infra/cloud/scripts/install-gitleaks.sh, which every surface that
+    # needs the binary calls, so a tampered or truncated download fails
+    # this job instead of failing open.
     #
-    # Scope is the change, not the whole history: `base.sha..HEAD` for pull
-    # requests, `before..sha` for pushes to main. A repository-wide sweep
-    # needs its own triage of historic findings and is tracked separately
-    # (the M2 follow-up of task 2b3962b1).
+    # Scope is the change AND the tracked tree:
+    #   - the change: `base.sha..HEAD` for pull requests, `before..sha`
+    #     for pushes to main
+    #   - the tree: every tracked file at HEAD, exported from the Git
+    #     index, so a secret committed into any tracked file fails this
+    #     job even when the commit carrying it is outside the change
+    #     range
+    #
+    # The tree scan joins the gate only because the tracked tree at main
+    # scans clean under the enforced config (task 46211c26). Without that
+    # clean baseline, wiring it in would redden every open pull request
+    # on an unrelated historic finding, and the tempting fix -- a broad
+    # allowlist entry -- is exactly what that task exists to prevent.
+    #
+    # The full published history is NOT scanned here. It runs on a weekly
+    # schedule in .github/workflows/secret-scan-history.yml, which is an
+    # alerting surface and not a merge-gate input: a full-history scan on
+    # every run is too slow, and a history-only finding must not block a
+    # merge that does not contain it.
     #
     # Every failure mode blocks this job, and therefore the merge gate:
     # secrets found, a missing binary, a missing config, and a scan scope
-    # that resolves to zero commits — a green check must never mean
-    # "scanned nothing".
+    # that resolves to zero commits or zero tracked files -- a green check
+    # must never mean "scanned nothing".
     #
     # Companion to the local pre-commit hook installed by
     # scripts/install-hooks.sh; both go through the same entrypoint,
     # infra/cloud/scripts/run-secret-scan.sh, so the policy cannot drift.
-    env:
-      GITLEAKS_VERSION: "8.30.1"
-      GITLEAKS_ARCHIVE: "gitleaks_8.30.1_linux_x64.tar.gz"
-      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Resolve the pinned gitleaks release
+        id: pin
+        run: bash infra/cloud/scripts/install-gitleaks.sh --print-pin
+
       - name: Cache the pinned gitleaks archive
         uses: actions/cache@v4
         with:
           path: ~/.cache/sindustries-gitleaks
-          key: gitleaks-cli-${{ env.GITLEAKS_VERSION }}-${{ env.GITLEAKS_SHA256 }}
+          key: gitleaks-cli-${{ steps.pin.outputs.version }}-${{ steps.pin.outputs.sha256 }}
 
       - name: Install gitleaks CLI (pinned)
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/$GITLEAKS_ARCHIVE"
-          cache_dir="$HOME/.cache/sindustries-gitleaks"
-          mkdir -p "$RUNNER_TEMP/gitleaks" "$RUNNER_TEMP/bin" "$cache_dir"
-
-          fetch() {
-            local url="$1"
-            shift
-            curl --fail --location --silent --show-error \
-              --retry 3 --retry-all-errors --retry-delay 5 \
-              --connect-timeout 30 --max-time 300 \
-              "$@" --output "$archive" "$url"
-          }
-
-          cached=0
-          if [ -f "$cache_dir/$GITLEAKS_ARCHIVE" ]; then
-            cp "$cache_dir/$GITLEAKS_ARCHIVE" "$archive"
-            cached=1
-          else
-            release_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_ARCHIVE}"
-            if ! fetch "$release_url"; then
-              # The release-asset CDN intermittently answers 504 for this
-              # asset. A required merge-gate input cannot rest on one
-              # flaky path, so fall back to the API's asset endpoint --
-              # a different CDN route to the same bytes. The SHA256 check
-              # below is what guarantees the content either way.
-              echo "::warning::the release download URL failed; retrying via the GitHub API asset endpoint"
-              asset_id="$(curl --fail --location --silent --show-error \
-                --retry 3 --retry-all-errors --retry-delay 5 \
-                "https://api.github.com/repos/gitleaks/gitleaks/releases/tags/v${GITLEAKS_VERSION}" \
-                | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(a["id"] for a in data["assets"] if a["name"]==sys.argv[1]))' "$GITLEAKS_ARCHIVE")"
-              fetch "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/${asset_id}" \
-                -H "Accept: application/octet-stream"
-            fi
-          fi
-
-          # The checksum is the guarantee: a truncated, tampered or
-          # substituted download fails this step, and therefore the job.
-          echo "${GITLEAKS_SHA256}  $archive" | sha256sum --check --strict -
-          if [ "$cached" -eq 0 ]; then
-            cp "$archive" "$cache_dir/$GITLEAKS_ARCHIVE"
-          fi
-
-          tar --extract --gzip --file "$archive" \
-            --directory "$RUNNER_TEMP/gitleaks" gitleaks
-          install -m 0755 "$RUNNER_TEMP/gitleaks/gitleaks" "$RUNNER_TEMP/bin/gitleaks"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        run: bash infra/cloud/scripts/install-gitleaks.sh
 
       - name: Scan for secrets
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash infra/cloud/scripts/run-secret-scan.sh --base "$BASE_SHA"
+
+      - name: Scan the tracked tree for secrets
+        run: bash infra/cloud/scripts/run-secret-scan.sh --tree
 
       - name: Contract test for secret-scan enforcement
         run: bash infra/cloud/scripts/tests/secret-scan-enforcement.test.sh
