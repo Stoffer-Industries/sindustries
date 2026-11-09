@@ -13,7 +13,7 @@ infra/cloud/observability/
   README.md                          # this file — operator index
   bootstrap-observability.sh         # idempotent local script with subcommand dispatch (validate | app | secrets | dashboards | alerts | deploy | smoke | evidence | all)
   evidence-capture.sh                # prints the closing-PR evidence pack template (md | sh | json)
-  failure-inject.sh                  # 10 failure-injection scenario names with --dry-run; 6 usable (redis-down/up, db-down/up), 4 refused (tasks-api-down/up, budget-api-down/up — service-scoped child drills are unavailable since staging is one app)
+  failure-inject.sh                  # 10 failure-injection scenario names with --dry-run; 4 usable (redis-down/up, db-down/up), 4 refused (tasks-api-down/up, budget-api-down/up — service-scoped child drills are unavailable since staging is one app), 2 unusable (deploy-failed/deploy-restored — no live alert matches them since that alert file was removed)
   env/
     .env.example                     # redacted env-var contract
   grafana/
