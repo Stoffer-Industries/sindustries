@@ -240,6 +240,20 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
                 f'entrypoint: {direct.group(0).strip()}'
             )
 
+    # GitHub exposes the `runner` context to step-level `env` and `with`,
+    # but not to a job-level `env`. A workflow that uses it there is
+    # rejected when the file is loaded, and the run fails with no job and
+    # no log — which reads like a scanner failure and is not one. The
+    # job-level environment variable is the one to use instead.
+    for workflow_label, workflow_text in ((CI, ci_text), (HISTORY_WORKFLOW, history_text)):
+        for job_env in re.finditer(r'(?m)^ {4}env:\n((?: {6,}[^\n]*\n)+)', workflow_text):
+            if 'runner.' in job_env.group(1):
+                problems.append(
+                    f'{workflow_label}: a job-level `env` uses the `runner` context, '
+                    'which GitHub does not expose there — use a step-level `env` or '
+                    'the RUNNER_TEMP environment variable instead'
+                )
+
     # Every global path allowlist entry must carry its own reason. A
     # directory-wide entry is also rejected: the repository-wide triage is
     # allowed to narrow a finding to one file, not to silence a subtree.
@@ -651,6 +665,20 @@ sentinels = [
             r"^(  '''\\\.env\\\.example\$'''),.*$",
             r'\1,',
             'allowlist reason',
+        ),
+        contributing_text,
+        config_text,
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'a job-level env uses the `runner` context',
+        mutate(
+            ci_text,
+            r'^    env:\n      CTO_CRAFT_LANGGRAPH_DATABASE_URL:',
+            '    env:\n      SENTINEL_DIR: ${{ runner.temp }}/sentinel\n'
+            '      CTO_CRAFT_LANGGRAPH_DATABASE_URL:',
+            'job-level runner context',
         ),
         contributing_text,
         config_text,
