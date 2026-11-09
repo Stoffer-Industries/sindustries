@@ -152,6 +152,15 @@ def _log(msg: str, *, verbose_only: bool = False) -> None:
 # Module-level counter for `_gh_api` calls. Surfaced in the --verbose exit summary
 # (AC4). Tests reset this in setUp so counts don't leak across cases.
 _GH_API_CALL_COUNT = 0
+# Cache of the per-agent GitHub credential probe, keyed by
+# (config_dir, token_env). One probe per process per identity keeps the
+# ~36-call hydration fan-out from paying for it once per endpoint.
+_GH_TOKEN_PROBE_CACHE: dict[tuple[str, str], bool] = {}
+# PAT-shaped substrings are redacted from any probe detail that reaches a log
+# line. The repo is public, so a leaked token would be published permanently.
+_TOKEN_REDACTION_RE = re.compile(
+    r"(gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"
+)
 URL_RE = re.compile(r"https?://[^\s)>]+")
 # PR URLs carry the repository, and PR numbers are repo-scoped: a bare number
 # is ambiguous across repos. The parser keeps both halves so every fetched or
@@ -693,8 +702,66 @@ def _build_attention_page_items(
     return items
 
 
+def _gh_token_is_usable(config_dir: str, token_env: str, token: str) -> bool:
+    """True when `token` authenticates `gh` against the agent's own profile.
+
+    `gh` prefers an env token over the keyring credential at
+    `GH_CONFIG_DIR`, so a token that was rotated or revoked out from under a
+    long-lived session wins over a perfectly good keyring credential and
+    every call fails with `Bad credentials (HTTP 401)`. The PR-hydration
+    fan-out then degrades to an empty projection that reads as "nothing
+    assigned" — the false-negative this probe exists to remove (task
+    76f00654 AC1).
+
+    The probe runs `gh api user` through the shared wrapper with the SAME
+    environment a real call would use, so what it measures is what the
+    endpoint call will get. A bare `gh api user` would inherit the ambient
+    `GITHUB_TOKEN` and could report success for the wrong identity, hiding
+    the very failure being detected.
+
+    The verdict is cached per (config_dir, token_env) so the fan-out pays for
+    the probe once per process instead of once per endpoint.
+    """
+    key = (config_dir, token_env)
+    cached = _GH_TOKEN_PROBE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    env = gh_env(config_dir=config_dir, token=token)
+    detail: list[str] = []
+    try:
+        result = safe_run(
+            gh_command("api", "user", "--jq", ".login"),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_GH_API_TIMEOUT_SECONDS,
+        )
+        usable = result.returncode == 0
+        stderr_lines = (result.stderr or "").strip().splitlines()
+        if stderr_lines:
+            detail.append(stderr_lines[0])
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        usable = False
+        detail.append(f"{type(exc).__name__}: {exc}")
+    if not usable:
+        excerpt = _TOKEN_REDACTION_RE.sub("***", " ".join(detail)).strip()
+        print(
+            f"[agent_task_queue] WARN: {token_env} env token failed the gh auth "
+            f"probe ({excerpt or 'no detail'}); falling back to the "
+            f"GH_CONFIG_DIR={config_dir} keyring credential",
+            file=sys.stderr,
+            flush=True,
+        )
+    _GH_TOKEN_PROBE_CACHE[key] = usable
+    return usable
+
+
 def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     """Run `gh api <endpoint>` and parse JSON. Wraps `_GH_API_TIMEOUT_SECONDS`.
+
+    A token env var that `gh` rejects is dropped before the call, so the
+    wrapper falls through to the keyring credential at `GH_CONFIG_DIR`
+    instead of failing every endpoint (task 76f00654 AC1).
 
     Raises:
         _GhApiTimeout — when the underlying `gh api` call exceeds the per-call
@@ -705,6 +772,8 @@ def _gh_api(config_dir: str, token_env: str, endpoint: str) -> Any:
     global _GH_API_CALL_COUNT
     _GH_API_CALL_COUNT += 1
     token = os.environ.get(token_env)
+    if token and not _gh_token_is_usable(config_dir, token_env, token):
+        token = None
     env = gh_env(config_dir=config_dir, token=token)
     started = time.monotonic()
     try:
