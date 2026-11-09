@@ -7,9 +7,19 @@
 #
 # The default ruleset already catches X_API_KEY=..., AKAHU_CLIENT_SECRET=...,
 # BUDET_API_TOKEN_KEY=... etc. when assigned a non-empty value. The
-# `allowlist` block below covers the noise we KNOW is fine:
-#   - .env.example empty-value lines (KEY=) used to document the contract.
-#   - test fixtures that intentionally include fake values (CI test names).
+# `allowlist` block below covers the value shapes we KNOW is fine:
+#   - empty `KEY=` lines used to document a contract.
+#   - common placeholder words in docs and comments.
+#
+# There is NO global path allowlist. The global `[allowlist]` table
+# suppresses no file path at all, so every tracked file is scanned by
+# every rule and the merge gate's claim — a secret committed into any
+# tracked file fails the required job — holds literally. The two
+# subtree-shaped path entries that used to live here
+# (`tests/.*/fixtures/.*` and `services/.*/test/.*\.test\.[jt]sx?$`)
+# suppressed live findings and were removed by task 46211c26. The
+# contract test now rejects any allowlist path whose non-final segment
+# is a glob, so a subtree-wide suppression cannot come back.
 #
 # The allowlist is intentionally narrow — every entry here has a reason.
 # Do NOT add broad allowlists; the value of this scan is its strictness.
@@ -29,13 +39,7 @@ useDefault = true
 # Anything not listed here falls through to gitleaks' built-in rules.
 
 [allowlist]
-description = "Noise we know is fine: empty .env.example lines + test fixtures."
-paths = [
-  '''\.env\.example$''',         # .env.example empty-value lines (KEY=)
-  '''\.env\.example\.template$''', # ditto for any *.template variants
-  '''tests/.*/fixtures/.*''',     # test fixtures with fake secret values
-  '''services/.*/test/.*\.test\.[jt]sx?$''', # test files referencing secret-name strings
-]
+description = "Value shapes we know are fine: empty `KEY=` documentation lines and common placeholder words."
 stopwords = [
   # Common placeholder phrases that appear in docs/comments; not secrets.
   "example",
@@ -47,10 +51,12 @@ stopwords = [
   "CHANGEME",
 ]
 
-# Regex allowlist: empty-value lines in .env.example look like `KEY=`
+# Regex allowlist: an empty-value documentation line looks like `KEY=`
 # (no value, just an equals sign). The default ruleset flags the line
 # itself because the regex pattern matches `KEY=...`. Allowlist the
-# specific shape `^[A-Z][A-Z0-9_]*\s*=\s*$` on .env.example files.
+# specific shape `^[A-Z][A-Z0-9_]*\s*=\s*$`. The shape is matched, not
+# the file: an empty assignment carries no value to disclose, so this
+# suppresses nothing in any file that holds a real value.
 regexes = [
   '''^\s*[A-Z][A-Z0-9_]*\s*=\s*$''',
 ]
@@ -63,15 +69,16 @@ regexes = [
 # .env.example) were removed while implementing task 2b3962b1. They were
 # inert: a custom rule's pattern is read from `regex` (singular), and the
 # plural `regexes` form is ignored, so both rules carried a path and no
-# pattern at all. The noise they were written for is already covered by
-# the global allowlist above — the `.env.example` path and the
-# empty-assignment regex — so removing them restores the bundled rules at
-# full strength rather than narrowing them.
+# pattern at all. The noise they were written for is covered by the
+# empty-assignment regex above, so removing them restores the bundled
+# rules at full strength rather than narrowing them.
 
 # Rule-scoped allowlists for the repository-wide triage findings of task
-# 46211c26. Every entry matches one rule, one exact commit and one exact
-# path. A new commit, a different path, or a different rule is still
-# scanned. The per-finding triage and remediation state is recorded in
+# 46211c26. Every entry matches one rule and one exact path. A
+# commit-scoped entry adds one exact commit; a value-scoped entry adds
+# the exact reviewed value shapes. A new commit, a different path, a
+# different value, or a different rule is still scanned. The per-finding
+# triage and remediation state is recorded in
 # docs/runbooks/secret-scan-triage.md.
 [[rules]]
 id = "generic-api-key"
@@ -90,6 +97,39 @@ id = "generic-api-key"
     "6819c8fef2567790c6759101d0c4e093af10e22b",
   ]
   paths = ['''docs/repo-audits/2026-W26\.md$''']
+
+  # `condition = "AND"` is load-bearing here, not decoration. A gitleaks
+  # allowlist's default condition is OR, and under OR the `paths` entry
+  # alone matches, so the whole file is suppressed and a different
+  # credential committed to it would pass the gate unnoticed. Under AND
+  # the finding must match BOTH the exact file AND one of the exact value
+  # shapes, so a different value in this file — and any value in any
+  # other file — is still scanned. Verified against the shipped config:
+  # with AND, a fresh secret in this file is detected; without it, it is
+  # not.
+  #
+  # This entry is scoped to the exact VALUE rather than to an exact
+  # commit, and that is deliberate rather than a shortcut. The tree
+  # scope is the merge-gate input and it scans a directory, not a
+  # commit: `gitleaks dir` produces findings with no commit metadata,
+  # so a commit-scoped allowlist cannot suppress a tree-scope finding at
+  # all. Scoping by value is also the narrower of the two — it names the
+  # exact literals that are not credentials instead of suppressing a
+  # whole file at a whole commit.
+  #
+  # The two literals are anchored (`^...$`) on purpose. An unanchored
+  # pattern would also match any value that merely contains one of them,
+  # so the anchors are what make "a different value in this file is
+  # still detected" true rather than merely intended.
+  [[rules.allowlists]]
+  description = "Reviewed false positives: two hard-coded fixture values in the content-scheduler API's CTO-Craft import-route test read as API keys. The exact file and the exact anchored value shapes are named, and the AND condition means both must match, so a different value in this file — and any value in any other file — is still scanned."
+  condition = "AND"
+  regexTarget = "secret"
+  regexes = [
+    '''^test\-secret\-1234567890$''',
+    '''^wrong\-secret\-1234567$''',
+  ]
+  paths = ['''services/content-scheduler-api/test/contentSchedulerImport\.test\.ts$''']
 
 # Test-only detection rule (task 2b3962b1). The canary token is a
 # distinctive, non-credential marker used by the secret-scan negative

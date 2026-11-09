@@ -12,14 +12,15 @@
 # Scopes:
 #   --staged   staged changes only (the local pre-commit hook)
 #   --history  every commit reachable from local and remote refs
-#   --tree     tracked files only (the committed/indexed tree)
+#   --tree     tracked files only (the committed HEAD tree)
 #   default    the change since the resolved base commit
 #
-# The tree scope is exported from the Git index before it is scanned. That
-# keeps gitignored local files (`.env.local`, `.vercel/`, and similar) out of
-# the result without maintaining a second list of tracked paths. The history
-# scope uses `--all`, so published remote branches are included when the
-# checkout has fetched them.
+# The tree scope is exported from the committed HEAD tree before it is
+# scanned. That keeps gitignored local files (`.env.local`, `.vercel/`, and
+# similar) and uncommitted working-tree changes out of the result without
+# maintaining a second list of tracked paths. The history scope uses
+# `--all`, so published remote branches are included when the checkout has
+# fetched them.
 #
 # Usage:
 #   run-secret-scan.sh [--staged | --history | --tree]
@@ -335,18 +336,128 @@ if [ "$TREE" -eq 1 ]; then
   fi
 
   tree_dir="$TMP_DIR/tree"
+  archive_tar="$TMP_DIR/tree.tar"
   mkdir -p "$tree_dir"
-  if ! git -C "$ROOT" archive --format=tar HEAD | tar --extract --file - --directory "$tree_dir"; then
+  if ! git -C "$ROOT" archive --format=tar HEAD > "$archive_tar"; then
     annotate_error "could not export the committed tracked tree"
     exit 4
   fi
-  exported_count="$(find "$tree_dir" -mindepth 1 \( -type f -o -type l \) -print | wc -l | tr -d '[:space:]')"
-  if [ "$exported_count" != "$tracked_count" ]; then
-    annotate_error "tracked-tree export count mismatch (tree: $tracked_count, exported: $exported_count)"
+  if ! tar --extract --file "$archive_tar" --directory "$tree_dir"; then
+    annotate_error "could not extract the exported tracked tree"
     exit 4
   fi
 
-  echo "secret scan: tree scope resolved to $tracked_count tracked file(s) at $head_sha (tree $tree_sha)"
+  # `git archive` honours the `export-ignore` attribute, so a tracked
+  # file marked with it is deliberately left out of the export. Count the
+  # archive's own entries rather than the tracked blob count, so an
+  # intentional exclusion does not turn a scannable tree into a red gate,
+  # and then account for every excluded path explicitly below: a tracked
+  # file that is missing for any other reason is a real gap in the
+  # coverage and fails closed.
+  archive_count="$(tar --list --file "$archive_tar" | awk 'length($0) && $0 !~ /\/$/ { c++ } END { print c + 0 }')"
+  exported_count="$(find "$tree_dir" -mindepth 1 \( -type f -o -type l \) -print | wc -l | tr -d '[:space:]')"
+  if [ "$exported_count" != "$archive_count" ]; then
+    annotate_error "tracked-tree export count mismatch (archive: $archive_count, exported: $exported_count)"
+    exit 4
+  fi
+  if [ "$exported_count" -lt 1 ]; then
+    annotate_error "secret scan scope resolved to zero tracked files"
+    exit 4
+  fi
+
+  exclusion_report="$TMP_DIR/exclusion-report.txt"
+  if ! python3 - "$ROOT" "$archive_tar" > "$exclusion_report" <<'PY'
+import subprocess
+import sys
+
+root, archive_tar = sys.argv[1], sys.argv[2]
+
+# Only blobs are tracked files. A submodule entry is a gitlink, not a
+# blob, and `git archive` does not materialise one — it is not a tracked
+# file that went missing from the export.
+raw = subprocess.run(
+    ["git", "-C", root, "ls-tree", "-r", "-z", "HEAD"],
+    stdout=subprocess.PIPE,
+    check=True,
+).stdout
+
+tracked = set()
+for record in raw.split(b"\0"):
+    if not record:
+        continue
+    meta, _, path = record.partition(b"\t")
+    fields = meta.split()
+    if len(fields) >= 2 and fields[1] == b"blob":
+        tracked.add(path.decode("utf-8", "surrogateescape"))
+
+listing = subprocess.run(
+    ["tar", "--list", "--file", archive_tar],
+    stdout=subprocess.PIPE,
+    check=True,
+).stdout.decode("utf-8", "surrogateescape")
+
+archived = set()
+for line in listing.splitlines():
+    if not line:
+        continue
+    if line.endswith("/"):
+        line = line[:-1]
+    if line:
+        archived.add(line)
+
+excluded = sorted(tracked - archived)
+
+if not excluded:
+    print(0)
+    print(0)
+    raise SystemExit(0)
+
+raw = subprocess.run(
+    ["git", "-C", root, "check-attr", "-z", "export-ignore", "--stdin"],
+    input="\0".join(excluded).encode("utf-8", "surrogateescape"),
+    stdout=subprocess.PIPE,
+    check=True,
+).stdout
+
+# `git check-attr -z` emits path\0attribute\0value\0 triples.
+fields = raw.split(b"\0")
+values = {}
+for index in range(0, len(fields) - 2, 3):
+    path = fields[index].decode("utf-8", "surrogateescape")
+    value = fields[index + 2].decode("utf-8", "surrogateescape")
+    values[path] = value
+
+# git exports a path unless the `export-ignore` attribute is set on it.
+# The bare form is what git honours everywhere; the explicit true-ish
+# spellings are accepted too, because a newer git honours those as well
+# and the accounting has to stay correct on both.
+IGNORED = {"set", "true", "yes", "on", "1"}
+unexplained = [path for path in excluded if values.get(path, "unspecified") not in IGNORED]
+
+print(len(excluded))
+print(len(unexplained))
+for path in unexplained:
+    print(path)
+PY
+  then
+    annotate_error "could not account for the tracked files excluded from the export"
+    exit 4
+  fi
+
+  excluded_count="$(sed -n '1p' "$exclusion_report")"
+  unexplained_count="$(sed -n '2p' "$exclusion_report")"
+  if [ "$unexplained_count" != "0" ]; then
+    annotate_error "tracked-tree export is missing $unexplained_count tracked file(s) that carry no export-ignore attribute"
+    sed -n '3,$p' "$exclusion_report" | while IFS= read -r missing_path; do
+      [ -n "$missing_path" ] && annotate_error "missing from the export: $missing_path"
+    done
+    exit 4
+  fi
+  if [ "$excluded_count" != "0" ]; then
+    annotate_warning "tracked-tree export omits $excluded_count tracked file(s) via the export-ignore attribute"
+  fi
+
+  echo "secret scan: tree scope resolved to $exported_count tracked file(s) at $head_sha (tree $tree_sha)"
   status=0
   gitleaks dir --verbose --redact=100 --no-banner --config "$CONFIG" \
     --report-format json --report-path "$RAW_REPORT" "$tree_dir" || status=$?
@@ -355,7 +466,7 @@ if [ "$TREE" -eq 1 ]; then
     annotate_error "secret scan failed on the tracked tree (finding count: $finding_count)"
     exit "$status"
   fi
-  echo "secret scan: no secrets found in $tracked_count tracked file(s) (at $head_sha, finding count: 0, config: $CONFIG)"
+  echo "secret scan: no secrets found in $exported_count tracked file(s) (at $head_sha, finding count: 0, config: $CONFIG)"
   exit 0
 fi
 

@@ -96,6 +96,20 @@ def strip_comments(text):
     )
 
 
+def is_glob_segment(segment):
+    """Whether a path segment covers more than one directory entry.
+
+    A segment that is a bare glob (`.*`, `.+`, `[^/]+`) matches any name
+    at that position, so a path built from one covers a whole subtree. A
+    segment that merely *contains* a glob construct covers a subtree too —
+    `foo.*` matches every name beginning with `foo` — so both are
+    treated as glob-shaped.
+    """
+    if segment in ('.*', '.+', '[^/]+'):
+        return True
+    return '.*' in segment or '.+' in segment or '[^/]+' in segment
+
+
 def contributing_bullet(contributing_text, job_id):
     """The inventory bullet CONTRIBUTING.md documents for a CI job."""
     lines = contributing_text.splitlines()
@@ -254,60 +268,77 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
                     'the RUNNER_TEMP environment variable instead'
                 )
 
-    # Every global path allowlist entry must carry its own reason. A
-    # directory-wide entry is also rejected: the repository-wide triage is
-    # allowed to narrow a finding to one file, not to silence a subtree.
-    paths_block = re.search(r'(?ms)^paths\s*=\s*\[(.*?)^\]', config_text)
-    if paths_block:
-        path_lines = [
-            line.strip()
-            for line in paths_block.group(1).splitlines()
-            if line.strip() and not line.strip().startswith('#')
-        ]
-        for line in path_lines:
-            if '#' not in line:
-                problems.append(
-                    f'{CONFIG}: an allowlist path has no inline reason: {line}'
-                )
-            match = re.search(r"'''(.*?)'''", line)
-            if not match:
-                problems.append(
-                    f'{CONFIG}: an allowlist path could not be parsed: {line}'
-                )
-                continue
-            pattern = match.group(1)
-            if pattern in ('.*', '^.*$', '.+', '^.+'):
-                problems.append(
-                    f'{CONFIG}: the allowlist path `{pattern}` would suppress the '
-                    'whole repository'
-                )
-            parts = pattern.lstrip('^').split('/')
-            if len(parts) == 2 and parts[1] in ('.*', '.+', '[^/]+'):
-                problems.append(
-                    f'{CONFIG}: the allowlist path `{pattern}` covers a whole '
-                    'top-level directory'
-                )
-    else:
-        problems.append(f'{CONFIG}: no global allowlist `paths` block found')
+    # The global `[allowlist]` table must not suppress any file path. A
+    # path-wide entry is precisely what makes "a secret committed into any
+    # tracked file fails the merge gate" untrue, and the repository-wide
+    # triage is allowed to narrow a finding to one file, never to silence
+    # a subtree.
+    #
+    # The guard inspects EVERY segment of a path, not only the two-segment
+    # shape. `tests/.*/fixtures/.*` covers a whole directory subtree, and
+    # a check that stopped at `parts[1]` of a two-segment path let exactly
+    # that shape through — which is how two subtree-wide entries shipped
+    # inside this very repository.
+    global_allowlist_block = re.search(
+        r'(?ms)^\[allowlist\](.*?)(?=^\[|\Z)', config_text
+    )
+    global_allowlist = global_allowlist_block.group(1) if global_allowlist_block else ''
+    paths_block = re.search(r'(?ms)^paths\s*=\s*\[(.*?)^\]', global_allowlist)
+    if re.search(r'(?m)^paths\s*=', global_allowlist):
+        problems.append(
+            f'{CONFIG}: the global allowlist declares `paths` — a global path '
+            'allowlist suppresses whole directories and makes the merge gate\'s '
+            '"any tracked file" claim untrue; narrow a finding with a rule-scoped '
+            'allowlist instead'
+        )
+        if not paths_block:
+            problems.append(
+                f'{CONFIG}: the global allowlist `paths` entry could not be parsed'
+            )
+        else:
+            path_lines = [
+                line.strip()
+                for line in paths_block.group(1).splitlines()
+                if line.strip() and not line.strip().startswith('#')
+            ]
+            for line in path_lines:
+                if '#' not in line:
+                    problems.append(
+                        f'{CONFIG}: an allowlist path has no inline reason: {line}'
+                    )
+                match = re.search(r"'''(.*?)'''", line)
+                if not match:
+                    problems.append(
+                        f'{CONFIG}: an allowlist path could not be parsed: {line}'
+                    )
+                    continue
+                pattern = match.group(1)
+                segments = pattern.lstrip('^').split('/')
+                if len(segments) == 1 and is_glob_segment(segments[0]):
+                    problems.append(
+                        f'{CONFIG}: the allowlist path `{pattern}` would suppress the '
+                        'whole repository'
+                    )
+                for index, segment in enumerate(segments):
+                    if is_glob_segment(segment):
+                        problems.append(
+                            f'{CONFIG}: the allowlist path `{pattern}` covers a whole '
+                            f'directory subtree (segment {index} is a glob)'
+                        )
 
     # The repository-wide triage exceptions are rule-scoped: one rule, one
     # exact commit and one exact path. A global commit or path exception
     # would suppress unrelated findings and would violate AC1.
-    global_allowlist_block = re.search(
-        r'(?ms)^\[allowlist\](.*?)(?=^\[|\Z)', config_text
-    )
-    if global_allowlist_block:
-        global_allowlist = global_allowlist_block.group(1)
-        if re.search(r'(?m)^\s*commits\s*=', global_allowlist):
-            problems.append(
-                f'{CONFIG}: a global commit allowlist would skip every finding in the '
-                'commit; repository-history exceptions must be rule-scoped'
-            )
+    if re.search(r'(?m)^\s*commits\s*=', global_allowlist):
+        problems.append(
+            f'{CONFIG}: a global commit allowlist would skip every finding in the '
+            'commit; repository-history exceptions must be rule-scoped'
+        )
     for path in (
         'apps/gymtrack/api/oauth/token\\.js$',
         'docs/repo-audits/2026-W26\\.md$',
     ):
-        if path in (paths_block.group(1) if paths_block else ''):
+        if path in global_allowlist:
             problems.append(
                 f'{CONFIG}: the triage path `{path}` is globally allowlisted; use a '
                 'rule-scoped exact-commit/exact-path exception instead'
@@ -328,23 +359,56 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
             problems.append(f'{CONFIG}: a rule-scoped allowlist has no reason')
         if not re.search(r'(?m)^\s*condition\s*=\s*"AND"', block):
             problems.append(
-                f'{CONFIG}: a rule-scoped allowlist must require commit AND path, '
-                'not either one alone'
+                f'{CONFIG}: a rule-scoped allowlist must require every criterion it '
+                'declares, not any one of them alone'
             )
+        paths = re.search(r'(?ms)^\s*paths\s*=\s*\[(.*?)\]', block)
+        if not paths:
+            problems.append(f'{CONFIG}: a rule-scoped allowlist has no exact path')
         commits = re.search(
             r'(?ms)^\s*commits\s*=\s*\[(.*?)\]', block
         )
-        if not commits:
-            problems.append(f'{CONFIG}: a rule-scoped allowlist has no exact commit')
-        else:
+        value_scope = re.search(
+            r'(?ms)^\s*regexes\s*=\s*\[(.*?)\]', block
+        )
+        if not commits and not value_scope:
+            problems.append(
+                f'{CONFIG}: a rule-scoped allowlist has neither an exact commit nor '
+                'an exact value scope, so it suppresses every finding in its path'
+            )
+        if commits:
             for commit in re.findall(r'["\']([0-9a-f]+)["\']', commits.group(1)):
                 if len(commit) != 40:
                     problems.append(
                         f'{CONFIG}: rule-scoped allowlist commit is not a full SHA: {commit}'
                     )
-        paths = re.search(r'(?ms)^\s*paths\s*=\s*\[(.*?)\]', block)
-        if not paths:
-            problems.append(f'{CONFIG}: a rule-scoped allowlist has no exact path')
+        if value_scope:
+            # A value-scoped allowlist is how a tree-scope finding is
+            # triaged. The tree scope is the merge-gate input and it scans
+            # a directory, not a commit: `gitleaks dir` produces findings
+            # with no commit metadata, so a commit-scoped exception cannot
+            # suppress a tree-scope finding at all. Scoping by value is
+            # also the narrower of the two — it names the exact literals
+            # that are not credentials instead of suppressing a whole file
+            # at a whole commit.
+            #
+            # The value scope has to be exact for that to stay narrow. An
+            # unanchored pattern also matches every value that merely
+            # contains it, which would turn two reviewed literals into a
+            # file-wide suppression.
+            if not re.search(r'(?m)^\s*regexTarget\s*=\s*"secret"', block):
+                problems.append(
+                    f'{CONFIG}: a value-scoped rule allowlist must set '
+                    '`regexTarget = "secret"` so the pattern is matched against the '
+                    'secret alone and not against the whole line'
+                )
+            for pattern in re.findall(r"'''(.*?)'''", value_scope.group(1)):
+                if not (pattern.startswith('^') and pattern.endswith('$')):
+                    problems.append(
+                        f'{CONFIG}: a value-scoped rule allowlist pattern is not '
+                        f'anchored, so it also matches any value that contains it: '
+                        f'{pattern}'
+                    )
 
     # AC4 requires a durable, per-finding ledger. Keep the assertion
     # structural rather than pinning the current finding count: a later
@@ -355,11 +419,11 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
             problems.append(f'{RUNBOOK}: no `## Findings ledger` section found')
         ledger_rows = [
             line for line in runbook_text.splitlines()
-            if line.startswith('| History |')
+            if line.startswith('| History |') or line.startswith('| Tree |')
         ]
         if len(ledger_rows) < 2:
             problems.append(
-                f'{RUNBOOK}: the findings ledger has fewer than two triaged history findings'
+                f'{RUNBOOK}: the findings ledger has fewer than two triaged findings'
             )
         for row in ledger_rows:
             columns = [cell.strip() for cell in row.strip('|').split('|')]
@@ -371,6 +435,19 @@ def check(ci_text, contributing_text, config_text, entrypoint_text, entrypoint_m
                 problems.append(
                     f'{RUNBOOK}: a findings-ledger row has no commit identifier'
                 )
+        # The tree scope is the merge-gate input, so a finding that the
+        # tracked-tree scan suppresses has to be recorded here too. A
+        # ledger that lists only history findings would describe a
+        # surface the merge gate never reads.
+        tree_rows = [
+            line for line in runbook_text.splitlines()
+            if line.startswith('| Tree |')
+        ]
+        if not tree_rows:
+            problems.append(
+                f'{RUNBOOK}: the findings ledger has no tracked-tree rows, but the '
+                'tracked tree is the merge gate\'s scan scope'
+            )
         for forbidden in ('Secret value', 'Match text', 'Entropy', 'Fingerprint'):
             if forbidden in runbook_text:
                 problems.append(
@@ -646,28 +723,80 @@ sentinels = [
         entrypoint_mode,
     ),
     (
-        'the allowlist gains a repository-wide path',
+        'the global allowlist gains a repository-wide path',
+        ci_text,
+        contributing_text,
         mutate(
             config_text,
-            r"^  '''\\\.env\\\.example\$''',.*$",
-            "  '''.*$''', # broad sentinel",
+            r'^\[allowlist\]$',
+            "[allowlist]\npaths = [\n  '''.*$''', # broad sentinel\n]",
             'broad allowlist path',
         ),
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'the global allowlist gains a two-segment directory path',
+        ci_text,
         contributing_text,
-        config_text,
+        mutate(
+            config_text,
+            r'^\[allowlist\]$',
+            "[allowlist]\npaths = [\n  '''tests/.*''', # broad sentinel\n]",
+            'two-segment directory allowlist path',
+        ),
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'the global allowlist gains a three-segment subtree path',
+        ci_text,
+        contributing_text,
+        mutate(
+            config_text,
+            r'^\[allowlist\]$',
+            "[allowlist]\npaths = [\n  '''tests/.*/fixtures/.*''', # broad sentinel\n]",
+            'three-segment subtree allowlist path',
+        ),
         entrypoint_text,
         entrypoint_mode,
     ),
     (
         'an allowlist path loses its reason',
+        ci_text,
+        contributing_text,
         mutate(
             config_text,
-            r"^(  '''\\\.env\\\.example\$'''),.*$",
-            r'\1,',
+            r'^\[allowlist\]$',
+            "[allowlist]\npaths = [\n  '''tests/fixed-file.txt''',\n]",
             'allowlist reason',
         ),
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'a value-scoped rule allowlist loses its anchors',
+        ci_text,
         contributing_text,
-        config_text,
+        mutate(
+            config_text,
+            r"'''\^test",
+            "'''test",
+            'value allowlist anchors',
+        ),
+        entrypoint_text,
+        entrypoint_mode,
+    ),
+    (
+        'a value-scoped rule allowlist stops targeting the secret alone',
+        ci_text,
+        contributing_text,
+        mutate(
+            config_text,
+            r'^(\s*)regexTarget = "secret"$',
+            r'\1regexTarget = "match"',
+            'value allowlist regexTarget',
+        ),
         entrypoint_text,
         entrypoint_mode,
     ),
@@ -807,6 +936,39 @@ fi
 if ! grep -q "finding count: 0" "$tree_clean_output"; then
   echo "FAIL: a passing tree scan did not report its finding count" >&2
   cat "$tree_clean_output" >&2
+  exit 1
+fi
+
+# A tracked file that git deliberately excludes from the archive must not
+# turn a scannable tree into a red gate. `git archive` honours the
+# `export-ignore` attribute, so the exported set is smaller than the
+# tracked blob count; the scope check has to account for that exclusion
+# instead of failing on it, while still refusing a tracked file that is
+# missing for any other reason.
+new_repo "$WORK_DIR/export-ignore"
+printf 'kept\n' > "$WORK_DIR/export-ignore/kept.txt"
+printf 'excluded\n' > "$WORK_DIR/export-ignore/excluded.txt"
+printf 'excluded.txt export-ignore\n' > "$WORK_DIR/export-ignore/.gitattributes"
+git -C "$WORK_DIR/export-ignore" add kept.txt excluded.txt .gitattributes
+git -C "$WORK_DIR/export-ignore" commit -q -m "add a file with an export-ignore attribute"
+
+export_ignore_output="$WORK_DIR/export-ignore.out"
+export_ignore_status=0
+bash "$REPO_ROOT/$ENTRYPOINT" --config "$CONFIG" --tree \
+  "$WORK_DIR/export-ignore" >"$export_ignore_output" 2>&1 || export_ignore_status=$?
+if [ "$export_ignore_status" -ne 0 ]; then
+  echo "FAIL: a tracked tree with an export-ignore attribute did not pass the scan (exit $export_ignore_status)" >&2
+  cat "$export_ignore_output" >&2
+  exit 1
+fi
+if ! grep -q "export-ignore" "$export_ignore_output"; then
+  echo "FAIL: a tree scan did not name the export-ignore exclusion" >&2
+  cat "$export_ignore_output" >&2
+  exit 1
+fi
+if ! grep -q "tree scope resolved to 2 tracked file(s)" "$export_ignore_output"; then
+  echo "FAIL: a tree scan did not report the scanned file count with an export-ignore exclusion" >&2
+  cat "$export_ignore_output" >&2
   exit 1
 fi
 

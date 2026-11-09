@@ -92,10 +92,30 @@ residual rather than part of the scheduled alert scope. The tracked-tree scope
 resolved 1,360 files at main (1,361 on the implementation branch, which adds
 the approved tech design). Every finding was reviewed individually.
 
-The enforced baseline uses rule-scoped allowlists only. Each allowlist matches
-one rule, one exact commit and one exact path; there is no repository-wide,
-directory-wide or file-wide path suppression. The resulting baseline scans
-clean, and the rows below preserve the residual history surface explicitly.
+That measurement was taken with the global path allowlist still in place, so
+it could not see what that allowlist was hiding. Removing the two subtree
+path entries required a re-measurement: with the exceptions removed, the
+history scope over 4,021 reachable commits resolves **18** findings — the
+six above, plus twelve in one content-scheduler test file, one per finding
+per commit across the three commits that record that file's content — and the
+tracked-tree scope over 1,365 files resolves **4** findings, the same four
+literals in the file content that is in the tree today. Every one of those
+sixteen was reviewed individually and is recorded below. The baseline itself
+is unchanged by the removal: with the shipped config, the history scope
+reports 0 findings over 4,021 commits and the tracked-tree scope reports 0
+findings over 1,365 files.
+
+The enforced baseline uses rule-scoped allowlists only. There is no global
+path allowlist at all: the global `[allowlist]` table suppresses no file path,
+so every tracked file is scanned by every rule and the merge gate's "a secret
+committed into any tracked file fails the required job" claim holds literally.
+The two subtree-shaped global path entries that used to live in the config
+(`tests/.*/fixtures/.*` and `services/.*/test/.*\.test\.[jt]sx?$`) suppressed
+live tracked-tree findings and were removed. Each remaining rule-scoped
+allowlist matches one rule and one exact path, plus either one exact commit or
+one exact anchored value shape; there is no repository-wide, directory-wide or
+file-wide path suppression. The resulting baseline scans clean, and the rows
+below preserve the residual history and tracked-tree surfaces explicitly.
 
 | Scope | Rule | Path | Commit | Line | Triage | Remediation status | Owner | Date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -105,6 +125,44 @@ clean, and the rows below preserve the residual history surface explicitly.
 | History | `sindustries-secret-scan-canary` | `infra/cloud/secret-scan-canary.txt` | `4cc7c358795f6d3230b91b668a657146acbadf54` | 1 | Synthetic marker published by the prior negative-control pull request; it is not a credential. | No credential was exposed. The exact rule, commit and path are allowlisted together; a new canary commit must still fail the tree scan. | Rowan | 2026-11-10 |
 | History | `sindustries-secret-scan-canary` | `infra/cloud/secret-scan-canary.txt` | `8485bb99d6dd7340bec81fb5d17e3e675dd59002` | 1 | Synthetic marker published by the prior negative-control pull request; it is not a credential. | No credential was exposed. The exact rule, commit and path are allowlisted together; a new canary commit must still fail the tree scan. | Rowan | 2026-11-10 |
 | History | `sindustries-secret-scan-canary` | `infra/cloud/secret-scan-canary.txt` | `7c9615a621eafa8bee07bd4819bb4136d7eb91e7` | 1 | Synthetic marker published by the prior negative-control pull request; it is not a credential. | No credential was exposed. The exact rule, commit and path are allowlisted together; a new canary commit must still fail the tree scan. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `1a8d2b3c5432d7726953ec60efa8619c7e477e34` | 301 | False positive: a hard-coded test fixture literal for the ingest-secret header, not a credential. It is a fixed, published test value with no issuer, no account and no scope. | No credential was exposed. Suppressed by a rule-scoped allowlist that names this exact file and the exact anchored value shape, so the same file with any other value still fails the scan. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `1a8d2b3c5432d7726953ec60efa8619c7e477e34` | 317 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the import assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding row. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `1a8d2b3c5432d7726953ec60efa8619c7e477e34` | 331 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the missing-header assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding row. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `1a8d2b3c5432d7726953ec60efa8619c7e477e34` | 335 | False positive: the deliberately wrong fixture literal used to assert that a mismatched ingest secret is rejected. | No credential was exposed. Suppressed by a rule-scoped allowlist that names this exact file and the exact anchored value shape; the value is a negative test input, so it must not authenticate anything. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `9ebdcb40b3ec4b34add9cbb2502bea063c278948` | 301 | False positive: the same four fixture literals in the same file, in the tree this commit records. Triaged independently of the preceding commit. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `9ebdcb40b3ec4b34add9cbb2502bea063c278948` | 317 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the import assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `9ebdcb40b3ec4b34add9cbb2502bea063c278948` | 331 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the missing-header assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `9ebdcb40b3ec4b34add9cbb2502bea063c278948` | 335 | False positive: the deliberately wrong fixture literal used to assert that a mismatched ingest secret is rejected. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 307 | False positive: the same hard-coded test fixture literal, in the tree this commit records. This is the file content that is still in the tracked tree today, so the same finding is reachable through the tree scope as well — see the tracked-tree rows below. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 323 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the import assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 337 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the missing-header assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| History | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 341 | False positive: the deliberately wrong fixture literal used to assert that a mismatched ingest secret is rejected. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding rows. | Rowan | 2026-11-10 |
+| Tree | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 307 | False positive: a hard-coded test fixture literal for the ingest-secret header, not a credential. It is a fixed, published test value with no issuer, no account and no scope. | No credential was exposed. Suppressed by a rule-scoped allowlist that names this exact file and the exact anchored value shape, so the same file with any other value still fails the tree scan. | Rowan | 2026-11-10 |
+| Tree | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 323 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the import assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding row. | Rowan | 2026-11-10 |
+| Tree | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 337 | False positive: the same hard-coded test fixture literal, assigned as the configured ingest secret for the missing-header assertion. | No credential was exposed. Suppressed by the same rule-scoped, exact-value allowlist as the preceding row. | Rowan | 2026-11-10 |
+| Tree | `generic-api-key` | `services/content-scheduler-api/test/contentSchedulerImport.test.ts` | `d8427866da68527b024710d02e78d0b4223ca10b` | 341 | False positive: the deliberately wrong fixture literal used to assert that a mismatched ingest secret is rejected. | No credential was exposed. Suppressed by a rule-scoped allowlist that names this exact file and the exact anchored value shape; the value is a negative test input, so it must not authenticate anything. | Rowan | 2026-11-10 |
+
+The sixteen content-scheduler rows are the same two fixture literals in one
+test file, reached through two scopes. The twelve history rows are the
+findings the history scope reports across the three commits that record that
+file's content; the four tracked-tree rows are the same findings in the file
+content that is in the tracked tree today, which is the scope the merge gate
+reads.
+
+Those sixteen rows were previously invisible. A global subtree path allowlist
+(`services/.*/test/.*\.test\.[jt]sx?$`) suppressed every `*.test.ts` file
+under a service's `test/` directory, and the ledger had no tree-scope rows at
+all. They are recorded here because a suppressed finding that is not triaged
+is exactly the residual surface this ledger exists to make explicit.
+
+A value-scoped allowlist, rather than a commit-scoped one, is what suppresses
+these sixteen rows. The tree scope scans a directory, so `gitleaks dir`
+produces findings with no commit metadata and a commit-scoped exception cannot
+apply to a tree-scope finding at all. Scoping by value is also the narrower
+of the two options: it names the exact literals that are not credentials
+instead of suppressing a whole file at a whole commit. The value patterns are
+anchored, so a value that merely contains one of them is still detected — a
+different secret in this same file fails the scan.
 
 A future scan finding is added as a new row before it is closed. Removing a
 row requires the remediation status to say why the residual no longer exists.
