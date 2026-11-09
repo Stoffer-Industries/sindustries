@@ -82,12 +82,13 @@ cleanup() {
       "Secret-scan negative control: synthetic canary, expected to fail." >/dev/null 2>&1 || true
   fi
   git push origin --delete "$BRANCH" >/dev/null 2>&1 || true
-  git checkout -q main 2>/dev/null || true
+  git checkout -q "${ORIGINAL_BRANCH:-main}" 2>/dev/null || true
   git branch -q -D "$BRANCH" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 echo "negative-control: publishing the synthetic canary on $BRANCH (base $BASE_REF)"
+ORIGINAL_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 git fetch -q origin "$BASE_REF" || git fetch -q origin main
 git checkout -q -B "$BRANCH" "$BASE_REF"
 mkdir -p "$(dirname "$CANARY_FILE")"
