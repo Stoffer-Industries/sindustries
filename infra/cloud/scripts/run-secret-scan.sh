@@ -30,6 +30,11 @@
 # missing binary, a missing config and an empty scope are all explicit
 # failures with their own exit code, so a green check can never mean
 # "scanned nothing".
+#
+# `--verbose` makes a failing scan name the rule, the file and the line it
+# found, so a CI log says what was detected rather than only that
+# something was. `--redact=100` keeps the value itself out of the log:
+# this repository is public and so are its CI logs.
 
 set -euo pipefail
 
@@ -134,7 +139,7 @@ fi
 # The local pre-commit hook's mode: scan what is staged, nothing else.
 if [ "$STAGED" -eq 1 ]; then
   status=0
-  gitleaks protect --staged --redact=100 --no-banner \
+  gitleaks protect --staged --verbose --redact=100 --no-banner \
     --config "$CONFIG" --source "$ROOT" || status=$?
   if [ "$status" -ne 0 ]; then
     annotate_error "secret scan failed on staged changes"
@@ -188,7 +193,7 @@ if [ -n "$base" ]; then
     exit 4
   fi
   status=0
-  gitleaks git --redact=100 --no-banner --config "$CONFIG" \
+  gitleaks git --verbose --redact=100 --no-banner --config "$CONFIG" \
     --log-opts "${base}..HEAD" "$ROOT" || status=$?
   if [ "$status" -ne 0 ]; then
     annotate_error "secret scan failed on ${base}..HEAD"
@@ -200,7 +205,7 @@ fi
 
 annotate_warning "no base commit could be resolved in $ROOT; scanning the working tree instead"
 status=0
-gitleaks dir --redact=100 --no-banner --config "$CONFIG" "$ROOT" || status=$?
+gitleaks dir --verbose --redact=100 --no-banner --config "$CONFIG" "$ROOT" || status=$?
 if [ "$status" -ne 0 ]; then
   annotate_error "secret scan failed on the working tree"
   exit "$status"
