@@ -15,10 +15,15 @@
 # the control finishes.
 #
 # Usage:
-#   secret-scan-negative-control.sh [--keep]
+#   secret-scan-negative-control.sh [--base <ref>] [--keep]
 #
-#   --keep   leave the throwaway branch and pull request in place (for
-#            debugging a failed control); they are closed otherwise.
+#   --base <ref>  the ref the throwaway branch is created from
+#                 (default: origin/main). Use a branch that already carries
+#                 the canary rule in .gitleaks.toml — otherwise the
+#                 control would scan a config that cannot detect the
+#                 canary and would report a false green.
+#   --keep        leave the throwaway branch and pull request in place (for
+#                 debugging a failed control); they are closed otherwise.
 #
 # Requirements: `gh` authenticated with push access to the repository, and
 # a clean working tree on the canonical checkout.
@@ -26,12 +31,27 @@
 set -euo pipefail
 
 KEEP=0
-if [ "${1:-}" = "--keep" ]; then
-  KEEP=1
-elif [ "$#" -gt 0 ]; then
-  echo "usage: secret-scan-negative-control.sh [--keep]" >&2
-  exit 2
-fi
+BASE_REF="origin/main"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --keep)
+      KEEP=1
+      shift
+      ;;
+    --base)
+      if [ "$#" -lt 2 ]; then
+        echo "usage: secret-scan-negative-control.sh [--base <ref>] [--keep]" >&2
+        exit 2
+      fi
+      BASE_REF="$2"
+      shift 2
+      ;;
+    *)
+      echo "usage: secret-scan-negative-control.sh [--base <ref>] [--keep]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -67,9 +87,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "negative-control: publishing the synthetic canary on $BRANCH"
-git fetch -q origin main
-git checkout -q -B "$BRANCH" origin/main
+echo "negative-control: publishing the synthetic canary on $BRANCH (base $BASE_REF)"
+git fetch -q origin "$BASE_REF" || git fetch -q origin main
+git checkout -q -B "$BRANCH" "$BASE_REF"
 mkdir -p "$(dirname "$CANARY_FILE")"
 printf '%s\n' "$CANARY_VALUE" > "$CANARY_FILE"
 git add "$CANARY_FILE"
@@ -88,7 +108,7 @@ echo "negative-control: head $HEAD_SHA"
 
 echo "negative-control: waiting for the pull-request run"
 RUN_ID=""
-for _ in $(seq 1 60); do
+for _ in $(seq 1 80); do
   sleep 15
   RUN_ID="$(gh run list --repo "$REPO_SLUG" --branch "$BRANCH" --limit 20 \
     --json databaseId,headSha,event,status \
@@ -104,13 +124,28 @@ if [ -z "$RUN_ID" ]; then
 fi
 echo "negative-control: run $RUN_ID"
 
-echo "negative-control: waiting for the run to finish"
-gh run watch "$RUN_ID" --repo "$REPO_SLUG" --exit-status >/dev/null 2>&1 || true
+# Wait for the two jobs the control is about, not for the whole run: the
+# point of the control is the secret-scan job's conclusion and the merge
+# gate's conclusion, and the rest of CI is not evidence either way.
+read_conclusion() {
+  gh run view "$RUN_ID" --repo "$REPO_SLUG" --json jobs \
+    --jq "[.jobs[] | select(.name == \"$1\")][0].conclusion // empty"
+}
 
-SCAN_CONCLUSION="$(gh run view "$RUN_ID" --repo "$REPO_SLUG" --json jobs \
-  --jq '[.jobs[] | select(.name == "gitleaks secret scan")][0].conclusion // "missing"')"
-GATE_CONCLUSION="$(gh run view "$RUN_ID" --repo "$REPO_SLUG" --json jobs \
-  --jq '[.jobs[] | select(.name == "merge gate")][0].conclusion // "missing"')"
+SCAN_CONCLUSION=""
+GATE_CONCLUSION=""
+for _ in $(seq 1 80); do
+  SCAN_CONCLUSION="$(read_conclusion 'gitleaks secret scan')"
+  GATE_CONCLUSION="$(read_conclusion 'merge gate')"
+  if [ -n "$SCAN_CONCLUSION" ] && [ -n "$GATE_CONCLUSION" ]; then
+    break
+  fi
+  sleep 15
+done
+if [ -z "$SCAN_CONCLUSION" ]; then
+  echo "negative-control: the 'gitleaks secret scan' job never reported a conclusion" >&2
+  exit 1
+fi
 
 echo "negative-control: run URL   https://github.com/$REPO_SLUG/actions/runs/$RUN_ID"
 echo "negative-control: gitleaks secret scan -> $SCAN_CONCLUSION"
