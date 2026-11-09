@@ -612,7 +612,37 @@ This was not a theoretical gap. `gh-with-agent-token-tests` — the only regress
 - **Required** = every job in `ci.yml` that is neither `merge-gate` itself nor downstream of it (i.e. its `needs` does not include `merge-gate`).
 - **Advisory** = named in `ADVISORY_VERIFICATION_JOBS`, an explicit empty-by-default frozenset in `infra/cloud/scripts/tests/ci-deployment-gates.test.sh`, co-located with the derivation it constrains. It is empty today: there is no verification job whose failure is allowed to not block release.
 
-`continue-on-error` is deliberately **not** the advisory marker. It already means fail-open on the `gitleaks` job (tracked separately as W43 F2, `needs-human-decision`), so it is a known gap rather than a pattern to copy. Adding a name to `ADVISORY_VERIFICATION_JOBS` is a security-posture decision and requires the same tech-design + Quinn-approval path as the task that created the allowlist.
+`continue-on-error` is deliberately **not** the advisory marker, and no job relies on it any more: the `gitleaks` job — the one job that used to carry `continue-on-error: true` — is blocking by construction (see *Secret scan enforcement* below). Adding a name to `ADVISORY_VERIFICATION_JOBS` is a security-posture decision and requires the same tech-design + Quinn-approval path as the task that created the allowlist.
+
+### Secret scan enforcement
+
+The `gitleaks` job is a required `merge-gate` input, and it now blocks the merge. It runs the gitleaks CLI directly — **not** `gitleaks/gitleaks-action`, which refuses to start on an organisation repo without a paid `GITLEAKS_LICENSE` secret. That path aborted before scanning anything, and the `continue-on-error: true` on the step turned the abort into a green `success`, so the merge gate had been collecting a green secret-scan result from a job that had never scanned a commit (W42 F6, W43 F2, W44, W46 F3; task `2b3962b1`).
+
+| Property | Value |
+|---|---|
+| Binary | gitleaks `v8.30.1`, MIT-licensed — no credential, no organisation secret, no owner-only provisioning step |
+| Pin | `gitleaks_8.30.1_linux_x64.tar.gz`, SHA256 `551f6fc8…70eb`, checked with `sha256sum --check --strict` |
+| Entrypoint | `infra/cloud/scripts/run-secret-scan.sh` — the CI job, the contract test and the local pre-commit hook all call it |
+| Scope | the change: `base.sha..HEAD` for pull requests, `before..sha` for pushes to `main` |
+| Failure modes | secrets found, missing binary (exit 2), missing config (exit 3), empty scan scope (exit 4) — every one of them blocking |
+
+The scope is the change, not the whole history. A history-wide scan on every run would redden `main` on the first historic finding after it lands, and the tempting fix — a broad allowlist — would weaken the gate this exists to make real. A repository-wide sweep is therefore tracked separately (the M2 follow-up of task `2b3962b1`): one triage of the real findings, and only then does the tree scan join the gate with a clean baseline.
+
+Two properties make a green meaningful:
+
+- **The entrypoint never reports success for an empty scope.** A range that resolves to zero commits is exit 4 with an `::error::` annotation, so a green can never again mean "scanned nothing".
+- **Every setup failure is visible and blocking.** A missing binary or config exits non-zero with an `::error::` annotation; there is no `|| true`, no `continue-on-error` and no `set +e` around the scan.
+
+That the gate is real is scripted rather than asserted. `infra/cloud/scripts/secret-scan-negative-control.sh` publishes a synthetic canary token — detected by the test-only rule `sindustries-secret-scan-canary`, which only ever adds detections and never suppresses one — on a throwaway branch, opens a pull request so the `pull_request` trigger runs, and asserts that both the `gitleaks secret scan` job and the `merge gate` job conclude `failure`. The canary is synthetic and carries no credential; the branch and the pull request are deleted when the control finishes. The always-on half of the same proof is the contract test `infra/cloud/scripts/tests/secret-scan-enforcement.test.sh`, which runs inside the `gitleaks` job itself.
+
+#### The config itself was inert until task `2b3962b1`
+
+Turning the gate on exposed two defects in `.gitleaks.toml` that had been masked by the gate never running at all. Both are fixed in the same change, because a green gate over a scan that detects nothing is not enforcement:
+
+- **`[extend]` never loaded the default ruleset.** `useDefault` has defaulted to **false** since gitleaks v8.19, and the `[extend]` table set no keys, so the config shipped with *no* rules at all. The comment above the table claimed the bundled ruleset was in use. With the default ruleset loaded, the scan detects the secrets it claims to detect — for example a `API_KEY=sk_live_…` line, which the previous config did not flag at all.
+- **A rule's pattern is read from `regex` (singular); the plural `regexes` form is ignored.** The two per-rule overrides that aimed at empty `.env.example` placeholders therefore carried a path and no pattern, and one of them shadowed the built-in `generic-api-key` rule for the whole repository. They have been removed — the global allowlist already covers the `.env.example` path and the empty-assignment shape they were written for, so removing them restores the bundled rules at full strength instead of narrowing them. (An allowlist does legitimately use the plural `regexes` form; only a *rule* does not.)
+
+The corrected config was measured against the tracked tree at `main` before it was enabled: **zero** findings across all 1356 tracked files, so switching the default ruleset on does not retroactively redden the repository. The findings it does surface are in gitignored local development files (`.vercel/`, `*.env.local`, `*.env.prodlike`) — local machine state, not repository history — which is why the gate scans the change rather than the tree. A repository-wide triage of history remains the M2 follow-up of task `2b3962b1`; the contract test now guards all three facts (the default ruleset is loaded, no rule uses the ignored plural field, and the canary rule exists) so the config cannot silently go inert again.
 
 ### The expected set is derived, not hand-maintained
 

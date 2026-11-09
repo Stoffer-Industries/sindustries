@@ -44,8 +44,10 @@ gate = jobs.get('merge-gate', {})
 # is no verification job whose failure is allowed to not block release.
 # Adding a name here is a security-posture decision and requires a tech
 # design, same as this one. Do NOT use `continue-on-error` as the
-# advisory marker — it already means fail-open on `gitleaks` (W43 F2,
-# needs-human-decision) and that is a known gap, not a pattern to copy.
+# advisory marker: it means fail-open, and the one job that used it
+# (`gitleaks`) is now blocking by construction — its scan runs through
+# `infra/cloud/scripts/run-secret-scan.sh`, which exits non-zero on a
+# finding, a missing binary, a missing config and an empty scan scope.
 ADVISORY_VERIFICATION_JOBS = frozenset()
 
 # Verified live 2026-10-24 via
