@@ -336,6 +336,37 @@ hardcoded repo. The default set is `DEFAULT_SCANNED_REPOS`:
 repo name is a hard error, never a silent skip — a silently skipped repo is the
 same "empty list means no coverage" false-clean shape in miniature.
 
+### GitHub credential resolution in the agent queue
+
+The queue authenticates each agent's GitHub calls through the shared wrapper
+(`agents/lib/github-cli.sh`), which strips ambient `GITHUB_TOKEN`/`GH_TOKEN` and
+proxy variables and then presents the caller's own token as `GH_TOKEN`. The
+per-agent token env var (`ROWAN_GITHUB_TOKEN` and friends) wins over the
+keyring credential at `GH_CONFIG_DIR`, because `gh` prefers an env token.
+
+That precedence is a failure mode when the token is **stale** — rotated or
+revoked out from under a long-lived session. Every call then fails with
+`Bad credentials (HTTP 401)`, PR hydration degrades, and the queue reports no
+PR work at all: the same false-negative shape as an unprovisioned profile, but
+with a different cause and a different fix.
+
+`_gh_api` therefore probes the token once per process (`gh api user`, through
+the same wrapper and the same environment a real call would use) before
+injecting it. A rejected token is dropped, the call falls through to the
+keyring credential at `GH_CONFIG_DIR`, and the reason is printed to stderr:
+
+```
+[agent_task_queue] WARN: ROWAN_GITHUB_TOKEN env token failed the gh auth probe
+(gh: Bad credentials (HTTP 401)); falling back to the GH_CONFIG_DIR=~/.config/gh-rowan
+keyring credential
+```
+
+The probe runs once per process, not once per endpoint, so the ~36-call
+hydration fan-out pays for it once. Token-shaped substrings are redacted from
+the WARN. This is read-path resilience only — refreshing the stale value in
+`~/.openclaw/.env` and restarting the session remains the operator's fix. Runbook:
+`infra/runbooks/agent-github-identity-profile-unprovisioned.md`.
+
 PR numbers are repo-scoped, so every emitted PR item carries its repository:
 
 ```jsonc

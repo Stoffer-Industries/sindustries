@@ -8,6 +8,18 @@ shipped_date: null
 
 # Stale GitHub env token must not silently empty the agent task queue — tech design
 
+> **Scope note (2026-11-10).** This task already carried a
+> `[tech-design-not-required]` waiver (the spec author embedded the design and
+> the patch in the task description) and Quinn's structured `tech_design`
+> approval of 2026-10-10. The implementation on this branch therefore follows
+> the **approved minimal scope** — a probe-and-fallback inside `_gh_api`, plus
+> its test ladder and the runbook/system-doc updates — and deliberately does
+> **not** implement the wider shared-helper boundary described below. The
+> shared helper in `agents/lib/github_cli.py`, the `credentialSource` envelope
+> field, and the identity-mismatch hard-degrade are proposed here for a
+> follow-up task and need their own approval; this document records the
+> reasoning, not a commitment to that shape.
+
 ## Product spec link
 
 - Product spec: inline in the task description (no brain spec file). Task `76f00654` — "🔧 Harden agent_task_queue.py: probe-and-fallback on 401 instead of unconditional env-injection". Spec authored by Lox at Rowan's explicit ask; Rowan owns implementation and review.
