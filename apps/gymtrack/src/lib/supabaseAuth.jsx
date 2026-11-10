@@ -105,6 +105,11 @@ export function SupabaseAuthProvider({ children }) {
        * error, providerDisabled }` envelope as the Clerk implementation
        * so callers (SignUpPage / LoginScreen) can branch without
        * re-implementing the heuristic.
+       *
+       * `data.redirecting` is the provider-agnostic "the browser is
+       * navigating" signal shared with the Clerk implementation. Supabase
+       * additionally returns `data.url`, which the page assigns to
+       * `window.location`.
        */
       async startOAuthRedirect(provider, redirectPath = '/workout') {
         const { data, error } = await supabase.auth.signInWithOAuth({
@@ -115,7 +120,7 @@ export function SupabaseAuthProvider({ children }) {
         });
         const providerDisabled = !!error && isProviderDisabledError(error);
         return {
-          data,
+          data: data ? { ...data, redirecting: true } : null,
           error: error ?? null,
           providerDisabled
         };

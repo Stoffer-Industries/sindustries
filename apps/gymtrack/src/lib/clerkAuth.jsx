@@ -354,8 +354,10 @@ export function ClerkAuthProvider({ children }) {
       const strategy = clerkStrategyForProvider(provider);
       const redirectUrl = new URL(redirectPath, window.location.origin).toString();
       const redirectCallbackUrl = new URL('/sso-callback', window.location.origin).toString();
-      rememberClerkSsoDestination(redirectPath);
       try {
+        // Inside the try: the destination write is best-effort storage and
+        // must never escape as an unhandled rejection (task 7e7826c5).
+        rememberClerkSsoDestination(redirectPath);
         const { error } = await clerkSignIn.sso({
           strategy,
           redirectUrl,
@@ -370,7 +372,15 @@ export function ClerkAuthProvider({ children }) {
             providerDisabled: false
           };
         }
-        return { data: { provider }, error: null, providerDisabled: false };
+        // `redirecting` is the provider-agnostic "the browser is navigating"
+        // signal. Clerk owns the navigation, so there is no `data.url` here;
+        // the shared useOAuthRedirect() hook uses this flag to show
+        // intermediate feedback and to bound the silent-no-op case.
+        return {
+          data: { provider, redirecting: true },
+          error: null,
+          providerDisabled: false
+        };
       } catch (err) {
         clearClerkSsoDestination();
         reportClerkError(err, `oauth_${provider}_throw`);
