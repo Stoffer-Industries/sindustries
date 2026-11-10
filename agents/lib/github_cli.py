@@ -16,9 +16,12 @@ from agents.lib.subprocess_safe import safe_run
 
 
 _WRAPPER = Path(__file__).with_name("github-cli.sh")
-_PROBE_TIMEOUT_SECONDS: Final = 5.0
+# Credential probes authorise the same GitHub API calls they precede. Keep
+# their timeout at least as generous as the endpoint timeout so a slow link
+# cannot make the probe fail while the endpoint it guards would have worked.
+GITHUB_CLI_REQUEST_TIMEOUT_SECONDS: Final = 10.0
 _TOKEN_REDACTION_RE = re.compile(
-    r"(gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"
+    r"(gh[epousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"
 )
 
 CredentialSource = str
@@ -129,7 +132,7 @@ def _probe_login(
     config_dir: str,
     token: str | None,
     *,
-    timeout_seconds: float = _PROBE_TIMEOUT_SECONDS,
+    timeout_seconds: float = GITHUB_CLI_REQUEST_TIMEOUT_SECONDS,
 ) -> _ProbeResult:
     """Resolve the active GitHub login for one candidate credential.
 
@@ -243,8 +246,14 @@ def resolve_gh_credentials(
     rotated token is re-probed. A per-key lock with double-checked locking
     keeps the threaded PR-hydration fan-out from issuing duplicate probes.
     """
+    expected = expected_login.strip()
+    if not expected:
+        # Identity enforcement is a security boundary, not an optional hint.
+        # Without a known expected login there is no safe attribution target.
+        return GhCredentials("none", None, None, "unknown-identity")
+
     token = os.environ.get(token_env)
-    key = _credential_cache_key(config_dir, token_env, expected_login, token)
+    key = _credential_cache_key(config_dir, token_env, expected, token)
     with _CREDENTIAL_CACHE_LOCK:
         cached = _CREDENTIAL_CACHE.get(key)
     if cached is not None:
@@ -260,7 +269,7 @@ def resolve_gh_credentials(
         resolved = _resolve_credentials_uncached(
             config_dir,
             token_env,
-            expected_login,
+            expected,
             token,
         )
         with _CREDENTIAL_CACHE_LOCK:
@@ -276,6 +285,7 @@ def _reset_credential_cache_for_tests() -> None:
 
 
 __all__ = [
+    "GITHUB_CLI_REQUEST_TIMEOUT_SECONDS",
     "GhCredentials",
     "gh_command",
     "gh_env",

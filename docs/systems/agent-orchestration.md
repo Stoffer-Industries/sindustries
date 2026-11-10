@@ -502,14 +502,20 @@ be able to tell them apart.
 
 - `credentialSource` is `none` in the queue envelope: read `credentialReason`
   first. `identity-mismatch` means the credential belongs to another GitHub
-  account; `no-valid-credential` means neither the env token nor the keyring
-  authenticated; `probe-error` means the probe itself failed (network, timeout,
-  or a non-authentication error) — check connectivity before rotating anything.
+  account; `identity-unprovisioned` means the agent has neither a profile nor
+  a token and no probe was attempted; `unknown-identity` means no expected
+  GitHub login could be derived, so attribution was refused; `no-valid-credential`
+  means neither the env token nor the keyring authenticated; `probe-error`
+  means the probe itself failed (network, timeout, or a non-authentication
+  error) — check connectivity before rotating anything.
 - A probe that times out is reported as `probe-error`, not as a stale token.
   The probe runs through the shared wrapper so ambient credentials cannot make
-  a keyring-only check succeed for the wrong identity.
+  a keyring-only check succeed for the wrong identity. Its timeout is shared
+  with the GitHub endpoint timeout, so a slow link cannot make the probe fail
+  while the endpoint it authorises would have succeeded.
 - Probe diagnostics are redacted: the exact token and any token-shaped
-  substring are replaced before the detail reaches a log line.
+  substring — including GitHub Enterprise (`ghe_`) tokens — are replaced
+  before the detail reaches a log line.
 
 ### Shared subprocess helper
 
