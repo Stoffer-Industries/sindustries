@@ -42,6 +42,8 @@ vi.mock('./supabase.js', () => ({
 import { ClerkAuthProvider } from './clerkAuth.jsx';
 import { AuthContext } from './authContext.jsx';
 
+let oauthResult = null;
+
 function Harness() {
   const auth = useContext(AuthContext);
   const [message, setMessage] = useState('');
@@ -75,8 +77,8 @@ function Harness() {
       </button>
       <button
         onClick={async () => {
-          const result = await auth.startOAuthRedirect('google', '/history');
-          setMessage(result.error?.message ?? 'redirecting');
+          oauthResult = await auth.startOAuthRedirect('google', '/history');
+          setMessage(oauthResult.error?.message ?? 'redirecting');
         }}
       >
         google
@@ -96,6 +98,7 @@ function renderProvider() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  oauthResult = null;
   mocks.signIn.status = 'needs_identifier';
   mocks.signIn.createdSessionId = null;
   mocks.signIn.create.mockResolvedValue({ error: null });
@@ -218,6 +221,46 @@ describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
       redirectUrl: 'http://localhost:3000/history',
       redirectCallbackUrl: 'http://localhost:3000/sso-callback'
     });
+  });
+
+  it('publishes the redirecting signal when the SSO redirect is accepted', async () => {
+    mocks.signIn.sso.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'google' }));
+
+    await screen.findByText('redirecting');
+    expect(oauthResult.data.redirecting).toBe(true);
+    expect(oauthResult.data.provider).toBe('google');
+    expect(oauthResult.error).toBeNull();
+    expect(oauthResult.providerDisabled).toBe(false);
+  });
+
+  it('returns an envelope instead of rejecting when sessionStorage is unavailable', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+    mocks.signIn.sso.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'google' }));
+
+    expect(await screen.findByText('redirecting')).toBeVisible();
+    expect(oauthResult.error).toBeNull();
+    expect(oauthResult.data.redirecting).toBe(true);
+    expect(mocks.signIn.sso).toHaveBeenCalled();
+  });
+
+  it('returns an error envelope when the provider rejects', async () => {
+    mocks.signIn.sso.mockRejectedValue(new Error('Clerk is unavailable'));
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'google' }));
+
+    // The provider's own message wins over the generic fallback.
+    expect(await screen.findByText('Clerk is unavailable')).toBeVisible();
+    expect(oauthResult.error).toBeInstanceOf(Error);
+    expect(oauthResult.providerDisabled).toBe(false);
   });
 
   it('starts email verification after a password sign-up remains incomplete', async () => {
