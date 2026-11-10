@@ -328,15 +328,34 @@ export function otlpEndpoint() {
 }
 
 /**
+ * Normalize the optional context fields to the same sentinel the stream
+ * labels use ('none').
+ *
+ * The labels and the log body MUST agree. The hosted Grafana Cloud
+ * tenant only reliably indexes `service_name`, so the dashboard reads
+ * every other field with `| json` out of the body. A body that carried
+ * `"errorCode": null` while the label said `errorCode="none"` would
+ * give an operator two different answers for the same event depending
+ * on which surface they queried.
+ */
+function normalizedEvent(sanitized) {
+  return {
+    ...sanitized,
+    provider: sanitized.provider ?? 'none',
+    errorCode: sanitized.errorCode ?? 'none',
+    status: sanitized.status ?? 'none',
+    source: sanitized.source ?? 'browser'
+  };
+}
+
+/**
  * Build the OTLP/HTTP JSON body for an OTLP/logs push.
  *
  * Per Quinn's PR #836 review constraint #3 (2026-10-21 22:20Z): the
  * `app` and `source` keys MUST be emitted as RESOURCE attributes, not
  * log-record attributes. Loki's OTLP ingestion promotes resource
  * attributes into indexed stream labels; log-record attributes land in
- * structured metadata, which a LogQL stream selector cannot match. So
- * the operator query `{app="gymtrack", source="browser"}` only returns
- * rows if these are resource attributes.
+ * structured metadata, which a LogQL stream selector cannot match.
  *
  * The rest of the Loki stream-label set is emitted as resource
  * attributes too, deliberately and not incidentally: the dashboard's
@@ -346,21 +365,41 @@ export function otlpEndpoint() {
  * aggregations — a silent degradation that reads as "no errors
  * happened" rather than "the labels are in the wrong place".
  *
+ * `service.name` / `service_name` (live production evidence, Quinn,
+ * 2026-11-10, on the hosted Grafana Cloud tenant): the tenant indexes
+ * `service_name` and nothing else reliably. Events pushed without a
+ * service name landed under `service_name="unknown_service"`, and the
+ * documented operator selector `{app="gymtrack", source="browser"}`
+ * matched nothing — partly because `source` is the EVENT source
+ * (`auth`, `window.error`, `unhandledrejection`), never the literal
+ * string `browser`, and partly because `app` was not usable as an
+ * indexed selector on that tenant. `service.name` is the OpenTelemetry
+ * semantic convention for the service identity and is what Grafana
+ * Cloud promotes to the indexed `service_name` label; the literal
+ * `service_name` resource attribute keeps the contract intact on
+ * tenants that promote resource attributes verbatim.
+ *
  * The log record body carries the sanitized event as a JSON string so
  * the browser-side redaction / allow-list / dedupe contract survives
- * the transport switch unchanged.
+ * the transport switch unchanged. The body's optional fields use the
+ * same 'none' sentinel as the labels (`normalizedEvent()`), so the
+ * `| json` path the dashboard reads returns the same values the labels
+ * advertise.
  */
 export function buildOtlpLogsPayload(sanitized) {
+  const event = normalizedEvent(sanitized);
   const resourceAttributes = [
+    { key: 'service.name', value: { stringValue: 'gymtrack' } },
+    { key: 'service_name', value: { stringValue: 'gymtrack' } },
     { key: 'app', value: { stringValue: 'gymtrack' } },
-    { key: 'source', value: { stringValue: sanitized.source ?? 'browser' } },
-    { key: 'environment', value: { stringValue: sanitized.environment } },
-    { key: 'release', value: { stringValue: sanitized.release } },
-    { key: 'route', value: { stringValue: sanitized.route } },
-    { key: 'operation', value: { stringValue: sanitized.operation } },
-    { key: 'provider', value: { stringValue: sanitized.provider ?? 'none' } },
-    { key: 'errorCode', value: { stringValue: sanitized.errorCode ?? 'none' } },
-    { key: 'status', value: { stringValue: sanitized.status ?? 'none' } }
+    { key: 'source', value: { stringValue: event.source } },
+    { key: 'environment', value: { stringValue: event.environment } },
+    { key: 'release', value: { stringValue: event.release } },
+    { key: 'route', value: { stringValue: event.route } },
+    { key: 'operation', value: { stringValue: event.operation } },
+    { key: 'provider', value: { stringValue: event.provider } },
+    { key: 'errorCode', value: { stringValue: event.errorCode } },
+    { key: 'status', value: { stringValue: event.status } }
   ];
 
   return {
@@ -374,7 +413,7 @@ export function buildOtlpLogsPayload(sanitized) {
               {
                 timeUnixNano: `${Date.now()}000000`,
                 severityText: 'ERROR',
-                body: { stringValue: JSON.stringify(sanitized) }
+                body: { stringValue: JSON.stringify(event) }
               }
             ]
           }
@@ -389,29 +428,38 @@ export function buildOtlpLogsPayload(sanitized) {
  *
  * The stream labels are the same set documented in
  * `docs/systems/observability.md` § Browser-side error telemetry —
- * `app`, `source`, and the safe-context fields. Operators query them
- * with `{app="gymtrack", source="browser"}`.
+ * `service_name`, `app`, `source`, and the safe-context fields.
+ * Operators query them with `{service_name="gymtrack"}` and read the
+ * per-event fields with `| json` (see `buildOtlpLogsPayload()` for the
+ * live evidence behind that contract).
+ *
+ * `source` is the EVENT source (`auth`, `window.error`,
+ * `unhandledrejection`) — it was previously hardcoded to `browser`
+ * here while the OTLP path carried the real value, so the two
+ * transports disagreed about the same event.
  *
  * Extracted from the inline handler expression so the OTLP and Loki
  * branches share the same dispatch and the payload shapes are unit
  * tested directly.
  */
 export function buildLokiPayload(sanitized) {
+  const event = normalizedEvent(sanitized);
   return {
     streams: [
       {
         stream: {
+          service_name: 'gymtrack',
           app: 'gymtrack',
-          source: 'browser',
-          environment: sanitized.environment,
-          release: sanitized.release,
-          route: sanitized.route,
-          operation: sanitized.operation,
-          provider: sanitized.provider ?? 'none',
-          errorCode: sanitized.errorCode ?? 'none',
-          status: sanitized.status ?? 'none'
+          source: event.source,
+          environment: event.environment,
+          release: event.release,
+          route: event.route,
+          operation: event.operation,
+          provider: event.provider,
+          errorCode: event.errorCode,
+          status: event.status
         },
-        values: [[`${Date.now()}000000`, JSON.stringify(sanitized)]]
+        values: [[`${Date.now()}000000`, JSON.stringify(event)]]
       }
     ]
   };

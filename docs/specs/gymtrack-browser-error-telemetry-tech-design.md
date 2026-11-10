@@ -8,6 +8,8 @@ shipped_date: null
 
 # GymTrack Browser Error Telemetry → Grafana — Tech Design
 
+> **Correction — label contract (2026-11-11).** The operator query written into this design, `{app="gymtrack", source="browser"}`, does not match anything on the hosted Grafana Cloud tenant, and the sections below still quote it as the current contract. Live production evidence (Quinn, 2026-11-10) showed the tenant indexes `service_name` only — events pushed without a service name landed under `service_name="unknown_service"` — and `source` is the **event** source (`auth`, `window.error`, `unhandledrejection`), never the literal string `browser`. The relay now emits the service identity (`service.name` + `service_name` resource attributes, and a `service_name` stream label on the Loki push path), and the operator query is **`{service_name="gymtrack"}`** with the per-event fields read from the sanitized JSON body via `| json`. The authoritative contract now lives in `docs/systems/observability.md` § "Browser-side error telemetry"; the quoted selector below is historical design intent, not the shipped operator path.
+
 ## Product spec link
 
 - Task: `e89db27f-6d78-418e-91c1-0759f8779d06` (💻 Add GymTrack browser error telemetry to Grafana)
