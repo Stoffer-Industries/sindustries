@@ -18,10 +18,11 @@ const mocks = vi.hoisted(() => ({
   signUp: {
     status: 'missing_requirements',
     createdUserId: null,
+    createdSessionId: null,
     password: vi.fn(),
     finalize: vi.fn(),
     reset: vi.fn(),
-    verifications: { sendEmailCode: vi.fn() }
+    verifications: { sendEmailCode: vi.fn(), verifyEmailCode: vi.fn() }
   }
 }));
 
@@ -43,6 +44,7 @@ import { ClerkAuthProvider } from './clerkAuth.jsx';
 import { AuthContext } from './authContext.jsx';
 
 let oauthResult = null;
+let signupResult = null;
 
 function Harness() {
   const auth = useContext(AuthContext);
@@ -69,11 +71,19 @@ function Harness() {
       </button>
       <button
         onClick={async () => {
-          const result = await auth.signUp('person@example.com', 'valid-password');
-          setMessage(result.error?.message ?? 'signed-up');
+          signupResult = await auth.signUp('person@example.com', 'valid-password');
+          setMessage(signupResult.error?.message ?? 'signed-up');
         }}
       >
         sign up
+      </button>
+      <button
+        onClick={async () => {
+          const result = await auth.verifySignUpCode('123456');
+          setMessage(result.error?.message ?? 'signup-verified');
+        }}
+      >
+        verify signup
       </button>
       <button
         onClick={async () => {
@@ -99,6 +109,7 @@ function renderProvider() {
 beforeEach(() => {
   vi.clearAllMocks();
   oauthResult = null;
+  signupResult = null;
   mocks.signIn.status = 'needs_identifier';
   mocks.signIn.createdSessionId = null;
   mocks.signIn.create.mockResolvedValue({ error: null });
@@ -106,8 +117,10 @@ beforeEach(() => {
   mocks.signIn.supportedSecondFactors = [];
   mocks.signUp.status = 'missing_requirements';
   mocks.signUp.createdUserId = null;
+  mocks.signUp.createdSessionId = null;
   mocks.signUp.reset.mockResolvedValue({ error: null });
   mocks.signUp.verifications.sendEmailCode.mockResolvedValue({ error: null });
+  mocks.signUp.verifications.verifyEmailCode.mockResolvedValue({ error: null });
 });
 
 afterEach(() => {
@@ -285,5 +298,76 @@ describe('ClerkAuthProvider Clerk v6 custom-flow contract', () => {
 
     expect(screen.getByText('Security check timed out. Please retry.')).toBeVisible();
     expect(mocks.signUp.reset).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * The sign-up verification contract (task 6e9410d5).
+ *
+ * Before this task, `signUp` returned `pendingVerification: true` and the
+ * page ignored it — the account was created, the emailed code was thrown
+ * away, and the user was navigated to a protected route that bounced them
+ * straight back to /login. The contract now says explicitly that a
+ * verification step is required, and `verifySignUpCode` completes it.
+ */
+describe('ClerkAuthProvider sign-up verification contract (task 6e9410d5)', () => {
+  it('reports that a verification step is required when the address is not verified yet', async () => {
+    mocks.signUp.password.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign up' }));
+
+    await waitFor(() => expect(mocks.signUp.verifications.sendEmailCode).toHaveBeenCalledOnce());
+    expect(signupResult.data).toEqual({
+      needsVerification: true,
+      verificationMode: 'signup_email_code'
+    });
+    expect(signupResult.error).toBeNull();
+  });
+
+  it('reports that no verification step is required when a session is issued immediately', async () => {
+    mocks.signUp.password.mockImplementation(async () => {
+      mocks.signUp.status = 'complete';
+      mocks.signUp.createdUserId = 'user_fixture';
+      return { error: null };
+    });
+    mocks.signUp.finalize.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sign up' }));
+
+    await screen.findByText('signed-up');
+    expect(signupResult.data).toEqual({
+      user: 'user_fixture',
+      needsVerification: false
+    });
+  });
+
+  it('verifies the emailed code and finalizes the sign-up session', async () => {
+    mocks.signUp.verifications.verifyEmailCode.mockImplementation(async () => {
+      mocks.signUp.status = 'complete';
+      mocks.signUp.createdSessionId = 'sess_signup_verified';
+      return { error: null };
+    });
+    mocks.signUp.finalize.mockResolvedValue({ error: null });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'verify signup' }));
+
+    expect(await screen.findByText('signup-verified')).toBeVisible();
+    expect(mocks.signUp.verifications.verifyEmailCode).toHaveBeenCalledWith({ code: '123456' });
+    expect(mocks.signUp.finalize).toHaveBeenCalledOnce();
+  });
+
+  it('does not finalize the sign-up session when the code is rejected', async () => {
+    mocks.signUp.verifications.verifyEmailCode.mockResolvedValue({
+      error: { longMessage: 'That code is not valid.' }
+    });
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'verify signup' }));
+
+    expect(await screen.findByText('That code is not valid.')).toBeVisible();
+    expect(mocks.signUp.finalize).not.toHaveBeenCalled();
   });
 });
