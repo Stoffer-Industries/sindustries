@@ -4,11 +4,34 @@ import { createContext, useContext } from 'react';
  * Shared AuthContext for both SupabaseAuthProvider and ClerkAuthProvider.
  *
  * The two providers expose the same shape (`{ session, user, loading,
- * signIn, signUp, signOut, startOAuthRedirect }`) so consumers (`useAuth`)
- * can read from either implementation. Provider-internal state management
+ * signIn, signUp, verifySignInCode, verifySignUpCode, signOut,
+ * startOAuthRedirect }`) so consumers (`useAuth`) can read from either
+ * implementation. Provider-internal state management
  * (Supabase listener wiring vs Clerk hook consumption) lives in the
  * respective provider module — this file owns only the context object and
  * the hook.
+ *
+ * Sign-up contract (both providers):
+ *
+ *   - `signUp(email, password) -> { data, error }`
+ *       `data.needsVerification === true` means the account was created but
+ *       its email address is not verified yet, so NO session exists. The
+ *       page must render a code-entry step. `data.verificationMode` names
+ *       the verification mechanism ('signup_email_code' for both
+ *       providers today). When a session is issued immediately,
+ *       `data.needsVerification === false`.
+ *   - `verifySignUpCode(code) -> { data, error }`
+ *       Completes the pending sign-up with the emailed one-time code and
+ *       returns `{ data: { session } }`. The page never supplies the email
+ *       address — each provider already owns the pending sign-up attempt
+ *       (Clerk's `signUp` resource; Supabase's stored email + token) — so
+ *       the view never becomes a second source of truth for it.
+ *
+ * `verifySignUpCode` is deliberately separate from `verifySignInCode`:
+ * the sign-in code and the sign-up code live on different provider
+ * resources (`signIn` vs `signUp`) and are different OTP types, so folding
+ * them into one method would put a provider-shaped switch in this shared
+ * contract.
  *
  * `startOAuthRedirect(provider, redirectPath)` contract (both providers):
  *

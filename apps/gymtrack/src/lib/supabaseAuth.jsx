@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, setSupabaseAccessTokenGetter } from './supabase.js';
 import { AuthContext } from './authContext.jsx';
 import { isProviderDisabledError } from './authFlow.js';
@@ -48,6 +48,20 @@ export function SupabaseAuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   /**
+   * The email address of the sign-up attempt that is awaiting a
+   * verification code.
+   *
+   * Supabase's `verifyOtp` needs the email alongside the token, but the
+   * provider-agnostic contract deliberately does not take one — the page
+   * must not become a second source of truth for the pending sign-up.
+   * The provider therefore remembers the address it was given at sign-up
+   * time and consumes it when the code is verified. A ref (not state) is
+   * correct here: it is provider-internal bookkeeping, and writing it must
+   * not re-create the context value for every consumer.
+   */
+  const pendingSignupEmailRef = useRef(null);
+
+  /**
    * Ensure no stale Clerk access-token getter is wired into the supabase-js
    * singleton. Supabase manages its own bearer token via the persisted
    * session; the Clerk getter is only relevant when ClerkAuthProvider is
@@ -91,8 +105,53 @@ export function SupabaseAuthProvider({ children }) {
       },
       async signUp(email, password) {
         const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) reportAuthError(error, supabaseSafeContext(error, 'signup'));
-        return { data, error };
+        if (error) {
+          reportAuthError(error, supabaseSafeContext(error, 'signup'));
+          return { data: null, error };
+        }
+        // A project with email confirmation enabled returns a user but NO
+        // session — the account exists but is not usable until the emailed
+        // code is verified. That is the case SignUpPage must render a code
+        // field for (task 6e9410d5). A project with auto-confirm returns a
+        // session straight away.
+        const needsVerification = data?.user != null && data?.session == null;
+        if (needsVerification) {
+          pendingSignupEmailRef.current = email;
+          return {
+            data: { needsVerification: true, verificationMode: 'signup_email_code' },
+            error: null
+          };
+        }
+        pendingSignupEmailRef.current = null;
+        return { data: { needsVerification: false }, error: null };
+      },
+      /**
+       * Verify the one-time code emailed when the account was created.
+       *
+       * Contract: `verifySignUpCode(code) -> { data: { session }, error }`.
+       * The email address comes from the provider's own pending-sign-up
+       * state, so the page stays provider-agnostic and matches the Clerk
+       * implementation's shape exactly.
+       */
+      async verifySignUpCode(code) {
+        const email = pendingSignupEmailRef.current;
+        if (!email) {
+          return {
+            data: null,
+            error: new Error('This verification code is no longer valid. Please sign up again.')
+          };
+        }
+        const { data, error } = await supabase.auth.verifyOtp({
+          email,
+          token: code,
+          type: 'signup'
+        });
+        if (error) {
+          reportAuthError(error, supabaseSafeContext(error, 'verify_signup_code'));
+          return { data: null, error: new Error(error.message) };
+        }
+        pendingSignupEmailRef.current = null;
+        return { data: { session: data?.session ?? null }, error: null };
       },
       async signOut() {
         const { error } = await supabase.auth.signOut();
