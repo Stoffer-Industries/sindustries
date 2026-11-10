@@ -7,6 +7,7 @@ vi.mock('../lib/supabase.js', () => ({ supabase: { auth: { getUser: vi.fn(), onA
 
 const mockSignIn = vi.fn();
 const mockVerifySignInCode = vi.fn();
+const mockStartOAuthRedirect = vi.fn();
 vi.mock('../lib/auth.jsx', () => ({
   useAuth: () => ({
     session: null,
@@ -15,12 +16,17 @@ vi.mock('../lib/auth.jsx', () => ({
     signIn: mockSignIn,
     verifySignInCode: mockVerifySignInCode,
     signUp: vi.fn(),
-    signOut: vi.fn()
+    signOut: vi.fn(),
+    startOAuthRedirect: mockStartOAuthRedirect
   }),
   AuthProvider: ({ children }) => children
 }));
 
 import LoginScreen from './LoginScreen.jsx';
+
+// jsdom's window.location.assign is non-configurable; stub the global
+// `location` so the OAuth redirect path does not actually navigate.
+const mockLocationAssign = vi.fn();
 
 function renderLogin() {
   return render(
@@ -32,6 +38,7 @@ function renderLogin() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('location', { ...window.location, assign: mockLocationAssign });
 });
 
 describe('LoginScreen', () => {
@@ -94,5 +101,53 @@ describe('LoginScreen', () => {
     await user.type(screen.getByTestId('login-verification-code'), '654321');
     await user.click(screen.getByTestId('login-verify-submit'));
     expect(mockVerifySignInCode).toHaveBeenCalledWith('654321', 'first_factor_email_code');
+  });
+});
+
+describe('LoginScreen Google OAuth (task 7e7826c5)', () => {
+  it('navigates to the provider URL when the redirect starts (AC3)', async () => {
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: { url: 'https://accounts.google.com/o/oauth2/auth?client_id=fixture', redirecting: true },
+      error: null,
+      providerDisabled: false
+    });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.click(screen.getByTestId('login-google'));
+
+    expect(await screen.findByTestId('login-oauth-status')).toHaveTextContent('Redirecting to Google');
+    expect(mockLocationAssign).toHaveBeenCalledWith(
+      'https://accounts.google.com/o/oauth2/auth?client_id=fixture'
+    );
+  });
+
+  it('shows a visible inline error when the OAuth redirect throws (AC3)', async () => {
+    mockStartOAuthRedirect.mockRejectedValue(new Error('SecurityError: sessionStorage'));
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.click(screen.getByTestId('login-google'));
+
+    expect(await screen.findByTestId('login-error')).toHaveTextContent(
+      /Something went wrong starting Google sign-in/
+    );
+  });
+
+  it('removes the Google button and shows the not-available message when the provider is disabled (AC3)', async () => {
+    mockStartOAuthRedirect.mockResolvedValue({
+      data: null,
+      error: null,
+      providerDisabled: true
+    });
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.click(screen.getByTestId('login-google'));
+
+    expect(await screen.findByTestId('login-error')).toHaveTextContent(
+      'Sign-in with google is not available right now. Try another option.'
+    );
+    expect(screen.queryByTestId('login-google')).not.toBeInTheDocument();
   });
 });

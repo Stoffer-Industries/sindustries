@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import { oauthProviderLabel, useOAuthRedirect } from '../lib/useOAuthRedirect.js';
 import {
   DISABLED_OAUTH_PROVIDERS,
   SUPPORTED_OAUTH_PROVIDERS
@@ -34,7 +35,14 @@ const INITIAL_AVAILABLE_PROVIDERS = SUPPORTED_OAUTH_PROVIDERS.filter(
  * already exists; an empty-history state is rendered for fresh users.
  */
 export default function SignUpPage() {
-  const { session, signUp, startOAuthRedirect } = useAuth();
+  const { session, signUp } = useAuth();
+  const {
+    startOAuth,
+    pending: oauthPending,
+    error: oauthError,
+    redirecting,
+    provider: oauthProvider
+  } = useOAuthRedirect();
   const navigate = useNavigate();
   const location = useLocation();
   const fromState = location.state?.from;
@@ -57,21 +65,23 @@ export default function SignUpPage() {
 
   async function handleOAuth(provider) {
     setError(null);
-    const { data, error: oauthError, providerDisabled } =
-      await startOAuthRedirect(provider, from);
-    if (providerDisabled) {
+    // The shared hook owns the whole click contract: it never rejects, so a
+    // provider that throws surfaces as a visible message instead of an
+    // unhandled rejection (the silent no-op reported in task 7e7826c5).
+    const result = await startOAuth(provider, from);
+    if (result.providerDisabled) {
       // Mark this provider as disabled in the UI by removing it from the
       // available list so the button disappears on re-render.
       setAvailableProviders((prev) => prev.filter((p) => p !== provider));
       setError(`Sign-up with ${provider} is not available right now. Try another option.`);
       return;
     }
-    if (oauthError) {
-      setError(oauthError.message);
+    if (result.error) {
+      setError(result.error.message);
       return;
     }
-    if (data?.url) {
-      window.location.assign(data.url);
+    if (result.data?.url) {
+      window.location.assign(result.data.url);
     }
   }
 
@@ -87,6 +97,8 @@ export default function SignUpPage() {
     }
     navigate(from, { replace: true });
   }
+
+  const visibleError = error ?? (oauthError ? oauthError.message : null);
 
   return (
     <main className="container signup-screen">
@@ -105,6 +117,7 @@ export default function SignUpPage() {
             type="button"
             className="btn-primary oauth-google"
             onClick={() => handleOAuth('google')}
+            disabled={oauthPending}
             data-testid="signup-google"
           >
             Continue with Google
@@ -116,12 +129,28 @@ export default function SignUpPage() {
             type="button"
             className="btn-primary oauth-apple"
             onClick={() => handleOAuth('apple')}
+            disabled={oauthPending}
             data-testid="signup-apple"
           >
             Continue with Apple
           </button>
         ) : null}
+
+        {redirecting ? (
+          <p className="status show" role="status" data-testid="signup-oauth-status">
+            Redirecting to {oauthProviderLabel(oauthProvider)}…
+          </p>
+        ) : null}
       </div>
+
+      {/* Rendered outside the email panel on purpose: the panel is collapsed
+          by default, so an OAuth error shown inside it would be invisible —
+          another silent no-op (task 7e7826c5). */}
+      {visibleError ? (
+        <div className="status show error" role="alert" data-testid="signup-error">
+          {visibleError}
+        </div>
+      ) : null}
 
       {emailPanelOpen ? (
         <form onSubmit={handleSubmit} className="signup-form" data-testid="signup-form">
@@ -148,12 +177,6 @@ export default function SignUpPage() {
               data-testid="signup-password"
             />
           </label>
-
-          {error ? (
-            <div className="status show error" role="alert" data-testid="signup-error">
-              {error}
-            </div>
-          ) : null}
 
           {/* Clerk mounts its bot-protection challenge at this stable DOM id
               for custom sign-up flows. */}
