@@ -3,7 +3,7 @@
 // check (AC4 — CI deploy workflows use the stable hostnames; slice 3).
 //
 // Pure Node 22, no deps (uses node:test + node:assert). Exercises
-// scripts/check-deploy-workflow-stable-hostname.mjs on three cases:
+// scripts/check-deploy-workflow-stable-hostname.mjs on these cases:
 //   1. A synthetic tree with the tasks-api, budget-api, and
 //      content-scheduler-api deploy workflows all pointing at the
 //      matrix stable staging URLs passes the check.
@@ -12,6 +12,12 @@
 //      regressions where someone reverts the smoke URL to fly.dev).
 //   3. A synthetic tree missing the budget-api deploy workflow file
 //      fails the check on "deploy-staging-budget-api.yml not found".
+//   4. A synthetic tree whose deploy workflow contains a provider URL
+//      without a `<!-- stable-fallback -->` annotation fails the check.
+//      This is the regression guard for the branch that used to be dead:
+//      it compared one hard-coded production provider host that no
+//      workflow contains, so the provider URL that DOES appear went
+//      unchecked.
 //
 // Run with: node --test tests/cloud/tests/check-deploy-workflow-stable-hostname.test.mjs
 
@@ -167,6 +173,58 @@ test('synthetic tree: a required deploy workflow still targeting the provider UR
       combined,
       /smoke check does not target matrix stable URL/,
       `expected the smoke-url error, got: ${combined}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A workflow that carries a provider URL with no stable-fallback
+// annotation. The smoke URL is the stable hostname, so the only
+// provider-shaped URL in the file is the unannotated fallback.
+const TASKS_API_WORKFLOW_UNANNOTATED_PROVIDER = [
+  'name: Deploy tasks-api (Fly.io staging)',
+  'on:',
+  '  workflow_call:',
+  'jobs:',
+  '  deploy:',
+  '    steps:',
+  '      - name: Smoke check',
+  '        run: |',
+  '          set -euo pipefail',
+  '          echo "fallback: https://sindustries-tasks-api-staging.fly.dev/health"',
+  '          URL="https://tasks-api.staging.sindustries.co.nz/health"',
+  '          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do',
+  '            if curl --fail --silent --max-time 10 "$URL"; then',
+  '              exit 0',
+  '            fi',
+  '            sleep 5',
+  '          done',
+  '          exit 1',
+  '',
+].join('\n');
+
+test('synthetic tree: a provider URL without a stable-fallback annotation fails the check', async () => {
+  // AC4: provider-specific URLs remain only as documented migration or
+  // provider fallback paths. The old check compared a single hard-coded
+  // production provider host (`https://<providerFallback><healthPath>`)
+  // that no workflow contains, so this branch never fired and the
+  // provider URL that IS in the workflows went unvalidated.
+  const dir = makeTree([
+    ['infra/cloud/hostname-matrix.json', matrixFile(MINIMUM_API_SURFACES)],
+    ['.github/workflows/deploy-staging-tasks-api.yml', TASKS_API_WORKFLOW_UNANNOTATED_PROVIDER],
+    ['.github/workflows/deploy-staging-budget-api.yml', workflowFor('budget-api')],
+    ['.github/workflows/deploy-staging-content-scheduler-api.yml', workflowFor('content-scheduler-api')],
+  ]);
+  try {
+    let err;
+    try { await exec('node', [SCRIPT, dir]); } catch (e) { err = e; }
+    assert.ok(err, 'expected the script to fail on an unannotated provider URL');
+    const combined = (err.stderr || '') + (err.stdout || '');
+    assert.match(
+      combined,
+      /without a `<!-- stable-fallback -->` or `<!-- documented-migration -->` annotation/,
+      `expected the unannotated-provider-URL error, got: ${combined}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

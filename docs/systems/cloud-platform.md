@@ -378,6 +378,7 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 - The auto-post worker row with `staging: null`, `production: null`, and `publicUrl: false` — the explicit non-public nature is auditable from the matrix and from the per-hostname comment block at the top of `infra/cloud/fly/auto-post-worker.fly.toml`.
 - A `providerFallback` per public surface (the `*.fly.dev` / `*.vercel.app` URL the design records as the migration path until the stable CNAMEs + certs land).
 - A `cnameTargets` per public surface (the DNS target each stable hostname's CNAME must resolve to, per environment).
+- A `vercelEnvironments` per frontend surface (the Vercel environment each stable hostname's custom domain is bound to).
 
 `providerFallback` and `cnameTargets` are different things and are not interchangeable. `providerFallback` is the **production** provider host — the documented migration path. `cnameTargets` is the per-environment DNS target:
 
@@ -390,9 +391,25 @@ The full staging + production hostname matrix lives at [`infra/cloud/hostname-ma
 | content-scheduler-api | `sindustries-platform-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.staging.sindustries.co.nz --> | `sindustries-content-scheduler-api.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is content-scheduler-api.sindustries.co.nz --> |
 | health-probe | `sindustries-health-probe-staging.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.staging.sindustries.co.nz --> | `sindustries-health-probe.fly.dev` <!-- stable-fallback: provider CNAME target; the stable hostname is health-probe.sindustries.co.nz --> |
 
-The staging column differs from the production column because the staging topology differs from production: the three API surfaces are served by the one consolidated platform Fly app (task `219fb673`), and health-probe keeps its own staging Fly app. The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments — the domain-to-project binding lives in the Vercel project, not in DNS, so the frontend separation is evidenced by the HTTPS check rather than the CNAME target.
+The staging column differs from the production column because the staging topology differs from production: the three API surfaces are served by the one consolidated platform Fly app (task `219fb673`), and health-probe keeps its own staging Fly app.
 
-Asserting `providerFallback` against a staging hostname demands a CNAME to the **production** provider host. That is a cross-environment alias — the thing AC2 forbids — and no staging deployment serves it. The harness therefore reads `cnameTargets[environment]`; `tests/cloud/scripts/check-stable-hostname-matrix.mjs` additionally fails the build if a staging target equals a production target (Vercel's shared managed target excepted, since it carries no environment identity).
+The Vercel frontends CNAME to Vercel's shared managed custom-domain target in both environments. That target is the same for **every** Vercel project, so the DNS shape carries no environment identity at all for those two surfaces: the staging hostname and the production hostname of one project resolve to byte-identical DNS. The environment separation therefore lives in the Vercel environment each custom domain is bound to, which the matrix records as `vercelEnvironments`:
+
+| Surface | `vercelEnvironments.staging` | `vercelEnvironments.production` |
+| --- | --- | --- |
+| mission-control | `preview` | `production` |
+| tasks-app | `preview` | `production` |
+
+`tests/cloud/scripts/check-stable-hostname-matrix.mjs` asserts that the two stable hostnames bind to **different** Vercel environments and that both bindings match `infra/cloud/vercel-env-matrix.json`.
+
+**AC2 for the two frontends is verified at two different levels, and the weaker one must not be overstated:**
+
+- **Repo-verified (contract):** the staging stable hostname is bound to the project's staging Vercel environment and the production stable hostname to a different one; the staging environment's `VITE_*` API base URLs point at the staging API hostnames (asserted by `tests/cloud/scripts/check-vercel-env-matrix.mjs`).
+- **Operator-verified (Vercel — not repo-verified):** that the bound environment is actually serving a deployment built from the expected branch (`staging` for the preview environment, `main` for production).
+
+The HTTPS check does **not** distinguish a staging deployment from a production one — a production build served under the staging hostname returns a healthy 200. It is a reachability and certificate check, not an environment-separation check, and the docs must not describe it as the separator.
+
+Asserting `providerFallback` against a staging hostname demands a CNAME to the **production** provider host. That is a cross-environment alias — the thing AC2 forbids — and no staging deployment serves it. The harness therefore reads `cnameTargets[environment]`; `tests/cloud/scripts/check-stable-hostname-matrix.mjs` additionally fails the build if a staging target is **any** production target — the union of `cnameTargets.production` and `providerFallback`, because those two are deliberately allowed to diverge (task `020f423e` renames the production apps, so the CNAME target moves while the documented migration-path fallback stays). Vercel's shared managed target is excepted from the comparison, since it carries no environment identity.
 
 The static checks `tests/cloud/scripts/check-stable-hostname-matrix.mjs` and `tests/cloud/scripts/check-stable-url-fallbacks.mjs` enforce the matrix on every CI run; both pass on the committed tree at the time of writing.
 

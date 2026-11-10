@@ -211,7 +211,6 @@ of joining them silently.
 - `scripts/test/check-no-legacy-approval-marker.test.mjs` — the legacy approval-marker check; no CI job runs it
 - `tests/cloud/tests/check-cors-origin-matrix.test.mjs` — the stable-hostname CORS matrix check (task 5cb4a8fe slice 2); no CI job runs it
 - `tests/cloud/tests/check-deploy-workflow-stable-hostname.test.mjs` — the deploy-workflow hostname check (task 5cb4a8fe slice 3); no CI job runs it
-- `tests/cloud/tests/check-stable-hostname-matrix.test.mjs` — the stable-hostname matrix check (task 5cb4a8fe slice 1); no CI job runs it
 - `tests/cloud/tests/check-stable-url-fallbacks.test.mjs` — the provider-URL fallback check (task 5cb4a8fe slice 4); no CI job runs it
 - `tests/cloud/tests/check-vercel-env-matrix.test.mjs` — the Vercel environment matrix check (task 5cb4a8fe slice 5); no CI job runs it
 - `tests/cloud/tests/staging-db-migration-failure-drill.test.sh` — the staging database migration failure drill; it needs a live database, so it runs from the root `test:cloud-db` script rather than from CI

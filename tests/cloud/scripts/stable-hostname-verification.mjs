@@ -58,7 +58,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { argv, exit, stderr, stdout } from 'node:process';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCHEMA_VERSION = 1;
@@ -196,21 +196,54 @@ function expectedCnameTarget(surface, environment) {
 // Every production CNAME target in the matrix. A staging hostname that
 // resolves to one of these is aliasing staging onto production (AC2).
 //
+// The set is the UNION of two fields, because the two are deliberately
+// allowed to diverge:
+//
+//   - `cnameTargets.production` — the production CNAME target, and
+//   - `providerFallback` — the production provider host (the
+//     documented migration path).
+//
+// Taking only `cnameTargets.production` lets a staging hostname alias
+// `providerFallback` the moment the two diverge; taking only
+// `providerFallback` would miss a surface whose production CNAME target
+// moved but whose provider fallback did not. The union closes both gaps.
+//
 // Vercel's shared managed custom-domain target is excluded: it is
 // environment-agnostic by design (every Vercel custom domain CNAMEs to
 // it), so it carries no environment identity and cannot be a leak
 // signal. The staging/production separation for a Vercel surface lives
-// in the domain-to-project binding in the Vercel project, which the
-// HTTPS check exercises.
+// in the domain-to-environment binding in the Vercel project — which the
+// HTTPS check does NOT and cannot verify (see
+// docs/systems/cloud-platform.md).
 const VERCEL_MANAGED_CNAME_TARGET = 'cname.vercel-dns.com';
+
+// DNS is case-insensitive and a fully-qualified name may carry a
+// trailing root dot, so every host comparison normalises first. Leak
+// comparisons happen on a label boundary: a name like
+// "foo.sindustries-tasks-api.fly.dev" is a subdomain of the production
+// provider host and must be treated as the same production target
+// rather than an unrelated host that slips past the guard.
+function normalizeHost(host) {
+  return typeof host === 'string' ? host.trim().toLowerCase().replace(/\.+$/, '') : '';
+}
+
+function isSameOrSubdomain(host, other) {
+  const a = normalizeHost(host);
+  const b = normalizeHost(other);
+  if (!a || !b) return false;
+  return a === b || a.endsWith(`.${b}`);
+}
 
 function productionCnameTargets(matrix) {
   const out = new Set();
   for (const surface of matrix?.surfaces ?? []) {
-    const target = expectedCnameTarget(surface, 'production');
-    if (typeof target !== 'string' || target.length === 0) continue;
-    if (target === VERCEL_MANAGED_CNAME_TARGET) continue;
-    out.add(target);
+    const candidates = [expectedCnameTarget(surface, 'production'), surface?.providerFallback];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || candidate.length === 0) continue;
+      const key = normalizeHost(candidate);
+      if (!key || key === VERCEL_MANAGED_CNAME_TARGET) continue;
+      out.add(key);
+    }
   }
   return out;
 }
@@ -232,7 +265,7 @@ function makeRow(surface, environment, status, details, evidence) {
   };
 }
 
-async function checkDns(surface, environment, matrix) {
+async function checkDns(surface, environment, productionTargets) {
   // Uses node:dns/promises. The harness asserts the CNAME chain
   // terminates at the target the matrix records for THIS environment
   // (`cnameTargets[environment]`), NOT at `providerFallback`.
@@ -267,33 +300,65 @@ async function checkDns(surface, environment, matrix) {
       details: { expectedCnameTarget: expected ?? null, providerFallback: surface.providerFallback ?? null },
     };
   }
-  const target = records[0];
+
+  // The CNAME chain may contain more than one hop. The design (section 7)
+  // says the harness "expects the CNAME chain to terminate at the
+  // matching target", so the TERMINAL hop is what we compare: a provider
+  // that inserts an extra hop must not produce a false failure. The full
+  // chain is recorded in details.cnameChain so a reviewer can see it.
+  const cnameChain = records.map(normalizeHost);
+  const target = cnameChain[cnameChain.length - 1];
   if (!expected) {
     return {
       ok: false,
       evidence: `matrix records no ${environment} CNAME target for ${surface.id} (add cnameTargets.${environment} to infra/cloud/hostname-matrix.json)`,
-      details: { cnameTarget: target, expectedCnameTarget: null, providerFallback: surface.providerFallback ?? null },
+      details: { cnameChain, cnameTarget: target, expectedCnameTarget: null, providerFallback: surface.providerFallback ?? null },
     };
   }
   // AC2 guard: a staging hostname must never CNAME to a production
-  // provider target. Catch that before the equality check so the
-  // evidence names the cross-environment leak rather than a bare
-  // "expected X" mismatch.
-  if (environment !== 'production' && productionCnameTargets(matrix).has(target)) {
-    return {
-      ok: false,
-      evidence: `CNAME ${host} -> ${target} (${environment} hostname points at a PRODUCTION provider target — cross-environment leak)`,
-      details: { cnameTarget: target, expectedCnameTarget: expected, providerFallback: surface.providerFallback ?? null },
-    };
+  // provider target — at ANY hop, not just the terminal one, because a
+  // chain that passes through a production host is a leak regardless of
+  // where it ends. Catch that before the equality check so the evidence
+  // names the cross-environment leak rather than a bare "expected X"
+  // mismatch.
+  if (environment !== 'production') {
+    for (const hop of cnameChain) {
+      for (const productionTarget of productionTargets) {
+        if (!isSameOrSubdomain(hop, productionTarget)) continue;
+        return {
+          ok: false,
+          evidence: `CNAME ${host} -> ${records.join(' -> ')} (${environment} hostname resolves through PRODUCTION provider target "${productionTarget}" — cross-environment leak)`,
+          details: { cnameChain, cnameTarget: target, expectedCnameTarget: expected, providerFallback: surface.providerFallback ?? null },
+        };
+      }
+    }
   }
-  const matches = target === expected;
+  const matches = normalizeHost(target) === normalizeHost(expected);
   return {
     ok: matches,
     evidence: matches
-      ? `CNAME ${host} -> ${target}`
-      : `CNAME ${host} -> ${target} (expected ${expected})`,
-    details: { cnameTarget: target, expectedCnameTarget: expected, providerFallback: surface.providerFallback ?? null },
+      ? `CNAME ${host} -> ${records.join(' -> ')}`
+      : `CNAME ${host} -> ${records.join(' -> ')} (expected ${expected})`,
+    details: { cnameChain, cnameTarget: target, expectedCnameTarget: expected, providerFallback: surface.providerFallback ?? null },
   };
+}
+
+// The health path(s) each surface is probed at.
+//
+// AC5 names the Content Scheduler auto-post health endpoint explicitly:
+// "API health endpoints, the Content Scheduler auto-post health
+// endpoint, and representative authenticated staging workflows". That
+// endpoint is served by the content-scheduler-api surface (the auto-post
+// worker itself has no HTTP surface), so that surface is probed at both
+// its own /health and the auto-post health path.
+const HEALTH_PATHS_BY_SURFACE = {
+  'health-probe': ['/healthz'],
+  'content-scheduler-api': ['/health', '/api/v1/content-scheduler/auto-post/health'],
+};
+
+function healthPathsForSurface(surface) {
+  if (surface.kind === 'frontend') return ['/'];
+  return HEALTH_PATHS_BY_SURFACE[surface.id] ?? ['/health'];
 }
 
 async function checkHttps(surface, environment) {
@@ -302,27 +367,43 @@ async function checkHttps(surface, environment) {
   // returns 200. The harness does not parse the body shape (the
   // representative-workflow step in staging-workflows.mjs is the
   // authoritative body check).
+  //
+  // A surface may be probed at more than one health path (the Content
+  // Scheduler surface also carries the auto-post health endpoint). Every
+  // path is requested and every result is recorded, so one missing
+  // endpoint never hides the others.
   if (!surface[environment]) {
     return { ok: true, evidence: 'no public URL — skipped by design' };
   }
   const host = surface[environment];
-  const healthPath = surface.kind === 'frontend' ? '/' : surface.id === 'health-probe' ? '/healthz' : '/health';
-  const url = `https://${host}${healthPath}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  let response;
-  try {
-    response = await fetch(url, { signal: controller.signal, redirect: 'manual' });
-  } catch (err) {
+  const paths = healthPathsForSurface(surface);
+  const checks = [];
+  for (const path of paths) {
+    const url = `https://${host}${path}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(url, { signal: controller.signal, redirect: 'manual' });
+    } catch (err) {
+      clearTimeout(timer);
+      checks.push({ path, url, ok: false, status: null, error: redactMessage(err.message) });
+      continue;
+    }
     clearTimeout(timer);
-    return { ok: false, evidence: `fetch ${url} failed: ${redactMessage(err.message)}` };
+    const status = response.status;
+    checks.push({ path, url, ok: status >= 200 && status < 400, status });
   }
-  clearTimeout(timer);
-  const status = response.status;
-  if (status < 200 || status >= 400) {
-    return { ok: false, evidence: `fetch ${url} returned ${status}`, details: { status } };
-  }
-  return { ok: true, evidence: `fetch ${url} returned ${status}`, details: { status } };
+  const ok = checks.every((c) => c.ok);
+  const evidence = checks
+    .map((c) => (c.ok ? `fetch ${c.url} returned ${c.status}` : `fetch ${c.url} failed: ${c.error ?? `returned ${c.status}`}`))
+    .join(' | ');
+  const details = { checks };
+  // `status` is kept for the single-path case so existing consumers of
+  // details.status keep working; a multi-path surface carries the full
+  // per-path breakdown in details.checks instead.
+  if (checks.length === 1 && typeof checks[0].status === 'number') details.status = checks[0].status;
+  return { ok, evidence, details };
 }
 
 async function checkCorsPreflight(surface, environment, args) {
@@ -370,13 +451,13 @@ async function checkCorsPreflight(surface, environment, args) {
   };
 }
 
-async function runLiveChecks(surface, environment, args, matrix) {
+async function runLiveChecks(surface, environment, args, productionTargets) {
   // Live mode runs all three checks and reports each one. It does NOT
   // short-circuit on the first failure: a DNS failure used to hide the
   // HTTPS and CORS results behind it, so those stages stayed
   // unevidenced until DNS was fixed. The row still fails when any
   // check fails; it just now carries every stage's evidence.
-  const dnsCheck = await checkDns(surface, environment, matrix);
+  const dnsCheck = await checkDns(surface, environment, productionTargets);
   const httpsCheck = await checkHttps(surface, environment);
   const corsCheck = await checkCorsPreflight(surface, environment, args);
   const details = {
@@ -411,7 +492,11 @@ function runDryCheck(surface, environment) {
       evidence: `matrix records ${surface.id}.${environment}=null (worker; no public URL)`,
     };
   }
-  const checks = ['dns (CNAME -> matrix cname target)', 'https (GET <health>)', 'cors preflight (Origin -> API)'];
+  const checks = [
+    'dns (CNAME -> matrix cname target)',
+    `https (GET ${healthPathsForSurface(surface).join(', GET ')})`,
+    'cors preflight (Origin -> API)',
+  ];
   return {
     status: 'skip',
     details: {
@@ -462,6 +547,10 @@ async function main() {
   // (auto-post-worker) record a single skip row for the staging
   // environment because the matrix records staging=null.
   const rows = [];
+  // The production-target set is the same for every row, so it is built
+  // once here instead of being recomputed per surface inside the DNS
+  // check.
+  const productionTargets = productionCnameTargets(matrix);
   for (const surface of matrix.surfaces) {
     if (surface.kind === 'worker' && surface.publicUrl === false) {
       rows.push({
@@ -479,7 +568,7 @@ async function main() {
     let result;
     if (mode === 'live') {
       try {
-        result = await runLiveChecks(surface, environment, args, matrix);
+        result = await runLiveChecks(surface, environment, args, productionTargets);
       } catch (err) {
         errors.push(`${surface.id}: ${redactMessage(err.message)}`);
         result = {
@@ -576,7 +665,27 @@ async function main() {
   exit(0);
 }
 
-main().catch((err) => {
-  stderr.write(`fatal: stable-hostname-verification crashed: ${redactMessage(err?.stack ?? err?.message ?? String(err))}\n`);
-  exit(2);
-});
+// The pure helpers are exported so the contract test can exercise the
+// AC2 leak-guard set and the host-normalisation rules directly, without
+// needing live DNS to prove them.
+export {
+  expectedCnameTarget,
+  normalizeHost,
+  isSameOrSubdomain,
+  productionCnameTargets,
+  healthPathsForSurface,
+  HEALTH_PATHS_BY_SURFACE,
+};
+
+// `main()` only runs when the file is invoked directly; importing the
+// helpers above must not start a harness run.
+const invokedDirectly = process.argv[1]
+  ? resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    stderr.write(`fatal: stable-hostname-verification crashed: ${redactMessage(err?.stack ?? err?.message ?? String(err))}\n`);
+    exit(2);
+  });
+}
